@@ -2,9 +2,9 @@
  * Financial Functions — Native RuntimeValue implementation.
  */
 
-import { excelToDate } from "@utils/utils.base";
-
-import type { RuntimeValue, NumberValue, ErrorValue } from "../runtime/values";
+import { isDate1904 } from "@formula/functions/_date-context";
+import { flattenNumbers, firstError } from "@formula/functions/_shared";
+import type { RuntimeValue, NumberValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -15,9 +15,8 @@ import {
   topLeft,
   rvNumber,
   rvBoolean
-} from "../runtime/values";
-import { isDate1904 } from "./_date-context";
-import { flattenNumbers, firstError } from "./_shared";
+} from "@formula/runtime/values";
+import { excelToDate } from "@utils/utils.base";
 
 /**
  * Convert an Excel serial to a UTC `Date`, honouring the active date1904 mode.

@@ -7,8 +7,8 @@
  * numbers, strings, booleans, and error literals.
  */
 
-import { FormulaParseError } from "../errors";
-import { TokenType, type Token } from "./token-types";
+import { FormulaParseError } from "@formula/errors";
+import { TokenType, type Token } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Character Helpers

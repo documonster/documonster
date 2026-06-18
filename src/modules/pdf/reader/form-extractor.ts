@@ -13,16 +13,16 @@
  * @see PDF Reference 1.7, §12.7 - Interactive Forms
  */
 
-import type { PdfDocument } from "./pdf-document";
-import type { PdfDictValue, PdfObject } from "./pdf-parser";
+import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue, PdfObject } from "@pdf/reader/pdf-parser";
 import {
   isPdfArray,
   isPdfRef,
   dictGetName,
   dictGetNumber,
   decodePdfStringBytes
-} from "./pdf-parser";
-import { getDictStringValue } from "./reader-utils";
+} from "@pdf/reader/pdf-parser";
+import { getDictStringValue } from "@pdf/reader/reader-utils";
 
 // =============================================================================
 // Types

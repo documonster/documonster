@@ -38,7 +38,7 @@ async function makeXlsxWithSlicerAndTimeline(): Promise<Uint8Array> {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "Sheet1");
   Cell.setValue(ws, "A1", "Dashboard");
-  const baseBuf = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  const baseBuf = new Uint8Array(await Workbook.toBuffer(wb));
   const baseEntries = await extractAll(baseBuf);
 
   // Slicer / timeline parts synthesised here — the content is
@@ -93,7 +93,7 @@ describe("slicer + timeline raw passthrough", () => {
   it("preserves all four dashboard parts across load + save", async () => {
     const original = await makeXlsxWithSlicerAndTimeline();
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, original);
+    await Workbook.read(wb, original);
 
     // After load, the workbook-level model exposes the raw bytes so
     // later callers can inspect them if needed. The expected shape is
@@ -112,7 +112,7 @@ describe("slicer + timeline raw passthrough", () => {
     // Round-trip: every part excelts captured must be re-emitted
     // verbatim, and the Content Types manifest must mention the new
     // content types so Excel recognises them.
-    const resaved = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const resaved = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(resaved, { label: "slicer+timeline resave" });
     const entries = await extractAll(resaved);
     expect(entries.get("xl/slicers/slicer1.xml")).toBeDefined();
@@ -139,7 +139,7 @@ describe("slicer + timeline raw passthrough", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", 1);
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     await expectValidXlsx(buf, { label: "empty workbook no slicer/timeline" });
     const entries = await extractAll(new Uint8Array(buf));
     const contentTypes = decoder.decode(entries.get("[Content_Types].xml")!.data);

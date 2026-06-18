@@ -17,13 +17,12 @@
  */
 
 import { zlibSync } from "@archive/compression/compress";
+import type { EncryptionState } from "@pdf/core/encryption";
+import { encryptData } from "@pdf/core/encryption";
+import { PdfDict, pdfRef, pdfString, pdfHexString, pdfDate, pdfNumber } from "@pdf/core/pdf-object";
+import type { PdfContentStream } from "@pdf/core/pdf-stream";
+import { PdfStructureError } from "@pdf/errors";
 import { concatUint8Arrays } from "@utils/binary";
-
-import { PdfStructureError } from "../errors";
-import type { EncryptionState } from "./encryption";
-import { encryptData } from "./encryption";
-import { PdfDict, pdfRef, pdfString, pdfHexString, pdfDate, pdfNumber } from "./pdf-object";
-import type { PdfContentStream } from "./pdf-stream";
 
 // =============================================================================
 // Types

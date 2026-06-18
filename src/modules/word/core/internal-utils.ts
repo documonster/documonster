@@ -6,7 +6,7 @@
  * implementations of base64, UUID, UTF-16LE encoding, and XML helpers.
  */
 
-import { DocxError } from "../errors";
+import { DocxError } from "@word/errors";
 
 // =============================================================================
 // Shared TextEncoder / TextDecoder singletons

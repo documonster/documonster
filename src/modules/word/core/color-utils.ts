@@ -16,8 +16,7 @@ import {
   THEME_COLOR_ATTRIBUTE_MAP
 } from "@utils/theme-colors";
 import type { OoxmlThemeColorName } from "@utils/theme-colors";
-
-import type { DocumentTheme, ColorSpec, HexColor } from "../types";
+import type { DocumentTheme, ColorSpec, HexColor } from "@word/types";
 
 // Re-export shared utilities so existing consumers that import from here
 // continue to work without changes.

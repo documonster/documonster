@@ -339,9 +339,9 @@ describe("Column", () => {
     ]);
     Worksheet.addRow(ws, { id: 1, name: "Alice", dob: new Date(1990, 0, 1) });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const ws2 = Workbook.getWorksheet(wb2, "test")!;
     expect(Column.getWidth(ws2, 1)).toBe(10);
@@ -469,9 +469,9 @@ describe("Column", () => {
       ]);
       Worksheet.addRow(ws, { name: "Dave", address: { city: "Perth" } });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "test")!;
 
       expect(Cell.getValue(ws2, "A2")).toBe("Dave");

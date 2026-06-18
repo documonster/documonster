@@ -22,7 +22,7 @@ async function save() {
   console.log("Protection Time:", stopwatch.microseconds);
 
   stopwatch.start();
-  await Workbook.writeXlsx(wb, filename);
+  await Workbook.writeFile(wb, filename);
   console.log("Done.");
   console.log("Time taken:", stopwatch.microseconds);
 }

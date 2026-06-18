@@ -11,7 +11,7 @@
  * - Practical interoperability constraints from Word/LibreOffice
  */
 
-import { walkBlocks } from "../core/walker";
+import { walkBlocks } from "@word/core/walker";
 import type {
   DocxDocument,
   BodyContent,
@@ -36,7 +36,7 @@ import type {
   ParagraphChild,
   FontDef,
   CustomXmlPart
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Types

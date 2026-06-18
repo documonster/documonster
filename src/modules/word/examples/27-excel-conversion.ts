@@ -156,7 +156,7 @@ for (const tbl of tables) {
     Worksheet.addRow(sheet, row);
   }
 }
-await Workbook.writeXlsx(wb2, path.join(outDir, "05-extracted.xlsx"));
+await Workbook.writeFile(wb2, path.join(outDir, "05-extracted.xlsx"));
 console.log(`  → 05-extracted.xlsx`);
 
 // ---------------------------------------------------------------------------

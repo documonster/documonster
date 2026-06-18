@@ -33,6 +33,8 @@
  * ```
  */
 
+import type { PdfPageBuilder } from "@pdf/builder/document-builder";
+import { renderLayoutDocumentToPdf, type RenderLayoutOptions } from "@pdf/render-layout-to-pdf";
 import {
   layoutDocumentFull,
   type FullLayoutOptions,
@@ -40,9 +42,6 @@ import {
 } from "@word/layout/layout-full";
 import type { LayoutChart } from "@word/layout/layout-model";
 import type { Chart, ChartContent, ChartExContent, DocxDocument } from "@word/types";
-
-import type { PdfPageBuilder } from "./builder/document-builder";
-import { renderLayoutDocumentToPdf, type RenderLayoutOptions } from "./render-layout-to-pdf";
 
 /** Options for DOCX → PDF conversion. */
 export interface DocxToPdfOptions {
@@ -147,7 +146,7 @@ export async function docxToPdf(
       ) => boolean | void)
     | undefined;
   try {
-    const mod = await import("./excel-bridge");
+    const mod = await import("@pdf/excel-bridge");
     if (typeof mod.createWordLayoutChartPdfRenderer === "function") {
       builtInLayoutRenderer = mod.createWordLayoutChartPdfRenderer();
     }

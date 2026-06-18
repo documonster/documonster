@@ -6,8 +6,8 @@
  * (the value system).
  */
 
-import { parseDefinedNameRange } from "../compile/address-utils";
-import { bind, type BindingContext } from "../compile/binder";
+import { parseDefinedNameRange } from "@formula/compile/address-utils";
+import { bind, type BindingContext } from "@formula/compile/binder";
 import type {
   BoundExpr,
   BoundCellRef,
@@ -16,26 +16,23 @@ import type {
   BoundSpecialCall,
   BoundNameExpr,
   BoundLambda
-} from "../compile/bound-ast";
-import { BoundExprKind } from "../compile/bound-ast";
-import type { CompiledFormula } from "../compile/compiled-formula";
+} from "@formula/compile/bound-ast";
+import { BoundExprKind } from "@formula/compile/bound-ast";
+import type { CompiledFormula } from "@formula/compile/compiled-formula";
 import {
   resolveStructuredRefRows,
   buildTableGeometry,
   resolveStructuredRefColumns
-} from "../compile/structured-ref-utils";
-import { FormulaError } from "../errors";
-import type { WorkbookSnapshot } from "../integration/workbook-snapshot";
+} from "@formula/compile/structured-ref-utils";
+import { FormulaError } from "@formula/errors";
+import type { WorkbookSnapshot } from "@formula/integration/workbook-snapshot";
 import {
   snapshotCellKey,
   formulaCellKey,
   resolveDefinedName as resolveDefinedNameFromSnapshot
-} from "../integration/workbook-snapshot";
-import { parse } from "../syntax/parser";
-import { stripFunctionPrefix } from "../syntax/token-types";
-import { tokenize } from "../syntax/tokenizer";
-import { lookupFunction } from "./function-registry";
-import type { FunctionDescriptor } from "./function-registry";
+} from "@formula/integration/workbook-snapshot";
+import { lookupFunction } from "@formula/runtime/function-registry";
+import type { FunctionDescriptor } from "@formula/runtime/function-registry";
 import type {
   RuntimeValue,
   ScalarValue,
@@ -43,7 +40,7 @@ import type {
   LambdaValue,
   ErrorValue,
   RefArea
-} from "./values";
+} from "@formula/runtime/values";
 import {
   RVKind,
   BLANK,
@@ -67,7 +64,10 @@ import {
   scalarEquals,
   compareScalarsSameKind,
   fromSnapshotValue
-} from "./values";
+} from "@formula/runtime/values";
+import { parse } from "@formula/syntax/parser";
+import { stripFunctionPrefix } from "@formula/syntax/token-types";
+import { tokenize } from "@formula/syntax/tokenizer";
 
 // ============================================================================
 // Eval Session

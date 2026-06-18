@@ -65,13 +65,13 @@ export type {
   ColumnMismatchConfig,
   ColumnMismatchLess,
   ColumnMismatchMore
-} from "./types";
+} from "@csv/types";
 
 // =============================================================================
 // Core API — the `Csv` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-export * as Csv from "./surface/csv";
+export * as Csv from "@csv/surface/csv";
 
 // Type-only re-exports for the generator + number utilities (the value
 // functions live on the `Csv` namespace; these are the option/result types).
@@ -85,11 +85,11 @@ export type {
   GeneratorContext,
   StopCondition,
   StopContext
-} from "./utils/generate";
-export type { DecimalSeparator } from "./utils/number";
+} from "@csv/utils/generate";
+export type { DecimalSeparator } from "@csv/utils/number";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { CsvError, CsvWorkerError } from "./errors";
+export { CsvError, CsvWorkerError } from "@csv/errors";

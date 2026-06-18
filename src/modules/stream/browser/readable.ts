@@ -2,6 +2,10 @@
  * Browser Stream - Readable
  */
 
+import { getDuplexFrom } from "@stream/browser/_lazy";
+import { ChunkBuffer } from "@stream/browser/chunk-buffer";
+import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
+import { PipeManager } from "@stream/browser/pipe-manager";
 import { stringToEncodedBytes } from "@stream/common/binary-chunk";
 import { getDefaultHighWaterMark } from "@stream/common/utils";
 import type { IDuplex, ReadableStreamOptions, WritableLike } from "@stream/types";
@@ -9,11 +13,6 @@ import { createStreamDecoder, decodeBytesToString } from "@utils/binary";
 import type { StreamDecoder } from "@utils/binary";
 import { createAbortError, toError } from "@utils/errors";
 import { EventEmitter } from "@utils/event-emitter";
-
-import { getDuplexFrom } from "./_lazy";
-import { ChunkBuffer } from "./chunk-buffer";
-import { deferTask, inDeferredContext } from "./microtask-context";
-import { PipeManager } from "./pipe-manager";
 
 /**
  * Shared toString implementation for Uint8Array chunks converted from strings.

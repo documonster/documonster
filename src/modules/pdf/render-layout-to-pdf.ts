@@ -17,6 +17,8 @@
  * paragraph variants and per-line for paragraphs.
  */
 
+import { PdfDocumentBuilder, type PdfPageBuilder } from "@pdf/builder/document-builder";
+import type { PdfColor } from "@pdf/types";
 import type {
   LayoutAltChunk,
   LayoutChart,
@@ -39,9 +41,6 @@ import type {
   PositionedInlineImage,
   PositionedRun
 } from "@word/layout/layout-model";
-
-import { PdfDocumentBuilder, type PdfPageBuilder } from "./builder/document-builder";
-import type { PdfColor } from "./types";
 
 /** Options for rendering a LayoutDocument into a PdfDocumentBuilder. */
 export interface RenderLayoutOptions {

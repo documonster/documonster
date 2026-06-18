@@ -191,9 +191,9 @@ export async function roundTripChart(opts: AddChartOptions) {
   const ws = Workbook.addWorksheet(wb, "Sheet1");
   Cell.setValue(ws, "A1", "x");
   addChart(ws, opts, "C1:J15");
-  const buf = await Workbook.toXlsxBuffer(wb);
+  const buf = await Workbook.toBuffer(wb);
   const wb2 = Workbook.create();
-  await Workbook.loadXlsx(wb2, buf);
+  await Workbook.read(wb2, buf);
   const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
   return getCharts(ws2)[0];
 }

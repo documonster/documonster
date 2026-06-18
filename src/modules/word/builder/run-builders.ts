@@ -31,7 +31,7 @@ import type {
   TextFormField,
   CheckBoxFormField,
   DropDownFormField
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Run Builders

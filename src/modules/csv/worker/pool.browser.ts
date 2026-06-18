@@ -33,7 +33,6 @@
  */
 
 import { CsvWorkerError } from "@csv/errors";
-
 import type {
   CsvWorkerPoolOptions,
   CsvWorkerPoolStats,
@@ -57,8 +56,8 @@ import type {
   CsvParseOptions,
   CsvFormatOptions,
   CsvParseResult
-} from "./types";
-import { getWorkerBlobUrl, releaseWorkerBlobUrl } from "./worker-script.bundle";
+} from "@csv/worker/types";
+import { getWorkerBlobUrl, releaseWorkerBlobUrl } from "@csv/worker/worker-script.bundle";
 
 // =============================================================================
 // Constants
@@ -847,4 +846,4 @@ export type {
   GroupResult,
   AggregateResult,
   QueryResult
-} from "./types";
+} from "@csv/worker/types";

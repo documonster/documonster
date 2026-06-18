@@ -23,7 +23,7 @@ describe("HAN CELL xlsx files", () => {
     const buffer = fs.readFileSync(filePath);
 
     const workbook = Workbook.create();
-    await Workbook.loadXlsx(workbook, buffer);
+    await Workbook.read(workbook, buffer);
 
     // Verify the workbook structure
     expect(getWorksheets(workbook).length).toBe(1);

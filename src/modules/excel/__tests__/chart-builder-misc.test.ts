@@ -89,9 +89,9 @@ describe("ROBUST-6: _renderTxPr includes rotation", () => {
       { type: "bar", series: [baseSeries("S")], categoryAxis: { textRotation: -45 } },
       "C1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     // After round-trip, axis txPr should contain rotation
     const catAx = Chart.chartModel(
       getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0]
@@ -195,9 +195,9 @@ describe("supplementary edge cases", () => {
       row += 12;
     }
     expect(getCharts(ws)).toHaveLength(16);
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(getCharts(ws2)).toHaveLength(16);
     for (let i = 0; i < types.length; i++) {
@@ -476,7 +476,7 @@ describe("bar chart pictureFill.image (high-level)", () => {
 
     // Full round-trip: the xlsx output contains the image part and the
     // chart XML references it via <a:blip r:embed="rIdN"/>.
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/media/image1.png")).toBeDefined();
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);

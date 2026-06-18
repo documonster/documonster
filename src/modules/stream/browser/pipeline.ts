@@ -2,6 +2,11 @@
  * Browser Stream - Pipeline & Finished
  */
 
+import { Duplex } from "@stream/browser/duplex";
+import { createListenerRegistry } from "@stream/browser/helpers";
+import { Readable } from "@stream/browser/readable";
+import { Transform } from "@stream/browser/transform";
+import { Writable } from "@stream/browser/writable";
 import { createFinishedAll } from "@stream/common/finished-all";
 import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/common/options";
 import { isPipelineOptions } from "@stream/common/options";
@@ -12,12 +17,6 @@ import {
   isWritableStream
 } from "@stream/internal/type-guards";
 import type { PipelineStreamLike } from "@stream/types";
-
-import { Duplex } from "./duplex";
-import { createListenerRegistry } from "./helpers";
-import { Readable } from "./readable";
-import { Transform } from "./transform";
-import { Writable } from "./writable";
 
 // Re-export for consumers
 export type { PipelineOptions, FinishedOptions } from "@stream/common/options";

@@ -696,7 +696,7 @@ describe("P1: chart convenience APIs and presets", () => {
     // The chart model should now carry a rel id for the drawing part.
     expect(Chart.chartModel(chart)?.userShapesRelId).toMatch(/^rId/);
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const overlay = zipData.get("xl/drawings/chartUserShape1.xml");
     expect(overlay).toBeDefined();
@@ -709,7 +709,7 @@ describe("P1: chart convenience APIs and presets", () => {
 
     // Load the produced file and confirm the overlay bytes survive.
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     expect(Chart.userShapesXml(chart2)).toBeDefined();
     expect(textDecoder.decode(Chart.userShapesXml(chart2)!)).toContain("Callout");
@@ -1116,9 +1116,9 @@ describe("Renderer gap fixes verification", () => {
       },
       "C1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const s = Chart.chartModel(getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0])!.chart.plotArea
       .chartTypes[0].series[0];
     const parsed = parseSpPr(s.spPr!);

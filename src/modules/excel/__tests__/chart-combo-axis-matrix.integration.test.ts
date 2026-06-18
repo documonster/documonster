@@ -29,8 +29,8 @@ async function loadFixture(bytes: Uint8Array): Promise<{
   chartXml: string;
 }> {
   const wb = Workbook.create();
-  await Workbook.loadXlsx(wb, bytes);
-  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  await Workbook.read(wb, bytes);
+  const out = new Uint8Array(await Workbook.toBuffer(wb));
   const entries = await extractAll(out);
   return { wb, out, entries, chartXml: entryText(entries, "xl/charts/chart1.xml")! };
 }
@@ -146,8 +146,8 @@ describe("Chart combo / axis matrix", () => {
     const fixtures = comboAxisFixtures;
     for (const fixture of fixtures) {
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, fixture.bytes);
-      const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      await Workbook.read(wb, fixture.bytes);
+      const out = new Uint8Array(await Workbook.toBuffer(wb));
       await expectValidXlsx(out, { label: fixture.id });
     }
   });

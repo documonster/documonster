@@ -4,9 +4,7 @@
  * Renders Office Math Markup Language elements (m:oMath).
  */
 
-import type { XmlSink } from "@xml/types";
-
-import { NS_M } from "../constants";
+import { NS_M } from "@word/constants";
 import type {
   MathBlock,
   MathContent,
@@ -29,7 +27,8 @@ import type {
   MathBar,
   MathBox,
   MathEquationArray
-} from "../types";
+} from "@word/types";
+import type { XmlSink } from "@xml/types";
 
 /** Render math content array. */
 function renderMathContents(xml: XmlSink, contents: readonly MathContent[]): void {

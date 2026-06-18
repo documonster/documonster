@@ -11,7 +11,7 @@ Cell.setValue(ws, "B1", "Hello, World!");
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
-Workbook.writeXlsx(wb, filename).then(() => {
+Workbook.writeFile(wb, filename).then(() => {
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

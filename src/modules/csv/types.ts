@@ -5,7 +5,7 @@
  * This file contains all interfaces, types, and type utilities.
  */
 
-import type { FormattedValue as FormattedValueImpl } from "./format/formatted-value";
+import type { FormattedValue as FormattedValueImpl } from "@csv/format/formatted-value";
 
 // =============================================================================
 // Row Types
@@ -453,7 +453,7 @@ export interface CsvParseObjectOptions extends CsvParseOptions {
 // =============================================================================
 
 // Re-export from formatted-value for compatibility
-export { isFormattedValue, quoted, unquoted } from "./format/formatted-value";
+export { isFormattedValue, quoted, unquoted } from "@csv/format/formatted-value";
 
 /**
  * Check if transform function is synchronous.

@@ -10,7 +10,7 @@
  * import { excelToDocx } from "excelts/word/excel";
  *
  * const wb = new Workbook();
- * await Workbook.loadXlsx(wb, buffer);
+ * await Workbook.read(wb, buffer);
  * const doc = excelToDocx(wb);
  * ```
  */
@@ -89,9 +89,8 @@ import {
   rowGetCell
 } from "@excel/worksheet";
 import type { Worksheet } from "@excel/worksheet";
-
-import { type Mutable } from "../core/internal-utils";
-import { extractParagraphText } from "../core/text-utils";
+import { type Mutable } from "@word/core/internal-utils";
+import { extractParagraphText } from "@word/core/text-utils";
 import type {
   Alignment,
   Chart,
@@ -111,8 +110,8 @@ import type {
   TableCellProperties,
   Border,
   Shading
-} from "../types";
-import { EMU_PER_INCH } from "../units";
+} from "@word/types";
+import { EMU_PER_INCH } from "@word/units";
 
 // =============================================================================
 // Public API
@@ -780,7 +779,7 @@ export async function generateChartEmbeddedXlsx(
     }
   }
 
-  return new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  return new Uint8Array(await Workbook.toBuffer(wb));
 }
 
 // =============================================================================

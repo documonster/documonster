@@ -2,11 +2,14 @@
   "compilerOptions": {
     "paths": {
       "@archive": ["./src/modules/archive/index.ts"],
+      "@excel": ["./src/modules/excel/index.ts"],
       "@excel/*": ["./src/modules/excel/*"],
       "@archive/*": ["./src/modules/archive/*"],
       "@stream": ["./src/modules/stream/index.ts"],
       "@stream/*": ["./src/modules/stream/*"],
+      "@csv": ["./src/modules/csv/index.ts"],
       "@csv/*": ["./src/modules/csv/*"],
+      "@markdown": ["./src/modules/markdown/index.ts"],
       "@markdown/*": ["./src/modules/markdown/*"],
       "@xml": ["./src/modules/xml/index.ts"],
       "@xml/*": ["./src/modules/xml/*"],

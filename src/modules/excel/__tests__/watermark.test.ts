@@ -104,13 +104,13 @@ describe("Excel Overlay Watermark (XLSX)", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, opacity: 0.15 });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     expect(buffer).toBeInstanceOf(Uint8Array);
     expect(buffer.byteLength).toBeGreaterThan(0);
 
     // Verify the XLSX can be loaded back
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     expect(getWorksheets(wb2).length).toBe(1);
     expect(Cell.getValue(getWorksheets(wb2)[0], "A1")).toBe("Hello");
   });
@@ -123,11 +123,11 @@ describe("Excel Overlay Watermark (XLSX)", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, opacity: 0.3 });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
 
     // Load back and verify watermark state is restored
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = getWorksheets(wb2)[0];
 
     // The watermark should be detected from the alphaModFix on the drawing
@@ -147,11 +147,11 @@ describe("Excel Overlay Watermark (XLSX)", () => {
     addImage(ws, imgId, "A1:B2");
     addWatermark(ws, { imageId: imgId, opacity: 0.1 });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     expect(buffer.byteLength).toBeGreaterThan(0);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     // Both the regular image and watermark should have been written
     const ws2 = getWorksheets(wb2)[0];
     const images = getImages(ws2);
@@ -176,7 +176,7 @@ describe("Excel Header Watermark (XLSX)", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, mode: "header" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     expect(buffer).toBeInstanceOf(Uint8Array);
     expect(buffer.byteLength).toBeGreaterThan(0);
   });
@@ -189,11 +189,11 @@ describe("Excel Header Watermark (XLSX)", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, mode: "header" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
 
     // Read back and verify header footer
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const hf = getWorksheets(wb2)[0].headerFooter;
     expect(hf.oddHeader).toContain("&G");
   });
@@ -213,7 +213,7 @@ describe("BlipXform alphaModFix", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, opacity: 0.5 });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     expect(buffer.byteLength).toBeGreaterThan(0);
   });
 });
@@ -275,12 +275,12 @@ describe("createTextWatermarkImage", () => {
     const imgId = addWorkbookImage(wb, { buffer: png, extension: "png" });
     addWatermark(ws, { imageId: imgId, opacity: 0.3 });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     expect(buffer.byteLength).toBeGreaterThan(0);
 
     // Verify it can be read back
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     expect(Cell.getValue(getWorksheets(wb2)[0], "A1")).toBe("Hello");
   });
 
@@ -348,9 +348,9 @@ describe("Header watermark applyTo", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, mode: "header" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const hf = getWorksheets(wb2)[0].headerFooter;
     expect(hf.oddHeader).toContain("&G");
     expect(hf.evenHeader).toContain("&G");
@@ -365,9 +365,9 @@ describe("Header watermark applyTo", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, mode: "header", applyTo: "odd" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const hf = getWorksheets(wb2)[0].headerFooter;
     expect(hf.oddHeader).toContain("&G");
     // evenHeader and firstHeader should NOT have &G
@@ -384,9 +384,9 @@ describe("Header watermark applyTo", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, mode: "header", applyTo: "odd" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const hf = getWorksheets(wb2)[0].headerFooter;
     // Should contain both original text and &G
     expect(hf.oddHeader).toContain("&LMy Report");
@@ -440,10 +440,10 @@ describe("Excel watermark opacity edge cases", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, opacity: 2.5 }); // over 1
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     // Should not throw
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     // Opacity clamped to 1.0 means no alphaModFix is written (fully opaque),
     // so on read-back it becomes a regular image rather than a watermark.
     // This is correct behavior: a fully opaque "watermark" is just an image.
@@ -459,9 +459,9 @@ describe("Excel watermark opacity edge cases", () => {
     const imgId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
     addWatermark(ws, { imageId: imgId, opacity: -0.5 }); // negative
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const wm = getWatermark(getWorksheets(wb2)[0]);
     expect(wm).not.toBeNull();
     expect(wm!.opacity).toBeGreaterThanOrEqual(0);

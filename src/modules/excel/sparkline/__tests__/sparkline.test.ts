@@ -215,7 +215,7 @@ describe("Worksheet.addSparklineGroup", () => {
       lineColor: "#FF0000"
     });
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     // The XML is compressed, so scan isn't direct. Just verify the write didn't throw
     // and the buffer is non-empty.
     expect(buf.byteLength).toBeGreaterThan(0);
@@ -241,9 +241,9 @@ describe("Worksheet.addSparklineGroup", () => {
     });
     expect(getSparklineGroups(ws)).toHaveLength(1);
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const _ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     // Sparkline groups are stored in worksheet extLst — they should round-trip
     // if the ext-lst-xform emitted them and the parser picks them up.
@@ -431,7 +431,7 @@ describe("Sparkline edge cases", () => {
     });
     expect(getSparklineGroups(ws)).toHaveLength(3);
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     expect(buf.byteLength).toBeGreaterThan(0);
     // Write pipeline should not throw for multiple sparkline groups
   });

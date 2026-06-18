@@ -4,10 +4,8 @@
  * Renders w:rPr and run-level content (w:t, w:br, w:tab, w:drawing, etc.)
  */
 
-import type { XmlSink } from "@xml/types";
-
-import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "../constants";
-import { DocxRawXmlPolicyError } from "../errors";
+import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "@word/constants";
+import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   RunProperties,
   RunContent,
@@ -20,8 +18,9 @@ import type {
   Border,
   UnderlineSpec,
   ColorSpec
-} from "../types";
-import type { RenderHelpers } from "./render-context";
+} from "@word/types";
+import type { RenderHelpers } from "@word/writer/render-context";
+import type { XmlSink } from "@xml/types";
 
 /** Render a single border element. */
 export function renderBorderElement(xml: XmlSink, tagName: string, border: Border): void {

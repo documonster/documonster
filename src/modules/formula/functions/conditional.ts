@@ -2,15 +2,23 @@
  * Conditional Aggregate Functions — Native RuntimeValue Implementation
  */
 
-import type { RuntimeValue, ScalarValue, ArrayValue, ErrorValue } from "../runtime/values";
-import { RVKind, ERRORS, rvNumber, toStringRV, topLeft, isArray, isError } from "../runtime/values";
 import {
   asArray,
   excelWildcardToRegex,
   getCell,
   hasUnescapedWildcard,
   unescapeExcelWildcard
-} from "./_shared";
+} from "@formula/functions/_shared";
+import type { RuntimeValue, ScalarValue, ArrayValue, ErrorValue } from "@formula/runtime/values";
+import {
+  RVKind,
+  ERRORS,
+  rvNumber,
+  toStringRV,
+  topLeft,
+  isArray,
+  isError
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Criteria Predicate Builder (RuntimeValue version)

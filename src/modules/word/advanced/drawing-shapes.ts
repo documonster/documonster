@@ -12,8 +12,6 @@
  * - Text body formatting within shapes
  */
 
-import { xmlEncodeAttr } from "@xml/encode";
-
 import type {
   DrawingShape,
   Paragraph,
@@ -23,7 +21,8 @@ import type {
   VerticalPositionRelative,
   WrapStyle,
   WrapTextSide
-} from "../types";
+} from "@word/types";
+import { xmlEncodeAttr } from "@xml/encode";
 
 // =============================================================================
 // Preset Shape Types (OOXML ST_ShapeType enum — all 187 values)

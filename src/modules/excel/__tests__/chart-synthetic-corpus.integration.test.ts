@@ -136,7 +136,7 @@ describe("Synthetic chart corpus", () => {
           { series: [] }
         ).type;
         const wb = Workbook.create();
-        await Workbook.loadXlsx(wb, fixture.bytes);
+        await Workbook.read(wb, fixture.bytes);
         const sheet = Workbook.getWorksheet(wb, "Data")!;
         expect(sheet, fixture.id).toBeDefined();
         const charts = getCharts(sheet!);
@@ -153,7 +153,7 @@ describe("Synthetic chart corpus", () => {
       for (const fixture of fixtures) {
         const layoutType = fixture.id.replace(/^chartEx-/, "");
         const wb = Workbook.create();
-        await Workbook.loadXlsx(wb, fixture.bytes);
+        await Workbook.read(wb, fixture.bytes);
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
         const plotArea = Chart.chartExModel(charts[0])?.chartSpace.chart.plotArea;
@@ -239,7 +239,7 @@ describe("Synthetic chart corpus", () => {
         }
       });
 
-      const entries = await extractAll(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
+      const entries = await extractAll(new Uint8Array(await Workbook.toBuffer(wb)));
       const contentTypes = entryText(entries, "[Content_Types].xml")!;
       expect(contentTypes).toContain("/xl/charts/chart1.xml");
       expect(contentTypes).toContain("/xl/charts/chartEx1.xml");
@@ -267,7 +267,7 @@ describe("Synthetic chart corpus", () => {
         { type: "waterfall", categories: "Data!$A$1:$A$2", series: [{ values: "Data!$B$1:$B$2" }] },
         "D1:J10"
       );
-      const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      const buffer = new Uint8Array(await Workbook.toBuffer(wb));
       const entries = await extractAll(buffer);
       const chartExEntry = entries.get("xl/charts/chartEx1.xml")!;
       const originalXml = new TextDecoder().decode(chartExEntry.data);
@@ -292,7 +292,7 @@ describe("Synthetic chart corpus", () => {
       // sees it. The legacy test variant operated on the raw entries
       // map; the new validator operates on a real zip buffer, so we
       // must re-zip.
-      const { ZipArchive } = await import("@archive");
+      const { ZipArchive } = await import("@archive/zip");
       const zip = new ZipArchive({ level: 0 });
       for (const [p, entry] of entries) {
         if (entry.type !== "directory") {

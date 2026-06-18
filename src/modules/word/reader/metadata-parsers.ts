@@ -9,15 +9,14 @@
  * Re-exports them for backward compatibility.
  */
 
+import { type Mutable } from "@word/core/internal-utils";
+import { attrInt, attrVal, findChildNs } from "@word/reader/parse-utils";
+import type { PersonInfo, WebSettings } from "@word/types";
 import { parseXml } from "@xml/dom";
 
-import { type Mutable } from "../core/internal-utils";
-import type { PersonInfo, WebSettings } from "../types";
-import { attrInt, attrVal, findChildNs } from "./parse-utils";
-
 // Backward-compatible re-exports.
-export { parseThemeXml } from "./theme-parser";
-export { parseSettingsXml } from "./settings-parser";
+export { parseThemeXml } from "@word/reader/theme-parser";
+export { parseSettingsXml } from "@word/reader/settings-parser";
 
 /** Parse word/webSettings.xml. */
 export function parseWebSettings(xmlStr: string): WebSettings {

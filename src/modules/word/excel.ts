@@ -18,5 +18,5 @@ export {
   buildWordChartExXml,
   wordChartToChartModel,
   generateChartEmbeddedXlsx
-} from "./bridge/excel-bridge";
-export type { ExcelToDocxOptions, WordChartExOptions } from "./bridge/excel-bridge";
+} from "@word/bridge/excel-bridge";
+export type { ExcelToDocxOptions, WordChartExOptions } from "@word/bridge/excel-bridge";

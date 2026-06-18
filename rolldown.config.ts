@@ -32,7 +32,7 @@ interface ModuleBundle {
 
 const MODULES: ModuleBundle[] = [
   { global: "Excel", file: "excel", input: "./src/modules/excel/index.browser.ts" },
-  { global: "Word", file: "word", input: "./src/modules/word/index.browser.ts" },
+  { global: "Word", file: "word", input: "./src/modules/word/index.ts" },
   { global: "Pdf", file: "pdf", input: "./src/modules/pdf/index.ts" },
   { global: "Csv", file: "csv", input: "./src/modules/csv/index.ts" },
   { global: "Markdown", file: "markdown", input: "./src/modules/markdown/index.ts" },

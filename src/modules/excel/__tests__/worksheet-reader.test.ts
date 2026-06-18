@@ -18,7 +18,7 @@ import { describe, it, expect } from "vitest";
 async function buildXlsxBuffer(builder: (wb: WorkbookData) => void): Promise<Uint8Array> {
   const wb = Workbook.create();
   builder(wb);
-  return Workbook.toXlsxBuffer(wb);
+  return Workbook.toBuffer(wb);
 }
 
 /** Result of streaming a single worksheet */

@@ -45,17 +45,17 @@
 // Public API — the `Pdf` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-export * as Pdf from "./surface/pdf";
+export * as Pdf from "@pdf/surface/pdf";
 
 // Conversion option types (the converter functions live on `Pdf.*`).
-export type { ChartToPdfOptions } from "./excel-bridge";
-export type { DocxToPdfOptions } from "./word-bridge";
+export type { ChartToPdfOptions } from "@pdf/excel-bridge";
+export type { DocxToPdfOptions } from "@pdf/word-bridge";
 
 // =============================================================================
 // Types — Writing
 // =============================================================================
 
-export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook, PdfImage } from "./pdf";
+export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook, PdfImage } from "@pdf/pdf";
 
 export type {
   PdfExportOptions,
@@ -68,20 +68,20 @@ export type {
   PdfTextWatermark,
   PdfImageWatermark,
   PdfWatermarkFilter
-} from "./types";
+} from "@pdf/types";
 
 // =============================================================================
 // Types — Reading
 // =============================================================================
 
-export type { ReadPdfOptions, ReadPdfResult, ReadPdfPage } from "./reader/pdf-reader";
-export type { PdfMetadata } from "./reader/metadata-reader";
-export type { ExtractedImage } from "./reader/image-extractor";
-export type { TextLine } from "./reader/text-reconstruction";
-export type { PdfAnnotation, PdfRect } from "./reader/annotation-extractor";
-export type { PdfFormField, PdfFormFieldType } from "./reader/form-extractor";
-export type { PdfBookmark } from "./reader/bookmark-extractor";
-export type { PdfTable, PdfTableRow, PdfTableCell } from "./reader/table-extractor";
+export type { ReadPdfOptions, ReadPdfResult, ReadPdfPage } from "@pdf/reader/pdf-reader";
+export type { PdfMetadata } from "@pdf/reader/metadata-reader";
+export type { ExtractedImage } from "@pdf/reader/image-extractor";
+export type { TextLine } from "@pdf/reader/text-reconstruction";
+export type { PdfAnnotation, PdfRect } from "@pdf/reader/annotation-extractor";
+export type { PdfFormField, PdfFormFieldType } from "@pdf/reader/form-extractor";
+export type { PdfBookmark } from "@pdf/reader/bookmark-extractor";
+export type { PdfTable, PdfTableRow, PdfTableCell } from "@pdf/reader/table-extractor";
 
 // =============================================================================
 // Types — Building
@@ -112,8 +112,8 @@ export type {
   DropdownOptions,
   RadioGroupOptions,
   PdfSignatureOptions
-} from "./builder/document-builder";
-export type { LoadOptions } from "./builder/pdf-editor";
+} from "@pdf/builder/document-builder";
+export type { LoadOptions } from "@pdf/builder/pdf-editor";
 
 // =============================================================================
 // Types — Digital Signatures
@@ -124,10 +124,10 @@ export type {
   CmsSignedData,
   SignOptions,
   Asn1Node
-} from "./core/digital-signature";
+} from "@pdf/core/digital-signature";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "./errors";
+export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/errors";

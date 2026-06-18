@@ -29,7 +29,7 @@ ws.pageSetup.printTitlesRow = "1:1";
 ws.pageSetup.printArea = "A1:B10";
 
 try {
-  await Workbook.writeXlsx(wb, filename);
+  await Workbook.writeFile(wb, filename);
   console.log("Done.");
 } catch (error) {
   console.log(error.message);

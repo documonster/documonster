@@ -9,8 +9,8 @@
  * - Parsing/formatting are delegated to the main CSV implementations to avoid drift.
  */
 
-import { formatCsv } from "../format";
-import { parseCsv } from "../parse";
+import { formatCsv } from "@csv/format";
+import { parseCsv } from "@csv/parse";
 import type {
   CsvWorkerRequestMessage,
   CsvWorkerResponseMessage,
@@ -22,7 +22,7 @@ import type {
   GroupByConfig,
   AggregateConfig,
   PageConfig
-} from "./types";
+} from "@csv/worker/types";
 
 type SessionData = any[] | any[][];
 

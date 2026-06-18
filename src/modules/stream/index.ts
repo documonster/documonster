@@ -18,7 +18,7 @@
  */
 
 // Shared type + platform-independent exports
-export * from "./index.base";
+export * from "@stream/index.base";
 
 // Core stream classes (native Node.js)
 import { Readable, Transform, Duplex, PassThrough } from "stream";

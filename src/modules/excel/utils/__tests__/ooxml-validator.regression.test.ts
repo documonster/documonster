@@ -1,6 +1,6 @@
-import { ZipArchive } from "@archive";
 import type { ExtractedFile } from "@archive/unzip/extract";
 import { extractAll } from "@archive/unzip/extract";
+import { ZipArchive } from "@archive/zip";
 import { Cell, Workbook } from "@excel/index";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { addFormCheckbox } from "@excel/worksheet";
@@ -44,7 +44,7 @@ async function makeWorkbookWithSingleCheckbox(): Promise<Uint8Array> {
   addFormCheckbox(ws, "J2:K3", { link: "D6", checked: false, text: "J2:K3" });
   Cell.setValue(ws, "D6", false);
 
-  return Workbook.toXlsxBuffer(wb);
+  return Workbook.toBuffer(wb);
 }
 
 describe("OOXML validator regressions (legacy form controls)", () => {

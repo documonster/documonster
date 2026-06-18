@@ -47,7 +47,7 @@ Cell.setStyle(ws, "H3", { border: borders.doubleRed });
 Cell.setStyle(ws, "I3", { border: borders.doubleRed });
 
 try {
-  await Workbook.writeXlsx(wb, filename);
+  await Workbook.writeFile(wb, filename);
   console.log("Done.");
 } catch (error) {
   console.log(error.message);

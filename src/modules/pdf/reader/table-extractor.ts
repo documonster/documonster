@@ -14,7 +14,7 @@
  * @see text-reconstruction.ts for line grouping logic
  */
 
-import type { TextFragment } from "./content-interpreter";
+import type { TextFragment } from "@pdf/reader/content-interpreter";
 
 // =============================================================================
 // Public Types

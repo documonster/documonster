@@ -1,5 +1,5 @@
 /**
- * documonster/excel — base exports (platform independent).
+ * @cj-tech-master/excelts/excel — base exports (platform independent).
  *
  * Shared domain dot-namespaces + error classes for both the Node and browser
  * entries. The two platform-specific namespaces (`Workbook`, `Stream`) are
@@ -7,11 +7,11 @@
  * and then adds its own platform variant of those two. Mirrors the word
  * module's `index.base.ts` structure.
  *
- *   import { Workbook, Worksheet, Cell, Chart } from "documonster/excel";
+ *   import { Workbook, Worksheet, Cell, Chart } from "@cj-tech-master/excelts/excel";
  *   const wb = Workbook.create();
  *   const ws = Workbook.addWorksheet(wb, "Sheet1");
  *   Cell.setValue(ws, "A1", 42);
- *   const buf = await Workbook.toXlsxBuffer(wb);
+ *   const buf = await Workbook.toBuffer(wb);
  *
  * Each namespace is an ESM namespace re-export over a physical `surface/*.ts`
  * module of flat functions, which tree-shakes per-member on rolldown / rspack.

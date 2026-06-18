@@ -18,7 +18,7 @@ import type {
   PdfBorderSideData,
   PdfBordersData,
   PdfAlignmentData
-} from "../types";
+} from "@pdf/types";
 
 // =============================================================================
 // Color Conversion

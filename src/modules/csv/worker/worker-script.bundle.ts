@@ -19,7 +19,9 @@ let workerScriptPromise: Promise<string> | null = null;
  */
 function loadWorkerScript(): Promise<string> {
   if (!workerScriptPromise) {
-    workerScriptPromise = import("./worker-script.generated").then(m => m.CSV_WORKER_SCRIPT);
+    workerScriptPromise = import("@csv/worker/worker-script.generated").then(
+      m => m.CSV_WORKER_SCRIPT
+    );
   }
   return workerScriptPromise;
 }

@@ -16,7 +16,7 @@
  * @see Adobe Technical Note #5411 - CMap Resources
  */
 
-import { PdfTokenizer, TokenType } from "./pdf-tokenizer";
+import { PdfTokenizer, TokenType } from "@pdf/reader/pdf-tokenizer";
 
 // =============================================================================
 // Types

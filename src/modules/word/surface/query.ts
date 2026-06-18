@@ -3,7 +3,7 @@
  * mutations (search, replace, mail-merge, revisions, style resolution,
  * compatibility, data binding, form fields, format search, tree walking).
  *
- * `import { Query } from "documonster/word"` →
+ * `import { Query } from "@cj-tech-master/excelts/word"` →
  *   `Query.extractText(doc)`, `Query.searchText(doc, /x/)`,
  *   `Query.replaceText(...)`, `Query.collectParagraphs(doc)`, … — tree-shaken
  *   via `export * as Query`.
@@ -21,30 +21,30 @@ export {
   tableCount,
   extractText,
   searchText
-} from "../query/search";
-export { replaceText } from "../query/replace";
-export { mailMerge } from "../query/mail-merge";
+} from "@word/query/search";
+export { replaceText } from "@word/query/replace";
+export { mailMerge } from "@word/query/mail-merge";
 export {
   acceptAllRevisions,
   rejectAllRevisions,
   listRevisions,
   acceptRevision,
   rejectRevision
-} from "../query/revisions";
+} from "@word/query/revisions";
 export {
   resolveStyle,
   resolveRunStyle,
   resolveNumberingLevel,
   resolveTableStyle
-} from "../query/style-resolve";
-export { getCompatibilityMode, setCompatibilityMode } from "../query/compat";
-export { resolveDataBindings } from "../query/data-binding";
-export { extractFormFields, fillFormFields } from "../query/form-fields";
-export { searchByFormat, countByFormat, getUsedFormats } from "../query/format-search";
+} from "@word/query/style-resolve";
+export { getCompatibilityMode, setCompatibilityMode } from "@word/query/compat";
+export { resolveDataBindings } from "@word/query/data-binding";
+export { extractFormFields, fillFormFields } from "@word/query/form-fields";
+export { searchByFormat, countByFormat, getUsedFormats } from "@word/query/format-search";
 export {
   walkDocument,
   walkBlocks,
   collectParagraphs,
   collectRuns,
   collectTables
-} from "../core/walker";
+} from "@word/core/walker";

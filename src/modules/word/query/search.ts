@@ -4,9 +4,9 @@
  * Functions for searching, counting, and extracting text from a DocxDocument.
  */
 
-import { extractParagraphText } from "../core/text-utils";
-import { walkDocument } from "../core/walker";
-import type { DocxVisitor } from "../core/walker";
+import { extractParagraphText } from "@word/core/text-utils";
+import { walkDocument } from "@word/core/walker";
+import type { DocxVisitor } from "@word/core/walker";
 import type {
   DocxDocument,
   Paragraph,
@@ -16,7 +16,7 @@ import type {
   CommentDef,
   ImageDef,
   SectionProperties
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Types

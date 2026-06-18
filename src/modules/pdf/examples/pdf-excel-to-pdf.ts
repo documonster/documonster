@@ -40,7 +40,7 @@ async function convertFile(
   options?: Parameters<typeof Pdf.fromExcel>[1]
 ): Promise<void> {
   const wb = Workbook.create();
-  await Workbook.readXlsxFile(wb, xlsxPath);
+  await Workbook.readFile(wb, xlsxPath);
   const pdf = await Pdf.fromExcel(wb, options);
   fs.writeFileSync(path.join(outDir, pdfName), pdf);
   const sheets = getWorksheets(wb).length;
@@ -152,7 +152,7 @@ await convertFile(
 console.log("10. Same file, multiple export variants:");
 
 const wb10 = Workbook.create();
-await Workbook.readXlsxFile(wb10, path.join(excelDataDir, "test.xlsx"));
+await Workbook.readFile(wb10, path.join(excelDataDir, "test.xlsx"));
 
 // Variant A: Landscape, no grid
 const pdfA = await Pdf.fromExcel(wb10, { orientation: "landscape" });

@@ -55,9 +55,9 @@ describe("Worksheet", () => {
       Cell.setValue(ws, "A2", "below break");
       rowAddPageBreak(Worksheet.getRow(ws, 1));
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "test")!;
       expect(ws2.rowBreaks.length).toBe(1);

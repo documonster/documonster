@@ -16,9 +16,9 @@
  *   correctly through `excelToDate()`.
  */
 
-import { dateToExcel, excelToDate } from "@utils/utils.base";
-
-import type { RuntimeValue, ErrorValue } from "../runtime/values";
+import { isDate1904 } from "@formula/functions/_date-context";
+import { argToNumber, checkError } from "@formula/functions/_shared";
+import type { RuntimeValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -30,9 +30,8 @@ import {
   topLeft,
   rvNumber,
   rvBoolean
-} from "../runtime/values";
-import { isDate1904 } from "./_date-context";
-import { argToNumber, checkError } from "./_shared";
+} from "@formula/runtime/values";
+import { dateToExcel, excelToDate } from "@utils/utils.base";
 
 // ============================================================================
 // Type alias for native function signature

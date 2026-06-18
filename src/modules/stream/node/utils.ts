@@ -13,6 +13,8 @@ import { createIsTransform, createIsDuplex, createIsStream } from "@stream/commo
 import { getDefaultHighWaterMark } from "@stream/common/utils";
 import { UnsupportedStreamTypeError } from "@stream/errors";
 import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
+import { pipeline, finished } from "@stream/node/pipeline";
+import { Writable } from "@stream/node/writable";
 import type {
   DuplexStreamOptions,
   IDuplex,
@@ -21,9 +23,6 @@ import type {
   WritableLike
 } from "@stream/types";
 import { createTextDecoder, concatUint8Arrays } from "@utils/binary";
-
-import { pipeline, finished } from "./pipeline";
-import { Writable } from "./writable";
 
 // =============================================================================
 // Utility Functions

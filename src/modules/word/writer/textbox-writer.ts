@@ -4,11 +4,10 @@
  * Renders text boxes using VML (v:shape) with mc:AlternateContent.
  */
 
+import { NS_V, NS_O, NS_W10, NS_W } from "@word/constants";
+import type { TextBox } from "@word/types";
+import { renderParagraph } from "@word/writer/paragraph-writer";
 import type { XmlSink } from "@xml/types";
-
-import { NS_V, NS_O, NS_W10, NS_W } from "../constants";
-import type { TextBox } from "../types";
-import { renderParagraph } from "./paragraph-writer";
 
 /** Render a text box as a VML shape within a paragraph. */
 export function renderTextBox(xml: XmlSink, textBox: TextBox): void {

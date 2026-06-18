@@ -25,8 +25,8 @@
  * - `PreserveWrite` — keep the cell's existing cached result (unsupported fn).
  */
 
-import type { SnapshotCellValue } from "../integration/workbook-snapshot";
-import type { SpillRegion } from "./types";
+import type { SnapshotCellValue } from "@formula/integration/workbook-snapshot";
+import type { SpillRegion } from "@formula/materialize/types";
 
 // ============================================================================
 // Individual Write Operations

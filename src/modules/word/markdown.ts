@@ -11,10 +11,14 @@
  * ```
  */
 
-export { renderToMarkdown, markdownToDocx, markdownToDocxBody } from "./convert/markdown/markdown";
+export {
+  renderToMarkdown,
+  markdownToDocx,
+  markdownToDocxBody
+} from "@word/convert/markdown/markdown";
 export type {
   MarkdownRenderOptions,
   MarkdownImportOptions,
   MarkdownImageData,
   MarkdownBodyResult
-} from "./convert/markdown/markdown";
+} from "@word/convert/markdown/markdown";

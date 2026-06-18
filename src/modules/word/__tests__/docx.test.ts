@@ -12,6 +12,7 @@
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
+import { TemplateError } from "../errors";
 import {
   Document,
   DocxError,
@@ -23,7 +24,7 @@ import {
   Query,
   Units
 } from "../index";
-import { fillTemplate, TemplateError } from "../template/template-engine";
+import { fillTemplate } from "../template/template-engine";
 import type { DocxDocument, Paragraph, Table } from "../types";
 import {
   createContentTypes,
@@ -1013,11 +1014,11 @@ describe("Document.toBuffer()", () => {
     const longText = "A".repeat(10000);
     const h1 = Document.create();
     Document.addParagraph(h1, longText);
-    const bytesLow = await Io.toBuffer(Document.build(h1), 1);
+    const bytesLow = await Io.toBuffer(Document.build(h1), { compressionLevel: 1 });
 
     const h2 = Document.create();
     Document.addParagraph(h2, longText);
-    const bytesHigh = await Io.toBuffer(Document.build(h2), 9);
+    const bytesHigh = await Io.toBuffer(Document.build(h2), { compressionLevel: 9 });
 
     // Higher compression should produce smaller output
     expect(bytesHigh.length).toBeLessThanOrEqual(bytesLow.length);

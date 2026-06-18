@@ -35,21 +35,18 @@
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
 import { SinkAdapter, type AnySink } from "@stream/internal/sink-adapter";
-import { xmlEncodeAttr } from "@xml/encode";
-import { XmlWriter } from "@xml/writer";
-
 import {
   ContentType,
   RelType,
   PartPath,
   DOCUMENT_NAMESPACES,
   STD_DOC_ATTRIBUTES
-} from "../constants";
-import { sanitizeMediaFileName, sanitizeUrl, utf8Encoder } from "../core/internal-utils";
-import { getFileExt, getPartRelsPath } from "../core/opc-paths";
-import { walkBlocks } from "../core/walker";
-import { DocxWriteError } from "../errors";
-import type { WordSecurityPolicy } from "../security/policy";
+} from "@word/constants";
+import { sanitizeMediaFileName, sanitizeUrl, utf8Encoder } from "@word/core/internal-utils";
+import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
+import { walkBlocks } from "@word/core/walker";
+import { DocxWriteError } from "@word/errors";
+import type { WordSecurityPolicy } from "@word/security/policy";
 import type {
   AbstractNumbering,
   AppProperties,
@@ -79,26 +76,30 @@ import type {
   SectionProperties,
   StyleDef,
   Watermark
-} from "../types";
-import { renderChartPart } from "./chart-writer";
-import { renderComments, renderCommentsExtended } from "./comment-writer";
-import { buildCommonAuxiliaryParts } from "./common-parts";
+} from "@word/types";
+import { renderChartPart } from "@word/writer/chart-writer";
+import { renderComments, renderCommentsExtended } from "@word/writer/comment-writer";
+import { buildCommonAuxiliaryParts } from "@word/writer/common-parts";
 import {
   createContentTypes,
   addContentTypeDefault,
   addContentTypeOverride,
   addImageContentTypeDefaults,
   renderContentTypes
-} from "./content-types";
-import { renderBodyContent } from "./document-writer";
-import { renderHeader, renderFooter, renderWatermarkHeader } from "./header-footer-writer";
+} from "@word/writer/content-types";
+import { renderBodyContent } from "@word/writer/document-writer";
+import {
+  renderHeader,
+  renderFooter,
+  renderWatermarkHeader
+} from "@word/writer/header-footer-writer";
 import {
   collectChartsFromHeaderFooter,
   collectHyperlinksFromHeaderFooter,
   collectHyperlinksFromNotes,
   collectImageRidsFromContent,
   collectImageRidsFromNotes
-} from "./reference-scanners";
+} from "@word/writer/reference-scanners";
 import {
   createRelationships,
   addRelationship,
@@ -106,11 +107,13 @@ import {
   getRelationshipCount,
   renderRelationships,
   type RelationshipsState
-} from "./relationships";
-import { createRenderContext, type WordRenderContext } from "./render-context";
-import { renderSectionProperties } from "./section-writer";
-import { StreamBuf } from "./stream-buf";
-import { StringBuf } from "./string-buf";
+} from "@word/writer/relationships";
+import { createRenderContext, type WordRenderContext } from "@word/writer/render-context";
+import { renderSectionProperties } from "@word/writer/section-writer";
+import { StreamBuf } from "@word/writer/stream-buf";
+import { StringBuf } from "@word/writer/string-buf";
+import { xmlEncodeAttr } from "@xml/encode";
+import { XmlWriter } from "@xml/writer";
 
 // Per-instance StringBuf is created in the constructor (see _xmlBuffer field below).
 // Previously this was a module-level singleton which caused data races with concurrent instances.

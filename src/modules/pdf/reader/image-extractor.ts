@@ -15,9 +15,9 @@
  * @see PDF Reference 1.7, §4.8 - Images
  */
 
-import type { PdfDocument } from "./pdf-document";
-import type { PdfDictValue, PdfStream } from "./pdf-parser";
-import { isPdfRef, isPdfArray, dictGetName, dictGetNumber } from "./pdf-parser";
+import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue, PdfStream } from "@pdf/reader/pdf-parser";
+import { isPdfRef, isPdfArray, dictGetName, dictGetNumber } from "@pdf/reader/pdf-parser";
 
 // =============================================================================
 // Types

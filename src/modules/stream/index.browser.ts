@@ -8,7 +8,7 @@
  */
 
 // Shared type + platform-independent exports
-export * from "./index.base";
+export * from "@stream/index.base";
 
 // Core stream classes (browser implementations)
 import { Readable } from "@stream/browser/readable";

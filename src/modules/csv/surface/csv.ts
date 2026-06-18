@@ -2,7 +2,7 @@
  * `Csv` namespace surface — CSV parsing, formatting, detection, streaming,
  * row utilities, dynamic typing, generation.
  *
- * `import { Csv } from "documonster/csv"` →
+ * `import { Csv } from "@cj-tech-master/excelts/csv"` →
  *   `Csv.parse(text)`, `Csv.parseAsync(...)`, `Csv.format(rows)`,
  *   `Csv.detectDelimiter(text)`, `new Csv.ParserStream()`, …
  *
@@ -11,18 +11,18 @@
  */
 
 // Type guards / helpers
-export { isFormattedValue, quoted, unquoted } from "../types";
+export { isFormattedValue, quoted, unquoted } from "@csv/types";
 
 // Parsing
-export { parseCsv as parse } from "../parse/sync";
+export { parseCsv as parse } from "@csv/parse/sync";
 export {
   parseCsvAsync as parseAsync,
   parseCsvRows as parseRows,
   parseCsvWithProgress as parseWithProgress
-} from "../parse/async";
+} from "@csv/parse/async";
 
 // Formatting
-export { formatCsv as format } from "../format/index";
+export { formatCsv as format } from "@csv/format/index";
 
 // Streaming
 export {
@@ -30,10 +30,10 @@ export {
   CsvFormatterStream as FormatterStream,
   createCsvParserStream as createParserStream,
   createCsvFormatterStream as createFormatterStream
-} from "../stream/index";
+} from "@csv/stream/index";
 
 // Detection
-export { detectDelimiter, detectLinebreak, stripBom } from "../utils/detect";
+export { detectDelimiter, detectLinebreak, stripBom } from "@csv/utils/detect";
 
 // Row utilities
 export {
@@ -44,10 +44,10 @@ export {
   processColumns,
   deduplicateHeaders,
   deduplicateHeadersWithRenames
-} from "../utils/row";
+} from "@csv/utils/row";
 
 // Dynamic typing
-export { applyDynamicTyping, applyDynamicTypingToRow } from "../utils/dynamic-typing";
+export { applyDynamicTyping, applyDynamicTypingToRow } from "@csv/utils/dynamic-typing";
 
 // Generation
 export {
@@ -56,10 +56,10 @@ export {
   csvGenerateAsync as generateAsync,
   csvGenerateData as generateData,
   createCsvGenerator as createGenerator
-} from "../utils/generate";
+} from "@csv/utils/generate";
 
 // Number formatting
 export {
   formatNumberForCsv as formatNumber,
   parseNumberFromCsv as parseNumber
-} from "../utils/number";
+} from "@csv/utils/number";

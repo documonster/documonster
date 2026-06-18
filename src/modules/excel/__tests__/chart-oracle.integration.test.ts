@@ -27,7 +27,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
       { type: "bar", series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }] },
       "D1:J10"
     );
-    const input = new Uint8Array(await Workbook.toXlsxBuffer(workbook));
+    const input = new Uint8Array(await Workbook.toBuffer(workbook));
     await expectValidXlsx(input);
 
     const result = await runExternalOracle({
@@ -86,7 +86,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
       }
     });
 
-    const input = new Uint8Array(await Workbook.toXlsxBuffer(workbook));
+    const input = new Uint8Array(await Workbook.toBuffer(workbook));
     await expectValidXlsx(input);
 
     const libreOffice = await runOfficeOpenValidation({
@@ -141,8 +141,8 @@ describe("optional chart oracle and enterprise corpus harness", () => {
     for (const entry of entries) {
       const input = await readFile(join(root, entry.path));
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, input);
-      const output = await Workbook.toXlsxBuffer(wb);
+      await Workbook.read(wb, input);
+      const output = await Workbook.toBuffer(wb);
       const outBytes = new Uint8Array(output);
       const zip = await extractAll(outBytes);
       await expectValidXlsx(outBytes, { label: entry.path });

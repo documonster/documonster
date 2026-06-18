@@ -30,7 +30,7 @@ async function buildCommentsXlsx(): Promise<Uint8Array> {
   Cell.setValue(ws, "B2", "World");
   cellSetComment(getCell(ws, "B2"), noteCreate({ texts: [{ text: "Comment by Bob" }] }, "Bob"));
 
-  const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  const buffer = new Uint8Array(await Workbook.toBuffer(wb));
   await expectValidXlsx(buffer, { label: "comments-subdir build" });
   return buffer;
 }
@@ -94,7 +94,7 @@ describe("Comments subdirectory layout", () => {
   it("round-trips comments and authors through flat layout", async () => {
     const buffer = await buildCommentsXlsx();
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, buffer);
+    await Workbook.read(wb, buffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     const a1 = getCell(ws, "A1");
@@ -111,7 +111,7 @@ describe("Comments subdirectory layout", () => {
     const subdirBuffer = await repackToSubdirLayout(flatBuffer);
 
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, subdirBuffer);
+    await Workbook.read(wb, subdirBuffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     const a1 = getCell(ws, "A1");
@@ -128,7 +128,7 @@ describe("Comments subdirectory layout", () => {
     const subdirBuffer = await repackToSubdirLayout(flatBuffer);
 
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, subdirBuffer);
+    await Workbook.read(wb, subdirBuffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     // Verify the actual text survived
@@ -142,10 +142,10 @@ describe("Comments subdirectory layout", () => {
     Cell.setValue(ws, "A1", "Test");
     cellSetComment(getCell(ws, "A1"), noteCreate({ texts: [{ text: "No author set" }] }));
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "comment-default-author" });
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(Cell.getNote(ws2, "A1")).toBeDefined();
@@ -179,7 +179,7 @@ describe("Comments subdirectory layout", () => {
 
     const repackedBuffer = await archive.bytes();
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, repackedBuffer);
+    await Workbook.read(wb, repackedBuffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     expect(Cell.getNote(ws, "A1")).toContain("Comment by Alice");
@@ -222,7 +222,7 @@ describe("Comments subdirectory layout", () => {
 
     const repackedBuffer = await archive.bytes();
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, repackedBuffer);
+    await Workbook.read(wb, repackedBuffer);
     const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
     // Despite reversed VML order, each cell should get its own note metadata

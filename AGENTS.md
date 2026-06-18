@@ -86,7 +86,7 @@ Layer 0:  utils    (no module dependencies)
 `@excel/*`, `@word/*`, `@formula/*`, `@pdf/*`, `@csv/*`, `@markdown/*`, `@xml/*`, `@archive/*`, `@stream/*` → `./src/modules/<name>/*`
 `@utils/*` → `./src/utils/*` | `@test/*` → `./src/test/*`
 
-Use aliases for cross-module imports. Use relative paths only within the same module.
+Use aliases for **all** module imports — both cross-module (`@archive/...` from excel) and same-module (`@excel/cell` from within excel). This matches the IDE auto-import setting (`importModuleSpecifier: "non-relative"`) and keeps imports stable when files move. The only exception is `src/utils/` (Layer 0), whose internal files use relative paths (`./errors`, `./glob`).
 
 ## Code Style
 

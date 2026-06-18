@@ -6,7 +6,7 @@
  * problem kinds.
  *
  * ```ts
- * const report = await validateXlsxBuffer(await Workbook.toXlsxBuffer(wb));
+ * const report = await validateXlsxBuffer(await Workbook.toBuffer(wb));
  * if (!report.ok) {
  *   console.error(report.problems);
  * }

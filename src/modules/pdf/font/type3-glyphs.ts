@@ -2556,7 +2556,7 @@ import {
   GEOMETRIC_EXT,
   ROMAN_NUMERALS,
   ENCLOSED_EXT
-} from "./type3-glyphs-extended";
+} from "@pdf/font/type3-glyphs-extended";
 import {
   ARROWS_HARPOONS,
   DINGBATS_FULL,
@@ -2565,7 +2565,7 @@ import {
   SUP_ARROWS_B,
   MISC_MATH_A_EXT,
   MISC_SYM_ARROWS_EXT
-} from "./type3-glyphs-extended2";
+} from "@pdf/font/type3-glyphs-extended2";
 import {
   DINGBATS_FILL,
   MISC_SYM_FILL,
@@ -2574,7 +2574,7 @@ import {
   GEN_PUNCT_FILL,
   NUM_FORMS_FILL,
   FINAL_FILL
-} from "./type3-glyphs-fill";
+} from "@pdf/font/type3-glyphs-fill";
 import {
   SPACES,
   CIRCLED_DIGITS,
@@ -2588,7 +2588,7 @@ import {
   LETTERLIKE_FULL,
   CURRENCY_REMAINING,
   ARROWS_REMAINING
-} from "./type3-glyphs-quality";
+} from "@pdf/font/type3-glyphs-quality";
 
 const ALL_TABLES: Array<Record<number, GlyphDef>> = [
   GEO,

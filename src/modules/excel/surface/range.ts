@@ -1,7 +1,7 @@
 /**
  * `Range` namespace surface — geometric range helpers.
  *
- * `import { Range } from "documonster/excel"` → `Range.create("A1:B2")`,
+ * `import { Range } from "@cj-tech-master/excelts/excel"` → `Range.create("A1:B2")`,
  * `Range.contains(r, "A1")`, `Range.forEachAddress(r, cb)`.
  */
 export {

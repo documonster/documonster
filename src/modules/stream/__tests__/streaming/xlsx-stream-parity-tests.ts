@@ -75,13 +75,13 @@ export function createXlsxStreamParityTests(getContext: () => ParityTestContext)
 
       const options = { zip: { level: 6, modTime: new Date(Date.UTC(2000, 0, 1, 0, 0, 0)) } };
 
-      const bufferNonStream = await Workbook.toXlsxBuffer(wb, options);
+      const bufferNonStream = await Workbook.toBuffer(wb, options);
 
       // In browser builds, `xlsx.write()` expects a StreamBuf-like sink with
       // synchronous `write()`/`end()`; using StreamBuf keeps behavior consistent
       // across Node and browser.
       const stream = new StreamBuf();
-      await Workbook.writeXlsxStream(wb, stream as any, options);
+      await Workbook.writeStream(wb, stream as any, options);
       const bufferStream = stream.read() || new Uint8Array(0);
 
       expect(bufferStream.length).toBe(bufferNonStream.length);
@@ -92,17 +92,17 @@ export function createXlsxStreamParityTests(getContext: () => ParityTestContext)
       const wb = ctx.Workbook.create();
       buildSmallWorkbook(wb);
 
-      const data = await Workbook.toXlsxBuffer(wb, {
+      const data = await Workbook.toBuffer(wb, {
         zip: { level: 6, modTime: new Date(Date.UTC(2000, 0, 1, 0, 0, 0)) }
       });
 
       const wbFromBuffer = ctx.Workbook.create();
-      await Workbook.loadXlsx(wbFromBuffer, data);
+      await Workbook.read(wbFromBuffer, data);
 
       const wbFromStream = ctx.Workbook.create();
       const stream = new ctx.PassThrough();
       stream.end(data);
-      await Workbook.readXlsxStream(wbFromStream, stream as any);
+      await Workbook.readStream(wbFromStream, stream as any);
 
       const sheet1a = Workbook.getWorksheet(wbFromBuffer, "Sheet1")!;
       const sheet1b = Workbook.getWorksheet(wbFromStream, "Sheet1")!;

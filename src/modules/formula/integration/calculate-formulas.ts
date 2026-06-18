@@ -17,11 +17,11 @@
  * 8. **Apply** — write plan to live workbook
  */
 
-import type { WorkbookLike } from "../materialize/types";
-import { calculateFormulasImpl } from "./calculate-formulas-impl";
+import { calculateFormulasImpl } from "@formula/integration/calculate-formulas-impl";
+import type { WorkbookLike } from "@formula/materialize/types";
 
 // Re-export shared types for external consumers
-export type { DefinedNamesLike, WorkbookLike } from "../materialize/types";
+export type { DefinedNamesLike, WorkbookLike } from "@formula/materialize/types";
 
 /**
  * Recalculate all formula cells in a workbook.

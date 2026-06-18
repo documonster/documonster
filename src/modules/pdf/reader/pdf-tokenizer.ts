@@ -8,7 +8,7 @@
  * @see PDF Reference 1.7, §3.1 - Lexical Conventions
  */
 
-import { PdfStructureError } from "../errors";
+import { PdfStructureError } from "@pdf/errors";
 
 // =============================================================================
 // Token Types

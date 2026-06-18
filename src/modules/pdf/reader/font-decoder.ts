@@ -13,10 +13,10 @@
  * @see PDF Reference 1.7, §5.5 - Character Encoding
  */
 
-import type { CMap } from "./cmap-parser";
-import { parseCMap } from "./cmap-parser";
-import type { PdfDocument } from "./pdf-document";
-import type { PdfDictValue, PdfObject, PdfArrayValue } from "./pdf-parser";
+import type { CMap } from "@pdf/reader/cmap-parser";
+import { parseCMap } from "@pdf/reader/cmap-parser";
+import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue, PdfObject, PdfArrayValue } from "@pdf/reader/pdf-parser";
 import {
   isPdfDict,
   isPdfRef,
@@ -24,7 +24,7 @@ import {
   dictGetName,
   dictGetNumber,
   dictGetArray
-} from "./pdf-parser";
+} from "@pdf/reader/pdf-parser";
 
 // =============================================================================
 // Types

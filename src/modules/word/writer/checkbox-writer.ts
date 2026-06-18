@@ -12,10 +12,9 @@
  * attribute and the actual glyph for the displayed run.
  */
 
+import { NS_W14 } from "@word/constants";
+import type { CheckBox } from "@word/types";
 import type { XmlSink } from "@xml/types";
-
-import { NS_W14 } from "../constants";
-import type { CheckBox } from "../types";
 
 /**
  * Normalise a checked-state value to {hex, glyph}.

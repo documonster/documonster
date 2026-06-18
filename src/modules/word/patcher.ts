@@ -17,8 +17,8 @@
  * of which container holds it.
  */
 
-import { type Mutable } from "./core/internal-utils";
-import { isHyperlink, isRun } from "./core/text-utils";
+import { type Mutable } from "@word/core/internal-utils";
+import { isHyperlink, isRun } from "@word/core/text-utils";
 import type {
   BodyContent,
   DocxDocument,
@@ -35,7 +35,7 @@ import type {
   TableOfContents,
   TextBox,
   TextContent
-} from "./types";
+} from "@word/types";
 
 // =============================================================================
 // Public types

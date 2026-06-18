@@ -8,13 +8,12 @@
  * direct import would form a cycle.
  */
 
+import type { Mutable } from "@word/core/internal-utils";
+import { attrInt, attrVal, findChildrenNs } from "@word/reader/parse-utils";
+import { type ReaderContext, createFieldState } from "@word/reader/reader-context";
+import type { CommentDef, Paragraph } from "@word/types";
 import { parseXml } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
-
-import type { Mutable } from "../core/internal-utils";
-import type { CommentDef, Paragraph } from "../types";
-import { attrInt, attrVal, findChildrenNs } from "./parse-utils";
-import { type ReaderContext, createFieldState } from "./reader-context";
 
 /** Parse `word/comments.xml` into a list of CommentDef. */
 export function parseCommentsXml(

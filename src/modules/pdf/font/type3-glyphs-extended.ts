@@ -13,7 +13,7 @@
  *  - Additional Arrows, Math, Dingbats, Misc Symbols, Currency, Technical
  */
 
-import type { GlyphDef, GlyphPen } from "./type3-glyphs";
+import type { GlyphDef, GlyphPen } from "@pdf/font/type3-glyphs";
 
 const W = 600;
 

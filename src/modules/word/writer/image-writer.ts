@@ -5,11 +5,10 @@
  * with full support for rotation, flip, lock anchor, outline, and wrap margins.
  */
 
+import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "@word/constants";
+import type { FloatingImage } from "@word/types";
+import { DEFAULT_RELATIVE_HEIGHT, DEFAULT_WRAP_MARGIN_EMU } from "@word/units";
 import type { XmlSink } from "@xml/types";
-
-import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "../constants";
-import type { FloatingImage } from "../types";
-import { DEFAULT_RELATIVE_HEIGHT, DEFAULT_WRAP_MARGIN_EMU } from "../units";
 
 /** Render a floating image as a standalone paragraph with wp:anchor. */
 export function renderFloatingImage(

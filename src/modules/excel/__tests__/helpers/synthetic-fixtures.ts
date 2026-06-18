@@ -52,7 +52,7 @@ export interface SyntheticFixture {
   id: string;
   /** Human-readable description (e.g. "classic bar with dataLabels + trendline"). */
   description: string;
-  /** xlsx bytes ready to pass to `Workbook.loadXlsx(Workbook)`. */
+  /** xlsx bytes ready to pass to `Workbook.read(Workbook)`. */
   bytes: Uint8Array;
 }
 
@@ -335,7 +335,7 @@ export async function buildClassicPresetFixtures(): Promise<SyntheticFixture[]> 
     });
     addChart(sheet, options, "K1:Q12");
 
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     const decorated = await decorateWithSyntheticMarkers(raw);
     fixtures.push({
       id: `classic-${preset}`,
@@ -387,7 +387,7 @@ export async function buildChartExFixtures(): Promise<SyntheticFixture[]> {
       "K1:Q12"
     );
 
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     // ChartEx fixtures get both the SYNTHETIC marker comment and a
     // vendor `cx:extLst` on `cx:chartSpace`. The structured renderer
     // preserves the latter via `chartSpace.extLst` raw passthrough so
@@ -437,7 +437,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "combo-stacked-secondary",
       description: "stacked bar + line with secondary value axis",
@@ -475,7 +475,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "combo-scatter-line",
       description: "scatter + line combo with secondary axis",
@@ -497,7 +497,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "axis-log",
       description: "line chart with log10 value axis",
@@ -533,7 +533,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "combo-three-groups-shared-secondary",
       description: "three combo groups, two sharing the same secondary axis",
@@ -562,7 +562,7 @@ export async function buildComboAxisFixtures(): Promise<SyntheticFixture[]> {
       },
       "K1:Q14"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "combo-3d-bar-line",
       description: "3D bar group with serAx + 2D line group",
@@ -632,7 +632,7 @@ export async function buildChartsheetFixtures(): Promise<SyntheticFixture[]> {
     }
   });
 
-  const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  const raw = new Uint8Array(await Workbook.toBuffer(wb));
   fixtures.push({
     id: "chartsheet-mixed",
     description: "four chartsheets (pie, funnel, combo, hidden) plus a Data worksheet",
@@ -691,7 +691,7 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
       },
       "D1:J12"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "pivot-chart-multi-value",
       description:
@@ -759,7 +759,7 @@ export async function buildPivotChartFixtures(): Promise<SyntheticFixture[]> {
       },
       "D1:J12"
     );
-    const raw = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const raw = new Uint8Array(await Workbook.toBuffer(wb));
     fixtures.push({
       id: "pivot-chart-multi-cache",
       description: "two independent pivot caches each driving a pivot chart",

@@ -10,7 +10,7 @@ export {
   terminateDefaultWorkerPool,
   parseWithPool,
   formatWithPool
-} from "./pool.browser";
+} from "@csv/worker/pool.browser";
 
 export type {
   // Pool options
@@ -37,6 +37,6 @@ export type {
   GroupResult,
   AggregateResult,
   QueryResult
-} from "./types";
+} from "@csv/worker/types";
 
-export { getWorkerBlobUrl, releaseWorkerBlobUrl } from "./worker-script.bundle";
+export { getWorkerBlobUrl, releaseWorkerBlobUrl } from "@csv/worker/worker-script.bundle";

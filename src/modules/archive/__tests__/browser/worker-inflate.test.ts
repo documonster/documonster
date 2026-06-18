@@ -1,5 +1,5 @@
-import { zip } from "@archive";
 import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import { zip } from "@archive/create-archive";
 import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
 import { describe, it, expect } from "vitest";
 

@@ -113,10 +113,10 @@ export class InvalidValueTypeError extends ExcelError {
 }
 
 /**
- * Error thrown when XML parsing encounters unexpected content.
+ * Error thrown when xlsx (OOXML) parsing encounters unexpected content.
  */
-export class XmlParseError extends ExcelError {
-  override name = "XmlParseError";
+export class XlsxParseError extends ExcelError {
+  override name = "XlsxParseError";
 
   constructor(
     public readonly context: string,

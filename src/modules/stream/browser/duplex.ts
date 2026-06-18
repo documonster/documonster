@@ -2,16 +2,15 @@
  * Browser Stream - Duplex
  */
 
+import { addEmitterListener, createListenerRegistry } from "@stream/browser/helpers";
+import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
+import { Readable } from "@stream/browser/readable";
+import { Writable } from "@stream/browser/writable";
 import { parseEndArgs } from "@stream/common/end-args";
 import { StreamTypeError } from "@stream/errors";
 import type { DuplexStreamOptions, IDuplex, WritableLike } from "@stream/types";
 import { createAbortError } from "@utils/errors";
 import { EventEmitter } from "@utils/event-emitter";
-
-import { addEmitterListener, createListenerRegistry } from "./helpers";
-import { deferTask, inDeferredContext } from "./microtask-context";
-import { Readable } from "./readable";
-import { Writable } from "./writable";
 
 // =============================================================================
 // Duplex Stream

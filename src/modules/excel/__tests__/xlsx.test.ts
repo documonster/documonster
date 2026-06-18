@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 async function buildMinimalXlsx(): Promise<Uint8Array> {
   const wb = Workbook.create();
   Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hello");
-  return Workbook.toXlsxBuffer(wb);
+  return Workbook.toBuffer(wb);
 }
 
 /**
@@ -33,7 +33,7 @@ async function buildDirtyXlsx(
   // 1. Build a clean XLSX
   const wb = Workbook.create();
   Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", cellText);
-  const cleanBuffer = await Workbook.toXlsxBuffer(wb);
+  const cleanBuffer = await Workbook.toBuffer(wb);
 
   // 2. Extract all ZIP entries
   const { extractAll } = await import("@archive/unzip/extract");
@@ -93,7 +93,7 @@ async function buildRichXlsx(): Promise<Uint8Array> {
   const ws2 = Workbook.addWorksheet(wb, "Hidden", { state: "hidden" });
   Cell.setValue(ws2, "A1", "secret");
 
-  return Workbook.toXlsxBuffer(wb);
+  return Workbook.toBuffer(wb);
 }
 
 // =============================================================================
@@ -113,7 +113,7 @@ describe("XLSX", () => {
       expect(buffer.length).toBeGreaterThan(0);
 
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       expect(getWorksheets(wb).length).toBe(1);
       expect(Cell.getValue(Workbook.getWorksheet(wb, "Sheet1")!, "A1")).toBe("hello");
@@ -122,7 +122,7 @@ describe("XLSX", () => {
     it("preserves all value types through round-trip", async () => {
       const buffer = await buildRichXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       const ws = Workbook.getWorksheet(wb, "Data")!;
       expect(Cell.getValue(ws, "A2")).toBe(1); // number
@@ -144,7 +144,7 @@ describe("XLSX", () => {
     it("preserves styles through round-trip", async () => {
       const buffer = await buildRichXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       const cell = getCell(Workbook.getWorksheet(wb, "Data")!, "A1");
       expect(cellFont(cell)!.bold).toBe(true);
@@ -157,7 +157,7 @@ describe("XLSX", () => {
     it("preserves merged cells through round-trip", async () => {
       const buffer = await buildRichXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       const ws = Workbook.getWorksheet(wb, "Data")!;
       expect(Cell.getValue(ws, "H1")).toBe("merged");
@@ -167,7 +167,7 @@ describe("XLSX", () => {
     it("preserves column definitions through round-trip", async () => {
       const buffer = await buildRichXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       const ws = Workbook.getWorksheet(wb, "Data")!;
       expect(Column.getWidth(ws, 1)).toBe(10);
@@ -178,7 +178,7 @@ describe("XLSX", () => {
     it("preserves metadata through round-trip", async () => {
       const buffer = await buildRichXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       expect(wb.creator).toBe("TestAuthor");
       expect(wb.created).toBeInstanceOf(Date);
@@ -187,7 +187,7 @@ describe("XLSX", () => {
     it("preserves sheet state (hidden) through round-trip", async () => {
       const buffer = await buildRichXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
 
       expect(Workbook.getWorksheet(wb, "Data")!.state).toBe("visible");
       expect(Workbook.getWorksheet(wb, "Hidden")!.state).toBe("hidden");
@@ -199,9 +199,9 @@ describe("XLSX", () => {
       Cell.setValue(Workbook.addWorksheet(wb1, "Second"), "A1", 2);
       Cell.setValue(Workbook.addWorksheet(wb1, "Third"), "A1", 3);
 
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const names = getWorksheets(wb2).map(ws => getSheetName(ws));
       expect(names).toEqual(["First", "Second", "Third"]);
@@ -209,10 +209,10 @@ describe("XLSX", () => {
 
     it("handles empty workbook (no worksheets)", async () => {
       const wb1 = Workbook.create();
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(getWorksheets(wb2).length).toBe(0);
     });
@@ -220,10 +220,10 @@ describe("XLSX", () => {
     it("handles workbook with empty worksheet", async () => {
       const wb1 = Workbook.create();
       Workbook.addWorksheet(wb1, "Empty");
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(getWorksheets(wb2).length).toBe(1);
       expect(Workbook.getWorksheet(wb2, "Empty")).toBeDefined();
@@ -238,7 +238,7 @@ describe("XLSX", () => {
     it("accepts Uint8Array", async () => {
       const buffer = await buildMinimalXlsx();
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buffer);
+      await Workbook.read(wb, buffer);
       expect(getWorksheets(wb).length).toBe(1);
     });
 
@@ -250,7 +250,7 @@ describe("XLSX", () => {
       ) as ArrayBuffer;
 
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, arrayBuffer);
+      await Workbook.read(wb, arrayBuffer);
       expect(getWorksheets(wb).length).toBe(1);
       expect(Cell.getValue(Workbook.getWorksheet(wb, "Sheet1")!, "A1")).toBe("hello");
     });
@@ -261,24 +261,24 @@ describe("XLSX", () => {
       const base64 = Buffer.from(buffer).toString("base64");
 
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, base64, { base64: true });
+      await Workbook.read(wb, base64, { base64: true });
       expect(getWorksheets(wb).length).toBe(1);
       expect(Cell.getValue(Workbook.getWorksheet(wb, "Sheet1")!, "A1")).toBe("hello");
     });
 
     it("rejects invalid input (plain object)", async () => {
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, {} as any)).rejects.toThrow();
+      await expect(Workbook.read(wb, {} as any)).rejects.toThrow();
     });
 
     it("rejects null input", async () => {
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, null as any)).rejects.toThrow();
+      await expect(Workbook.read(wb, null as any)).rejects.toThrow();
     });
 
     it("rejects undefined input", async () => {
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, undefined as any)).rejects.toThrow();
+      await expect(Workbook.read(wb, undefined as any)).rejects.toThrow();
     });
 
     it("accepts a Node Buffer (Buffer extends Uint8Array)", async () => {
@@ -286,7 +286,7 @@ describe("XLSX", () => {
       // Node Buffer shares the Uint8Array prototype at runtime.
       const buf = Buffer.from(u8);
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, buf);
+      await Workbook.read(wb, buf);
       expect(getWorksheets(wb).length).toBe(1);
       expect(Cell.getValue(Workbook.getWorksheet(wb, "Sheet1")!, "A1")).toBe("hello");
     });
@@ -295,7 +295,7 @@ describe("XLSX", () => {
       const u8 = await buildMinimalXlsx();
       const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, view);
+      await Workbook.read(wb, view);
       expect(getWorksheets(wb).length).toBe(1);
       expect(Cell.getValue(Workbook.getWorksheet(wb, "Sheet1")!, "A1")).toBe("hello");
     });
@@ -304,9 +304,7 @@ describe("XLSX", () => {
       // Binary zip bytes cannot round-trip through a JS string; we require
       // the explicit opt-in so users are never silently corrupted.
       const wb = Workbook.create();
-      await expect(
-        Workbook.loadXlsx(wb, "PK\u0003\u0004 not real binary" as string)
-      ).rejects.toThrow(
+      await expect(Workbook.read(wb, "PK\u0003\u0004 not real binary" as string)).rejects.toThrow(
         // Backwards-compatible prefix — existing callers that check
         // err.message.includes("Can't read the data...") keep working.
         /Can't read the data of 'the loaded zip file'/
@@ -321,7 +319,7 @@ describe("XLSX", () => {
   describe("corrupt input handling", () => {
     it("rejects empty Uint8Array", async () => {
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, new Uint8Array(0))).rejects.toThrow();
+      await expect(Workbook.read(wb, new Uint8Array(0))).rejects.toThrow();
     });
 
     it("rejects random bytes (not a ZIP file)", async () => {
@@ -332,7 +330,7 @@ describe("XLSX", () => {
       }
 
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, garbage)).rejects.toThrow();
+      await expect(Workbook.read(wb, garbage)).rejects.toThrow();
     });
 
     it("rejects a truncated ZIP file", async () => {
@@ -341,7 +339,7 @@ describe("XLSX", () => {
       const truncated = validBuffer.slice(0, Math.floor(validBuffer.length / 2));
 
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, truncated)).rejects.toThrow();
+      await expect(Workbook.read(wb, truncated)).rejects.toThrow();
     });
 
     it("rejects a JPEG file passed as XLSX", async () => {
@@ -349,14 +347,14 @@ describe("XLSX", () => {
       const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
 
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, jpeg)).rejects.toThrow();
+      await expect(Workbook.read(wb, jpeg)).rejects.toThrow();
     });
 
     it("rejects a plain text file", async () => {
       const text = new TextEncoder().encode("This is not an XLSX file");
 
       const wb = Workbook.create();
-      await expect(Workbook.loadXlsx(wb, text)).rejects.toThrow();
+      await expect(Workbook.read(wb, text)).rejects.toThrow();
     });
   });
 
@@ -373,7 +371,7 @@ describe("XLSX", () => {
       const chunks: Uint8Array[] = [];
       output.on("data", (chunk: Uint8Array) => chunks.push(chunk));
 
-      await Workbook.writeXlsxStream(wb, output);
+      await Workbook.writeStream(wb, output);
 
       const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
       expect(totalLength).toBeGreaterThan(0);
@@ -387,7 +385,7 @@ describe("XLSX", () => {
       }
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf);
+      await Workbook.read(wb2, buf);
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "Stream")!, "A1")).toBe("streamed");
     });
 
@@ -399,7 +397,7 @@ describe("XLSX", () => {
       input.end(buffer);
 
       const wb = Workbook.create();
-      await Workbook.readXlsxStream(wb, input);
+      await Workbook.readStream(wb, input);
 
       expect(getWorksheets(wb).length).toBe(1);
       expect(Cell.getValue(Workbook.getWorksheet(wb, "Sheet1")!, "A1")).toBe("hello");
@@ -410,13 +408,13 @@ describe("XLSX", () => {
 
       // Load via buffer
       const wb1 = Workbook.create();
-      await Workbook.loadXlsx(wb1, buffer);
+      await Workbook.read(wb1, buffer);
 
       // Load via stream
       const input = new PassThrough();
       input.end(buffer);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxStream(wb2, input);
+      await Workbook.readStream(wb2, input);
 
       // Same worksheets
       expect(getWorksheets(wb1).length).toBe(getWorksheets(wb2).length);
@@ -443,11 +441,11 @@ describe("XLSX", () => {
       Cell.setValue(ws, "A1", "shared");
       Cell.setValue(ws, "A2", "shared"); // same string
 
-      const buffer = await Workbook.toXlsxBuffer(wb, { useSharedStrings: true });
+      const buffer = await Workbook.toBuffer(wb, { useSharedStrings: true });
       expect(buffer.length).toBeGreaterThan(0);
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1")).toBe("shared");
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A2")).toBe("shared");
     });
@@ -458,11 +456,11 @@ describe("XLSX", () => {
       Cell.setValue(ws, "A1", 42);
       Cell.setStyle(ws, "A1", { font: { bold: true } });
 
-      const buffer = await Workbook.toXlsxBuffer(wb, { useStyles: true });
+      const buffer = await Workbook.toBuffer(wb, { useStyles: true });
       expect(buffer.length).toBeGreaterThan(0);
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       expect(Cell.getStyle(Workbook.getWorksheet(wb2, "Sheet1")!, "A1").font!.bold).toBe(true);
     });
 
@@ -470,8 +468,8 @@ describe("XLSX", () => {
       const wb = Workbook.create();
       Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "compress");
 
-      const bufStore = await Workbook.toXlsxBuffer(wb, { zip: { level: 0 } }); // STORE
-      const bufDeflate = await Workbook.toXlsxBuffer(wb, { zip: { level: 9 } }); // max compression
+      const bufStore = await Workbook.toBuffer(wb, { zip: { level: 0 } }); // STORE
+      const bufDeflate = await Workbook.toBuffer(wb, { zip: { level: 9 } }); // max compression
 
       // Level 0 (STORE) should be larger than level 9
       expect(bufStore.length).toBeGreaterThan(bufDeflate.length);
@@ -479,7 +477,7 @@ describe("XLSX", () => {
       // Both should be readable
       for (const buf of [bufStore, bufDeflate]) {
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buf);
+        await Workbook.read(wb2, buf);
         expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1")).toBe("compress");
       }
     });
@@ -494,14 +492,14 @@ describe("XLSX", () => {
       const wb = Workbook.create();
       Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "test");
 
-      const buf1 = await Workbook.toXlsxBuffer(wb);
-      const buf2 = await Workbook.toXlsxBuffer(wb);
+      const buf1 = await Workbook.toBuffer(wb);
+      const buf2 = await Workbook.toBuffer(wb);
 
       // Both buffers should be valid
       const wb1 = Workbook.create();
-      await Workbook.loadXlsx(wb1, buf1);
+      await Workbook.read(wb1, buf1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf2);
+      await Workbook.read(wb2, buf2);
 
       expect(Cell.getValue(Workbook.getWorksheet(wb1, "Sheet1")!, "A1")).toBe("test");
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1")).toBe("test");
@@ -514,7 +512,7 @@ describe("XLSX", () => {
       Cell.setValue(Workbook.addWorksheet(wb2, "Original"), "A1", "original");
 
       // Load overwrites
-      await Workbook.loadXlsx(wb2, buf1);
+      await Workbook.read(wb2, buf1);
       expect(Workbook.getWorksheet(wb2, "Original")).toBeUndefined();
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1")).toBe("hello");
     });
@@ -532,11 +530,11 @@ describe("XLSX", () => {
         Worksheet.addRow(ws, [i, `row-${i}`, i * 0.1]);
       }
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       expect(buffer.length).toBeGreaterThan(0);
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "Big")!;
       expect(Cell.getValue(ws2, "A1")).toBe(1);
@@ -560,7 +558,7 @@ describe("XLSX", () => {
         hyperlink: "#Sheet2!A1"
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
 
       // Inspect the raw XML to verify correct OOXML structure
       const { extractAll } = await import("@archive/unzip/extract");
@@ -585,7 +583,7 @@ describe("XLSX", () => {
 
       // Verify round-trip
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const cell = getCell(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
       expect(cellText(cell)).toBe("Go to Sheet2");
@@ -602,7 +600,7 @@ describe("XLSX", () => {
     it("reads XLSX with 0x7F (DEL) in shared string without crashing", async () => {
       const dirtyBuffer = await buildDirtyXlsx("\x7f");
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, dirtyBuffer);
+      await Workbook.read(wb, dirtyBuffer);
 
       const ws = Workbook.getWorksheet(wb, "Sheet1")!;
       expect(ws).toBeDefined();
@@ -613,7 +611,7 @@ describe("XLSX", () => {
     it("reads XLSX with multiple control chars in shared string", async () => {
       const dirtyBuffer = await buildDirtyXlsx("\x01\x02\x03\x7f");
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, dirtyBuffer);
+      await Workbook.read(wb, dirtyBuffer);
 
       const ws = Workbook.getWorksheet(wb, "Sheet1")!;
       expect(ws).toBeDefined();
@@ -641,7 +639,7 @@ describe("XLSX", () => {
     it("reads XLSX with NUL bytes in shared string", async () => {
       const dirtyBuffer = await buildDirtyXlsx("\x00\x00\x00");
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, dirtyBuffer);
+      await Workbook.read(wb, dirtyBuffer);
 
       const ws = Workbook.getWorksheet(wb, "Sheet1")!;
       expect(ws).toBeDefined();
@@ -670,7 +668,7 @@ describe("XLSX", () => {
         ref: "A1:A10",
         rules: [{ type: "dataBar", priority: 1, ...ruleOverrides } as any]
       });
-      return Workbook.toXlsxBuffer(wb);
+      return Workbook.toBuffer(wb);
     }
 
     it("should produce valid data bar with default settings", async () => {
@@ -723,7 +721,7 @@ describe("XLSX", () => {
 
       // Read it back
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf1);
+      await Workbook.read(wb2, buf1);
 
       // Verify conditional formatting survived
       const ws = Workbook.getWorksheet(wb2, "Sheet1")!;
@@ -733,7 +731,7 @@ describe("XLSX", () => {
       expect(dbRule).toBeDefined();
 
       // Write again
-      const buf2 = await Workbook.toXlsxBuffer(wb2);
+      const buf2 = await Workbook.toBuffer(wb2);
       const xml = await getSheetXml(buf2);
 
       // Must still have matching primary + ext IDs after round-trip
@@ -772,7 +770,7 @@ describe("XLSX", () => {
         result: 6,
         isDynamicArray: true
       });
-      return Workbook.toXlsxBuffer(wb);
+      return Workbook.toBuffer(wb);
     }
 
     it("should write cm attribute and metadata.xml for dynamic array formula", async () => {
@@ -806,7 +804,7 @@ describe("XLSX", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Cell.setValue(ws, "A1", { formula: "SUM(B1:B10)", result: 55 });
-      const buf = await Workbook.toXlsxBuffer(wb);
+      const buf = await Workbook.toBuffer(wb);
 
       const metadataXml = await getZipEntry(buf, "xl/metadata.xml");
       expect(metadataXml).toBeUndefined();
@@ -820,7 +818,7 @@ describe("XLSX", () => {
 
       // Read back
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf1);
+      await Workbook.read(wb2, buf1);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       const cellValue = Cell.getValue(ws2, "D1") as any;
 
@@ -830,7 +828,7 @@ describe("XLSX", () => {
       expect(cellValue.isDynamicArray).toBe(true);
 
       // Write again
-      const buf2 = await Workbook.toXlsxBuffer(wb2);
+      const buf2 = await Workbook.toBuffer(wb2);
 
       // Verify second generation
       const sheetXml = await getZipEntry(buf2, "xl/worksheets/sheet1.xml");
@@ -856,7 +854,7 @@ describe("XLSX", () => {
         result: "a",
         isDynamicArray: true
       });
-      const buf = await Workbook.toXlsxBuffer(wb);
+      const buf = await Workbook.toBuffer(wb);
 
       const sheetXml = (await getZipEntry(buf, "xl/worksheets/sheet1.xml"))!;
       // Both cells should have cm="1"
@@ -886,7 +884,7 @@ describe("XLSX", () => {
         result: 1,
         isDynamicArray: true
       });
-      const buf = await Workbook.toXlsxBuffer(wb);
+      const buf = await Workbook.toBuffer(wb);
 
       const sheetXml = (await getZipEntry(buf, "xl/worksheets/sheet1.xml"))!;
       // Only the dynamic array cell should have cm
@@ -896,7 +894,7 @@ describe("XLSX", () => {
 
       // Round-trip: read back and verify
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf);
+      await Workbook.read(wb2, buf);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
       const cseVal = Cell.getValue(ws2, "A1") as any;
@@ -1081,7 +1079,7 @@ describe("XLSX", () => {
 
       // ---- Test 1: Load and verify isDynamicArray ----
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, xlsxBuffer);
+      await Workbook.read(wb, xlsxBuffer);
       const ws = Workbook.getWorksheet(wb, "Sheet1")!;
 
       // Regular cells should load normally
@@ -1097,7 +1095,7 @@ describe("XLSX", () => {
       expect(d1.result).toBe(10);
 
       // ---- Test 2: Round-trip — write back and verify structure ----
-      const buf2 = await Workbook.toXlsxBuffer(wb);
+      const buf2 = await Workbook.toBuffer(wb);
       const sheetXml = await getZipEntry(buf2, "xl/worksheets/sheet1.xml");
       expect(sheetXml).toMatch(/<c r="D1"[^>]*cm="1"/);
 
@@ -1138,7 +1136,7 @@ describe("XLSX", () => {
         result: 1,
         isDynamicArray: true
       });
-      const buf = await Workbook.toXlsxBuffer(wb);
+      const buf = await Workbook.toBuffer(wb);
 
       // Extract ZIP, replace metadata.xml with one that has NO XLDAPR type
       const { extractAll } = await import("@archive/unzip/extract");
@@ -1170,7 +1168,7 @@ describe("XLSX", () => {
 
       // Load the tampered file
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, tamperedBuf);
+      await Workbook.read(wb2, tamperedBuf);
       const cellVal = Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1") as any;
 
       // cm was present but mapped to XLRICHVALUE, not XLDAPR — should NOT be isDynamicArray

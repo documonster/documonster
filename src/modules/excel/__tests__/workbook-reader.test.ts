@@ -17,7 +17,7 @@ import { describe, it, expect } from "vitest";
 async function buildXlsxBuffer(builder: (wb: WorkbookData) => void): Promise<Uint8Array> {
   const wb = Workbook.create();
   builder(wb);
-  return Workbook.toXlsxBuffer(wb);
+  return Workbook.toBuffer(wb);
 }
 
 // =============================================================================
@@ -54,7 +54,7 @@ describe("WorkbookReader", () => {
         const ws = Workbook.addWorksheet(wb, "Sheet1");
         Cell.setValue(ws, "A1", "hello");
         Cell.setValue(ws, "A2", 42);
-        const data = await Workbook.toXlsxBuffer(wb);
+        const data = await Workbook.toBuffer(wb);
 
         const webStream = new ReadableStream<Uint8Array>({
           start(controller) {

@@ -1,6 +1,6 @@
 {
   "name": "@cj-tech-master/excelts",
-  "version": "10.2.0",
+  "version": "11.0.0",
   "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
   "keywords": [
     "archive",
@@ -252,8 +252,8 @@
     },
     "./word": {
       "browser": {
-        "types": "./dist/browser/modules/word/index.browser.d.ts",
-        "default": "./dist/browser/modules/word/index.browser.js"
+        "types": "./dist/browser/modules/word/index.d.ts",
+        "default": "./dist/browser/modules/word/index.js"
       },
       "import": {
         "types": "./dist/types/modules/word/index.d.ts",

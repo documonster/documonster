@@ -6,21 +6,26 @@
  * (`numbering-writer.ts` is already separate from `styles-writer.ts`).
  */
 
-import { findChild, parseXml } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import { type Mutable } from "@word/core/internal-utils";
+import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
+import {
+  attrInt,
+  attrVal,
+  findChildNs,
+  findChildrenNs,
+  serializeElement
+} from "@word/reader/parse-utils";
+import { parseRunProperties } from "@word/reader/properties-parsers";
 import type {
   AbstractNumbering,
   LevelOverride,
   NumberingInstance,
   NumberingLevel,
   NumPicBullet
-} from "../types";
-import { ptToEmu } from "../units";
-import { parseParagraphProperties } from "./paragraph-section-parsers";
-import { attrInt, attrVal, findChildNs, findChildrenNs, serializeElement } from "./parse-utils";
-import { parseRunProperties } from "./properties-parsers";
+} from "@word/types";
+import { ptToEmu } from "@word/units";
+import { findChild, parseXml } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
 
 export function parseNumberingXml(xmlStr: string): {
   abstractNums: AbstractNumbering[];

@@ -1,7 +1,7 @@
 /**
  * `Ole` namespace surface — OLE embedded object extraction / embedding.
  *
- * `import { Ole } from "documonster/word"` →
+ * `import { Ole } from "@cj-tech-master/excelts/word"` →
  *   `Ole.extract(doc)`, `Ole.has(doc)`, `Ole.getData(doc, rId)`,
  *   `Ole.add(...)`, … — tree-shaken via `export * as Ole`.
  */
@@ -11,4 +11,4 @@ export {
   getOleObjectData as getData,
   createOleEmbedding as createEmbedding,
   addOleObject as add
-} from "../advanced/ole-objects";
+} from "@word/advanced/ole-objects";

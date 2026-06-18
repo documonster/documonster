@@ -501,7 +501,8 @@ describe("TAR Module", () => {
 // ============================================================================
 // Test unified API with format switching via zip()/unzip()
 // ============================================================================
-import { zip, unzip } from "@archive";
+import { zip } from "@archive/create-archive";
+import { unzip } from "@archive/read-archive";
 
 describe("TAR via unified API (format switching)", () => {
   it("should create TAR archive using zip({ format: 'tar' })", async () => {

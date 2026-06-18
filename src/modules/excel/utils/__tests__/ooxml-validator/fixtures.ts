@@ -10,7 +10,7 @@
  * object.
  */
 
-import { ZipArchive } from "@archive";
+import { ZipArchive } from "@archive/zip";
 
 const TEXT = new TextEncoder();
 

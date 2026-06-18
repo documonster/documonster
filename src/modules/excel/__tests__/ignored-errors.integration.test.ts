@@ -23,11 +23,11 @@ describe("ignoredErrors", () => {
     ];
 
     // Write
-    await Workbook.writeXlsx(wb, TEST_FILE);
+    await Workbook.writeFile(wb, TEST_FILE);
 
     // Read back
     const wb2 = Workbook.create();
-    await Workbook.readXlsxFile(wb2, TEST_FILE);
+    await Workbook.readFile(wb2, TEST_FILE);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     // Verify
@@ -49,11 +49,11 @@ describe("ignoredErrors", () => {
     Cell.setValue(ws, "A1", "test");
     // ignoredErrors defaults to [] — should not write <ignoredErrors> tag
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "empty ignoredErrors" });
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(ws2.ignoredErrors).toEqual([]);
   });
@@ -78,11 +78,11 @@ describe("ignoredErrors", () => {
       }
     ];
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "all-boolean ignoredErrors" });
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(ws2.ignoredErrors).toHaveLength(1);
@@ -113,7 +113,7 @@ describe("ignoredErrors", () => {
 
     // Read back with standard reader
     const wb2 = Workbook.create();
-    await Workbook.readXlsxFile(wb2, TEST_FILE);
+    await Workbook.readFile(wb2, TEST_FILE);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(ws2.ignoredErrors).toHaveLength(1);

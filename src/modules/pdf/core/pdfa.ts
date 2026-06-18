@@ -15,8 +15,8 @@
  *      format for long-term preservation — Part 1: Use of PDF 1.4 (PDF/A-1)
  */
 
-import { PdfDict, pdfNumber, pdfRef } from "./pdf-object";
-import type { PdfWriter } from "./pdf-writer";
+import { PdfDict, pdfNumber, pdfRef } from "@pdf/core/pdf-object";
+import type { PdfWriter } from "@pdf/core/pdf-writer";
 
 // =============================================================================
 // sRGB ICC Profile

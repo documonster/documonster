@@ -8,17 +8,19 @@
  * It is used internally by the public `pdf()` and `excelToPdf()` APIs.
  */
 
-import { yieldToEventLoop } from "@utils/utils.base";
-
-import { writeImageXObject } from "../builder/image-utils";
-import { initEncryption } from "../core/encryption";
-import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "../core/pdf-object";
-import { PdfContentStream, isWinAnsiCodePoint } from "../core/pdf-stream";
-import { PdfWriter } from "../core/pdf-writer";
-import { PdfError, PdfRenderError } from "../errors";
-import { FontManager, resolvePdfFontName } from "../font/font-manager";
-import { iterateSystemFontCandidates } from "../font/system-fonts";
-import { parseTtf } from "../font/ttf-parser";
+import { writeImageXObject } from "@pdf/builder/image-utils";
+import { initEncryption } from "@pdf/core/encryption";
+import { PdfDict, pdfRef, pdfNumber, pdfString as pdfStr } from "@pdf/core/pdf-object";
+import { PdfContentStream, isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
+import { PdfWriter } from "@pdf/core/pdf-writer";
+import { PdfError, PdfRenderError } from "@pdf/errors";
+import { FontManager, resolvePdfFontName } from "@pdf/font/font-manager";
+import { iterateSystemFontCandidates } from "@pdf/font/system-fonts";
+import { parseTtf } from "@pdf/font/ttf-parser";
+import { createChartSurface } from "@pdf/render/chart-surface";
+import { layoutChartsheet, layoutSheet } from "@pdf/render/layout-engine";
+import { renderPage, alphaGsName, renderWatermark } from "@pdf/render/page-renderer";
+import { argbToPdfColor } from "@pdf/render/style-converter";
 import {
   PageSizes,
   PdfCellType,
@@ -33,11 +35,8 @@ import {
   type PdfOrientation,
   type LayoutPage,
   type PdfWatermark
-} from "../types";
-import { createChartSurface } from "./chart-surface";
-import { layoutChartsheet, layoutSheet } from "./layout-engine";
-import { renderPage, alphaGsName, renderWatermark } from "./page-renderer";
-import { argbToPdfColor } from "./style-converter";
+} from "@pdf/types";
+import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
 // Public API

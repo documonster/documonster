@@ -120,9 +120,9 @@ describe("buildChartModel — all 16 chart types", () => {
       "D36:J46"
     );
 
-    const bytes = await Workbook.toXlsxBuffer(wb);
+    const bytes = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, bytes);
+    await Workbook.read(wb2, bytes);
     const charts = getCharts(Workbook.getWorksheet(wb2, "Data")!);
     expect(charts.length).toBe(4);
 
@@ -1185,9 +1185,9 @@ describe("combo chart round-trip via addComboChart API", () => {
       "C1:J15"
     );
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
     expect(Chart.title(chart)).toBe("Combo");
@@ -1214,9 +1214,9 @@ describe("combo chart round-trip via addComboChart API", () => {
       "C1:J15"
     );
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
     expect(Chart.title(chart)).toBe("3D Combo");
@@ -1529,9 +1529,9 @@ describe("multiple charts round-trip", () => {
 
     expect(getCharts(ws).length).toBe(2);
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(getCharts(ws2).length).toBe(2);

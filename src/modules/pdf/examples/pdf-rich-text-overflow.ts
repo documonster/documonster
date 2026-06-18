@@ -263,5 +263,5 @@ console.log(`${filename} generated — ${pdf.length} bytes`);
 console.log(`Output: ${path.join(outDir, filename)}`);
 
 // Also export as xlsx for comparison in Excel
-await Workbook.writeXlsx(wb, path.join(outDir, "rich-text-overflow.xlsx"));
+await Workbook.writeFile(wb, path.join(outDir, "rich-text-overflow.xlsx"));
 console.log("rich-text-overflow.xlsx generated for comparison in Excel");

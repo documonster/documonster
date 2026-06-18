@@ -172,7 +172,7 @@ describe("Form Control Checkbox", () => {
         text: "Test Checkbox"
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       // Should contain unified VML drawing file
@@ -218,7 +218,7 @@ describe("Form Control Checkbox", () => {
       addFormCheckbox(ws, "A1:B2", { checked: true });
       addFormCheckbox(ws, "A3:B4", { checked: false });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       // Should contain unified VML drawing file
@@ -238,7 +238,7 @@ describe("Form Control Checkbox", () => {
         text: "Test Checkbox"
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const vmlEntry = entries.get("xl/drawings/vmlDrawing1.vml");
@@ -284,7 +284,7 @@ describe("Form Control Checkbox", () => {
       Cell.setValue(ws, "D11", false);
       Cell.setValue(ws, "D12", false);
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
 
       // Gate on strict OOXML wiring and ordering rules we learned from Excel repair logs.
       await expectValidXlsx(buffer);
@@ -329,7 +329,7 @@ describe("Form Control Checkbox", () => {
         link: "C1"
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const ctrlPropEntry = entries.get("xl/ctrlProps/ctrlProp1.xml");
@@ -351,7 +351,7 @@ describe("Form Control Checkbox", () => {
 
       addFormCheckbox(ws, "A1:B2", { checked: true });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const contentTypesEntry = entries.get("[Content_Types].xml");
@@ -367,7 +367,7 @@ describe("Form Control Checkbox", () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       // Should not contain VML drawing file for form controls
@@ -387,7 +387,7 @@ describe("Form Control Checkbox", () => {
       // Add a form checkbox
       addFormCheckbox(ws, "A1:B2", { checked: true });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       // Both notes and form controls should be in a single unified VML file

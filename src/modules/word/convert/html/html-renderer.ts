@@ -6,9 +6,9 @@
  * headings, comments, footnotes/endnotes, and more.
  */
 
-import { resolveThemeColor } from "../../core/color-utils";
-import { bytesToBase64, sanitizeUrl } from "../../core/internal-utils";
-import { extractMathText, isRun } from "../../core/text-utils";
+import { resolveThemeColor } from "@word/core/color-utils";
+import { bytesToBase64, sanitizeUrl } from "@word/core/internal-utils";
+import { extractMathText, isRun } from "@word/core/text-utils";
 import type {
   DocxDocument,
   Paragraph,
@@ -33,8 +33,8 @@ import type {
   CommentDef,
   Chart,
   ChartExContent
-} from "../../types";
-import { EMU_PER_INCH } from "../../units";
+} from "@word/types";
+import { EMU_PER_INCH } from "@word/units";
 
 /** Options for HTML rendering. */
 export interface HtmlRenderOptions {

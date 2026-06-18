@@ -1,7 +1,10 @@
 /**
- * Browser xlsx IO handle accessor. Kept out of `workbook.browser` so the
- * heavy `XLSX` serializer is not a static dependency of the workbook record
- * module (which would create a workbook ↔ xlsx import cycle).
+ * Browser xlsx IO handle accessor and the canonical public IO surface.
+ *
+ * Kept out of `workbook.browser` so the heavy `XLSX` serializer is not a static
+ * dependency of the workbook record module (which would create a
+ * workbook ↔ xlsx import cycle). Selected over `xlsx-io.ts` (Node) via the
+ * `.browser` same-name swap at build/test time.
  */
 import type { WorkbookData } from "@excel/workbook-core";
 import {
@@ -25,12 +28,12 @@ export function getXlsxIo(wb: WorkbookData): XLSX {
 // =============================================================================
 
 /** Serialize a workbook to xlsx bytes. */
-export function toXlsxBuffer(wb: WorkbookData, options?: XlsxWriteOptions): Promise<Uint8Array> {
+export function toBuffer(wb: WorkbookData, options?: XlsxWriteOptions): Promise<Uint8Array> {
   return getXlsxIo(wb).writeBuffer(options);
 }
 
-/** Load xlsx bytes into a workbook (mutates and returns `wb`). */
-export function loadXlsx(
+/** Read xlsx bytes into a workbook (mutates and returns `wb`). */
+export function read(
   wb: WorkbookData,
   data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
   options?: XlsxReadOptions
@@ -38,8 +41,8 @@ export function loadXlsx(
   return getXlsxIo(wb).load(data, options) as unknown as Promise<WorkbookData>;
 }
 
-/** Read a workbook from a parse stream. */
-export function readXlsxStream(
+/** Read a workbook from a parse stream (mutates and returns `wb`). */
+export function readStream(
   wb: WorkbookData,
   stream: IParseStream,
   options?: XlsxReadOptions
@@ -48,7 +51,7 @@ export function readXlsxStream(
 }
 
 /** Write a workbook to a writable stream. */
-export function writeXlsxStream(
+export function writeStream(
   wb: WorkbookData,
   stream: IWritableStream,
   options?: XlsxWriteOptions

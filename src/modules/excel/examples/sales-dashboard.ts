@@ -986,7 +986,7 @@ async function main(): Promise<void> {
   // Write outputs
   // =========================================================================
 
-  await Workbook.writeXlsx(wb, XLSX_PATH);
+  await Workbook.writeFile(wb, XLSX_PATH);
   console.log(`XLSX → ${XLSX_PATH}`);
 
   const pdf = await excelToPdf(wb, {

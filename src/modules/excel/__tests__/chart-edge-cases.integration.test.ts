@@ -46,7 +46,7 @@ async function buildMultiChartWorkbook(count: number): Promise<Uint8Array> {
       `D${top}:J${bottom}`
     );
   }
-  return new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  return new Uint8Array(await Workbook.toBuffer(wb));
 }
 
 function listChartParts(entries: EntryMap): string[] {
@@ -58,7 +58,7 @@ describe("Chart edge cases", () => {
     it("removing a chart drops its content-type, drawing rel, and chart part", async () => {
       const bytes = await buildMultiChartWorkbook(3);
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, bytes);
+      await Workbook.read(wb, bytes);
       const ws = Workbook.getWorksheet(wb, "Data")!;
       expect(getCharts(ws).length).toBe(3);
 
@@ -67,7 +67,7 @@ describe("Chart edge cases", () => {
       expect(removed).toBe(true);
       expect(getCharts(ws).length).toBe(2);
 
-      const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      const out = new Uint8Array(await Workbook.toBuffer(wb));
       const entries = await extractAll(out);
 
       // Validator must remain clean (no dangling rels / missing parts).
@@ -100,10 +100,10 @@ describe("Chart edge cases", () => {
     it("removing the only chart drops the drawing part itself", async () => {
       const bytes = await buildMultiChartWorkbook(1);
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, bytes);
+      await Workbook.read(wb, bytes);
       const ws = Workbook.getWorksheet(wb, "Data")!;
       expect(removeChart(ws, 0)).toBe(true);
-      const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      const out = new Uint8Array(await Workbook.toBuffer(wb));
       const entries = await extractAll(out);
       await expectValidXlsx(out);
       // No chart parts should remain.
@@ -122,7 +122,7 @@ describe("Chart edge cases", () => {
     it("preserves drawing anchor order for 5 charts through round-trip", async () => {
       const bytes = await buildMultiChartWorkbook(5);
       const { wb, entries } = await loadRoundTrip(bytes);
-      await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
+      await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
 
       // High-level model: 5 charts, original add order preserved.
       const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
@@ -169,7 +169,7 @@ describe("Chart edge cases", () => {
           "Chart #4",
           "Chart #5"
         ]);
-        bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+        bytes = new Uint8Array(await Workbook.toBuffer(wb));
       }
     });
   });
@@ -198,20 +198,20 @@ describe("Chart edge cases", () => {
           },
           "D1:J10"
         );
-        const bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+        const bytes = new Uint8Array(await Workbook.toBuffer(wb));
 
         // First round-trip: structured rebuild after high-level mutation.
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, bytes);
+        await Workbook.read(wb2, bytes);
         const chart = getCharts(Workbook.getWorksheet(wb2, "Data")!)[0];
         expect(Chart.title(chart), "loaded title").toBe(title);
         // Force structured re-render by touching title with the same value.
         Chart.setTitle(chart, title);
-        const out = new Uint8Array(await Workbook.toXlsxBuffer(wb2));
+        const out = new Uint8Array(await Workbook.toBuffer(wb2));
         await expectValidXlsx(out);
 
         const wb3 = Workbook.create();
-        await Workbook.loadXlsx(wb3, out);
+        await Workbook.read(wb3, out);
         const reloaded = getCharts(Workbook.getWorksheet(wb3, "Data")!)[0];
         expect(Chart.title(reloaded), "reloaded title after structured rebuild").toBe(title);
       }

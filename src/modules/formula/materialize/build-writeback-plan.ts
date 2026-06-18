@@ -18,22 +18,20 @@
  * from the `WorkbookSnapshot` and the evaluation results.
  */
 
-import { parseRefRange } from "../compile/address-utils";
-import type { CompiledFormula } from "../compile/compiled-formula";
-import type { FormulaInstance } from "../integration/formula-instance";
+import { parseRefRange } from "@formula/compile/address-utils";
+import type { CompiledFormula } from "@formula/compile/compiled-formula";
+import type { FormulaInstance } from "@formula/integration/formula-instance";
 import type {
   WorkbookSnapshot,
   WorksheetSnapshot,
   SnapshotCellValue
-} from "../integration/workbook-snapshot";
+} from "@formula/integration/workbook-snapshot";
 import {
   snapshotCellKey,
   spillCellKeyFromId,
   formulaCellKey
-} from "../integration/workbook-snapshot";
-import type { RuntimeValue, ScalarValue, ArrayValue } from "../runtime/values";
-import { RVKind } from "../runtime/values";
-import type { SpillRegion } from "./types";
+} from "@formula/integration/workbook-snapshot";
+import type { SpillRegion } from "@formula/materialize/types";
 import type {
   WritebackPlan,
   WriteOperation,
@@ -43,7 +41,9 @@ import type {
   CSEWrite,
   ScalarWrite,
   PreserveWrite
-} from "./writeback-plan";
+} from "@formula/materialize/writeback-plan";
+import type { RuntimeValue, ScalarValue, ArrayValue } from "@formula/runtime/values";
+import { RVKind } from "@formula/runtime/values";
 
 // ============================================================================
 // Spill Tracking State

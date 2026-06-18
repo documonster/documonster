@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   Cell.setValue(ws, "A21", "Note: Click checkboxes in Excel to update linked cell values.");
   Cell.setStyle(ws, "A21", { font: { italic: true, color: { argb: "FF666666" } } });
 
-  await Workbook.writeXlsx(wb, outputPath);
+  await Workbook.writeFile(wb, outputPath);
 
   console.log(`Wrote: ${outputPath}`);
   console.log("");

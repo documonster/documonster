@@ -1389,7 +1389,7 @@ async function main(): Promise<void> {
   // Write XLSX + PDF
   // =========================================================================
 
-  await Workbook.writeXlsx(wb, XLSX_PATH);
+  await Workbook.writeFile(wb, XLSX_PATH);
   console.log(`XLSX → ${XLSX_PATH}`);
 
   // PDF export with metadata (skip encryption to keep the file openable in

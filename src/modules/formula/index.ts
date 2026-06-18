@@ -3,7 +3,7 @@
  *
  * **Functional, zero-side-effect** is the only evaluation style:
  * ```ts
- * import { Formula } from "documonster/formula";
+ * import { Formula } from "@cj-tech-master/excelts/formula";
  * Formula.calculate(workbook);
  * ```
  * Perfect tree-shaking: unused exports are dropped, no module initialisation
@@ -19,10 +19,10 @@
 // Public value API — the `Formula` domain namespace. Tree-shaken per-member
 // on rolldown / rspack; a consumer that references only `Formula.tokenize`
 // never pulls in the evaluator.
-export * as Formula from "./surface/formula";
+export * as Formula from "@formula/surface/formula";
 
 // Errors — extend BaseError, consistent with every other module's errors.ts.
-export { FormulaError, FormulaParseError } from "./errors";
+export { FormulaError, FormulaParseError } from "@formula/errors";
 
 // Structural types callers may need to describe their host workbook.
 export type {
@@ -36,4 +36,4 @@ export type {
   SpillRegion,
   WorkbookLike,
   WorksheetLike
-} from "./materialize/types";
+} from "@formula/materialize/types";

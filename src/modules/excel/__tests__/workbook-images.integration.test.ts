@@ -35,10 +35,10 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "Hello, World!");
       addBackgroundImage(ws, imageId);
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
@@ -67,10 +67,10 @@ describe("Workbook", () => {
       });
       addImage(ws, imageId, "C3:E6");
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
@@ -111,10 +111,10 @@ describe("Workbook", () => {
         editAs: "oneCell"
       });
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
@@ -146,10 +146,10 @@ describe("Workbook", () => {
         editAs: "oneCell"
       });
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
@@ -187,10 +187,10 @@ describe("Workbook", () => {
         }
       });
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
@@ -239,10 +239,10 @@ describe("Workbook", () => {
         editAs: "oneCell"
       });
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(ws2).toBeDefined();
@@ -277,15 +277,15 @@ describe("Workbook", () => {
         addImage(ws, imgId, { tl: { col: 1, row: 0 }, br: { col: 2, row: 1 } });
 
         // First write
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         // Read back and write again
-        await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         // Read the final file and verify images are not duplicated
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
@@ -302,17 +302,17 @@ describe("Workbook", () => {
         });
         addImage(ws, imgId, "B2:D4");
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         // Perform 3 read-write cycles on the same workbook
         for (let i = 0; i < 3; i++) {
-          await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
-          await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+          await Workbook.readFile(wb, TEST_XLSX_FILE_NAME);
+          await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         }
 
         // Read the final file with a fresh workbook
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
@@ -334,14 +334,14 @@ describe("Workbook", () => {
         addImage(ws, imgId1, "A1:B2");
         addImage(ws, imgId2, "C3:D4");
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         // Read-write cycle
-        await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
@@ -358,12 +358,12 @@ describe("Workbook", () => {
         });
         addImage(ws, imgId, "C3:E6");
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
-        await Workbook.readXlsxFile(wb, TEST_XLSX_FILE_NAME);
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         const images = getImages(ws2!);
         expect(images.length).toBe(1);
@@ -693,10 +693,10 @@ describe("Workbook", () => {
         Worksheet.duplicateRow(ws, 1, 2);
 
         // Write and read back
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
 
@@ -744,7 +744,7 @@ describe("Workbook", () => {
 
       it("loads test file and duplicates row with images", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("duplicate-row-images.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("duplicate-row-images.xlsx"));
 
         // The test file has a drawing on sheet3 with an image at row 12
         const ws = Workbook.getWorksheet(wb, "Sheet3")!;
@@ -769,10 +769,10 @@ describe("Workbook", () => {
         expect(imagesAfter.length).toBe(countBefore + imagesOnSrcRow.length);
 
         // Write and read back to verify integrity
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet3")!;
         const finalImages = getImages(ws2!);
         expect(finalImages.length).toBe(countBefore + imagesOnSrcRow.length);
@@ -861,10 +861,10 @@ describe("Workbook", () => {
         addImage(ws, imgId2, "C3:D4");
         addImage(ws, imgId1, "E5:F6");
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
 
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
         const images = getImages(ws2);
@@ -896,12 +896,12 @@ describe("Workbook", () => {
         ext: { width: 200, height: 150 }
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "absoluteAnchor image" });
 
       // Read back
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "absolute")!;
       const images = getImages(ws2);
 
@@ -939,7 +939,7 @@ describe("Workbook", () => {
 
       // Read back with standard reader
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, outFile);
+      await Workbook.readFile(wb2, outFile);
       const ws2 = Workbook.getWorksheet(wb2, "absolute")!;
       const images = getImages(ws2);
 
@@ -972,11 +972,11 @@ describe("Workbook", () => {
       addImage(ws, imageId, "B2:D5");
 
       const file = testFilePath("workbook-svg.test");
-      await Workbook.writeXlsx(wb, file);
+      await Workbook.writeFile(wb, file);
       await expectValidXlsx(await fsReadFileAsync(file), { label: "svg-image" });
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, file);
+      await Workbook.readFile(wb2, file);
       const ws2 = Workbook.getWorksheet(wb2, "svg")!;
 
       const images = getImages(ws2);
@@ -1006,8 +1006,8 @@ describe("Workbook", () => {
       });
       addImage(ws, imageId, "A1:B2");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
-      const { unzip } = await import("@archive/index");
+      const buffer = await Workbook.toBuffer(wb);
+      const { unzip } = await import("@archive/read-archive");
       const reader = unzip(buffer as unknown as Uint8Array);
       const entries: Record<string, string> = {};
       for await (const entry of reader.entries()) {
@@ -1039,8 +1039,8 @@ describe("Workbook", () => {
       addImage(ws, imageId, "A1:B2");
       addImage(ws, imageId, "D1:E2"); // same image, second anchor
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
-      const { unzip } = await import("@archive/index");
+      const buffer = await Workbook.toBuffer(wb);
+      const { unzip } = await import("@archive/read-archive");
       const reader = unzip(buffer as unknown as Uint8Array);
       const entries: Record<string, string> = {};
       for await (const entry of reader.entries()) {
@@ -1068,13 +1068,13 @@ describe("Workbook", () => {
       addImage(ws, imageId, "B2:D5");
 
       // First round-trip.
-      const buf1 = await Workbook.toXlsxBuffer(wb);
+      const buf1 = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf1 as unknown as Uint8Array);
+      await Workbook.read(wb2, buf1 as unknown as Uint8Array);
 
       // Second round-trip from the re-read workbook.
-      const buf2 = await Workbook.toXlsxBuffer(wb2);
-      const { unzip } = await import("@archive/index");
+      const buf2 = await Workbook.toBuffer(wb2);
+      const { unzip } = await import("@archive/read-archive");
       const reader = unzip(buf2 as unknown as Uint8Array);
       const entries: Record<string, string> = {};
       for await (const entry of reader.entries()) {
@@ -1085,7 +1085,7 @@ describe("Workbook", () => {
       expect(entries[drawingKey]).toContain("asvg:svgBlip");
 
       const wb3 = Workbook.create();
-      await Workbook.loadXlsx(wb3, buf2 as unknown as Uint8Array);
+      await Workbook.read(wb3, buf2 as unknown as Uint8Array);
       const raster = getImage(wb3, getImages(Workbook.getWorksheet(wb3, "svg")!)[0].imageId!);
       expect(Buffer.compare(pngBytes, raster!.buffer as Uint8Array)).toBe(0);
       const svgMediaId = (raster as { svgMediaId?: number }).svgMediaId;

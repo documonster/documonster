@@ -14,8 +14,8 @@ import type {
   NumberValue,
   ErrorValue,
   ArrayValue
-} from "../runtime/values";
-import { RVKind, BLANK, toNumberRV, topLeft } from "../runtime/values";
+} from "@formula/runtime/values";
+import { RVKind, BLANK, toNumberRV, topLeft } from "@formula/runtime/values";
 
 // ============================================================================
 // Error propagation

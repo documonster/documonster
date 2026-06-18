@@ -1,7 +1,7 @@
 /**
  * `Anchor` namespace surface — drawing anchor handle (cell coordinate + offset).
  *
- * `import { Anchor } from "documonster/excel"` →
+ * `import { Anchor } from "@cj-tech-master/excelts/excel"` →
  *   `Anchor.create(ws, "B2")`, `Anchor.col(a)`, `Anchor.setRow(a, 4)`,
  *   `Anchor.model(a)`, `Anchor.clone(a)`.
  */

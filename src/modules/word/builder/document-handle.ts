@@ -5,6 +5,9 @@
  * documents via an opaque DocumentHandle.
  */
 
+import { paragraph, textParagraph, heading } from "@word/builder/paragraph-builders";
+import { pageBreak, floatingImage, mathBlock } from "@word/builder/run-builders";
+import { gridBorders, simpleTable } from "@word/builder/table-builders";
 import type {
   DocxDocument,
   BodyContent,
@@ -46,10 +49,7 @@ import type {
   FloatingImage,
   Watermark,
   WebSettings
-} from "../types";
-import { paragraph, textParagraph, heading } from "./paragraph-builders";
-import { pageBreak, floatingImage, mathBlock } from "./run-builders";
-import { gridBorders, simpleTable } from "./table-builders";
+} from "@word/types";
 
 // =============================================================================
 // Document Handle & Namespace

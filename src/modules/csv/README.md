@@ -5,7 +5,8 @@
 A high-performance, RFC 4180 compliant CSV parser and formatter with zero dependencies.
 
 ```typescript
-import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
+// Csv.parse, Csv.format, Csv.ParserStream, …
 ```
 
 ## Features
@@ -27,19 +28,19 @@ import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/cs
 ### Parsing
 
 ```typescript
-import { parseCsv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Simple: returns string[][]
-const rows = parseCsv("name,age\nAlice,30\nBob,25");
+const rows = Csv.parse("name,age\nAlice,30\nBob,25");
 // [["name","age"], ["Alice","30"], ["Bob","25"]]
 
 // With headers: returns { rows, headers, meta, errors }
-const result = parseCsv("name,age\nAlice,30\nBob,25", { headers: true });
+const result = Csv.parse("name,age\nAlice,30\nBob,25", { headers: true });
 // result.rows = [{ name: "Alice", age: "30" }, { name: "Bob", age: "25" }]
 // result.headers = ["name", "age"]
 
 // With dynamic typing: auto-converts numbers, booleans, dates
-const typed = parseCsv("name,age,active\nAlice,30,true", {
+const typed = Csv.parse("name,age,active\nAlice,30,true", {
   headers: true,
   dynamicTyping: true
 });
@@ -49,24 +50,24 @@ const typed = parseCsv("name,age,active\nAlice,30,true", {
 ### Formatting
 
 ```typescript
-import { formatCsv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // From arrays
-formatCsv([
+Csv.format([
   ["name", "age"],
   ["Alice", "30"]
 ]);
 // "name,age\nAlice,30"
 
 // From objects (auto-derives headers)
-formatCsv([
+Csv.format([
   { name: "Alice", age: 30 },
   { name: "Bob", age: 25 }
 ]);
 // "name,age\nAlice,30\nBob,25"
 
 // With options
-formatCsv(data, {
+Csv.format(data, {
   delimiter: ";",
   bom: true,
   escapeFormulae: true,
@@ -78,22 +79,22 @@ formatCsv(data, {
 
 ## Parsing API
 
-### `parseCsv(input, options?)`
+### `Csv.parse(input, options?)`
 
 Synchronous CSV parser with type-safe overloads.
 
 ```typescript
 // No options -> string[][]
-parseCsv(csvString): string[][];
+Csv.parse(csvString): string[][];
 
 // headers: true -> CsvParseResult<Record<string, unknown>>
-parseCsv(csvString, { headers: true }): CsvParseResult;
+Csv.parse(csvString, { headers: true }): CsvParseResult;
 
 // headers: true + dynamicTyping -> auto-coerced values
-parseCsv(csvString, { headers: true, dynamicTyping: true }): CsvParseResult;
+Csv.parse(csvString, { headers: true, dynamicTyping: true }): CsvParseResult;
 
 // info: true -> rows include metadata (line number, raw input, etc.)
-parseCsv(csvString, { headers: true, info: true }): CsvParseResult<RecordWithInfo>;
+Csv.parse(csvString, { headers: true, info: true }): CsvParseResult<RecordWithInfo>;
 ```
 
 **Parse Options (`CsvParseOptions`):**
@@ -132,44 +133,44 @@ interface CsvParseResult<T> {
 }
 ```
 
-### `parseCsvAsync(input, options?)`
+### `Csv.parseAsync(input, options?)`
 
 Async parser supporting strings, `AsyncIterable<string | Uint8Array>`, and `ReadableStream`.
 
 ```typescript
-import { parseCsvAsync } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // From string
-const result = await parseCsvAsync(csvString, { headers: true });
+const result = await Csv.parseAsync(csvString, { headers: true });
 
 // From ReadableStream (browser fetch)
 const response = await fetch("/data.csv");
-const result = await parseCsvAsync(response.body, { headers: true });
+const result = await Csv.parseAsync(response.body, { headers: true });
 
 // From async iterable
-const result = await parseCsvAsync(asyncChunks, { headers: true });
+const result = await Csv.parseAsync(asyncChunks, { headers: true });
 ```
 
-### `parseCsvRows(input, options?)`
+### `Csv.parseRows(input, options?)`
 
 True streaming async generator -- yields rows one at a time. Memory-efficient for large files.
 
 ```typescript
-import { parseCsvRows } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
-for await (const row of parseCsvRows(hugeFile, { headers: true })) {
+for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
   console.log(row); // { name: "...", age: "..." }
 }
 ```
 
-### `parseCsvWithProgress(input, options?, onProgress?)`
+### `Csv.parseWithProgress(input, options?, onProgress?)`
 
 Async parser with progress callback for large files.
 
 ```typescript
-import { parseCsvWithProgress } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
-const result = await parseCsvWithProgress(
+const result = await Csv.parseWithProgress(
   largeCsvString,
   { headers: true },
   ({ rowsProcessed, bytesProcessed }) => {
@@ -182,24 +183,24 @@ const result = await parseCsvWithProgress(
 
 ## Formatting API
 
-### `formatCsv(data, options?)`
+### `Csv.format(data, options?)`
 
 Batch CSV formatter. Accepts arrays of arrays or arrays of objects.
 
 ```typescript
-import { formatCsv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Array of arrays
-formatCsv([
+Csv.format([
   ["a", "b"],
   [1, 2]
 ]);
 
 // Array of objects
-formatCsv([{ name: "Alice", age: 30 }]);
+Csv.format([{ name: "Alice", age: 30 }]);
 
 // RowHashArray format
-formatCsv([
+Csv.format([
   [
     ["name", "Alice"],
     ["age", "30"]
@@ -226,19 +227,19 @@ formatCsv([
 
 ## Streaming API
 
-### `CsvParserStream`
+### `Csv.ParserStream`
 
 Transform stream that parses CSV data chunk-by-chunk. Cross-platform (Node.js + browser).
 
 ```typescript
-import { CsvParserStream, createCsvParserStream } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 import { pipeline } from "@cj-tech-master/excelts/stream";
 
 // Using factory function
-const parser = createCsvParserStream({ headers: true, dynamicTyping: true });
+const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
 
 // Using class constructor
-const parser = new CsvParserStream({ headers: true });
+const parser = new Csv.ParserStream({ headers: true });
 
 // With transform and validation
 parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
@@ -253,14 +254,14 @@ parser.on("end", () => console.log("Done"));
 await pipeline(readableStream, parser, writable);
 ```
 
-### `CsvFormatterStream`
+### `Csv.FormatterStream`
 
 Transform stream that formats rows to CSV text. Cross-platform (Node.js + browser).
 
 ```typescript
-import { CsvFormatterStream, createCsvFormatterStream } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
-const formatter = createCsvFormatterStream({
+const formatter = Csv.createFormatterStream({
   headers: ["name", "age"],
   delimiter: ";",
   bom: true
@@ -279,19 +280,19 @@ formatter.pipe(writable);
 ## Detection Utilities
 
 ```typescript
-import { detectDelimiter, detectLinebreak, stripBom } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Auto-detect delimiter from CSV content
-detectDelimiter("a,b,c\n1,2,3"); // ","
-detectDelimiter("a;b;c\n1;2;3"); // ";"
-detectDelimiter("a\tb\tc\n1\t2\t3"); // "\t"
+Csv.detectDelimiter("a,b,c\n1,2,3"); // ","
+Csv.detectDelimiter("a;b;c\n1;2;3"); // ";"
+Csv.detectDelimiter("a\tb\tc\n1\t2\t3"); // "\t"
 
 // Detect line terminator (quote-aware)
-detectLinebreak("a,b\r\nc,d"); // "\r\n"
-detectLinebreak("a,b\nc,d"); // "\n"
+Csv.detectLinebreak("a,b\r\nc,d"); // "\r\n"
+Csv.detectLinebreak("a,b\nc,d"); // "\n"
 
 // Strip UTF-8 BOM
-stripBom("\ufeffname,age"); // "name,age"
+Csv.stripBom("\ufeffname,age"); // "name,age"
 ```
 
 ---
@@ -299,13 +300,13 @@ stripBom("\ufeffname,age"); // "name,age"
 ## Row Utilities
 
 ```typescript
-import { isRowHashArray, deduplicateHeaders, processColumns } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Check if row is a RowHashArray
-isRowHashArray([["key", "value"]]); // true
+Csv.isRowHashArray([["key", "value"]]); // true
 
 // Deduplicate header names
-deduplicateHeaders(["id", "name", "name", "name"]);
+Csv.deduplicateHeaders(["id", "name", "name", "name"]);
 // ["id", "name", "name_1", "name_2"]
 ```
 
@@ -314,13 +315,13 @@ deduplicateHeaders(["id", "name", "name", "name"]);
 ## Dynamic Typing
 
 ```typescript
-import { applyDynamicTyping } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Auto-convert string values to native types
-applyDynamicTyping("42"); // 42 (number)
-applyDynamicTyping("3.14"); // 3.14 (number)
-applyDynamicTyping("true"); // true (boolean)
-applyDynamicTyping("hello"); // "hello" (string, unchanged)
+Csv.applyDynamicTyping("42"); // 42 (number)
+Csv.applyDynamicTyping("3.14"); // 3.14 (number)
+Csv.applyDynamicTyping("true"); // true (boolean)
+Csv.applyDynamicTyping("hello"); // "hello" (string, unchanged)
 ```
 
 ---
@@ -328,14 +329,14 @@ applyDynamicTyping("hello"); // "hello" (string, unchanged)
 ## Number Utilities
 
 ```typescript
-import { formatNumberForCsv, parseNumberFromCsv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Format numbers with locale-specific decimal separator
-formatNumberForCsv(3.14, "."); // "3.14"
-formatNumberForCsv(3.14, ","); // "3,14"
+Csv.formatNumber(3.14, "."); // "3.14"
+Csv.formatNumber(3.14, ","); // "3,14"
 
 // Parse numbers with locale-specific decimal separator
-parseNumberFromCsv("3,14", ","); // 3.14
+Csv.parseNumber("3,14", ","); // 3.14
 ```
 
 ---
@@ -345,23 +346,17 @@ parseNumberFromCsv("3,14", ","); // 3.14
 Generate test CSV data with built-in column types and seeded PRNG for reproducibility.
 
 ```typescript
-import {
-  csvGenerate,
-  csvGenerateRows,
-  csvGenerateAsync,
-  csvGenerateData,
-  createCsvGenerator
-} from "@cj-tech-master/excelts/csv";
+import { Csv } from "@cj-tech-master/excelts/csv";
 
 // Generate CSV string
-const { csv, headers, data } = csvGenerate({
+const { csv, headers, data } = Csv.generate({
   columns: ["name", "email", "int", "bool", "date"],
   rows: 100,
   seed: 42
 });
 
 // Generate with custom column types
-const { csv } = csvGenerate({
+const { csv } = Csv.generate({
   columns: [
     { type: "int", min: 18, max: 65, name: "age" },
     { type: "float", min: 0, max: 100, name: "score" },
@@ -371,25 +366,25 @@ const { csv } = csvGenerate({
 });
 
 // Memory-efficient: yields rows one at a time
-for (const row of csvGenerateRows({ columns: 5, rows: 1_000_000 })) {
+for (const row of Csv.generateRows({ columns: 5, rows: 1_000_000 })) {
   process.stdout.write(row + "\n");
 }
 
 // Generate for a duration (unlimited rows)
-for (const row of csvGenerateRows({ columns: 3, duration: 5000 })) {
+for (const row of Csv.generateRows({ columns: 3, duration: 5000 })) {
   // Generates for 5 seconds
 }
 
 // Async generator with delay between rows
-for await (const row of csvGenerateAsync({ columns: 5, rows: 100, delay: 10 })) {
+for await (const row of Csv.generateAsync({ columns: 5, rows: 100, delay: 10 })) {
   console.log(row);
 }
 
 // Generate raw data (not CSV strings)
-const rawRows = csvGenerateData({ columns: ["name", "int"], rows: 10 });
+const rawRows = Csv.generateData({ columns: ["name", "int"], rows: 10 });
 // [[name, number], ...]
 
-const objects = csvGenerateData({
+const objects = Csv.generateData({
   columns: [{ type: "name", name: "fullName" }],
   rows: 10,
   objectMode: true
@@ -397,7 +392,7 @@ const objects = csvGenerateData({
 // [{ fullName: "..." }, ...]
 
 // Reusable generator with preset config
-const gen = createCsvGenerator({ columns: ["name", "email"], seed: 42 });
+const gen = Csv.createGenerator({ columns: ["name", "email"], seed: 42 });
 const batch1 = gen.generate(100);
 const batch2 = gen.generate(100);
 ```
@@ -410,10 +405,11 @@ const batch2 = gen.generate(100);
 ## Error Classes
 
 ```typescript
+import { Csv } from "@cj-tech-master/excelts/csv";
 import { CsvError, CsvWorkerError } from "@cj-tech-master/excelts/csv";
 
 try {
-  parseCsv(badInput, { headers: true });
+  Csv.parse(badInput, { headers: true });
 } catch (e) {
   if (e instanceof CsvError) {
     console.error(e.message);
@@ -428,41 +424,41 @@ try {
 
 ### Core Functions
 
-| Function                                             | Description                                      |
-| ---------------------------------------------------- | ------------------------------------------------ |
-| `parseCsv(input, options?)`                          | Synchronous CSV parser                           |
-| `parseCsvAsync(input, options?)`                     | Async parser (strings, streams, async iterables) |
-| `parseCsvRows(input, options?)`                      | Async generator yielding rows one at a time      |
-| `parseCsvWithProgress(input, options?, onProgress?)` | Parser with progress reporting                   |
-| `formatCsv(data, options?)`                          | Batch CSV formatter                              |
+| Function                                              | Description                                      |
+| ----------------------------------------------------- | ------------------------------------------------ |
+| `Csv.parse(input, options?)`                          | Synchronous CSV parser                           |
+| `Csv.parseAsync(input, options?)`                     | Async parser (strings, streams, async iterables) |
+| `Csv.parseRows(input, options?)`                      | Async generator yielding rows one at a time      |
+| `Csv.parseWithProgress(input, options?, onProgress?)` | Parser with progress reporting                   |
+| `Csv.format(data, options?)`                          | Batch CSV formatter                              |
 
 ### Stream Classes
 
-| Class                                | Description                                |
-| ------------------------------------ | ------------------------------------------ |
-| `CsvParserStream`                    | Transform stream: CSV bytes -> parsed rows |
-| `CsvFormatterStream`                 | Transform stream: rows -> CSV text         |
-| `createCsvParserStream(options?)`    | Factory for `CsvParserStream`              |
-| `createCsvFormatterStream(options?)` | Factory for `CsvFormatterStream`           |
+| Class                                 | Description                                |
+| ------------------------------------- | ------------------------------------------ |
+| `Csv.ParserStream`                    | Transform stream: CSV bytes -> parsed rows |
+| `Csv.FormatterStream`                 | Transform stream: rows -> CSV text         |
+| `Csv.createParserStream(options?)`    | Factory for `Csv.ParserStream`             |
+| `Csv.createFormatterStream(options?)` | Factory for `Csv.FormatterStream`          |
 
 ### Utilities
 
-| Function                         | Description                   |
-| -------------------------------- | ----------------------------- |
-| `detectDelimiter(input)`         | Auto-detect CSV delimiter     |
-| `detectLinebreak(input)`         | Auto-detect line terminator   |
-| `stripBom(input)`                | Strip UTF-8 BOM               |
-| `applyDynamicTyping(value)`      | Convert string to native type |
-| `formatNumberForCsv(value, sep)` | Format number for locale      |
-| `parseNumberFromCsv(value, sep)` | Parse locale-formatted number |
-| `deduplicateHeaders(headers)`    | Rename duplicate headers      |
+| Function                          | Description                   |
+| --------------------------------- | ----------------------------- |
+| `Csv.detectDelimiter(input)`      | Auto-detect CSV delimiter     |
+| `Csv.detectLinebreak(input)`      | Auto-detect line terminator   |
+| `Csv.stripBom(input)`             | Strip UTF-8 BOM               |
+| `Csv.applyDynamicTyping(value)`   | Convert string to native type |
+| `Csv.formatNumber(value, sep)`    | Format number for locale      |
+| `Csv.parseNumber(value, sep)`     | Parse locale-formatted number |
+| `Csv.deduplicateHeaders(headers)` | Rename duplicate headers      |
 
 ### Generator Functions
 
-| Function                       | Description                         |
-| ------------------------------ | ----------------------------------- |
-| `csvGenerate(options?)`        | Generate CSV string + data          |
-| `csvGenerateRows(options?)`    | Sync generator yielding CSV rows    |
-| `csvGenerateAsync(options?)`   | Async generator with delay support  |
-| `csvGenerateData(options?)`    | Generate raw data (not CSV strings) |
-| `createCsvGenerator(options?)` | Reusable generator factory          |
+| Function                        | Description                         |
+| ------------------------------- | ----------------------------------- |
+| `Csv.generate(options?)`        | Generate CSV string + data          |
+| `Csv.generateRows(options?)`    | Sync generator yielding CSV rows    |
+| `Csv.generateAsync(options?)`   | Async generator with delay support  |
+| `Csv.generateData(options?)`    | Generate raw data (not CSV strings) |
+| `Csv.createGenerator(options?)` | Reusable generator factory          |

@@ -36,11 +36,11 @@ describe("DataValidation Large Range Performance", () => {
       };
 
       const filePath = path.join(tempDir, "large-range.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
       const start = performance.now();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const elapsed = performance.now() - start;
 
       expect(elapsed).toBeLessThan(500);
@@ -87,11 +87,11 @@ describe("DataValidation Large Range Performance", () => {
       };
 
       const filePath = path.join(tempDir, "multi-column.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
       const start = performance.now();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const elapsed = performance.now() - start;
 
       expect(elapsed).toBeLessThan(1000);
@@ -121,10 +121,10 @@ describe("DataValidation Large Range Performance", () => {
       }
 
       const filePath = path.join(tempDir, "small-range.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "A1"))).toBeDefined();
@@ -143,10 +143,10 @@ describe("DataValidation Large Range Performance", () => {
       };
 
       const filePath = path.join(tempDir, "threshold.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "A1"))).toBeDefined();
@@ -164,10 +164,10 @@ describe("DataValidation Large Range Performance", () => {
       };
 
       const filePath = path.join(tempDir, "over-threshold.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "A1"))).toBeDefined();
@@ -187,10 +187,10 @@ describe("DataValidation Large Range Performance", () => {
       });
 
       const filePath = path.join(tempDir, "single-cell.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "A1"))?.type).toBe("whole");
@@ -219,10 +219,10 @@ describe("DataValidation Large Range Performance", () => {
       }
 
       const filePath = path.join(tempDir, "disjoint.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "E4"))).toBeDefined();
@@ -243,10 +243,10 @@ describe("DataValidation Large Range Performance", () => {
       });
 
       const filePath = path.join(tempDir, "any-type.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "A1"))?.type).toBe("any");
@@ -271,10 +271,10 @@ describe("DataValidation Large Range Performance", () => {
       };
 
       const filePath = path.join(tempDir, "cross-sheet-ref.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb3 = Workbook.create();
-      await Workbook.readXlsxFile(wb3, filePath);
+      await Workbook.readFile(wb3, filePath);
       const ws2Loaded = Workbook.getWorksheet(wb3, "Input")!;
 
       const dv = cellDataValidation(getCell(ws2Loaded, "A100")) as
@@ -301,10 +301,10 @@ describe("DataValidation Large Range Performance", () => {
       });
 
       const filePath = path.join(tempDir, "overlap.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       const dvB2 = cellDataValidation(getCell(ws2, "B2")) as DataValidationWithFormulae | undefined;
@@ -337,10 +337,10 @@ describe("DataValidation Large Range Performance", () => {
       ws.dataValidations.model["range:A1:A1048576"] = fullValidation;
 
       const filePath = path.join(tempDir, "full-props.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       const dv = cellDataValidation(getCell(ws2, "A500")) as DataValidationWithFormulae | undefined;
@@ -375,10 +375,10 @@ describe("DataValidation Large Range Performance", () => {
       expect(cellDataValidation(getCell(ws, "A2"))).toBeDefined();
 
       const filePath = path.join(tempDir, "remove.xlsx");
-      await Workbook.writeXlsx(wb, filePath);
+      await Workbook.writeFile(wb, filePath);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filePath);
+      await Workbook.readFile(wb2, filePath);
       const ws2 = Workbook.getWorksheet(wb2, "Test")!;
 
       expect(cellDataValidation(getCell(ws2, "A1"))).toBeUndefined();

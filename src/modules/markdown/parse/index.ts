@@ -20,9 +20,9 @@
  * ```
  */
 
-import { BR_TAG_REGEX, LINEBREAK_REGEX, UNESCAPE_REGEX } from "../constants";
-import { MarkdownParseError } from "../errors";
-import type { MarkdownAlignment, MarkdownParseOptions, MarkdownParseResult } from "../types";
+import { BR_TAG_REGEX, LINEBREAK_REGEX, UNESCAPE_REGEX } from "@markdown/constants";
+import { MarkdownParseError } from "@markdown/errors";
+import type { MarkdownAlignment, MarkdownParseOptions, MarkdownParseResult } from "@markdown/types";
 
 // =============================================================================
 // Character Codes (avoid repeated charCodeAt comparisons with magic numbers)

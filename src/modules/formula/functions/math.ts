@@ -2,13 +2,20 @@
  * Math / Aggregate Functions — Native RuntimeValue implementation.
  */
 
+import {
+  argToNumber,
+  flattenAll,
+  flattenNumbers,
+  firstError,
+  forEachNumber
+} from "@formula/functions/_shared";
 import type {
   RuntimeValue,
   NumberValue,
   ArrayValue,
   ErrorValue,
   ScalarValue
-} from "../runtime/values";
+} from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -20,8 +27,7 @@ import {
   topLeft,
   isError,
   isArray
-} from "../runtime/values";
-import { argToNumber, flattenAll, flattenNumbers, firstError, forEachNumber } from "./_shared";
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Native Function Type

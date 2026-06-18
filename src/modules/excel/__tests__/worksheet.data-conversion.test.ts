@@ -427,9 +427,9 @@ describe("Worksheet", () => {
         { name: "Bob", age: 25, active: false }
       ]);
 
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const result = toJSON(Workbook.getWorksheet(wb2, "Data")!);
       expect(result).toHaveLength(2);
@@ -445,9 +445,9 @@ describe("Worksheet", () => {
         [3, 4]
       ]);
 
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const result = toAOA(Workbook.getWorksheet(wb2, "Data")!);
       expect(result[0]).toEqual(["X", "Y"]);

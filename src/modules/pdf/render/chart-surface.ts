@@ -17,11 +17,11 @@
  * `translateScene` in `@excel/chart/render/chart-renderer.ts`).
  */
 
-import type { PdfContentStream } from "../core/pdf-stream";
-import type { FontManager } from "../font/font-manager";
-import { resolvePdfFontName } from "../font/font-manager";
-import type { PdfChartDrawingSurface, PdfChartPathOp, PdfColor } from "../types";
-import { alphaGsName, emitTextWithMatrix } from "./page-renderer";
+import type { PdfContentStream } from "@pdf/core/pdf-stream";
+import type { FontManager } from "@pdf/font/font-manager";
+import { resolvePdfFontName } from "@pdf/font/font-manager";
+import { alphaGsName, emitTextWithMatrix } from "@pdf/render/page-renderer";
+import type { PdfChartDrawingSurface, PdfChartPathOp, PdfColor } from "@pdf/types";
 
 /**
  * Build a {@link PdfChartDrawingSurface} that forwards to the given content

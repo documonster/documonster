@@ -24,12 +24,11 @@
  * it without creating a `advanced/ → writer/` import cycle.
  */
 
+import { DOCUMENT_NAMESPACES, STD_DOC_ATTRIBUTES } from "@word/constants";
+import type { BodyContent, BuildingBlockGallery, GlossaryDocument } from "@word/types";
+import { renderBodyContent } from "@word/writer/document-writer";
 import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
-
-import { DOCUMENT_NAMESPACES, STD_DOC_ATTRIBUTES } from "../constants";
-import type { BodyContent, BuildingBlockGallery, GlossaryDocument } from "../types";
-import { renderBodyContent } from "./document-writer";
 
 /**
  * Map the friendly {@link BuildingBlockGallery} token to the OOXML

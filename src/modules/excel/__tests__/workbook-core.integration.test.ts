@@ -51,59 +51,59 @@ describe("Workbook", () => {
     it("xlsx file", async () => {
       const wb = testUtils.createTestBook(Workbook.create(), "xlsx", undefined);
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx", undefined, {});
     });
     describe("Xlsx Zip Compression", () => {
       it("xlsx file with best compression", async () => {
         const wb = testUtils.createTestBook(Workbook.create(), "xlsx", undefined);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME, {
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME, {
           zip: {
             level: 9
           }
         });
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         testUtils.checkTestBook(wb2, "xlsx", undefined, {});
       });
 
       it("xlsx file with default compression", async () => {
         const wb = testUtils.createTestBook(Workbook.create(), "xlsx", undefined);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME, {
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME, {
           zip: {}
         });
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         testUtils.checkTestBook(wb2, "xlsx", undefined, {});
       });
 
       it("xlsx file with fast compression", async () => {
         const wb = testUtils.createTestBook(Workbook.create(), "xlsx", undefined);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME, {
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME, {
           zip: {
             level: 1
           }
         });
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         testUtils.checkTestBook(wb2, "xlsx", undefined, {});
       });
 
       it("xlsx file with no compression", async () => {
         const wb = testUtils.createTestBook(Workbook.create(), "xlsx", undefined);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME, {
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME, {
           zip: {
             level: 0
           }
         });
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         testUtils.checkTestBook(wb2, "xlsx", undefined, {});
       });
     });
@@ -119,9 +119,9 @@ describe("Workbook", () => {
 
       Workbook.addWorksheet(wb, "This & That");
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(Workbook.getWorksheet(wb2, "Hello, World!")).toBeTruthy();
       expect(Workbook.getWorksheet(wb2, "This & That")).toBeTruthy();
     });
@@ -134,10 +134,10 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "Hello, \x01World!");
       Cell.setValue(ws, "A2", "Hello, \x0bWorld!");
 
-      await Workbook.writeXlsx(wb, filename);
+      await Workbook.writeFile(wb, filename);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filename);
+      await Workbook.readFile(wb2, filename);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(Cell.getValue(ws2, "A1")).toBe("Hello, World!");
       expect(Cell.getValue(ws2, "A2")).toBe("Hello, World!");
@@ -168,10 +168,10 @@ describe("Workbook", () => {
         Cell.setValue(ws, `B${i + 1}`, value);
       }
 
-      await Workbook.writeXlsx(wb, filename);
+      await Workbook.writeFile(wb, filename);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filename);
+      await Workbook.readFile(wb2, filename);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       for (let i = 0; i < specialValues.length; i++) {
         const value = specialValues[i];
@@ -185,8 +185,8 @@ describe("Workbook", () => {
       const outFile = testFilePath("hyperlink-without-text.workbook");
 
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, sourceFile);
-      const buffer = await Workbook.toXlsxBuffer(wb, {
+      await Workbook.readFile(wb, sourceFile);
+      const buffer = await Workbook.toBuffer(wb, {
         useStyles: true,
         useSharedStrings: true
       });
@@ -194,26 +194,26 @@ describe("Workbook", () => {
       await fs.promises.writeFile(outFile, buffer);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, outFile);
+      await Workbook.readFile(wb2, outFile);
       expect(getWorksheets(wb2).length).toBeGreaterThan(0);
     });
 
     it("readFile should not throw", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("graceful-read-no-throw.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("graceful-read-no-throw.xlsx"));
       expect(getWorksheets(wb).length).toBeGreaterThan(0);
     });
 
     it("unexpected xml node should not break parsing", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("unexpected-xml-node.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("unexpected-xml-node.xlsx"));
       expect(getWorksheets(wb).length).toBeGreaterThan(0);
     });
 
     describe("1904 dates", () => {
       it("reads 1904-based workbook", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("date-system-1904.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("date-system-1904.xlsx"));
 
         expect(wb.properties.date1904).toBe(true);
         const ws = Workbook.getWorksheet(wb, "Sheet1")!;
@@ -227,10 +227,10 @@ describe("Workbook", () => {
         const ws = Workbook.addWorksheet(wb, "Sheet1");
         Cell.setValue(ws, "B4", new Date("1904-01-01T00:00:00.000Z"));
 
-        await Workbook.writeXlsx(wb, filename);
+        await Workbook.writeFile(wb, filename);
 
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, filename);
+        await Workbook.readFile(wb2, filename);
         expect(wb2.properties.date1904).toBe(true);
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect((Cell.getValue(ws2, "B4") as Date).toISOString()).toBe("1904-01-01T00:00:00.000Z");
@@ -239,14 +239,14 @@ describe("Workbook", () => {
 
     it("sheet order is preserved", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("sheet-order.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("sheet-order.xlsx"));
       expect(getWorksheets(wb).map(ws => getSheetName(ws))).toEqual(["First", "Second"]);
     });
 
     describe("missing r attribute in row/cell elements", () => {
       it("reads xlsx missing r attributes", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("missing-cell-address.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("missing-cell-address.xlsx"));
 
         const ws = getWorksheets(wb)[0];
         expect(ws).toBeDefined();
@@ -265,7 +265,7 @@ describe("Workbook", () => {
 
       it("infers cell addresses when r is missing", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("missing-cell-address.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("missing-cell-address.xlsx"));
         const ws = getWorksheets(wb)[0];
 
         expect(Cell.getValue(ws, "A1")).toBeDefined();
@@ -278,7 +278,7 @@ describe("Workbook", () => {
 
       it("can write back after reading", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("missing-cell-address.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("missing-cell-address.xlsx"));
 
         // NOTE: `expectValidXlsx` is intentionally NOT invoked here.
         // The `missing-cell-address.xlsx` fixture is already OOXML-broken
@@ -286,7 +286,7 @@ describe("Workbook", () => {
         // the theme part while leaving content-types / rels pointing at
         // it. A stricter validator flags that, but the test only asserts
         // "write does not throw", which remains true.
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         expect(buffer).toBeDefined();
         expect(buffer.byteLength).toBeGreaterThan(0);
       });
@@ -294,20 +294,20 @@ describe("Workbook", () => {
 
     it("optional autofilter and custom autofilter on tables", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("table-autofilter-optional.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("table-autofilter-optional.xlsx"));
       expect(getWorksheets(wb).length).toBeGreaterThan(0);
     });
 
     it("<contentType /> element", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("content-type-element.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("content-type-element.xlsx"));
       expect(getWorksheets(wb).length).toBeGreaterThan(0);
     });
 
     it("borders for merged cells survive rewrite", async () => {
       const outFile = testFilePath("merged-cell-borders.workbook");
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("merged-cell-borders.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("merged-cell-borders.xlsx"));
 
       const assertBorder = (cell: any, borders: Array<"left" | "right" | "top" | "bottom">) => {
         expect(cell.style?.border).toBeTruthy();
@@ -322,10 +322,10 @@ describe("Workbook", () => {
       assertBorder(getCell(ws, "C2"), ["right", "top"]);
       assertBorder(getCell(ws, "C3"), ["right", "bottom"]);
 
-      await Workbook.writeXlsx(wb, outFile);
+      await Workbook.writeFile(wb, outFile);
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, outFile);
+      await Workbook.readFile(wb2, outFile);
       const ws2 = Workbook.getWorksheet(wb2, 1)!;
       assertBorder(getCell(ws2, "B2"), ["left", "top"]);
       assertBorder(getCell(ws2, "B3"), ["left", "bottom"]);
@@ -338,8 +338,8 @@ describe("Workbook", () => {
       const outFile = testFilePath("malformed-comment.workbook");
 
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, sourceFile);
-      const buffer = await Workbook.toXlsxBuffer(wb, {
+      await Workbook.readFile(wb, sourceFile);
+      const buffer = await Workbook.toBuffer(wb, {
         useStyles: true,
         useSharedStrings: true
       });
@@ -352,7 +352,7 @@ describe("Workbook", () => {
 
     it("table without autofilter model", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, excelTestDataPath("table-without-autofilter.xlsx"));
+      await Workbook.readFile(wb, excelTestDataPath("table-without-autofilter.xlsx"));
       expect(getWorksheets(wb).length).toBeGreaterThan(0);
     }, 6000);
 
@@ -368,7 +368,7 @@ describe("Workbook", () => {
         cellSetValue(getCell(ws1, "A1"), "Sheet 1 Data");
         cellSetValue(getCell(ws2, "A1"), "Sheet 2 Data");
 
-        const buffer = await Workbook.toXlsxBuffer(workbook);
+        const buffer = await Workbook.toBuffer(workbook);
         await expectValidXlsx(buffer, { label: "sequential sheet filenames" });
         const zipData = await extractAll(new Uint8Array(buffer));
 
@@ -394,7 +394,7 @@ describe("Workbook", () => {
         cellSetValue(getCell(ws1, "A1"), "Data 1");
         cellSetValue(getCell(ws2, "A1"), "Data 2");
 
-        const buffer = await Workbook.toXlsxBuffer(workbook);
+        const buffer = await Workbook.toBuffer(workbook);
         await expectValidXlsx(buffer, { label: "sheetId preserved" });
         const zipData = await extractAll(new Uint8Array(buffer));
 
@@ -410,7 +410,7 @@ describe("Workbook", () => {
         const sourceFile = excelTestDataPath("many-defined-names.xlsx");
 
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, sourceFile);
+        await Workbook.readFile(wb, sourceFile);
         expect(getWorksheets(wb).length).toBeGreaterThan(0);
 
         const dnModel = definedNamesModel(getDefinedNames(wb));
@@ -429,7 +429,7 @@ describe("Workbook", () => {
         const buffer = await fs.promises.readFile(sourceFile);
 
         const wb = Workbook.create();
-        await Workbook.loadXlsx(wb, buffer);
+        await Workbook.read(wb, buffer);
         expect(getWorksheets(wb).length).toBeGreaterThan(0);
       }, 60000);
 
@@ -437,7 +437,7 @@ describe("Workbook", () => {
         const sourceFile = excelTestDataPath("many-defined-names.xlsx");
 
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, sourceFile);
+        await Workbook.readFile(wb, sourceFile);
 
         // Collect ranges from all defined names — opaque names have empty ranges,
         // so array constants should never appear in the ranges array.
@@ -456,14 +456,14 @@ describe("Workbook", () => {
     describe("regressions", () => {
       it("worksheet should not be undefined", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("worksheet-not-undefined.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("worksheet-not-undefined.xlsx"));
         const ws = Workbook.getWorksheet(wb, 1)!;
         expect(ws).toBeDefined();
       });
 
       it("reads worksheet hidden state", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("hidden-worksheet-state.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("hidden-worksheet-state.xlsx"));
 
         const expected: Record<number, string> = { 1: "visible", 2: "hidden", 3: "visible" };
         Workbook.eachSheet(wb, (ws, sheetId) => {
@@ -473,7 +473,7 @@ describe("Workbook", () => {
 
       it("reads workbook with whole-column defined names", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("whole-column-defined-names.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("whole-column-defined-names.xlsx"));
         expect(getWorksheets(wb).length).toBeGreaterThan(0);
       });
 
@@ -494,11 +494,11 @@ describe("Workbook", () => {
         ];
         setWorkbookModel(wb, workbookModel);
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "empty Print_Area ranges" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(ws2).toBeDefined();
@@ -513,11 +513,11 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "not empty");
         getCell(ws, "B1").style = { numFmt: "@" };
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "lastColumn empty column" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         expect(getLastColumn(ws2)).toBe(getColumn(ws2, 2));
@@ -525,7 +525,7 @@ describe("Workbook", () => {
 
       it("inlineStr cell type support", async () => {
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, excelTestDataPath("inline-string-cells.xlsx"));
+        await Workbook.readFile(wb, excelTestDataPath("inline-string-cells.xlsx"));
 
         const ws = Workbook.getWorksheet(wb, "Sheet1")!;
         expect(Cell.getValue(ws, "A1")).toBe("A");
@@ -551,10 +551,10 @@ describe("Workbook", () => {
           Cell.setValue(ws, "C1", " both ");
           Cell.setNote(ws, "C1", " both ");
 
-          await Workbook.writeXlsx(wb, testFile);
+          await Workbook.writeFile(wb, testFile);
 
           const wb2 = Workbook.create();
-          await Workbook.readXlsxFile(wb2, testFile);
+          await Workbook.readFile(wb2, testFile);
           const ws2 = Workbook.getWorksheet(wb2, "foo")!;
           expect(Cell.getValue(ws2, "A1")).toBe(" leading");
           expect(Cell.getNote(ws2, "A1")).toBe(" leading");
@@ -573,10 +573,10 @@ describe("Workbook", () => {
           Cell.setValue(ws, "B1", " Hello, \n World! ");
           Cell.setNote(ws, "B1", " Later, \n Alligator! ");
 
-          await Workbook.writeXlsx(wb, testFile);
+          await Workbook.writeFile(wb, testFile);
 
           const wb2 = Workbook.create();
-          await Workbook.readXlsxFile(wb2, testFile);
+          await Workbook.readFile(wb2, testFile);
           const ws2 = Workbook.getWorksheet(wb2, "foo")!;
           expect(Cell.getValue(ws2, "A1")).toBe("Hello,\nWorld!");
           expect(Cell.getNote(ws2, "A1")).toBe("Later,\nAlligator!");
@@ -603,10 +603,10 @@ describe("Workbook", () => {
           Cell.setNote(ws, "A1", TEST_NOTE);
           Cell.setStyle(ws, "A1", { alignment: { wrapText: true } });
 
-          await Workbook.writeXlsx(wb, testFile);
+          await Workbook.writeFile(wb, testFile);
 
           const wb2 = Workbook.create();
-          await Workbook.readXlsxFile(wb2, testFile);
+          await Workbook.readFile(wb2, testFile);
           const ws2 = Workbook.getWorksheet(wb2, "sheet1")!;
           expect(ws2).toBeDefined();
           expect(Cell.getValue(ws2, "A1")).toEqual(TEST_VALUE);
@@ -625,10 +625,10 @@ describe("Workbook", () => {
             height: 150
           });
 
-          await Workbook.writeXlsx(wb, testFile);
+          await Workbook.writeFile(wb, testFile);
 
           const wb2 = Workbook.create();
-          await Workbook.readXlsxFile(wb2, testFile);
+          await Workbook.readFile(wb2, testFile);
           const ws2 = Workbook.getWorksheet(wb2, "foo")!;
           const note = Cell.getNote(ws2, "A1") as any;
           expect(note.width).toBe(240);
@@ -642,10 +642,10 @@ describe("Workbook", () => {
           Cell.setValue(ws, "A1", "plain comment");
           Cell.setNote(ws, "A1", "just text");
 
-          await Workbook.writeXlsx(wb, testFile);
+          await Workbook.writeFile(wb, testFile);
 
           const wb2 = Workbook.create();
-          await Workbook.readXlsxFile(wb2, testFile);
+          await Workbook.readFile(wb2, testFile);
           const ws2 = Workbook.getWorksheet(wb2, "foo")!;
           // A plain string note round-trips back to a string.
           expect(Cell.getNote(ws2, "A1")).toBe("just text");
@@ -660,8 +660,8 @@ describe("Workbook", () => {
           Cell.setValue(ws, "A1", "x");
           Cell.setNote(ws, "A1", { texts: [{ text: "n" }], width: 97.8, height: 59.1 });
 
-          const buffer = await Workbook.toXlsxBuffer(wb);
-          const { unzip } = await import("@archive/index");
+          const buffer = await Workbook.toBuffer(wb);
+          const { unzip } = await import("@archive/read-archive");
           const reader = unzip(buffer as unknown as Uint8Array);
           let vml = "";
           for await (const entry of reader.entries()) {
@@ -686,7 +686,7 @@ describe("Workbook", () => {
             extension: "jpeg"
           });
           addImage(worksheet, imageId1, "B2:D6");
-          await Workbook.writeXlsx(workbook, testFile);
+          await Workbook.writeFile(workbook, testFile);
         } catch (err) {
           error = err;
         }
@@ -703,9 +703,9 @@ describe("Workbook", () => {
       wb.lastModifiedBy = "Bar";
       wb.created = new Date(2016, 0, 1);
       wb.modified = new Date(2016, 4, 19);
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(wb2.creator).toBe(wb.creator);
       expect(wb2.lastModifiedBy).toBe(wb.lastModifiedBy);
       expect(wb2.created).toEqual(wb.created);
@@ -724,9 +724,9 @@ describe("Workbook", () => {
 
       ws.pageSetup.printTitlesRow = "1:2";
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "printHeader")!;
       expect(ws2.pageSetup.printTitlesRow).toBe("1:2");
       expect(ws2.pageSetup.printTitlesColumn).toBeUndefined();
@@ -747,9 +747,9 @@ describe("Workbook", () => {
 
       ws.pageSetup.printTitlesRow = "A:B";
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "printColumn")!;
       expect(ws2.pageSetup.printTitlesRow).toBeUndefined();
       expect(ws2.pageSetup.printTitlesColumn).toBe("A:B");
@@ -785,9 +785,9 @@ describe("Workbook", () => {
         ]);
       }
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "printHeaderAndColumn")!;
       expect(ws2.pageSetup.printTitlesRow).toBe("1:2");
       expect(ws2.pageSetup.printTitlesColumn).toBe("A:B");
@@ -799,11 +799,11 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "test");
       ws.pageSetup.printArea = "A1";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "single-cell printArea" });
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws2.pageSetup.printArea).toBe("A1:A1");
@@ -827,7 +827,7 @@ describe("Workbook", () => {
       }
       ws.pageSetup.printArea = "A1:B5&&D1:E10";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "multiple printAreas" });
 
       // Inspect workbook.xml to confirm a single `<definedName>` with both
@@ -843,7 +843,7 @@ describe("Workbook", () => {
       expect(workbookContent).toContain("$A$1:$B$5,&apos;Sheet1&apos;!$D$1:$E$10");
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws2.pageSetup.printArea).toBe("A1:B5&&D1:E10");
     });
@@ -857,11 +857,11 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "test");
       ws.pageSetup.printArea = "A1:B5,D1:E10";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "comma-separated printArea" });
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws2.pageSetup.printArea).toBe("A1:B5&&D1:E10");
     });
@@ -878,11 +878,11 @@ describe("Workbook", () => {
       ws1.pageSetup.printArea = "A1:B2&&D1:E2";
       ws2.pageSetup.printArea = "A1:C3";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "per-sheet multiple printAreas" });
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       expect(Workbook.getWorksheet(wb2, "S1")!.pageSetup.printArea).toBe("A1:B2&&D1:E2");
       expect(Workbook.getWorksheet(wb2, "S2")!.pageSetup.printArea).toBe("A1:C3");
     });
@@ -896,11 +896,11 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "x");
       ws.pageSetup.printArea = "A1:B5&&D1:E10";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "comma-named sheet printAreas" });
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Q1, Forecast")!;
       expect(ws2.pageSetup.printArea).toBe("A1:B5&&D1:E10");
     });
@@ -934,7 +934,7 @@ describe("Workbook", () => {
           Cell.setValue(ws, "A1", "x");
           ws.pageSetup.printArea = input;
 
-          const buffer = await Workbook.toXlsxBuffer(wb);
+          const buffer = await Workbook.toBuffer(wb);
           await expectValidXlsx(buffer, { label: `printArea normalise ${input}` });
 
           const zipData = await extractAll(new Uint8Array(buffer));
@@ -945,7 +945,7 @@ describe("Workbook", () => {
           expect(workbookContent).toContain(xmlContains);
 
           const wb2 = Workbook.create();
-          await Workbook.loadXlsx(wb2, buffer);
+          await Workbook.read(wb2, buffer);
           expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe(expectedRoundTrip);
         });
       }
@@ -956,7 +956,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printTitlesRow = "$1:$2";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "printTitlesRow $1:$2" });
         const zipData = await extractAll(new Uint8Array(buffer));
         const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
@@ -964,7 +964,7 @@ describe("Workbook", () => {
         expect(workbookContent).toContain("$1:$2");
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printTitlesRow).toBe("1:2");
       });
 
@@ -974,7 +974,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printTitlesColumn = "$a:$b";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "printTitlesColumn $a:$b" });
         const zipData = await extractAll(new Uint8Array(buffer));
         const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
@@ -982,7 +982,7 @@ describe("Workbook", () => {
         expect(workbookContent).toContain("$A:$B");
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printTitlesColumn).toBe("A:B");
       });
 
@@ -997,11 +997,11 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printTitlesRow = "A:B";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "row=A:B legacy" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         const ps = Workbook.getWorksheet(wb2, "S")!.pageSetup;
         expect(ps.printTitlesRow).toBeUndefined();
         expect(ps.printTitlesColumn).toBe("A:B");
@@ -1014,14 +1014,14 @@ describe("Workbook", () => {
         // Garbage input — neither an address nor a range.
         ws.pageSetup.printArea = "not-a-range!!";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "garbage printArea" });
         const zipData = await extractAll(new Uint8Array(buffer));
         const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
         expect(workbookContent).not.toContain("Print_Area");
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBeUndefined();
       });
 
@@ -1035,14 +1035,14 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "1:5";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "whole-row printArea" });
         const zipData = await extractAll(new Uint8Array(buffer));
         const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
         expect(workbookContent).toContain("$1:$5");
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe("1:5");
       });
 
@@ -1052,14 +1052,14 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "A:C";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "whole-column printArea" });
         const zipData = await extractAll(new Uint8Array(buffer));
         const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
         expect(workbookContent).toContain("$A:$C");
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe("A:C");
       });
 
@@ -1072,11 +1072,11 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "A1&&B2:C3&&5:7&&E:F";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "mixed shapes" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         // Cell promotes to A1:A1 (degenerate range); other shapes
         // round-trip verbatim.
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe("A1:A1&&B2:C3&&5:7&&E:F");
@@ -1096,11 +1096,11 @@ describe("Workbook", () => {
           { name: "_xlnm.Print_Area", localSheetId: 0, ranges: [], rawText: "'S'!$A$1" }
         ];
         setWorkbookModel(wb, m);
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "bare-cell OOXML" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe("A1:A1");
       });
 
@@ -1119,7 +1119,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "A1:AAAA5";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/Column AAAA is out of bounds/);
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(/Column AAAA is out of bounds/);
       });
 
       it("whole-column printArea past XFD throws with the letter in the message", async () => {
@@ -1128,7 +1128,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "AAAA:AAAB";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/Column AAAA is out of bounds/);
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(/Column AAAA is out of bounds/);
       });
 
       it("printTitlesColumn past XFD throws with the letter in the message", async () => {
@@ -1137,7 +1137,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printTitlesColumn = "AAAA:AAAB";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/Column AAAA is out of bounds/);
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(/Column AAAA is out of bounds/);
       });
 
       it("loading a workbook whose OOXML carries an out-of-bounds column drops the bad range without aborting the load", async () => {
@@ -1154,7 +1154,7 @@ describe("Workbook", () => {
         // range and a good range. The good range must survive the load.
         const cleanWb = Workbook.create();
         Cell.setValue(Workbook.addWorksheet(cleanWb, "Sheet1"), "A1", "x");
-        const cleanBuf = await Workbook.toXlsxBuffer(cleanWb);
+        const cleanBuf = await Workbook.toBuffer(cleanWb);
 
         const entries = await extractAll(new Uint8Array(cleanBuf));
         const wbXmlText = new TextDecoder().decode(entries.get("xl/workbook.xml")!.data);
@@ -1175,7 +1175,7 @@ describe("Workbook", () => {
         const patchedBuffer = await createZip(zipFiles);
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, patchedBuffer);
+        await Workbook.read(wb2, patchedBuffer);
         // Bad range dropped, good range kept.
         expect(Workbook.getWorksheet(wb2, "Sheet1")!.pageSetup.printArea).toBe("A1:B5");
       });
@@ -1190,11 +1190,11 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "'Q1, Forecast'!A1:B5,'Q1, Forecast'!D1:E10";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "comma-in-name sheet-prefixed input" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "Q1, Forecast")!.pageSetup.printArea).toBe(
           "A1:B5&&D1:E10"
         );
@@ -1206,11 +1206,11 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "'A&&B'!A1:B5&&'A&&B'!D1:E10";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "ampersand-in-name sheet-prefixed input" });
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "A&&B")!.pageSetup.printArea).toBe("A1:B5&&D1:E10");
       });
 
@@ -1228,10 +1228,10 @@ describe("Workbook", () => {
           const ws = Workbook.addWorksheet(wb, "S");
           Cell.setValue(ws, "A1", "x");
           ws.pageSetup.printArea = input;
-          const buffer = await Workbook.toXlsxBuffer(wb);
+          const buffer = await Workbook.toBuffer(wb);
           await expectValidXlsx(buffer, { label: `reversed ${input}` });
           const wb2 = Workbook.create();
-          await Workbook.loadXlsx(wb2, buffer);
+          await Workbook.read(wb2, buffer);
           expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe(expected);
         }
       });
@@ -1242,7 +1242,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "A0:B5";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/Row 0 is out of bounds/);
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(/Row 0 is out of bounds/);
       });
 
       it("whole-row 0 input (e.g. `0:5`) is rejected", async () => {
@@ -1251,7 +1251,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "0:5";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/Row 0 is out of bounds/);
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(/Row 0 is out of bounds/);
       });
 
       it("row past Excel's 1048576 limit is rejected", async () => {
@@ -1260,7 +1260,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "A1:B1048577";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(
           /Row 1048577 is out of bounds.*1 to 1048576/
         );
       });
@@ -1271,7 +1271,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printTitlesRow = "1:1048577";
 
-        await expect(Workbook.toXlsxBuffer(wb)).rejects.toThrow(/Row 1048577 is out of bounds/);
+        await expect(Workbook.toBuffer(wb)).rejects.toThrow(/Row 1048577 is out of bounds/);
       });
 
       it("leading-zero row inputs are normalised to canonical integers", async () => {
@@ -1283,7 +1283,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A1", "x");
         ws.pageSetup.printArea = "A001:B005";
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "leading-zero row" });
         const zipData = await extractAll(new Uint8Array(buffer));
         const workbookContent = new TextDecoder().decode(zipData.get("xl/workbook.xml")?.data);
@@ -1291,7 +1291,7 @@ describe("Workbook", () => {
         expect(workbookContent).not.toContain("$A$001");
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
         expect(Workbook.getWorksheet(wb2, "S")!.pageSetup.printArea).toBe("A1:B5");
       });
 
@@ -1303,7 +1303,7 @@ describe("Workbook", () => {
         // `ColumnOutOfBoundsError`.
         const cleanWb = Workbook.create();
         Cell.setValue(Workbook.addWorksheet(cleanWb, "Sheet1"), "A1", "x");
-        const cleanBuf = await Workbook.toXlsxBuffer(cleanWb);
+        const cleanBuf = await Workbook.toBuffer(cleanWb);
 
         const entries = await extractAll(new Uint8Array(cleanBuf));
         const wbXmlText = new TextDecoder().decode(entries.get("xl/workbook.xml")!.data);
@@ -1321,7 +1321,7 @@ describe("Workbook", () => {
         const patchedBuffer = await createZip(zipFiles);
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, patchedBuffer);
+        await Workbook.read(wb2, patchedBuffer);
         expect(Workbook.getWorksheet(wb2, "Sheet1")!.pageSetup.printArea).toBe("A1:B5");
       });
     });
@@ -1332,11 +1332,11 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "test");
       ws.pageSetup.printTitlesColumn = "A";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "single-column printTitlesColumn" });
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws2.pageSetup.printTitlesColumn).toBe("A:A");
@@ -1348,11 +1348,11 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "test");
       ws.pageSetup.printTitlesRow = "1";
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       await expectValidXlsx(buffer, { label: "single-row printTitlesRow" });
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws2.pageSetup.printTitlesRow).toBe("1:1");
@@ -1365,9 +1365,9 @@ describe("Workbook", () => {
         [2, 3],
         [3, 4]
       ]);
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(Cell.getValue(ws2, "A1")).toEqual({
         formula: "ROW()+COLUMN()",
@@ -1401,9 +1401,9 @@ describe("Workbook", () => {
 
       ws.autoFilter = "A1:B1";
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(ws2.autoFilter).toBe("A1:B1");
     });
@@ -1416,9 +1416,9 @@ describe("Workbook", () => {
       Cell.setValue(ws, "C1", "City");
       ws.autoFilter = { from: { row: 1, col: 1 }, to: { row: 1, col: 3 } };
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       // After round-trip, autoFilter is read back as string form
       expect(ws2.autoFilter).toBe("A1:C1");
@@ -1430,9 +1430,9 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "World!");
       wb.company = "Cyber Sapiens, Ltd";
       wb.manager = "Test Manager";
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(wb2.company).toBe(wb.company);
       expect(wb2.manager).toBe(wb.manager);
     });
@@ -1446,9 +1446,9 @@ describe("Workbook", () => {
       wb.keywords = "the keywords";
       wb.category = "the category";
       wb.description = "the description";
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(wb2.title).toBe(wb.title);
       expect(wb2.subject).toBe(wb.subject);
       expect(wb2.keywords).toBe(wb.keywords);
@@ -1463,9 +1463,9 @@ describe("Workbook", () => {
       wb.language = "Klingon";
       wb.revision = 2;
       wb.contentStatus = "Final";
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(wb2.language).toBe(wb.language);
       expect(wb2.revision).toBe(wb.revision);
       expect(wb2.contentStatus).toBe(wb.contentStatus);
@@ -1477,9 +1477,9 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "Foo");
       Cell.setValue(ws, "A2", "");
       Cell.setValue(ws, "A3", "Baz");
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       expect(Cell.getValue(ws2, "A1")).toBe("Foo");
@@ -1490,9 +1490,9 @@ describe("Workbook", () => {
     it("dataValidations", async () => {
       const wb = testUtils.createTestBook(Workbook.create(), "xlsx", ["dataValidations"]);
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx", ["dataValidations"], {});
     });
 
@@ -1507,7 +1507,7 @@ describe("Workbook", () => {
 
       Worksheet.addRow(ws, { id: 1, name: "" });
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
     });
 
     it("a lot of sheets to xlsx file", async function () {
@@ -1519,9 +1519,9 @@ describe("Workbook", () => {
         const ws = Workbook.addWorksheet(wb, `sheet${i}`);
         Cell.setValue(ws, "A1", i);
       }
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       for (i = 1; i <= numSheets; i++) {
         const ws2 = Workbook.getWorksheet(wb2, `sheet${i}`)!;
         expect(ws2).toBeTruthy();
@@ -1608,9 +1608,9 @@ describe("Workbook", () => {
       assign(ws1a, "G2", 1, ["once", "twice"]);
       cellRemoveName(getCell(ws1a, "G2"), "once");
 
-      await Workbook.writeXlsx(wb1, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb1, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2a = Workbook.getWorksheet(wb2, "blort")!;
       const ws2b = Workbook.getWorksheet(wb2, "foo")!;
 
@@ -1678,7 +1678,7 @@ describe("Workbook", () => {
       it("Duplicate rows with styles properly", async () => {
         const fileDuplicateRowTestFile = excelTestDataPath("duplicate-row-styles.xlsx");
         const wb = Workbook.create();
-        await Workbook.readXlsxFile(wb, fileDuplicateRowTestFile);
+        await Workbook.readFile(wb, fileDuplicateRowTestFile);
         const ws = Workbook.getWorksheet(wb, "duplicateTest")!;
         if (!ws) {
           throw new Error("Worksheet not found");
@@ -1688,9 +1688,9 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A2", "TwoInfo");
         Worksheet.duplicateRow(ws, 1, 2);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "duplicateTest")!;
 
         expect(Cell.getValue(ws2, "A2")).toBe("OneInfo");
@@ -1709,9 +1709,9 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A4", "FourInfo");
         Worksheet.duplicateRow(ws, 1, 2, false);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "duplicateTest")!;
 
         expect(Cell.getValue(ws2, "A1")).toBe("OneInfo");
@@ -1729,9 +1729,9 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A4", "FourInfo");
         Worksheet.duplicateRow(ws, 1, 2, true);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "duplicateTest")!;
 
         expect(Cell.getValue(ws2, "A1")).toBe("OneInfo");
@@ -1749,9 +1749,9 @@ describe("Workbook", () => {
         Row.setHeight(ws, 2, 15);
         Worksheet.duplicateRow(ws, 1, 1, true);
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "duplicateTest")!;
 
         expect(Cell.getValue(ws2, "A1")).toBe("OneInfo");
@@ -1771,9 +1771,9 @@ describe("Workbook", () => {
 
         Worksheet.merge(ws, "B2:C3");
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "blort")!;
 
         expect(Cell.getValue(ws2, "B2")).toBe("B2");
@@ -1805,9 +1805,9 @@ describe("Workbook", () => {
 
         const dblRed = testUtils.styles.borders.doubleRed;
 
-        await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+        await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
-        await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+        await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
         const ws2 = Workbook.getWorksheet(wb2, "blort")!;
 
         // Non-border styles are identical on all cells
@@ -1864,15 +1864,15 @@ describe("Workbook", () => {
 
     testUtils.createTestBook(wb, "xlsx", sheets);
 
-    await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+    await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
     const wb2 = Workbook.create();
-    await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+    await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
     testUtils.checkTestBook(wb2, "xlsx", sheets, options);
   });
 
   it("throws an error when xlsx file not found", async () => {
     const wb = Workbook.create();
-    await expect(Workbook.readXlsxFile(wb, "./wb.doesnotexist.xlsx")).rejects.toThrow();
+    await expect(Workbook.readFile(wb, "./wb.doesnotexist.xlsx")).rejects.toThrow();
   });
 
   it("throws an error when csv file not found", async () => {
@@ -1883,7 +1883,7 @@ describe("Workbook", () => {
     const wb = Workbook.create();
     try {
       // Deliberately passing the wrong runtime type to verify the guard.
-      await Workbook.loadXlsx(wb, {} as unknown as Uint8Array);
+      await Workbook.read(wb, {} as unknown as Uint8Array);
       expect.fail("should fail for given argument");
     } catch (e) {
       expect((e as Error).message).toContain(
@@ -1909,9 +1909,9 @@ describe("Workbook", () => {
       ];
       Cell.setValue(ws, "A1", "Let it Snow!");
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "frozen")!;
       expect(ws2).toBeTruthy();
       expect(Cell.getValue(ws2, "A1")).toBe("Let it Snow!");
@@ -1984,9 +1984,9 @@ describe("Workbook", () => {
       ];
       Cell.setValue(ws, "A1", "Do the splits!");
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "split")!;
       expect(ws2).toBeTruthy();
       expect(Cell.getValue(ws2, "A1")).toBe("Do the splits!");
@@ -2050,9 +2050,9 @@ describe("Workbook", () => {
       const ws2 = Workbook.addWorksheet(wb, "two");
       ws2.views = [testUtils.views.sheet.split];
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(wb2.views).toEqual(wb.views);
 
       const ws1b = Workbook.getWorksheet(wb2, "one")!;

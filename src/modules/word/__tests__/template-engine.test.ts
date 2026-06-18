@@ -10,7 +10,8 @@
 
 import { describe, it, expect } from "vitest";
 
-import { fillTemplate, TemplateError } from "../template/template-engine";
+import { TemplateError } from "../errors";
+import { fillTemplate } from "../template/template-engine";
 import type { DocxDocument, Paragraph, Run } from "../types";
 
 function paraWithText(text: string): Paragraph {

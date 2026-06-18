@@ -1,5 +1,5 @@
-import { isAbortError } from "@archive";
 import { toAsyncIterable } from "@archive/io/archive-source";
+import { isAbortError } from "@archive/shared/errors";
 import { describe, expect, it } from "vitest";
 
 describe("archive-source", () => {

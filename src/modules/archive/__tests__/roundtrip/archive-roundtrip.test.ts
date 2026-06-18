@@ -12,7 +12,9 @@
  * - Performance: many small files, large files
  */
 
-import { zip, unzip, TarArchive, parseTar, TarReader, TAR_TYPE } from "@archive";
+import { zip } from "@archive/create-archive";
+import { unzip } from "@archive/read-archive";
+import { TarArchive, parseTar, TarReader, TAR_TYPE } from "@archive/tar/index.browser";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, it, expect } from "vitest";
 

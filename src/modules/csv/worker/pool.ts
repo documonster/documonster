@@ -84,4 +84,4 @@ export type {
   GroupResult,
   AggregateResult,
   QueryResult
-} from "./types";
+} from "@csv/worker/types";

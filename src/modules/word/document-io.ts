@@ -5,29 +5,32 @@
  * plus the public Patch and Template APIs that combine read/patch/write.
  */
 
-import { bytesToBase64 } from "./core/internal-utils";
-import { applyPatchesToDocument, type PatchOperation } from "./patcher";
-import { readDocx } from "./reader/docx-reader";
-import { fillTemplate } from "./template/template-engine";
-import type { TemplateOptions } from "./template/template-engine";
-import type { DocxDocument } from "./types";
-import { packageDocx } from "./writer/docx-packager";
+import { bytesToBase64 } from "@word/core/internal-utils";
+import { applyPatchesToDocument, type PatchOperation } from "@word/patcher";
+import { readDocx } from "@word/reader/docx-reader";
+import { fillTemplate } from "@word/template/template-engine";
+import type { TemplateOptions } from "@word/template/template-engine";
+import type { DocxDocument } from "@word/types";
+import { packageDocx, type PackageDocxOptions } from "@word/writer/docx-packager";
 
 // Re-export patch types for backward compatibility
-export type { PatchContent, PatchOperation } from "./patcher";
+export type { PatchContent, PatchOperation } from "@word/patcher";
 
 // =============================================================================
 // Document IO (toBuffer / toBase64)
 // =============================================================================
 
 /** Package a DocxDocument model to DOCX bytes. */
-export async function toBuffer(doc: DocxDocument, compressionLevel?: number): Promise<Uint8Array> {
-  return packageDocx(doc, compressionLevel);
+export async function toBuffer(
+  doc: DocxDocument,
+  options?: PackageDocxOptions
+): Promise<Uint8Array> {
+  return packageDocx(doc, options);
 }
 
 /** Package a DocxDocument model to base64 string. */
-export async function toBase64(doc: DocxDocument, compressionLevel?: number): Promise<string> {
-  const bytes = await toBuffer(doc, compressionLevel);
+export async function toBase64(doc: DocxDocument, options?: PackageDocxOptions): Promise<string> {
+  const bytes = await toBuffer(doc, options);
   return bytesToBase64(bytes);
 }
 
@@ -80,7 +83,7 @@ export async function patchTemplate(
   // Deep clone the document to avoid mutating the cached template
   const doc = structuredClone(template._doc);
   const patched = applyPatchesToDocument(doc, patches);
-  return packageDocx(patched, options?.compressionLevel);
+  return packageDocx(patched, { compressionLevel: options?.compressionLevel });
 }
 
 /**
@@ -107,7 +110,7 @@ export async function patchDocument(
 ): Promise<Uint8Array> {
   const doc = await readDocx(buffer);
   const patched = applyPatchesToDocument(doc, patches);
-  return packageDocx(patched, options?.compressionLevel);
+  return packageDocx(patched, { compressionLevel: options?.compressionLevel });
 }
 
 // =============================================================================
@@ -131,7 +134,7 @@ export async function fillTemplateFromBuffer(
 ): Promise<Uint8Array> {
   const doc = await readDocx(buffer);
   const filled = fillTemplate(doc, data, options);
-  return packageDocx(filled, options?.compressionLevel);
+  return packageDocx(filled, { compressionLevel: options?.compressionLevel });
 }
 
 // =============================================================================
@@ -155,7 +158,7 @@ export async function toFlatOpcFromDoc(
   compressionLevel?: number
 ): Promise<string> {
   // Use level 0 (store-only) since we're immediately decompressing
-  const zipBytes = await packageDocx(doc, compressionLevel ?? 0);
+  const zipBytes = await packageDocx(doc, { compressionLevel: compressionLevel ?? 0 });
 
   const { unzip } = await import("@archive/read-archive");
   const reader = unzip(zipBytes);
@@ -166,6 +169,6 @@ export async function toFlatOpcFromDoc(
     entries.set(path, data);
   }
 
-  const { toFlatOpc } = await import("./convert/flat-opc");
+  const { toFlatOpc } = await import("@word/convert/flat-opc");
   return toFlatOpc(entries);
 }

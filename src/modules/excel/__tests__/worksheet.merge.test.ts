@@ -348,9 +348,9 @@ describe("Worksheet", () => {
       Worksheet.duplicateRow(ws, 1, 2, true);
 
       // Write to buffer and read back
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
       const ws2 = Workbook.getWorksheet(wb2, "sheet")!;
 
       const model2 = getSheetModel(ws2);

@@ -2,7 +2,7 @@
  * `Glossary` namespace surface — building blocks / glossary document
  * (AutoText, Quick Parts).
  *
- * `import { Glossary } from "documonster/word"` →
+ * `import { Glossary } from "@cj-tech-master/excelts/word"` →
  *   `Glossary.createBlock(...)`, `Glossary.findBlock(...)`,
  *   `Glossary.autoTextEntries(g)`, … — tree-shaken via `export * as Glossary`.
  */
@@ -13,4 +13,4 @@ export {
   listBuildingBlocks as listBlocks,
   getAutoTextEntries as autoTextEntries,
   getQuickParts as quickParts
-} from "../advanced/glossary";
+} from "@word/advanced/glossary";

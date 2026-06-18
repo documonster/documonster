@@ -11,13 +11,13 @@
  */
 
 // Export (DOCX → Markdown)
-export { renderToMarkdown } from "./markdown-renderer";
-export type { MarkdownRenderOptions } from "./markdown-renderer";
+export { renderToMarkdown } from "@word/convert/markdown/markdown-renderer";
+export type { MarkdownRenderOptions } from "@word/convert/markdown/markdown-renderer";
 
 // Import (Markdown → DOCX)
-export { markdownToDocx, markdownToDocxBody } from "./markdown-import";
+export { markdownToDocx, markdownToDocxBody } from "@word/convert/markdown/markdown-import";
 export type {
   MarkdownImportOptions,
   MarkdownImageData,
   MarkdownBodyResult
-} from "./markdown-import";
+} from "@word/convert/markdown/markdown-import";

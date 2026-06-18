@@ -4,7 +4,7 @@
  *
  * Usage:
  *
- *   const buffer = await Workbook.toXlsxBuffer(wb);
+ *   const buffer = await Workbook.toBuffer(wb);
  *   await expectValidXlsx(buffer);
  *
  * The helper accepts the output of `writeBuffer()` directly
@@ -71,7 +71,7 @@ export async function expectValidWorkbook(
   workbook: WorkbookData,
   options: ExpectValidXlsxOptions = {}
 ): Promise<Uint8Array> {
-  const buffer = await Workbook.toXlsxBuffer(workbook);
+  const buffer = await Workbook.toBuffer(workbook);
   const bytes = new Uint8Array(buffer);
   await expectValidXlsx(bytes, options);
   return bytes;

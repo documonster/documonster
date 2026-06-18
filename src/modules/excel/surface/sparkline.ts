@@ -1,6 +1,6 @@
 /**
  * `Sparkline` namespace surface.
- * `import { Sparkline } from "documonster/excel"` → `Sparkline.add(ws, opts)`.
+ * `import { Sparkline } from "@cj-tech-master/excelts/excel"` → `Sparkline.add(ws, opts)`.
  */
 export {
   addSparklineGroup as add,

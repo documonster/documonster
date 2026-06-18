@@ -8,10 +8,9 @@
  * own render functions, which keeps the writer module graph acyclic.
  */
 
+import type { StructuredDocumentTag } from "@word/types";
+import type { WordRenderContext } from "@word/writer/render-context";
 import type { XmlSink } from "@xml/types";
-
-import type { StructuredDocumentTag } from "../types";
-import type { WordRenderContext } from "./render-context";
 
 /**
  * Render the `<w:sdt>` ↦ `<w:sdtPr>` block for a given SDT.

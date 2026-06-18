@@ -11,9 +11,9 @@
  */
 
 // HTML → render (DocxDocument → HTML output)
-export { renderToHtml } from "./html-renderer";
-export type { HtmlRenderOptions, HtmlRenderResult } from "./html-renderer";
+export { renderToHtml } from "@word/convert/html/html-renderer";
+export type { HtmlRenderOptions, HtmlRenderResult } from "@word/convert/html/html-renderer";
 
 // HTML → DOCX import (HTML string → BodyContent[])
-export { htmlToDocxBody, htmlToDocx } from "./html-import";
-export type { HtmlImportOptions, HtmlToDocxResult } from "./html-import";
+export { htmlToDocxBody, htmlToDocx } from "@word/convert/html/html-import";
+export type { HtmlImportOptions, HtmlToDocxResult } from "@word/convert/html/html-import";

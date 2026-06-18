@@ -52,7 +52,7 @@ async function generateBasic() {
   Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
 
   const path = `${outDir}/auto-fit-basic.xlsx`;
-  await Workbook.writeXlsx(wb, path);
+  await Workbook.writeFile(wb, path);
   console.log(`Written: ${path}`);
 }
 
@@ -104,7 +104,7 @@ async function generateFonts() {
   Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
 
   const path = `${outDir}/auto-fit-fonts.xlsx`;
-  await Workbook.writeXlsx(wb, path);
+  await Workbook.writeFile(wb, path);
   console.log(`Written: ${path}`);
 }
 
@@ -199,7 +199,7 @@ async function generateAdvanced() {
   Worksheet.autoFitRows(ws);
 
   const path = `${outDir}/auto-fit-advanced.xlsx`;
-  await Workbook.writeXlsx(wb, path);
+  await Workbook.writeFile(wb, path);
   console.log(`Written: ${path}`);
 }
 

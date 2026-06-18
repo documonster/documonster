@@ -1,7 +1,7 @@
 /**
  * `DataValidation` namespace surface — sheet data-validation rules.
  *
- * `import { DataValidation } from "documonster/excel"` →
+ * `import { DataValidation } from "@cj-tech-master/excelts/excel"` →
  *   `DataValidation.create()`, `DataValidation.add(dv, "A1", rule)`,
  *   `DataValidation.find(dv, "A1")`, `DataValidation.remove(dv, "A1")`.
  *

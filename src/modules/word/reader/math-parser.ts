@@ -6,10 +6,12 @@
  * corresponding model interface (MathFraction, MathRadical, MathDelimiter, etc).
  */
 
-import { textContent } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import { type Mutable } from "@word/core/internal-utils";
+import {
+  attrLocal as mathAttrVal,
+  findChildLocal as findMathChild,
+  findChildrenLocal as findMathChildren
+} from "@word/reader/parse-utils";
 import type {
   MathContent,
   MathBlock,
@@ -22,12 +24,9 @@ import type {
   MathGroupChar,
   MathBorderBox,
   MathAccent
-} from "../types";
-import {
-  attrLocal as mathAttrVal,
-  findChildLocal as findMathChild,
-  findChildrenLocal as findMathChildren
-} from "./parse-utils";
+} from "@word/types";
+import { textContent } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
 
 // =============================================================================
 // Math Parser

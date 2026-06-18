@@ -5,12 +5,12 @@
  * Handles header processing, column validation, and row completion.
  */
 
-import type { CsvRecordError, HeaderArray, RecordInfo } from "../types";
-import { applyDynamicTypingToRow } from "../utils/dynamic-typing";
-import { isEmptyRow, hasAllEmptyValues } from "../utils/row";
-import type { ParseConfig } from "./config";
-import { processHeaders, validateAndAdjustColumns, convertRowToObject } from "./helpers";
-import type { ParseState } from "./state";
+import type { ParseConfig } from "@csv/parse/config";
+import { processHeaders, validateAndAdjustColumns, convertRowToObject } from "@csv/parse/helpers";
+import type { ParseState } from "@csv/parse/state";
+import type { CsvRecordError, HeaderArray, RecordInfo } from "@csv/types";
+import { applyDynamicTypingToRow } from "@csv/utils/dynamic-typing";
+import { isEmptyRow, hasAllEmptyValues } from "@csv/utils/row";
 
 // =============================================================================
 // Types

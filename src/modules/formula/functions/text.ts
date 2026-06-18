@@ -2,9 +2,9 @@
  * Text Functions — Native RuntimeValue implementations.
  */
 
-import { excelToDate } from "@utils/utils.base";
-
-import type { RuntimeValue, ScalarValue, ErrorValue } from "../runtime/values";
+import { isDate1904 } from "@formula/functions/_date-context";
+import { argToNumber, checkError, excelWildcardToRegex } from "@formula/functions/_shared";
+import type { RuntimeValue, ScalarValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -18,9 +18,8 @@ import {
   rvString,
   rvBoolean,
   rvArray
-} from "../runtime/values";
-import { isDate1904 } from "./_date-context";
-import { argToNumber, checkError, excelWildcardToRegex } from "./_shared";
+} from "@formula/runtime/values";
+import { excelToDate } from "@utils/utils.base";
 
 // ============================================================================
 // Local utility

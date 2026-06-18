@@ -4,9 +4,9 @@
  * Extract and fill form field values in a document.
  */
 
-import { isHyperlink, isRun } from "../core/text-utils";
-import { walkDocument } from "../core/walker";
-import type { DocxVisitor } from "../core/walker";
+import { isHyperlink, isRun } from "@word/core/text-utils";
+import { walkDocument } from "@word/core/walker";
+import type { DocxVisitor } from "@word/core/walker";
 import type {
   DocxDocument,
   BodyContent,
@@ -21,7 +21,7 @@ import type {
   Run,
   StructuredDocumentTag,
   Table
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Types

@@ -10,10 +10,9 @@
  * own file to keep `docx-reader.ts` focused on package orchestration.
  */
 
+import type { ImageWatermark, TextWatermark, Watermark } from "@word/types";
 import { findChild } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
-
-import type { ImageWatermark, TextWatermark, Watermark } from "../types";
 
 /** Detect a watermark shape inside a header XML root, if present. */
 export function detectWatermarkFromRoot(root: XmlElement): Watermark | undefined {

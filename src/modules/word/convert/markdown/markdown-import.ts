@@ -17,8 +17,8 @@
  * @stability experimental
  */
 
-import { sanitizeUrl } from "../../core/internal-utils";
-import { isRun } from "../../core/text-utils";
+import { sanitizeUrl } from "@word/core/internal-utils";
+import { isRun } from "@word/core/text-utils";
 import type {
   AbstractNumbering,
   Alignment,
@@ -42,7 +42,7 @@ import type {
   TableProperties,
   TableRow,
   TableWidth
-} from "../../types";
+} from "@word/types";
 
 // =============================================================================
 // Public API

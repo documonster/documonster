@@ -272,7 +272,7 @@ describe("Worksheet", () => {
         rows: [["a1", { formula: "CONCAT([@A])" }]]
       });
 
-      const buffer = await Workbook.toXlsxBuffer(workbook);
+      const buffer = await Workbook.toBuffer(workbook);
       const zipData = await extractAll(new Uint8Array(buffer));
 
       const sheet1 = zipData.get("xl/worksheets/sheet1.xml");
@@ -308,7 +308,7 @@ describe("Worksheet", () => {
         ]
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
 
       // Manually inject a <calculatedColumnFormula> child element into the table XML
       // to simulate what Excel produces for calculated columns.
@@ -336,7 +336,7 @@ describe("Worksheet", () => {
 
       // This should NOT throw: "Cannot read properties of undefined (reading 'style')"
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, modifiedBuffer);
+      await Workbook.read(wb2, modifiedBuffer);
 
       const ws2: any = Workbook.getWorksheet(wb2, "Data")!;
       expect(ws2).toBeDefined();
@@ -350,9 +350,9 @@ describe("Worksheet", () => {
       expect(table2.table.columns[2].name).toBe("Label");
 
       // Round-trip: write and reload — calculatedColumnFormula should survive
-      const buffer2 = await Workbook.toXlsxBuffer(wb2);
+      const buffer2 = await Workbook.toBuffer(wb2);
       const wb3 = Workbook.create();
-      await Workbook.loadXlsx(wb3, buffer2);
+      await Workbook.read(wb3, buffer2);
       const ws3: any = Workbook.getWorksheet(wb3, "Data")!;
       const table3 = Table.get(ws3, "CalcTable");
       expect(table3.table.columns[1].calculatedColumnFormula).toBe("[Value]*2");
@@ -513,7 +513,7 @@ describe("Worksheet", () => {
         totalsRow: false
       });
 
-      const buffer = await Workbook.toXlsxBuffer(workbook);
+      const buffer = await Workbook.toBuffer(workbook);
 
       // Verify the table XML has sanitized name
       const entries = await extractAll(new Uint8Array(buffer));
@@ -576,9 +576,9 @@ describe("Worksheet", () => {
         rows: [["val1"], ["val2"]]
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "test")!;
       const table2 = Table.get(ws2, "my_table");

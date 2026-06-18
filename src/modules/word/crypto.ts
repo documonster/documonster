@@ -23,15 +23,15 @@ export {
   parseEncryptionInfoXml,
   deriveEncryptionKey,
   AGILE_BLOCK_KEYS
-} from "./security/encryption";
-export type { AgileEncryptionInfo, EncryptOptions } from "./security/encryption";
+} from "@word/security/encryption";
+export type { AgileEncryptionInfo, EncryptOptions } from "@word/security/encryption";
 
 // Encryption error type (also exported from main entry)
-export { DocxEncryptedError } from "./errors";
+export { DocxEncryptedError } from "@word/errors";
 
 // CFB (Compound File Binary) reader/writer
-export { readCfb, writeCfb } from "./security/cfb-reader";
-export type { CfbEntry } from "./security/cfb-reader";
+export { readCfb, writeCfb } from "@word/security/cfb-reader";
+export type { CfbEntry } from "@word/security/cfb-reader";
 
 // Digital signature utilities
 export {
@@ -39,8 +39,8 @@ export {
   parseSignatureXml,
   extractSignatures,
   isWellFormedSignature
-} from "./security/digital-signatures";
-export type { DigitalSignatureInfo } from "./security/digital-signatures";
+} from "@word/security/digital-signatures";
+export type { DigitalSignatureInfo } from "@word/security/digital-signatures";
 
 // Font obfuscation utilities
-export { deobfuscateFont, obfuscateFont, generateFontKey } from "./font/font-obfuscation";
+export { deobfuscateFont, obfuscateFont, generateFontKey } from "@word/font/font-obfuscation";

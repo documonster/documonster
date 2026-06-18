@@ -9,8 +9,8 @@ import { describe, it, expect } from "vitest";
  *
  * These tests exercise the FULL pipeline:
  *   1. Create a workbook with data + formulas
- *   2. Write to XLSX buffer via Workbook.toXlsxBuffer(wb)
- *   3. Read back via new Workbook() + Workbook.loadXlsx(wb, buffer)
+ *   2. Write to XLSX buffer via Workbook.toBuffer(wb)
+ *   3. Read back via new Workbook() + Workbook.read(wb, buffer)
  *   4. Call wb.calculateFormulas()
  *   5. Verify ALL formula results match expected values
  *
@@ -183,13 +183,13 @@ describe("Formula XLSX Round-Trip", () => {
       Cell.setValue(ws1, "F20", { formula: "SUM(Scores)", result: 0 });
 
       // ── Step 2: Write to buffer ──────────────────────────────────────────
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       expect(buffer).toBeInstanceOf(Uint8Array);
       expect(buffer.length).toBeGreaterThan(0);
 
       // ── Step 3: Read back ────────────────────────────────────────────────
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(ws2).toBeDefined();
@@ -362,11 +362,11 @@ describe("Formula XLSX Round-Trip", () => {
       });
 
       // ── Step 2: Write to buffer ──────────────────────────────────────────
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
 
       // ── Step 3: Read back ────────────────────────────────────────────────
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
 
       const s1 = Workbook.getWorksheet(wb2, "Sheet1")!;
       const s2 = Workbook.getWorksheet(wb2, "Sheet2")!;
@@ -451,11 +451,11 @@ describe("Formula XLSX Round-Trip", () => {
       Cell.setValue(ws1, "B5", { formula: "B1+B3", result: 290 });
 
       // Write
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
 
       // Read back
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
       // Modify the data cells — cached formula results are now stale
@@ -528,9 +528,9 @@ describe("Formula XLSX Round-Trip", () => {
       });
 
       // Write → Read
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
 
       // Calculate
       calculateFormulas(wb2);
@@ -604,9 +604,9 @@ describe("Formula XLSX Round-Trip", () => {
       Cell.setValue(ws, "E7", { formula: "POWER(2,10)", result: 0 });
 
       // Write → Read → Calculate
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
       calculateFormulas(wb2);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
@@ -653,9 +653,9 @@ describe("Formula XLSX Round-Trip", () => {
       Worksheet.fillFormula(ws, "B1:B5", "A1*2", [20, 40, 60, 80, 100]);
 
       // Write → Read → Calculate
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
       calculateFormulas(wb2);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
@@ -697,9 +697,9 @@ describe("Formula XLSX Round-Trip", () => {
       });
 
       // Write → Read → Calculate
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
       calculateFormulas(wb2);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
@@ -729,14 +729,14 @@ describe("Formula XLSX Round-Trip", () => {
       Cell.setValue(ws1, "A4", { formula: "A3*A1", result: 105 });
 
       // First round-trip
-      const buf1 = await Workbook.toXlsxBuffer(wb1);
+      const buf1 = await Workbook.toBuffer(wb1);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buf1 as Buffer);
+      await Workbook.read(wb2, buf1 as Buffer);
 
       // Second round-trip
-      const buf2 = await Workbook.toXlsxBuffer(wb2);
+      const buf2 = await Workbook.toBuffer(wb2);
       const wb3 = Workbook.create();
-      await Workbook.loadXlsx(wb3, buf2 as Buffer);
+      await Workbook.read(wb3, buf2 as Buffer);
 
       // Calculate on the doubly-round-tripped workbook
       calculateFormulas(wb3);

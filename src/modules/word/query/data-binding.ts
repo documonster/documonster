@@ -5,9 +5,6 @@
  * against CustomXML parts and populating the SDT content with values.
  */
 
-import { parseXml } from "@xml/dom";
-import type { XmlElement, XmlNode } from "@xml/types";
-
 import type {
   DocxDocument,
   BodyContent,
@@ -16,7 +13,9 @@ import type {
   Table,
   StructuredDocumentTag,
   SdtDataBinding
-} from "../types";
+} from "@word/types";
+import { parseXml } from "@xml/dom";
+import type { XmlElement, XmlNode } from "@xml/types";
 
 // =============================================================================
 // Public API

@@ -26,11 +26,11 @@ describe("Table", () => {
       ]
     });
 
-    const template = await Workbook.toXlsxBuffer(wb1);
+    const template = await Workbook.toBuffer(wb1);
     await expectValidXlsx(template, { label: "table-addrow-loaded template" });
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, template);
+    await Workbook.read(wb2, template);
 
     const ws2: any = Workbook.getWorksheet(wb2, "Data")!;
     const table2 = Table.get(ws2, "TestTable");
@@ -52,11 +52,11 @@ describe("Table", () => {
     // open with "Removed Records: Table from /xl/tables/tableN.xml".
     expect(tableModel(table2).autoFilterRef).toBe("A1:B4");
 
-    const out = await Workbook.toXlsxBuffer(wb2);
+    const out = await Workbook.toBuffer(wb2);
     await expectValidXlsx(out, { label: "table-addrow-loaded after addRow" });
 
     const wb3 = Workbook.create();
-    await Workbook.loadXlsx(wb3, out);
+    await Workbook.read(wb3, out);
     const ws3: any = Workbook.getWorksheet(wb3, "Data")!;
     const table3 = Table.get(ws3, "TestTable");
 
@@ -123,7 +123,7 @@ describe("Table", () => {
     });
 
     // Should not throw
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "distinct table names across sheets" });
     expect(buffer).toBeTruthy();
   });

@@ -10,9 +10,9 @@
  * modified portions of the tree).
  */
 
-import { extractParagraphText, isRun } from "../core/text-utils";
-import { walkBlocks } from "../core/walker";
-import { layoutDocument, type LayoutOptions, type LayoutResult } from "../layout/layout";
+import { extractParagraphText, isRun } from "@word/core/text-utils";
+import { walkBlocks } from "@word/core/walker";
+import { layoutDocument, type LayoutOptions, type LayoutResult } from "@word/layout/layout";
 import type {
   BodyContent,
   BookmarkStart,
@@ -26,7 +26,7 @@ import type {
   Table,
   TableCell,
   TableOfContents
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Public API Types

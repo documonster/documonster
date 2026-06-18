@@ -21,8 +21,8 @@
  * 8. **Apply** — The plan is applied to the live workbook.
  */
 
-import { parseRefRange } from "../compile/address-utils";
-import { bind, type BindingContext } from "../compile/binder";
+import { parseRefRange } from "@formula/compile/address-utils";
+import { bind, type BindingContext } from "@formula/compile/binder";
 import {
   extractStaticDeps,
   analyzeExpr,
@@ -30,34 +30,38 @@ import {
   detectSubtotalOutput,
   type NameDepResolver,
   type CompiledFormula
-} from "../compile/compiled-formula";
+} from "@formula/compile/compiled-formula";
 import {
   buildDependencyGraphFromDeps,
   topologicalSort,
   mergeDynamicDeps,
   type DependencyGraph
-} from "../compile/dependency-analysis";
-import { setDate1904 } from "../functions/_date-context";
-import { buildWritebackPlan } from "../materialize/build-writeback-plan";
-import { getPersistentSpillMap, getGhostSnapshots } from "../materialize/spill-engine";
-import type { WorkbookLike } from "../materialize/types";
+} from "@formula/compile/dependency-analysis";
+import { setDate1904 } from "@formula/functions/_date-context";
+import { applyWritebackPlan } from "@formula/integration/apply-writeback-plan";
+import { collectFormulaInstances } from "@formula/integration/formula-instance";
+import type { FormulaInstance } from "@formula/integration/formula-instance";
+import { buildWorkbookSnapshot } from "@formula/integration/workbook-adapter";
+import {
+  formulaCellKey,
+  resolveDefinedName,
+  type WorkbookSnapshot
+} from "@formula/integration/workbook-snapshot";
+import { buildWritebackPlan } from "@formula/materialize/build-writeback-plan";
+import { getPersistentSpillMap, getGhostSnapshots } from "@formula/materialize/spill-engine";
+import type { WorkbookLike } from "@formula/materialize/types";
 import {
   EvalSession,
   evaluateFormula,
   evaluateFormulaRaw,
   type EvalContext
-} from "../runtime/evaluator";
-import type { FunctionDescriptor } from "../runtime/function-registry";
-import type { RuntimeValue } from "../runtime/values";
-import { RVKind, rvNumber, BLANK, ERRORS } from "../runtime/values";
-import type { AstNode } from "../syntax/ast";
-import { parse } from "../syntax/parser";
-import { tokenize } from "../syntax/tokenizer";
-import { applyWritebackPlan } from "./apply-writeback-plan";
-import { collectFormulaInstances } from "./formula-instance";
-import type { FormulaInstance } from "./formula-instance";
-import { buildWorkbookSnapshot } from "./workbook-adapter";
-import { formulaCellKey, resolveDefinedName, type WorkbookSnapshot } from "./workbook-snapshot";
+} from "@formula/runtime/evaluator";
+import type { FunctionDescriptor } from "@formula/runtime/function-registry";
+import type { RuntimeValue } from "@formula/runtime/values";
+import { RVKind, rvNumber, BLANK, ERRORS } from "@formula/runtime/values";
+import type { AstNode } from "@formula/syntax/ast";
+import { parse } from "@formula/syntax/parser";
+import { tokenize } from "@formula/syntax/tokenizer";
 
 // ============================================================================
 // Persistent Caches (keyed by workbook — survive across invocations)

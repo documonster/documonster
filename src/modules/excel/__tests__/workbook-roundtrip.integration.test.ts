@@ -311,8 +311,8 @@ describe("Workbook Round-trip Preservation", () => {
 
     // Load and save the workbook
     const workbook = Workbook.create();
-    await Workbook.loadXlsx(workbook, inputBuffer);
-    outputBuffer = (await Workbook.toXlsxBuffer(workbook)) as Buffer;
+    await Workbook.read(workbook, inputBuffer);
+    outputBuffer = (await Workbook.toBuffer(workbook)) as Buffer;
 
     // OOXML conformance gate on every round-trip output.
     await expectValidXlsx(new Uint8Array(outputBuffer));

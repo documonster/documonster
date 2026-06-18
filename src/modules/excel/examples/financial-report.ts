@@ -870,7 +870,7 @@ async function main(): Promise<void> {
   // Write XLSX + encrypted PDF
   // ---------------------------------------------------------------------------
 
-  await Workbook.writeXlsx(wb, XLSX_PATH);
+  await Workbook.writeFile(wb, XLSX_PATH);
   console.log(`XLSX → ${XLSX_PATH}`);
 
   // Encrypted PDF — owner can do anything, users need a password

@@ -37,7 +37,7 @@ Cell.setComment(ws, "A1", Note.create({ texts: [{ text: "Comment by Alice" }] },
 Cell.setValue(ws, "B2", "World");
 Cell.setComment(ws, "B2", Note.create({ texts: [{ text: "Comment by Bob" }] }, "Bob"));
 
-await Workbook.writeXlsx(wb, flatFile);
+await Workbook.writeFile(wb, flatFile);
 console.log(`  Written flat-layout file: ${flatFile}`);
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ console.log(`  Written flat-layout file: ${flatFile}`);
 // ---------------------------------------------------------------------------
 console.log("\nStep 2: Reading flat-layout file...");
 const wb2 = Workbook.create();
-await Workbook.readXlsxFile(wb2, flatFile);
+await Workbook.readFile(wb2, flatFile);
 const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
 console.log(
@@ -119,7 +119,7 @@ console.log(`  Written subdirectory-layout file: ${subdirFile}`);
 // ---------------------------------------------------------------------------
 console.log("\nStep 4: Reading subdirectory-layout file...");
 const wb3 = Workbook.create();
-await Workbook.readXlsxFile(wb3, subdirFile);
+await Workbook.readFile(wb3, subdirFile);
 const ws3 = Workbook.getWorksheet(wb3, "Sheet1")!;
 
 console.log(

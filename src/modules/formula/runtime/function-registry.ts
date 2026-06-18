@@ -9,8 +9,7 @@
  * are handled directly by the evaluator's special-form dispatch.
  */
 
-import { stripFunctionPrefix } from "../syntax/token-types";
-import type { RuntimeValue, ScalarValue } from "./values";
+import type { RuntimeValue, ScalarValue } from "@formula/runtime/values";
 import {
   RVKind,
   BLANK,
@@ -21,7 +20,8 @@ import {
   toNumberRV,
   toStringRV,
   topLeft
-} from "./values";
+} from "@formula/runtime/values";
+import { stripFunctionPrefix } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Function Descriptor
@@ -514,7 +514,7 @@ import {
   fnVALUETOTEXT,
   fnARRAYTOTEXT,
   fnENCODEURL
-} from "../functions/text";
+} from "@formula/functions/text";
 
 function registerNativeTextFunctions(): void {
   defineEager("CONCATENATE", 1, 255, fnCONCATENATE);
@@ -602,7 +602,7 @@ import {
   fnDAYS360,
   fnNETWORKDAYS_INTL,
   fnWORKDAY_INTL
-} from "../functions/date";
+} from "@formula/functions/date";
 
 function registerNativeDateFunctions(): void {
   defineEager("TODAY", 0, 0, fnTODAY);
@@ -688,7 +688,7 @@ import {
   fnBITXOR,
   fnBITLSHIFT,
   fnBITRSHIFT
-} from "../functions/engineering";
+} from "@formula/functions/engineering";
 
 function registerNativeEngineeringFunctions(): void {
   defineEager("BIN2DEC", 1, 1, fnBIN2DEC);
@@ -798,7 +798,7 @@ import {
   fnCOUPDAYSNC,
   fnCOUPDAYBS,
   fnCOUPDAYS
-} from "../functions/financial";
+} from "@formula/functions/financial";
 
 function registerNativeFinancialFunctions(): void {
   defineEager("PMT", 3, 5, fnPMT);
@@ -945,7 +945,7 @@ import {
   fnTREND,
   fnLINEST,
   fnLOGEST
-} from "../functions/statistical";
+} from "@formula/functions/statistical";
 
 function registerNativeStatisticalFunctions(): void {
   defineEager("MEDIAN", 1, 255, fnMEDIAN);
@@ -1147,7 +1147,7 @@ import {
   fnMINVERSE,
   fnMUNIT,
   fnSERIESSUM
-} from "../functions/math";
+} from "@formula/functions/math";
 
 function registerNativeMathFunctions(): void {
   defineEager("SUM", 1, 255, fnSUM);
@@ -1247,7 +1247,7 @@ import {
   fnAVERAGEIFS,
   fnMAXIFS,
   fnMINIFS
-} from "../functions/conditional";
+} from "@formula/functions/conditional";
 
 function registerNativeConditionalFunctions(): void {
   defineEager("SUMIF", 2, 3, fnSUMIF);
@@ -1279,7 +1279,7 @@ import {
   fnLOOKUP,
   fnTRANSPOSE,
   fnAREAS
-} from "../functions/lookup";
+} from "@formula/functions/lookup";
 
 function registerNativeLookupFunctions(): void {
   defineEager("ROW", 0, 1, fnROW);
@@ -1322,7 +1322,7 @@ import {
   fnEXPAND,
   fnSUBTOTAL,
   fnAGGREGATE
-} from "../functions/dynamic-array";
+} from "@formula/functions/dynamic-array";
 
 function registerNativeDynamicArrayFunctions(): void {
   defineEager("FILTER", 2, 3, fnFILTER);
@@ -1363,7 +1363,7 @@ import {
   fnDSTDEVP,
   fnDVAR,
   fnDVARP
-} from "../functions/database";
+} from "@formula/functions/database";
 
 function registerNativeDatabaseFunctions(): void {
   defineEager("DSUM", 3, 3, fnDSUM);

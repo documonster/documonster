@@ -1,7 +1,7 @@
 /**
  * `Formula` namespace surface — the formula engine's value API.
  *
- * `import { Formula } from "documonster/formula"` →
+ * `import { Formula } from "@cj-tech-master/excelts/formula"` →
  *   `Formula.calculate(workbook)`, `Formula.tokenize(src)`,
  *   `Formula.parse(tokens)`.
  *
@@ -9,6 +9,6 @@
  * Single flat namespace (formula is a single-purpose module). Re-exported
  * via `export * as Formula`, tree-shaken per-member on rolldown / rspack.
  */
-export { calculateFormulas as calculate } from "../integration/calculate-formulas";
-export { tokenize } from "../syntax/tokenizer";
-export { parse } from "../syntax/parser";
+export { calculateFormulas as calculate } from "@formula/integration/calculate-formulas";
+export { tokenize } from "@formula/syntax/tokenizer";
+export { parse } from "@formula/syntax/parser";

@@ -16,13 +16,9 @@
 
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
-import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
-import { XmlWriter } from "@xml/writer";
-
-import { sanitizeUrl, utf8Decoder, utf8Encoder } from "../../core/internal-utils";
-import { isRun } from "../../core/text-utils";
-import { DocxParseError } from "../../errors";
+import { sanitizeUrl, utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import { isRun } from "@word/core/text-utils";
+import { DocxParseError } from "@word/errors";
 import type {
   DocxDocument,
   AbstractNumbering,
@@ -54,8 +50,11 @@ import type {
   ImageDef,
   ImageMediaType,
   InlineImageContent
-} from "../../types";
-import { EMU_PER_CM, EMU_PER_INCH, EMU_PER_POINT, EMU_PER_PX } from "../../units";
+} from "@word/types";
+import { EMU_PER_CM, EMU_PER_INCH, EMU_PER_POINT, EMU_PER_PX } from "@word/units";
+import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
+import { XmlWriter } from "@xml/writer";
 
 // =============================================================================
 // ODF Namespace Constants

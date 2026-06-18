@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
   it("should read a workbook from ReadableStream<Uint8Array>", async () => {
     const { createWorkbook, addWorksheet } = await import("@excel/workbook.browser");
-    const { toXlsxBuffer } = await import("@excel/xlsx-io.browser");
+    const { toBuffer } = await import("@excel/xlsx-io.browser");
     const { WorkbookReader } = await import("@excel/stream/workbook-reader.browser");
 
     const wb = createWorkbook();
@@ -12,7 +12,7 @@ describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
     cellSetValue(getCell(ws, "A1"), "hello");
     cellSetValue(getCell(ws, "A2"), 42);
 
-    const data: Uint8Array = await toXlsxBuffer(wb);
+    const data: Uint8Array = await toBuffer(wb);
 
     const webStream = new ReadableStream<Uint8Array>({
       start(controller) {

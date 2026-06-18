@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   Cell.getStyle(ws, "B1").alignment = { vertical: "middle", horizontal: "center" } as any;
   Cell.setValue(ws, "C1", "Priority");
 
-  await Workbook.writeXlsx(wb, outputPath);
+  await Workbook.writeFile(wb, outputPath);
 
   console.log(`Wrote: ${outputPath}`);
 }

@@ -35,5 +35,5 @@ Stream.setCellValue(ws.getCell("C3"), "C3");
 wb.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
+  // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });

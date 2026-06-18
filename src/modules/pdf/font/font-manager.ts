@@ -17,19 +17,19 @@
  * and Type3 builder can create minimal subsets when writing the PDF.
  */
 
-import { PdfDict, pdfName, pdfRef } from "../core/pdf-object";
-import { hasNonWinAnsiChars, isWinAnsiCodePoint } from "../core/pdf-stream";
-import type { PdfWriter } from "../core/pdf-writer";
-import { PdfFontError } from "../errors";
-import { embedTtfFont, type EmbeddedFont } from "./font-embedder";
+import { PdfDict, pdfName, pdfRef } from "@pdf/core/pdf-object";
+import { hasNonWinAnsiChars, isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
+import type { PdfWriter } from "@pdf/core/pdf-writer";
+import { PdfFontError } from "@pdf/errors";
+import { embedTtfFont, type EmbeddedFont } from "@pdf/font/font-embedder";
 import {
   measureText as measureType1Text,
   getFontAscent as getType1Ascent,
   getFontDescent as getType1Descent,
   getLineHeight as getType1LineHeight
-} from "./metrics";
-import type { TtfFont } from "./ttf-parser";
-import type { Type3FontResult } from "./type3-font";
+} from "@pdf/font/metrics";
+import type { TtfFont } from "@pdf/font/ttf-parser";
+import type { Type3FontResult } from "@pdf/font/type3-font";
 
 // =============================================================================
 // Font Name Mapping (Type1 fallback)
@@ -517,7 +517,7 @@ export class FontManager {
     // implementation + Unicode glyph tables are loaded on demand so they stay
     // out of bundles that never render non-WinAnsi characters.
     if (!this.embeddedFont && this.type3CodePoints.size > 0) {
-      const { writeType3Fonts } = await import("./type3-font");
+      const { writeType3Fonts } = await import("@pdf/font/type3-font");
       this._type3Result = writeType3Fonts(writer, this.type3CodePoints);
       for (const [resourceName, objNum] of this._type3Result.fontObjects) {
         fontObjectMap.set(resourceName, objNum);

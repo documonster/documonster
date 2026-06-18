@@ -1,7 +1,7 @@
 /**
  * `Vba` namespace surface — VBA macro project inspection / management.
  *
- * `import { Vba } from "documonster/word"` →
+ * `import { Vba } from "@cj-tech-master/excelts/word"` →
  *   `Vba.has(doc)`, `Vba.getInfo(doc)`, `Vba.add(doc, bin)`,
  *   `Vba.remove(doc)`, … — tree-shaken via `export * as Vba`.
  */
@@ -12,4 +12,4 @@ export {
   addVbaProject as add,
   removeVbaProject as remove,
   listVbaParts as listParts
-} from "../advanced/vba-project";
+} from "@word/advanced/vba-project";

@@ -57,23 +57,18 @@ See `functions/` for the full list; `runtime/function-registry.ts` is the regist
 ### Paired with `Workbook` (most common)
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
-import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+import { Workbook, Cell } from "@cj-tech-master/excelts/excel";
+import { Formula } from "@cj-tech-master/excelts/formula";
 
-// Call once at startup — wires the engine into Workbook.calculateFormulas(),
-// the PDF bridge's automatic recalc, and strict defined-name classification
-// during XLSX load.
-installFormulaEngine();
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Sheet1");
+Cell.setValue(ws, "A1", 10);
+Cell.setValue(ws, "A2", 20);
+Cell.setValue(ws, "A3", 30);
+Cell.setValue(ws, "A4", { formula: "SUM(A1:A3)" });
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Sheet1");
-ws.getCell("A1").value = 10;
-ws.getCell("A2").value = 20;
-ws.getCell("A3").value = 30;
-ws.getCell("A4").value = { formula: "SUM(A1:A3)" };
-
-wb.calculateFormulas();
-console.log(ws.getCell("A4").result); // 60
+Formula.calculate(wb);
+console.log(Cell.getResult(ws, "A4")); // 60
 ```
 
 ### Standalone / functional
@@ -83,13 +78,13 @@ have to use the excel module at all. A bundle that imports only
 `calculateFormulas` pulls zero excel runtime code.
 
 ```typescript
-import { calculateFormulas, type WorkbookLike } from "@cj-tech-master/excelts/formula";
+import { Formula, type WorkbookLike } from "@cj-tech-master/excelts/formula";
 
 // Your own data — any object implementing WorkbookLike works.
-// No Workbook class, no installFormulaEngine() required.
+// No Workbook class required.
 const wb: WorkbookLike = buildMyWorkbookLike();
 
-calculateFormulas(wb); // pure function, zero global side effects
+Formula.calculate(wb); // pure function, zero global side effects
 ```
 
 This mode is ideal for:
@@ -99,29 +94,27 @@ This mode is ideal for:
 - Tests and benchmarks that want deterministic, per-instance behaviour
 - Concurrent evaluation of multiple workbooks without touching process globals
 
-### Per-Workbook syntax probe
+### Recalculating a loaded workbook
 
-If you use `Workbook` but want strict defined-name classification for a
-specific instance without touching process-global state, inject a
-probe explicitly:
+Load an XLSX with the excel module, then recalculate its formulas
+functionally. There is no install or registration step.
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
-import { createFormulaSyntaxProbe } from "@cj-tech-master/excelts/formula";
+import { Workbook } from "@cj-tech-master/excelts/excel";
+import { Formula } from "@cj-tech-master/excelts/formula";
 
-const wb = new Workbook({ formulaSyntaxProbe: createFormulaSyntaxProbe() });
-await wb.xlsx.load(buffer);
-// defined names classified strictly using the injected probe;
-// installFormulaEngine() is not required for classification here.
+const wb = Workbook.create();
+await Workbook.read(wb, buffer);
+Formula.calculate(wb); // defined names classified and formulas recalculated
 ```
 
 ### Tokenise / parse without evaluating
 
 ```typescript
-import { tokenize, parse } from "@cj-tech-master/excelts/formula";
+import { Formula } from "@cj-tech-master/excelts/formula";
 
-const tokens = tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
-const ast = parse(tokens); // throws on syntax errors
+const tokens = Formula.tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
+const ast = Formula.parse(tokens); // throws on syntax errors
 ```
 
 ## Why a separate subpath?

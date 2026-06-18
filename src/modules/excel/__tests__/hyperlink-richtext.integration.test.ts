@@ -38,11 +38,11 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
       hyperlink: "https://example.com"
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "rich-text hyperlink sharedStrings" });
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     const cell = getCell(ws2, "A1");
     const v = cellGetValue(cell);
@@ -74,10 +74,10 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
       hyperlink: "https://www.example.com"
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "plain hyperlink" });
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const v = Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
     if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
@@ -104,10 +104,10 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     Cell.setValue(ws, "A1", value);
     Cell.setValue(ws, "A2", value);
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer, { label: "rich-text hyperlink dedup" });
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     const a1 = Cell.getValue(ws2, "A1");
@@ -166,11 +166,11 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
       hyperlink: "https://example.com/formula-link"
     });
 
-    const buf1 = await Workbook.toXlsxBuffer(wb);
+    const buf1 = await Workbook.toBuffer(wb);
     await expectValidXlsx(buf1, { label: "formula+hyperlink pass 1" });
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf1);
+    await Workbook.read(wb2, buf1);
     const a1 = getCell(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
 
     // Public surface: classified as Hyperlink with the formula result as text
@@ -180,10 +180,10 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
     expect(cellGetModel(a1).formula).toBe("1+2");
 
     // Second round-trip — formula must still be present
-    const buf2 = await Workbook.toXlsxBuffer(wb2);
+    const buf2 = await Workbook.toBuffer(wb2);
     await expectValidXlsx(buf2, { label: "formula+hyperlink pass 2" });
     const wb3 = Workbook.create();
-    await Workbook.loadXlsx(wb3, buf2);
+    await Workbook.read(wb3, buf2);
     const a1b = getCell(Workbook.getWorksheet(wb3, "Sheet1")!, "A1");
     expect(cellType(a1b)).toBe(ValueType.Hyperlink);
     expect(cellHyperlink(a1b)).toBe("https://example.com/formula-link");
@@ -201,11 +201,11 @@ describe("Hyperlink + RichText round-trip (issue #142)", () => {
       hyperlink: "https://example.com"
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb, { useSharedStrings: false });
+    const buffer = await Workbook.toBuffer(wb, { useSharedStrings: false });
     await expectValidXlsx(buffer, { label: "rich-text hyperlink inline" });
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const v = Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1");
     if (typeof v !== "object" || v === null || !("hyperlink" in v)) {
       throw new Error("expected a hyperlink value");

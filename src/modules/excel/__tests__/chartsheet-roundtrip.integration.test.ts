@@ -146,9 +146,9 @@ describe("Chartsheet round-trip", () => {
     let bytes = fixture.bytes;
     for (let i = 0; i < 3; i++) {
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, bytes);
+      await Workbook.read(wb, bytes);
       expect(getChartsheets(wb).length, `pass ${i + 1}`).toBe(4);
-      bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      bytes = new Uint8Array(await Workbook.toBuffer(wb));
       await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
     }
   });
@@ -156,13 +156,13 @@ describe("Chartsheet round-trip", () => {
   it("a high-level mutation on a chartsheet's chart re-renders without dropping page metadata", async () => {
     const [fixture] = chartsheetFixtures;
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, fixture.bytes);
+    await Workbook.read(wb, fixture.bytes);
     const pie = getChartsheets(wb).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
     const chart = chartsheetChart(pie);
     expect(chart, "pie chartsheet chart accessor").toBeDefined();
     Chart.setTitle(chart!, "Mutated Pie Title");
 
-    const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const out = new Uint8Array(await Workbook.toBuffer(wb));
     const entries = await extractAll(out);
     await expectValidXlsx(out);
 
@@ -171,7 +171,7 @@ describe("Chartsheet round-trip", () => {
     expect(sheet1Xml, "page metadata still present").toMatch(/<pageMargins/);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, out);
+    await Workbook.read(wb2, out);
     const pie2 = getChartsheets(wb2).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
     expect(chartsheetChart(pie2)).toBeDefined();
     expect(Chart.title(chartsheetChart(pie2)!)).toBe("Mutated Pie Title");

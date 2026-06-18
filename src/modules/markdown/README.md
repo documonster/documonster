@@ -5,7 +5,8 @@
 GFM (GitHub Flavored Markdown) table parser and formatter with zero dependencies.
 
 ```typescript
-import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "@cj-tech-master/excelts/markdown";
+// Markdown.parse, Markdown.parseAll, Markdown.format
 ```
 
 ## Features
@@ -28,28 +29,28 @@ import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master
 ### Parsing
 
 ```typescript
-import { parseMarkdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "@cj-tech-master/excelts/markdown";
 
-const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const result = Markdown.parse("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["Name", "Age"]
 // result.rows = [["Alice", "30"]]
 // result.alignments = ["none", "none"]
 
 // With alignment detection
-const aligned = parseMarkdown("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
+const aligned = Markdown.parse("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
 // aligned.alignments = ["left", "center", "right"]
 
 // From a larger document (finds the first table)
-const doc = parseMarkdown("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
+const doc = Markdown.parse("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
 // doc.headers = ["A"], doc.rows = [["1"]]
 ```
 
 ### Formatting
 
 ```typescript
-import { formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "@cj-tech-master/excelts/markdown";
 
-formatMarkdown(
+Markdown.format(
   ["Name", "Age"],
   [
     ["Alice", "30"],
@@ -62,7 +63,7 @@ formatMarkdown(
 // | Bob   | 25  |
 
 // With alignment
-formatMarkdown(["Left", "Center", "Right"], [["a", "b", "c"]], {
+Markdown.format(["Left", "Center", "Right"], [["a", "b", "c"]], {
   columns: [
     { header: "Left", alignment: "left" },
     { header: "Center", alignment: "center" },
@@ -71,52 +72,59 @@ formatMarkdown(["Left", "Center", "Right"], [["a", "b", "c"]], {
 });
 
 // Any value types — auto-stringified
-formatMarkdown(["Name", "Age", "Active"], [["Alice", 30, true]]);
+Markdown.format(["Name", "Age", "Active"], [["Alice", 30, true]]);
 ```
 
 ### Workbook Integration
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Cell } from "@cj-tech-master/excelts/excel";
+import {
+  readMarkdown,
+  writeMarkdown,
+  readMarkdownAll,
+  readMarkdownFile,
+  writeMarkdownFile
+} from "@cj-tech-master/excelts/excel/markdown";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Read Markdown → Worksheet
-const ws = workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-console.log(ws.getRow(2).getCell(1).value); // "Alice"
+const ws = readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+console.log(Cell.getValue(ws, "A2")); // "Alice"
 
 // Worksheet → Markdown
-const markdownText = workbook.writeMarkdown();
+const markdownText = writeMarkdown(workbook);
 
 // Read all tables from a document
-const sheets = workbook.readMarkdownAll(markdownDoc, { sheetName: "Table" });
+const sheets = readMarkdownAll(workbook, markdownDoc, { sheetName: "Table" });
 // Creates "Table", "Table_2", "Table_3", ...
 
 // File I/O (Node.js only)
-await workbook.readMarkdownFile("data.md");
-await workbook.writeMarkdownFile("output.md");
+await readMarkdownFile(workbook, "data.md");
+await writeMarkdownFile(workbook, "output.md");
 ```
 
 ---
 
 ## Parsing API
 
-### `parseMarkdown(input, options?)`
+### `Markdown.parse(input, options?)`
 
 Parse the first Markdown table found in the input string.
 
 ```typescript
-parseMarkdown(input: string, options?: MarkdownParseOptions): MarkdownParseResult
+Markdown.parse(input: string, options?: MarkdownParseOptions): MarkdownParseResult
 ```
 
 Throws `MarkdownParseError` if no valid table is found.
 
-### `parseMarkdownAll(input, options?)`
+### `Markdown.parseAll(input, options?)`
 
 Parse all Markdown tables from a document.
 
 ```typescript
-parseMarkdownAll(input: string, options?: MarkdownParseOptions): MarkdownParseResult[]
+Markdown.parseAll(input: string, options?: MarkdownParseOptions): MarkdownParseResult[]
 ```
 
 Returns an empty array if no tables are found.
@@ -145,12 +153,12 @@ interface MarkdownParseResult {
 
 ## Formatting API
 
-### `formatMarkdown(headers, rows, options?)`
+### `Markdown.format(headers, rows, options?)`
 
 Format data as a Markdown table string.
 
 ```typescript
-formatMarkdown(headers: string[], rows: unknown[][], options?: MarkdownFormatOptions): string
+Markdown.format(headers: string[], rows: unknown[][], options?: MarkdownFormatOptions): string
 ```
 
 **Format Options (`MarkdownFormatOptions`):**
@@ -182,13 +190,13 @@ Newlines in cell content are converted to `<br>` tags during formatting, and can
 
 ```typescript
 // Format: newlines become <br>
-formatMarkdown(["Note"], [["Line 1\nLine 2"]]);
+Markdown.format(["Note"], [["Line 1\nLine 2"]]);
 // | Note           |
 // | -------------- |
 // | Line 1<br>Line 2 |
 
 // Parse: <br> back to newlines
-parseMarkdown(table, { convertBr: true });
+Markdown.parse(table, { convertBr: true });
 // rows[0] = ["Line 1\nLine 2"]
 ```
 
@@ -199,7 +207,7 @@ parseMarkdown(table, { convertBr: true });
 The formatter automatically accounts for CJK characters, fullwidth forms, and emoji when calculating column widths. No external dependencies needed.
 
 ```typescript
-formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
+Markdown.format(["Name", "名前"], [["Alice", "太郎"]]);
 // | Name  | 名前 |
 // | ----- | ---- |
 // | Alice | 太郎 |
@@ -210,10 +218,11 @@ formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
 ## Errors
 
 ```typescript
+import { Markdown } from "@cj-tech-master/excelts/markdown";
 import { MarkdownParseError } from "@cj-tech-master/excelts/markdown";
 
 try {
-  parseMarkdown("no table here");
+  Markdown.parse("no table here");
 } catch (e) {
   if (e instanceof MarkdownParseError) {
     console.log(e.message); // "Line 1: No valid Markdown table found in input"

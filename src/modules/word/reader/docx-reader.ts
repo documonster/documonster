@@ -6,21 +6,82 @@
  */
 
 import { unzip } from "@archive/read-archive";
-import { parseXml, findChild, textContent } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
-
-import { RelType, ContentType } from "../constants";
-import { type Mutable, utf8Decoder } from "../core/internal-utils";
-import { isRun } from "../core/text-utils";
+import { RelType, ContentType } from "@word/constants";
+import { type Mutable, utf8Decoder } from "@word/core/internal-utils";
+import { isRun } from "@word/core/text-utils";
 import {
   DocxError,
   DocxParseError,
   DocxMissingPartError,
   DocxEncryptedError,
   DocxLimitExceededError
-} from "../errors";
-import { decryptDocx } from "../security/encryption";
-import { resolveSecurityPolicy, type WordSecurityPolicy } from "../security/policy";
+} from "@word/errors";
+import {
+  replaceOpaqueCharts,
+  replaceOpaqueChartExDrawings,
+  parseChartXml,
+  parseChartExXml
+} from "@word/reader/chart-parser";
+import {
+  parseCommentsXml as parseCommentsXmlExternal,
+  parseCommentsExtendedXml
+} from "@word/reader/comments-parser";
+import {
+  parseCoreProps,
+  parseAppProps,
+  parseCustomPropsXml,
+  parseFontTableXml
+} from "@word/reader/doc-props-parsers";
+import { parseFfData } from "@word/reader/form-field-parser";
+import { parseDrawingContent, parseFloatingImage } from "@word/reader/image-parsers";
+import { parseMathContent, parseMathBlock } from "@word/reader/math-parser";
+import {
+  parseThemeXml,
+  parseWebSettings,
+  parsePeople,
+  parseSettingsXml
+} from "@word/reader/metadata-parsers";
+import { parseNumberingXml } from "@word/reader/numbering-parser";
+import {
+  parseParagraphProperties,
+  parseSectionProperties
+} from "@word/reader/paragraph-section-parsers";
+import {
+  attrVal,
+  attrInt,
+  findChildNs,
+  findChildrenNs,
+  boolToggle,
+  serializeElement,
+  collectRIds,
+  getPartRelsPath,
+  getFileName,
+  getFileExt,
+  resolvePartPath,
+  resolveRelTarget
+} from "@word/reader/parse-utils";
+import {
+  parseRunProperties,
+  parseShading,
+  parseTableWidth,
+  parseRevisionInfo
+} from "@word/reader/properties-parsers";
+import type { ReaderContext } from "@word/reader/reader-context";
+import {
+  createFieldState,
+  createReaderContext,
+  parseRelationships
+} from "@word/reader/reader-context";
+import { parseCheckBox, parseTocInstruction } from "@word/reader/sdt-helpers";
+import { parseStyles } from "@word/reader/styles-parser";
+import {
+  parseTableBorders,
+  parseTableCellMargins,
+  parseTableProperties
+} from "@word/reader/table-properties-parsers";
+import { detectWatermarkFromRoot } from "@word/reader/watermark-parser";
+import { decryptDocx } from "@word/security/encryption";
+import { resolveSecurityPolicy, type WordSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
   BodyContent,
@@ -73,59 +134,9 @@ import type {
   Chart,
   ChartExContent,
   DocxDocumentType
-} from "../types";
-import {
-  replaceOpaqueCharts,
-  replaceOpaqueChartExDrawings,
-  parseChartXml,
-  parseChartExXml
-} from "./chart-parser";
-import {
-  parseCommentsXml as parseCommentsXmlExternal,
-  parseCommentsExtendedXml
-} from "./comments-parser";
-import {
-  parseCoreProps,
-  parseAppProps,
-  parseCustomPropsXml,
-  parseFontTableXml
-} from "./doc-props-parsers";
-import { parseFfData } from "./form-field-parser";
-import { parseDrawingContent, parseFloatingImage } from "./image-parsers";
-import { parseMathContent, parseMathBlock } from "./math-parser";
-import { parseThemeXml, parseWebSettings, parsePeople, parseSettingsXml } from "./metadata-parsers";
-import { parseNumberingXml } from "./numbering-parser";
-import { parseParagraphProperties, parseSectionProperties } from "./paragraph-section-parsers";
-import {
-  attrVal,
-  attrInt,
-  findChildNs,
-  findChildrenNs,
-  boolToggle,
-  serializeElement,
-  collectRIds,
-  getPartRelsPath,
-  getFileName,
-  getFileExt,
-  resolvePartPath,
-  resolveRelTarget
-} from "./parse-utils";
-import {
-  parseRunProperties,
-  parseShading,
-  parseTableWidth,
-  parseRevisionInfo
-} from "./properties-parsers";
-import type { ReaderContext } from "./reader-context";
-import { createFieldState, createReaderContext, parseRelationships } from "./reader-context";
-import { parseCheckBox, parseTocInstruction } from "./sdt-helpers";
-import { parseStyles } from "./styles-parser";
-import {
-  parseTableBorders,
-  parseTableCellMargins,
-  parseTableProperties
-} from "./table-properties-parsers";
-import { detectWatermarkFromRoot } from "./watermark-parser";
+} from "@word/types";
+import { parseXml, findChild, textContent } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
 
 // =============================================================================
 // Run Content Parser

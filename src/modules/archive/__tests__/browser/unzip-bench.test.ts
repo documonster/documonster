@@ -5,7 +5,7 @@
  * so it stays stable across browsers/CI.
  */
 
-import { zip } from "@archive";
+import { zip } from "@archive/create-archive";
 import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
 import { describe, it, expect } from "vitest";
 

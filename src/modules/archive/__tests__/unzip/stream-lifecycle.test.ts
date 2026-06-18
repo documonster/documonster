@@ -15,7 +15,8 @@ import { createReadStream } from "fs";
 import { join } from "path";
 import { Readable } from "stream";
 
-import { unzip, zip } from "@archive";
+import { zip } from "@archive/create-archive";
+import { unzip } from "@archive/read-archive";
 import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
 import { PassThrough } from "@stream";
 import { describe, it, expect } from "vitest";

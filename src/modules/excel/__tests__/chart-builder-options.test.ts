@@ -1055,9 +1055,9 @@ describe("rich text writing API", () => {
       ]
     });
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     // On read, rich text may come back as rawTx — the plain-string title getter
     // should still extract the concatenated text.
@@ -1490,9 +1490,9 @@ describe("effect list and 3D structured", () => {
         }
       }
     };
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
     const s = Chart.chartModel(chart2)!.chart.plotArea.chartTypes[0].series[0] as any;
     // After round-trip spPr comes back as _rawXml — parseSpPr extracts it
@@ -1700,7 +1700,7 @@ describe("chart sidecar files", () => {
       "D1:J10"
     );
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const styleXml = textDecoder.decode(entries.get("xl/charts/style1.xml")!.data);
     const colorsXml = textDecoder.decode(entries.get("xl/charts/colors1.xml")!.data);
@@ -1733,7 +1733,7 @@ describe("chart sidecar files", () => {
     const dst = Workbook.addWorksheet(dstWb, "Dst");
     Chart.copyTo(getCharts(src)[0], dst, "A1:H10");
 
-    const buf = await Workbook.toXlsxBuffer(dstWb);
+    const buf = await Workbook.toBuffer(dstWb);
     const entries = await extractAll(new Uint8Array(buf));
     const styleXml = textDecoder.decode(entries.get("xl/charts/style1.xml")!.data);
     const colorsXml = textDecoder.decode(entries.get("xl/charts/colors1.xml")!.data);
@@ -1760,7 +1760,7 @@ describe("chart sidecar files", () => {
       "D1:J10"
     );
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const styleXml = textDecoder.decode(entries.get("xl/charts/styleEx1.xml")!.data);
     const colorsXml = textDecoder.decode(entries.get("xl/charts/colorsEx1.xml")!.data);

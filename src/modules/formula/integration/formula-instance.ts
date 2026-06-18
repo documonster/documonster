@@ -20,7 +20,7 @@ import type {
   FormulaCellKind,
   WorkbookSnapshot,
   WorksheetSnapshot
-} from "./workbook-snapshot";
+} from "@formula/integration/workbook-snapshot";
 
 // ============================================================================
 // FormulaInstance

@@ -14,7 +14,7 @@
  *   6. = <> < > <= >=  (comparison)
  */
 
-import { FormulaParseError } from "../errors";
+import { FormulaParseError } from "@formula/errors";
 import {
   NodeType,
   type AstNode,
@@ -22,14 +22,14 @@ import {
   type RangeRefNode,
   type FunctionCallNode,
   type ArrayNode
-} from "./ast";
+} from "@formula/syntax/ast";
 import {
   TokenType,
   type Token,
   type CellRefToken,
   type RangeToken,
   type FunctionToken
-} from "./token-types";
+} from "@formula/syntax/token-types";
 
 // ============================================================================
 // Operator Precedence

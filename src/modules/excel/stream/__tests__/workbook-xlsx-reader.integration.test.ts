@@ -26,7 +26,7 @@ describe("WorkbookReader", () => {
     it("xlsx file", async () => {
       const wb = testUtils.createTestBook(Workbook.create(), "xlsx");
 
-      await Workbook.writeXlsx(wb, TEST_FILE_NAME);
+      await Workbook.writeFile(wb, TEST_FILE_NAME);
       await testUtils.checkTestBookReader(TEST_FILE_NAME);
     }, 30000);
   });
@@ -37,20 +37,20 @@ describe("WorkbookReader", () => {
         const workbook = Workbook.create();
         // The Fibonacci sheet has 19 rows
         await expect(
-          Workbook.readXlsxFile(workbook, streamTestDataPath("fibonacci.xlsx"), { maxRows: 10 })
+          Workbook.readFile(workbook, streamTestDataPath("fibonacci.xlsx"), { maxRows: 10 })
         ).rejects.toThrow("Max row count (10) exceeded");
       });
 
       it("should fail fast on a huge file", async () => {
         const workbook = Workbook.create();
         await expect(
-          Workbook.readXlsxFile(workbook, streamTestDataPath("huge.xlsx"), { maxRows: 100 })
+          Workbook.readFile(workbook, streamTestDataPath("huge.xlsx"), { maxRows: 100 })
         ).rejects.toThrow("Max row count (100) exceeded");
       }, 30000);
 
       it("should parse fine if the limit is not exceeded", async () => {
         const workbook = Workbook.create();
-        await Workbook.readXlsxFile(workbook, streamTestDataPath("fibonacci.xlsx"), {
+        await Workbook.readFile(workbook, streamTestDataPath("fibonacci.xlsx"), {
           maxRows: 20
         });
         expect(getWorksheets(workbook).length).toBeGreaterThan(0);
@@ -62,20 +62,20 @@ describe("WorkbookReader", () => {
         const workbook = Workbook.create();
         // The many-columns sheet has 20 columns in row 2
         await expect(
-          Workbook.readXlsxFile(workbook, streamTestDataPath("many-columns.xlsx"), { maxCols: 15 })
+          Workbook.readFile(workbook, streamTestDataPath("many-columns.xlsx"), { maxCols: 15 })
         ).rejects.toThrow("Max column count (15) exceeded");
       });
 
       it("should fail fast on a huge file", async () => {
         const workbook = Workbook.create();
         await expect(
-          Workbook.readXlsxFile(workbook, streamTestDataPath("huge.xlsx"), { maxCols: 10 })
+          Workbook.readFile(workbook, streamTestDataPath("huge.xlsx"), { maxCols: 10 })
         ).rejects.toThrow("Max column count (10) exceeded");
       }, 30000);
 
       it("should parse fine if the limit is not exceeded", async () => {
         const workbook = Workbook.create();
-        await Workbook.readXlsxFile(workbook, streamTestDataPath("many-columns.xlsx"), {
+        await Workbook.readFile(workbook, streamTestDataPath("many-columns.xlsx"), {
           maxCols: 40
         });
         expect(getWorksheets(workbook).length).toBeGreaterThan(0);
@@ -89,19 +89,15 @@ describe("WorkbookReader", () => {
         const workbook = Workbook.create();
         // The Fibonacci sheet has 19 rows
         await expect(
-          Workbook.readXlsxStream(
-            workbook,
-            fs.createReadStream(streamTestDataPath("fibonacci.xlsx")),
-            {
-              maxRows: 10
-            }
-          )
+          Workbook.readStream(workbook, fs.createReadStream(streamTestDataPath("fibonacci.xlsx")), {
+            maxRows: 10
+          })
         ).rejects.toThrow("Max row count (10) exceeded");
       });
 
       it("should parse fine if the limit is not exceeded", async () => {
         const workbook = Workbook.create();
-        await Workbook.readXlsxStream(
+        await Workbook.readStream(
           workbook,
           fs.createReadStream(streamTestDataPath("fibonacci.xlsx")),
           {
@@ -118,7 +114,7 @@ describe("WorkbookReader", () => {
 
     beforeEach(async () => {
       wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, streamTestDataPath("test-row-styles.xlsx"));
+      await Workbook.readFile(wb, streamTestDataPath("test-row-styles.xlsx"));
     });
 
     it("edit styles of single row instead of all", () => {
@@ -160,10 +156,7 @@ describe("WorkbookReader", () => {
 
     beforeAll(async () => {
       const workbook = Workbook.create();
-      await Workbook.readXlsxStream(
-        workbook,
-        fs.createReadStream(streamTestDataPath("formulas.xlsx"))
-      );
+      await Workbook.readStream(workbook, fs.createReadStream(streamTestDataPath("formulas.xlsx")));
       worksheet = Workbook.getWorksheet(workbook)!;
     });
 
@@ -216,7 +209,7 @@ describe("WorkbookReader", () => {
 
     beforeAll(async () => {
       const workbook = Workbook.create();
-      await Workbook.readXlsxStream(
+      await Workbook.readStream(
         workbook,
         fs.createReadStream(streamTestDataPath("shared_string_with_escape.xlsx"))
       );
@@ -291,7 +284,7 @@ describe("WorkbookReader", () => {
   describe("with a spreadsheet that contains shared formulas", () => {
     it("should read shared formula models from a file", async () => {
       const wb = Workbook.create();
-      await Workbook.readXlsxFile(wb, streamTestDataPath("fibonacci.xlsx"));
+      await Workbook.readFile(wb, streamTestDataPath("fibonacci.xlsx"));
 
       const ws = Workbook.getWorksheet(wb, "fib")!;
 
@@ -466,7 +459,7 @@ describe("WorkbookReader", () => {
     it("should reject the promise with the XML parse error", async () => {
       const workbook = Workbook.create();
       await expect(
-        Workbook.readXlsxFile(workbook, streamTestDataPath("invalid-xml.xlsx"))
+        Workbook.readFile(workbook, streamTestDataPath("invalid-xml.xlsx"))
       ).rejects.toThrow("3:1: text data outside of root node.");
 
       // Wait a tick to verify no unhandled rejection fires
@@ -478,7 +471,7 @@ describe("WorkbookReader", () => {
   describe("with a spreadsheet that is missing some files in the zip container", () => {
     it("should not break", async () => {
       const workbook = Workbook.create();
-      await Workbook.readXlsxFile(workbook, streamTestDataPath("missing-bits.xlsx"));
+      await Workbook.readFile(workbook, streamTestDataPath("missing-bits.xlsx"));
       // Should load gracefully despite missing zip entries
       expect(getWorksheets(workbook).length).toBeGreaterThanOrEqual(0);
     });
@@ -489,10 +482,7 @@ describe("WorkbookReader", () => {
 
     beforeAll(async () => {
       const workbook = Workbook.create();
-      await Workbook.readXlsxStream(
-        workbook,
-        fs.createReadStream(streamTestDataPath("images.xlsx"))
-      );
+      await Workbook.readStream(workbook, fs.createReadStream(streamTestDataPath("images.xlsx")));
       worksheet = Workbook.getWorksheet(workbook)!;
     });
 
@@ -585,7 +575,7 @@ describe("WorkbookReader", () => {
   describe("with a spreadsheet containing a defined name that kinda looks like it contains a range", () => {
     it("should not crash", async () => {
       const workbook = Workbook.create();
-      await Workbook.readXlsxStream(
+      await Workbook.readStream(
         workbook,
         fs.createReadStream(streamTestDataPath("bogus-defined-name.xlsx"))
       );

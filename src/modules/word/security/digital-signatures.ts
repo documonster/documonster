@@ -22,10 +22,9 @@
  *   - XMLDSig: https://www.w3.org/TR/xmldsig-core/
  */
 
+import { utf8Decoder } from "@word/core/internal-utils";
+import { getFileName } from "@word/core/opc-paths";
 import { xmlDecode } from "@xml/encode";
-
-import { utf8Decoder } from "../core/internal-utils";
-import { getFileName } from "../core/opc-paths";
 
 /** Parsed digital signature metadata. */
 export interface DigitalSignatureInfo {

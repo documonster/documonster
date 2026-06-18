@@ -5,16 +5,7 @@
  * Extracted from the original `metadata-parsers.ts`.
  */
 
-import { parseXml } from "@xml/dom";
-
-import { type Mutable } from "../core/internal-utils";
-import type {
-  CompatFlag,
-  CompatSetting,
-  DocumentSettings,
-  HyphenationSettings,
-  ProtectionType
-} from "../types";
+import { type Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
   attrVal,
@@ -23,7 +14,15 @@ import {
   parseNoteProperties,
   serializeElement,
   sidToHashAlgorithm
-} from "./parse-utils";
+} from "@word/reader/parse-utils";
+import type {
+  CompatFlag,
+  CompatSetting,
+  DocumentSettings,
+  HyphenationSettings,
+  ProtectionType
+} from "@word/types";
+import { parseXml } from "@xml/dom";
 
 export function parseSettingsXml(xmlStr: string): DocumentSettings {
   const doc = parseXml(xmlStr);

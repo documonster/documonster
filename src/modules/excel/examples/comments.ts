@@ -99,7 +99,7 @@ Workbook.getXlsxIo(wb)
       });
     });
 
-    return Workbook.writeXlsx(wb, outputFile);
+    return Workbook.writeFile(wb, outputFile);
   })
   .then(() => {
     console.log("Wrote", outputFile);

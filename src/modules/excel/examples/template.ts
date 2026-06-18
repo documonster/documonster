@@ -8,7 +8,7 @@ Workbook.getXlsxIo(workbook)
       useStyles: true
     };
 
-    return Workbook.writeXlsx(stream, "./out/template-out.xlsx", options).then(() => {
+    return Workbook.writeFile(stream, "./out/template-out.xlsx", options).then(() => {
       console.log("Done.");
     });
   })

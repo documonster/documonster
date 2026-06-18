@@ -28,16 +28,16 @@ export type {
 
   // Workbook integration types
   MarkdownOptions
-} from "./types";
+} from "@markdown/types";
 
 // =============================================================================
 // Core Functions — `Markdown` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-export * as Markdown from "./surface/markdown";
+export * as Markdown from "@markdown/surface/markdown";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { MarkdownError, MarkdownParseError } from "./errors";
+export { MarkdownError, MarkdownParseError } from "@markdown/errors";

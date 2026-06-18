@@ -1,11 +1,12 @@
 /**
  * `Workbook` namespace surface — Node entry.
  *
- * `import { Workbook } from "documonster/excel"` → `Workbook.create()`,
- * `Workbook.addWorksheet(wb, name)`, `Workbook.toXlsxBuffer(wb)`, …
+ * `import { Workbook } from "@cj-tech-master/excelts/excel"` → `Workbook.create()`,
+ * `Workbook.addWorksheet(wb, name)`, `Workbook.toBuffer(wb)`, `Workbook.read(wb, bytes)`,
+ * `Workbook.readFile(wb, path)`, `Workbook.writeFile(wb, path)`, …
  *
  * Re-exports the workbook management functions (de-prefixed) plus the
- * Node xlsx IO (includes file-path `readXlsxFile` / `writeXlsx`).
+ * Node xlsx IO (includes file-path `readFile` / `writeFile`).
  */
 export {
   createWorkbook as create,
@@ -36,12 +37,12 @@ export {
 } from "@excel/workbook.browser";
 
 export {
-  toXlsxBuffer,
-  loadXlsx,
-  readXlsxFile,
-  writeXlsx,
-  readXlsxStream,
-  writeXlsxStream,
+  toBuffer,
+  read,
+  readFile,
+  writeFile,
+  readStream,
+  writeStream,
   createStreamWriter,
   createStreamReader,
   getXlsxIo

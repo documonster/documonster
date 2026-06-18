@@ -21,18 +21,18 @@
  * AST is not retained on the CompiledFormula).
  */
 
-import type { FormulaInstance } from "../integration/formula-instance";
-import type { ResolvedTable, WorkbookSnapshot } from "../integration/workbook-snapshot";
-import type { AstNode } from "../syntax/ast";
-import { NodeType } from "../syntax/ast";
-import { stripFunctionPrefix } from "../syntax/token-types";
-import type { BoundExpr } from "./bound-ast";
-import { BoundExprKind } from "./bound-ast";
+import type { BoundExpr } from "@formula/compile/bound-ast";
+import { BoundExprKind } from "@formula/compile/bound-ast";
 import {
   resolveStructuredRefRows,
   buildTableGeometry,
   resolveStructuredRefColumns
-} from "./structured-ref-utils";
+} from "@formula/compile/structured-ref-utils";
+import type { FormulaInstance } from "@formula/integration/formula-instance";
+import type { ResolvedTable, WorkbookSnapshot } from "@formula/integration/workbook-snapshot";
+import type { AstNode } from "@formula/syntax/ast";
+import { NodeType } from "@formula/syntax/ast";
+import { stripFunctionPrefix } from "@formula/syntax/token-types";
 
 // ============================================================================
 // CompiledFormula

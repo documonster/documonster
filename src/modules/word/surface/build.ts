@@ -2,7 +2,7 @@
  * `Build` namespace surface — content-node builders (runs, paragraphs,
  * tables, shapes, fields, math, …).
  *
- * `import { Build } from "documonster/word"` →
+ * `import { Build } from "@cj-tech-master/excelts/word"` →
  *   `Build.paragraph(...)`, `Build.text("hi")`, `Build.table(rows)`,
  *   `Build.heading("Title", 1)`, `Build.createShape(...)` — tree-shaken via
  *   `export * as Build`.
@@ -88,7 +88,7 @@ export {
   drawingShape,
   chart,
   structuredDocumentTag
-} from "../builder/run-builders";
+} from "@word/builder/run-builders";
 
 export {
   // paragraph / block builders
@@ -109,7 +109,7 @@ export {
   moveFromRangeEnd,
   moveToRangeStart,
   moveToRangeEnd
-} from "../builder/paragraph-builders";
+} from "@word/builder/paragraph-builders";
 
 export {
   // table builders
@@ -119,7 +119,7 @@ export {
   row,
   table,
   simpleTable
-} from "../builder/table-builders";
+} from "@word/builder/table-builders";
 
 export {
   // drawing-shape builders
@@ -132,4 +132,4 @@ export {
   createFlowchartShape,
   createCallout,
   createStar
-} from "../advanced/drawing-shapes";
+} from "@word/advanced/drawing-shapes";

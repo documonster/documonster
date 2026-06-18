@@ -11,7 +11,7 @@ describe("writeBuffer auto-validate hook", () => {
 
     const wb = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hello");
-    await Workbook.toXlsxBuffer(wb);
+    await Workbook.toBuffer(wb);
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -23,7 +23,7 @@ describe("writeBuffer auto-validate hook", () => {
     // negative-case test below).
     const wb = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hi");
-    const bytes = await Workbook.toXlsxBuffer(wb, { validate: true });
+    const bytes = await Workbook.toBuffer(wb, { validate: true });
     expect(bytes.byteLength).toBeGreaterThan(0);
   });
 
@@ -32,7 +32,7 @@ describe("writeBuffer auto-validate hook", () => {
     const wb = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", "hi");
 
-    await Workbook.toXlsxBuffer(wb, { validate: false });
+    await Workbook.toBuffer(wb, { validate: false });
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();

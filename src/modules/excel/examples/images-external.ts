@@ -94,7 +94,7 @@ Watermark.add(wmSheet, { imageId: wmImageId, mode: "overlay", opacity: 0.15 });
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await Workbook.writeXlsx(wb, filename);
+  await Workbook.writeFile(wb, filename);
   console.log("Done. Wrote linked-image workbook to:", filename);
   console.log("Time taken (us):", stopwatch.microseconds);
 } catch (error) {
@@ -112,7 +112,7 @@ const embeddedId = Image.add(embeddedWb, {
   extension: "png"
 });
 Image.place(embeddedWs, embeddedId, "B3:E10");
-const embeddedBytes = new Uint8Array(await Workbook.toXlsxBuffer(embeddedWb));
+const embeddedBytes = new Uint8Array(await Workbook.toBuffer(embeddedWb));
 
 const linkedBytes = fs.statSync(filename).size;
 console.log("");

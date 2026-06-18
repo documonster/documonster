@@ -4,8 +4,8 @@
  * Get and set the Word compatibility mode of a document.
  */
 
-import { type Mutable } from "../core/internal-utils";
-import type { DocxDocument, DocumentSettings } from "../types";
+import { type Mutable } from "@word/core/internal-utils";
+import type { DocxDocument, DocumentSettings } from "@word/types";
 
 // =============================================================================
 // Types

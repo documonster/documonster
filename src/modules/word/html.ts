@@ -11,10 +11,10 @@
  * ```
  */
 
-export { renderToHtml, htmlToDocxBody, htmlToDocx } from "./convert/html/html";
+export { renderToHtml, htmlToDocxBody, htmlToDocx } from "@word/convert/html/html";
 export type {
   HtmlRenderOptions,
   HtmlRenderResult,
   HtmlImportOptions,
   HtmlToDocxResult
-} from "./convert/html/html";
+} from "@word/convert/html/html";

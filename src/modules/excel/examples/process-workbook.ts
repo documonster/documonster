@@ -34,7 +34,7 @@ Workbook.getXlsxIo(wb)
     Cell.setStyle(ws!, "B1", { numFmt: "hh:mm:ss" });
 
     Worksheet.addRow(ws!, [1, "hello"]);
-    return Workbook.writeXlsx(wb, outputFile);
+    return Workbook.writeFile(wb, outputFile);
   })
   .then(() => {
     assert(passed, "Something went wrong", "All tests passed!");

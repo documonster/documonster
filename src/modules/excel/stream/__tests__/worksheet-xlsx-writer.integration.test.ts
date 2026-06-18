@@ -545,11 +545,11 @@ describe("WorksheetWriter", () => {
       Cell.setStyle(ws, "A2", { numFmt: "mmm-yy" });
 
       // Write to buffer
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
 
       // Read back
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
@@ -599,7 +599,7 @@ describe("WorksheetWriter", () => {
 
       // Read it back and verify it's valid
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, testFile);
+      await Workbook.readFile(wb2, testFile);
 
       const ws2 = Workbook.getWorksheet(wb2, "test")!;
       expect(ws2).toBeDefined();
@@ -645,7 +645,7 @@ describe("WorksheetWriter", () => {
       await workbook.commit();
 
       const checkBook = Workbook.create();
-      await Workbook.readXlsxFile(checkBook, testFile);
+      await Workbook.readFile(checkBook, testFile);
       const checkSheet = Workbook.getWorksheet(checkBook, "data")!;
       expect(checkSheet).toBeDefined();
       expect(checkSheet!.sheetProtection!.spinCount).toBe(1);

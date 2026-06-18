@@ -18,20 +18,19 @@
  * parseCsvAsync buffers the entire input; parseCsvRows streams progressively.
  */
 
-import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/utils.base";
-import { toError } from "@utils/errors";
-
-import { getUtf8ByteLength } from "../constants";
-import { CsvError } from "../errors";
-import { CsvParserStream } from "../stream/parser";
+import { getUtf8ByteLength } from "@csv/constants";
+import { CsvError } from "@csv/errors";
+import { parseCsv } from "@csv/parse/sync";
+import { CsvParserStream } from "@csv/stream/parser";
 import type {
   CsvParseOptions,
   CsvParseArrayOptions,
   CsvParseObjectOptions,
   CsvParseResult,
   RecordWithInfo
-} from "../types";
-import { parseCsv } from "./sync";
+} from "@csv/types";
+import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/utils.base";
+import { toError } from "@utils/errors";
 
 type ReadableStreamLike = { getReader: () => any };
 type AsyncInput = AsyncIterable<string | Uint8Array>;

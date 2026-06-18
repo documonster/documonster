@@ -1,6 +1,6 @@
 import * as PdfMod from "@pdf/index";
 /**
- * Public namespace-surface contract for `documonster/pdf`.
+ * Public namespace-surface contract for `@cj-tech-master/excelts/pdf`.
  *
  * Verifies the `Pdf` namespace shape (writing/reading/building/editing/
  * conversion/signatures) and that a representative member produces output.
@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 
 const { Pdf } = PdfMod;
 
-describe("documonster/pdf namespace surface", () => {
+describe("@cj-tech-master/excelts/pdf namespace surface", () => {
   it("exposes the expected members", () => {
     for (const m of [
       "create",

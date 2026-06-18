@@ -5,15 +5,13 @@
  * headers/footers, page numbering, page borders, vertical alignment, etc.
  */
 
-import type { XmlSink } from "@xml/types";
-
 import {
   DEFAULT_PAGE_WIDTH,
   DEFAULT_PAGE_HEIGHT,
   DEFAULT_MARGIN,
   DEFAULT_HEADER_FOOTER_MARGIN,
   DEFAULT_COLUMN_SPACE
-} from "../constants";
+} from "@word/constants";
 import type {
   SectionProperties,
   SectionColumns,
@@ -21,8 +19,9 @@ import type {
   PageBorders,
   FootnoteProperties,
   EndnoteProperties
-} from "../types";
-import { renderBorderElement } from "./run-writer";
+} from "@word/types";
+import { renderBorderElement } from "@word/writer/run-writer";
+import type { XmlSink } from "@xml/types";
 
 /** Render footnote/endnote properties. */
 function renderNoteProperties(

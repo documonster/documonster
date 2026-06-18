@@ -2,7 +2,7 @@
  * `Pdf` namespace surface — PDF writing, reading, building, editing,
  * conversion, and digital signatures.
  *
- * `import { Pdf } from "documonster/pdf"` →
+ * `import { Pdf } from "@cj-tech-master/excelts/pdf"` →
  *   `Pdf.create(rows)`, `Pdf.read(bytes)`, `new Pdf.Builder()`,
  *   `new Pdf.Editor()`, `Pdf.sign(...)`, `Pdf.verifySignature(...)`,
  *   `await Pdf.fromExcel(wb)`, `await Pdf.fromDocx(doc)`.
@@ -17,24 +17,23 @@
  */
 import type { Workbook } from "@excel/workbook.browser";
 import type { ChartHandle } from "@excel/worksheet-core";
+import { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "@pdf/builder/document-builder";
+import type { ChartToPdfOptions } from "@pdf/excel-bridge";
+import type { PdfExportOptions } from "@pdf/types";
+import type { DocxToPdfOptions } from "@pdf/word-bridge";
 import type { Chart as WordChart, DocxDocument } from "@word/types";
 
-import { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "../builder/document-builder";
-import type { ChartToPdfOptions } from "../excel-bridge";
-import type { PdfExportOptions } from "../types";
-import type { DocxToPdfOptions } from "../word-bridge";
-
 // --- Writing (core engine, statically linked) ---
-export { pdf as create } from "../pdf";
+export { pdf as create } from "@pdf/pdf";
 
 // --- Reading ---
-export { readPdf as read } from "../reader/pdf-reader";
+export { readPdf as read } from "@pdf/reader/pdf-reader";
 
 // --- Building (imported above; re-exported under namespace-friendly names) ---
 export { PdfDocumentBuilder as Builder, PdfPageBuilder as PageBuilder, parseSvgPath };
 
 // --- Editing ---
-export { PdfEditor as Editor, PdfEditorPage as EditorPage } from "../builder/pdf-editor";
+export { PdfEditor as Editor, PdfEditorPage as EditorPage } from "@pdf/builder/pdf-editor";
 
 // --- Digital signatures ---
 export {
@@ -42,10 +41,10 @@ export {
   signPdf as sign,
   buildSignatureDictPlaceholder,
   asn1Parse
-} from "../core/digital-signature";
+} from "@pdf/core/digital-signature";
 
 // --- Page-size presets ---
-export { PageSizes } from "../types";
+export { PageSizes } from "@pdf/types";
 
 // --- Cross-module converters (lazy: pull excel / word only when called) ---
 
@@ -54,7 +53,7 @@ export async function fromExcel(
   workbook: Workbook,
   options?: PdfExportOptions
 ): Promise<Uint8Array> {
-  const { excelToPdf } = await import("../excel-bridge");
+  const { excelToPdf } = await import("@pdf/excel-bridge");
   return excelToPdf(workbook, options);
 }
 
@@ -63,13 +62,13 @@ export async function fromChart(
   chart: ChartHandle,
   options?: ChartToPdfOptions
 ): Promise<Uint8Array> {
-  const { chartToPdf } = await import("../excel-bridge");
+  const { chartToPdf } = await import("@pdf/excel-bridge");
   return chartToPdf(chart, options);
 }
 
 /** Convert a DOCX document to a PDF. Dynamically loads the word bridge. */
 export async function fromDocx(doc: DocxDocument, options?: DocxToPdfOptions): Promise<Uint8Array> {
-  const { docxToPdf } = await import("../word-bridge");
+  const { docxToPdf } = await import("@pdf/word-bridge");
   return docxToPdf(doc, options);
 }
 
@@ -84,6 +83,6 @@ export async function wordChartRenderer(): Promise<
     rect: { x: number; y: number; width: number; height: number }
   ) => void
 > {
-  const { createWordChartPdfRenderer } = await import("../excel-bridge");
+  const { createWordChartPdfRenderer } = await import("@pdf/excel-bridge");
   return createWordChartPdfRenderer();
 }

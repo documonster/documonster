@@ -2,7 +2,7 @@
  * `Xml` namespace surface — XML encode/decode, DOM + SAX parsing, writers,
  * and query.
  *
- * `import { Xml } from "documonster/xml"` →
+ * `import { Xml } from "@cj-tech-master/excelts/xml"` →
  *   `Xml.encode(s)`, `Xml.parse(src)`, `Xml.query(doc, sel)`,
  *   `new Xml.Writer()`, `new Xml.StreamWriter()`, `Xml.parseSax(...)`.
  *
@@ -18,14 +18,14 @@ export {
   validateXmlName,
   encodeCData,
   validateCommentText
-} from "../encode";
+} from "@xml/encode";
 
 // Writers
-export { XmlWriter as Writer, StdDocAttributes } from "../writer";
-export { XmlStreamWriter as StreamWriter } from "../stream-writer";
+export { XmlWriter as Writer, StdDocAttributes } from "@xml/writer";
+export { XmlStreamWriter as StreamWriter } from "@xml/stream-writer";
 
 // Parsers
-export { SaxParser, parseSax, saxStream } from "../sax";
+export { SaxParser, parseSax, saxStream } from "@xml/sax";
 export {
   parseXml as parse,
   findChild,
@@ -34,6 +34,6 @@ export {
   attr,
   walk,
   toPlainObject
-} from "../dom";
-export { parseXmlToObject as parseToObject } from "../to-object";
-export { query, queryAll } from "../query";
+} from "@xml/dom";
+export { parseXmlToObject as parseToObject } from "@xml/to-object";
+export { query, queryAll } from "@xml/query";

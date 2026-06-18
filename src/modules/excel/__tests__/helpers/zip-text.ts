@@ -62,8 +62,8 @@ export async function loadRoundTrip(bytes: Uint8Array): Promise<{
   entries: EntryMap;
 }> {
   const wb = Workbook.create();
-  await Workbook.loadXlsx(wb, bytes);
-  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  await Workbook.read(wb, bytes);
+  const out = new Uint8Array(await Workbook.toBuffer(wb));
   const entries = await extractAll(out);
   return { wb, bytes: out, entries };
 }
@@ -78,9 +78,9 @@ export async function loadRoundTripDiff(
   mutate: (wb: WorkbookData) => void | Promise<void>
 ): Promise<{ before: EntryMap; after: EntryMap }> {
   const wb = Workbook.create();
-  await Workbook.loadXlsx(wb, bytes);
+  await Workbook.read(wb, bytes);
   await mutate(wb);
-  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  const out = new Uint8Array(await Workbook.toBuffer(wb));
   return {
     before: await extractAll(bytes),
     after: await extractAll(out)

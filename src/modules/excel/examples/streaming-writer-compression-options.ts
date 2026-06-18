@@ -39,7 +39,7 @@ Stream.setCellValue(ws.getCell("C3"), "C3");
 wb.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
+  // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });
 
 const filename2 = process.argv[3];
@@ -77,7 +77,7 @@ Stream.setCellValue(ws2.getCell("C3"), "C3");
 wb2.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
+  // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });
 
 const filename3 = process.argv[4];
@@ -112,5 +112,5 @@ Stream.setCellValue(ws3.getCell("C3"), "C3");
 wb3.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return Workbook.readXlsxFile(wb2, './wb.test2.xlsx');
+  // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });

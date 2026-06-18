@@ -2,6 +2,8 @@
  * Browser Stream - Writable
  */
 
+import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
+import { Readable } from "@stream/browser/readable";
 import { stringToEncodedBytes } from "@stream/common/binary-chunk";
 import { parseEndArgs } from "@stream/common/end-args";
 import { getDefaultHighWaterMark } from "@stream/common/utils";
@@ -10,9 +12,6 @@ import type { WritableStreamOptions, WritableLike } from "@stream/types";
 import { decodeBytesToString } from "@utils/binary";
 import { createAbortError } from "@utils/errors";
 import { EventEmitter } from "@utils/event-emitter";
-
-import { deferTask, inDeferredContext } from "./microtask-context";
-import { Readable } from "./readable";
 
 /**
  * Shared toString implementation for Uint8Array chunks converted from strings.

@@ -104,7 +104,7 @@ addSection("textRotation=45 tests", 13, 14, 15, 60, 45, i => `Test ${i + 1}`);
 
 // --- Write outputs ---
 (async () => {
-  await Workbook.writeXlsx(wb, path.join(outDir, "pdf-rotation-alignment.xlsx"));
+  await Workbook.writeFile(wb, path.join(outDir, "pdf-rotation-alignment.xlsx"));
   console.log("Generated pdf-rotation-alignment.xlsx");
 
   const pdfBytes = await Pdf.fromExcel(wb, { showGridLines: true, showSheetNames: true });

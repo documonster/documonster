@@ -29,7 +29,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Streaming** — `WorkbookReader` and `WorkbookWriter` for large files
 - **CSV import/export** — `readCsv`, `writeCsv`, `readCsvFile`, `writeCsvFile`
 - **Markdown import/export** — `readMarkdown`, `writeMarkdown`, `readMarkdownFile`, `writeMarkdownFile`
-- **PDF export** — `excelToPdf()` with full styling, pagination, fonts, encryption
+- **PDF export** — `Pdf.fromExcel()` with full styling, pagination, fonts, encryption
 - **Browser support** — `xlsx.load()`, `xlsx.writeBuffer()`, no polyfills needed
 
 ## Quick Start
@@ -37,21 +37,21 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 ### Creating a Workbook
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet } from "@cj-tech-master/excelts/excel";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("My Sheet");
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "My Sheet");
 
 // Add data
-sheet.addRow(["Name", "Age", "Email"]);
-sheet.addRow(["John Doe", 30, "john@example.com"]);
-sheet.addRow(["Jane Smith", 25, "jane@example.com"]);
+Worksheet.addRow(sheet, ["Name", "Age", "Email"]);
+Worksheet.addRow(sheet, ["John Doe", 30, "john@example.com"]);
+Worksheet.addRow(sheet, ["Jane Smith", 25, "jane@example.com"]);
 
 // Node.js: write to file
-await workbook.xlsx.writeFile("output.xlsx");
+await Workbook.writeFile(workbook, "output.xlsx");
 
 // Browser: write to buffer
-const buffer = await workbook.xlsx.writeBuffer();
+const buffer = await Workbook.toBuffer(workbook);
 ```
 
 #### Adding rows by object (with nested keys)
@@ -60,122 +60,125 @@ When columns have keys, rows can be added from objects. Keys may use dotted
 paths to pull values from nested objects:
 
 ```typescript
-sheet.columns = [
+Worksheet.setColumns(sheet, [
   { header: "Name", key: "name", width: 20 },
   { header: "City", key: "address.city", width: 20 }
-];
-sheet.addRow({ name: "Alice", address: { city: "Sydney" } });
+]);
+Worksheet.addRow(sheet, { name: "Alice", address: { city: "Sydney" } });
 ```
 
 ### Reading a Workbook
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet, Row } from "@cj-tech-master/excelts/excel";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Node.js: read from file
-await workbook.xlsx.readFile("input.xlsx");
+await Workbook.readFile(workbook, "input.xlsx");
 
 // Browser: read from ArrayBuffer
-await workbook.xlsx.load(arrayBuffer);
+await Workbook.read(workbook, arrayBuffer);
 
-const worksheet = workbook.getWorksheet(1);
-worksheet.eachRow((row, rowNumber) => {
-  console.log("Row " + rowNumber + " = " + JSON.stringify(row.values));
+const worksheet = Workbook.getWorksheet(workbook, 1);
+Worksheet.eachRow(worksheet, (row, rowNumber) => {
+  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.values(worksheet, rowNumber)));
 });
 ```
 
 ### Styling Cells
 
 ```typescript
-const cell = worksheet.getCell("A1");
-cell.value = "Hello";
-cell.font = {
+import { Cell } from "@cj-tech-master/excelts/excel";
+
+Cell.setValue(worksheet, "A1", "Hello");
+Cell.setFont(worksheet, "A1", {
   name: "Arial",
   size: 16,
   bold: true,
   color: { argb: "FFFF0000" }
-};
-cell.fill = {
+});
+Cell.setFill(worksheet, "A1", {
   type: "pattern",
   pattern: "solid",
   fgColor: { argb: "FFFFFF00" }
-};
-cell.border = {
+});
+Cell.setBorder(worksheet, "A1", {
   top: { style: "thin" },
   left: { style: "thin" },
   bottom: { style: "thin" },
   right: { style: "thin" }
-};
-cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-cell.numFmt = "$#,##0.00";
+});
+Cell.setAlignment(worksheet, "A1", { vertical: "middle", horizontal: "center", wrapText: true });
+Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 ```
 
 ### Number Formats
 
 ```typescript
+import { Cell } from "@cj-tech-master/excelts/excel";
+
 // Currency
-cell.numFmt = "$#,##0.00";
+Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 
 // Percentage
-cell.numFmt = "0.00%";
+Cell.setNumFmt(worksheet, "A1", "0.00%");
 
 // Date
-cell.numFmt = "yyyy-mm-dd";
+Cell.setNumFmt(worksheet, "A1", "yyyy-mm-dd");
 
 // Custom
-cell.numFmt = '#,##0.00 "units"';
+Cell.setNumFmt(worksheet, "A1", '#,##0.00 "units"');
 ```
 
 ### Rich Text
 
 ```typescript
-cell.value = {
+Cell.setValue(worksheet, "A1", {
   richText: [
     { text: "Bold ", font: { bold: true } },
     { text: "and ", font: {} },
     { text: "Red", font: { color: { argb: "FFFF0000" } } }
   ]
-};
+});
 ```
 
 ### Formulas
 
 ```typescript
-cell.value = { formula: "SUM(A1:A10)" };
-cell.value = { formula: "A1+B1", result: 42 }; // with cached result
+Cell.setValue(worksheet, "A1", { formula: "SUM(A1:A10)" });
+Cell.setValue(worksheet, "A1", { formula: "A1+B1", result: 42 }); // with cached result
 
 // Shared formulas
-sheet.getCell("A1").value = { formula: "B1*2", shareType: "shared", ref: "A1:A10" };
+Cell.setValue(sheet, "A1", { formula: "B1*2", shareType: "shared", ref: "A1:A10" });
 
 // Defined names
-workbook.definedNames.add("MyRange", "Sheet1!$A$1:$B$10");
+DefinedNames.add(Workbook.getDefinedNames(workbook), "Sheet1!$A$1:$B$10", "MyRange");
 ```
 
 ### Data Validation
 
 ```typescript
-worksheet.getCell("A1").dataValidation = {
+Cell.setValidation(worksheet, "A1", {
   type: "list",
   allowBlank: true,
   formulae: ['"Option1,Option2,Option3"']
-};
+});
 
-worksheet.getCell("B1").dataValidation = {
+Cell.setValidation(worksheet, "B1", {
   type: "whole",
   operator: "between",
   formulae: [1, 100],
   showErrorMessage: true,
   errorTitle: "Invalid",
   error: "Enter a number between 1 and 100"
-};
+});
 ```
 
 ### Conditional Formatting
 
 ```typescript
-worksheet.addConditionalFormatting({
+Worksheet.addConditionalFormatting(worksheet, {
   ref: "A1:A100",
   rules: [
     {
@@ -397,14 +400,10 @@ worksheet.columns.forEach(column => {
 
 ExcelTS includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
 
-> **Setup:** Chart support is opt-in to keep bundle size minimal. Call `installChartSupport()` once at startup before using any chart API (`addChart`, `addLineChart`, chart load/write, etc.):
->
-> ```typescript
-> import { installChartSupport } from "@cj-tech-master/excelts/chart";
-> installChartSupport(); // once, at startup
-> ```
->
-> Without this call, `worksheet.addChart()` and chart serialisation during `writeFile()` will throw.
+> **Setup:** No install or registration step is required. The chart APIs
+> (`Chart.add`, the per-type shortcuts, chart load/write, etc.) pull the chart
+> implementation directly and statically. A consumer that never references any
+> chart API gets the entire chart implementation tree-shaken out of the bundle.
 
 > A runnable end-to-end example is at [`src/modules/excel/examples/charts.ts`](examples/charts.ts) — it creates 70+ charts covering every classic + ChartEx type, all preset families, combo / pivot / chartsheet layouts, and exports SVG / PNG / PDF previews. Run with `pnpm exec tsx src/modules/excel/examples/charts.ts`.
 
@@ -776,18 +775,19 @@ ws.addChart(
 ### Preview Export
 
 ```typescript
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { Chart } from "@cj-tech-master/excelts/excel";
+import { Pdf } from "@cj-tech-master/excelts/pdf";
 
-const chart = ws.getCharts()[0];
+const chart = Chart.get(ws)[0];
 
 // SVG / PNG previews — Promise for PNG because the Node rasteriser is async.
-const svg = chart.toSVG({ width: 800, height: 450, backgroundColor: "transparent" });
-const png = await chart.toPNG({ width: 800, height: 450, scale: 2, dpi: 192 });
+const svg = Chart.toSVG(chart, { width: 800, height: 450, backgroundColor: "transparent" });
+const png = await Chart.toPNG(chart, { width: 800, height: 450, scale: 2, dpi: 192 });
 
 // Standalone one-page PDF — classic charts render as vector content
 // (selectable text, resolution-independent shapes); ChartEx types render
 // as vector too when supported, or raster via `forceRaster: true`.
-const pdf = await chartToPdf(chart, {
+const pdf = await Pdf.fromChart(chart, {
   title: "Revenue",
   width: 640,
   height: 400,
@@ -796,8 +796,9 @@ const pdf = await chartToPdf(chart, {
 
 // Inspect the vector-vs-raster decision explicitly:
 import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts/chart";
-if (chart.chartExModel) {
-  console.log(canRenderChartExAsVectorPdf(chart.chartExModel));
+const chartExModel = Chart.chartExModel(chart);
+if (chartExModel) {
+  console.log(canRenderChartExAsVectorPdf(chartExModel));
 }
 ```
 
@@ -1022,18 +1023,19 @@ Full API mapping tables are in dedicated docs, one per library:
 Export any workbook to PDF with zero external dependencies:
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet, Column } from "@cj-tech-master/excelts/excel";
+import { Pdf } from "@cj-tech-master/excelts/pdf";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Report");
-sheet.columns = [
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Report");
+Worksheet.setColumns(sheet, [
   { header: "Product", key: "product", width: 20 },
   { header: "Revenue", key: "revenue", width: 15 }
-];
-sheet.addRow({ product: "Widget", revenue: 1000 });
-sheet.getColumn("revenue").numFmt = "$#,##0.00";
+]);
+Worksheet.addRow(sheet, { product: "Widget", revenue: 1000 });
+Column.setStyle(sheet, "revenue", { numFmt: "$#,##0.00" });
 
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Sales Report"
@@ -1051,15 +1053,15 @@ window.open(URL.createObjectURL(blob));
 ### XLSX to PDF Conversion
 
 ```typescript
-const workbook = new Workbook();
-await workbook.xlsx.readFile("input.xlsx");
-const pdf = await excelToPdf(workbook);
+const workbook = Workbook.create();
+await Workbook.readFile(workbook, "input.xlsx");
+const pdf = await Pdf.fromExcel(workbook);
 ```
 
 ### PDF Encryption
 
 ```typescript
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader",
@@ -1072,7 +1074,7 @@ const pdf = await excelToPdf(workbook, {
 
 ```typescript
 import { readFileSync } from "fs";
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```
@@ -1080,45 +1082,59 @@ const pdf = await excelToPdf(workbook, {
 ## CSV Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cj-tech-master/excelts/excel";
+import {
+  readCsv,
+  writeCsv,
+  writeCsvBuffer,
+  readCsvFile,
+  writeCsvFile
+} from "@cj-tech-master/excelts/excel/csv";
 import fs from "fs";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Node.js: read/write CSV files
-await workbook.readCsvFile("data.csv");
-await workbook.writeCsvFile("output.csv");
+await readCsvFile(workbook, "data.csv");
+await writeCsvFile(workbook, "output.csv");
 
 // Read CSV from stream
-await workbook.readCsv(fs.createReadStream("data.csv"), { sheetName: "Imported" });
+await readCsv(workbook, fs.createReadStream("data.csv"), { sheetName: "Imported" });
 
 // Write CSV to stream
-await workbook.writeCsv(fs.createWriteStream("output.csv"));
+await writeCsv(workbook, fs.createWriteStream("output.csv"));
 
 // Write CSV to string / bytes
-const csvText = workbook.writeCsv();
-const bytes = await workbook.writeCsvBuffer();
+const csvText = writeCsv(workbook);
+const bytes = await writeCsvBuffer(workbook);
 
 // Browser: read from string/ArrayBuffer/File
-await workbook.readCsv(csvString);
-await workbook.readCsv(arrayBuffer);
+await readCsv(workbook, csvString);
+await readCsv(workbook, arrayBuffer);
 ```
 
 ## Markdown Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "@cj-tech-master/excelts/excel";
+import {
+  readMarkdown,
+  writeMarkdown,
+  writeMarkdownBuffer,
+  readMarkdownFile,
+  writeMarkdownFile
+} from "@cj-tech-master/excelts/excel/markdown";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Read Markdown table
-workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-await workbook.readMarkdownFile("table.md");
+readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+await readMarkdownFile(workbook, "table.md");
 
 // Write Markdown
-const mdText = workbook.writeMarkdown();
-await workbook.writeMarkdownFile("output.md");
-const bytes = workbook.writeMarkdownBuffer();
+const mdText = writeMarkdown(workbook);
+await writeMarkdownFile(workbook, "output.md");
+const bytes = writeMarkdownBuffer(workbook);
 ```
 
 ## Streaming API
@@ -1128,9 +1144,9 @@ const bytes = workbook.writeMarkdownBuffer();
 Read large XLSX files with minimal memory usage:
 
 ```typescript
-import { WorkbookReader } from "@cj-tech-master/excelts";
+import { Stream } from "@cj-tech-master/excelts/excel";
 
-const reader = new WorkbookReader("large-file.xlsx", {
+const reader = new Stream.WorkbookReader("large-file.xlsx", {
   worksheets: "emit",
   sharedStrings: "cache",
   hyperlinks: "ignore",
@@ -1150,9 +1166,9 @@ for await (const worksheet of reader) {
 Write large XLSX files row by row:
 
 ```typescript
-import { WorkbookWriter } from "@cj-tech-master/excelts";
+import { Stream } from "@cj-tech-master/excelts/excel";
 
-const workbook = new WorkbookWriter({
+const workbook = new Stream.WorkbookWriter({
   filename: "output.xlsx",
   useSharedStrings: true,
   useStyles: true
@@ -1170,7 +1186,7 @@ await workbook.commit();
 ### Web Streams (Node.js 22+ and Browsers)
 
 ```typescript
-import { WorkbookWriter, WorkbookReader } from "@cj-tech-master/excelts";
+import { Stream } from "@cj-tech-master/excelts/excel";
 
 // Write to Web WritableStream
 const chunks: Uint8Array[] = [];
@@ -1180,7 +1196,7 @@ const writable = new WritableStream({
   }
 });
 
-const writer = new WorkbookWriter({ stream: writable });
+const writer = new Stream.WorkbookWriter({ stream: writable });
 const sheet = writer.addWorksheet("Sheet1");
 sheet.addRow(["Name", "Score"]).commit();
 sheet.addRow(["Alice", 98]).commit();
@@ -1202,7 +1218,7 @@ const readable = new ReadableStream({
   }
 });
 
-const reader = new WorkbookReader(readable, { worksheets: "emit" });
+const reader = new Stream.WorkbookReader(readable, { worksheets: "emit" });
 for await (const ws of reader) {
   for await (const row of ws) {
     console.log(row.values);
@@ -1215,13 +1231,13 @@ for await (const ws of reader) {
 ### Using with Bundlers (Vite, Webpack, Rollup, esbuild)
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Cell } from "@cj-tech-master/excelts/excel";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Sheet1");
-sheet.getCell("A1").value = "Hello, Browser!";
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Sheet1");
+Cell.setValue(sheet, "A1", "Hello, Browser!");
 
-const buffer = await workbook.xlsx.writeBuffer();
+const buffer = await Workbook.toBuffer(workbook);
 const blob = new Blob([buffer], {
   type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 });
@@ -1234,14 +1250,14 @@ const url = URL.createObjectURL(blob);
 <script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
 <script>
   const { Workbook } = ExcelTS;
-  const wb = new Workbook();
+  const wb = Workbook.create();
 </script>
 ```
 
 ### Browser Notes
 
-- Use `xlsx.load(arrayBuffer)` instead of `xlsx.readFile()`
-- Use `xlsx.writeBuffer()` instead of `xlsx.writeFile()`
+- Use `Workbook.read(workbook, arrayBuffer)` instead of `Workbook.readFile(...)`
+- Use `Workbook.toBuffer(workbook)` instead of `Workbook.writeFile(...)`
 - PDF export is fully supported
 - CSV and Markdown operations are supported
 - Sheet protection with passwords uses pure JS SHA-512

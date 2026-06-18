@@ -8,8 +8,8 @@
  * but bytes are applied in a specific order derived from the GUID.
  */
 
-import { generateGuid } from "../core/internal-utils";
-import { DocxError } from "../errors";
+import { generateGuid } from "@word/core/internal-utils";
+import { DocxError } from "@word/errors";
 
 /** Parse a GUID string "{8-4-4-4-12}" into 16 bytes in obfuscation-apply order. */
 function parseGuid(guid: string): Uint8Array {

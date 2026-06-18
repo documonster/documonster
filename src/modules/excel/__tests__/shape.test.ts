@@ -7,7 +7,7 @@
  * - multiple shapes and different anchor inputs
  */
 
-import { unzip } from "@archive/index";
+import { unzip } from "@archive/read-archive";
 import { Cell, Workbook } from "@excel/index";
 import { addWorkbookImage } from "@excel/workbook-core";
 import { addChart, addImage, addShape, getShapes, getSheetModel } from "@excel/worksheet";
@@ -70,7 +70,7 @@ describe("Worksheet.addShape", () => {
       text: "Important"
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
 
     expect(xml).toContain("xdr:sp");
@@ -97,7 +97,7 @@ describe("Worksheet.addShape", () => {
       lineWidth: 2
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
 
     expect(xml).toContain('prst="rect"');
@@ -114,7 +114,7 @@ describe("Worksheet.addShape", () => {
     const ws = Workbook.addWorksheet(wb, "shapes");
     addShape(ws, { type: "rect", range: "A1:B2", lineColor: "000000" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
 
     expect(xml).toContain("<a:noFill");
@@ -126,7 +126,7 @@ describe("Worksheet.addShape", () => {
     Cell.setValue(ws, "A1", "data");
     addShape(ws, { type: "roundRect", range: "B2:D5", fillColor: "FFD966", text: "Note" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shapes" });
   });
 
@@ -138,7 +138,7 @@ describe("Worksheet.addShape", () => {
       range: { tl: "B2", ext: { width: 120, height: 80 } } as never,
       fillColor: "FF0000"
     });
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
     expect(xml).toContain("xdr:oneCellAnchor");
     expect(xml).toContain('prst="rect"');
@@ -153,7 +153,7 @@ describe("Worksheet.addShape", () => {
       range: { pos: { x: 30, y: 60 }, ext: { width: 120, height: 80 } } as never,
       fillColor: "00B050"
     });
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
     expect(xml).toContain("xdr:absoluteAnchor");
     expect(xml).toContain('prst="ellipse"');
@@ -164,7 +164,7 @@ describe("Worksheet.addShape", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "shapes");
     addShape(ws, { type: "rect", range: "A1:B2", fillColor: "#ffd966", lineColor: "#00b050" });
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
     expect(xml).toContain('<a:srgbClr val="FFD966"');
     expect(xml).toContain('<a:srgbClr val="00B050"');
@@ -176,7 +176,7 @@ describe("Worksheet.addShape", () => {
     const ws = Workbook.addWorksheet(wb, "shapes");
     // excelts cell fills use 8-digit ARGB; addShape must coerce to valid 6-digit RGB.
     addShape(ws, { type: "rect", range: "A1:B2", fillColor: "FFFF0000", lineColor: "FF00B050" });
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
     expect(xml).toContain('<a:srgbClr val="FF0000"');
     expect(xml).toContain('<a:srgbClr val="00B050"');
@@ -212,16 +212,16 @@ describe("Worksheet.addShape", () => {
     addShape(ws, { type: "rect", range: "C12:H20", fillColor: "FFD966" });
 
     // Round-trip so the chart becomes a preserved graphicFrame, then re-emit.
-    const buf1 = await Workbook.toXlsxBuffer(wb);
+    const buf1 = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf1 as unknown as Uint8Array);
+    await Workbook.read(wb2, buf1 as unknown as Uint8Array);
     addShape(Workbook.getWorksheet(wb2, "mix")!, {
       type: "ellipse",
       range: "C22:H30",
       fillColor: "9DC3E6"
     });
 
-    const xml = await readDrawingXml((await Workbook.toXlsxBuffer(wb2)) as unknown as Uint8Array);
+    const xml = await readDrawingXml((await Workbook.toBuffer(wb2)) as unknown as Uint8Array);
     const ids = [...xml.matchAll(/<xdr:cNvPr id="(\d+)"/g)].map(m => m[1]);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -230,7 +230,7 @@ describe("Worksheet.addShape", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "shapes");
     addShape(ws, { type: "rect", range: "A1:B2", text: "a < b & c > d" });
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
     expect(xml).toContain("a &lt; b &amp; c &gt; d");
     await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shape-text-escape" });
@@ -248,7 +248,7 @@ describe("Worksheet.addShape", () => {
     addShape(ws, { type: "rect", range: "D1:E2", fillColor: "FFD966" });
     addShape(ws, { type: "ellipse", range: "G1:H2", fillColor: "9DC3E6" });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);
     const ids = [...xml.matchAll(/<xdr:cNvPr id="(\d+)"/g)].map(m => m[1]);
     // Every cNvPr id within a drawing must be unique.
@@ -261,10 +261,10 @@ describe("Worksheet.addShape", () => {
     const ws = Workbook.addWorksheet(wb, "shapes");
     Cell.setValue(ws, "A1", "keep");
     addShape(ws, { type: "rect", range: "B2:D5", fillColor: "FFD966", text: "Box" });
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const ws2 = Workbook.getWorksheet(wb2, "shapes")!;
     // Cell data survives; shapes are not parsed back (documented limitation).
     expect(Cell.getValue(ws2, "A1")).toBe("keep");

@@ -5,18 +5,17 @@
  * Extracted from the original `metadata-parsers.ts`.
  */
 
-import { findChild, parseXml } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import { type Mutable } from "@word/core/internal-utils";
+import { findChildNs, serializeElement } from "@word/reader/parse-utils";
 import type {
   DocumentTheme,
   ThemeColorName,
   ThemeFont,
   ThemeFontScheme,
   ThemeFormatScheme
-} from "../types";
-import { findChildNs, serializeElement } from "./parse-utils";
+} from "@word/types";
+import { findChild, parseXml } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
 
 const THEME_COLOR_NAMES: ThemeColorName[] = [
   "dk1",

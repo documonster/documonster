@@ -51,17 +51,17 @@ export type {
   // Conversion options
   ToPlainObjectOptions,
   ParseXmlToObjectOptions
-} from "./types";
+} from "@xml/types";
 
 // =============================================================================
 // `Xml` domain namespace — encode/decode, writers, parsers, query
 // (tree-shaken via `export * as`)
 // =============================================================================
 
-export * as Xml from "./surface/xml";
+export * as Xml from "@xml/surface/xml";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "./errors";
+export { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "@xml/errors";

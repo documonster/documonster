@@ -2,7 +2,7 @@
  * Shared test helpers for unzip tests.
  */
 
-import { zip } from "@archive";
+import { zip } from "@archive/create-archive";
 
 export function delay(ms = 0): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));

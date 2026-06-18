@@ -3,8 +3,8 @@
  * Passed to all writer functions to provide shared state.
  */
 
-import type { WordSecurityPolicy } from "../security/policy";
-import { DEFAULT_SECURITY_POLICY } from "../security/policy";
+import type { WordSecurityPolicy } from "@word/security/policy";
+import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 
 /**
  * A fully-qualified part name within the package (e.g. "/word/document.xml").

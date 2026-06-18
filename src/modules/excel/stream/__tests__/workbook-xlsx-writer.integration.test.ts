@@ -46,7 +46,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx");
     });
 
@@ -69,7 +69,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filename);
+      await Workbook.readFile(wb2, filename);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       expect(Cell.getValue(ws2, "A1")).toEqual(hyperlink);
     });
@@ -107,7 +107,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, filename);
+      await Workbook.readFile(wb2, filename);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
       for (let i = 0, len = specialValues.length; i < len; i++) {
         const value = specialValues[i];
@@ -135,7 +135,7 @@ describe("WorkbookWriter", () => {
       ws.commit();
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(Cell.getValue(ws2, "A1")).toEqual({
         formula: "ROW()+COLUMN()",
@@ -176,7 +176,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(ws2.autoFilter).toBe("A1:B1");
     });
@@ -190,7 +190,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx", undefined, {
         checkStyles: false
       });
@@ -226,7 +226,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       ["A1", "B1", "C1", "A2", "B2", "C2", "A3", "B3", "C3"].forEach(address => {
         expect(Cell.getValue(ws2, address)).toBe(address);
@@ -282,7 +282,7 @@ describe("WorkbookWriter", () => {
       ws.commit();
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(Cell.getValue(ws2, "A1")).toEqual({
         richText: [
@@ -310,7 +310,7 @@ describe("WorkbookWriter", () => {
       }
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       for (let i = 1; i <= numSheets; i++) {
         const ws2 = Workbook.getWorksheet(wb2, `sheet${i}`)!;
         expect(ws2).toBeTruthy();
@@ -333,7 +333,7 @@ describe("WorkbookWriter", () => {
 
       // Verify the written file is a valid XLSX
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "test")!, "A1")).toBe("hello");
     });
 
@@ -361,7 +361,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(cellName(getCell(ws2, "A1"))).toBe("five");
 
@@ -386,7 +386,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(Cell.getValue(ws2, "A1")).toBe(xmlCharacters);
     });
@@ -397,7 +397,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx", ["dataValidations"]);
     });
 
@@ -413,7 +413,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx", ["dataValidations"]);
     });
 
@@ -454,7 +454,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       expect(Cell.getValue(ws2, "B2")).toBe(5);
@@ -503,7 +503,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(Cell.getValue(ws2, "B2")).toBe(5);
       expect(Cell.getNote(ws2, "B2")).toBe("five");
@@ -533,7 +533,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const backgroundId2 = getBackgroundImageId(ws2);
@@ -560,7 +560,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const backgroundId2 = getBackgroundImageId(ws2);
@@ -581,7 +581,7 @@ describe("WorkbookWriter", () => {
 
       await wb.commit();
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       testUtils.checkTestBook(wb2, "xlsx", ["conditionalFormatting"]);
     });
 
@@ -598,7 +598,7 @@ describe("WorkbookWriter", () => {
 
       // read generated file and extract saved conditional formatting rule
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, sheet)!;
       const [cf2] = ws2.conditionalFormattings;
 
@@ -650,7 +650,7 @@ describe("WorkbookWriter", () => {
       }
 
       const readBack = Workbook.create();
-      await Workbook.loadXlsx(readBack, xlsxBuffer);
+      await Workbook.read(readBack, xlsxBuffer);
       return Workbook.getWorksheet(readBack, "Sheet 1");
     }
 
@@ -756,7 +756,7 @@ describe("WorkbookWriter", () => {
       }
 
       const readBack = Workbook.create();
-      await Workbook.loadXlsx(readBack, xlsxBuffer);
+      await Workbook.read(readBack, xlsxBuffer);
       const ws = Workbook.getWorksheet(readBack, "Sheet 1")!;
       expect(Worksheet.rowCount(ws!)).toBe(20_000);
       expect(Cell.getValue(ws!, "A1")).toBe(bigValue);
@@ -811,7 +811,7 @@ describe("WorkbookWriter", () => {
 
       // Read back and verify
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
       expect(ws2).toBeDefined();
 
@@ -851,7 +851,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -886,7 +886,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -927,7 +927,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -974,7 +974,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -1009,7 +1009,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2Sheet1 = Workbook.getWorksheet(wb2, "Sheet1")!;
       const ws2Sheet2 = Workbook.getWorksheet(wb2, "Sheet2")!;
@@ -1043,7 +1043,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -1073,7 +1073,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       // Check background image
@@ -1109,7 +1109,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -1138,7 +1138,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -1167,7 +1167,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -1198,7 +1198,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Empty")!;
       expect(ws2).toBeDefined();
 
@@ -1241,7 +1241,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const images = getImages(ws2);
@@ -1286,7 +1286,7 @@ describe("WorkbookWriter", () => {
       }
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, xlsxBuffer);
+      await Workbook.read(wb2, xlsxBuffer);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       expect(Cell.getValue(ws2, "A1")).toBe("Hello");
@@ -1346,7 +1346,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       const backgroundId = getBackgroundImageId(ws2);
@@ -1380,7 +1380,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       expect(getImages(ws2).length).toBe(1);
@@ -1410,7 +1410,7 @@ describe("WorkbookWriter", () => {
       await wb.commit();
 
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
       const ws2 = Workbook.getWorksheet(wb2, "Hello")!;
 
       expect(getImages(ws2).length).toBe(1);

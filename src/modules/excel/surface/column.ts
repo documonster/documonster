@@ -2,7 +2,7 @@
  * `Column` namespace surface — column-level operations addressed by key, letter,
  * or 1-based number.
  *
- * `import { Column } from "documonster/excel"` → `Column.setWidth(ws, "A", 20)`,
+ * `import { Column } from "@cj-tech-master/excelts/excel"` → `Column.setWidth(ws, "A", 20)`,
  * `Column.setHeader(ws, 1, "Name")`, `Column.setStyle(ws, "B", { numFmt })`.
  */
 import {

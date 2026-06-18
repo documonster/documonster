@@ -1,7 +1,7 @@
 /**
  * `DefinedNames` namespace surface — workbook/worksheet defined names.
  *
- * `import { DefinedNames } from "documonster/excel"` →
+ * `import { DefinedNames } from "@cj-tech-master/excelts/excel"` →
  *   `DefinedNames.create()`, `DefinedNames.add(dn, "Sheet1!A1", "MyName")`,
  *   `DefinedNames.addFormula(dn, "Tax", "0.2")`, `DefinedNames.remove(...)`.
  *

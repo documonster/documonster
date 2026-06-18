@@ -1,7 +1,7 @@
 /**
  * `Chartsheet` namespace surface — operations on a chartsheet handle.
  *
- * `import { Chartsheet } from "documonster/excel"` →
+ * `import { Chartsheet } from "@cj-tech-master/excelts/excel"` →
  *   `Chartsheet.name(cs)`, `Chartsheet.chart(cs)`, `Chartsheet.model(cs)`.
  *
  * Chartsheet *creation / management* (`addChartsheet`, `getChartsheet`,

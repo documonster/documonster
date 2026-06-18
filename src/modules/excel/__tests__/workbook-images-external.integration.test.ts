@@ -62,7 +62,7 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "png", link: REMOTE_URL });
     addImage(ws, imageId, "B2:D6");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "external image" });
 
     const entries = await extractAll(buffer);
@@ -99,10 +99,10 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "png", link: REMOTE_URL });
     addImage(ws, imageId, "C3:E6");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const ws2 = Workbook.getWorksheet(wb2, "linked")!;
     const images = getImages(ws2);
@@ -127,11 +127,11 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "png", link: REMOTE_URL });
     addImage(ws, imageId, "A1:B2");
 
-    const first = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const first = new Uint8Array(await Workbook.toBuffer(wb));
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, first);
-    const second = new Uint8Array(await Workbook.toXlsxBuffer(wb2));
+    await Workbook.read(wb2, first);
+    const second = new Uint8Array(await Workbook.toBuffer(wb2));
     await expectValidXlsx(second, { label: "external image roundtrip" });
 
     const entries = await extractAll(second);
@@ -150,7 +150,7 @@ describe("Workbook external (linked) images", () => {
     addImage(ws, imageId, "A1:B2");
     addImage(ws, imageId, "D1:E2");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "external dedup" });
 
     const entries = await extractAll(buffer);
@@ -166,7 +166,7 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "png", link: localPath });
     addImage(ws, imageId, "A1:C4");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "external local path" });
 
     const entries = await extractAll(buffer);
@@ -185,7 +185,7 @@ describe("Workbook external (linked) images", () => {
       hyperlinks: { hyperlink: "https://example.com/click", tooltip: "Open" }
     });
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "external image + hyperlink" });
 
     const entries = await extractAll(buffer);
@@ -201,7 +201,7 @@ describe("Workbook external (linked) images", () => {
 
     // Round-trip: both the external link and the hyperlink survive a load.
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const images = getImages(Workbook.getWorksheet(wb2, "linked")!);
     expect(images).toHaveLength(1);
     expect(getImage(wb2, images[0].imageId!)!.link).toBe(REMOTE_URL);
@@ -218,9 +218,9 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "jpeg", link: jpgUrl });
     addImage(ws, imageId, "A1:B2");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const images = getImages(Workbook.getWorksheet(wb2, "linked")!);
     const medium = getImage(wb2, images[0].imageId!)!;
@@ -236,7 +236,7 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "png", link: url });
     addImage(ws, imageId, "A1:B2");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "external link escaping" });
 
     const entries = await extractAll(buffer);
@@ -247,7 +247,7 @@ describe("Workbook external (linked) images", () => {
 
     // The reader decodes them back to the exact original URL.
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
     const images = getImages(Workbook.getWorksheet(wb2, "linked")!);
     expect(getImage(wb2, images[0].imageId!)!.link).toBe(url);
   });
@@ -263,7 +263,7 @@ describe("Workbook external (linked) images", () => {
     });
     addImage(ws, imageId, "A1:B2");
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     const entries = await extractAll(buffer);
 
     // Bytes embedded → media part exists, blip uses r:embed, no External rel.
@@ -295,7 +295,7 @@ describe("Workbook external (linked) images", () => {
     expect(mediaEntries).toHaveLength(0);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, out);
+    await Workbook.read(wb2, out);
     const images = getImages(Workbook.getWorksheet(wb2, "linked")!);
     expect(images).toHaveLength(1);
     expect(getImage(wb2, images[0].imageId!)!.link).toBe(REMOTE_URL);
@@ -322,7 +322,7 @@ describe("Workbook external (linked) images", () => {
     const imageId = addWorkbookImage(wb, { extension: "png", link: REMOTE_URL });
     addWatermark(ws, { imageId, mode: "overlay", opacity: 0.2 });
 
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "external watermark" });
 
     const entries = await extractAll(buffer);
@@ -372,7 +372,7 @@ describe("Workbook external (linked) images", () => {
     addBackgroundImage(ws, 999);
 
     // Must not throw; the dangling background is simply dropped.
-    const buffer = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+    const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer, { label: "invalid background id" });
 
     const entries = await extractAll(buffer);

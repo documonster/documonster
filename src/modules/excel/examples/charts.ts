@@ -5181,10 +5181,10 @@ async function main(): Promise<void> {
   // path (stays byte-preserving for the rest of the chart XML).
   // ---------------------------------------------------------------------------
 
-  await Workbook.writeXlsx(wb, XLSX_PATH);
+  await Workbook.writeFile(wb, XLSX_PATH);
 
   const reread = Workbook.create();
-  await Workbook.readXlsxFile(reread, XLSX_PATH);
+  await Workbook.readFile(reread, XLSX_PATH);
   const firstSheet = Workbook.getWorksheet(reread, "1-Classic Gallery")!;
   if (!firstSheet) {
     throw new Error("Expected to read back the gallery worksheet.");
@@ -5209,7 +5209,7 @@ async function main(): Promise<void> {
       { preferRawPatch: true }
     );
   }
-  await Workbook.writeXlsx(reread, XLSX_PATH);
+  await Workbook.writeFile(reread, XLSX_PATH);
 
   // ---------------------------------------------------------------------------
   // Done — summarise counts and paths.

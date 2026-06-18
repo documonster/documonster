@@ -24,8 +24,8 @@ beforeAll(async () => {
 
 async function loadAndWrite(bytes: Uint8Array): Promise<{ bytes: Uint8Array; entries: EntryMap }> {
   const wb = Workbook.create();
-  await Workbook.loadXlsx(wb, bytes);
-  const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+  await Workbook.read(wb, bytes);
+  const out = new Uint8Array(await Workbook.toBuffer(wb));
   return { bytes: out, entries: await extractAll(out) };
 }
 
@@ -98,8 +98,8 @@ describe("Pivot chart round-trip", () => {
     let bytes = fixture.bytes;
     for (let i = 0; i < 3; i++) {
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, bytes);
-      bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      await Workbook.read(wb, bytes);
+      bytes = new Uint8Array(await Workbook.toBuffer(wb));
       const entries = await extractAll(bytes);
       const chartPath = [...entries.keys()].find(p => /^xl\/charts\/chart\d+[.]xml$/.test(p))!;
       const xml = entryText(entries, chartPath)!;

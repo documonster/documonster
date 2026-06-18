@@ -48,10 +48,10 @@ describe("Workbook", () => {
       Cell.setValue(ws, "B3", "B3");
       Cell.setValue(ws, "C3", "C3");
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
-      await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
+      await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       ["A1", "B1", "C1", "A2", "B2", "C2", "A3", "B3", "C3"].forEach(address => {
@@ -80,7 +80,7 @@ describe("Workbook", () => {
       bufferStream.end();
 
       const wb = Workbook.create();
-      await Workbook.readXlsxStream(wb, bufferStream);
+      await Workbook.readStream(wb, bufferStream);
 
       const ws = getWorksheets(wb)[0];
       expect(Cell.getValue(ws, "A1")).toEqual(richTextSampleA1);
@@ -95,10 +95,10 @@ describe("Workbook", () => {
       Cell.setStyle(ws, "B4", { fill: testUtils.styles.fills.redDarkVertical });
       Cell.setStyle(ws, "B4", { font: testUtils.styles.fonts.broadwayRedOutline20 });
 
-      await Workbook.writeXlsx(wb, TEST_XLSX_FILE_NAME);
-      await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
+      await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
+      await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
       const wb2 = Workbook.create();
-      await Workbook.readXlsxFile(wb2, TEST_XLSX_FILE_NAME);
+      await Workbook.readFile(wb2, TEST_XLSX_FILE_NAME);
 
       const ws2 = Workbook.getWorksheet(wb2, "blort")!;
       expect(Cell.getStyle(ws2, "B4").fill).toEqual(testUtils.styles.fills.redDarkVertical);

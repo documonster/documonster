@@ -5,14 +5,18 @@
  * Supports suffix, legal numbering style, restart levels, and level overrides.
  */
 
+import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { DocxRawXmlPolicyError } from "@word/errors";
+import type {
+  AbstractNumbering,
+  NumberingInstance,
+  NumberingLevel,
+  NumPicBullet
+} from "@word/types";
+import { EMU_PER_POINT } from "@word/units";
+import { renderParagraphProperties } from "@word/writer/paragraph-writer";
+import { renderRunProperties } from "@word/writer/run-writer";
 import type { XmlSink } from "@xml/types";
-
-import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
-import { DocxRawXmlPolicyError } from "../errors";
-import type { AbstractNumbering, NumberingInstance, NumberingLevel, NumPicBullet } from "../types";
-import { EMU_PER_POINT } from "../units";
-import { renderParagraphProperties } from "./paragraph-writer";
-import { renderRunProperties } from "./run-writer";
 
 /** Render a single numbering level. */
 function renderLevel(xml: XmlSink, level: NumberingLevel): void {

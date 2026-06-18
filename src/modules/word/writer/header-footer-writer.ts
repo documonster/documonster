@@ -4,8 +4,6 @@
  * Renders word/header{N}.xml and word/footer{N}.xml parts.
  */
 
-import type { XmlSink } from "@xml/types";
-
 import {
   NS_W,
   NS_R,
@@ -19,11 +17,12 @@ import {
   NS_WP14,
   NS_MC,
   STD_DOC_ATTRIBUTES
-} from "../constants";
-import type { HeaderFooterContent, TextWatermark, Watermark } from "../types";
-import { renderParagraph } from "./paragraph-writer";
-import type { RenderHelpers } from "./render-context";
-import { renderTable } from "./table-writer";
+} from "@word/constants";
+import type { HeaderFooterContent, TextWatermark, Watermark } from "@word/types";
+import { renderParagraph } from "@word/writer/paragraph-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
+import { renderTable } from "@word/writer/table-writer";
+import type { XmlSink } from "@xml/types";
 
 /** Render content blocks (shared between header and footer). */
 function renderContent(xml: XmlSink, content: HeaderFooterContent, helpers?: RenderHelpers): void {

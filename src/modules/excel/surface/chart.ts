@@ -2,7 +2,7 @@
  * `Chart` namespace surface — chart creation / management on a worksheet,
  * plus operations on a chart handle.
  *
- * `import { Chart } from "documonster/excel"` →
+ * `import { Chart } from "@cj-tech-master/excelts/excel"` →
  *   `Chart.add(ws, opts, range)`, `Chart.addBar(ws, opts, "D1:K20")`,
  *   `Chart.get(ws)`, `Chart.remove(ws, chart)` — creation / management.
  *   `Chart.toSVG(chart)`, `Chart.mutate(chart, fn)`, `Chart.setStyle(chart, n)`,

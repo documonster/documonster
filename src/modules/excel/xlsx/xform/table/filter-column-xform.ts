@@ -1,4 +1,4 @@
-import { XmlParseError } from "@excel/errors";
+import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { CustomFilterXform } from "@excel/xlsx/xform/table/custom-filter-xform";
@@ -81,7 +81,7 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
           this.parseOpen(node);
           return true;
         }
-        throw new XmlParseError(
+        throw new XlsxParseError(
           "filterColumn",
           `Unexpected xml node in parseOpen: ${JSON.stringify(node)}`
         );

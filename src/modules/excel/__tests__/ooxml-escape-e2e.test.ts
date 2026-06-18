@@ -33,7 +33,7 @@ describe("OOXML _xHHHH_ escape in table column headers (issue #94)", () => {
     const buffer = fs.readFileSync(filePath);
 
     const wb = Workbook.create();
-    await Workbook.loadXlsx(wb, buffer);
+    await Workbook.read(wb, buffer);
     const ws = getWorksheets(wb)[0]!;
 
     // Table column name must have the decoded newline
@@ -65,10 +65,10 @@ describe("OOXML _xHHHH_ escape in table column headers (issue #94)", () => {
       ]
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer as Buffer);
+    await Workbook.read(wb2, buffer as Buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     const table = getTable(ws2, "TestTable");

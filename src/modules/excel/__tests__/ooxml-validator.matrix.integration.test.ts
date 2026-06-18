@@ -15,7 +15,7 @@ import { describe, it } from "vitest";
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 
 async function assertWorkbookOoxmlOk(wb: WorkbookData): Promise<void> {
-  const buffer = await Workbook.toXlsxBuffer(wb);
+  const buffer = await Workbook.toBuffer(wb);
   await expectValidXlsx(buffer);
 }
 

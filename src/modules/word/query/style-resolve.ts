@@ -16,7 +16,7 @@ import type {
   TableProperties,
   TableStyleConditionalFormat,
   TableStyleConditionType
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Types

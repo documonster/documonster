@@ -16,14 +16,14 @@
  * - Assembling a glossary to attach via `doc.glossary`
  */
 
-import { generateGuid } from "../core/internal-utils";
+import { generateGuid } from "@word/core/internal-utils";
 import type {
   BodyContent,
   BuildingBlock,
   BuildingBlockGallery,
   GlossaryDocument,
   SectionProperties
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Types
@@ -32,7 +32,7 @@ import type {
 // The glossary data model (BuildingBlockGallery / BuildingBlock /
 // GlossaryDocument) lives in ../types so that DocxDocument can reference it
 // without an advanced/ → types cycle. Re-exported here for API compatibility.
-export type { BuildingBlock, BuildingBlockGallery, GlossaryDocument } from "../types";
+export type { BuildingBlock, BuildingBlockGallery, GlossaryDocument } from "@word/types";
 
 // =============================================================================
 // Glossary Document Builder

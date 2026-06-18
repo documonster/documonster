@@ -2,13 +2,13 @@
  * `Io` namespace surface — document serialization / deserialization,
  * incremental editing, and field updates.
  *
- * `import { Io } from "documonster/word"` →
+ * `import { Io } from "@cj-tech-master/excelts/word"` →
  *   `Io.package(doc)`, `Io.read(buffer)`, `Io.toBuffer(doc)`,
  *   `Io.patchDocument(...)`, `Io.updateFields(doc)`, … — tree-shaken via
  *   `export * as Io`.
  */
-export { packageDocx as package } from "../writer/docx-packager";
-export { readDocx as read } from "../reader/docx-reader";
+export { packageDocx as package } from "@word/writer/docx-packager";
+export { readDocx as read } from "@word/reader/docx-reader";
 export {
   toBuffer,
   toBase64,
@@ -17,8 +17,8 @@ export {
   patchTemplate,
   fillTemplateFromBuffer,
   toFlatOpcFromDoc
-} from "../document-io";
-export { editDocxIncremental, listDocxParts, readDocxPart } from "../incremental-edit";
-export { updateFields, updateTableOfContents } from "../advanced/field-engine";
-export { mergeDocuments as merge } from "../query/merge";
-export { splitDocument as split } from "../query/split";
+} from "@word/document-io";
+export { editDocxIncremental, listDocxParts, readDocxPart } from "@word/incremental-edit";
+export { updateFields, updateTableOfContents } from "@word/advanced/field-engine";
+export { mergeDocuments as merge } from "@word/query/merge";
+export { splitDocument as split } from "@word/query/split";

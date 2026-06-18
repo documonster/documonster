@@ -184,11 +184,11 @@ describe("Chart mutation round-trip", () => {
       let bytes = fixture.bytes;
       for (let i = 0; i < 3; i++) {
         const wb = Workbook.create();
-        await Workbook.loadXlsx(wb, bytes);
+        await Workbook.read(wb, bytes);
         // Touch title each pass so structured renderer must run.
         const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
         Chart.setTitle(chart, `Pass ${i + 1}`);
-        bytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+        bytes = new Uint8Array(await Workbook.toBuffer(wb));
         await expectValidXlsx(bytes, { label: `pass ${i + 1}` });
         const entries = await extractAll(bytes);
         const xml = chartParts(entries).chartXml;
@@ -204,7 +204,7 @@ describe("Chart mutation round-trip", () => {
       const fixtures = chartExFixtures;
       for (const fixture of fixtures) {
         const wb = Workbook.create();
-        await Workbook.loadXlsx(wb, fixture.bytes);
+        await Workbook.read(wb, fixture.bytes);
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
         const chart = charts[0];
@@ -224,7 +224,7 @@ describe("Chart mutation round-trip", () => {
             model.chartSpace.chart.autoTitleDeleted = false;
           }
         });
-        const afterBytes = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+        const afterBytes = new Uint8Array(await Workbook.toBuffer(wb));
         await expectValidXlsx(afterBytes, { label: fixture.id });
         const after = await extractAll(afterBytes);
         const chartExPath = [...after.keys()].find(name =>
@@ -251,10 +251,10 @@ describe("Chart mutation round-trip", () => {
     it("a structurally-mutated classic chart workbook opens cleanly in LibreOffice", async () => {
       const fixture = classicFixtures.find(f => f.id === "classic-barClustered")!;
       const wb = Workbook.create();
-      await Workbook.loadXlsx(wb, fixture.bytes);
+      await Workbook.read(wb, fixture.bytes);
       const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
       Chart.setTitle(chart, "LO-mutated title");
-      const out = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+      const out = new Uint8Array(await Workbook.toBuffer(wb));
       await expectValidXlsx(out, { label: "mutated-classic-LO" });
       const result = await runLibreOfficeOpenValidationAuto(out, "mutated-classic.xlsx");
       if (!result.available) {
@@ -272,7 +272,7 @@ describe("Chart mutation round-trip", () => {
       let pickedId: string | undefined;
       for (const fixture of chartExFixtures) {
         const wb = Workbook.create();
-        await Workbook.loadXlsx(wb, fixture.bytes);
+        await Workbook.read(wb, fixture.bytes);
         const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
         if (!Chart.chartExModel(chart)) {
           continue;
@@ -285,7 +285,7 @@ describe("Chart mutation round-trip", () => {
             model.chartSpace.chart.autoTitleDeleted = false;
           }
         });
-        mutated = new Uint8Array(await Workbook.toXlsxBuffer(wb));
+        mutated = new Uint8Array(await Workbook.toBuffer(wb));
         await expectValidXlsx(mutated, { label: `mutated-chartEx-${fixture.id}` });
         pickedId = fixture.id;
         break;

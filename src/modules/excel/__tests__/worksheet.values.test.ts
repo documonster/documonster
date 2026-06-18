@@ -215,9 +215,9 @@ describe("Worksheet", () => {
         expect((cellGetValue(headerCell) as Date).toISOString()).toBe("2024-02-02T00:00:00.000Z");
         expect(cellNumFmt(headerCell)).toBe("yyyy/mm/dd");
 
-        const buffer = await Workbook.toXlsxBuffer(workbook);
+        const buffer = await Workbook.toBuffer(workbook);
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
         const headerCell2 = getCell(ws2!, "A1");
@@ -467,11 +467,11 @@ describe("Worksheet", () => {
       expect(Cell.getValue(worksheet, 4, 1)).toBe(6);
 
       const filename = getUniqueTestFilePath(import.meta.url);
-      await Workbook.writeXlsx(workbook, filename);
+      await Workbook.writeFile(workbook, filename);
       expect(fs.existsSync(filename)).toBe(true);
 
       const readBack = Workbook.create();
-      await Workbook.readXlsxFile(readBack, filename);
+      await Workbook.readFile(readBack, filename);
 
       const ws2 = Workbook.getWorksheet(readBack, "ExampleWS")!;
       expect(ws2).toBeTruthy();
@@ -963,7 +963,7 @@ describe("Worksheet", () => {
           expect(cellNote(rowGetCell(row, 3))).toBe("test4");
           expect(cellNote(rowGetCell(row, 4))).toBe(undefined);
 
-          const buffer = await Workbook.toXlsxBuffer(wb);
+          const buffer = await Workbook.toBuffer(wb);
           expect(buffer.byteLength).toBeGreaterThan(0);
         });
         it("Remove and insert fewer", () => {

@@ -14,7 +14,7 @@
  * earlier, lower-quality definitions for the same code point.
  */
 
-import type { GlyphDef, GlyphPen } from "./type3-glyphs";
+import type { GlyphDef, GlyphPen } from "@pdf/font/type3-glyphs";
 
 const W = 600;
 

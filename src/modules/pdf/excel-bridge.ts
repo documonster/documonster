@@ -71,17 +71,8 @@ import {
   rowEachCell
 } from "@excel/worksheet";
 import type { Worksheet } from "@excel/worksheet";
-import { base64ToUint8Array } from "@utils/utils.base";
-import { wordChartToChartModel } from "@word/bridge/excel-bridge";
-import type { LayoutChart } from "@word/layout/layout-model";
-import type {
-  Chart as WordChart,
-  ChartContent as WordChartContent,
-  ChartExContent as WordChartExContent
-} from "@word/types";
-
-import { PdfDocumentBuilder, type PdfPageBuilder } from "./builder/document-builder";
-import { exportPdf } from "./render/pdf-exporter";
+import { PdfDocumentBuilder, type PdfPageBuilder } from "@pdf/builder/document-builder";
+import { exportPdf } from "@pdf/render/pdf-exporter";
 import {
   PdfCellType,
   type PdfWorkbook,
@@ -104,7 +95,15 @@ import {
   type PdfAnchorRange,
   type PdfExportOptions,
   type PdfCellTypeValue
-} from "./types";
+} from "@pdf/types";
+import { base64ToUint8Array } from "@utils/utils.base";
+import { wordChartToChartModel } from "@word/bridge/excel-bridge";
+import type { LayoutChart } from "@word/layout/layout-model";
+import type {
+  Chart as WordChart,
+  ChartContent as WordChartContent,
+  ChartExContent as WordChartExContent
+} from "@word/types";
 
 // =============================================================================
 // Public API

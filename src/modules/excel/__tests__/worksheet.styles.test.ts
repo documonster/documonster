@@ -263,9 +263,9 @@ describe("Worksheet", () => {
         }
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const cell = getCell(Workbook.getWorksheet(wb2, "test")!, "A1");
       expect(cellGetValue(cell)).toBe(42);
@@ -285,9 +285,9 @@ describe("Worksheet", () => {
       Cell.setValue(ws, "A1", 1.5);
       rowSetNumFmt(Worksheet.getRow(ws, 1), "0.000");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(Cell.getStyle(Workbook.getWorksheet(wb2, "test")!, "A1").numFmt).toBe("0.000");
     });

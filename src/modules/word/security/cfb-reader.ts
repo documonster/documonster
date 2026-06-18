@@ -9,7 +9,7 @@
  *   - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb
  */
 
-import { DocxParseError } from "../errors";
+import { DocxParseError } from "@word/errors";
 
 /** A stream entry extracted from/written to a CFB file. */
 export interface CfbEntry {

@@ -2,7 +2,8 @@
  * Engineering Functions — Native RuntimeValue implementation.
  */
 
-import type { RuntimeValue, ErrorValue, ScalarValue } from "../runtime/values";
+import { checkError } from "@formula/functions/_shared";
+import type { RuntimeValue, ErrorValue, ScalarValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -12,8 +13,7 @@ import {
   topLeft,
   rvNumber,
   rvString
-} from "../runtime/values";
-import { checkError } from "./_shared";
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Type alias for native function signature

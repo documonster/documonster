@@ -8,7 +8,7 @@
  * characters that share structural patterns (stars, arrows, chess pieces, etc).
  */
 
-import type { GlyphDef, GlyphPen } from "./type3-glyphs";
+import type { GlyphDef, GlyphPen } from "@pdf/font/type3-glyphs";
 
 const W = 600;
 

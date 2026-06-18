@@ -424,7 +424,7 @@ async function main() {
 
   // Write output
   const outPath = "out/pivot-tables-example.xlsx";
-  await Workbook.writeXlsx(workbook, outPath);
+  await Workbook.writeFile(workbook, outPath);
   console.log(`Done! ${rows.length} sales rows + ${empRows.length} employee rows`);
   console.log(`Generated 25 pivot tables -> ${outPath}`);
   console.log(`

@@ -5,12 +5,11 @@
  * and table style conditional formats.
  */
 
+import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import type { DocDefaults, StyleDef, TableStyleConditionalFormat, TableBorders } from "@word/types";
+import { renderParagraphProperties } from "@word/writer/paragraph-writer";
+import { renderRunProperties, renderShading } from "@word/writer/run-writer";
 import type { XmlSink } from "@xml/types";
-
-import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
-import type { DocDefaults, StyleDef, TableStyleConditionalFormat, TableBorders } from "../types";
-import { renderParagraphProperties } from "./paragraph-writer";
-import { renderRunProperties, renderShading } from "./run-writer";
 
 /** Render document defaults. */
 function renderDocDefaults(xml: XmlSink, defaults: DocDefaults): void {

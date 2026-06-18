@@ -15,7 +15,7 @@ describe("Workbook", () => {
       let wb;
       beforeAll(() => {
         wb = Workbook.create();
-        return Workbook.readXlsxFile(wb, excelTestDataPath("gold-standard.xlsx"));
+        return Workbook.readFile(wb, excelTestDataPath("gold-standard.xlsx"));
       });
 
       it("reads Values sheet", () => {

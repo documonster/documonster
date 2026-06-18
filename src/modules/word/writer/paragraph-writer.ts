@@ -4,10 +4,8 @@
  * Renders w:pPr and w:p elements including numbering, tabs, borders, etc.
  */
 
-import type { XmlSink } from "@xml/types";
-
-import { isRun } from "../core/text-utils";
-import { DocxRawXmlPolicyError } from "../errors";
+import { isRun } from "@word/core/text-utils";
+import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   ParagraphProperties,
   Paragraph,
@@ -26,16 +24,17 @@ import type {
   MovedFromRun,
   MovedToRun,
   ParagraphFrame
-} from "../types";
-import type { RenderHelpers } from "./render-context";
+} from "@word/types";
+import type { RenderHelpers } from "@word/writer/render-context";
 import {
   renderBorderElement,
   renderRun,
   renderRunProperties,
   renderRunPropertiesContents,
   renderShading
-} from "./run-writer";
-import { renderSectionProperties } from "./section-writer";
+} from "@word/writer/run-writer";
+import { renderSectionProperties } from "@word/writer/section-writer";
+import type { XmlSink } from "@xml/types";
 
 /** Render a single border element. */
 export function renderBorder(xml: XmlSink, tagName: string, border: Border): void {

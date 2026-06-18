@@ -39,7 +39,7 @@ import type {
   Table,
   TableCell,
   TableRow
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Types

@@ -33,12 +33,12 @@ async function writeThenParseZip(workbook: WorkbookData): Promise<ZipEntries>;
 async function writeThenParseZip(workbook: WorkbookData, filePath: string): Promise<ZipEntries>;
 async function writeThenParseZip(workbook: WorkbookData, filePath?: string): Promise<ZipEntries> {
   if (filePath) {
-    await Workbook.writeXlsx(workbook, filePath);
+    await Workbook.writeFile(workbook, filePath);
     const buffer = await fsReadFileAsync(filePath);
     await expectValidXlsx(buffer, { label: `writeThenParseZip ${filePath}` });
     return new ZipParser(buffer).extractAllSync();
   }
-  const buffer = await Workbook.toXlsxBuffer(workbook);
+  const buffer = await Workbook.toBuffer(workbook);
   await expectValidXlsx(buffer, { label: "writeThenParseZip buffer" });
   return new ZipParser(buffer as Buffer).extractAllSync();
 }
@@ -766,11 +766,11 @@ describe("Workbook", () => {
         });
 
         // Step 2: Save to file
-        await Workbook.writeXlsx(workbook, ROUNDTRIP_FILEPATH);
+        await Workbook.writeFile(workbook, ROUNDTRIP_FILEPATH);
 
         // Step 3: Read the file back
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, ROUNDTRIP_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, ROUNDTRIP_FILEPATH);
 
         // Step 4: Check that loaded workbook has pivot tables
         expect(loadedWorkbook.pivotTables.length).toBe(1);
@@ -816,11 +816,11 @@ describe("Workbook", () => {
 
         // Step 2: Save
         const MULTI_PIVOT_PATH = testFilePath("workbook-multi-pivot-roundtrip.test");
-        await Workbook.writeXlsx(workbook, MULTI_PIVOT_PATH);
+        await Workbook.writeFile(workbook, MULTI_PIVOT_PATH);
 
         // Step 3: Load
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, MULTI_PIVOT_PATH);
+        await Workbook.readFile(loadedWorkbook, MULTI_PIVOT_PATH);
 
         // Step 4: Verify both pivot tables are loaded
         expect(loadedWorkbook.pivotTables.length).toBe(2);
@@ -857,11 +857,11 @@ describe("Workbook", () => {
         });
 
         const CACHE_FILEPATH = testFilePath("workbook-pivot-cache.test");
-        await Workbook.writeXlsx(workbook, CACHE_FILEPATH);
+        await Workbook.writeFile(workbook, CACHE_FILEPATH);
 
         // Load and verify cache fields
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, CACHE_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, CACHE_FILEPATH);
 
         expect(loadedWorkbook.pivotTables.length).toBe(1);
         const pivot = loadedWorkbook.pivotTables[0];
@@ -886,11 +886,11 @@ describe("Workbook", () => {
         });
 
         const DATAFIELD_FILEPATH = testFilePath("workbook-pivot-datafields.test");
-        await Workbook.writeXlsx(workbook, DATAFIELD_FILEPATH);
+        await Workbook.writeFile(workbook, DATAFIELD_FILEPATH);
 
         // Load and verify data fields
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, DATAFIELD_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, DATAFIELD_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.dataFields).toBeDefined();
@@ -914,11 +914,11 @@ describe("Workbook", () => {
         });
 
         const COUNT_FILEPATH = testFilePath("workbook-pivot-count.test");
-        await Workbook.writeXlsx(workbook, COUNT_FILEPATH);
+        await Workbook.writeFile(workbook, COUNT_FILEPATH);
 
         // Load and verify metric
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, COUNT_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, COUNT_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.metric).toBe("count");
@@ -939,11 +939,11 @@ describe("Workbook", () => {
         });
 
         const FORMATS_FILEPATH = testFilePath("workbook-pivot-formats.test");
-        await Workbook.writeXlsx(workbook, FORMATS_FILEPATH);
+        await Workbook.writeFile(workbook, FORMATS_FILEPATH);
 
         // Load and verify
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, FORMATS_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, FORMATS_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.applyWidthHeightFormats).toBe("0");
@@ -968,11 +968,11 @@ describe("Workbook", () => {
         });
 
         const SPECIAL_CHARS_FILEPATH = testFilePath("workbook-pivot-special-chars.test");
-        await Workbook.writeXlsx(workbook, SPECIAL_CHARS_FILEPATH);
+        await Workbook.writeFile(workbook, SPECIAL_CHARS_FILEPATH);
 
         // Load and verify special characters are preserved
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, SPECIAL_CHARS_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, SPECIAL_CHARS_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.cacheFields[0].name).toBe("Name<>");
@@ -994,10 +994,10 @@ describe("Workbook", () => {
         });
 
         const SHARED_ITEMS_FILEPATH = testFilePath("workbook-pivot-shared-items.test");
-        await Workbook.writeXlsx(workbook, SHARED_ITEMS_FILEPATH);
+        await Workbook.writeFile(workbook, SHARED_ITEMS_FILEPATH);
 
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, SHARED_ITEMS_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, SHARED_ITEMS_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         // Check that row fields have shared items
@@ -1030,11 +1030,11 @@ describe("Workbook", () => {
         });
 
         // Save it
-        await Workbook.writeXlsx(workbook, NON_SEQ_CACHE_FILEPATH);
+        await Workbook.writeFile(workbook, NON_SEQ_CACHE_FILEPATH);
 
         // Load and resave
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, NON_SEQ_CACHE_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, NON_SEQ_CACHE_FILEPATH);
 
         expect(loadedWorkbook.pivotTables.length).toBe(1);
         const pivot = loadedWorkbook.pivotTables[0];
@@ -1046,11 +1046,11 @@ describe("Workbook", () => {
 
         // Save again
         const RESAVED_FILEPATH = testFilePath("workbook-pivot-non-seq-cache-resaved.test");
-        await Workbook.writeXlsx(loadedWorkbook, RESAVED_FILEPATH);
+        await Workbook.writeFile(loadedWorkbook, RESAVED_FILEPATH);
 
         // Load the resaved file
         const finalWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(finalWorkbook, RESAVED_FILEPATH);
+        await Workbook.readFile(finalWorkbook, RESAVED_FILEPATH);
 
         // Verify pivot table is still intact
         expect(finalWorkbook.pivotTables.length).toBe(1);
@@ -1667,11 +1667,11 @@ describe("Workbook", () => {
 
         // Step 2: Save
         const filePath = testFilePath("workbook-pivot-page-roundtrip1.test");
-        await Workbook.writeXlsx(workbook, filePath);
+        await Workbook.writeFile(workbook, filePath);
 
         // Step 3: Load
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, filePath);
+        await Workbook.readFile(loadedWorkbook, filePath);
 
         expect(loadedWorkbook.pivotTables.length).toBe(1);
         const pivot = loadedWorkbook.pivotTables[0];
@@ -2049,11 +2049,11 @@ describe("Workbook", () => {
         });
 
         const PERVALUE_FILEPATH = testFilePath("workbook-pivot-pervalue.test");
-        await Workbook.writeXlsx(workbook, PERVALUE_FILEPATH);
+        await Workbook.writeFile(workbook, PERVALUE_FILEPATH);
 
         // Load and verify
         const loadedWorkbook = Workbook.create();
-        await Workbook.readXlsxFile(loadedWorkbook, PERVALUE_FILEPATH);
+        await Workbook.readFile(loadedWorkbook, PERVALUE_FILEPATH);
 
         const pivot = loadedWorkbook.pivotTables[0];
         expect(pivot.valueMetrics).toBeDefined();
@@ -2249,10 +2249,10 @@ describe("Workbook", () => {
 
         // Step 2: Save → Load (loaded tables keep their tableNumbers)
         const filepath = testFilePath("r9-b1-table-number.test");
-        await Workbook.writeXlsx(workbook, filepath);
+        await Workbook.writeFile(workbook, filepath);
 
         const loaded = Workbook.create();
-        await Workbook.readXlsxFile(loaded, filepath);
+        await Workbook.readFile(loaded, filepath);
 
         expect(loaded.pivotTables.length).toBe(3);
         expect(loaded.pivotTables.map(pt => pt.tableNumber).sort((a, b) => a - b)).toEqual([
@@ -2300,11 +2300,11 @@ describe("Workbook", () => {
         addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
         const filepath = testFilePath("r9-b4-no-records.test");
-        await Workbook.writeXlsx(workbook, filepath);
+        await Workbook.writeFile(workbook, filepath);
 
         // Step 2: Load and artificially remove cacheRecords (simulating OLAP scenario)
         const loaded = Workbook.create();
-        await Workbook.readXlsxFile(loaded, filepath);
+        await Workbook.readFile(loaded, filepath);
 
         const pivot = loaded.pivotTables[0];
         expect(pivot.cacheRecords).toBeDefined();
@@ -2343,11 +2343,11 @@ describe("Workbook", () => {
         addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
         const filepath = testFilePath("r9-b3-rid-consistency.test");
-        await Workbook.writeXlsx(workbook, filepath);
+        await Workbook.writeFile(workbook, filepath);
 
         // Load, then save again
         const loaded = Workbook.create();
-        await Workbook.readXlsxFile(loaded, filepath);
+        await Workbook.readFile(loaded, filepath);
 
         const zipData = await writeThenParseZip(loaded);
 
@@ -2385,10 +2385,10 @@ describe("Workbook", () => {
 
         // Save and load (so pivot tables get loaded with their own cacheIds)
         const filepath = testFilePath("r9-b6-shared-cache.test");
-        await Workbook.writeXlsx(workbook, filepath);
+        await Workbook.writeFile(workbook, filepath);
 
         const loaded = Workbook.create();
-        await Workbook.readXlsxFile(loaded, filepath);
+        await Workbook.readFile(loaded, filepath);
 
         // Force both pivot tables to share the same cacheId (simulate shared cache)
         const pivot1 = loaded.pivotTables[0];
@@ -2445,11 +2445,11 @@ describe("Workbook", () => {
         addPivotTable(ws, { sourceSheet: source, rows: ["A"], values: ["D"], metric: "sum" });
 
         const filepath = testFilePath("r9-t5-mixed.test");
-        await Workbook.writeXlsx(workbook, filepath);
+        await Workbook.writeFile(workbook, filepath);
 
         // Step 2: Load and add another new pivot table
         const loaded = Workbook.create();
-        await Workbook.readXlsxFile(loaded, filepath);
+        await Workbook.readFile(loaded, filepath);
 
         expect(loaded.pivotTables.length).toBe(1);
         expect(loaded.pivotTables[0].isLoaded).toBe(true);
@@ -2492,10 +2492,10 @@ describe("Workbook", () => {
         expect(cacheRelMatches.length).toBe(2);
 
         // Step 4: Load the result again and verify integrity
-        const buffer = await Workbook.toXlsxBuffer(loaded);
+        const buffer = await Workbook.toBuffer(loaded);
         await expectValidXlsx(buffer, { label: "R9-T5 final load" });
         const final = Workbook.create();
-        await Workbook.loadXlsx(final, buffer as Buffer);
+        await Workbook.read(final, buffer as Buffer);
 
         expect(final.pivotTables.length).toBe(2);
         final.pivotTables.forEach(pt => {
@@ -2522,11 +2522,11 @@ describe("Workbook", () => {
         });
 
         const filepath = testFilePath("r9-b8-rels-skip.test");
-        await Workbook.writeXlsx(workbook, filepath);
+        await Workbook.writeFile(workbook, filepath);
 
         // Load (this will skip parsing cache def rels per R9-B8)
         const loaded = Workbook.create();
-        await Workbook.readXlsxFile(loaded, filepath);
+        await Workbook.readFile(loaded, filepath);
 
         // Verify pivot table is fully functional
         const pivot = loaded.pivotTables[0];

@@ -22,8 +22,7 @@
  */
 
 import { base64ToUint8Array } from "@utils/utils";
-
-import { sanitizeUrl } from "../../core/internal-utils";
+import { sanitizeUrl } from "@word/core/internal-utils";
 import type {
   BodyContent,
   Hyperlink,
@@ -42,8 +41,8 @@ import type {
   TableProperties,
   TableRow,
   TableWidth
-} from "../../types";
-import { EMU_PER_PX } from "../../units";
+} from "@word/types";
+import { EMU_PER_PX } from "@word/units";
 
 /** Options for HTML to DOCX conversion. */
 export interface HtmlImportOptions {

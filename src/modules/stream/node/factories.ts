@@ -37,7 +37,7 @@ export function createBufferedStream(options?: BufferedStreamOptions): BufferedS
   return new BufferedStream(options);
 }
 
-import { Writable } from "./writable";
+import { Writable } from "@stream/node/writable";
 
 // =============================================================================
 // Stream Creation Functions

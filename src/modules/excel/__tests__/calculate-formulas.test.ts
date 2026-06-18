@@ -1325,11 +1325,11 @@ describe("calculateFormulas", () => {
       Cell.setValue(ws1, "B1", { formula: "A3*2", result: 60 });
 
       // Write to buffer
-      const buffer = await Workbook.toXlsxBuffer(wb1);
+      const buffer = await Workbook.toBuffer(wb1);
 
       // Read back
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer as Buffer);
+      await Workbook.read(wb2, buffer as Buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
       // Modify data cells — cached results are now stale

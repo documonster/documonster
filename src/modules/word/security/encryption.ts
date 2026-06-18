@@ -27,17 +27,16 @@ import {
   hash as hashSyncMaybe,
   hashAsync
 } from "@utils/crypto";
-
 import {
   base64ToBytes,
   bytesToBase64,
   randomBytes,
   utf8Decoder,
   utf8Encoder
-} from "../core/internal-utils";
-import { DocxDecryptionError } from "../errors";
-import { readCfb, writeCfb } from "./cfb-reader";
-import type { CfbEntry } from "./cfb-reader";
+} from "@word/core/internal-utils";
+import { DocxDecryptionError } from "@word/errors";
+import { readCfb, writeCfb } from "@word/security/cfb-reader";
+import type { CfbEntry } from "@word/security/cfb-reader";
 
 /** Agile encryption parameters. */
 export interface AgileEncryptionInfo {

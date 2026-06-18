@@ -19,10 +19,10 @@ describe("Documonster.Excel Browser Tests", () => {
     Cell.setValue(Workbook.getWorksheet(wb, "blort"), "A1", "Hello, World!");
     Cell.setValue(Workbook.getWorksheet(wb, "blort"), "A2", 7);
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const ws2 = Workbook.getWorksheet(wb2, "blort")!;
     expect(ws2).toBeTruthy();
@@ -40,13 +40,13 @@ describe("Documonster.Excel Browser Tests", () => {
     Cell.setValue(ws, "A1", "Hello, World!");
     Cell.setValue(ws, "A2", 7);
 
-    const buffer = await Workbook.toXlsxBuffer(wb, options);
+    const buffer = await Workbook.toBuffer(wb, options);
 
     // Convert Uint8Array to base64 string
     const base64String = btoa(String.fromCharCode(...buffer));
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, base64String, options);
+    await Workbook.read(wb2, base64String, options);
 
     const ws2 = Workbook.getWorksheet(wb2, "blort")!;
     expect(ws2).toBeTruthy();
@@ -73,9 +73,9 @@ describe("Documonster.Excel Browser Tests", () => {
     expect(ws.sheetProtection.spinCount).toBe(1000);
 
     // Verify we can write and read back the protected workbook
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const ws2 = Workbook.getWorksheet(wb2, "protected")!;
     expect(ws2).toBeTruthy();
@@ -100,9 +100,9 @@ describe("Documonster.Excel Browser Tests", () => {
       const ws3 = Workbook.addWorksheet(wb, "Sheet3");
       Cell.setValue(ws3, "A1", "Sheet 3 Data");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(Workbook.getWorksheets(wb2).length).toBe(3);
       expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1")).toBe("Sheet 1 Data");
@@ -123,9 +123,9 @@ describe("Documonster.Excel Browser Tests", () => {
       Cell.setValue(ws, "C1", "Big");
       Cell.setFont(ws, "C1", { size: 20 });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "styled")!;
       expect(Cell.getFont(ws2, "A1")?.bold).toBe(true);
@@ -146,9 +146,9 @@ describe("Documonster.Excel Browser Tests", () => {
       Cell.setValue(ws, "C1", new Date(2024, 11, 25));
       Cell.setNumFmt(ws, "C1", "yyyy-mm-dd");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "formats")!;
       expect(Cell.getNumFmt(ws2, "A1")).toBe("#,##0.00");
@@ -166,9 +166,9 @@ describe("Documonster.Excel Browser Tests", () => {
       Cell.setValue(ws, "A2", "Another Merge");
       Worksheet.merge(ws, "A2:B3");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "merged")!;
       // Check that merge info is preserved
@@ -188,9 +188,9 @@ describe("Documonster.Excel Browser Tests", () => {
       Cell.setValue(ws, "A3", { formula: "SUM(A1:A2)", result: 30 });
       Cell.setValue(ws, "B1", { formula: "A1*2", result: 20 });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "formulas")!;
       expect(Cell.getFormula(ws2, "A3")).toBe("SUM(A1:A2)");
@@ -211,9 +211,9 @@ describe("Documonster.Excel Browser Tests", () => {
         }
       }
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "large")!;
       expect(Cell.getValue(ws2, 1, 1)).toBe("R1C1");
@@ -234,9 +234,9 @@ describe("Documonster.Excel Browser Tests", () => {
         hyperlink: "mailto:test@example.com"
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "links")!;
       expect(Cell.getText(ws2, "A1")).toBe("Google");
@@ -256,9 +256,9 @@ describe("Documonster.Excel Browser Tests", () => {
       Cell.setValue(ws, "A1", "Wide column");
       Cell.setValue(ws, "B1", "Wider column");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "dimensions")!;
       expect(Column.getWidth(ws2, "A")).toBe(25);
@@ -278,9 +278,9 @@ describe("Documonster.Excel Browser Tests", () => {
         formulae: ['"Yes,No,Maybe"']
       });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "validation")!;
       expect(Cell.getValidation(ws2, "A1")).toBeTruthy();
@@ -296,9 +296,9 @@ describe("Documonster.Excel Browser Tests", () => {
 
       Cell.setValue(ws, "B1", { formula: "MyValue * 2", result: 200 });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       // Check that the value and formula are preserved
       const ws2 = Workbook.getWorksheet(wb2, "names")!;
@@ -332,13 +332,13 @@ describe("Documonster.Excel Browser Tests", () => {
         Cell.setValue(ws, "A4", { formula: "A2*2", result: 24690 });
 
         // Write using JS fallback compression
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         expect(buffer).toBeTruthy();
         expect(buffer.byteLength).toBeGreaterThan(0);
 
         // Read using JS fallback decompression
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "fallback-test")!;
         expect(ws2).toBeTruthy();
@@ -370,11 +370,11 @@ describe("Documonster.Excel Browser Tests", () => {
           Cell.setValue(ws, `C${i}`, `Data ${i} with some repeated text`.repeat(3));
         }
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
         expect(buffer.byteLength).toBeGreaterThan(0);
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "large-data")!;
         expect(Cell.getValue(ws2, "A1")).toBe("Row 1");
@@ -408,10 +408,10 @@ describe("Documonster.Excel Browser Tests", () => {
         Cell.setValue(ws, "B1", 1234.56);
         Cell.setNumFmt(ws, "B1", "$#,##0.00");
 
-        const buffer = await Workbook.toXlsxBuffer(wb);
+        const buffer = await Workbook.toBuffer(wb);
 
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "styled")!;
         expect(Cell.getFont(ws2, "A1")?.bold).toBe(true);
@@ -429,7 +429,7 @@ describe("Documonster.Excel Browser Tests", () => {
       Cell.setValue(ws, "A1", "Created with native compression");
       Cell.setValue(ws, "A2", 42);
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
 
       // Now disable native APIs and try to read
       const originalCompressionStream = globalThis.CompressionStream;
@@ -440,7 +440,7 @@ describe("Documonster.Excel Browser Tests", () => {
 
       try {
         const wb2 = Workbook.create();
-        await Workbook.loadXlsx(wb2, buffer);
+        await Workbook.read(wb2, buffer);
 
         const ws2 = Workbook.getWorksheet(wb2, "native-created")!;
         expect(Cell.getValue(ws2, "A1")).toBe("Created with native compression");
@@ -466,7 +466,7 @@ describe("Documonster.Excel Browser Tests", () => {
         Cell.setValue(ws, "A1", "Created with JS fallback");
         Cell.setValue(ws, "A2", 123);
 
-        buffer = await Workbook.toXlsxBuffer(wb);
+        buffer = await Workbook.toBuffer(wb);
       } finally {
         // Restore native APIs
         globalThis.CompressionStream = originalCompressionStream;
@@ -475,7 +475,7 @@ describe("Documonster.Excel Browser Tests", () => {
 
       // Now read with native compression restored
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "fallback-created")!;
       expect(Cell.getValue(ws2, "A1")).toBe("Created with JS fallback");
@@ -573,11 +573,11 @@ describe("Documonster.Excel Browser Tests", () => {
       Image.place(ws, imageId, "B2:D6");
 
       // Write to buffer
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
 
       // Load via xlsx.load() which uses loadFromFiles internally
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       // Verify data
       const ws2 = Workbook.getWorksheet(wb2, "with-image")!;

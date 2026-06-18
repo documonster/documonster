@@ -4,13 +4,20 @@
  * Native RuntimeValue implementations.
  */
 
+import {
+  argToNumber,
+  flattenAll,
+  flattenNumbers,
+  firstError,
+  forEachNumber
+} from "@formula/functions/_shared";
 import type {
   RuntimeValue,
   ScalarValue,
   NumberValue,
   ErrorValue,
   ArrayValue
-} from "../runtime/values";
+} from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -20,8 +27,7 @@ import {
   toBooleanRV,
   topLeft,
   isError
-} from "../runtime/values";
-import { argToNumber, flattenAll, flattenNumbers, firstError, forEachNumber } from "./_shared";
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Local Helpers
@@ -893,7 +899,7 @@ export const fnFORECAST: NativeFn = args => {
 // Re-exported from math.ts — canonical definitions live there.
 // ============================================================================
 
-export { fnFACT, fnFACTDOUBLE, fnCOMBIN, fnCOMBINA, fnPERMUT } from "./math";
+export { fnFACT, fnFACTDOUBLE, fnCOMBIN, fnCOMBINA, fnPERMUT } from "@formula/functions/math";
 
 // ============================================================================
 // GEOMEAN, HARMEAN, TRIMMEAN, DEVSQ, AVEDEV

@@ -4,10 +4,9 @@
  * Renders TOC as a structured document tag (SDT) with field codes.
  */
 
+import type { TableOfContents } from "@word/types";
+import { renderParagraph } from "@word/writer/paragraph-writer";
 import type { XmlSink } from "@xml/types";
-
-import type { TableOfContents } from "../types";
-import { renderParagraph } from "./paragraph-writer";
 
 /** Build TOC field instruction from properties. */
 function buildTocInstruction(toc: TableOfContents): string {

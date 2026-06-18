@@ -19,17 +19,17 @@
  * ```
  */
 
-import { initEncryption } from "../core/encryption";
-import { PdfDict, pdfRef, pdfString, pdfNumber } from "../core/pdf-object";
-import { PdfContentStream } from "../core/pdf-stream";
-import { PdfWriter } from "../core/pdf-writer";
-import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
-import { FontManager } from "../font/font-manager";
-import { iterateSystemFontCandidates } from "../font/system-fonts";
-import { parseTtf } from "../font/ttf-parser";
-import { emitTextBlock, alphaGsName } from "../render/page-renderer";
-import type { PdfColor, PdfExportOptions } from "../types";
-import { writeImageXObject } from "./image-utils";
+import { writeImageXObject } from "@pdf/builder/image-utils";
+import { initEncryption } from "@pdf/core/encryption";
+import { PdfDict, pdfRef, pdfString, pdfNumber } from "@pdf/core/pdf-object";
+import { PdfContentStream } from "@pdf/core/pdf-stream";
+import { PdfWriter } from "@pdf/core/pdf-writer";
+import { writePdfAMetadata, writePdfAOutputIntent } from "@pdf/core/pdfa";
+import { FontManager } from "@pdf/font/font-manager";
+import { iterateSystemFontCandidates } from "@pdf/font/system-fonts";
+import { parseTtf } from "@pdf/font/ttf-parser";
+import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
+import type { PdfColor, PdfExportOptions } from "@pdf/types";
 
 // =============================================================================
 // Types
@@ -1642,7 +1642,8 @@ export class PdfDocumentBuilder {
     // 2. Build the PDF bytes
     // 3. Call signPdf() to fill in the real signature
     if (this._signatureOptions) {
-      const { buildSignatureDictPlaceholder, signPdf } = await import("../core/digital-signature");
+      const { buildSignatureDictPlaceholder, signPdf } =
+        await import("@pdf/core/digital-signature");
 
       const { dictString } = buildSignatureDictPlaceholder({
         name: this._signatureOptions.name,

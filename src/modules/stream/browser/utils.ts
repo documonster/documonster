@@ -2,6 +2,12 @@
  * Browser Stream - Utilities
  */
 
+import { Duplex } from "@stream/browser/duplex";
+import { removeEmitterListener, addEmitterListener } from "@stream/browser/helpers";
+import { pipeline, finished } from "@stream/browser/pipeline";
+import { Readable } from "@stream/browser/readable";
+import { Transform } from "@stream/browser/transform";
+import { Writable } from "@stream/browser/writable";
 import { createAddAbortSignal } from "@stream/common/add-abort-signal";
 import { toStreamBytes } from "@stream/common/binary-chunk";
 import { createConsumers } from "@stream/common/consumers";
@@ -17,13 +23,6 @@ import type {
   DuplexStreamOptions
 } from "@stream/types";
 import { concatUint8Arrays, createTextDecoder } from "@utils/binary";
-
-import { Duplex } from "./duplex";
-import { removeEmitterListener, addEmitterListener } from "./helpers";
-import { pipeline, finished } from "./pipeline";
-import { Readable } from "./readable";
-import { Transform } from "./transform";
-import { Writable } from "./writable";
 
 // =============================================================================
 // Utility Functions

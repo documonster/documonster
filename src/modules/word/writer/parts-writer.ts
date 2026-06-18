@@ -5,8 +5,6 @@
  * Renders various auxiliary parts of the DOCX package.
  */
 
-import type { XmlSink } from "@xml/types";
-
 import {
   NS_W,
   NS_R,
@@ -23,8 +21,8 @@ import {
   NS_XSI,
   NS_CUSTOM,
   STD_DOC_ATTRIBUTES
-} from "../constants";
-import { DocxRawXmlPolicyError } from "../errors";
+} from "@word/constants";
+import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   DocumentSettings,
   CoreProperties,
@@ -38,7 +36,8 @@ import type {
   ThemeFont,
   WebSettings,
   PersonInfo
-} from "../types";
+} from "@word/types";
+import type { XmlSink } from "@xml/types";
 
 /** Render footnote/endnote properties in settings. */
 function renderSettingsNoteProperties(

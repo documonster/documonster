@@ -1,4 +1,4 @@
 /**
- * DOCX Module - Node.js Entry Point
+ * DOCX Module — entry point (platform-independent; same bundle for Node and browser).
  */
-export * from "./index.base";
+export * from "@word/index.base";

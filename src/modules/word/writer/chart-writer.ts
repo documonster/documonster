@@ -5,10 +5,9 @@
  * high-level Chart definitions.
  */
 
+import { NS_A, NS_C_CHART, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import type { Chart, ChartAxis, ChartDataLabels, ChartSeries, ChartType } from "@word/types";
 import type { XmlSink } from "@xml/types";
-
-import { NS_A, NS_C_CHART, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
-import type { Chart, ChartAxis, ChartDataLabels, ChartSeries, ChartType } from "../types";
 
 const CHART_TYPE_CATEGORY = {
   bar: { tag: "barChart", direction: "bar", grouping: "clustered" },

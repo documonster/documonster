@@ -264,9 +264,9 @@ describe("DefinedNames", () => {
 
     definedNamesAdd(getDefinedNames(wb), "Data!A1:A3", "myRange");
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     const ranges = definedNamesGetRanges(getDefinedNames(wb2), "myRange");
     expect(ranges.name).toBe("myRange");
@@ -404,9 +404,9 @@ describe("DefinedNames", () => {
       { name: "OpaqueStr", ranges: [], rawText: '"hello"' }
     ]);
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buffer);
+    await Workbook.read(wb2, buffer);
 
     // Opaque names should survive round-trip
     expect(getDefinedNames(wb2).opaqueMap["OpaqueError"]).toBeDefined();

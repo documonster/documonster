@@ -111,9 +111,9 @@ describe("Worksheet", () => {
       ws.views = [{ state: "frozen", xSplit: 0, ySplit: 1, activeCell: "A2" }];
       Cell.setValue(ws, "A1", "header");
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       const ws2 = Workbook.getWorksheet(wb2, "frozen")!;
       expect(ws2.views.length).toBe(1);
@@ -201,9 +201,9 @@ describe("Worksheet", () => {
       Workbook.addWorksheet(wb, "visible");
       Workbook.addWorksheet(wb, "hidden", { state: "hidden" });
 
-      const buffer = await Workbook.toXlsxBuffer(wb);
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(Workbook.getWorksheet(wb2, "visible")!.state).toBe("visible");
       expect(Workbook.getWorksheet(wb2, "hidden")!.state).toBe("hidden");

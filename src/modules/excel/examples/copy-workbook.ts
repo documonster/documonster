@@ -12,7 +12,7 @@ const wb = Workbook.create();
 stopwatch.start();
 Workbook.getXlsxIo(wb)
   .readFile(filenameIn)
-  .then(() => Workbook.writeXlsx(wb, filenameOut))
+  .then(() => Workbook.writeFile(wb, filenameOut))
   .then(() => {
     const micros = stopwatch.microseconds;
     console.log("Done.");

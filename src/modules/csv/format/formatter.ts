@@ -21,14 +21,22 @@
  */
 
 import type {
+  CsvFormatRegex,
+  FormatFieldContext,
+  FormatRowOptions,
+  FormatConfig
+} from "@csv/format/config";
+import { createFormatConfig } from "@csv/format/config";
+import { isFormattedValue } from "@csv/format/formatted-value";
+import type {
   CsvFormatOptions,
   Row,
   TypeTransformMap,
   TransformContext,
   TransformResult
-} from "../types";
-import { startsWithFormulaChar } from "../utils/detect";
-import { formatNumberForCsv, type DecimalSeparator } from "../utils/number";
+} from "@csv/types";
+import { startsWithFormulaChar } from "@csv/utils/detect";
+import { formatNumberForCsv, type DecimalSeparator } from "@csv/utils/number";
 import {
   deduplicateHeaders,
   isRowHashArray,
@@ -36,10 +44,7 @@ import {
   rowHashArrayToValues,
   rowHashArrayMapByHeaders,
   processColumns
-} from "../utils/row";
-import type { CsvFormatRegex, FormatFieldContext, FormatRowOptions, FormatConfig } from "./config";
-import { createFormatConfig } from "./config";
-import { isFormattedValue } from "./formatted-value";
+} from "@csv/utils/row";
 
 // =============================================================================
 // Type Transform Functions

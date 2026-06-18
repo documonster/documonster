@@ -10,8 +10,6 @@
  * (sum/integral/product), delimiters (parentheses/brackets), and matrices.
  */
 
-import { xmlDecode, xmlEncode } from "@xml/encode";
-
 import type {
   MathContent,
   MathDelimiter,
@@ -23,7 +21,8 @@ import type {
   MathSubScript,
   MathSubSuperScript,
   MathSuperScript
-} from "../types";
+} from "@word/types";
+import { xmlDecode, xmlEncode } from "@xml/encode";
 
 // =============================================================================
 // OMML → MathML

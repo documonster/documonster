@@ -5,13 +5,12 @@
  * These are pure parsers that don't depend on ReaderContext.
  */
 
+import { type Mutable } from "@word/core/internal-utils";
+import { parseOutline, parseSrcRect, parseSvgBlip, parseXfrm } from "@word/reader/drawing-helpers";
+import { safeParseInt, serializeElement } from "@word/reader/parse-utils";
+import type { FloatingImage, InlineImageContent, OpaqueRunContent, RunContent } from "@word/types";
 import { findChild, textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
-import type { FloatingImage, InlineImageContent, OpaqueRunContent, RunContent } from "../types";
-import { parseOutline, parseSrcRect, parseSvgBlip, parseXfrm } from "./drawing-helpers";
-import { safeParseInt, serializeElement } from "./parse-utils";
 
 function parseDrawingContent(drawingEl: XmlElement, content: RunContent[]): void {
   // Look for wp:inline

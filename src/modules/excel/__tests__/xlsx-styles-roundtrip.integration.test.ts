@@ -60,11 +60,11 @@ describe("xlsx styles roundtrip", () => {
     Cell.setValue(ws, 11, 1, "Top Left");
     Cell.setStyle(ws, 11, 1, { alignment: { horizontal: "left", vertical: "top" } });
 
-    await Workbook.writeXlsx(wb, filename);
-    await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
+    await Workbook.writeFile(wb, filename);
+    await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
 
     const wb2 = Workbook.create();
-    await Workbook.readXlsxFile(wb2, filename);
+    await Workbook.readFile(wb2, filename);
 
     const ws2 = Workbook.getWorksheet(wb2, "blort")!;
     expect(ws2).toBeTruthy();
@@ -111,11 +111,11 @@ describe("xlsx styles roundtrip", () => {
     Cell.setValue(ws, "B1", "Styled text");
     Cell.setStyle(ws, "B1", { font: { bold: true } });
 
-    await Workbook.writeXlsx(wb, filename);
-    await expectValidXlsx(new Uint8Array(await Workbook.toXlsxBuffer(wb)));
+    await Workbook.writeFile(wb, filename);
+    await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
 
     const wb2 = Workbook.create();
-    await Workbook.readXlsxFile(wb2, filename);
+    await Workbook.readFile(wb2, filename);
 
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(ws2).toBeTruthy();

@@ -53,7 +53,7 @@ describe("threaded comments round-trip", () => {
     ws.threadedComments.push({ ref: "A1", comment: top });
     ws.threadedComments.push({ ref: "A1", comment: reply });
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     await expectValidXlsx(buf, { label: "threaded-comments emit" });
     const entries = await extractAll(new Uint8Array(buf));
 
@@ -106,10 +106,10 @@ describe("threaded comments round-trip", () => {
       comment: { personId, text: "Inspected", date: "2024-06-01T00:00:00Z" }
     });
 
-    const firstBuf = await Workbook.toXlsxBuffer(wb1);
+    const firstBuf = await Workbook.toBuffer(wb1);
     await expectValidXlsx(firstBuf, { label: "threaded-comments roundtrip 1" });
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, firstBuf);
+    await Workbook.read(wb2, firstBuf);
 
     // After reload the workbook carries the same person directory and
     // the worksheet carries the same threaded comments.
@@ -127,7 +127,7 @@ describe("threaded comments round-trip", () => {
     // Excel would accept them — we assert on structured content, not
     // byte equality, because element attribute order isn't strictly
     // controlled by the writer.
-    const secondBuf = await Workbook.toXlsxBuffer(wb2);
+    const secondBuf = await Workbook.toBuffer(wb2);
     await expectValidXlsx(secondBuf, { label: "threaded-comments roundtrip 2" });
     const secondEntries = await extractAll(new Uint8Array(secondBuf));
     expect(secondEntries.get("xl/persons/person.xml")).toBeDefined();
@@ -158,7 +158,7 @@ describe("threaded comments round-trip", () => {
         ]
       }
     });
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     await expectValidXlsx(buf, { label: "threaded-comments mentions" });
     const entries = await extractAll(new Uint8Array(buf));
     const xml = decoder.decode(entries.get("xl/threadedComments/threadedComment1.xml")!.data);
@@ -168,7 +168,7 @@ describe("threaded comments round-trip", () => {
     expect(xml).toContain(`length="4"`);
 
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const reloaded = Workbook.getWorksheet(wb2, "Sheet1")!.threadedComments[0].comment;
     expect(reloaded.mentions).toHaveLength(1);
     expect(reloaded.mentions![0].startIndex).toBe(0);
@@ -191,7 +191,7 @@ describe("threaded comments round-trip", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", 1);
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     await expectValidXlsx(buf, { label: "no-threaded-comments" });
     const entries = await extractAll(new Uint8Array(buf));
     expect(entries.get("xl/persons/person.xml")).toBeUndefined();

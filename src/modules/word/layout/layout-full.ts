@@ -16,10 +16,38 @@
  */
 
 import { measureTextWidth, mapToStandardFont, styledFontVariant } from "@utils/font-metrics";
-
-import { ommlToMathML } from "../advanced/math-convert";
-import { extractMathText, isHyperlink, isRun } from "../core/text-utils";
-import { resolveStyle } from "../query/style-resolve";
+import { ommlToMathML } from "@word/advanced/math-convert";
+import { extractMathText, isHyperlink, isRun } from "@word/core/text-utils";
+import { layoutDocument } from "@word/layout/layout";
+import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
+import {
+  DEFAULT_PAGE_HEIGHT_TWIPS,
+  DEFAULT_PAGE_MARGIN_TWIPS,
+  DEFAULT_PAGE_WIDTH_TWIPS
+} from "@word/layout/layout-constants";
+import type {
+  LayoutAltChunk,
+  LayoutChart,
+  LayoutCheckBox,
+  LayoutDocument,
+  LayoutFloat,
+  LayoutImage,
+  LayoutMath,
+  LayoutOpaqueDrawing,
+  LayoutPage,
+  LayoutParagraph,
+  LayoutSdt,
+  LayoutShape,
+  LayoutTable,
+  LayoutTableCell,
+  LayoutTableOfContents,
+  LayoutTextBox,
+  LineBox,
+  LineBoxItem,
+  PageContent,
+  PageGeometry
+} from "@word/layout/layout-model";
+import { resolveStyle } from "@word/query/style-resolve";
 import type {
   AltChunk,
   BodyContent,
@@ -45,37 +73,8 @@ import type {
   TableBorders,
   TableOfContents,
   TextBox
-} from "../types";
-import { EMU_PER_POINT } from "../units";
-import { layoutDocument } from "./layout";
-import type { LayoutOptions, LayoutResult } from "./layout";
-import {
-  DEFAULT_PAGE_HEIGHT_TWIPS,
-  DEFAULT_PAGE_MARGIN_TWIPS,
-  DEFAULT_PAGE_WIDTH_TWIPS
-} from "./layout-constants";
-import type {
-  LayoutAltChunk,
-  LayoutChart,
-  LayoutCheckBox,
-  LayoutDocument,
-  LayoutFloat,
-  LayoutImage,
-  LayoutMath,
-  LayoutOpaqueDrawing,
-  LayoutPage,
-  LayoutParagraph,
-  LayoutSdt,
-  LayoutShape,
-  LayoutTable,
-  LayoutTableCell,
-  LayoutTableOfContents,
-  LayoutTextBox,
-  LineBox,
-  LineBoxItem,
-  PageContent,
-  PageGeometry
-} from "./layout-model";
+} from "@word/types";
+import { EMU_PER_POINT } from "@word/units";
 
 // =============================================================================
 // Public API

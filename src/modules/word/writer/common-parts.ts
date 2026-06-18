@@ -8,9 +8,7 @@
  * the same rendering logic.
  */
 
-import { XmlWriter } from "@xml/writer";
-
-import { PartPath } from "../constants";
+import { PartPath } from "@word/constants";
 import type {
   AbstractNumbering,
   AppProperties,
@@ -25,9 +23,9 @@ import type {
   NumPicBullet,
   NumberingInstance,
   StyleDef
-} from "../types";
-import { renderFootnotes, renderEndnotes } from "./footnote-writer";
-import { renderNumbering } from "./numbering-writer";
+} from "@word/types";
+import { renderFootnotes, renderEndnotes } from "@word/writer/footnote-writer";
+import { renderNumbering } from "@word/writer/numbering-writer";
 import {
   renderSettings,
   renderFontTable,
@@ -35,9 +33,10 @@ import {
   renderAppProperties,
   renderCustomProperties,
   renderTheme
-} from "./parts-writer";
-import type { RenderHelpers } from "./render-context";
-import { renderStyles } from "./styles-writer";
+} from "@word/writer/parts-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
+import { renderStyles } from "@word/writer/styles-writer";
+import { XmlWriter } from "@xml/writer";
 
 // =============================================================================
 // Types

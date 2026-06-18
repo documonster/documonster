@@ -50,7 +50,7 @@ async function writeAndReadBack(
   const buffer = await getBuffer();
 
   const readBack = Workbook.create();
-  await Workbook.loadXlsx(readBack, buffer);
+  await Workbook.read(readBack, buffer);
   return readBack;
 }
 
@@ -362,7 +362,7 @@ describe("WorkbookWriter", () => {
 
       // Read back with non-streaming reader
       const readBack = Workbook.create();
-      await Workbook.loadXlsx(readBack, buffer);
+      await Workbook.read(readBack, buffer);
       const sheet = Workbook.getWorksheet(readBack, "Sheet1")!;
       const cfs = sheet.conditionalFormattings;
       expect(cfs.length).toBeGreaterThan(0);
@@ -370,7 +370,7 @@ describe("WorkbookWriter", () => {
       expect(dbRule).toBeDefined();
 
       // Write again with non-streaming writer and verify still valid
-      const buf2 = await Workbook.toXlsxBuffer(readBack);
+      const buf2 = await Workbook.toBuffer(readBack);
       const xml2 = await getSheetXml(buf2);
       const id2Match = xml2.match(/<x14:id>([^<]+)<\/x14:id>/);
       expect(id2Match).not.toBeNull();
@@ -472,7 +472,7 @@ describe("WorkbookWriter", () => {
 
       // Read back with non-streaming reader
       const readBack = Workbook.create();
-      await Workbook.loadXlsx(readBack, buffer);
+      await Workbook.read(readBack, buffer);
       const cellValue = Cell.getValue(Workbook.getWorksheet(readBack, "Sheet1")!, "A2") as any;
       expect(cellValue.formula).toBe("_xlfn._xlws.SORT(B1:B5)");
       expect(cellValue.isDynamicArray).toBe(true);
@@ -504,7 +504,7 @@ describe("WorkbookWriter", () => {
       const buffer = await getBuffer();
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(wb2.protection).toBeDefined();
       expect(wb2.protection!.lockStructure).toBe(true);
@@ -529,7 +529,7 @@ describe("WorkbookWriter", () => {
       const buffer = await getBuffer();
 
       const wb2 = Workbook.create();
-      await Workbook.loadXlsx(wb2, buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(getDefaultFont(wb2)).toBeDefined();
       expect(getDefaultFont(wb2)!.name).toBe("Arial");

@@ -2,7 +2,7 @@
  * Excel → formula `WorkbookLike` adapter.
  *
  * The formula engine consumes the structural `WorkbookLike` / `WorksheetLike` /
- * `CellLike` contract (`@formula`). documonster's workbook/worksheet/cell are
+ * `CellLike` contract (`@formula`). excelts' workbook/worksheet/cell are
  * plain-data records with no getters or methods, so this module wraps a
  * `WorkbookData` into a live `WorkbookLike` view. Reads delegate to the flat
  * container/cell helpers; cell `value` / `result` setters write back to the
@@ -118,7 +118,7 @@ function wrapWorksheet(ws: WorksheetData): WorksheetLike {
   };
 }
 
-/** Wrap a documonster `WorkbookData` record as a formula-engine `WorkbookLike`.
+/** Wrap an excelts `WorkbookData` record as a formula-engine `WorkbookLike`.
  *
  * Memoised per `WorkbookData` so repeated calls return the SAME `WorkbookLike`
  * instance. The formula engine persists spill state in a `WeakMap` keyed by the

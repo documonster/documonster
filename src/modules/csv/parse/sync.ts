@@ -5,7 +5,16 @@
  * Provides parseCsv function and low-level parsing generators.
  */
 
-import { getUtf8ByteLength } from "../constants";
+import { getUtf8ByteLength } from "@csv/constants";
+import type { ParseConfig } from "@csv/parse/config";
+import { resolveParseConfig, toScannerConfig } from "@csv/parse/config";
+import { filterValidHeaders } from "@csv/parse/helpers";
+import { splitLinesWithEndings } from "@csv/parse/lines";
+import type { RowProcessResult } from "@csv/parse/row-processor";
+import { processCompletedRow, rowToRecord } from "@csv/parse/row-processor";
+import { scanRow as scanRowImpl } from "@csv/parse/scanner";
+import type { ParseState } from "@csv/parse/state";
+import { createParseState, resetInfoState, getUnquotedArray } from "@csv/parse/state";
 import type {
   CsvParseOptions,
   CsvParseArrayOptions,
@@ -17,18 +26,9 @@ import type {
   RecordWithInfo,
   DynamicTypingConfig,
   CastDateConfig
-} from "../types";
-import { applyDynamicTypingToArrayRow } from "../utils/dynamic-typing";
-import { isEmptyRow } from "../utils/row";
-import type { ParseConfig } from "./config";
-import { resolveParseConfig, toScannerConfig } from "./config";
-import { filterValidHeaders } from "./helpers";
-import { splitLinesWithEndings } from "./lines";
-import type { RowProcessResult } from "./row-processor";
-import { processCompletedRow, rowToRecord } from "./row-processor";
-import { scanRow as scanRowImpl } from "./scanner";
-import type { ParseState } from "./state";
-import { createParseState, resetInfoState, getUnquotedArray } from "./state";
+} from "@csv/types";
+import { applyDynamicTypingToArrayRow } from "@csv/utils/dynamic-typing";
+import { isEmptyRow } from "@csv/utils/row";
 
 // =============================================================================
 // Helper Functions

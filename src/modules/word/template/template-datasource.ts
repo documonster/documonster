@@ -7,13 +7,12 @@
  * @stability experimental
  */
 
+import { DocxError } from "@word/errors";
+import { fillTemplate } from "@word/template/template-engine";
+import type { TemplateOptions } from "@word/template/template-engine";
+import type { DocxDocument } from "@word/types";
 import { parseXml } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
-
-import { DocxError } from "../errors";
-import type { DocxDocument } from "../types";
-import { fillTemplate } from "./template-engine";
-import type { TemplateOptions } from "./template-engine";
 
 // =============================================================================
 // DataSource Interface

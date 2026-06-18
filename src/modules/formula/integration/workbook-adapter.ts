@@ -15,15 +15,6 @@
  *    shared formula translation, etc.
  */
 
-import { dateToExcel } from "@utils/utils.base";
-
-import type {
-  CellLike,
-  TableDefinitionLike,
-  WorkbookLike,
-  WorksheetLike
-} from "../materialize/types";
-import { CellValueTypeLike } from "../materialize/types";
 import type {
   CalcPropertiesSnapshot,
   CellSnapshot,
@@ -37,8 +28,16 @@ import type {
   WorkbookPropertiesSnapshot,
   WorkbookSnapshot,
   WorksheetSnapshot
-} from "./workbook-snapshot";
-import { snapshotCellKey, scopedNameKey } from "./workbook-snapshot";
+} from "@formula/integration/workbook-snapshot";
+import { snapshotCellKey, scopedNameKey } from "@formula/integration/workbook-snapshot";
+import type {
+  CellLike,
+  TableDefinitionLike,
+  WorkbookLike,
+  WorksheetLike
+} from "@formula/materialize/types";
+import { CellValueTypeLike } from "@formula/materialize/types";
+import { dateToExcel } from "@utils/utils.base";
 
 // ============================================================================
 // Build Workbook Snapshot

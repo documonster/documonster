@@ -710,7 +710,7 @@ describe("Third-round chart bug fixes", () => {
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // `<c:bar3DChart>` must NOT contain `<c:overlap>` / `<c:serLines>`.
@@ -743,7 +743,7 @@ describe("Third-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(zipData.get("xl/charts/chart1.xml")!.data);
     // Pick the scaling block that carries logBase — a chart has one
@@ -830,7 +830,7 @@ describe("Third-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
     const xml = textDecoder.decode(zipData.get("xl/charts/chartEx1.xml")!.data);
     // Writer must emit `<cx:txData>` with the formula; cache fill
@@ -988,7 +988,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       }
     });
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const sheetXml = textDecoder.decode(entries.get("xl/chartsheets/sheet1.xml")!.data);
     // ECMA-376 CT_Chartsheet does not contain any of these elements.
@@ -1020,7 +1020,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
         blackAndWhite: true
       }
     });
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const sheetXml = textDecoder.decode(entries.get("xl/chartsheets/sheet1.xml")!.data);
     // Valid CT_CsPageSetup attributes should be present.
@@ -1116,7 +1116,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // if the cache lives elsewhere — but the write path through
     // `toString` should NEVER emit ISO-8601. Scan the chart XML
     // directly to be thorough.
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXml = textDecoder.decode(entries.get("xl/charts/chart1.xml")!.data);
     expect(chartXml).not.toMatch(/\dT\d{2}:\d{2}:\d{2}\.\d{3}Z/);
@@ -1233,7 +1233,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
       { type: "bar", series: [{ values: "Sheet1!$A$1:$A$2" }] },
       { pos: { x: 914400, y: 914400 }, ext: { cx: 3657600, cy: 2743200 } }
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const drawingXml = textDecoder.decode(entries.get("xl/drawings/drawing1.xml")!.data);
     // Chart is actually present
@@ -1306,7 +1306,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
       "D17:K31"
     );
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const drawingPaths = [...entries.keys()].filter(p => /^xl\/drawings\/drawing\d+\.xml$/.test(p));
     expect(drawingPaths.length).toBeGreaterThan(0);
@@ -1364,7 +1364,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     expect(ws3.id).toBe(5);
 
     // And the serialized workbook.xml must not carry duplicate sheetIds.
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const { extractAll } = await import("@archive/unzip/extract");
     const entries = await extractAll(new Uint8Array(buf));
     const workbookXml = new TextDecoder().decode(entries.get("xl/workbook.xml")!.data);
@@ -1393,7 +1393,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       }
     });
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const { extractAll } = await import("@archive/unzip/extract");
     const entries = await extractAll(new Uint8Array(buf));
     const drawingPaths = [...entries.keys()].filter(p => /^xl\/drawings\/drawing\d+\.xml$/.test(p));
@@ -1436,9 +1436,9 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     ]);
     ws2.pageSetup = { ...(ws2.pageSetup ?? {}), printArea: "A1:B3" };
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const loaded = Workbook.getWorksheet(wb2, "WS2")!;
     expect(loaded?.pageSetup?.printArea).toBe("A1:B3");
   });
@@ -1508,7 +1508,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
       }
     ];
 
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const relsXml = textDecoder.decode(entries.get("xl/chartsheets/_rels/sheet1.xml.rels")!.data);
     // Extra rel must survive save.
@@ -1710,7 +1710,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
         series: [{ categories: "Data!$A$1:$A$2", values: "Data!$B$1:$B$2" }]
       }
     });
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const csEntry = entries.get("xl/chartsheets/sheet1.xml");
     expect(csEntry).toBeDefined();
@@ -1720,7 +1720,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // Round-trip through a fresh load — the new model fields must
     // survive parse and re-serialise.
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const cs = Workbook.getChartsheet(wb2, "Charts");
     expect(chartsheetWorkbookViewId(cs!)).toBe(1);
     expect(chartsheetZoomToFit(cs!)).toBe(true);
@@ -2019,9 +2019,9 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // still round-trip whatever the model carries.
     const areaSer = Chart.getSeries(chart, 0) as { pictureOptions?: unknown };
     areaSer.pictureOptions = { pictureFormat: "stack" };
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const ws2 = Workbook.getWorksheet(wb2, "S")!;
     const chart2 = getCharts(ws2)[0];
     const ser2 = Chart.getSeries(chart2, 0) as { pictureOptions?: { pictureFormat?: string } };
@@ -2072,7 +2072,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // completing a write; the cache-populator runs during render and
     // any localSheetId mismatch would throw — successful writeBuffer
     // confirms the resolver threaded the correct scope.
-    await expect(Workbook.toXlsxBuffer(wb)).resolves.toBeDefined();
+    await expect(Workbook.toBuffer(wb)).resolves.toBeDefined();
   });
 
   it("Workbook.validateSheetName rejects worksheet/chartsheet name collisions (unified namespace)", () => {
@@ -2216,7 +2216,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)
@@ -2252,7 +2252,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)
@@ -2289,7 +2289,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     const entries = await extractAll(new Uint8Array(buf));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)
@@ -2354,16 +2354,16 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       } as AddChartOptions,
       "D1:J10"
     );
-    const buf = await Workbook.toXlsxBuffer(wb);
+    const buf = await Workbook.toBuffer(wb);
     // Round-trip, then mutate directly in the structured model.
     const wb2 = Workbook.create();
-    await Workbook.loadXlsx(wb2, buf);
+    await Workbook.read(wb2, buf);
     const chart2 = getCharts(Workbook.getWorksheet(wb2, "S")!)[0];
     const series = Chart.getSeries(chart2, 0) as any;
     // Directly mutate the fill — no call to `setSpPrFill`. Previously
     // this edit was lost.
     series.spPr.fill = { solid: { srgb: "00FF00" } };
-    const buf2 = await Workbook.toXlsxBuffer(wb2);
+    const buf2 = await Workbook.toBuffer(wb2);
     const entries = await extractAll(new Uint8Array(buf2));
     const chartXmlEntry = Array.from(entries.entries()).find(([path]) =>
       /xl\/charts\/chart\d+\.xml$/.test(path)

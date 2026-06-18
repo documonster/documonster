@@ -32,7 +32,7 @@ import {
   ExcelFileError,
   ImageError,
   ExcelNotSupportedError,
-  XmlParseError,
+  XlsxParseError,
   TableError,
   ChartOptionsError
 } from "@excel/errors";
@@ -6066,7 +6066,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     const xform = new WorkSheetXform(options);
     const worksheet = await xform.parseStream(stream);
     if (!worksheet) {
-      throw new XmlParseError(path, "Failed to parse worksheet");
+      throw new XlsxParseError(path, "Failed to parse worksheet");
     }
     worksheet.sheetNo = sheetNo;
     model.worksheetHash[path] = worksheet;

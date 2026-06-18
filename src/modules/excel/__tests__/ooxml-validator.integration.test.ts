@@ -84,7 +84,7 @@ describe("OOXML validator", () => {
       metric: "sum"
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer);
   });
 
@@ -108,7 +108,7 @@ describe("OOXML validator", () => {
       totalsRow: false
     });
 
-    const buffer = await Workbook.toXlsxBuffer(wb);
+    const buffer = await Workbook.toBuffer(wb);
     await expectValidXlsx(buffer);
   });
 });

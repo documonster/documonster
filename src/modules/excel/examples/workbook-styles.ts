@@ -343,7 +343,7 @@ Cell.setValidation(ws, "B24", {
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await Workbook.writeXlsx(wb, filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

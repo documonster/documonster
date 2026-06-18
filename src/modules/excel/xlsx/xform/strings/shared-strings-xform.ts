@@ -1,4 +1,4 @@
-import { XmlParseError } from "@excel/errors";
+import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
 import { StdDocAttributes } from "@xml/writer";
@@ -108,7 +108,7 @@ class SharedStringsXform extends BaseXform {
         this.parser.parseOpen(node);
         return true;
       default:
-        throw new XmlParseError(
+        throw new XlsxParseError(
           "sharedStrings",
           `Unexpected xml node in parseOpen: ${JSON.stringify(node)}`
         );
@@ -134,7 +134,7 @@ class SharedStringsXform extends BaseXform {
       case "sst":
         return false;
       default:
-        throw new XmlParseError("sharedStrings", `Unexpected xml node in parseClose: ${name}`);
+        throw new XlsxParseError("sharedStrings", `Unexpected xml node in parseClose: ${name}`);
     }
   }
 }

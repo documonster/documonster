@@ -92,7 +92,7 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     const ws = Workbook.getWorksheet(wb, "Real Name")!;
     expect(ws).toBeDefined();
@@ -127,7 +127,7 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     const ws = Workbook.getWorksheet(wb, "Absolute")!;
     expect(ws).toBeDefined();
@@ -164,7 +164,7 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     const ws = Workbook.getWorksheet(wb, "Multi")!;
     expect(ws).toBeDefined();
@@ -201,7 +201,7 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     const ws = Workbook.getWorksheet(wb, "DotSlash")!;
     expect(ws).toBeDefined();
@@ -236,7 +236,7 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     const internal = wb as unknown as { _worksheets: unknown[] };
     expect(Object.keys(internal._worksheets)).not.toContain("undefined");
@@ -269,7 +269,7 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     const internal = wb as unknown as { _worksheets: unknown[] };
     expect(Object.keys(internal._worksheets)).not.toContain("undefined");
@@ -304,7 +304,7 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     expect(getWorksheets(wb)).toHaveLength(1);
     const declared = Workbook.getWorksheet(wb, "Declared")!;
@@ -345,7 +345,7 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     expect(getWorksheets(wb)).toEqual([]);
     const internal = wb as unknown as { _worksheets: unknown[] };
@@ -382,7 +382,7 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     await writeFile(filePath, zipBytes);
 
     const wb = Workbook.create();
-    await Workbook.readXlsxFile(wb, filePath);
+    await Workbook.readFile(wb, filePath);
 
     expect(getWorksheets(wb)).toEqual([]);
     const internal = wb as unknown as { _worksheets: unknown[] };
