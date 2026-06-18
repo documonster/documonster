@@ -1,7 +1,7 @@
 /**
  * Integration test: comments subdirectory layout + author round-trip
  *
- * Verifies that excelts correctly reads comments from xlsx files using
+ * Verifies that documonster correctly reads comments from xlsx files using
  * the subdirectory layout (xl/comments/comment1.xml) with absolute rel
  * targets, as produced by tools like openpyxl.
  */

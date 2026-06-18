@@ -259,7 +259,7 @@ export interface SaxOptions {
  *      the assembled bytes to the slow sink with proper backpressure
  *      (e.g. via `pipeline()`).
  *
- * `XmlStreamWriter` is used internally by excelts's xlsx writer. The xlsx
+ * `XmlStreamWriter` is used internally by documonster's xlsx writer. The xlsx
  * writer wraps it in a backpressure-aware zip pipeline that awaits drain
  * BETWEEN zip entries — so memory grows at most by one entry's worth of
  * uncompressed XML before the producer is parked. Within a single very

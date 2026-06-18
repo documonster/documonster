@@ -1,7 +1,7 @@
 /**
  * `Cell` namespace surface — public `(ws, addr, …)` cell operations.
  *
- * Consumed as `import { Cell } from "@cj-tech-master/excelts/excel"` → `Cell.setValue(ws, "A1", 42)`.
+ * Consumed as `import { Cell } from "documonster/excel"` → `Cell.setValue(ws, "A1", 42)`.
  * Each function resolves the cell handle via `getCell(ws, addr)` and delegates
  * to the internal handle-level helpers. Consumers never hold a `CellData`.
  *

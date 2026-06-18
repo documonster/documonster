@@ -58,7 +58,7 @@ function getEffectiveCellType(cell) {
  *
  * This keeps the CellHyperlinkValue.text: string public contract intact while
  * also letting the Hyperlink value class retain the formatted runs
- * (see https://github.com/cjnoname/excelts/issues/142).
+ * (see https://github.com/documonster/documonster/issues/142).
  */
 function extractHyperlinkDisplay(raw: unknown): { text: string; richText?: RichText[] } {
   if (raw === null || raw === undefined) {

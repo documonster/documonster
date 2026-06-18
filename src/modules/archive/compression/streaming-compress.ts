@@ -55,7 +55,7 @@ type ZlibFlushable = {
  * readable side; if a consumer is slow, our `push()` returns false but
  * the inner zlib stream keeps emitting 'data' until its OWN HWM stops it.
  * In the worst case, the zlib internal queue + our readable queue both
- * fill to HWM (≈64 KiB total). For excelts's actual use (one zlib stream
+ * fill to HWM (≈64 KiB total). For documonster's actual use (one zlib stream
  * per ZIP entry, consumer is the zip framer which keeps up), this is fine.
  */
 class TrueStreamingZlib<T extends ZlibFlushable> extends Transform {

@@ -413,7 +413,7 @@ export interface PdfExportOptions {
   /**
    * Optional formula recalculator, injected to avoid a static dependency on
    * the ~200 KB formula engine. Pass `calculateFormulas` from
-   * `@cj-tech-master/excelts/formula` to recompute formula results before
+   * `documonster/formula` to recompute formula results before
    * export; omit it to use the workbook's existing cached results. Explicit
    * replacement for the old formula host-registry — only opt-in callers pull
    * the engine into their bundle.
@@ -526,7 +526,7 @@ export interface PdfExportOptions {
 
   /**
    * PDF document creator metadata.
-   * @default "excelts"
+   * @default "documonster"
    */
   creator?: string;
 

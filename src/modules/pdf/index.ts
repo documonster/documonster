@@ -1,11 +1,11 @@
 /**
- * PDF module for excelts.
+ * PDF module for documonster.
  *
  * A full-featured, zero-dependency PDF engine for both writing and reading.
  *
  * @example Standalone PDF generation:
  * ```typescript
- * import { pdf } from "excelts/pdf";
+ * import { pdf } from "documonster/pdf";
  *
  * const bytes = await pdf([
  *   ["Product", "Revenue"],
@@ -16,8 +16,8 @@
  *
  * @example From Excel Workbook:
  * ```typescript
- * import { Workbook } from "excelts";
- * import { excelToPdf } from "excelts/pdf";
+ * import { Workbook } from "documonster";
+ * import { excelToPdf } from "documonster/pdf";
  *
  * const workbook = new Workbook();
  * const sheet = workbook.addWorksheet("Sales");
@@ -27,7 +27,7 @@
  *
  * @example Read PDF — extract text, images, and metadata:
  * ```typescript
- * import { readPdf } from "excelts/pdf";
+ * import { readPdf } from "documonster/pdf";
  *
  * const result = await readPdf(pdfBytes);
  * console.log(result.text);               // All text

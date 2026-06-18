@@ -25,8 +25,8 @@
  *
  * @example
  * ```typescript
- * import { readDocx } from "excelts/word";
- * import { docxToPdf } from "excelts/pdf";
+ * import { readDocx } from "documonster/word";
+ * import { docxToPdf } from "documonster/pdf";
  *
  * const doc = await readDocx(docxBytes);
  * const pdfBytes = await docxToPdf(doc);
@@ -87,7 +87,7 @@ export interface DocxToPdfOptions {
    * to plug in the Excel chart renderer for publication-quality output:
    *
    * ```typescript
-   * import { createWordChartPdfRenderer } from "excelts/pdf";
+   * import { createWordChartPdfRenderer } from "documonster/pdf";
    * const pdfBytes = await docxToPdf(doc, {
    *   chartRenderer: createWordChartPdfRenderer()
    * });

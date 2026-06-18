@@ -2,7 +2,7 @@
  * `Font` namespace surface — font embedding / subsetting, text shaping,
  * hyphenation.
  *
- * `import { Font } from "@cj-tech-master/excelts/word"` →
+ * `import { Font } from "documonster/word"` →
  *   `Font.embed(opts)`, `Font.subset(data, chars)`, `Font.shapeText(...)`,
  *   `Font.hyphenateWord(...)`, … — tree-shaken via `export * as Font`.
  */

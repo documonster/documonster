@@ -392,7 +392,7 @@ export interface ShapeProperties {
  * `a:xfrm` — shape transform: origin, extent, rotation, flip.
  *
  * OOXML coordinates are in EMUs (1/914400 inch) for position/extent and
- * in 1/60000 of a degree for `rotation`. excelts exposes the raw units
+ * in 1/60000 of a degree for `rotation`. documonster exposes the raw units
  * so round-trip is lossless; helpers in `shape-properties.ts` convert
  * to / from points and degrees when a caller prefers friendlier units.
  */
@@ -1731,7 +1731,7 @@ export interface PivotFormat {
  * `http://schemas.microsoft.com/office/drawing/2007/8/2/chart`).
  *
  * Written as `c:chartSpace/c:extLst/c:ext/c14:pivotOptions`, so Excel
- * recognises the metadata on load; prior versions of excelts wrote this
+ * recognises the metadata on load; prior versions of documonster wrote this
  * data under a private `excelts:` namespace that Excel silently discarded.
  *
  * All `dropZone*` fields are boolean flags controlling whether the

@@ -8,7 +8,7 @@ import { addTable, getTable } from "@excel/worksheet";
 /**
  * End-to-end test for OOXML _xHHHH_ escape decoding in table column headers.
  *
- * Issue: https://github.com/cjnoname/excelts/issues/94
+ * Issue: https://github.com/documonster/documonster/issues/94
  *
  * Root cause: Excel stores newlines in `<tableColumn name="..."/>` attributes
  * as `_x000a_` (OOXML ST_Xstring escaping). On load, `Table.store()` copies

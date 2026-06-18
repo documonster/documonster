@@ -6,8 +6,8 @@
  *
  * @example
  * ```typescript
- * import { Workbook } from "excelts";
- * import { excelToDocx } from "excelts/word/excel";
+ * import { Workbook } from "documonster";
+ * import { excelToDocx } from "documonster/word/excel";
  *
  * const wb = new Workbook();
  * await Workbook.read(wb, buffer);

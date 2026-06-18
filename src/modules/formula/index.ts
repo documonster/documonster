@@ -1,9 +1,9 @@
 /**
- * Public entry for the excelts formula engine.
+ * Public entry for the documonster formula engine.
  *
  * **Functional, zero-side-effect** is the only evaluation style:
  * ```ts
- * import { Formula } from "@cj-tech-master/excelts/formula";
+ * import { Formula } from "documonster/formula";
  * Formula.calculate(workbook);
  * ```
  * Perfect tree-shaking: unused exports are dropped, no module initialisation

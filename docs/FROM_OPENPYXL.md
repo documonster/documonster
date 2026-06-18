@@ -55,7 +55,7 @@ wb.save("out.xlsx")
 **TypeScript:**
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster";
 
 const wb = new Workbook();
 const ws = wb.addWorksheet("Sales");

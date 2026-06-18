@@ -1,5 +1,5 @@
 /**
- * @cj-tech-master/excelts/excel — Node entry.
+ * documonster/excel — Node entry.
  *
  * Re-exports the platform-independent base (domain namespaces + errors) and
  * adds the Node variants of the two platform-specific namespaces:

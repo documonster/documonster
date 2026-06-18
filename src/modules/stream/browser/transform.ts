@@ -35,7 +35,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     }
     // Duck-type: must have Duplex characteristics + _transform method
     return (
-      instance.__excelts_stream === true &&
+      instance.__documonster_stream === true &&
       typeof instance.read === "function" &&
       typeof instance.pipe === "function" &&
       typeof instance.write === "function" &&
@@ -156,7 +156,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     }
   ) {
     super();
-    (this as any).__excelts_stream = true;
+    (this as any).__documonster_stream = true;
 
     // ObjectMode: per-side overrides general (matching Node)
     const objectMode = options?.objectMode ?? false;

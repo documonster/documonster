@@ -42,7 +42,7 @@ const EMU_PER_POINT = 12700;
  * Normalize a user-supplied colour to the bare 6-digit RGB hex that OOXML's
  * `<a:srgbClr val="...">` requires:
  * - strips a leading `#`
- * - accepts 8-digit ARGB (the form excelts uses for cell fills) and drops the
+ * - accepts 8-digit ARGB (the form documonster uses for cell fills) and drops the
  *   leading alpha byte, since `srgbClr` carries no alpha channel
  * - upper-cases
  *

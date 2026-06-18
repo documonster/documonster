@@ -5,7 +5,7 @@
 A high-performance, RFC 4180 compliant CSV parser and formatter with zero dependencies.
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 // Csv.parse, Csv.format, Csv.ParserStream, …
 ```
 
@@ -28,7 +28,7 @@ import { Csv } from "@cj-tech-master/excelts/csv";
 ### Parsing
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Simple: returns string[][]
 const rows = Csv.parse("name,age\nAlice,30\nBob,25");
@@ -50,7 +50,7 @@ const typed = Csv.parse("name,age,active\nAlice,30,true", {
 ### Formatting
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // From arrays
 Csv.format([
@@ -138,7 +138,7 @@ interface CsvParseResult<T> {
 Async parser supporting strings, `AsyncIterable<string | Uint8Array>`, and `ReadableStream`.
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // From string
 const result = await Csv.parseAsync(csvString, { headers: true });
@@ -156,7 +156,7 @@ const result = await Csv.parseAsync(asyncChunks, { headers: true });
 True streaming async generator -- yields rows one at a time. Memory-efficient for large files.
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
   console.log(row); // { name: "...", age: "..." }
@@ -168,7 +168,7 @@ for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
 Async parser with progress callback for large files.
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 const result = await Csv.parseWithProgress(
   largeCsvString,
@@ -188,7 +188,7 @@ const result = await Csv.parseWithProgress(
 Batch CSV formatter. Accepts arrays of arrays or arrays of objects.
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Array of arrays
 Csv.format([
@@ -232,8 +232,8 @@ Csv.format([
 Transform stream that parses CSV data chunk-by-chunk. Cross-platform (Node.js + browser).
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
-import { pipeline } from "@cj-tech-master/excelts/stream";
+import { Csv } from "documonster/csv";
+import { pipeline } from "documonster/stream";
 
 // Using factory function
 const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
@@ -259,7 +259,7 @@ await pipeline(readableStream, parser, writable);
 Transform stream that formats rows to CSV text. Cross-platform (Node.js + browser).
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 const formatter = Csv.createFormatterStream({
   headers: ["name", "age"],
@@ -280,7 +280,7 @@ formatter.pipe(writable);
 ## Detection Utilities
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Auto-detect delimiter from CSV content
 Csv.detectDelimiter("a,b,c\n1,2,3"); // ","
@@ -300,7 +300,7 @@ Csv.stripBom("\ufeffname,age"); // "name,age"
 ## Row Utilities
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Check if row is a RowHashArray
 Csv.isRowHashArray([["key", "value"]]); // true
@@ -315,7 +315,7 @@ Csv.deduplicateHeaders(["id", "name", "name", "name"]);
 ## Dynamic Typing
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Auto-convert string values to native types
 Csv.applyDynamicTyping("42"); // 42 (number)
@@ -329,7 +329,7 @@ Csv.applyDynamicTyping("hello"); // "hello" (string, unchanged)
 ## Number Utilities
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Format numbers with locale-specific decimal separator
 Csv.formatNumber(3.14, "."); // "3.14"
@@ -346,7 +346,7 @@ Csv.parseNumber("3,14", ","); // 3.14
 Generate test CSV data with built-in column types and seeded PRNG for reproducibility.
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
 
 // Generate CSV string
 const { csv, headers, data } = Csv.generate({
@@ -405,8 +405,8 @@ const batch2 = gen.generate(100);
 ## Error Classes
 
 ```typescript
-import { Csv } from "@cj-tech-master/excelts/csv";
-import { CsvError, CsvWorkerError } from "@cj-tech-master/excelts/csv";
+import { Csv } from "documonster/csv";
+import { CsvError, CsvWorkerError } from "documonster/csv";
 
 try {
   Csv.parse(badInput, { headers: true });

@@ -5,7 +5,7 @@
 A zero-dependency, cross-platform archive toolkit for creating, reading, and editing ZIP and TAR archives.
 
 ```typescript
-import { zip, unzip, ZipArchive, ZipReader } from "@cj-tech-master/excelts/zip";
+import { zip, unzip, ZipArchive, ZipReader } from "documonster/zip";
 ```
 
 ## Features
@@ -29,7 +29,7 @@ import { zip, unzip, ZipArchive, ZipReader } from "@cj-tech-master/excelts/zip";
 ### Creating a ZIP
 
 ```typescript
-import { zip, ZipArchive } from "@cj-tech-master/excelts/zip";
+import { zip, ZipArchive } from "documonster/zip";
 
 // Convenience function
 const archive = zip();
@@ -48,7 +48,7 @@ const bytes = await archive.bytes();
 ### Reading a ZIP
 
 ```typescript
-import { unzip, ZipReader } from "@cj-tech-master/excelts/zip";
+import { unzip, ZipReader } from "documonster/zip";
 
 const reader = unzip(zipBytes);
 for await (const entry of reader.entries()) {
@@ -66,7 +66,7 @@ const data = await reader.bytes("hello.txt");
 ### Editing a ZIP
 
 ```typescript
-import { editZip } from "@cj-tech-master/excelts/zip";
+import { editZip } from "documonster/zip";
 
 const editor = await editZip(existingZipBytes, { preserve: "best-effort" });
 editor.delete("old.txt");
@@ -84,7 +84,7 @@ const output = await editor.bytes();
 Factory function that creates a new `ZipArchive` or `TarArchive`.
 
 ```typescript
-import { zip } from "@cj-tech-master/excelts/zip";
+import { zip } from "documonster/zip";
 
 const archive = zip(); // ZipArchive
 const tarArchive = zip({ format: "tar" }); // TarArchive
@@ -95,7 +95,7 @@ const tarArchive = zip({ format: "tar" }); // TarArchive
 Streaming ZIP archive builder with chainable API.
 
 ```typescript
-import { ZipArchive } from "@cj-tech-master/excelts/zip";
+import { ZipArchive } from "documonster/zip";
 
 const archive = new ZipArchive({ level: 6, reproducible: true });
 
@@ -150,7 +150,7 @@ for await (const chunk of op.iterable) { ... }
 Open an archive for reading.
 
 ```typescript
-import { unzip } from "@cj-tech-master/excelts/zip";
+import { unzip } from "documonster/zip";
 
 const reader = unzip(zipBytes);
 const reader = unzip(zipBytes, { password: "secret" });
@@ -162,7 +162,7 @@ const reader = unzip(tarBytes, { format: "tar" });
 Streaming ZIP reader with random-access support.
 
 ```typescript
-import { ZipReader } from "@cj-tech-master/excelts/zip";
+import { ZipReader } from "documonster/zip";
 
 const reader = new ZipReader(zipBytes);
 
@@ -222,7 +222,7 @@ entry.discard();                  // Skip without reading
 Filesystem-like editing of existing ZIP archives. Unchanged entries are passed through efficiently (raw compressed bytes preserved).
 
 ```typescript
-import { editZip, editZipUrl, ZipEditor } from "@cj-tech-master/excelts/zip";
+import { editZip, editZipUrl, ZipEditor } from "documonster/zip";
 
 // From bytes
 const editor = await editZip(zipBytes, {
@@ -243,7 +243,7 @@ editor.rename("a.txt", "b.txt");      // Rename entry
 editor.setComment("Updated archive"); // Set archive comment
 
 // Reusable edit plans
-import { ZipEditPlan } from "@cj-tech-master/excelts/zip";
+import { ZipEditPlan } from "documonster/zip";
 
 const plan = new ZipEditPlan();
 plan.set("config.json", newConfig);
@@ -263,7 +263,7 @@ for await (const chunk of editor.stream()) { ... }
 Read ZIP files from HTTP servers using Range requests -- download only the entries you need.
 
 ```typescript
-import { RemoteZipReader } from "@cj-tech-master/excelts/zip";
+import { RemoteZipReader } from "documonster/zip";
 
 const reader = await RemoteZipReader.open("https://example.com/large.zip");
 
@@ -323,7 +323,7 @@ import {
   decompressAuto,
   decompressAutoSync,
   detectCompressionFormat
-} from "@cj-tech-master/excelts/zip";
+} from "documonster/zip";
 
 // DEFLATE-RAW (used by ZIP files)
 const compressed = await compress(data, { level: 9 });
@@ -354,7 +354,7 @@ import {
   createZlibStream,
   createUnzlibStream,
   hasDeflateRaw
-} from "@cj-tech-master/excelts/zip";
+} from "documonster/zip";
 
 // DEFLATE-RAW streaming
 const deflater = createDeflateStream({ level: 6 });
@@ -375,7 +375,7 @@ hasDeflateRaw(); // true in Node.js, depends on CompressionStream in browser
 ### CRC32
 
 ```typescript
-import { crc32, crc32Update, crc32Finalize } from "@cj-tech-master/excelts/zip";
+import { crc32, crc32Update, crc32Finalize } from "documonster/zip";
 
 // One-shot
 const checksum = crc32(data);
@@ -396,7 +396,7 @@ Unified API compatible with the ZIP interface.
 ### Creating TAR archives
 
 ```typescript
-import { tar, TarArchive } from "@cj-tech-master/excelts/zip";
+import { tar, TarArchive } from "documonster/zip";
 
 // Convenience function
 const tarBytes = await tar(
@@ -418,7 +418,7 @@ for await (const chunk of archive.stream()) { ... }
 ### Reading TAR archives
 
 ```typescript
-import { unzip, TarReader } from "@cj-tech-master/excelts/zip";
+import { unzip, TarReader } from "documonster/zip";
 
 // Via unified API
 const reader = unzip(tarBytes, { format: "tar" });
@@ -438,7 +438,7 @@ const paths = await reader.list();
 ### TAR + GZIP (Node.js only)
 
 ```typescript
-import { targz, TarGzArchive, parseTarGz, untargz } from "@cj-tech-master/excelts/zip";
+import { targz, TarGzArchive, parseTarGz, untargz } from "documonster/zip";
 
 // Create .tar.gz
 const tgzBytes = await targz(
@@ -469,7 +469,7 @@ const files = await untargz(tgzBytes);
 High-level `ArchiveFile` class with disk I/O, glob patterns, directory traversal, and extraction.
 
 ```typescript
-import { ArchiveFile } from "@cj-tech-master/excelts/zip";
+import { ArchiveFile } from "documonster/zip";
 
 // Create from scratch
 const af = new ArchiveFile();
@@ -515,7 +515,7 @@ await tar.writeToFile("archive.tar");
 ZIP Traditional (legacy) and AES-256 encryption support.
 
 ```typescript
-import { ZipArchive, unzip, RemoteZipReader } from "@cj-tech-master/excelts/zip";
+import { ZipArchive, unzip, RemoteZipReader } from "documonster/zip";
 
 // Encrypted entries (handled automatically during read)
 const reader = unzip(encryptedZip, { password: "secret" });
@@ -550,7 +550,7 @@ import {
   RangeNotSupportedError,
   HttpRangeError,
   AbortError
-} from "@cj-tech-master/excelts/zip";
+} from "documonster/zip";
 ```
 
 ---

@@ -50,7 +50,7 @@ export interface RenderLayoutOptions {
   readonly author?: string;
   /** Document subject. */
   readonly subject?: string;
-  /** Document creator (defaults to "excelts"). */
+  /** Document creator (defaults to "documonster"). */
   readonly creator?: string;
   /** Default font family used when a paragraph run has no explicit font. */
   readonly defaultFont?: string;

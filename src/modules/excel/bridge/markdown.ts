@@ -1,5 +1,5 @@
 /**
- * `@cj-tech-master/excelts/excel/markdown` — Markdown ↔ Workbook free functions.
+ * `documonster/excel/markdown` — Markdown ↔ Workbook free functions.
  *
  * Tree-shakeable Markdown-table import/export for the excel Workbook.
  */

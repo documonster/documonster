@@ -3,7 +3,7 @@ import { extractAll } from "@archive/unzip/extract";
  * Tests for the body-level `<w14:checkbox>` SDT writer.
  *
  * The writer is reachable from the public API via the `checkBox()` builder
- * exposed at `excelts/word`. ECMA-376 Part 4 §17.5.2.41 says
+ * exposed at `documonster/word`. ECMA-376 Part 4 §17.5.2.41 says
  * `w14:checkedState/@w14:val` must be a hexadecimal Unicode code point —
  * but the public TS type only declares it as `string`, so callers will
  * naturally try to pass a literal glyph (e.g. `"✓"`). Earlier the writer

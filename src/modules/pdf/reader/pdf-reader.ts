@@ -18,7 +18,7 @@
  *
  * @example Text extraction:
  * ```typescript
- * import { readPdf } from "excelts/pdf";
+ * import { readPdf } from "documonster/pdf";
  *
  * const pdf = await readPdf(pdfBytes);
  * console.log(pdf.text);           // All text from all pages

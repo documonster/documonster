@@ -10,7 +10,7 @@
  *     displays in the formula bar; not part of the OOXML storage contract,
  *     but produced by hand-written formulas and some older tools).
  *
- * When writing, excelts always emits the numeric form — indices map
+ * When writing, documonster always emits the numeric form — indices map
  * positionally into the workbook's `<externalReferences>` list. When a
  * formula arrives with the filename form, the writer assigns (or reuses) an
  * ExternalLinkModel with that filename as its `target` and rewrites the

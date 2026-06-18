@@ -5,7 +5,7 @@
 A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with `Pdf.create()` or the `Pdf.fromExcel()` bridge. **Read** any PDF with `Pdf.read()` — extract text, images, and metadata from all major PDF versions. **Build** free-form PDFs with `Pdf.Builder` — text, vector graphics, SVG paths, annotations, and form fields. **Edit** existing PDFs with `Pdf.Editor` — overlay content, fill forms, add/remove/rotate pages, merge documents, and sign digitally. All APIs are async and yield to the event loop between pages to avoid blocking.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 // Write — standalone:      Pdf.create(rows)
 // Write — from Excel:      await Pdf.fromExcel(workbook)
@@ -94,7 +94,7 @@ import { Pdf } from "@cj-tech-master/excelts/pdf";
 ### Read a PDF
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 import { readFileSync } from "fs";
 
 const bytes = readFileSync("document.pdf");
@@ -175,8 +175,8 @@ for (const page of result.pages) {
 The simplest way to generate PDFs from Excel workbooks:
 
 ```typescript
-import { Workbook, Worksheet, Column } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Sales");
@@ -203,8 +203,8 @@ window.open(url);
 ### Read XLSX, Export PDF
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 await Workbook.readFile(workbook, "report.xlsx");
@@ -221,7 +221,7 @@ const pdf = await Pdf.fromExcel(workbook, {
 Generate PDFs from plain data — no Excel module, no Map objects, no boilerplate:
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 // Simplest — pass a 2D array
 const bytes = await Pdf.create([
@@ -327,10 +327,10 @@ const bytes = await Pdf.create(data, {
 Create PDFs with precise control over text, shapes, and layout:
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const doc = new Pdf.Builder();
-doc.setMetadata({ title: "My Report", author: "excelts" });
+doc.setMetadata({ title: "My Report", author: "documonster" });
 
 const page = doc.addPage({ width: 595, height: 842 }); // A4
 
@@ -375,7 +375,7 @@ const bytes = await doc.build();
 Overlay content, fill forms, merge documents, and manipulate pages:
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const editor = Pdf.Editor.load(existingPdfBytes);
 
@@ -412,7 +412,7 @@ const incremental = await editor.saveIncremental(); // preserves original bytes
 ### Digital Signatures
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 // Verify a signature
 const result = await Pdf.verifySignature(pdfBytes, signatureHex, byteRange);
@@ -500,7 +500,7 @@ interface PdfExportOptions {
   title?: string;
   author?: string;
   subject?: string;
-  creator?: string; // PDF producer string (default: "excelts")
+  creator?: string; // PDF producer string (default: "documonster")
 
   // Font
   font?: Uint8Array; // TrueType font file bytes (for Unicode/CJK)
@@ -694,8 +694,8 @@ await Pdf.fromExcel(workbook, { ignorePrintArea: true });
 JPEG and PNG images are embedded when sheets contain images:
 
 ```typescript
-import { Workbook, Image } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook, Image } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const imageId = Image.add(workbook, {
   buffer: jpegBytes,
@@ -784,8 +784,8 @@ The font is automatically subsetted (only used glyphs are embedded) to minimize 
 Each sheet's `pageSetup` is respected when using the Excel bridge:
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const ws1 = Workbook.addWorksheet(workbook, "Summary");
 ws1.pageSetup.paperSize = 9; // A4
@@ -820,11 +820,11 @@ The PDF module is fully tree-shakeable. If you don't import any PDF exports, the
 
 ```typescript
 // Only imports Excel core — PDF module is NOT included
-import { Workbook } from "@cj-tech-master/excelts/excel";
+import { Workbook } from "documonster/excel";
 
 // Imports Excel + PDF bridge
-import { Workbook } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 ```
 
 ---
@@ -867,7 +867,7 @@ npx tsx src/modules/pdf/examples/pdf-signatures.ts
 Read a PDF file and extract text, images, and metadata. Returns `Promise<ReadPdfResult>`.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 // Basic
 const result = await Pdf.read(pdfBytes);
@@ -911,8 +911,8 @@ await Pdf.create([["A", 1]], { showGridLines: true, pageSize: "A4" });
 Convert an Excel `Workbook` to PDF. Returns `Promise<Uint8Array>`.
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 // ... build workbook ...
@@ -924,7 +924,7 @@ const bytes = await Pdf.fromExcel(workbook, { showGridLines: true });
 Build free-form PDFs with text, vector graphics, annotations, and form fields.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const doc = new Pdf.Builder();
 doc.setMetadata({ title, author, subject, creator });
@@ -958,7 +958,7 @@ const bytes = await doc.build(); // Returns Promise<Uint8Array>
 Edit existing PDFs — overlay content, fill forms, merge, split, and sign.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const editor = Pdf.Editor.load(pdfBytes, { password? });
 
@@ -998,7 +998,7 @@ const pages = await editor.splitPages();      // Split into individual PDFs
 Verify a digital signature. Returns `Promise<SignatureVerificationResult>`.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const result = await Pdf.verifySignature(pdfBytes, sigHex, [0, off1, off2, len2]);
 // result.valid            — boolean
@@ -1012,7 +1012,7 @@ const result = await Pdf.verifySignature(pdfBytes, sigHex, [0, off1, off2, len2]
 Sign a PDF containing a signature placeholder. Returns `Promise<Uint8Array>`.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 // Step 1: Build placeholder
 const { dictString, placeholder } = Pdf.buildSignatureDictPlaceholder({
@@ -1028,7 +1028,7 @@ const signed = await Pdf.sign(pdfWithPlaceholder, certificate, privateKey);
 Parse an SVG path `d` attribute into an array of `PathOp` objects for `drawPath()`.
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const ops = Pdf.parseSvgPath("M10 10 L90 10 L50 80 Z");
 page.drawPath(ops, { fill: { r: 1, g: 0, b: 0 } });
@@ -1043,13 +1043,13 @@ import {
   PdfFontError, // Font parsing/embedding failures
   PdfStructureError, // PDF structure assembly failures
   isPdfError // Type guard: (err: unknown) => err is PdfError
-} from "@cj-tech-master/excelts/pdf";
+} from "documonster/pdf";
 ```
 
 All errors extend `BaseError` with `cause` chain support:
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 try {
   await Pdf.fromExcel(workbook);

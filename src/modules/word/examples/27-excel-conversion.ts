@@ -172,7 +172,7 @@ console.log(`  → 05-extracted.xlsx`);
   //     you want to reuse Excel's chart rendering pipeline against a
   //     Word-defined chart (e.g. for headless preview generation, or for
   //     pre-computing geometry). The returned object's shape mirrors
-  //     `excelts/excel`'s ChartModel — opaque here but introspectable
+  //     `documonster/excel`'s ChartModel — opaque here but introspectable
   //     by anyone who wants to drill in via the Excel module.
   const sampleChart: Chart = {
     type: "column",

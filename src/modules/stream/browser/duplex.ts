@@ -36,7 +36,7 @@ export class Duplex<TRead = Uint8Array, TWrite = Uint8Array> extends EventEmitte
     }
     // Duck-type: must have both Readable and Writable characteristics + stream brand
     return (
-      instance.__excelts_stream === true &&
+      instance.__documonster_stream === true &&
       typeof instance.read === "function" &&
       typeof instance.pipe === "function" &&
       typeof instance.write === "function" &&
@@ -375,7 +375,7 @@ export class Duplex<TRead = Uint8Array, TWrite = Uint8Array> extends EventEmitte
     }
   ) {
     super();
-    (this as any).__excelts_stream = true;
+    (this as any).__documonster_stream = true;
 
     this.allowHalfOpen = options?.allowHalfOpen ?? true;
     this._emitClose = options?.emitClose ?? true;

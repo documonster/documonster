@@ -101,7 +101,7 @@ function populateMarkdownWorksheet(
  *
  * @example
  * ```ts
- * import { readMarkdown } from "@cj-tech-master/excelts/excel/markdown";
+ * import { readMarkdown } from "documonster/excel/markdown";
  * readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
  * ```
  */

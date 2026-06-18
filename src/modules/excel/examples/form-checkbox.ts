@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const outputPath = process.argv[2] || "src/modules/excel/examples/data/form-checkbox.xlsx";
 
   const wb = Workbook.create();
-  wb.creator = "excelts";
+  wb.creator = "documonster";
 
   const ws = Workbook.addWorksheet(wb, "Form Controls");
 

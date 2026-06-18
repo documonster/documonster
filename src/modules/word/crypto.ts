@@ -1,15 +1,15 @@
 /**
  * DOCX Module - Encryption & Digital Signatures (Subpath Entry)
  *
- * Public API at `excelts/word/crypto`. Referenced by
+ * Public API at `documonster/word/crypto`. Referenced by
  * `package.json#exports["./word/crypto"]`. Import this subpath separately to
  * keep encryption / CFB / signature / font obfuscation code out of bundles
  * that only need core document building.
  *
  * @example
  * ```ts
- * import { isEncryptedDocx, decryptDocx, encryptDocx } from "excelts/word/crypto";
- * import { extractSignatures } from "excelts/word/crypto";
+ * import { isEncryptedDocx, decryptDocx, encryptDocx } from "documonster/word/crypto";
+ * import { extractSignatures } from "documonster/word/crypto";
  * ```
  */
 

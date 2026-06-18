@@ -1,5 +1,5 @@
 /**
- * Public namespace-surface contract for `@cj-tech-master/excelts/excel`.
+ * Public namespace-surface contract for `documonster/excel`.
  *
  * Locks the shape of the dot-namespace API (`Workbook`, `Cell`, `Chart`, …):
  * each namespace exists, key members are callable, and a representative
@@ -10,7 +10,7 @@
 import * as Excel from "@excel/index";
 import { describe, it, expect } from "vitest";
 
-describe("@cj-tech-master/excelts/excel namespace surface", () => {
+describe("documonster/excel namespace surface", () => {
   it("exposes exactly the expected domain namespaces", () => {
     const NAMESPACES = [
       "Address",

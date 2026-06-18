@@ -1,7 +1,7 @@
 /**
  * `Vba` namespace surface — VBA macro project inspection / management.
  *
- * `import { Vba } from "@cj-tech-master/excelts/word"` →
+ * `import { Vba } from "documonster/word"` →
  *   `Vba.has(doc)`, `Vba.getInfo(doc)`, `Vba.add(doc, bin)`,
  *   `Vba.remove(doc)`, … — tree-shaken via `export * as Vba`.
  */

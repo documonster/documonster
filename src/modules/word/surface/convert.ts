@@ -2,7 +2,7 @@
  * `Convert` namespace surface — format conversions (Flat OPC, ODT, semantic IR,
  * OMML ↔ MathML, document mapping).
  *
- * `import { Convert } from "@cj-tech-master/excelts/word"` →
+ * `import { Convert } from "documonster/word"` →
  *   `Convert.parseFlatOpc(xml)`, `Convert.readOdt(buf)`,
  *   `Convert.docxToSemantic(doc)`, `Convert.ommlToMathML(...)`, … — tree-shaken
  *   via `export * as Convert`.

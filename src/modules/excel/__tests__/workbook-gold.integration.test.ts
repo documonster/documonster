@@ -31,8 +31,8 @@ describe("Workbook", () => {
         });
 
         expect(cellGetValue(getCell(ws, "B6"))).toEqual({
-          hyperlink: "https://www.npmjs.com/package/excelts",
-          text: "excelts"
+          hyperlink: "https://www.npmjs.com/package/documonster",
+          text: "documonster"
         });
 
         expect(Worksheet.lastColumn(ws)).toBe(getColumn(ws, 2));

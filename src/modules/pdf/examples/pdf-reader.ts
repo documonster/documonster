@@ -282,7 +282,7 @@ const metaPdf = await pdf([["Data", 123]], {
   title: "Quarterly Report",
   author: "Finance Team",
   subject: "Q4 2025 Financials",
-  creator: "excelts PDF module"
+  creator: "documonster PDF module"
 });
 
 const meta = await readPdf(metaPdf);

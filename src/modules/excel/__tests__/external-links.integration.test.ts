@@ -268,7 +268,7 @@ describe("external workbook links — end-to-end", () => {
     await writeFile("tmp/external-link-chinese.xlsx", buf);
 
     // Reload and verify — the file we just wrote must be a valid xlsx
-    // that excelts itself can read back.
+    // that documonster itself can read back.
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
 

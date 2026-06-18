@@ -54,8 +54,8 @@
 ### 配合 `Workbook` 用(最常见)
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
-import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+import { Workbook } from "documonster";
+import { installFormulaEngine } from "documonster/formula";
 
 // 启动时调用一次 — 让 Workbook.calculateFormulas()、PDF bridge 自动重算,
 // 以及 XLSX 加载时的 defined-name 严格分类生效。
@@ -78,7 +78,7 @@ console.log(ws.getCell("A4").result); // 60
 `calculateFormulas` 的 bundle 里**零** excel 运行时代码。
 
 ```typescript
-import { calculateFormulas, type WorkbookLike } from "@cj-tech-master/excelts/formula";
+import { calculateFormulas, type WorkbookLike } from "documonster/formula";
 
 // 你自己的数据结构 — 只要实现 WorkbookLike 就行。
 // 不需要 Workbook 类,也不需要 installFormulaEngine()。
@@ -100,8 +100,8 @@ calculateFormulas(wb); // 纯函数,零全局副作用
 显式注入 probe:
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
-import { createFormulaSyntaxProbe } from "@cj-tech-master/excelts/formula";
+import { Workbook } from "documonster";
+import { createFormulaSyntaxProbe } from "documonster/formula";
 
 const wb = new Workbook({ formulaSyntaxProbe: createFormulaSyntaxProbe() });
 await wb.xlsx.load(buffer);
@@ -112,7 +112,7 @@ await wb.xlsx.load(buffer);
 ### 不求值,只 tokenize / parse
 
 ```typescript
-import { tokenize, parse } from "@cj-tech-master/excelts/formula";
+import { tokenize, parse } from "documonster/formula";
 
 const tokens = tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
 const ast = parse(tokens); // 语法错误时抛异常
@@ -120,7 +120,7 @@ const ast = parse(tokens); // 语法错误时抛异常
 
 ## 为什么单独一个 subpath?
 
-公式引擎 minified 后约 200 KB。大多数 `@cj-tech-master/excelts` 用户只读写 XLSX、让 Excel 自己重算 — 无条件把引擎打进这些 bundle 是一笔看不见的巨大成本。
+公式引擎 minified 后约 200 KB。大多数 `documonster` 用户只读写 XLSX、让 Excel 自己重算 — 无条件把引擎打进这些 bundle 是一笔看不见的巨大成本。
 
 subpath 给你三种 tree-shaking 结果:
 
@@ -133,7 +133,7 @@ subpath 给你三种 tree-shaking 结果:
 函数式 `calculateFormulas` API 通过 `WorkbookLike` 结构化接口工作，**不引入任何 excel 运行时代码** — 只要对象形状符合 workbook 接口就能传进去。服务端对已缓存的 XLSX 做重算也可以：excel 的 import 留在 excel bundle 里。
 
 > **IIFE 说明:** `<script>` 标签的 IIFE 产物
-> (`dist/iife/excelts.iife.min.js`) 刻意不包含公式引擎,保持精简。
+> (`dist/iife/documonster.iife.min.js`) 刻意不包含公式引擎,保持精简。
 > 如果通过 `<script>` 标签使用时需要公式计算,请改用 ESM 并调用本
 > subpath 的 `installFormulaEngine()`。
 

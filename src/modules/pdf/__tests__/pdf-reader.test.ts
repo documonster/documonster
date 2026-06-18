@@ -481,7 +481,7 @@ describe("PDF Roundtrip (Write → Read)", () => {
     expect(result.metadata).toBeDefined();
     expect(result.metadata.pdfVersion).toBe("2.0");
     expect(result.metadata.pageCount).toBeGreaterThan(0);
-    expect(result.metadata.producer).toContain("excelts");
+    expect(result.metadata.producer).toContain("documonster");
   });
 
   it("should extract page dimensions", async () => {

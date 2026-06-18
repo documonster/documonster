@@ -473,7 +473,7 @@ const FEATURE_ROWS: FeatureRow[] = [
  */
 const LIBRARY_ROWS: LibraryRow[] = [
   {
-    library: "excelts",
+    library: "documonster",
     language: "TypeScript / JavaScript",
     classicCreate: "full",
     chartEx: "full",
@@ -650,7 +650,7 @@ function renderLibraryTable(title: string, rows: LibraryRow[]): string {
     "| ------- | -------- | :------------: | :-----: | :---: | :---------: | :--------: | :---------: | :-------------------: | :--------------: |";
   const body = rows
     .map(r => {
-      const libCell = r.library === "excelts" ? `**${r.library}**` : r.library;
+      const libCell = r.library === "documonster" ? `**${r.library}**` : r.library;
       return `| ${libCell} | ${r.language} | ${SYMBOL[r.classicCreate]} | ${SYMBOL[r.chartEx]} | ${SYMBOL[r.combo]} | ${SYMBOL[r.pivotChart]} | ${SYMBOL[r.chartsheet]} | ${SYMBOL[r.editLoaded]} | ${SYMBOL[r.preview]} | ${SYMBOL[r.rawXmlPreserve]} |`;
     })
     .join("\n");

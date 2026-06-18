@@ -2,7 +2,7 @@
  * `Build` namespace surface — content-node builders (runs, paragraphs,
  * tables, shapes, fields, math, …).
  *
- * `import { Build } from "@cj-tech-master/excelts/word"` →
+ * `import { Build } from "documonster/word"` →
  *   `Build.paragraph(...)`, `Build.text("hi")`, `Build.table(rows)`,
  *   `Build.heading("Title", 1)`, `Build.createShape(...)` — tree-shaken via
  *   `export * as Build`.

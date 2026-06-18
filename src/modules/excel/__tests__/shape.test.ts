@@ -174,7 +174,7 @@ describe("Worksheet.addShape", () => {
   it("drops the alpha byte from 8-digit ARGB colours (srgbClr is RGB-only)", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "shapes");
-    // excelts cell fills use 8-digit ARGB; addShape must coerce to valid 6-digit RGB.
+    // documonster cell fills use 8-digit ARGB; addShape must coerce to valid 6-digit RGB.
     addShape(ws, { type: "rect", range: "A1:B2", fillColor: "FFFF0000", lineColor: "FF00B050" });
     const buffer = await Workbook.toBuffer(wb);
     const xml = await readDrawingXml(buffer as unknown as Uint8Array);

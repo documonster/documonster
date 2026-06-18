@@ -511,7 +511,7 @@ export function renderAppProperties(xml: XmlSink, props?: AppProperties): void {
     "xmlns:vt": NS_VT
   });
 
-  xml.leafNode("Application", undefined, props?.application ?? "excelts");
+  xml.leafNode("Application", undefined, props?.application ?? "documonster");
   xml.leafNode("AppVersion", undefined, props?.appVersion ?? "1.0.0");
 
   if (props?.pages !== undefined) {

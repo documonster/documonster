@@ -2,7 +2,7 @@
  * `Archive` namespace surface — high-level ZIP/TAR creation & extraction,
  * remote/random-access readers, and crypto/CRC primitives.
  *
- * `import { Archive } from "@cj-tech-master/excelts/archive"` →
+ * `import { Archive } from "documonster/archive"` →
  *   `Archive.zip(...)`, `Archive.unzip(...)`, `new Archive.ZipArchive()`,
  *   `new Archive.ZipReader(...)`, `Archive.editZip(...)`,
  *   `new Archive.TarArchive()`, `Archive.tar(...)`, `Archive.parseTar(...)`,

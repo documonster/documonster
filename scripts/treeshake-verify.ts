@@ -3,7 +3,7 @@
  *
  * Verifies tree-shaking correctness across three bundlers (esbuild, rolldown,
  * rspack) and two platforms (node + browser) by:
- * 1. Creating a temporary consumer project that depends on excelts via symlink
+ * 1. Creating a temporary consumer project that depends on documonster via symlink
  * 2. Bundling minimal import scenarios
  * 3. Inspecting output to verify unused modules are eliminated
  *
@@ -373,7 +373,7 @@ function setupTmpProject(): void {
     JSON.stringify({ name: "treeshake-test", type: "module", private: true }, null, 2)
   );
 
-  // Symlink excelts into node_modules (handles scoped packages)
+  // Symlink documonster into node_modules (handles scoped packages)
   const nmDir = path.join(TMP_DIR, "node_modules");
   const scope = PKG_NAME.startsWith("@") ? PKG_NAME.split("/")[0] : null;
   const parentDir = scope ? path.join(nmDir, scope) : nmDir;

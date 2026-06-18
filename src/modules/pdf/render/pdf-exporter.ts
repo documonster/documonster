@@ -636,7 +636,7 @@ function resolveOptions(
     title: options?.title ?? "",
     author: options?.author ?? "",
     subject: options?.subject ?? "",
-    creator: options?.creator ?? "excelts",
+    creator: options?.creator ?? "documonster",
     watermark: options?.watermark
   };
 }

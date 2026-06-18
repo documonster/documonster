@@ -5,7 +5,7 @@ import * as Word from "@word/index";
 import * as Xml from "@xml/index";
 /**
  * Public namespace-surface contract for the non-excel domain modules:
- * `@cj-tech-master/excelts/word`, `/csv`, `/markdown`, `/xml`, `/pdf`, `/formula`.
+ * `documonster/word`, `/csv`, `/markdown`, `/xml`, `/pdf`, `/formula`.
  *
  * Locks each module's namespace shape and verifies a representative member
  * is callable / behaves. Guards against accidental removal or rename of
@@ -17,7 +17,7 @@ function isFn(ns: unknown, member: string): boolean {
   return typeof (ns as Record<string, unknown>)[member] === "function";
 }
 
-describe("@cj-tech-master/excelts/word namespace surface", () => {
+describe("documonster/word namespace surface", () => {
   it("exposes the expected domain namespaces", () => {
     for (const ns of [
       "Document",
@@ -69,7 +69,7 @@ describe("@cj-tech-master/excelts/word namespace surface", () => {
   });
 });
 
-describe("@cj-tech-master/excelts/csv namespace surface", () => {
+describe("documonster/csv namespace surface", () => {
   it("Csv namespace exposes parse/format/detection", () => {
     for (const m of ["parse", "format", "parseAsync", "detectDelimiter"]) {
       expect(isFn(Csv.Csv, m), `Csv.${m}`).toBe(true);
@@ -89,7 +89,7 @@ describe("@cj-tech-master/excelts/csv namespace surface", () => {
   });
 });
 
-describe("@cj-tech-master/excelts/markdown namespace surface", () => {
+describe("documonster/markdown namespace surface", () => {
   it("Markdown namespace exposes parse/format", () => {
     for (const m of ["parse", "parseAll", "format"]) {
       expect(isFn(Markdown.Markdown, m), `Markdown.${m}`).toBe(true);
@@ -103,7 +103,7 @@ describe("@cj-tech-master/excelts/markdown namespace surface", () => {
   });
 });
 
-describe("@cj-tech-master/excelts/xml namespace surface", () => {
+describe("documonster/xml namespace surface", () => {
   it("Xml namespace exposes encode/parse/writers", () => {
     for (const m of ["encode", "decode", "parse", "query"]) {
       expect(isFn(Xml.Xml, m), `Xml.${m}`).toBe(true);
@@ -120,7 +120,7 @@ describe("@cj-tech-master/excelts/xml namespace surface", () => {
   });
 });
 
-describe("@cj-tech-master/excelts/formula namespace surface", () => {
+describe("documonster/formula namespace surface", () => {
   it("Formula namespace exposes calculate/tokenize/parse", () => {
     for (const m of ["calculate", "tokenize", "parse"]) {
       expect(isFn(Formula.Formula, m), `Formula.${m}`).toBe(true);

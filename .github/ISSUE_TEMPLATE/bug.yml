@@ -61,7 +61,7 @@ body:
       label: "Reproduction"
       placeholder: |
         ```ts
-        import { Workbook } from "@cj-tech-master/excelts";
+        import { Workbook } from "documonster";
 
         // ...
         ```

@@ -1,7 +1,7 @@
 /**
  * `Markdown` namespace surface — GFM table parsing / formatting.
  *
- * `import { Markdown } from "@cj-tech-master/excelts/markdown"` →
+ * `import { Markdown } from "documonster/markdown"` →
  *   `Markdown.parse(text)`, `Markdown.parseAll(text)`, `Markdown.format(rows)`.
  *
  * Single flat namespace (markdown is a single-purpose module). Re-exported

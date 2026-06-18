@@ -1,13 +1,13 @@
 /**
  * DOCX Module - HTML Converters (Subpath Entry)
  *
- * Re-exports the HTML converter API at `excelts/word/html`. This file is
+ * Re-exports the HTML converter API at `documonster/word/html`. This file is
  * referenced by `package.json#exports["./word/html"]`; it forwards to the
  * implementation under `./convert/html`.
  *
  * @example
  * ```ts
- * import { renderToHtml, htmlToDocxBody } from "excelts/word/html";
+ * import { renderToHtml, htmlToDocxBody } from "documonster/word/html";
  * ```
  */
 

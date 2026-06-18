@@ -2,7 +2,7 @@ import type { CellData } from "@excel/cell";
 /**
  * `Row` namespace surface — row-level operations addressed by row number.
  *
- * `import { Row } from "@cj-tech-master/excelts/excel"` → `Row.setHeight(ws, 1, 24)`,
+ * `import { Row } from "documonster/excel"` → `Row.setHeight(ws, 1, 24)`,
  * `Row.setStyle(ws, 3, { font })`, `Row.getValues(ws, 2)`.
  */
 import {

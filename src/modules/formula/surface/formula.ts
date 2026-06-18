@@ -1,7 +1,7 @@
 /**
  * `Formula` namespace surface — the formula engine's value API.
  *
- * `import { Formula } from "@cj-tech-master/excelts/formula"` →
+ * `import { Formula } from "documonster/formula"` →
  *   `Formula.calculate(workbook)`, `Formula.tokenize(src)`,
  *   `Formula.parse(tokens)`.
  *

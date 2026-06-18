@@ -7,7 +7,7 @@
  * used on the `CellData` / `RowData` returned by a streaming worksheet
  * writer, so streaming code never has to reach for the internal flat helpers.
  *
- * `import { Stream } from "@cj-tech-master/excelts/excel"` →
+ * `import { Stream } from "documonster/excel"` →
  *   `const wb = new Stream.WorkbookWriter({ filename });`
  *   `const ws = wb.addWorksheet("Sheet1");`
  *   `const row = ws.addRow([1, 2, 3]);`

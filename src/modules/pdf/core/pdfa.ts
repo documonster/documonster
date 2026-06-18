@@ -208,8 +208,8 @@ export function writePdfAMetadata(
   const title = escapeXml(metadata.title ?? "");
   const author = escapeXml(metadata.author ?? "");
   const subject = escapeXml(metadata.subject ?? "");
-  const creator = escapeXml(metadata.creator ?? "excelts");
-  const producer = "excelts";
+  const creator = escapeXml(metadata.creator ?? "documonster");
+  const producer = "documonster";
 
   const xmp = [
     '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',

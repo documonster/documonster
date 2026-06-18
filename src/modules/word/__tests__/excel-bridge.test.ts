@@ -2,7 +2,7 @@ import { Cell, Workbook, Worksheet } from "@excel/index";
 import { rowSetFont } from "@excel/row";
 import type { WorkbookData } from "@excel/workbook-core";
 /**
- * Tests for the Word ↔ Excel bridge helpers exposed at `excelts/word/excel`.
+ * Tests for the Word ↔ Excel bridge helpers exposed at `documonster/word/excel`.
  *
  * Beyond the high-level `excelToDocx` / `extractTablesToExcel` flows, the
  * bridge ships four lower-level helpers that production code (and the

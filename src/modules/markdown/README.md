@@ -5,7 +5,7 @@
 GFM (GitHub Flavored Markdown) table parser and formatter with zero dependencies.
 
 ```typescript
-import { Markdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
 // Markdown.parse, Markdown.parseAll, Markdown.format
 ```
 
@@ -29,7 +29,7 @@ import { Markdown } from "@cj-tech-master/excelts/markdown";
 ### Parsing
 
 ```typescript
-import { Markdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
 
 const result = Markdown.parse("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["Name", "Age"]
@@ -48,7 +48,7 @@ const doc = Markdown.parse("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
 ### Formatting
 
 ```typescript
-import { Markdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
 
 Markdown.format(
   ["Name", "Age"],
@@ -78,14 +78,14 @@ Markdown.format(["Name", "Age", "Active"], [["Alice", 30, true]]);
 ### Workbook Integration
 
 ```typescript
-import { Workbook, Cell } from "@cj-tech-master/excelts/excel";
+import { Workbook, Cell } from "documonster/excel";
 import {
   readMarkdown,
   writeMarkdown,
   readMarkdownAll,
   readMarkdownFile,
   writeMarkdownFile
-} from "@cj-tech-master/excelts/excel/markdown";
+} from "documonster/excel/markdown";
 
 const workbook = Workbook.create();
 
@@ -218,8 +218,8 @@ Markdown.format(["Name", "名前"], [["Alice", "太郎"]]);
 ## Errors
 
 ```typescript
-import { Markdown } from "@cj-tech-master/excelts/markdown";
-import { MarkdownParseError } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
+import { MarkdownParseError } from "documonster/markdown";
 
 try {
   Markdown.parse("no table here");

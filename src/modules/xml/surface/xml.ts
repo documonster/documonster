@@ -2,7 +2,7 @@
  * `Xml` namespace surface — XML encode/decode, DOM + SAX parsing, writers,
  * and query.
  *
- * `import { Xml } from "@cj-tech-master/excelts/xml"` →
+ * `import { Xml } from "documonster/xml"` →
  *   `Xml.encode(s)`, `Xml.parse(src)`, `Xml.query(doc, sel)`,
  *   `new Xml.Writer()`, `new Xml.StreamWriter()`, `Xml.parseSax(...)`.
  *

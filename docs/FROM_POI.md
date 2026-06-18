@@ -72,7 +72,7 @@ wb.close();
 **TypeScript:**
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster";
 
 const wb = new Workbook();
 const ws = wb.addWorksheet("Sales");
@@ -330,7 +330,7 @@ writeFileSync("chart.svg", svg);
 const png = await chart.toPNG({ width: 640, height: 360, scale: 2 });
 writeFileSync("chart.png", png);
 
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { chartToPdf } from "documonster/pdf";
 const pdf = await chartToPdf(chart, { title: "Quarterly revenue" });
 writeFileSync("chart.pdf", pdf);
 ```

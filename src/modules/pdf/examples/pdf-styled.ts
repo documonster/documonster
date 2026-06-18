@@ -374,7 +374,7 @@ const pdf = await Pdf.fromExcel(wb, {
   showSheetNames: true,
   showPageNumbers: true,
   title: "Styled PDF Export Demo",
-  author: "excelts"
+  author: "documonster"
 });
 
 fs.writeFileSync(path.join(outDir, "pdf-styled.pdf"), pdf);

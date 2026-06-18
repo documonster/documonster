@@ -2680,7 +2680,7 @@ function generateMetaXml(doc: DocxDocument): string {
   }
 
   // Generator
-  w.leafNode("meta:generator", undefined, "excelts/odt");
+  w.leafNode("meta:generator", undefined, "documonster/odt");
 
   w.closeNode(); // office:meta
   w.closeNode(); // office:document-meta

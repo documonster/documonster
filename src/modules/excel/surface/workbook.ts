@@ -1,7 +1,7 @@
 /**
  * `Workbook` namespace surface — Node entry.
  *
- * `import { Workbook } from "@cj-tech-master/excelts/excel"` → `Workbook.create()`,
+ * `import { Workbook } from "documonster/excel"` → `Workbook.create()`,
  * `Workbook.addWorksheet(wb, name)`, `Workbook.toBuffer(wb)`, `Workbook.read(wb, bytes)`,
  * `Workbook.readFile(wb, path)`, `Workbook.writeFile(wb, path)`, …
  *

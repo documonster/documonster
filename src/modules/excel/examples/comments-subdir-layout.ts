@@ -1,7 +1,7 @@
 /**
  * Example: Comments with subdirectory layout (Issue #148)
  *
- * Demonstrates that excelts can read comments from xlsx files that use
+ * Demonstrates that documonster can read comments from xlsx files that use
  * the subdirectory layout (xl/comments/comment1.xml) produced by tools
  * like openpyxl, in addition to the standard flat layout (xl/comments1.xml).
  *

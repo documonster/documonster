@@ -71,12 +71,12 @@ jobs:
           echo "Waiting for npm registry to propagate..."
           sleep 30
           EXPECTED_VERSION="${{ steps.canary_version.outputs.version }}"
-          PUBLISHED_VERSION=$(npm view @cj-tech-master/excelts@${EXPECTED_VERSION} version 2>/dev/null || echo "NOT_FOUND")
+          PUBLISHED_VERSION=$(npm view documonster@${EXPECTED_VERSION} version 2>/dev/null || echo "NOT_FOUND")
           if [ "$PUBLISHED_VERSION" != "$EXPECTED_VERSION" ]; then
             echo "ERROR: Expected version ${EXPECTED_VERSION} but found ${PUBLISHED_VERSION} on npm registry"
             exit 1
           fi
-          echo "Verified: @cj-tech-master/excelts@${EXPECTED_VERSION} is live on npm"
+          echo "Verified: documonster@${EXPECTED_VERSION} is live on npm"
 
       - name: Comment on commit
         uses: actions/github-script@v9
@@ -86,7 +86,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               commit_sha: context.sha,
-              body: `🚀 Canary version published: \`${{ steps.canary_version.outputs.version }}\`\n\nInstall with: \`npm install @cj-tech-master/excelts@canary\``
+              body: `🚀 Canary version published: \`${{ steps.canary_version.outputs.version }}\`\n\nInstall with: \`npm install documonster@canary\``
             })
 
   # Step 2b: Publish — triggered only when release-please creates a release (PR merged).
@@ -134,9 +134,9 @@ jobs:
           echo "Waiting for npm registry to propagate..."
           sleep 30
           EXPECTED_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view @cj-tech-master/excelts@${EXPECTED_VERSION} version 2>/dev/null || echo "NOT_FOUND")
+          PUBLISHED_VERSION=$(npm view documonster@${EXPECTED_VERSION} version 2>/dev/null || echo "NOT_FOUND")
           if [ "$PUBLISHED_VERSION" != "$EXPECTED_VERSION" ]; then
             echo "ERROR: Expected version ${EXPECTED_VERSION} but found ${PUBLISHED_VERSION} on npm registry"
             exit 1
           fi
-          echo "Verified: @cj-tech-master/excelts@${EXPECTED_VERSION} is live on npm"
+          echo "Verified: documonster@${EXPECTED_VERSION} is live on npm"

@@ -78,7 +78,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
     }
     // Duck-type: must have key Writable methods and the stream brand
     return (
-      instance.__excelts_stream === true &&
+      instance.__documonster_stream === true &&
       typeof instance.write === "function" &&
       typeof instance.end === "function" &&
       typeof instance.on === "function" &&
@@ -154,7 +154,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
 
   constructor(options?: WritableOptions<T>) {
     super();
-    (this as any).__excelts_stream = true;
+    (this as any).__documonster_stream = true;
     this._objectMode = options?.objectMode ?? false;
     this._highWaterMark = options?.highWaterMark ?? getDefaultHighWaterMark(this._objectMode);
     this._autoDestroy = options?.autoDestroy ?? true;

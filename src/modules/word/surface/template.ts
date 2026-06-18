@@ -1,7 +1,7 @@
 /**
  * `Template` namespace surface — template filling, data sources, chart binding.
  *
- * `import { Template } from "@cj-tech-master/excelts/word"` →
+ * `import { Template } from "documonster/word"` →
  *   `Template.fillTemplate(...)`, `Template.JsonDataSource`,
  *   `Template.fillTemplateFromSource(...)`, … — tree-shaken via
  *   `export * as Template`.

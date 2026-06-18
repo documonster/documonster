@@ -2,7 +2,7 @@
  * Word Example 47 — Low-level crypto building blocks
  *
  * Complements `34-decrypt-roundtrip.ts` by exercising the lower-level helpers
- * exposed via `excelts/word/crypto`:
+ * exposed via `documonster/word/crypto`:
  *   - readCfb / writeCfb — parse and synthesise OLE2 Compound Files. The
  *     encrypted DOCX wire format wraps a ZIP package inside CFB streams; the
  *     same primitives also underpin .doc, .ppt, .xls (legacy formats) and OLE

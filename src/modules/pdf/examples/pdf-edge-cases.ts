@@ -237,7 +237,7 @@ const mainPdf = await Pdf.fromExcel(wb, {
   showGridLines: true,
   showSheetNames: true,
   title: "PDF Edge Cases",
-  author: "excelts"
+  author: "documonster"
 });
 fs.writeFileSync(path.join(outDir, "pdf-edge-cases.pdf"), mainPdf);
 console.log("pdf-edge-cases.pdf — 6 sheets covering advanced rendering edge cases");

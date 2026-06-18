@@ -635,7 +635,7 @@ export function renameChartsheet(
   if (currentName === name) {
     return true;
   }
-  model.name = "__excelts_pending_chartsheet_rename__";
+  model.name = "__documonster_pending_chartsheet_rename__";
   try {
     model.name = _validateChartsheetName(wb, name);
     return true;

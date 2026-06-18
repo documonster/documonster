@@ -25,7 +25,7 @@ The rest of the API (workbook metadata, worksheets, rows, cells, styles, merges,
 ExcelTS:
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster";
 
 const wb = new Workbook();
 const ws = wb.addWorksheet("Sheet1");
@@ -101,7 +101,7 @@ const png = await chart.toPNG({ width: 640, height: 360, scale: 2 });
 writeFileSync("chart.png", png);
 
 // Standalone PDF — classic chart uses vector path, ChartEx uses raster.
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { chartToPdf } from "documonster/pdf";
 const pdf = await chartToPdf(chart, { title: "Quarterly revenue" });
 writeFileSync("chart.pdf", pdf);
 ```

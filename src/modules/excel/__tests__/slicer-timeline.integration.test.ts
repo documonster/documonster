@@ -1,19 +1,19 @@
 /**
  * Integration tests for Office 2010+ slicer and timeline raw-passthrough.
  *
- * excelts does not yet structurally model slicers or timelines — the
+ * documonster does not yet structurally model slicers or timelines — the
  * OOXML surface is large (four coordinated part families:
  * `xl/slicers`, `xl/slicerCaches`, `xl/timelines`, `xl/timelineCaches`,
  * plus sheet-level extensions and workbook-level cache list entries).
- * Dashboard workbooks that travel through excelts must not lose these
+ * Dashboard workbooks that travel through documonster must not lose these
  * parts; the tests below verify the preserve-on-roundtrip path does
  * its job.
  *
  * We synthesise a fake source workbook whose zip already contains the
  * parts (simulating a file authored by Excel), feed it through the
- * excelts loader, write it back out, and assert that every byte we
+ * documonster loader, write it back out, and assert that every byte we
  * care about survives. The content of the parts themselves is
- * treated opaquely — excelts has no opinion on them, so the round
+ * treated opaquely — documonster has no opinion on them, so the round
  * trip is literal byte preservation rather than structural equality.
  */
 
@@ -30,7 +30,7 @@ const decoder = new TextDecoder();
 /**
  * Produce a tiny xlsx buffer that already contains a slicer + slicer
  * cache + timeline + timeline cache (plus their rels), as if written
- * by Excel. We start from a workbook excelts can author, then patch
+ * by Excel. We start from a workbook documonster can author, then patch
  * the zip to add the extra parts and wire them into the rels files
  * and Content Types manifest.
  */
@@ -67,7 +67,7 @@ async function makeXlsxWithSlicerAndTimeline(): Promise<Uint8Array> {
   const encoder = new TextEncoder();
 
   // Rebuild the zip with the extra parts + updated Content Types
-  // manifest, preserving the bytes of every entry excelts produced.
+  // manifest, preserving the bytes of every entry documonster produced.
   const editor = await ZipEditor.open(baseBuf);
   const existingContentTypes = decoder.decode(baseEntries.get("[Content_Types].xml")!.data);
   const patchedContentTypes = existingContentTypes.replace(
@@ -109,7 +109,7 @@ describe("slicer + timeline raw passthrough", () => {
       "xl/timelineCaches/timelineCache1.xml"
     );
 
-    // Round-trip: every part excelts captured must be re-emitted
+    // Round-trip: every part documonster captured must be re-emitted
     // verbatim, and the Content Types manifest must mention the new
     // content types so Excel recognises them.
     const resaved = new Uint8Array(await Workbook.toBuffer(wb));

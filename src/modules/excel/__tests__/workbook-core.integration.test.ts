@@ -816,7 +816,7 @@ describe("Workbook", () => {
       // `<definedName name="_xlnm.Print_Area">` whose text is a comma-
       // separated list of ranges (Excel's native format). The
       // worksheet-level `printArea` field uses `&&` as the multi-range
-      // separator (legacy excelts convention, preserved for backwards
+      // separator (legacy documonster convention, preserved for backwards
       // compatibility); both `&&` and `,` are accepted on input.
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");

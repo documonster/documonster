@@ -205,7 +205,7 @@ export class PdfWriter {
     if (options.creator) {
       dict.set("Creator", pdfString(options.creator));
     }
-    dict.set("Producer", pdfString("excelts"));
+    dict.set("Producer", pdfString("documonster"));
     dict.set("CreationDate", pdfDate(new Date()));
 
     this.addObject(objNum, dict);

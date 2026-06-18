@@ -1,7 +1,7 @@
 /**
  * `Streaming` namespace surface — streaming DOCX writer.
  *
- * `import { Streaming } from "@cj-tech-master/excelts/word"` →
+ * `import { Streaming } from "documonster/word"` →
  *   `Streaming.createDocxStream(opts)`, `new Streaming.StreamingDocxWriter(...)`
  *   — tree-shaken via `export * as Streaming`.
  */

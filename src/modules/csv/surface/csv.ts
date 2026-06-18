@@ -2,7 +2,7 @@
  * `Csv` namespace surface — CSV parsing, formatting, detection, streaming,
  * row utilities, dynamic typing, generation.
  *
- * `import { Csv } from "@cj-tech-master/excelts/csv"` →
+ * `import { Csv } from "documonster/csv"` →
  *   `Csv.parse(text)`, `Csv.parseAsync(...)`, `Csv.format(rows)`,
  *   `Csv.detectDelimiter(text)`, `new Csv.ParserStream()`, …
  *

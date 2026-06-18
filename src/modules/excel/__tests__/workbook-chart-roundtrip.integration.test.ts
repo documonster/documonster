@@ -19,7 +19,7 @@ import * as fs from "fs";
  *   - pivot-chart-roundtrip.integration.test.ts    — multi-cache,
  *     dropZone, refreshOnOpen pivot chart fidelity
  *
- * Related issue: https://github.com/nickmessing/excelts/issues/41
+ * Related issue: https://github.com/nickmessing/documonster/issues/41
  */
 import * as path from "path";
 

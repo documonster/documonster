@@ -34,12 +34,12 @@ Works in Node.js 22+ and modern browsers.
 - **Streaming writer** — `createDocxStream()` for large documents
 - **Validation** — structural checks with severity-tagged issues
 - **OOXML Strict** — transparent normalization to Transitional on read
-- **Browser support** — the same `@cj-tech-master/excelts/word` import works in Node.js and browsers
+- **Browser support** — the same `documonster/word` import works in Node.js and browsers
 
 ## Quick Start
 
 ```typescript
-import { Document, Io } from "@cj-tech-master/excelts/word";
+import { Document, Io } from "documonster/word";
 
 // Create a document
 const doc = Document.create();
@@ -63,7 +63,7 @@ console.log(parsed.body.length, "elements");
 ### Document Builder
 
 ```typescript
-import { Document, Build, Io } from "@cj-tech-master/excelts/word";
+import { Document, Build, Io } from "documonster/word";
 
 const doc = Document.create();
 
@@ -110,7 +110,7 @@ const bytes = await Io.toBuffer(model);
 ### Reading Documents
 
 ```typescript
-import { Io, Query } from "@cj-tech-master/excelts/word";
+import { Io, Query } from "documonster/word";
 
 const doc = await Io.read(fileBuffer);
 
@@ -124,7 +124,7 @@ const results = Query.searchText(doc, /pattern/g);
 ### Modifying Documents
 
 ```typescript
-import { Io, Query } from "@cj-tech-master/excelts/word";
+import { Io, Query } from "documonster/word";
 
 const doc = await Io.read(buffer);
 const modified = Query.replaceText(doc, "OLD_TEXT", "NEW_TEXT");
@@ -136,7 +136,7 @@ const output = await Io.toBuffer(modified);
 ### Template Engine
 
 ```typescript
-import { Template } from "@cj-tech-master/excelts/word";
+import { Template } from "documonster/word";
 
 const filled = Template.fillTemplate(doc, {
   name: "John",
@@ -149,7 +149,7 @@ const filled = Template.fillTemplate(doc, {
 ### Form Fields
 
 ```typescript
-import { Query, Build } from "@cj-tech-master/excelts/word";
+import { Query, Build } from "documonster/word";
 
 // `Build.formTextField` / `Build.formCheckboxField` build form-field runs.
 
@@ -171,7 +171,7 @@ const filled = Query.fillFormFields(
 ### Data Binding (OpenDoPE)
 
 ```typescript
-import { Query } from "@cj-tech-master/excelts/word";
+import { Query } from "documonster/word";
 
 // Resolve SDT data bindings against CustomXML parts
 const resolved = Query.resolveDataBindings(doc);
@@ -186,7 +186,7 @@ const resolved2 = Query.resolveDataBindings(
 ### Drawing Shapes with Effects
 
 ```typescript
-import { Build } from "@cj-tech-master/excelts/word";
+import { Build } from "documonster/word";
 
 const shape = Build.createShape({
   shapeType: "roundRect",
@@ -221,7 +221,7 @@ const shape = Build.createShape({
 ### Font Embedding with Subsetting
 
 ```typescript
-import { Font } from "@cj-tech-master/excelts/word";
+import { Font } from "documonster/word";
 
 // Embed with automatic subsetting (only glyphs used in document)
 const result = Font.embed({
@@ -238,7 +238,7 @@ const docWithFonts = Font.addEmbedded(doc, [result]);
 ### Track Changes
 
 ```typescript
-import { Query } from "@cj-tech-master/excelts/word";
+import { Query } from "documonster/word";
 
 const accepted = Query.acceptAllRevisions(doc);
 const rejected = Query.rejectAllRevisions(doc);
@@ -247,7 +247,7 @@ const rejected = Query.rejectAllRevisions(doc);
 ### Document Diff
 
 ```typescript
-import { Diff } from "@cj-tech-master/excelts/word";
+import { Diff } from "documonster/word";
 
 const diff = Diff.documents(docA, docB);
 // → { changes: [{ type: "added"|"removed"|"modified", ... }] }
@@ -256,7 +256,7 @@ const diff = Diff.documents(docA, docB);
 ### Document Merge
 
 ```typescript
-import { Io } from "@cj-tech-master/excelts/word";
+import { Io } from "documonster/word";
 
 const merged = Io.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```
@@ -264,7 +264,7 @@ const merged = Io.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ### Streaming Writer
 
 ```typescript
-import { Streaming } from "@cj-tech-master/excelts/word";
+import { Streaming } from "documonster/word";
 
 const stream = Streaming.createDocxStream();
 stream.addText("Title", { style: "Heading1" });
@@ -277,7 +277,7 @@ const buffer = await stream.finalize();
 ### Document Protection
 
 ```typescript
-import { Security } from "@cj-tech-master/excelts/word";
+import { Security } from "documonster/word";
 
 const protectedDoc = Security.protect(doc, { type: "readOnly", password: "secret" });
 const isProtected = Security.isProtected(protectedDoc); // true
@@ -287,7 +287,7 @@ const valid = Security.verifyPassword(protectedDoc, "secret"); // true
 ### Validation
 
 ```typescript
-import { Validation } from "@cj-tech-master/excelts/word";
+import { Validation } from "documonster/word";
 
 const result = Validation.document(doc);
 if (!result.valid) {
@@ -301,28 +301,28 @@ if (!result.valid) {
 // DOCX → Markdown (GFM: headings, bold/italic/strike, inline code,
 // code blocks, blockquotes, ordered/unordered lists, tables with
 // alignment, links, images, footnotes)
-import { renderToMarkdown } from "@cj-tech-master/excelts/word/markdown";
+import { renderToMarkdown } from "documonster/word/markdown";
 const md = renderToMarkdown(doc);
 const mdSetext = renderToMarkdown(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX (full document or body fragment)
-import { markdownToDocx, markdownToDocxBody } from "@cj-tech-master/excelts/word/markdown";
+import { markdownToDocx, markdownToDocxBody } from "documonster/word/markdown";
 const doc = markdownToDocx("# Title\n\nHello **world**");
 const bodyItems = markdownToDocxBody("- a\n- b");
 
 // DOCX → HTML
-import { renderToHtml } from "@cj-tech-master/excelts/word/html";
+import { renderToHtml } from "documonster/word/html";
 const html = renderToHtml(doc);
 
 // HTML → DOCX body content
-import { htmlToDocxBody } from "@cj-tech-master/excelts/word/html";
+import { htmlToDocxBody } from "documonster/word/html";
 const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
 ```
 
 ### Flat OPC Format
 
 ```typescript
-import { Convert } from "@cj-tech-master/excelts/word";
+import { Convert } from "documonster/word";
 
 // Single-XML representation of a DOCX
 const flatXml = Convert.toFlatOpc(doc);
@@ -331,7 +331,7 @@ const doc = Convert.parseFlatOpc(flatXmlString);
 
 ### Encryption & Signatures
 
-Low-level cryptography helpers live on the `@cj-tech-master/excelts/word/crypto`
+Low-level cryptography helpers live on the `documonster/word/crypto`
 subpath so they stay out of bundles that only read/write plain DOCX.
 
 ```typescript
@@ -341,7 +341,7 @@ import {
   encryptDocx,
   extractSignatures,
   hasDigitalSignatures
-} from "@cj-tech-master/excelts/word/crypto";
+} from "documonster/word/crypto";
 
 // Decrypt a password-protected DOCX (Agile Encryption)
 if (isEncryptedDocx(bytes)) {
@@ -363,8 +363,8 @@ borders), column widths, rich-text runs, and an optional title page.
 Hidden sheets are skipped; rows/columns can be capped.
 
 ```typescript
-import { excelToDocx, extractTablesToExcel } from "@cj-tech-master/excelts/word/excel";
-import { Io } from "@cj-tech-master/excelts/word";
+import { excelToDocx, extractTablesToExcel } from "documonster/word/excel";
+import { Io } from "documonster/word";
 
 // Workbook → DocxDocument (all visible sheets, formatting preserved)
 const doc = excelToDocx(workbook);
@@ -395,8 +395,8 @@ inline images, headers/footers, and floats all render identically to the
 SVG path.
 
 ```typescript
-import { Io } from "@cj-tech-master/excelts/word";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Io } from "documonster/word";
+import { Pdf } from "documonster/pdf";
 
 const doc = await Io.read(docxBytes);
 const pdfBytes = await Pdf.fromDocx(doc);
@@ -425,7 +425,7 @@ degrade to a titled placeholder box (no throw, no blank page). To supply
 your own classic-chart renderer:
 
 ```typescript
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
 const pdf = await Pdf.fromDocx(doc, {
   chartRenderer: await Pdf.wordChartRenderer()
@@ -455,12 +455,12 @@ transparently normalized to their Transitional equivalents — no user action re
 | ISO 29500 Strict       | ✅ Auto-normalized                                             |
 | Encrypted .docx        | ✅ Decrypt with password (Agile Encryption)                    |
 | Digital Signatures     | 🔍 Detection & metadata extraction (no signing/verification)   |
-| Browser                | ✅ (same `@cj-tech-master/excelts/word` import)                |
+| Browser                | ✅ (same `documonster/word` import)                            |
 | Node.js 22+            | ✅                                                             |
 
 ## Migration from `docx` (npm)
 
-| docx (npm)                          | excelts/word                                             |
+| docx (npm)                          | documonster/word                                         |
 | ----------------------------------- | -------------------------------------------------------- |
 | `new Document()`                    | `Document.create()`                                      |
 | `new Paragraph({ text })`           | `textParagraph(text)`                                    |
@@ -474,7 +474,7 @@ transparently normalized to their Transitional equivalents — no user action re
 
 ## Migration from `mammoth.js`
 
-| mammoth.js                         | excelts/word                                         |
+| mammoth.js                         | documonster/word                                     |
 | ---------------------------------- | ---------------------------------------------------- |
 | `mammoth.convertToHtml(input)`     | `readDocx(buf)` → `renderToHtml(doc)`                |
 | `mammoth.convertToMarkdown(input)` | `readDocx(buf)` → `renderToMarkdown(doc)`            |

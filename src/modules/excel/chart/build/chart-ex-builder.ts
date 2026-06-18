@@ -499,7 +499,7 @@ function buildSeriesAndData(
         // diagnose why their hierarchical chart is empty.)
         if (typeof process !== "undefined" && process.env?.NODE_ENV !== "production") {
           console.warn(
-            "[excelts] Treemap/sunburst hierarchy + categories could not be combined into a " +
+            "[documonster] Treemap/sunburst hierarchy + categories could not be combined into a " +
               "contiguous multi-column range. Excel will render the chart as an empty plot area. " +
               "Lay your leaf + hierarchy columns contiguously on the same sheet with matching rows."
           );

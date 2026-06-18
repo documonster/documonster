@@ -123,7 +123,7 @@ class WorkbookXform extends BaseXform {
     model.sheets.forEach((sheet: any) => {
       if (sheet.pageSetup && sheet.pageSetup.printArea) {
         const ranges: string[] = [];
-        // Split on either `&&` (legacy excelts separator) or `,` (Excel's
+        // Split on either `&&` (legacy documonster separator) or `,` (Excel's
         // native separator) at the *top level* — commas / `&&` inside a
         // quoted sheet name (`'Q1, Forecast'!A1:B5`) must NOT be treated
         // as separators. A naive `split(/&&|,/)` shreds such inputs.
@@ -418,7 +418,7 @@ class WorkbookXform extends BaseXform {
             // A print-area `<definedName>` may carry multiple ranges as a
             // comma-separated list (Excel's native format) — read every
             // range, not just the first. Rejoin with `&&` so the
-            // worksheet-level `printArea` field uses the legacy excelts
+            // worksheet-level `printArea` field uses the legacy documonster
             // separator (preserved for backwards compatibility on the
             // public API; both `&&` and `,` are accepted on write).
             //
@@ -534,7 +534,7 @@ class WorkbookXform extends BaseXform {
  * the reader (parsing the body of an OOXML `<definedName>` when the
  * defined-name layer hands us the raw text). Recognises both:
  *   - `,` — the OOXML / Excel-native separator
- *   - `&&` — the legacy excelts convention preserved on the public API
+ *   - `&&` — the legacy documonster convention preserved on the public API
  *
  * Quoted sheet names (`'Q1, Forecast'!A1:B5`) are skipped over: any `,`,
  * `&`, or `'` inside a quoted name is preserved verbatim. A doubled
@@ -844,7 +844,7 @@ function normalisePrintAreaRange(input: string, sheetName: string): string | und
  * the canonical OOXML form `'Sheet'!$N:$N` (rows) or `'Sheet'!$L:$L`
  * (columns).
  *
- * Long-standing excelts behaviour lets users put a column expression on
+ * Long-standing documonster behaviour lets users put a column expression on
  * `printTitlesRow` (and vice versa) — the OOXML reader has always
  * re-classified the value onto the correct field on round-trip — so we
  * honour that by letting the parser infer the actual axis from the

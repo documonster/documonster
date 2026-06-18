@@ -120,14 +120,14 @@ describe("PdfWriter", () => {
       writer.addInfoDict({
         title: "Test Doc",
         author: "Test Author",
-        creator: "excelts"
+        creator: "documonster"
       });
 
       const pdf = writer.build();
       const text = new TextDecoder().decode(pdf);
       expect(text).toContain("/Title (Test Doc)");
       expect(text).toContain("/Author (Test Author)");
-      expect(text).toContain("/Producer (excelts)");
+      expect(text).toContain("/Producer (documonster)");
       expect(text).toContain("/Info");
     });
   });

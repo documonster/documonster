@@ -57,7 +57,7 @@ const LOCAL_FILE_URL = pathToFileURL(localPng).href;
 // NOTE: Excel desktop will NOT auto-download this — it shows a placeholder by
 // design. The relationship in the .xlsx is still correct.
 const REMOTE_URL =
-  "https://raw.githubusercontent.com/cjnoname/excelts/main/src/modules/excel/examples/data/image2.png";
+  "https://raw.githubusercontent.com/documonster/documonster/main/src/modules/excel/examples/data/image2.png";
 
 // ---------------------------------------------------------------------------
 // 1. A workbook with EXTERNAL (linked) images — no bytes embedded.

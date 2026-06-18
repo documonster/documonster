@@ -2,7 +2,7 @@
 
 Self-contained, runnable examples that cover every public Word-module API
 plus its conversion bridges (HTML, Markdown, Excel, PDF, Flat OPC, ODT)
-plus the `excelts/word/crypto` subpath for decryption. Each file is
+plus the `documonster/word/crypto` subpath for decryption. Each file is
 hermetic — no external assets are required; all images / fonts are inline
 byte literals.
 

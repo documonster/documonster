@@ -3,7 +3,7 @@
  * mutations (search, replace, mail-merge, revisions, style resolution,
  * compatibility, data binding, form fields, format search, tree walking).
  *
- * `import { Query } from "@cj-tech-master/excelts/word"` →
+ * `import { Query } from "documonster/word"` →
  *   `Query.extractText(doc)`, `Query.searchText(doc, /x/)`,
  *   `Query.replaceText(...)`, `Query.collectParagraphs(doc)`, … — tree-shaken
  *   via `export * as Query`.

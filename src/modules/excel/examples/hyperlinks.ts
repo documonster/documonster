@@ -7,9 +7,9 @@ const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Foo");
 
 Cell.setValue(ws, "A1", {
-  hyperlink: "https://www.npmjs.com/package/excelts",
+  hyperlink: "https://www.npmjs.com/package/documonster",
   text: "ExcelTS",
-  tooltip: "https://www.npmjs.com/package/excelts"
+  tooltip: "https://www.npmjs.com/package/documonster"
 });
 
 const stopwatch = new HrStopwatch();

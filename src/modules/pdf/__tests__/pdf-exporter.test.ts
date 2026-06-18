@@ -382,7 +382,7 @@ describe("excelToPdf", () => {
       const pdf = await excelToPdf(wb);
 
       const text = pdfToString(pdf);
-      expect(text).toContain("/Producer (excelts)");
+      expect(text).toContain("/Producer (documonster)");
     });
 
     it("should encode Unicode metadata and bookmark titles correctly", async () => {

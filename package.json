@@ -1,5 +1,5 @@
 {
-  "name": "@cj-tech-master/excelts",
+  "name": "documonster",
   "version": "11.0.0",
   "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
   "keywords": [
@@ -24,9 +24,9 @@
     "zero-dependency",
     "zip"
   ],
-  "homepage": "https://github.com/cjnoname/excelts#readme",
+  "homepage": "https://github.com/documonster/documonster#readme",
   "bugs": {
-    "url": "https://github.com/cjnoname/excelts/issues"
+    "url": "https://github.com/documonster/documonster/issues"
   },
   "license": "MIT",
   "author": {
@@ -35,7 +35,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cjnoname/excelts.git"
+    "url": "https://github.com/documonster/documonster.git"
   },
   "files": [
     "dist",

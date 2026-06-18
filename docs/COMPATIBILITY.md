@@ -80,18 +80,18 @@ ExcelTS ships a **zero-dependency deterministic preview renderer** for SVG / PNG
 
 ## Cross-library comparison
 
-| Library        | Language                | Classic create | ChartEx | Combo | Pivot chart | Chartsheet | Edit loaded | Preview (SVG/PNG/PDF) | Raw-XML preserve |
-| -------------- | ----------------------- | :------------: | :-----: | :---: | :---------: | :--------: | :---------: | :-------------------: | :--------------: |
-| **excelts**    | TypeScript / JavaScript |       ✅       |   ✅    |  ✅   |     ✅      |     ✅     |     ✅      |          ✅           |        ✅        |
-| ExcelJS        | JavaScript              |       ➖       |   ➖    |  ❌   |     ❌      |     ❌     |     ➖      |          ➖           |        ⚠️        |
-| SheetJS (xlsx) | JavaScript              |       ➖       |   ➖    |  ❌   |     ❌      |     ➖     |     ➖      |          ➖           |        ⚠️        |
-| xlsxwriter     | Python (write-only)     |       ✅       |   ➖    |  ✅   |     ❌      |     ✅     |     ➖      |          ➖           |        ❌        |
-| openpyxl       | Python                  |       ✅       |   ➖    |  ⚠️   |     ❌      |     ✅     |     ⚠️      |          ➖           |        ❌        |
-| excelize       | Go                      |       ✅       |   ➖    |  ⚠️   |     ❌      |     ⚠️     |     ⚠️      |          ➖           |        ⚠️        |
-| Apache POI     | Java                    |       ✅       |   ⚠️    |  ✅   |     ⚠️      |     ✅     |     ✅      |          ➖           |        ⚠️        |
-| EPPlus         | C# / .NET               |       ✅       |   ➖    |  ✅   |     ⚠️      |     ✅     |     ✅      |          ➖           |        ⚠️        |
-| ClosedXML      | C# / .NET               |       ⚠️       |   ➖    |  ⚠️   |     ❌      |     ❌     |     ⚠️      |          ➖           |        ⚠️        |
-| Aspose.Cells   | multi (paid)            |       ✅       |   ✅    |  ✅   |     ✅      |     ✅     |     ✅      |          ✅           |        ✅        |
+| Library         | Language                | Classic create | ChartEx | Combo | Pivot chart | Chartsheet | Edit loaded | Preview (SVG/PNG/PDF) | Raw-XML preserve |
+| --------------- | ----------------------- | :------------: | :-----: | :---: | :---------: | :--------: | :---------: | :-------------------: | :--------------: |
+| **documonster** | TypeScript / JavaScript |       ✅       |   ✅    |  ✅   |     ✅      |     ✅     |     ✅      |          ✅           |        ✅        |
+| ExcelJS         | JavaScript              |       ➖       |   ➖    |  ❌   |     ❌      |     ❌     |     ➖      |          ➖           |        ⚠️        |
+| SheetJS (xlsx)  | JavaScript              |       ➖       |   ➖    |  ❌   |     ❌      |     ➖     |     ➖      |          ➖           |        ⚠️        |
+| xlsxwriter      | Python (write-only)     |       ✅       |   ➖    |  ✅   |     ❌      |     ✅     |     ➖      |          ➖           |        ❌        |
+| openpyxl        | Python                  |       ✅       |   ➖    |  ⚠️   |     ❌      |     ✅     |     ⚠️      |          ➖           |        ❌        |
+| excelize        | Go                      |       ✅       |   ➖    |  ⚠️   |     ❌      |     ⚠️     |     ⚠️      |          ➖           |        ⚠️        |
+| Apache POI      | Java                    |       ✅       |   ⚠️    |  ✅   |     ⚠️      |     ✅     |     ✅      |          ➖           |        ⚠️        |
+| EPPlus          | C# / .NET               |       ✅       |   ➖    |  ✅   |     ⚠️      |     ✅     |     ✅      |          ➖           |        ⚠️        |
+| ClosedXML       | C# / .NET               |       ⚠️       |   ➖    |  ⚠️   |     ❌      |     ❌     |     ⚠️      |          ➖           |        ⚠️        |
+| Aspose.Cells    | multi (paid)            |       ✅       |   ✅    |  ✅   |     ✅      |     ✅     |     ✅      |          ✅           |        ✅        |
 
 ## Enterprise corpus
 

@@ -5,7 +5,7 @@
 高性能、RFC 4180 兼容的 CSV 解析器和格式化器，零依赖。
 
 ```typescript
-import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/csv";
+import { parseCsv, formatCsv, CsvParserStream } from "documonster/csv";
 ```
 
 ## 功能特性
@@ -27,7 +27,7 @@ import { parseCsv, formatCsv, CsvParserStream } from "@cj-tech-master/excelts/cs
 ### 解析
 
 ```typescript
-import { parseCsv } from "@cj-tech-master/excelts/csv";
+import { parseCsv } from "documonster/csv";
 
 // 简单用法：返回 string[][]
 const rows = parseCsv("name,age\nAlice,30\nBob,25");
@@ -49,7 +49,7 @@ const typed = parseCsv("name,age,active\nAlice,30,true", {
 ### 格式化
 
 ```typescript
-import { formatCsv } from "@cj-tech-master/excelts/csv";
+import { formatCsv } from "documonster/csv";
 
 // 从数组
 formatCsv([
@@ -137,7 +137,7 @@ interface CsvParseResult<T> {
 异步解析器，支持字符串、`AsyncIterable<string | Uint8Array>` 和 `ReadableStream`。
 
 ```typescript
-import { parseCsvAsync } from "@cj-tech-master/excelts/csv";
+import { parseCsvAsync } from "documonster/csv";
 
 // 从字符串
 const result = await parseCsvAsync(csvString, { headers: true });
@@ -155,7 +155,7 @@ const result = await parseCsvAsync(asyncChunks, { headers: true });
 真正的流式异步生成器 — 逐行产出。适合大文件的内存高效处理。
 
 ```typescript
-import { parseCsvRows } from "@cj-tech-master/excelts/csv";
+import { parseCsvRows } from "documonster/csv";
 
 for await (const row of parseCsvRows(hugeFile, { headers: true })) {
   console.log(row); // { name: "...", age: "..." }
@@ -167,7 +167,7 @@ for await (const row of parseCsvRows(hugeFile, { headers: true })) {
 带进度回调的异步解析器，适合大文件。
 
 ```typescript
-import { parseCsvWithProgress } from "@cj-tech-master/excelts/csv";
+import { parseCsvWithProgress } from "documonster/csv";
 
 const result = await parseCsvWithProgress(
   largeCsvString,
@@ -187,7 +187,7 @@ const result = await parseCsvWithProgress(
 批量 CSV 格式化器。接受数组的数组或对象的数组。
 
 ```typescript
-import { formatCsv } from "@cj-tech-master/excelts/csv";
+import { formatCsv } from "documonster/csv";
 
 // 数组的数组
 formatCsv([
@@ -231,8 +231,8 @@ formatCsv([
 转换流，逐块解析 CSV 数据。跨平台（Node.js + 浏览器）。
 
 ```typescript
-import { CsvParserStream, createCsvParserStream } from "@cj-tech-master/excelts/csv";
-import { pipeline } from "@cj-tech-master/excelts/stream";
+import { CsvParserStream, createCsvParserStream } from "documonster/csv";
+import { pipeline } from "documonster/stream";
 
 // 使用工厂函数
 const parser = createCsvParserStream({ headers: true, dynamicTyping: true });
@@ -258,7 +258,7 @@ await pipeline(readableStream, parser, writable);
 转换流，将行格式化为 CSV 文本。跨平台（Node.js + 浏览器）。
 
 ```typescript
-import { CsvFormatterStream, createCsvFormatterStream } from "@cj-tech-master/excelts/csv";
+import { CsvFormatterStream, createCsvFormatterStream } from "documonster/csv";
 
 const formatter = createCsvFormatterStream({
   headers: ["name", "age"],
@@ -279,7 +279,7 @@ formatter.pipe(writable);
 ## 检测工具
 
 ```typescript
-import { detectDelimiter, detectLinebreak, stripBom } from "@cj-tech-master/excelts/csv";
+import { detectDelimiter, detectLinebreak, stripBom } from "documonster/csv";
 
 // 从 CSV 内容自动检测分隔符
 detectDelimiter("a,b,c\n1,2,3"); // ","
@@ -299,7 +299,7 @@ stripBom("\ufeffname,age"); // "name,age"
 ## 行工具
 
 ```typescript
-import { isRowHashArray, deduplicateHeaders, processColumns } from "@cj-tech-master/excelts/csv";
+import { isRowHashArray, deduplicateHeaders, processColumns } from "documonster/csv";
 
 // 检查行是否为 RowHashArray
 isRowHashArray([["key", "value"]]); // true
@@ -314,7 +314,7 @@ deduplicateHeaders(["id", "name", "name", "name"]);
 ## 动态类型
 
 ```typescript
-import { applyDynamicTyping } from "@cj-tech-master/excelts/csv";
+import { applyDynamicTyping } from "documonster/csv";
 
 // 将字符串值自动转换为原生类型
 applyDynamicTyping("42"); // 42（number）
@@ -328,7 +328,7 @@ applyDynamicTyping("hello"); // "hello"（string，不变）
 ## 数字工具
 
 ```typescript
-import { formatNumberForCsv, parseNumberFromCsv } from "@cj-tech-master/excelts/csv";
+import { formatNumberForCsv, parseNumberFromCsv } from "documonster/csv";
 
 // 使用区域特定的小数分隔符格式化数字
 formatNumberForCsv(3.14, "."); // "3.14"
@@ -351,7 +351,7 @@ import {
   csvGenerateAsync,
   csvGenerateData,
   createCsvGenerator
-} from "@cj-tech-master/excelts/csv";
+} from "documonster/csv";
 
 // 生成 CSV 字符串
 const { csv, headers, data } = csvGenerate({
@@ -410,7 +410,7 @@ const batch2 = gen.generate(100);
 ## 错误类
 
 ```typescript
-import { CsvError, CsvWorkerError } from "@cj-tech-master/excelts/csv";
+import { CsvError, CsvWorkerError } from "documonster/csv";
 
 try {
   parseCsv(badInput, { headers: true });

@@ -9,8 +9,8 @@
  *
  * @example
  * ```ts
- * import { htmlToDocxBody } from "excelts/word/html";
- * import { Document, toBuffer } from "excelts/word";
+ * import { htmlToDocxBody } from "documonster/word/html";
+ * import { Document, toBuffer } from "documonster/word";
  *
  * const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
  * const h = Document.create();

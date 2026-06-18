@@ -17,7 +17,7 @@ export class EventEmitter {
   // Brand for ExcelTS browser stream objects.
   // Use a string key (not a Symbol) so it still works if the bundle ends up
   // containing multiple copies of this module.
-  readonly __excelts_stream: true = true;
+  readonly __documonster_stream: true = true;
 
   private _listeners: Map<string | symbol, ListenerValue> = new Map();
   private _maxListeners: number = EventEmitter.defaultMaxListeners;

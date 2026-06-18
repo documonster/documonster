@@ -1,11 +1,11 @@
 /**
- * Public entry for the excelts chart module.
+ * Public entry for the documonster chart module.
  *
  * **Functional, zero-side-effect, fully tree-shakeable.** Import the chart
  * builders, renderers, presets and parsers you need:
  *
  * ```ts
- * import { buildChartModel, renderChartSvg } from "@cj-tech-master/excelts/chart";
+ * import { buildChartModel, renderChartSvg } from "documonster/chart";
  * const model = buildChartModel(options);
  * const svg   = renderChartSvg(model);
  * ```

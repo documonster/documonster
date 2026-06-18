@@ -37,7 +37,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 ### Creating a Workbook
 
 ```typescript
-import { Workbook, Worksheet } from "@cj-tech-master/excelts/excel";
+import { Workbook, Worksheet } from "documonster/excel";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "My Sheet");
@@ -70,7 +70,7 @@ Worksheet.addRow(sheet, { name: "Alice", address: { city: "Sydney" } });
 ### Reading a Workbook
 
 ```typescript
-import { Workbook, Worksheet, Row } from "@cj-tech-master/excelts/excel";
+import { Workbook, Worksheet, Row } from "documonster/excel";
 
 const workbook = Workbook.create();
 
@@ -89,7 +89,7 @@ Worksheet.eachRow(worksheet, (row, rowNumber) => {
 ### Styling Cells
 
 ```typescript
-import { Cell } from "@cj-tech-master/excelts/excel";
+import { Cell } from "documonster/excel";
 
 Cell.setValue(worksheet, "A1", "Hello");
 Cell.setFont(worksheet, "A1", {
@@ -116,7 +116,7 @@ Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 ### Number Formats
 
 ```typescript
-import { Cell } from "@cj-tech-master/excelts/excel";
+import { Cell } from "documonster/excel";
 
 // Currency
 Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
@@ -466,7 +466,7 @@ import {
   EXCEL_CHART_EX_PRESETS,
   applyChartPreset,
   applyChartExPreset
-} from "@cj-tech-master/excelts/chart";
+} from "documonster/chart";
 
 // 99 classic presets + 10 ChartEx presets (Excel UI aliases)
 ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
@@ -775,8 +775,8 @@ ws.addChart(
 ### Preview Export
 
 ```typescript
-import { Chart } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Chart } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const chart = Chart.get(ws)[0];
 
@@ -795,7 +795,7 @@ const pdf = await Pdf.fromChart(chart, {
 });
 
 // Inspect the vector-vs-raster decision explicitly:
-import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts/chart";
+import { canRenderChartExAsVectorPdf } from "documonster/chart";
 const chartExModel = Chart.chartExModel(chart);
 if (chartExModel) {
   console.log(canRenderChartExAsVectorPdf(chartExModel));
@@ -992,7 +992,7 @@ These features would require multi-week investments with a low payoff for a prev
 - **Vector path (default)** — `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`, `pareto`, `boxWhisker`, `regionMap` all go through `drawChartExPdf`, which shares its geometry collectors with the SVG renderer so the two backends stay pixel-equivalent modulo rasterisation. Sunburst arcs are emitted as cubic-Bézier approximations (≤ 0.03 % max error); everything else is straight `drawRect` / `drawLine` / `drawPath` primitives that PDF understands natively. `regionMap` reuses the same TopoJSON decoder + projection math + centroid table as the SVG renderer; the only intentional visual divergence is that the rounded-corner frame (`rx="14"`) becomes a sharp-corner frame in PDF (`drawRect` does not expose a corner radius).
 - **Raster opt-in** — any ChartEx type can be rasterised on demand with `chartToPdf(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text or vector scalability.
 
-Use `chartToPdf(chart, options)` from `@cj-tech-master/excelts/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
+Use `chartToPdf(chart, options)` from `documonster/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
 
 **Pivot chart note:** ExcelTS supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
 
@@ -1023,8 +1023,8 @@ Full API mapping tables are in dedicated docs, one per library:
 Export any workbook to PDF with zero external dependencies:
 
 ```typescript
-import { Workbook, Worksheet, Column } from "@cj-tech-master/excelts/excel";
-import { Pdf } from "@cj-tech-master/excelts/pdf";
+import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Report");
@@ -1082,14 +1082,14 @@ const pdf = await Pdf.fromExcel(workbook, {
 ## CSV Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts/excel";
+import { Workbook } from "documonster/excel";
 import {
   readCsv,
   writeCsv,
   writeCsvBuffer,
   readCsvFile,
   writeCsvFile
-} from "@cj-tech-master/excelts/excel/csv";
+} from "documonster/excel/csv";
 import fs from "fs";
 
 const workbook = Workbook.create();
@@ -1116,14 +1116,14 @@ await readCsv(workbook, arrayBuffer);
 ## Markdown Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts/excel";
+import { Workbook } from "documonster/excel";
 import {
   readMarkdown,
   writeMarkdown,
   writeMarkdownBuffer,
   readMarkdownFile,
   writeMarkdownFile
-} from "@cj-tech-master/excelts/excel/markdown";
+} from "documonster/excel/markdown";
 
 const workbook = Workbook.create();
 
@@ -1144,7 +1144,7 @@ const bytes = writeMarkdownBuffer(workbook);
 Read large XLSX files with minimal memory usage:
 
 ```typescript
-import { Stream } from "@cj-tech-master/excelts/excel";
+import { Stream } from "documonster/excel";
 
 const reader = new Stream.WorkbookReader("large-file.xlsx", {
   worksheets: "emit",
@@ -1166,7 +1166,7 @@ for await (const worksheet of reader) {
 Write large XLSX files row by row:
 
 ```typescript
-import { Stream } from "@cj-tech-master/excelts/excel";
+import { Stream } from "documonster/excel";
 
 const workbook = new Stream.WorkbookWriter({
   filename: "output.xlsx",
@@ -1186,7 +1186,7 @@ await workbook.commit();
 ### Web Streams (Node.js 22+ and Browsers)
 
 ```typescript
-import { Stream } from "@cj-tech-master/excelts/excel";
+import { Stream } from "documonster/excel";
 
 // Write to Web WritableStream
 const chunks: Uint8Array[] = [];
@@ -1231,7 +1231,7 @@ for await (const ws of reader) {
 ### Using with Bundlers (Vite, Webpack, Rollup, esbuild)
 
 ```typescript
-import { Workbook, Cell } from "@cj-tech-master/excelts/excel";
+import { Workbook, Cell } from "documonster/excel";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Sheet1");
@@ -1247,7 +1247,7 @@ const url = URL.createObjectURL(blob);
 ### Using with Script Tags
 
 ```html
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+<script src="https://unpkg.com/documonster/dist/iife/documonster.iife.min.js"></script>
 <script>
   const { Workbook } = ExcelTS;
   const wb = Workbook.create();
@@ -1300,7 +1300,7 @@ import {
   errorToJSON,
   getErrorChain,
   getRootCause
-} from "@cj-tech-master/excelts";
+} from "documonster";
 ```
 
 ## Examples

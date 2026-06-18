@@ -2,7 +2,7 @@
  * `Security` namespace surface — encryption, document protection, security
  * policies.
  *
- * `import { Security } from "@cj-tech-master/excelts/word"` →
+ * `import { Security } from "documonster/word"` →
  *   `Security.encrypt(...)`, `Security.protect(...)`, `Security.isProtected(doc)`,
  *   `Security.DEFAULT_SECURITY_POLICY`, … — tree-shaken via
  *   `export * as Security`.

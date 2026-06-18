@@ -1,5 +1,5 @@
 /**
- * `@cj-tech-master/excelts/excel/csv` — CSV ↔ Workbook free functions.
+ * `documonster/excel/csv` — CSV ↔ Workbook free functions.
  *
  * Tree-shakeable CSV import/export for the excel Workbook. Importing this
  * subpath is what pulls the CSV parser/formatter into a bundle; the core

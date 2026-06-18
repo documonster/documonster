@@ -1,7 +1,7 @@
 /**
  * Integration test: Office 365 threaded comments round-trip.
  *
- * Exercises the parts excelts must wire up end-to-end when a workbook
+ * Exercises the parts documonster must wire up end-to-end when a workbook
  * carries modern threaded comments:
  *
  *   - `xl/persons/person.xml` (workbook-level person directory)

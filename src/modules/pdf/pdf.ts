@@ -6,7 +6,7 @@
  *
  * @example Simplest — pass a 2D array:
  * ```typescript
- * import { pdf } from "@cj-tech-master/excelts/pdf";
+ * import { pdf } from "documonster/pdf";
  *
  * const bytes = await pdf([
  *   ["Product", "Revenue"],

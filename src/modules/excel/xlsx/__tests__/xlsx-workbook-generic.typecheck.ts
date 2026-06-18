@@ -1,4 +1,4 @@
-// Type-only regression test for https://github.com/cjnoname/excelts/issues/160
+// Type-only regression test for https://github.com/documonster/documonster/issues/160
 //
 // This file is typechecked by `pnpm type` (tsgo) but is NOT executed by Vitest.
 // It pins down the type contract that issue #160 was about: under the Node

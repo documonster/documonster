@@ -960,14 +960,14 @@ async function runWriteBufferSelfCheck(bytes: Uint8Array): Promise<void> {
       .join("\n");
     // eslint-disable-next-line no-console
     console.warn(
-      `[excelts] writeBuffer() produced xlsx with ${report.problems.length} OOXML issue(s):\n` +
+      `[documonster] writeBuffer() produced xlsx with ${report.problems.length} OOXML issue(s):\n` +
         `${summary}\n` +
         `Pass \`{ validate: false }\` to silence this self-check, or set NODE_ENV=production.`
     );
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn(
-      `[excelts] writeBuffer() self-check threw unexpectedly and was skipped: ${String(err)}`
+      `[documonster] writeBuffer() self-check threw unexpectedly and was skipped: ${String(err)}`
     );
   }
 }
@@ -4965,7 +4965,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
 
   /**
    * Emit the raw slicer/timeline parts captured on load. Pure
-   * byte-copy — excelts does not modify these parts. The partner
+   * byte-copy — documonster does not modify these parts. The partner
    * Content-Types and rels are covered separately (content types in
    * `addContentTypes`, sheet/workbook rels by the corresponding
    * xforms consuming the existing `xl/_rels/*.rels` captured on
@@ -5306,7 +5306,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
           return true;
         }
         // Raw-passthrough capture for slicers and timelines — two
-        // coordinated Office dashboard features excelts does not
+        // coordinated Office dashboard features documonster does not
         // structurally model but must not destroy on round-trip.
         // Each family has two part types (the control itself + its
         // cache); both are captured into maps on the workbook model
@@ -6629,7 +6629,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     }
 
     // Raw-passthrough catch-all for Office 2010+ slicer/timeline
-    // dashboard controls and their associated rels. excelts does not
+    // dashboard controls and their associated rels. documonster does not
     // model these structurally yet; capturing the bytes here prevents
     // silent data loss on round-trip when a dashboard workbook comes
     // through. Same idea covers the two-level rels files produced by

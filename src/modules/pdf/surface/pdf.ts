@@ -2,7 +2,7 @@
  * `Pdf` namespace surface — PDF writing, reading, building, editing,
  * conversion, and digital signatures.
  *
- * `import { Pdf } from "@cj-tech-master/excelts/pdf"` →
+ * `import { Pdf } from "documonster/pdf"` →
  *   `Pdf.create(rows)`, `Pdf.read(bytes)`, `new Pdf.Builder()`,
  *   `new Pdf.Editor()`, `Pdf.sign(...)`, `Pdf.verifySignature(...)`,
  *   `await Pdf.fromExcel(wb)`, `await Pdf.fromDocx(doc)`.

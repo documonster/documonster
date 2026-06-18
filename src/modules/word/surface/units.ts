@@ -2,7 +2,7 @@
  * `Units` namespace surface — measurement unit conversions (twips, EMU,
  * points, etc.).
  *
- * `import { Units } from "@cj-tech-master/excelts/word"` →
+ * `import { Units } from "documonster/word"` →
  *   `Units.inchesToTwips(1)`, `Units.ptToEmu(12)`, … — tree-shaken via
  *   `export * as Units`.
  */

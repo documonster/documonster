@@ -37,13 +37,13 @@ fs.mkdirSync(outDir, { recursive: true });
 
 {
   const doc = new Pdf.Builder();
-  doc.setMetadata({ title: "Builder Basics", author: "excelts" });
+  doc.setMetadata({ title: "Builder Basics", author: "documonster" });
 
   const page = doc.addPage({ width: 595, height: 842 }); // A4
 
   // Title
   page.drawText("PDF Document Builder", { x: 72, y: 770, fontSize: 24, bold: true });
-  page.drawText("Built from scratch with excelts", {
+  page.drawText("Built from scratch with documonster", {
     x: 72,
     y: 745,
     fontSize: 12,
@@ -407,7 +407,7 @@ fs.mkdirSync(outDir, { recursive: true });
   const doc = new Pdf.Builder();
   doc.setMetadata({
     title: "PDF/A Compliant Document",
-    author: "excelts",
+    author: "documonster",
     subject: "Archive-safe document"
   });
   doc.setPdfACompliance();

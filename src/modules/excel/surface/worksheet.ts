@@ -1,7 +1,7 @@
 /**
  * `Worksheet` namespace surface — sheet-level structure operations.
  *
- * `import { Worksheet } from "@cj-tech-master/excelts/excel"` → `Worksheet.merge(ws, "A1:B2")`,
+ * `import { Worksheet } from "documonster/excel"` → `Worksheet.merge(ws, "A1:B2")`,
  * `Worksheet.addRow(ws, [...])`, `Worksheet.eachRow(ws, cb)`, …
  *
  * Cell / Row / Column / Chart / Table / Image / Pivot operations live in their

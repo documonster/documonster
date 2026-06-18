@@ -1,7 +1,7 @@
 /**
  * `Watermark` namespace surface — worksheet background watermark.
  *
- * `import { Watermark } from "@cj-tech-master/excelts/excel"` →
+ * `import { Watermark } from "documonster/excel"` →
  *   `Watermark.add(ws, opts)`, `Watermark.get(ws)`, `Watermark.remove(ws)`.
  */
 export {

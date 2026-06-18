@@ -7,7 +7,7 @@
  *
  * @example
  * ```ts
- * import { diffDocuments } from "excelts/word";
+ * import { diffDocuments } from "documonster/word";
  *
  * const changes = diffDocuments(oldDoc, newDoc);
  * console.log(changes.filter(c => c.type === "modified"));

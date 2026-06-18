@@ -2,7 +2,7 @@
  * `Io` namespace surface — document serialization / deserialization,
  * incremental editing, and field updates.
  *
- * `import { Io } from "@cj-tech-master/excelts/word"` →
+ * `import { Io } from "documonster/word"` →
  *   `Io.package(doc)`, `Io.read(buffer)`, `Io.toBuffer(doc)`,
  *   `Io.patchDocument(...)`, `Io.updateFields(doc)`, … — tree-shaken via
  *   `export * as Io`.

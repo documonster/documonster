@@ -34,7 +34,7 @@ const { certificate, privateKey } = await generateTestCertificate("Example Signe
   console.log("1. Sign a new PDF with PdfDocumentBuilder:");
 
   const doc = new Pdf.Builder();
-  doc.setMetadata({ title: "Signed Agreement", author: "excelts" });
+  doc.setMetadata({ title: "Signed Agreement", author: "documonster" });
 
   const page = doc.addPage();
   page.drawText("Service Agreement", { x: 72, y: 750, fontSize: 24, bold: true });

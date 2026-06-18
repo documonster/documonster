@@ -7,8 +7,8 @@
  *
  * @example
  * ```typescript
- * import { Workbook } from "excelts";
- * import { excelToPdf } from "excelts/pdf";
+ * import { Workbook } from "documonster";
+ * import { excelToPdf } from "documonster/pdf";
  *
  * const workbook = new Workbook();
  * // ... build workbook ...
@@ -128,7 +128,7 @@ export async function excelToPdf(
   // reflect the latest cell values (fixes stale cached results from XLSX).
   //
   // The formula engine is opt-in via explicit injection: callers pass
-  // `{ recalculate: calculateFormulas }` (from `@cj-tech-master/excelts/formula`)
+  // `{ recalculate: calculateFormulas }` (from `documonster/formula`)
   // to recompute; callers who don't fall back to the cached results the XLSX
   // shipped with. This keeps the ~200 KB engine out of bundles that only
   // export already-computed workbooks — no host-registry needed.
@@ -204,7 +204,7 @@ export interface ChartToPdfOptions {
  * Lives in `excel-bridge.ts` because invoking the PDF builder from the
  * chart module would cross the Layer 4 → Layer 5 import boundary
  * documented in `AGENTS.md`. Consumers import it from
- * `@cj-tech-master/excelts/pdf` alongside `excelToPdf`.
+ * `documonster/pdf` alongside `excelToPdf`.
  */
 export async function chartToPdf(
   chart: ChartHandle,
@@ -1451,7 +1451,7 @@ async function convertChartsheet(cs: ChartsheetData): Promise<PdfChartsheetData>
  *
  * @example
  * ```typescript
- * import { docxToPdf, createWordChartPdfRenderer } from "excelts/pdf";
+ * import { docxToPdf, createWordChartPdfRenderer } from "documonster/pdf";
  *
  * const pdfBytes = await docxToPdf(doc, {
  *   chartRenderer: createWordChartPdfRenderer()

@@ -6,7 +6,7 @@ Last updated: 2026-05-05.
 
 ## 1. Motivation
 
-Consumers importing the top-level `Workbook` from `excelts` get **2.1 MB** of
+Consumers importing the top-level `Workbook` from `documonster` get **2.1 MB** of
 JavaScript in their final bundle even when they never draw a chart, never touch
 PDF, and never evaluate a formula. Empirical measurement with `esbuild
 --tree-shaking=true`:

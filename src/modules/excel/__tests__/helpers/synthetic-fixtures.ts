@@ -11,7 +11,7 @@ import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
  * checking proprietary `.xlsx` blobs into the repo.
  *
  * IMPORTANT: these are SYNTHETIC fixtures — the workbook bytes are
- * produced by excelts itself. They are NOT a substitute for true Office
+ * produced by documonster itself. They are NOT a substitute for true Office
  * round-trip oracle coverage. The fixtures are deliberately marked with
  * a non-conformant XML comment via the `syntheticMarker` helper so the
  * mutation tests can prove that loaded raw XML (including unknown
@@ -58,7 +58,7 @@ export interface SyntheticFixture {
 
 /** Marker every synthetic fixture is decorated with. */
 export const SYNTHETIC_MARKER =
-  "<!-- SYNTHETIC-FIXTURE: produced by excelts (not by Excel/LibreOffice/WPS) -->";
+  "<!-- SYNTHETIC-FIXTURE: produced by documonster (not by Excel/LibreOffice/WPS) -->";
 
 /** Pre-compiled `<c:chart>` decoration regex used by `injectSyntheticMarker`. */
 const C_CHART_OPEN = /<c:chart(\s|>)/;

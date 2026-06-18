@@ -1,7 +1,7 @@
 /**
  * `Layout` namespace surface — document layout and SVG rendering.
  *
- * `import { Layout } from "@cj-tech-master/excelts/word"` →
+ * `import { Layout } from "documonster/word"` →
  *   `Layout.document(doc)`, `Layout.documentFull(doc)`,
  *   `Layout.renderDocumentToSvg(doc)`, … — tree-shaken via `export * as Layout`.
  */

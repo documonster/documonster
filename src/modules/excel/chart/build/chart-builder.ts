@@ -658,7 +658,7 @@ function validateSeriesPatchOptions(
   // options bag with no `values` / `xValues` / `bubbleSize`. The
   // `allowMissingRefs` flag short-circuits the "required" assertions so we
   // don't need to inject placeholder strings (previous implementation used
-  // an `__excelts_placeholder__` sentinel that would have triggered false
+  // an `__documonster_placeholder__` sentinel that would have triggered false
   // positives if `values` ever gained a content-level check).
   validateSeriesOptions(chartType, opts as AddChartSeriesOptions, path, { allowMissingRefs: true });
 }
@@ -872,7 +872,7 @@ function buildPivotSourceXml(source: PivotChartSource): string {
     throw new ChartOptionsError("Pivot chart source fmtId must be a non-negative integer.");
   }
   // Pivot chart options used to be embedded inside `<c:pivotSource>` under a
-  // private `xmlns:excelts` namespace; Excel never recognised that and the
+  // private `xmlns:documonster` namespace; Excel never recognised that and the
   // parser never read it back. Options are now routed into
   // `ChartModel.pivotOptions` (see {@link ChartModel.pivotOptions}) and
   // serialised as MS standard `c14:pivotOptions` inside chartSpace's extLst.

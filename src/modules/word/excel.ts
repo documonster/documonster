@@ -1,13 +1,13 @@
 /**
  * DOCX Module - Excel Bridge (Subpath Entry)
  *
- * Re-exports the Excel bridge API at `excelts/word/excel`. This file is
+ * Re-exports the Excel bridge API at `documonster/word/excel`. This file is
  * referenced by `package.json#exports["./word/excel"]`; it forwards to the
  * implementation under `./bridge/excel-bridge`.
  *
  * @example
  * ```ts
- * import { excelToDocx } from "excelts/word/excel";
+ * import { excelToDocx } from "documonster/word/excel";
  * ```
  */
 

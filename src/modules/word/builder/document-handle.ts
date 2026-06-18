@@ -148,7 +148,7 @@ function _ensureNumberingInstance(s: _DocumentState, abstractNumId: number): num
  *
  * @example
  * ```ts
- * import { Document, toBuffer } from "excelts/word";
+ * import { Document, toBuffer } from "documonster/word";
  *
  * const doc = Document.create();
  * Document.addHeading(doc, "Hello World", 1);

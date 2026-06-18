@@ -17,7 +17,7 @@ import { readCsvStream, writeCsvStream, type CsvOptions } from "./csv-bridge";
  *
  * @example
  * ```ts
- * import { readCsvFile } from "@cj-tech-master/excelts/excel/csv";
+ * import { readCsvFile } from "documonster/excel/csv";
  * await readCsvFile(workbook, "data.csv", { delimiter: ";", sheetName: "Data" });
  * ```
  */

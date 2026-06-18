@@ -57,8 +57,8 @@ See `functions/` for the full list; `runtime/function-registry.ts` is the regist
 ### Paired with `Workbook` (most common)
 
 ```typescript
-import { Workbook, Cell } from "@cj-tech-master/excelts/excel";
-import { Formula } from "@cj-tech-master/excelts/formula";
+import { Workbook, Cell } from "documonster/excel";
+import { Formula } from "documonster/formula";
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Sheet1");
@@ -78,7 +78,7 @@ have to use the excel module at all. A bundle that imports only
 `calculateFormulas` pulls zero excel runtime code.
 
 ```typescript
-import { Formula, type WorkbookLike } from "@cj-tech-master/excelts/formula";
+import { Formula, type WorkbookLike } from "documonster/formula";
 
 // Your own data — any object implementing WorkbookLike works.
 // No Workbook class required.
@@ -100,8 +100,8 @@ Load an XLSX with the excel module, then recalculate its formulas
 functionally. There is no install or registration step.
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts/excel";
-import { Formula } from "@cj-tech-master/excelts/formula";
+import { Workbook } from "documonster/excel";
+import { Formula } from "documonster/formula";
 
 const wb = Workbook.create();
 await Workbook.read(wb, buffer);
@@ -111,7 +111,7 @@ Formula.calculate(wb); // defined names classified and formulas recalculated
 ### Tokenise / parse without evaluating
 
 ```typescript
-import { Formula } from "@cj-tech-master/excelts/formula";
+import { Formula } from "documonster/formula";
 
 const tokens = Formula.tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
 const ast = Formula.parse(tokens); // throws on syntax errors
@@ -119,7 +119,7 @@ const ast = Formula.parse(tokens); // throws on syntax errors
 
 ## Why a separate subpath?
 
-The formula engine is ~200 KB minified. Most callers of `@cj-tech-master/excelts`
+The formula engine is ~200 KB minified. Most callers of `documonster`
 only read and write XLSX files and let Excel recalculate on open — pulling
 the engine into those bundles unconditionally would be a large, invisible
 cost.
@@ -139,7 +139,7 @@ a cached XLSX loaded by the excel module works too; the excel import
 stays in the excel bundle.
 
 > **IIFE note:** The script-tag IIFE bundle
-> (`dist/iife/excelts.iife.min.js`) intentionally excludes the formula
+> (`dist/iife/documonster.iife.min.js`) intentionally excludes the formula
 > engine so it stays lean. Script-tag users who need formula
 > calculation should switch to ESM and call `installFormulaEngine()`
 > from this subpath.

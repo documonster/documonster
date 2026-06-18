@@ -5,7 +5,7 @@
 GFM（GitHub 风格 Markdown）表格解析器和格式化器，零依赖。
 
 ```typescript
-import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "documonster/markdown";
 ```
 
 ## 功能特性
@@ -28,7 +28,7 @@ import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master
 ### 解析
 
 ```typescript
-import { parseMarkdown } from "@cj-tech-master/excelts/markdown";
+import { parseMarkdown } from "documonster/markdown";
 
 const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["Name", "Age"]
@@ -47,7 +47,7 @@ const doc = parseMarkdown("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
 ### 格式化
 
 ```typescript
-import { formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { formatMarkdown } from "documonster/markdown";
 
 formatMarkdown(
   ["Name", "Age"],
@@ -77,7 +77,7 @@ formatMarkdown(["Name", "Age", "Active"], [["Alice", 30, true]]);
 ### 工作簿集成
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster";
 
 const workbook = new Workbook();
 
@@ -210,7 +210,7 @@ formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
 ## 错误
 
 ```typescript
-import { MarkdownParseError } from "@cj-tech-master/excelts/markdown";
+import { MarkdownParseError } from "documonster/markdown";
 
 try {
   parseMarkdown("no table here");

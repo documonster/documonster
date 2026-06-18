@@ -16,7 +16,7 @@
  *   them unless you also handle the underlying OOXML directly.
  *
  * Tree-shakeable subpaths: HTML/Markdown/Excel/PDF integrations live under
- * `excelts/word/{html,markdown,excel}` and `excelts/pdf` — they are not
+ * `documonster/word/{html,markdown,excel}` and `documonster/pdf` — they are not
  * re-exported here so bundlers can drop them when unused.
  */
 
@@ -558,10 +558,10 @@ export type {
 
 // NOTE: renderToMarkdown, renderToHtml, htmlToDocx, excelToDocx, markdownToDocx are NOT exported
 // from the main entry — they live in dedicated subpaths to ensure tree-shaking:
-//   import { renderToMarkdown, markdownToDocx } from "excelts/word/markdown"
-//   import { renderToHtml }     from "excelts/word/html"
-//   import { excelToDocx }      from "excelts/word/excel"
-//   import { docxToPdf }        from "excelts/pdf"
+//   import { renderToMarkdown, markdownToDocx } from "documonster/word/markdown"
+//   import { renderToHtml }     from "documonster/word/html"
+//   import { excelToDocx }      from "documonster/word/excel"
+//   import { docxToPdf }        from "documonster/pdf"
 
 // --- Stable API ---
 export type { EncryptOptions } from "@word/security/encryption";

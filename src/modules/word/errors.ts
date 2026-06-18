@@ -69,7 +69,7 @@ export class DocxUnsupportedFeatureError extends DocxError {
 /**
  * Error thrown when a DOCX file is encrypted (CFB format) and no password
  * was provided. Pass `{ password }` in the second argument of `readDocx()`
- * to decrypt automatically, or call `decryptDocx()` from "excelts/word/crypto"
+ * to decrypt automatically, or call `decryptDocx()` from "documonster/word/crypto"
  * directly if you need lower-level access to the decrypted ZIP bytes.
  */
 export class DocxEncryptedError extends DocxError {
@@ -78,7 +78,7 @@ export class DocxEncryptedError extends DocxError {
   constructor() {
     super(
       "The document is encrypted (password-protected). " +
-        'Pass { password } to readDocx(), or use decryptDocx() from "excelts/word/crypto" ' +
+        'Pass { password } to readDocx(), or use decryptDocx() from "documonster/word/crypto" ' +
         "for lower-level decryption."
     );
   }

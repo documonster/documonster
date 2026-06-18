@@ -1,7 +1,7 @@
 /**
  * Hyperlink + RichText integration tests.
  *
- * Regression coverage for https://github.com/cjnoname/excelts/issues/142:
+ * Regression coverage for https://github.com/documonster/documonster/issues/142:
  * a hyperlink cell whose display text is rich-text (shared-string `<r>` runs)
  * must round-trip through `writeBuffer` / `load` with:
  *

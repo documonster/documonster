@@ -316,7 +316,7 @@ export function buildChartStyle(model: ChartStyleModel): string {
     process.env?.NODE_ENV !== "production"
   ) {
     console.warn(
-      "[excelts] buildChartStyle: `model.elements` overrides are not yet supported — " +
+      "[documonster] buildChartStyle: `model.elements` overrides are not yet supported — " +
         "the default Excel style template will be emitted (customisation ignored). " +
         "Pass a pre-built sidecar via `rawXml` if you need genuine overrides."
     );

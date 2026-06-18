@@ -1,6 +1,6 @@
 # documonster 1.0 — Architecture & Refactor Design
 
-Status: design document, the blueprint for the excelts → documonster rewrite.
+Status: design document, the blueprint for the documonster → documonster rewrite.
 This is the **single authoritative blueprint**. It absorbs the empirical
 measurements, per-module audit, and design-pattern examples from
 `FUTURE_ARCHITECTURE.md`, and supersedes its staged v10→v13 + codemod plan with
@@ -24,8 +24,8 @@ Last updated: 2026-06-12.
 3. **Zero `host-registry` / zero `install*()`.** No global mutable registration
    slots. Dependencies travel with data, not with module-level side effects.
 4. **Clean break, no compatibility layer.** documonster 1.0 is a brand-new
-   package; it does not preserve the excelts class API. No codemod, no
-   deprecated re-exports. The old `@cj-tech-master/excelts` package is frozen
+   package; it does not preserve the documonster class API. No codemod, no
+   deprecated re-exports. The old `documonster` package is frozen
    and deprecated, pointing users to documonster.
 
 The hard rules from `AGENTS.md` still hold: zero runtime dependencies, prefer
@@ -657,7 +657,7 @@ implementation-proven choice over the trendier `Result` type.
 
 ---
 
-## 4b. Migration guide (excelts → documonster)
+## 4b. Migration guide (documonster → documonster)
 
 Clean break does **not** mean "leave users stranded." Even without a
 compatibility layer, ship a migration aid so adoption is tractable:
@@ -700,8 +700,8 @@ genuinely low-risk and can follow.
 | 5         | Apply the proven spike (phase 1) at full scale: chart exports render bytes in place, defined-name rewrite at call time; move full raw-patch tree + read path (`parseChartEx`) behind chart exports; core handles chart parts as opaque bytes. Whole-library zero-register achieved.                                                                                                                                          | high (de-risked by spike) | chart fully off core  |
 | 6         | Align word/pdf/xml/archive/stream to the unified flat-named-export shape (§1.2).                                                                                                                                                                                                                                                                                                                                             | medium                    | consistency           |
 | 7         | Update `treeshake-verify.ts`: assert read-only XLSX excludes csv/markdown/chart/formula/pdf subtrees. `pnpm check && build && test` all green; benchmark vs phase-0 baseline (no perf regression); produce before/after size table. Write `docs/MIGRATION_FROM_EXCELTS.md`.                                                                                                                                                  | —                         | verify                |
-| 8         | Brand rename excelts → documonster (package.json name=`documonster`, homepage/bugs/repository=`documonster/documonster`, README/README_zh/AGENTS, rolldown iife filenames + global name, CI/release.yml package refs); version=`1.0.0`; reset CHANGELOG.                                                                                                                                                                     | low                       | —                     |
-| 9         | GitHub: migrate repo to `documonster` org; reconfigure `NPM_TOKEN`, release-please component name `excelts`→`documonster`; publish `documonster@1.0.0`; `npm deprecate @cj-tech-master/excelts "Renamed to documonster. Install: npm i documonster"`.                                                                                                                                                                        | medium                    | —                     |
+| 8         | Brand rename documonster → documonster (package.json name=`documonster`, homepage/bugs/repository=`documonster/documonster`, README/README_zh/AGENTS, rolldown iife filenames + global name, CI/release.yml package refs); version=`1.0.0`; reset CHANGELOG.                                                                                                                                                                 | low                       | —                     |
+| 9         | GitHub: migrate repo to `documonster` org; reconfigure `NPM_TOKEN`, release-please component name `documonster`→`documonster`; publish `documonster@1.0.0`; `npm deprecate documonster "Renamed to documonster. Install: npm i documonster"`.                                                                                                                                                                                | medium                    | —                     |
 
 Verification gate after every phase: `pnpm check` then `pnpm format`, plus the
 relevant test subset, plus `treeshake-verify` once phase 3+ lands. **After
@@ -712,13 +712,13 @@ baseline — flat-function dispatch must not regress the hot write path.**
 
 ## 6. Success metrics
 
-| Metric                                    | Current (excelts)  | documonster 1.0 target                 |
-| ----------------------------------------- | ------------------ | -------------------------------------- |
-| Core entry bundle (read/write cells only) | 2146 KB            | < 200 KB                               |
-| chart code when not imported              | always in bundle   | 0 (tree-shaken)                        |
-| Tree-shake ratio (core path)              | 40.6%              | < 8%                                   |
-| host-registry / install slots             | 2 (chart, formula) | 0                                      |
-| Public API object-creation paradigms      | 4+                 | 1 (`create*()` + flat named functions) |
+| Metric                                    | Current (documonster) | documonster 1.0 target                 |
+| ----------------------------------------- | --------------------- | -------------------------------------- |
+| Core entry bundle (read/write cells only) | 2146 KB               | < 200 KB                               |
+| chart code when not imported              | always in bundle      | 0 (tree-shaken)                        |
+| Tree-shake ratio (core path)              | 40.6%                 | < 8%                                   |
+| host-registry / install slots             | 2 (chart, formula)    | 0                                      |
+| Public API object-creation paradigms      | 4+                    | 1 (`create*()` + flat named functions) |
 
 ---
 
@@ -735,9 +735,9 @@ baseline — flat-function dispatch must not regress the hot write path.**
    dot. Mitigation: verb-noun naming groups by prefix (`setCell…`, `getCell…`,
    `addSheet…`) so prefix-typing discovers them; optional `export * as Excel`
    dot-sugar for rolldown users (§1.1a), never the sole path.
-4. **Clean break breaks all existing excelts users.** Mitigation: ship
+4. **Clean break breaks all existing documonster users.** Mitigation: ship
    `docs/MIGRATION_FROM_EXCELTS.md` (§4b) with an exhaustive old→new mapping;
-   excelts stays frozen + deprecated pointing to documonster.
+   documonster stays frozen + deprecated pointing to documonster.
 5. **`chartParts`-on-handle render timing.** Rendering at `Chart.*` mutation
    time instead of write time changes _when_ bytes are produced. Mitigation:
    the chart round-trip corpus asserts byte-identical output; every `Chart.*`

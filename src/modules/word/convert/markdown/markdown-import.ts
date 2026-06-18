@@ -7,8 +7,8 @@
  *
  * @example
  * ```ts
- * import { markdownToDocx } from "excelts/word/markdown";
- * import { Document, toBuffer } from "excelts/word";
+ * import { markdownToDocx } from "documonster/word/markdown";
+ * import { Document, toBuffer } from "documonster/word";
  *
  * const doc = markdownToDocx("# Hello\n\nWorld **bold**");
  * const buffer = await toBuffer(doc);

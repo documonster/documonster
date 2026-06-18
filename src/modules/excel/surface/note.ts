@@ -1,7 +1,7 @@
 /**
  * `Note` namespace surface — cell note / comment values.
  *
- * `import { Note } from "@cj-tech-master/excelts/excel"` →
+ * `import { Note } from "documonster/excel"` →
  *   `Note.create("text", "author")`, `Note.isNote(v)`, `Note.model(n)`,
  *   `Note.fromModel(model)`.
  *

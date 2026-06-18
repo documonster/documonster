@@ -1,5 +1,5 @@
 /**
- * `@cj-tech-master/excelts/excel/markdown` — Node entry.
+ * `documonster/excel/markdown` — Node entry.
  *
  * Re-exports the cross-platform Markdown functions plus the Node-only
  * file-path variants.

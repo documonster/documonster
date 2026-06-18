@@ -45,7 +45,7 @@ const fakeStyles = {
 };
 
 const fakeHyperlinkMap = {
-  B6: "https://www.npmjs.com/package/excelts"
+  B6: "https://www.npmjs.com/package/documonster"
 };
 
 function fixDate(model: any) {

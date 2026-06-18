@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Project rename — `excelts` → `documonster`.**
+> This package was previously published as `@cj-tech-master/excelts`. Starting
+> with **v11.0.0** it is published as **`documonster`** (no org scope). The
+> version history below up to and including v10.2.0 was carried over from the
+> `excelts` project; the linked commits point at the original `excelts`
+> repository. To migrate, replace every `@cj-tech-master/excelts` import
+> specifier with `documonster` (subpaths are unchanged, e.g.
+> `@cj-tech-master/excelts/excel` → `documonster/excel`). See the v11.0.0 entry
+> for the API changes that shipped alongside the rename.
+
+## [11.0.0](https://github.com/documonster/documonster) (2026-06-18)
+
+### ⚠ BREAKING CHANGES
+
+* **Renamed package** from `@cj-tech-master/excelts` to `documonster`. Update
+  all imports: `@cj-tech-master/excelts/<module>` → `documonster/<module>`.
+* **excel:** Unified `Workbook` IO naming — `loadXlsx`→`read`,
+  `readXlsxFile`→`readFile`, `writeXlsx`→`writeFile`, `toXlsxBuffer`→`toBuffer`,
+  `readXlsxStream`/`writeXlsxStream`→`readStream`/`writeStream`.
+* **excel:** Renamed error class `XmlParseError` → `XlsxParseError`.
+* **archive:** Public API moved under the `Archive` namespace
+  (`import { Archive } from "documonster/archive"`).
+* **word:** `toBuffer`/`toBase64`/`packageDocx` now take an options object
+  instead of a bare `compressionLevel` number.
+
+### Improvements
+
+* Project-wide architecture consistency pass: all error subclasses thread
+  `{ cause }`, ~234 bare `throw new Error` replaced with module error classes,
+  same-module imports unified to path aliases across all nine modules, and
+  `TemplateError` consolidated into the word errors module.
+
 ## [10.2.0](https://github.com/cjnoname/excelts/compare/v10.1.0...v10.2.0) (2026-06-12)
 
 
@@ -1005,7 +1037,7 @@ This release includes all changes from 1.6.0 (which was not published to npm).
 - **archive:** Gzip/Zlib compression (`gzip()`, `gunzip()`, `zlib()`, `unzlib()`)
 - **archive:** ZIP64 large file support
 - **archive:** progress/abort support for all archive operations
-- **stream:** new subpath export `@cj-tech-master/excelts/stream`
+- **stream:** new subpath export `documonster/stream`
 - **stream:** cross-platform stream error classes (`StreamError`, `StreamStateError`, `StreamTypeError`)
 - **stream:** type guards (`isReadableStream`, `isWritableStream`, `isAsyncIterable`, `isTransformStream`)
 - **excel:** structured error hierarchy (16 typed error classes extending `ExcelError`)
@@ -1022,7 +1054,7 @@ This release includes all changes from 1.6.0 (which was not published to npm).
 - **stream:** binary utilities (`textEncoder`, `stringToUint8Array`, etc.) no longer re-exported from stream module (moved to `@utils/binary`)
 - **stream:** `ReadWriteBufferOptions` type
 - **archive:** `UnzipEntry.isDirectory` (replaced by `UnzipEntry.type: "file" | "directory" | "symlink"`)
-- **archive:** archive APIs removed from browser main entry (use `@cj-tech-master/excelts/zip` subpath instead)
+- **archive:** archive APIs removed from browser main entry (use `documonster/zip` subpath instead)
 
 ### Breaking Changes
 
@@ -1034,7 +1066,7 @@ This release includes all changes from 1.6.0 (which was not published to npm).
 - **stream:** `normalizeWritable` / `Writeable` replaced by `toWritable`
 - **stream:** `BufferedStream.toUint8Array()` now consumes the buffer (resets to empty after call)
 - **archive:** `UnzipEntry.isDirectory` removed; use `entry.type === "directory"` instead
-- **archive:** archive APIs removed from browser main entry; use `@cj-tech-master/excelts/zip` subpath
+- **archive:** archive APIs removed from browser main entry; use `documonster/zip` subpath
 - **excel:** `Image` type renamed to `ImageData` (deprecated alias preserved)
 - **excel:** `ZipOptions` renamed to `WorkbookZipOptions` (deprecated alias preserved)
 - **eventemitter:** `emit("error")` now throws if no listener (matches Node.js behavior)

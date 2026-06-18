@@ -493,7 +493,7 @@ async function readCsvBlob(
  *
  * @example
  * ```ts
- * import { readCsv } from "@cj-tech-master/excelts/excel/csv";
+ * import { readCsv } from "documonster/excel/csv";
  * await readCsv(workbook, "a,b,c\n1,2,3");
  * await readCsv(workbook, "https://example.com/data.csv");
  * await readCsv(workbook, input, { delimiter: ";", sheetName: "Data" });

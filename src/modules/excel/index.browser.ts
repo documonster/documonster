@@ -1,5 +1,5 @@
 /**
- * @cj-tech-master/excelts/excel — browser entry.
+ * documonster/excel — browser entry.
  *
  * Same surface as the Node entry via the shared base, but the two
  * platform-specific namespaces resolve to their browser variants:
