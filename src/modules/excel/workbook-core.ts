@@ -1,4 +1,4 @@
-import type { ChartExEntry } from "@excel/chart/chart-ex-types";
+import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
 /**
  * workbook-core — the low-level Workbook container layer.
  *
@@ -19,7 +19,7 @@ import type { ChartExEntry } from "@excel/chart/chart-ex-types";
  *
  * No file below this one imports the heavy `workbook.browser`.
  */
-import type { ChartEntry } from "@excel/chart/types";
+import type { ChartEntry } from "@excel/chart/model/types";
 import type { DefinedNamesData } from "@excel/defined-names";
 import { ImageError, WorksheetNameError } from "@excel/errors";
 import type { PivotTable } from "@excel/pivot-table";

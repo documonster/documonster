@@ -14,13 +14,17 @@
 // `*-core` data layer (never on this file), so there is no import cycle, and
 // the bundler tree-shakes the whole chart tree out of consumer bundles that
 // never create or serialise a chart.
-import { fillChartCaches, fillChartExCaches } from "@excel/chart/cache-populator";
-import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
-import { buildChartExModel } from "@excel/chart/chart-ex-builder";
-import type { AddChartExOptions, ChartExEntry, ChartExModel } from "@excel/chart/chart-ex-types";
-import { resolvePendingChartImages } from "@excel/chart/chart-images";
-import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
-import type { AddComboChartOptions, ChartEntry, ChartModel } from "@excel/chart/types";
+import { fillChartCaches, fillChartExCaches } from "@excel/chart/build/cache-populator";
+import { buildChartModel, buildComboChartModel } from "@excel/chart/build/chart-builder";
+import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+import type {
+  AddChartExOptions,
+  ChartExEntry,
+  ChartExModel
+} from "@excel/chart/model/chart-ex-types";
+import type { AddComboChartOptions, ChartEntry, ChartModel } from "@excel/chart/model/types";
+import { resolvePendingChartImages } from "@excel/chart/serialize/chart-images";
+import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
 import {
   chartsheetModel,
   createChartsheet,

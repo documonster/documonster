@@ -12,20 +12,20 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
-import { parseChartEx } from "@excel/chart/chart-ex-parser";
+import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
+import type { ChartEntry } from "@excel/chart/model/types";
+import { themeIndexToName } from "@excel/chart/render/chart-utils";
+import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 import {
   renderChartEx,
   renderChartExLegendXml,
   rewriteChartExDataRefsToDefinedNames
-} from "@excel/chart/chart-ex-serialize";
-import type { ChartExEntry } from "@excel/chart/chart-ex-types";
+} from "@excel/chart/serialize/chart-ex-serialize";
 // Chart serialisation / deserialisation imports the chart implementation
 // statically. The chart modules depend only on the `*-core` data layer, so
 // there is no import cycle, and a consumer that never reads/writes a workbook
 // containing charts gets this code tree-shaken out by the bundler.
-import { buildChartColors, buildChartStyle } from "@excel/chart/chart-sidecar";
-import { themeIndexToName } from "@excel/chart/chart-utils";
-import type { ChartEntry } from "@excel/chart/types";
+import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
 import { definedNamesAddHidden, definedNamesModel } from "@excel/defined-names";
 import {
   ExcelStreamStateError,

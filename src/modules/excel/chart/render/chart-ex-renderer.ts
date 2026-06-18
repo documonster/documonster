@@ -8,9 +8,13 @@
  * neutral utilities from `chart-utils` — so neither imports the other.
  */
 
-import { ChartOptionsError } from "@excel/errors";
-
-import type { ChartExAxis, ChartExDataEntry, ChartExModel, ChartExSeries } from "./chart-ex-types";
+import type {
+  ChartExAxis,
+  ChartExDataEntry,
+  ChartExModel,
+  ChartExSeries
+} from "@excel/chart/model/chart-ex-types";
+import type { ChartTitle, ShapeProperties } from "@excel/chart/model/types";
 import {
   renderSvgToPng,
   type ChartPdfDrawingSurface,
@@ -18,7 +22,7 @@ import {
   type ChartRenderOptions,
   type RegionMapDataOptions,
   type RegionMapMatchRule
-} from "./chart-renderer";
+} from "@excel/chart/render/chart-renderer";
 import {
   COLORS,
   DEFAULT_HEIGHT,
@@ -37,10 +41,14 @@ import {
   withAlpha,
   type ChartRect,
   type PdfColor
-} from "./chart-utils";
-import { getSpPrFill } from "./shape-properties";
-import { resolveTopologyObject, type ResolvedRing, type TopologyLike } from "./topojson";
-import type { ChartTitle, ShapeProperties } from "./types";
+} from "@excel/chart/render/chart-utils";
+import {
+  resolveTopologyObject,
+  type ResolvedRing,
+  type TopologyLike
+} from "@excel/chart/render/topojson";
+import { getSpPrFill } from "@excel/chart/serialize/shape-properties";
+import { ChartOptionsError } from "@excel/errors";
 
 /**
  * Local alias kept for file-level readability. ChartEx code has always

@@ -5,9 +5,7 @@
  * structured model that the renderer serialises to `cx:chart` XML.
  */
 
-import { ChartOptionsError } from "@excel/errors";
-
-import { hexToColor, toShapeProperties } from "./chart-builder";
+import { hexToColor, toShapeProperties } from "@excel/chart/build/chart-builder";
 import type {
   AddChartExOptions,
   AddChartExSeriesOptions,
@@ -16,8 +14,9 @@ import type {
   ChartExModel,
   ChartExSeries,
   ChartExSeriesType
-} from "./chart-ex-types";
-import type { ChartRichText } from "./types";
+} from "@excel/chart/model/chart-ex-types";
+import type { ChartRichText } from "@excel/chart/model/types";
+import { ChartOptionsError } from "@excel/errors";
 
 /**
  * Parse a single-column range reference of the form `Sheet!$A$2:$A$8`

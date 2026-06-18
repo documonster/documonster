@@ -15,7 +15,7 @@
  *
  *   - **Zero dependencies on chart-renderer / chart-ex-renderer** so
  *     this module sits below them in the import graph and does not
- *     create cycles. Types-only imports from `./types` are fine.
+ *     create cycles. Types-only imports from `@excel/chart/model/types` are fine.
  *   - **Behaviour-preserving** compared with the consolidated
  *     implementations. The old files had two classes of helper:
  *     (1) strictly identical duplicates and (2) near-duplicates where
@@ -30,9 +30,8 @@
  *     directly without adapters.
  */
 
+import type { ChartColor, ChartFill, ChartLine } from "@excel/chart/model/types";
 import { stripXmlIllegalChars as sharedStripXmlIllegalChars } from "@xml/encode";
-
-import type { ChartColor, ChartFill, ChartLine } from "./types";
 
 // ============================================================================
 // Types

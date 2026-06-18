@@ -18,26 +18,31 @@
  * root `sideEffects: false` contract keeps this guarantee intact.
  */
 
-export { buildChartModel } from "./chart-handle";
+export { buildChartModel } from "@excel/chart/serialize/chart-handle";
 export type { ChartHandle } from "@excel/worksheet-core";
-export { buildComboChartModel } from "./chart-builder";
-export { fillChartCaches, fillChartExCaches, fillNumRef, fillStrRef } from "./cache-populator";
+export { buildComboChartModel } from "@excel/chart/build/chart-builder";
+export {
+  fillChartCaches,
+  fillChartExCaches,
+  fillNumRef,
+  fillStrRef
+} from "@excel/chart/build/cache-populator";
 export {
   parseChartColors,
   buildChartColors,
   parseChartStyle,
   buildChartStyle
-} from "./chart-sidecar";
-export { buildChartExModel } from "./chart-ex-builder";
-export { parseChartEx } from "./chart-ex-parser";
+} from "@excel/chart/serialize/chart-sidecar";
+export { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+export { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 export {
   canRenderChartExAsVectorPdf,
   drawChartExPdf,
   renderChartExPng,
   renderChartExSvg,
   VECTOR_PDF_CHART_EX_LAYOUT_IDS
-} from "./chart-ex-renderer";
-export { renderChartEx } from "./chart-ex-serialize";
+} from "@excel/chart/render/chart-ex-renderer";
+export { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
 export {
   applyChartExPreset,
   applyChartPreset,
@@ -45,22 +50,22 @@ export {
   CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
   EXCEL_CHART_PRESETS
-} from "./chart-presets";
+} from "@excel/chart/model/chart-presets";
 export {
   chartExOptionsFromRows,
   chartExOptionsFromTable,
   chartOptionsFromRows,
   chartOptionsFromTable,
   seriesFromColumns
-} from "./chart-api";
+} from "@excel/chart/build/chart-api";
 export type {
   AddChartExFromRowsOptions,
   AddChartExFromTableOptions,
   AddChartFromRowsOptions,
   AddChartFromTableOptions,
   SeriesFromColumnsOptions
-} from "./chart-api";
-export type { ExcelChartExPreset, ExcelChartPreset } from "./chart-presets";
+} from "@excel/chart/build/chart-api";
+export type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/model/chart-presets";
 export {
   applyAxisTransform,
   buildChartScene,
@@ -68,7 +73,7 @@ export {
   drawChartPdf,
   renderChartPng,
   renderChartSvg
-} from "./chart-renderer";
+} from "@excel/chart/render/chart-renderer";
 export type {
   ChartPdfDrawingSurface,
   ChartPdfPathOp,
@@ -83,9 +88,14 @@ export type {
   PdfColor,
   RegionMapDataOptions,
   RegionMapMatchRule
-} from "./chart-renderer";
-export { resolveTopologyObject } from "./topojson";
-export type { ResolvedRing, TopoGeometry, TopoGeometryCollection, TopologyLike } from "./topojson";
+} from "@excel/chart/render/chart-renderer";
+export { resolveTopologyObject } from "@excel/chart/render/topojson";
+export type {
+  ResolvedRing,
+  TopoGeometry,
+  TopoGeometryCollection,
+  TopologyLike
+} from "@excel/chart/render/topojson";
 export type {
   ChartExModel,
   ChartExSpace,
@@ -108,8 +118,8 @@ export type {
   AddChartExSeriesOptions,
   ChartExType,
   ChartExEntry
-} from "./chart-ex-types";
-export type { ChartEntry, ChartAnchorModel, ChartRelEntry } from "./types";
+} from "@excel/chart/model/chart-ex-types";
+export type { ChartEntry, ChartAnchorModel, ChartRelEntry } from "@excel/chart/model/types";
 export type {
   ChartModel,
   ChartType,
@@ -256,7 +266,7 @@ export type {
   PrintSettings,
   PivotFormat,
   // Transitively-referenced types that callers need when constructing
-  // public option shapes. They used to live behind `@excel/chart/types`
+  // public option shapes. They used to live behind `@excel/chart/model/types`
   // only, forcing consumers to either duplicate the interface or reach
   // into the internal module path.
   DataLabelsRange,
@@ -274,7 +284,7 @@ export type {
   ChartUnknownElement,
   ChartStyleElement,
   ChartRange
-} from "./types";
+} from "@excel/chart/model/types";
 export {
   parseSpPr,
   parseTxPr,
@@ -288,4 +298,4 @@ export {
   buildTxPr,
   setSpPrFill,
   setSpPrLine
-} from "./shape-properties";
+} from "@excel/chart/serialize/shape-properties";

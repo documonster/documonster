@@ -27,7 +27,7 @@ import {
   renderChartSvg,
   seriesFromColumns
 } from "@excel/chart";
-import { createChart } from "@excel/chart/chart-handle";
+import { createChart } from "@excel/chart/serialize/chart-handle";
 import {
   chartsheetId,
   chartsheetModel,
@@ -1043,7 +1043,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // validation gate doesn't permit fractional border widths to
     // reach the API (but the helper is still called internally from
     // places that do allow them, e.g. axis / legend spPr paths).
-    const { toShapeProperties } = await import("@excel/chart/chart-builder");
+    const { toShapeProperties } = await import("@excel/chart/build/chart-builder");
     const spPr = toShapeProperties({ borderWidth: 0.825, border: "000000" });
     expect(spPr?.line?.width).toBeDefined();
     // Width must be integer — Math.round of 0.825 * 12700 = 10478.
@@ -1124,7 +1124,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("chart-ex-renderer honours valScaling.min/max on the value axis", async () => {
-    const { renderChartExSvg } = await import("@excel/chart/chart-ex-renderer");
+    const { renderChartExSvg } = await import("@excel/chart/render/chart-ex-renderer");
     // Histogram with explicit axis bounds wider than the data range.
     // Without the fix, the rendered SVG's axis range is
     // [0, maxOfData]; with the fix, it stretches to the authored
@@ -1188,7 +1188,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("gradient scaled attribute round-trips (default absent vs. explicit 0/1)", async () => {
-    const { parseSpPr } = await import("@excel/chart/shape-properties");
+    const { parseSpPr } = await import("@excel/chart/serialize/shape-properties");
     // Author-side value forwarded through the parser — this is the
     // path a file loaded from disk takes. The parser was previously
     // missing the `scaled` attribute entirely, so `parseSpPr` always
@@ -1449,7 +1449,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // OOXML theme-index mapping (0..3 are bg/fg slots; accents start
     // at 4) and emitted nonsense tokens like `accent0` /
     // `accent4` for `theme=4` when the correct output is `accent1`.
-    const { buildChartExModel: buildEx } = await import("@excel/chart/chart-ex-builder");
+    const { buildChartExModel: buildEx } = await import("@excel/chart/build/chart-ex-builder");
     void buildEx;
     // Drive the function directly via a lightweight call — we can't
     // easily trigger the raw patch path from public API, so reach
@@ -1525,7 +1525,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // `pictureFill` via `applySeriesOptions`, must drop the raw
     // bytes so the writer emits the new blip fill — not the cached
     // bytes that don't know about the pending image.
-    const { applyChartSeriesOptionsPatch } = await import("@excel/chart/chart-builder");
+    const { applyChartSeriesOptionsPatch } = await import("@excel/chart/build/chart-builder");
     const series: BarSeries = {
       index: 0,
       order: 0,
@@ -1679,7 +1679,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
       "E1:J10"
     );
     const chart = getCharts(ws)[0];
-    const { buildChartSeriesForType } = await import("@excel/chart/chart-builder");
+    const { buildChartSeriesForType } = await import("@excel/chart/build/chart-builder");
     const extra = buildChartSeriesForType(
       "bar",
       { categories: "WS!$A$1:$A$3", values: "WS!$C$1:$C$3" },
@@ -2306,7 +2306,8 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // Driving a raw-patchable ChartEx edit through the pipeline
     // should now preserve `spPr` / `txPr` / `legendEntry` / `align`
     // because the raw writer delegates to `renderChartExLegendXml`.
-    const { renderChartExLegendXml: internal } = await import("@excel/chart/chart-ex-serialize");
+    const { renderChartExLegendXml: internal } =
+      await import("@excel/chart/serialize/chart-ex-serialize");
     // The exported function is the shared writer the raw path uses.
     // Call it directly to verify full coverage.
     const legendModel = {
@@ -2436,7 +2437,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
   });
 
   it("chart-sidecar colorStyle / chartColors strip NaN modifiers instead of serialising 'NaN'", async () => {
-    const { buildChartColors } = await import("@excel/chart/chart-sidecar");
+    const { buildChartColors } = await import("@excel/chart/serialize/chart-sidecar");
     const xml = buildChartColors({
       method: "cycle",
       id: 10,

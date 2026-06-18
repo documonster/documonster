@@ -27,10 +27,12 @@ import {
   cellText,
   cellType
 } from "@excel/cell";
-import { buildChartExModel } from "@excel/chart/chart-ex-builder";
-import { renderChartEx } from "@excel/chart/chart-ex-serialize";
-import type { AddChartExOptions, ChartExModel, ChartExType } from "@excel/chart/chart-ex-types";
-import { renderChartSvg } from "@excel/chart/chart-renderer";
+import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+import type {
+  AddChartExOptions,
+  ChartExModel,
+  ChartExType
+} from "@excel/chart/model/chart-ex-types";
 import type {
   AxisDataSource,
   BarChartGroup,
@@ -56,7 +58,9 @@ import type {
   SurfaceChartGroup,
   SurfaceSeries,
   ChartAxis as ExcelChartAxis
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
+import { renderChartSvg } from "@excel/chart/render/chart-renderer";
+import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
 import { ValueType } from "@excel/enums";
 import { Workbook } from "@excel/index";
 import { rowCellCount } from "@excel/row";

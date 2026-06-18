@@ -14,8 +14,6 @@
  * binding without requiring callers to juggle rel ids manually.
  */
 
-import { type WorkbookData, addWorkbookImage, getImage } from "@excel/workbook-core";
-
 import type {
   AddChartPictureFillImage,
   ChartBlipFill,
@@ -26,7 +24,8 @@ import type {
   ChartTypeGroup,
   SeriesBase,
   ShapeProperties
-} from "./types.ts";
+} from "@excel/chart/model/types";
+import { type WorkbookData, addWorkbookImage, getImage } from "@excel/workbook-core";
 
 /**
  * Rel information that {@link resolvePendingChartImages} appends to the

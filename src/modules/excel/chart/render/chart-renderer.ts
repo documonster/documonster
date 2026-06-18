@@ -1,38 +1,3 @@
-import { measureTextWidthPx } from "@excel/utils/text-metrics";
-
-import {
-  AXIS_COLOR,
-  COLORS,
-  DEFAULT_HEIGHT,
-  DEFAULT_WIDTH,
-  GRID_COLOR,
-  PRESET_COLOR_HEX_TABLE,
-  clamp01,
-  escapeXml,
-  escapeXmlAttr,
-  fmt,
-  hexToPdfColor,
-  hexToPdfColorWithAlpha,
-  interpolateColor,
-  normalizeHex6,
-  previewShapeFillColor,
-  previewShapeLineColor,
-  previewShapeLineWidthPx,
-  resolveChartColor,
-  valueToX,
-  valueToY,
-  withAlpha,
-  type PdfColor
-} from "./chart-utils";
-import { loadSystemFont, rasterizeGlyph, type RasterFont } from "./glyph-rasterizer";
-import {
-  parseSpPr,
-  parseTxPr,
-  getSpPrFill,
-  getSpPrLine,
-  getTxPrFontSize
-} from "./shape-properties";
-import { STROKE_FONT } from "./stroke-font";
 import type {
   AxisDataSource,
   ChartAxis,
@@ -56,14 +21,52 @@ import type {
   ShapeProperties,
   StringReference,
   Trendline
-} from "./types";
+} from "@excel/chart/model/types";
+import {
+  AXIS_COLOR,
+  COLORS,
+  DEFAULT_HEIGHT,
+  DEFAULT_WIDTH,
+  GRID_COLOR,
+  PRESET_COLOR_HEX_TABLE,
+  clamp01,
+  escapeXml,
+  escapeXmlAttr,
+  fmt,
+  hexToPdfColor,
+  hexToPdfColorWithAlpha,
+  interpolateColor,
+  normalizeHex6,
+  previewShapeFillColor,
+  previewShapeLineColor,
+  previewShapeLineWidthPx,
+  resolveChartColor,
+  valueToX,
+  valueToY,
+  withAlpha,
+  type PdfColor
+} from "@excel/chart/render/chart-utils";
+import {
+  loadSystemFont,
+  rasterizeGlyph,
+  type RasterFont
+} from "@excel/chart/render/glyph-rasterizer";
+import { STROKE_FONT } from "@excel/chart/render/stroke-font";
+import {
+  parseSpPr,
+  parseTxPr,
+  getSpPrFill,
+  getSpPrLine,
+  getTxPrFontSize
+} from "@excel/chart/serialize/shape-properties";
+import { measureTextWidthPx } from "@excel/utils/text-metrics";
 
 export type { PdfColor };
 
 /**
  * Legacy name — kept so existing imports
- * (`import { PRESET_COLOR_HEX } from "./chart-renderer"`) continue to
- * resolve. Prefer importing directly from `./chart-utils` in new code.
+ * (`import { PRESET_COLOR_HEX } from "@excel/chart/render/chart-renderer"`) continue to
+ * resolve. Prefer importing directly from `@excel/chart/render/chart-utils` in new code.
  */
 export const PRESET_COLOR_HEX = PRESET_COLOR_HEX_TABLE;
 

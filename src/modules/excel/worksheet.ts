@@ -24,20 +24,19 @@ import {
   chartOptionsFromRows,
   chartOptionsFromTable,
   seriesFromColumns as chartSeriesFromColumns
-} from "@excel/chart/chart-api";
+} from "@excel/chart/build/chart-api";
 import type {
   AddChartExFromRowsOptions,
   AddChartExFromTableOptions,
   AddChartFromRowsOptions,
   AddChartFromTableOptions,
   SeriesFromColumnsOptions
-} from "@excel/chart/chart-api";
-import { buildChartModel, buildComboChartModel } from "@excel/chart/chart-builder";
-import { buildChartExModel } from "@excel/chart/chart-ex-builder";
-import type { AddChartExOptions } from "@excel/chart/chart-ex-types";
-import { createChart, registerChart, registerChartEx } from "@excel/chart/chart-handle";
-import { applyChartExPreset, applyChartPreset } from "@excel/chart/chart-presets";
-import type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/chart-presets";
+} from "@excel/chart/build/chart-api";
+import { buildChartModel, buildComboChartModel } from "@excel/chart/build/chart-builder";
+import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+import type { AddChartExOptions } from "@excel/chart/model/chart-ex-types";
+import { applyChartExPreset, applyChartPreset } from "@excel/chart/model/chart-presets";
+import type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/model/chart-presets";
 import type {
   AddBarChartOptions,
   AddChartOptions,
@@ -47,7 +46,8 @@ import type {
   AddScatterChartOptions,
   AddSurfaceChartOptions,
   ChartAnchorModel
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
+import { createChart, registerChart, registerChartEx } from "@excel/chart/serialize/chart-handle";
 import {
   type ColumnData,
   type ColumnModel,

@@ -3,7 +3,7 @@ import type {
   AddComboChartOptions,
   PivotChartOptions as PivotChartMetadataOptions,
   PivotChartSource
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
 import type { PivotTable } from "@excel/pivot-table";
 import { quoteSheetName } from "@excel/utils/address";
 

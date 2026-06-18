@@ -12,11 +12,12 @@
  * neither imports the other.
  */
 
-import { ChartOptionsError } from "@excel/errors";
-
-import type { ChartExAxis, ChartExDataEntry, ChartExModel, ChartExSeries } from "./chart-ex-types";
-import { escapeXml, escapeXmlAttr, fmtNumAttr, fmtNumText, themeIndexToName } from "./chart-utils";
-import { isRawXmlShape, isRawXmlTxPr } from "./shape-properties";
+import type {
+  ChartExAxis,
+  ChartExDataEntry,
+  ChartExModel,
+  ChartExSeries
+} from "@excel/chart/model/chart-ex-types";
 import type {
   ChartColor,
   ChartRichText,
@@ -31,7 +32,16 @@ import type {
   ShapeProperties,
   ShapeProperties3D,
   ShapeTransform
-} from "./types";
+} from "@excel/chart/model/types";
+import {
+  escapeXml,
+  escapeXmlAttr,
+  fmtNumAttr,
+  fmtNumText,
+  themeIndexToName
+} from "@excel/chart/render/chart-utils";
+import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/serialize/shape-properties";
+import { ChartOptionsError } from "@excel/errors";
 
 /**
  * Rewrite a freshly-built ChartEx model's data references to use

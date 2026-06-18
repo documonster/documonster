@@ -1,6 +1,6 @@
-import type { AddChartExOptions, ChartExModel } from "@excel/chart/chart-ex-types";
-import { createChart } from "@excel/chart/chart-handle";
-import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/types";
+import type { AddChartExOptions, ChartExModel } from "@excel/chart/model/chart-ex-types";
+import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/model/types";
+import { createChart } from "@excel/chart/serialize/chart-handle";
 import { getChartEntry, getChartExStructuredEntry, validateSheetName } from "@excel/workbook-core";
 import type { WorkbookData } from "@excel/workbook-core";
 import type { ChartHandle, WorksheetData } from "@excel/worksheet-core";

@@ -20,7 +20,7 @@ import type {
   ChartTextProperties,
   ChartTitle,
   ShapeProperties
-} from "./types";
+} from "@excel/chart/model/types";
 
 // ============================================================================
 // Top-level chartEx model

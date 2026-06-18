@@ -11,7 +11,6 @@
  * The r: namespace is http://schemas.openxmlformats.org/officeDocument/2006/relationships
  */
 
-import { escapeXml, escapeXmlAttr } from "@excel/chart/chart-utils";
 import type {
   ChartModel,
   ChartData,
@@ -46,7 +45,8 @@ import type {
   DisplayUnits,
   LegendEntry,
   PictureOptions
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
+import { escapeXml, escapeXmlAttr } from "@excel/chart/render/chart-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {
   parseXsdBoolean as sharedParseXsdBoolean,
@@ -149,7 +149,7 @@ class RawXmlCapture {
 }
 
 // `escapeXml` / `escapeXmlAttr` / `escapeXmlText` are imported from
-// `@excel/chart/chart-utils`. They're the single authoritative entry
+// `@excel/chart/render/chart-utils`. They're the single authoritative entry
 // points every chart writer uses for text content / attribute values —
 // the xform used to carry its own local copies that (1) did not strip
 // the C0 / C1 control characters XML 1.0 forbids, letting malformed

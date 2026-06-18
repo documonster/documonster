@@ -1,4 +1,4 @@
-import type { PivotChartOptions } from "@excel/chart/types";
+import type { PivotChartOptions } from "@excel/chart/model/types";
 import { type ColumnData } from "@excel/column";
 import { PivotTableError } from "@excel/errors";
 import { type RangeData, rangeCreate, rangeExpand } from "@excel/range";

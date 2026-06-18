@@ -14,7 +14,7 @@
  *
  * All coordinates are PDF points with **bottom-left origin** — matching the
  * convention the chart renderer emits after its internal Y-flip (see
- * `translateScene` in `@excel/chart/chart-renderer.ts`).
+ * `translateScene` in `@excel/chart/render/chart-renderer.ts`).
  */
 
 import type { PdfContentStream } from "../core/pdf-stream";

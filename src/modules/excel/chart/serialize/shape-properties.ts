@@ -29,7 +29,7 @@ import type {
   ShapeProperties3D,
   ShapeTransform,
   Bevel
-} from "./types";
+} from "@excel/chart/model/types";
 
 // ============================================================================
 // Raw XML access helpers

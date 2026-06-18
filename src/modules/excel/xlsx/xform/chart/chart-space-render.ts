@@ -12,8 +12,6 @@
  * The r: namespace is http://schemas.openxmlformats.org/officeDocument/2006/relationships
  */
 
-import { escapeXml, themeIndexToName } from "@excel/chart/chart-utils";
-import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shape-properties";
 import type {
   ChartModel,
   ChartData,
@@ -84,7 +82,9 @@ import type {
   ChartBlipFill,
   UpDownBars,
   PictureOptions
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
+import { escapeXml, themeIndexToName } from "@excel/chart/render/chart-utils";
+import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/serialize/shape-properties";
 import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 

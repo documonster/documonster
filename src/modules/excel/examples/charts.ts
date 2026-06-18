@@ -162,6 +162,8 @@ import {
   type NumberReference,
   type StringReference
 } from "@excel/chart/index";
+import { drawChartExPdf } from "@excel/chart/render/chart-ex-renderer";
+import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import {
   Cell,
   Chart,
@@ -178,9 +180,6 @@ import {
 } from "@excel/index";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { chartToPdf } from "@pdf/excel-bridge";
-
-import { drawChartExPdf } from "../chart/chart-ex-renderer";
-import { drawChartPdf } from "../chart/chart-renderer";
 
 const OUT_DIR = resolve(process.cwd(), "tmp");
 const XLSX_PATH = resolve(OUT_DIR, "charts-example.xlsx");

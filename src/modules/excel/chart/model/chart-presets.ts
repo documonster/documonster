@@ -1,7 +1,6 @@
+import type { AddChartExOptions, ChartExType } from "@excel/chart/model/chart-ex-types";
+import type { AddChartOptions, AddChartSeriesOptions } from "@excel/chart/model/types";
 import { ChartOptionsError } from "@excel/errors";
-
-import type { AddChartExOptions, ChartExType } from "./chart-ex-types";
-import type { AddChartOptions, AddChartSeriesOptions } from "./types";
 
 type PresetSeriesDefaults = Partial<Pick<AddChartSeriesOptions, "bubble3D" | "explosion">>;
 

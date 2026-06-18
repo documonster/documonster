@@ -29,15 +29,15 @@ import type {
 // excel `*-core` data layer, so excel→PDF conversion pulls in chart rendering
 // only when the bundler can reach it (i.e. when `excelToPdf` is used). No
 // install step is required.
-import { fillChartExCaches } from "@excel/chart/cache-populator";
-import { parseChartEx } from "@excel/chart/chart-ex-parser";
+import { fillChartExCaches } from "@excel/chart/build/cache-populator";
 import {
   canRenderChartExAsVectorPdf,
   drawChartExPdf,
   renderChartExPng
-} from "@excel/chart/chart-ex-renderer";
-import { chartChartExModel, chartChartModel } from "@excel/chart/chart-handle";
-import { drawChartPdf, renderChartPng } from "@excel/chart/chart-renderer";
+} from "@excel/chart/render/chart-ex-renderer";
+import { drawChartPdf, renderChartPng } from "@excel/chart/render/chart-renderer";
+import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
+import { chartChartExModel, chartChartModel } from "@excel/chart/serialize/chart-handle";
 import {
   chartsheetChartExModel,
   chartsheetChartModel,

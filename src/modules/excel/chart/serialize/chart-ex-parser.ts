@@ -5,9 +5,6 @@
  * the original XML on the model so clean round-trips can still use raw bytes.
  */
 
-import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
-import type { XmlElement, XmlNode } from "@xml/types";
-
 import type {
   ChartExAxis,
   ChartExDataEntry,
@@ -15,16 +12,18 @@ import type {
   ChartExModel,
   ChartExSeries,
   ChartExUnknownElement
-} from "./chart-ex-types";
-import { escapeXml, escapeXmlAttr } from "./chart-utils";
-import { parseSpPr, parseTxPr } from "./shape-properties";
+} from "@excel/chart/model/chart-ex-types";
 import type {
   ChartLegend,
   ChartRichText,
   ChartTextProperties,
   ChartTitle,
   ShapeProperties
-} from "./types";
+} from "@excel/chart/model/types";
+import { escapeXml, escapeXmlAttr } from "@excel/chart/render/chart-utils";
+import { parseSpPr, parseTxPr } from "@excel/chart/serialize/shape-properties";
+import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
+import type { XmlElement, XmlNode } from "@xml/types";
 
 // Element-name whitelists for unknown-child detection. Parents not listed here
 // are either (a) purely raw-passthrough containers already captured via

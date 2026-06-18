@@ -5,9 +5,6 @@
  * OOXML chart model that the XForm layer serialises.
  */
 
-import { ChartOptionsError } from "@excel/errors";
-
-import { escapeXml } from "./chart-utils";
 import type {
   AddChartOptions,
   AddChartSeriesOptions,
@@ -81,7 +78,9 @@ import type {
   PivotChartSource,
   PictureOptions,
   SeriesAxis
-} from "./types";
+} from "@excel/chart/model/types";
+import { escapeXml } from "@excel/chart/render/chart-utils";
+import { ChartOptionsError } from "@excel/errors";
 
 const EMU_PER_POINT = 12700;
 const DEFAULT_AXIS_START_ID = 100000000;

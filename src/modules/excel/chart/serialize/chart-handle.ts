@@ -7,7 +7,13 @@
  */
 
 import { anchorCreate, anchorModel, type AnchorData, type AnchorModel } from "@excel/anchor";
-import type { ChartExModel } from "@excel/chart/chart-ex-types";
+import { fillChartCaches, fillChartExCaches } from "@excel/chart/build/cache-populator";
+import {
+  applyChartSeriesOptionsPatch,
+  buildChartModel,
+  buildChartSeriesForType
+} from "@excel/chart/build/chart-builder";
+import type { ChartExModel } from "@excel/chart/model/chart-ex-types";
 import type {
   AddChartOptions,
   AddChartRange,
@@ -24,7 +30,10 @@ import type {
   ChartTextProperties,
   SeriesBase,
   AddChartSeriesOptions
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
+import { resolvePendingChartImages } from "@excel/chart/serialize/chart-images";
+import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
+import { parseTxPr } from "@excel/chart/serialize/shape-properties";
 import { ChartOptionsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import {
@@ -42,16 +51,6 @@ import {
 import type { ChartAnchorRange, ChartHandle, WorksheetData } from "@excel/worksheet-core";
 import { getSheetWorkbook } from "@excel/worksheet-core";
 import { RelType } from "@excel/xlsx/rel-type";
-
-import { fillChartCaches, fillChartExCaches } from "./cache-populator";
-import {
-  applyChartSeriesOptionsPatch,
-  buildChartModel,
-  buildChartSeriesForType
-} from "./chart-builder";
-import { resolvePendingChartImages } from "./chart-images";
-import { buildChartColors, buildChartStyle } from "./chart-sidecar";
-import { parseTxPr } from "./shape-properties";
 
 /**
  * Default chart extent when a caller passes a single-cell address. Matches

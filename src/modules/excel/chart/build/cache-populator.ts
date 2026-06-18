@@ -1,5 +1,5 @@
 import { cellGetValue } from "@excel/cell";
-import type { ChartExModel } from "@excel/chart/chart-ex-types";
+import type { ChartExModel } from "@excel/chart/model/chart-ex-types";
 /**
  * Chart cache populator.
  *
@@ -25,7 +25,7 @@ import type {
   StringCache,
   StringReference,
   MultiLevelStringReference
-} from "@excel/chart/types";
+} from "@excel/chart/model/types";
 import { definedNamesGetRangesScoped } from "@excel/defined-names";
 import { tableDisplayName, tableModel, tableName } from "@excel/table";
 import { colCache } from "@excel/utils/col-cache";
