@@ -725,7 +725,3 @@ function getEndnoteText(state: MdRenderState, noteId: number): string {
   }
   return parts.join(" ");
 }
-
-// =============================================================================
-// Deprecated aliases (kept for backward compatibility)
-// =============================================================================

@@ -14,9 +14,6 @@ export interface RangeData {
   sheetName?: string;
 }
 
-/** @deprecated internal alias kept during the class→namespace migration. */
-export type RangeModel = RangeData;
-
 interface RowDimensions {
   min: number;
   max: number;

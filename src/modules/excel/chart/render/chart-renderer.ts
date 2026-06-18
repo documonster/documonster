@@ -34,7 +34,6 @@ import {
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
   GRID_COLOR,
-  PRESET_COLOR_HEX_TABLE,
   clamp01,
   escapeXml,
   escapeXmlAttr,
@@ -62,13 +61,6 @@ import {
 import { measureTextWidthPx } from "@excel/utils/text-metrics";
 
 export type { PdfColor };
-
-/**
- * Legacy name — kept so existing imports
- * (`import { PRESET_COLOR_HEX } from "@excel/chart/render/chart-renderer"`) continue to
- * resolve. Prefer importing directly from `@excel/chart/shared/chart-utils` in new code.
- */
-export const PRESET_COLOR_HEX = PRESET_COLOR_HEX_TABLE;
 
 // ---------------------------------------------------------------------------
 // Plot layout constants — extracted from getPlotRect / legendRect so the

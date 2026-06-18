@@ -770,7 +770,7 @@ export type ChartLineSpacing =
 export interface ChartParagraph {
   /** Paragraph properties (a:pPr) */
   properties?: ChartParagraphProperties;
-  /** Legacy alias for default run properties (kept for backward compat). */
+  /** Default run properties for the paragraph. */
   runProperties?: ChartTextProperties;
   /** Text runs */
   runs?: ChartTextRun[];
