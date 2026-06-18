@@ -1,14 +1,14 @@
-# ExcelTS
+# Documonster
 
 [![构建状态](https://github.com/documonster/documonster/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/documonster/documonster/actions/workflows/ci.yml) &nbsp; [English](README.md)
 
 TypeScript 生态在文档和数据处理领域长期存在碎片化问题。要处理电子表格、文档、PDF 以及围绕它们的各种数据和归档格式，往往需要分别引入不同的包；到了浏览器端又要换一套方案；流式处理还得再额外接入一个适配库。这些库的 API 风格、质量和维护状态参差不齐，给每个需要组合使用它们的项目都带来了额外的负担。
 
-ExcelTS 正是为了解决这个问题而生。一个包、一套 API、一份代码 — 在 Node.js、Bun 和浏览器中行为完全一致。流式处理是每个模块的一等公民，而非通过第三方适配器后期拼装的附属品。目标很简单：安装一次，按需导入，在任何环境下都获得相同的可靠体验 — 同时将流式处理的性能发挥到极致。
+Documonster 正是为了解决这个问题而生。一个包、一套 API、一份代码 — 在 Node.js、Bun 和浏览器中行为完全一致。流式处理是每个模块的一等公民，而非通过第三方适配器后期拼装的附属品。目标很简单：安装一次，按需导入，在任何环境下都获得相同的可靠体验 — 同时将流式处理的性能发挥到极致。
 
 ## 关于本项目
 
-ExcelTS 是一个零依赖的 TypeScript 电子表格和文档工具包：
+Documonster 是一个零依赖的 TypeScript 电子表格和文档工具包：
 
 - **AI 友好** — 简洁一致的 API,专为 AI 编程助手设计。每个模块都配有完整的文档和可运行的示例供 AI 学习
 - **零运行时依赖** — 纯 TypeScript,无外部包
@@ -18,7 +18,7 @@ ExcelTS 是一个零依赖的 TypeScript 电子表格和文档工具包：
 
 ## 模块
 
-ExcelTS 由九个独立模块组成,每个模块都有自己的文档和可运行示例。
+Documonster 由九个独立模块组成,每个模块都有自己的文档和可运行示例。
 
 ### Excel — XLSX/JSON 工作簿管理器
 
@@ -146,7 +146,7 @@ const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 import { Document, toBuffer, readDocx } from "documonster/word";
 const wdoc = Document.create();
 Document.addHeading(wdoc, "报告", 1);
-Document.addParagraph(wdoc, "由 ExcelTS 生成。");
+Document.addParagraph(wdoc, "由 Documonster 生成。");
 const docxBytes = await toBuffer(Document.build(wdoc));
 const parsedDocx = await readDocx(docxBytes); // 往返读取
 
@@ -165,7 +165,7 @@ calculateFormulas(anyWorkbookLikeObject);
 
 ## 浏览器支持
 
-ExcelTS 原生支持浏览器，现代打包工具**零配置**即可使用。
+Documonster 原生支持浏览器，现代打包工具**零配置**即可使用。
 
 ```typescript
 // 打包工具（Vite、Webpack、Rollup、esbuild）— 直接导入
@@ -182,7 +182,7 @@ const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer
 > `Workbook.calculateFormulas()`，请改用 ESM + 导入
 > `documonster/formula`。
 
-对于不支持原生 `CompressionStream` API 的旧版浏览器，ExcelTS 自动使用内置的纯 JavaScript DEFLATE 实现 — 无需 polyfill。
+对于不支持原生 `CompressionStream` API 的旧版浏览器，Documonster 自动使用内置的纯 JavaScript DEFLATE 实现 — 无需 polyfill。
 
 ## 系统要求
 

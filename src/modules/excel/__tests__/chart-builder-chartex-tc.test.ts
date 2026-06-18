@@ -344,7 +344,7 @@ describe("ChartEx modern chart types", () => {
     const zipData = await extractAll(new Uint8Array(buf));
     const chartExEntry = zipData.get("xl/charts/chartEx1.xml");
     expect(chartExEntry).toBeDefined();
-    const marker = "<!-- excelts-chartEx-raw-passthrough -->";
+    const marker = "<!-- documonster-chartEx-raw-passthrough -->";
     const chartExXml = textDecoder.decode(chartExEntry!.data);
     chartExEntry!.data = textEncoder.encode(
       chartExXml.replace("<cx:chart>", `${marker}<cx:chart>`)
@@ -769,7 +769,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   }
 
   it("preserves unmodified loaded chart XML exactly", async () => {
-    const marker = "<!-- excelts-raw-passthrough -->";
+    const marker = "<!-- documonster-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -786,7 +786,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("patches loaded chart XML after a high-level title mutation", async () => {
-    const marker = "<!-- excelts-raw-passthrough -->";
+    const marker = "<!-- documonster-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -805,7 +805,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("re-renders loaded chart XML after a direct model mutation, preserving leading comments", async () => {
-    const marker = "<!-- excelts-raw-passthrough -->";
+    const marker = "<!-- documonster-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -827,7 +827,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("patches loaded chart XML after a high-level legend mutation", async () => {
-    const marker = "<!-- excelts-legend-raw-passthrough -->";
+    const marker = "<!-- documonster-legend-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -846,7 +846,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("patches loaded chart XML for series data label changes without dropping unsupported raw XML", async () => {
-    const marker = "<!-- excelts-series-label-raw-passthrough -->";
+    const marker = "<!-- documonster-series-label-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -906,7 +906,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("patches loaded chart XML for chart-group data labels while preserving series label XML", async () => {
-    const marker = "<!-- excelts-group-label-raw-passthrough -->";
+    const marker = "<!-- documonster-group-label-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml
         .replace("<c:chart>", `${marker}<c:chart>`)
@@ -936,7 +936,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("patches loaded chart XML for plot area manual layout without dropping unsupported raw XML", async () => {
-    const marker = "<!-- excelts-plot-layout-raw-passthrough -->";
+    const marker = "<!-- documonster-plot-layout-raw-passthrough -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -1018,7 +1018,7 @@ describe("TC2b: classic chart raw passthrough", () => {
   });
 
   it("patches loaded chart XML for series formatting, markers, trendlines, error bars, data points, and axis formatting", async () => {
-    const marker = "<!-- excelts-wide-raw-patch -->";
+    const marker = "<!-- documonster-wide-raw-patch -->";
     const input = await makeWorkbookWithInjectedChartXml(xml =>
       xml.replace("<c:chart>", `${marker}<c:chart>`)
     );
@@ -1888,7 +1888,7 @@ describe("TC2d: high-level chart series editing API", () => {
 
     const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
-    const marker = "<!-- excelts-series-raw-passthrough -->";
+    const marker = "<!-- documonster-series-raw-passthrough -->";
     const chartEntry = zipData.get("xl/charts/chart1.xml")!;
     chartEntry.data = textEncoder.encode(
       textDecoder.decode(chartEntry.data).replace("<c:chart>", `${marker}<c:chart>`)
@@ -1930,7 +1930,7 @@ describe("TC2d: high-level chart series editing API", () => {
 
     const buf = await Workbook.toBuffer(wb);
     const zipData = await extractAll(new Uint8Array(buf));
-    const marker = "<!-- excelts-axis-raw-passthrough -->";
+    const marker = "<!-- documonster-axis-raw-passthrough -->";
     const chartEntry = zipData.get("xl/charts/chart1.xml")!;
     chartEntry.data = textEncoder.encode(
       textDecoder.decode(chartEntry.data).replace("<c:chart>", `${marker}<c:chart>`)

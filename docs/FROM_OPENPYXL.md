@@ -1,14 +1,14 @@
 # Migrating from openpyxl (Python)
 
-[openpyxl](https://openpyxl.readthedocs.io/en/stable/charts/introduction.html) is Python's class-based Excel library — `BarChart()`, `LineChart()`, `PieChart()` etc. are instantiated and composed with `Reference` objects pointing at cell ranges. ExcelTS adopts a flatter, options-object approach that maps cleanly from openpyxl's class graph.
+[openpyxl](https://openpyxl.readthedocs.io/en/stable/charts/introduction.html) is Python's class-based Excel library — `BarChart()`, `LineChart()`, `PieChart()` etc. are instantiated and composed with `Reference` objects pointing at cell ranges. Documonster adopts a flatter, options-object approach that maps cleanly from openpyxl's class graph.
 
 Companion guides: [`FROM_XLSXWRITER.md`](./FROM_XLSXWRITER.md) · [`FROM_EXCELIZE.md`](./FROM_EXCELIZE.md) · [`FROM_POI.md`](./FROM_POI.md) · [`FROM_EXCELJS.md`](./FROM_EXCELJS.md)
 
 ## Philosophy
 
-openpyxl models Excel's object graph directly — one class per OOXML element. ExcelTS keeps the underlying model (`ChartModel`, `ChartExModel`) but the **authoring surface** is an options object, similar to xlsxwriter's, so the common case (create a chart, add series, set title) is one `addChart({ … })` call instead of six `setAttr` calls on a chart instance.
+openpyxl models Excel's object graph directly — one class per OOXML element. Documonster keeps the underlying model (`ChartModel`, `ChartExModel`) but the **authoring surface** is an options object, similar to xlsxwriter's, so the common case (create a chart, add series, set title) is one `addChart({ … })` call instead of six `setAttr` calls on a chart instance.
 
-| Aspect                  | openpyxl                                                                  | ExcelTS                                                                           |
+| Aspect                  | openpyxl                                                                  | Documonster                                                                       |
 | ----------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Chart instantiation     | `BarChart()`, `LineChart()`, …                                            | `ws.addChart({ type: "bar" / "line" / … })`                                       |
 | Data sources            | `Reference(ws, min_col, min_row, max_col, max_row)` then `chart.add_data` | Excel-style A1 string: `"Sheet1!$B$2:$B$10"`                                      |
@@ -139,7 +139,7 @@ ws.addChart(
 );
 ```
 
-ExcelTS automatically inserts the secondary value axis when any series declares `useSecondaryAxis: true`, so there's no extra class graph to construct. The secondary-axis options (`secondaryValueAxis`, `secondaryCategoryAxis`) are siblings of `valueAxis` / `categoryAxis`.
+Documonster automatically inserts the secondary value axis when any series declares `useSecondaryAxis: true`, so there's no extra class graph to construct. The secondary-axis options (`secondaryValueAxis`, `secondaryCategoryAxis`) are siblings of `valueAxis` / `categoryAxis`.
 
 ## Example 3 — Pie chart with data labels
 
@@ -231,11 +231,11 @@ ws.addChart(
 );
 ```
 
-ExcelTS keeps xValues/values as separate fields rather than wrapping in a `Series` object. `scatterStyle` is the first-class axis: valid values are `lineMarker`, `line`, `marker`, `smooth`, `smoothMarker` — matching Excel's scatter sub-types.
+Documonster keeps xValues/values as separate fields rather than wrapping in a `Series` object. `scatterStyle` is the first-class axis: valid values are `lineMarker`, `line`, `marker`, `smooth`, `smoothMarker` — matching Excel's scatter sub-types.
 
 ## Example 5 — Loading a chart and editing it (openpyxl can't)
 
-openpyxl can read _some_ loaded chart metadata (`ws._charts`) but cannot reliably mutate it without data loss. ExcelTS:
+openpyxl can read _some_ loaded chart metadata (`ws._charts`) but cannot reliably mutate it without data loss. Documonster:
 
 ```typescript
 await wb.xlsx.load(readFileSync("existing.xlsx"));
@@ -266,7 +266,7 @@ if (unknown) {
 await wb.xlsx.writeBuffer({ templateMode: "strict" });
 ```
 
-If the loaded chart was authored by Excel 2013+ and carries `c15:datalabelsRange` or `c16:pivotOptions16` extensions, ExcelTS preserves them through the edit — openpyxl would silently lose them on re-serialisation.
+If the loaded chart was authored by Excel 2013+ and carries `c15:datalabelsRange` or `c16:pivotOptions16` extensions, Documonster preserves them through the edit — openpyxl would silently lose them on re-serialisation.
 
 ## Example 6 — Modern chart types (openpyxl cannot create these)
 
@@ -330,22 +330,22 @@ See `docs/COMPATIBILITY.md` → "ChartEx types" for the complete type list with 
 
 ## Behavioural differences
 
-- **`Reference` vs A1 strings.** openpyxl's `Reference` lets you pass column/row integers; ExcelTS always uses Excel-style A1 notation. This is less terse but works directly with cells copy-pasted from the UI.
-- **Default anchor.** openpyxl defaults to E15 + 15×7.5cm. ExcelTS makes the range explicit (`addChart(options, "E15:L30")`) — there's no implicit default.
+- **`Reference` vs A1 strings.** openpyxl's `Reference` lets you pass column/row integers; Documonster always uses Excel-style A1 notation. This is less terse but works directly with cells copy-pasted from the UI.
+- **Default anchor.** openpyxl defaults to E15 + 15×7.5cm. Documonster makes the range explicit (`addChart(options, "E15:L30")`) — there's no implicit default.
 - **No `chart.width` / `chart.height` cm properties.** Size is derived from the anchor range + worksheet column widths / row heights. To make a specific chart larger, pass a larger range.
-- **Gauge / Sankey / radial-bar charts**: openpyxl supports these as _combined_ classic charts. ExcelTS builds the same via `addComboChart` with appropriate groups; see `src/modules/excel/__tests__/chart-builder.test.ts` for patterns.
-- **Streaming writers.** openpyxl supports `WriteOnlyWorkbook`; ExcelTS has `WorkbookWriter` (see the main README → Streaming section). Chart support in both streaming modes is limited to adding pre-built models — dynamic editing during streaming is not supported in either library.
+- **Gauge / Sankey / radial-bar charts**: openpyxl supports these as _combined_ classic charts. Documonster builds the same via `addComboChart` with appropriate groups; see `src/modules/excel/__tests__/chart-builder.test.ts` for patterns.
+- **Streaming writers.** openpyxl supports `WriteOnlyWorkbook`; Documonster has `WorkbookWriter` (see the main README → Streaming section). Chart support in both streaming modes is limited to adding pre-built models — dynamic editing during streaming is not supported in either library.
 
-## Features ExcelTS has that openpyxl does not
+## Features Documonster has that openpyxl does not
 
 - **Render preview**: SVG/PNG/PDF from the model directly (no Excel / LibreOffice roundtrip needed for previews).
 - **ChartEx helper APIs**: `chartExOptionsFromTable` / `chartExOptionsFromRows`.
 - **Pivot chart metadata**: `ws.addPivotChart(pivotTable, options, range)` — openpyxl reads only.
 - **User-shape overlays**: byte-preserving programmatic API.
 - **Vendor-extension preservation**: `templateMode: "strict"` + `Chart.unknownElements` catch silent loss.
-- **Browser support**: ExcelTS runs in both Node and browsers; openpyxl is Python-only.
+- **Browser support**: Documonster runs in both Node and browsers; openpyxl is Python-only.
 
-## Features openpyxl has that ExcelTS maps differently
+## Features openpyxl has that Documonster maps differently
 
 - **`chart.legend.position`** → `legend: { legendPos: "r" | "l" | "t" | "b" | "tr" }` on the options object.
 - **`chart.y_axis.crosses = "autoZero"`** → `valueAxis: { crosses: "autoZero" }`.

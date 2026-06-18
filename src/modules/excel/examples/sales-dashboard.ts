@@ -204,7 +204,7 @@ async function main(): Promise<void> {
   const wb = Workbook.create();
   wb.title = "Sales Dashboard";
   wb.subject = "Regional BI dashboard";
-  wb.creator = "ExcelTS sales-dashboard example";
+  wb.creator = "Documonster sales-dashboard example";
   wb.keywords = "sales, pivot, regions, channel, treemap, regionMap";
 
   const txns = generateTransactions();
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
     },
     headerFooter: {
       oddHeader: '&L&"Calibri,Bold"Transactions&R&D',
-      oddFooter: "&LExcelTS&CPage &P / &N&R&F"
+      oddFooter: "&LDocumonster&CPage &P / &N&R&F"
     }
   });
 
@@ -991,7 +991,7 @@ async function main(): Promise<void> {
 
   const pdf = await excelToPdf(wb, {
     title: "Sales BI Dashboard — FY23-25",
-    author: "ExcelTS",
+    author: "Documonster",
     showGridLines: false,
     showPageNumbers: true,
     sheets: [

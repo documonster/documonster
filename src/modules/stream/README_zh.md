@@ -21,7 +21,7 @@ import { Readable, pipeline, createTransform } from "documonster/stream";
 
 ## 安装
 
-Stream 模块是 ExcelTS 的一部分。通过子路径导入：
+Stream 模块是 Documonster 的一部分。通过子路径导入：
 
 ```typescript
 import {

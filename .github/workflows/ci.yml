@@ -194,13 +194,13 @@ jobs:
         env:
           CI: true
           LIBREOFFICE_BIN: soffice
-          EXCELTS_LIBREOFFICE_VISUAL_ORACLE: "1"
-          EXCELTS_LIBREOFFICE_OPEN_VALIDATION: "1"
+          DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE: "1"
+          DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION: "1"
           # Optional enterprise corpus — only fires when the private
           # directory is mounted into the runner (via repository
           # secret + setup action). Safe to leave unset on public PRs.
-          EXCELTS_ENTERPRISE_CORPUS_DIR: ${{ vars.EXCELTS_ENTERPRISE_CORPUS_DIR }}
-          EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION: "1"
+          DOCUMONSTER_ENTERPRISE_CORPUS_DIR: ${{ vars.DOCUMONSTER_ENTERPRISE_CORPUS_DIR }}
+          DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION: "1"
 
   codeql:
     needs: should-run

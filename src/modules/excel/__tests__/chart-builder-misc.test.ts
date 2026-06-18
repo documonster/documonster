@@ -706,13 +706,13 @@ describe("renderChartSvg auto-injects effectList filters", () => {
 
     // The SVG must contain a <defs> block with a <filter> inside.
     expect(svg).toContain("<defs>");
-    expect(svg).toMatch(/<filter id="excelts-fx-\d+"/);
+    expect(svg).toMatch(/<filter id="documonster-fx-\d+"/);
     expect(svg).toContain("<feGaussianBlur");
     expect(svg).toContain("<feOffset");
     expect(svg).toContain("<feMerge");
 
     // And at least one <g> element must reference the filter.
-    expect(svg).toMatch(/<g filter="url\(#excelts-fx-\d+\)">/);
+    expect(svg).toMatch(/<g filter="url\(#documonster-fx-\d+\)">/);
   });
 
   it("deduplicates filters when multiple series share the same effect list", () => {
@@ -747,10 +747,10 @@ describe("renderChartSvg auto-injects effectList filters", () => {
     const chart = getCharts(ws)[0];
     const svg = Chart.toSVG(chart, { width: 400, height: 200 });
     // Exactly one <filter> definition even though two series share it.
-    const filterDefs = (svg.match(/<filter id="excelts-fx-/g) ?? []).length;
+    const filterDefs = (svg.match(/<filter id="documonster-fx-/g) ?? []).length;
     expect(filterDefs).toBe(1);
     // But both series reference it (two <g filter="url(...)">)
-    const filterRefs = (svg.match(/<g filter="url\(#excelts-fx-/g) ?? []).length;
+    const filterRefs = (svg.match(/<g filter="url\(#documonster-fx-/g) ?? []).length;
     expect(filterRefs).toBe(2);
   });
 

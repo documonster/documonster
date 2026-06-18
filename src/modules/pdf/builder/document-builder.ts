@@ -843,7 +843,7 @@ export class PdfPageBuilder {
   /**
    * Draw a simple SVG document onto this page.
    *
-   * Supports the SVG primitives emitted by ExcelTS chart rendering:
+   * Supports the SVG primitives emitted by Documonster chart rendering:
    * `rect`, `line`, `circle`, `polyline`, `polygon`, `path`, and `text`.
    */
   drawSvg(options: DrawSvgOptions): this {

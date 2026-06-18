@@ -31,7 +31,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
     await expectValidXlsx(input);
 
     const result = await runExternalOracle({
-      envFlag: "EXCELTS_LIBREOFFICE_VISUAL_ORACLE",
+      envFlag: "DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE",
       executableEnv: "LIBREOFFICE_BIN",
       candidates: ["soffice", "libreoffice"],
       args: ["--headless", "--convert-to", "pdf", "--outdir", "{outDir}", "{input}"],
@@ -90,7 +90,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
     await expectValidXlsx(input);
 
     const libreOffice = await runOfficeOpenValidation({
-      envFlag: "EXCELTS_LIBREOFFICE_OPEN_VALIDATION",
+      envFlag: "DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION",
       executableEnv: "LIBREOFFICE_BIN",
       candidates: ["soffice", "libreoffice"],
       input,
@@ -104,14 +104,14 @@ describe("optional chart oracle and enterprise corpus harness", () => {
     }
 
     const office = await runOfficeOpenValidation({
-      envFlag: "EXCELTS_OFFICE_OPEN_VALIDATION",
+      envFlag: "DOCUMONSTER_OFFICE_OPEN_VALIDATION",
       executableEnv: "EXCEL_OFFICE_BIN",
       candidates: [],
-      args: process.env.EXCELTS_OFFICE_OPEN_ARGS
-        ? process.env.EXCELTS_OFFICE_OPEN_ARGS.split(" ").filter(Boolean)
+      args: process.env.DOCUMONSTER_OFFICE_OPEN_ARGS
+        ? process.env.DOCUMONSTER_OFFICE_OPEN_ARGS.split(" ").filter(Boolean)
         : undefined,
-      versionArgs: process.env.EXCELTS_OFFICE_VERSION_ARGS
-        ? process.env.EXCELTS_OFFICE_VERSION_ARGS.split(" ").filter(Boolean)
+      versionArgs: process.env.DOCUMONSTER_OFFICE_VERSION_ARGS
+        ? process.env.DOCUMONSTER_OFFICE_VERSION_ARGS.split(" ").filter(Boolean)
         : false,
       input,
       inputName: "chart-open-validation.xlsx"
@@ -124,14 +124,14 @@ describe("optional chart oracle and enterprise corpus harness", () => {
   });
 
   it("optionally runs configured enterprise chart corpus round-trips", async () => {
-    const rootValue = process.env.EXCELTS_ENTERPRISE_CORPUS_DIR;
+    const rootValue = process.env.DOCUMONSTER_ENTERPRISE_CORPUS_DIR;
     if (!rootValue) {
-      expect("Set EXCELTS_ENTERPRISE_CORPUS_DIR to enable.").toBeTruthy();
+      expect("Set DOCUMONSTER_ENTERPRISE_CORPUS_DIR to enable.").toBeTruthy();
       return;
     }
     const root = resolve(rootValue);
-    const manifestPath = process.env.EXCELTS_ENTERPRISE_CORPUS_MANIFEST
-      ? resolve(process.env.EXCELTS_ENTERPRISE_CORPUS_MANIFEST)
+    const manifestPath = process.env.DOCUMONSTER_ENTERPRISE_CORPUS_MANIFEST
+      ? resolve(process.env.DOCUMONSTER_ENTERPRISE_CORPUS_MANIFEST)
       : join(root, "manifest.json");
     const entries = existsSync(manifestPath)
       ? (await loadEnterpriseCorpusManifest(manifestPath)).entries
@@ -160,9 +160,12 @@ describe("optional chart oracle and enterprise corpus harness", () => {
         ).toBe(true);
       }
 
-      if (entry.openValidation || process.env.EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION === "1") {
+      if (
+        entry.openValidation ||
+        process.env.DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION === "1"
+      ) {
         const opened = await runOfficeOpenValidation({
-          envFlag: "EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION",
+          envFlag: "DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION",
           executableEnv: "LIBREOFFICE_BIN",
           candidates: ["soffice", "libreoffice"],
           input: new Uint8Array(output),

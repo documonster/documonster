@@ -1222,7 +1222,7 @@ function resolveSpkColor(c: any): { r: number; g: number; b: number } | undefine
 
 /**
  * Translate a `Chart.range` into the PDF layer's anchor shape. Returns
- * `undefined` for charts that ExcelTS could not anchor to any cell
+ * `undefined` for charts that Documonster could not anchor to any cell
  * (extremely rare — usually indicates a corrupt drawing relationship).
  */
 function chartAnchorRange(chart: ChartHandle): PdfAnchorRange | undefined {

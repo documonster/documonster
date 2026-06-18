@@ -14,7 +14,7 @@ type ListenerValue = EventListener | ListenerList;
 const isListenerList = (value: ListenerValue): value is ListenerList => Array.isArray(value);
 
 export class EventEmitter {
-  // Brand for ExcelTS browser stream objects.
+  // Brand for Documonster browser stream objects.
   // Use a string key (not a Symbol) so it still works if the bundle ends up
   // containing multiple copies of this module.
   readonly __documonster_stream: true = true;

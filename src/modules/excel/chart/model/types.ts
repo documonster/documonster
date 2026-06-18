@@ -1,5 +1,5 @@
 /**
- * Chart type definitions for ExcelTS
+ * Chart type definitions for Documonster
  *
  * Covers the full OOXML DrawingML Chart specification (c: namespace).
  * Every chart in an XLSX file is a `c:chartSpace` containing a `c:chart`

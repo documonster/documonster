@@ -225,8 +225,8 @@ function cellAddr(col: number, row: number): string {
 
 async function main(): Promise<void> {
   const wb = Workbook.create();
-  wb.title = "ExcelTS — Chart Gallery";
-  wb.creator = "ExcelTS charts example";
+  wb.title = "Documonster — Chart Gallery";
+  wb.creator = "Documonster charts example";
   wb.created = new Date();
 
   // "Sales" — month × (revenue, profit, cost, units, growth) grid used by
@@ -5136,7 +5136,7 @@ async function main(): Promise<void> {
   const previewWorksheets = [gallery, combo, ex, features, advanced];
   let previewCounter = 0;
   const pdfDoc = new PdfDocumentBuilder();
-  pdfDoc.setMetadata({ title: "ExcelTS chart previews", author: "charts example" });
+  pdfDoc.setMetadata({ title: "Documonster chart previews", author: "charts example" });
   for (const ws of previewWorksheets) {
     for (const chart of Chart.get(ws)) {
       previewCounter += 1;

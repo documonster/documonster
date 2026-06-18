@@ -13,7 +13,7 @@ describe("DataValidation Large Range Performance", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(testOutDir(), "excelts-test-"));
+    tempDir = fs.mkdtempSync(path.join(testOutDir(), "documonster-test-"));
   });
 
   afterEach(() => {

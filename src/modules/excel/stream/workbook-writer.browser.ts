@@ -257,8 +257,8 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     this.WorksheetWriterClass = WorksheetWriterClass;
     this.created = options.created || new Date();
     this.modified = options.modified || this.created;
-    this.creator = options.creator ?? "ExcelTS";
-    this.lastModifiedBy = options.lastModifiedBy ?? "ExcelTS";
+    this.creator = options.creator ?? "Documonster";
+    this.lastModifiedBy = options.lastModifiedBy ?? "Documonster";
     this.lastPrinted = options.lastPrinted;
 
     this.useSharedStrings = options.useSharedStrings ?? false;

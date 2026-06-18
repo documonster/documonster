@@ -21,7 +21,7 @@ import { Readable, pipeline, createTransform } from "documonster/stream";
 
 ## Installation
 
-The stream module is part of ExcelTS. Import from the subpath:
+The stream module is part of Documonster. Import from the subpath:
 
 ```typescript
 import {

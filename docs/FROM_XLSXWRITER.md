@@ -1,12 +1,12 @@
 # Migrating from XlsxWriter (Python)
 
-[XlsxWriter](https://xlsxwriter.readthedocs.io/chart.html) is a Python, write-only library that is the de facto reference for "how a chart API should feel." ExcelTS is the closest TypeScript/JavaScript equivalent — its option shapes, preset names, and structural grouping were modelled after XlsxWriter's, with additions for reading, editing, rendering, and the full ChartEx surface that XlsxWriter does not expose.
+[XlsxWriter](https://xlsxwriter.readthedocs.io/chart.html) is a Python, write-only library that is the de facto reference for "how a chart API should feel." Documonster is the closest TypeScript/JavaScript equivalent — its option shapes, preset names, and structural grouping were modelled after XlsxWriter's, with additions for reading, editing, rendering, and the full ChartEx surface that XlsxWriter does not expose.
 
 Companion guides: [`FROM_OPENPYXL.md`](./FROM_OPENPYXL.md) · [`FROM_EXCELIZE.md`](./FROM_EXCELIZE.md) · [`FROM_POI.md`](./FROM_POI.md) · [`FROM_EXCELJS.md`](./FROM_EXCELJS.md)
 
 ## Cheat sheet — creation
 
-| Task                        | XlsxWriter (Python)                         | ExcelTS (TypeScript)                                                                                                                          |
+| Task                        | XlsxWriter (Python)                         | Documonster (TypeScript)                                                                                                                      |
 | --------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Create a workbook           | `Workbook("f.xlsx")`                        | `new Workbook()`                                                                                                                              |
 | Add a worksheet             | `wb.add_worksheet()`                        | `wb.addWorksheet("S")`                                                                                                                        |
@@ -49,7 +49,7 @@ ws.insert_chart("F1", chart, {"x_scale": 1.2, "y_scale": 1.2})
 wb.close()
 ```
 
-**TypeScript (ExcelTS):**
+**TypeScript (Documonster):**
 
 ```typescript
 import { Workbook } from "documonster";
@@ -93,7 +93,7 @@ await wb.xlsx.writeFile("report.xlsx"); // Node
 - `set_y_axis({"major_unit": 50})` → `valueAxis: { majorUnit: 50 }` option.
 - `data_labels: {"value": True}` → `dataLabels: { showVal: true }`.
 - `trendline: {"type": "linear"}` → `trendline: { type: "linear" }` (identical).
-- `insert_chart("F1", …, {"x_scale": 1.2, "y_scale": 1.2})` → range argument `"F1:M14"` sizes the chart directly (ExcelTS uses the anchor range; if you want scale-based sizing pick a larger range).
+- `insert_chart("F1", …, {"x_scale": 1.2, "y_scale": 1.2})` → range argument `"F1:M14"` sizes the chart directly (Documonster uses the anchor range; if you want scale-based sizing pick a larger range).
 - `chart.set_style(37)` → `chart.setStyle(37)` or `setBuiltInStyle(37)`.
 
 ## Example 2 — Combined chart (Pareto-style)
@@ -147,11 +147,11 @@ ws.addComboChart(
 );
 ```
 
-XlsxWriter documents that pie/scatter cannot be the primary chart in a combo. ExcelTS enforces the same via the `ChartOptionsError`: you'll get a typed error at build time rather than a mysterious write failure.
+XlsxWriter documents that pie/scatter cannot be the primary chart in a combo. Documonster enforces the same via the `ChartOptionsError`: you'll get a typed error at build time rather than a mysterious write failure.
 
 ## Example 3 — Chart from a worksheet Table
 
-XlsxWriter's `add_table` + `add_chart` requires you to manage row ranges manually. ExcelTS ships a helper:
+XlsxWriter's `add_table` + `add_chart` requires you to manage row ranges manually. Documonster ships a helper:
 
 ```typescript
 ws.addTable({
@@ -189,7 +189,7 @@ Same helper exists for ChartEx: `ws.addChartExFromTable("Sales", { type: "funnel
 
 ## Example 4 — Chart from an in-memory dataset
 
-XlsxWriter has no object-to-chart helper; you have to write cells first and remember the ranges. ExcelTS:
+XlsxWriter has no object-to-chart helper; you have to write cells first and remember the ranges. Documonster:
 
 ```typescript
 ws.addChartFromRows(
@@ -216,7 +216,7 @@ ChartEx variant: `ws.addChartExFromRows(rows, { type: "treemap", x, y, startCell
 
 ## Example 5 — Load, patch a single series, save
 
-XlsxWriter is write-only. ExcelTS round-trips:
+XlsxWriter is write-only. Documonster round-trips:
 
 ```typescript
 import { readFileSync } from "node:fs";
@@ -240,7 +240,7 @@ chart.mutate(
 await wb.xlsx.writeFile("out.xlsx");
 ```
 
-`preferRawPatch` lets ExcelTS apply a surgical byte patch for narrow edits (title, single series ref, grouping flags) so vendor extensions like `c15:layoutFlag` stay intact. If the edit can't patch cleanly the writer falls back to a structural rebuild; `templateMode: "strict"` turns that fallback into a hard error.
+`preferRawPatch` lets Documonster apply a surgical byte patch for narrow edits (title, single series ref, grouping flags) so vendor extensions like `c15:layoutFlag` stay intact. If the edit can't patch cleanly the writer falls back to a structural rebuild; `templateMode: "strict"` turns that fallback into a hard error.
 
 ## Example 6 — Rendering preview (XlsxWriter has none)
 
@@ -259,22 +259,22 @@ const pdf = await chartToPdf(chart, { title: "Quarterly revenue" });
 writeFileSync("chart.pdf", pdf);
 ```
 
-**Scope reminder**: this is a zero-dependency deterministic preview, not an Excel-pixel-perfect compositor. For production-grade output, use `chart.toSVG()` for dashboards and route the `.xlsx` through headless LibreOffice for Excel-identical PDFs — ExcelTS' byte-preserving round-trip makes that handoff safe. See README → "Rendering scope" for the full boundary list.
+**Scope reminder**: this is a zero-dependency deterministic preview, not an Excel-pixel-perfect compositor. For production-grade output, use `chart.toSVG()` for dashboards and route the `.xlsx` through headless LibreOffice for Excel-identical PDFs — Documonster' byte-preserving round-trip makes that handoff safe. See README → "Rendering scope" for the full boundary list.
 
 ## Behavioural differences worth knowing
 
-- **Chart sizing.** XlsxWriter uses `x_scale` / `y_scale` on `insert_chart`; ExcelTS sizes via the anchor range passed to `addChart` (`"D1:J10"` occupies cells D1 through J10). Use a larger range for a bigger chart.
-- **Data reference format.** XlsxWriter accepts `[sheet, first_row, first_col, last_row, last_col]` arrays as a convenience; ExcelTS requires the Excel-style `"Sheet!$A$1:$A$10"` string. Fully-qualified (with sheet name) is safest.
-- **No implicit cache refresh at save.** If you mutate a chart's value references but the target cells already hold the cache, ExcelTS keeps the old cache by default. Call `fillChartCaches(chart.chartModel, worksheet)` to regenerate explicitly.
-- **No `chart.set_table()` / `chart.set_legend({"none": True})` shortcuts.** Use `dataTable: true` on `addChart` and `{ legendPos: "none" }` (ExcelTS uses OOXML nomenclature).
+- **Chart sizing.** XlsxWriter uses `x_scale` / `y_scale` on `insert_chart`; Documonster sizes via the anchor range passed to `addChart` (`"D1:J10"` occupies cells D1 through J10). Use a larger range for a bigger chart.
+- **Data reference format.** XlsxWriter accepts `[sheet, first_row, first_col, last_row, last_col]` arrays as a convenience; Documonster requires the Excel-style `"Sheet!$A$1:$A$10"` string. Fully-qualified (with sheet name) is safest.
+- **No implicit cache refresh at save.** If you mutate a chart's value references but the target cells already hold the cache, Documonster keeps the old cache by default. Call `fillChartCaches(chart.chartModel, worksheet)` to regenerate explicitly.
+- **No `chart.set_table()` / `chart.set_legend({"none": True})` shortcuts.** Use `dataTable: true` on `addChart` and `{ legendPos: "none" }` (Documonster uses OOXML nomenclature).
 - **Pattern fills are structured, not enums.** XlsxWriter's 48 preset patterns become `pattern: { preset: "percent50", foreground: "FF0000", background: "FFFFFF" }` — same preset list, explicit shape.
 
-## Features XlsxWriter has that ExcelTS maps differently
+## Features XlsxWriter has that Documonster maps differently
 
-- **Sparklines** — XlsxWriter's `ws.add_sparkline(...)` becomes `ws.addSparkline({ ... })` (not a chart); covered in the main ExcelTS README.
-- **`add_data_table`** — XlsxWriter exposes data tables only as an on/off toggle. ExcelTS supports the full `c:dTable` structure: `dataTable: { showHorzBorder, showVertBorder, showOutline, showKeys, spPr, txPr }`.
+- **Sparklines** — XlsxWriter's `ws.add_sparkline(...)` becomes `ws.addSparkline({ ... })` (not a chart); covered in the main Documonster README.
+- **`add_data_table`** — XlsxWriter exposes data tables only as an on/off toggle. Documonster supports the full `c:dTable` structure: `dataTable: { showHorzBorder, showVertBorder, showOutline, showKeys, spPr, txPr }`.
 
-## Features ExcelTS has that XlsxWriter does not
+## Features Documonster has that XlsxWriter does not
 
 - **Read / edit / mutate**: structured access to loaded charts, not write-only.
 - **ChartEx**: sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap.
@@ -283,6 +283,6 @@ writeFileSync("chart.pdf", pdf);
 - **Preview renderer**: SVG/PNG/PDF from the model directly.
 - **User-shape overlays**: `Chart.userShapesXml` / `setUserShapesXml`.
 - **Vendor-extension preservation**: `templateMode: "strict"` + `Chart.unknownElements`.
-- **Browser support**: ExcelTS is platform-agnostic; XlsxWriter is Python-only.
+- **Browser support**: Documonster is platform-agnostic; XlsxWriter is Python-only.
 
 If you hit a gap in the mapping, open an issue with the XlsxWriter snippet and we'll add the translation.

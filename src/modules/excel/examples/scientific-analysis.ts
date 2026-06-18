@@ -4,7 +4,7 @@
  *
  * This example is what a research group would ship as "the data + the
  * analysis": raw samples, summary statistics, fitted curves, and every
- * distribution-focused chart ExcelTS knows how to emit.
+ * distribution-focused chart Documonster knows how to emit.
  *
  * Features covered:
  *   - 2000 experimental samples across 5 treatment groups + 2 control
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   const wb = Workbook.create();
   wb.title = "Dose-Response Study";
   wb.subject = "Statistical Analysis";
-  wb.creator = "ExcelTS scientific-analysis example";
+  wb.creator = "Documonster scientific-analysis example";
   wb.keywords = "dose-response, histogram, regression, ANOVA";
 
   const samples = generateSamples();
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     pageSetup: { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 1 },
     headerFooter: {
       oddHeader: '&L&"Calibri,Bold"Dose-Response Study&R&"Calibri,Regular"FY25 manuscript',
-      oddFooter: "&LExcelTS Research Group&CPage &P of &N&R&D"
+      oddFooter: "&LDocumonster Research Group&CPage &P of &N&R&D"
     }
   });
   Column.setWidth(methods, 1, 4);
@@ -764,7 +764,7 @@ async function main(): Promise<void> {
 
   const pdf = await excelToPdf(wb, {
     title: "Dose-Response Study",
-    author: "ExcelTS Research Group",
+    author: "Documonster Research Group",
     showGridLines: false,
     showPageNumbers: true
   });

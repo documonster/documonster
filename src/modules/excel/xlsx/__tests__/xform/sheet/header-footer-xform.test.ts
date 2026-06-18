@@ -7,11 +7,11 @@ const expectations = [
     title: "set oddHeader",
     create: () => new HeaderFooterXform(),
     preparedModel: {
-      oddHeader: "&CExcelts"
+      oddHeader: "&CDocumonster"
     },
-    xml: "<headerFooter><oddHeader>&amp;CExcelts</oddHeader></headerFooter>",
+    xml: "<headerFooter><oddHeader>&amp;CDocumonster</oddHeader></headerFooter>",
     parsedModel: {
-      oddHeader: "&CExcelts"
+      oddHeader: "&CDocumonster"
     },
     tests: ["render", "renderIn", "parse"]
   },
@@ -19,11 +19,11 @@ const expectations = [
     title: "set oddFooter",
     create: () => new HeaderFooterXform(),
     preparedModel: {
-      oddFooter: "&CExcelts"
+      oddFooter: "&CDocumonster"
     },
-    xml: "<headerFooter><oddFooter>&amp;CExcelts</oddFooter></headerFooter>",
+    xml: "<headerFooter><oddFooter>&amp;CDocumonster</oddFooter></headerFooter>",
     parsedModel: {
-      oddFooter: "&CExcelts"
+      oddFooter: "&CDocumonster"
     },
     tests: ["render", "renderIn", "parse"]
   },
@@ -31,11 +31,11 @@ const expectations = [
     title: "set oddHeader position",
     create: () => new HeaderFooterXform(),
     preparedModel: {
-      oddHeader: "&LExcelts"
+      oddHeader: "&LDocumonster"
     },
-    xml: "<headerFooter><oddHeader>&amp;LExcelts</oddHeader></headerFooter>",
+    xml: "<headerFooter><oddHeader>&amp;LDocumonster</oddHeader></headerFooter>",
     parsedModel: {
-      oddHeader: "&LExcelts"
+      oddHeader: "&LDocumonster"
     },
     tests: ["render", "renderIn", "parse"]
   },
@@ -44,16 +44,16 @@ const expectations = [
     create: () => new HeaderFooterXform(),
     preparedModel: {
       differentFirst: true,
-      oddHeader: "&CExcelts",
-      oddFooter: "&CExcelts",
+      oddHeader: "&CDocumonster",
+      oddFooter: "&CDocumonster",
       firstHeader: "&CHome",
       firstFooter: "&CHome"
     },
-    xml: '<headerFooter differentFirst="1"><oddFooter>&amp;CExcelts</oddFooter><firstFooter>&amp;CHome</firstFooter><oddHeader>&amp;CExcelts</oddHeader><firstHeader>&amp;CHome</firstHeader></headerFooter>',
+    xml: '<headerFooter differentFirst="1"><oddFooter>&amp;CDocumonster</oddFooter><firstFooter>&amp;CHome</firstFooter><oddHeader>&amp;CDocumonster</oddHeader><firstHeader>&amp;CHome</firstHeader></headerFooter>',
     parsedModel: {
       differentFirst: true,
-      oddHeader: "&CExcelts",
-      oddFooter: "&CExcelts",
+      oddHeader: "&CDocumonster",
+      oddFooter: "&CDocumonster",
       firstHeader: "&CHome",
       firstFooter: "&CHome"
     },

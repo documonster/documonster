@@ -65,7 +65,7 @@ class WorkbookReader extends WorkbookReaderBase<
   }
 
   async _storeWaitingWorksheet(sheetNo: string, entry: ZipEntry): Promise<WaitingWorksheet> {
-    const tmpDir = createTempDirSync("excelts-");
+    const tmpDir = createTempDirSync("documonster-");
     const filePath = join(tmpDir, `sheet${sheetNo}.xml`);
     const cleanup = () => {
       remove(tmpDir).catch(() => {});

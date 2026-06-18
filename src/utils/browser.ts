@@ -12,7 +12,7 @@ import type { Plugin } from "vitest/config";
  */
 export function preferBrowserFilesPlugin(): Plugin {
   return {
-    name: "excelts-prefer-browser-files",
+    name: "documonster-prefer-browser-files",
     enforce: "pre",
     async resolveId(source, importer) {
       if (source.startsWith("\0") || source.startsWith("virtual:") || source.startsWith("node:")) {

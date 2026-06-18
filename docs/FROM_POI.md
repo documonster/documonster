@@ -1,19 +1,19 @@
 # Migrating from Apache POI (Java)
 
-[Apache POI](https://poi.apache.org/components/spreadsheet/) is Java's de facto Excel library. Its XSSF (`.xlsx`) chart API is class-based like openpyxl but with a different abstraction: `XSSFChart`, `ChartDataFactory`, `XDDFChartData`, `XDDFLineChartData` etc. It is the open-source tool with the deepest chart-format coverage before ExcelTS — including partial ChartEx read support — so migration is mostly a surface translation rather than a capability expansion.
+[Apache POI](https://poi.apache.org/components/spreadsheet/) is Java's de facto Excel library. Its XSSF (`.xlsx`) chart API is class-based like openpyxl but with a different abstraction: `XSSFChart`, `ChartDataFactory`, `XDDFChartData`, `XDDFLineChartData` etc. It is the open-source tool with the deepest chart-format coverage before Documonster — including partial ChartEx read support — so migration is mostly a surface translation rather than a capability expansion.
 
 Companion guides: [`FROM_XLSXWRITER.md`](./FROM_XLSXWRITER.md) · [`FROM_OPENPYXL.md`](./FROM_OPENPYXL.md) · [`FROM_EXCELIZE.md`](./FROM_EXCELIZE.md) · [`FROM_EXCELJS.md`](./FROM_EXCELJS.md)
 
 ## Why migrate
 
 - **Runtime**: switching a Node/TypeScript backend off a JVM dependency (POI + a Java runtime) can cut container size by 100 – 300 MB.
-- **Browser support**: POI requires JVM; ExcelTS runs in Node _and_ modern browsers.
-- **ChartEx**: POI's `cx:` support is raw-XML read-only; ExcelTS creates, reads, edits, and previews all 8 ChartEx types.
-- **Preview renderer**: POI requires round-tripping through a separate image library (JasperReports, Apache Batik) to get a chart image; ExcelTS ships SVG/PNG/PDF out of the box.
+- **Browser support**: POI requires JVM; Documonster runs in Node _and_ modern browsers.
+- **ChartEx**: POI's `cx:` support is raw-XML read-only; Documonster creates, reads, edits, and previews all 8 ChartEx types.
+- **Preview renderer**: POI requires round-tripping through a separate image library (JasperReports, Apache Batik) to get a chart image; Documonster ships SVG/PNG/PDF out of the box.
 
 ## Philosophy map
 
-| Aspect             | POI (Java)                                                                   | ExcelTS                                                                                               |
+| Aspect             | POI (Java)                                                                   | Documonster                                                                                           |
 | ------------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Chart object       | `XSSFChart`                                                                  | `Chart` (returned from `ws.getCharts()`)                                                              |
 | Chart data factory | `XDDFChartData chartData = chart.createData(...)`                            | Options object passed to `addChart({ type, series, ... })`                                            |
@@ -207,7 +207,7 @@ ws.addComboChart(
 );
 ```
 
-`addComboChart` keeps the two chart groups in one structured call — POI needs two `chart.plot()` invocations plus an explicit secondary axis setup. Both approaches produce the same OOXML, ExcelTS just needs fewer steps.
+`addComboChart` keeps the two chart groups in one structured call — POI needs two `chart.plot()` invocations plus an explicit secondary axis setup. Both approaches produce the same OOXML, Documonster just needs fewer steps.
 
 ## Example 4 — Load existing chart and edit
 
@@ -250,7 +250,7 @@ for (const ws of wb.worksheets) {
 await wb.xlsx.writeBuffer();
 ```
 
-`preferRawPatch: true` lets ExcelTS apply a surgical byte patch (no XML rebuild) for narrow edits — preserving every `c15:` / `c16:` vendor extension byte-for-byte. POI's CT-level code rebuilds the subtree on every edit, which can silently drop unknown XML.
+`preferRawPatch: true` lets Documonster apply a surgical byte patch (no XML rebuild) for narrow edits — preserving every `c15:` / `c16:` vendor extension byte-for-byte. POI's CT-level code rebuilds the subtree on every edit, which can silently drop unknown XML.
 
 ## Example 5 — Chart style (1–48)
 
@@ -268,9 +268,9 @@ const chart = ws.getCharts().find(c => c.chartNumber === chartNum)!;
 chart.setStyle(37); // alias: chart.setBuiltInStyle(37)
 ```
 
-## Example 6 — ChartEx (POI partial read-only; ExcelTS full authoring)
+## Example 6 — ChartEx (POI partial read-only; Documonster full authoring)
 
-POI can read a chartEx `cx:chart` part as raw XML but has no structured builder for it. ExcelTS:
+POI can read a chartEx `cx:chart` part as raw XML but has no structured builder for it. Documonster:
 
 ```typescript
 // Sunburst — POI has no structural equivalent
@@ -335,16 +335,16 @@ const pdf = await chartToPdf(chart, { title: "Quarterly revenue" });
 writeFileSync("chart.pdf", pdf);
 ```
 
-**Scope reminder**: zero-dependency deterministic preview, not Excel-pixel-perfect. For publication-grade output route the `.xlsx` through `soffice --convert-to pdf` — ExcelTS' byte-preserving round-trip makes the handoff safe. See README → "Rendering scope" for the full boundary list.
+**Scope reminder**: zero-dependency deterministic preview, not Excel-pixel-perfect. For publication-grade output route the `.xlsx` through `soffice --convert-to pdf` — Documonster' byte-preserving round-trip makes the handoff safe. See README → "Rendering scope" for the full boundary list.
 
 ## Behavioural differences worth knowing
 
-- **Chart sizing.** POI's `XSSFClientAnchor(dx1, dy1, dx2, dy2, col1, row1, col2, row2)` uses cell-based coordinates with EMU offsets. ExcelTS' range (`"E1:M18"`) is cell-based only — set column widths / row heights to tune the pixel size, or use the cell-offset form via `chart.rangeFromOffset({ ... })`.
-- **No explicit axis objects.** POI requires creating `XDDFCategoryAxis` / `XDDFValueAxis` up front and passing them to `createData`. ExcelTS auto-creates the standard axis pair; pass `categoryAxis: { ... }` / `valueAxis: { ... }` only when you need non-default settings.
+- **Chart sizing.** POI's `XSSFClientAnchor(dx1, dy1, dx2, dy2, col1, row1, col2, row2)` uses cell-based coordinates with EMU offsets. Documonster' range (`"E1:M18"`) is cell-based only — set column widths / row heights to tune the pixel size, or use the cell-offset form via `chart.rangeFromOffset({ ... })`.
+- **No explicit axis objects.** POI requires creating `XDDFCategoryAxis` / `XDDFValueAxis` up front and passing them to `createData`. Documonster auto-creates the standard axis pair; pass `categoryAxis: { ... }` / `valueAxis: { ... }` only when you need non-default settings.
 - **Multiple `chart.plot(data)`** becomes one `addComboChart({ groups: [...] })` call.
 - **Raw CT access.** If you really need to drop to the CT level (new element not yet covered), reach for `chart.chartModel` (structured) and then call `chart.mutate(fn, { preferRawPatch })` — the model's type is declared in `src/modules/excel/chart/types.ts`.
 
-## Features ExcelTS has that POI does not
+## Features Documonster has that POI does not
 
 - **ChartEx structural authoring** (POI is read-only).
 - **Pivot chart metadata** with structured field buttons + `c14:pivotOptions` + `c16:pivotOptions16`.
@@ -353,11 +353,11 @@ writeFileSync("chart.pdf", pdf);
 - **User-shape overlays** (`c:userShapes`) with byte-preserving programmatic replacement.
 - **Browser support**.
 
-## Features POI has that ExcelTS maps differently
+## Features POI has that Documonster maps differently
 
-- **`XDDFLineProperties` / `XDDFShapeProperties`** — ExcelTS exposes equivalent fields on `series[i].spPr` (fill/line/effects) and `dataLabels.spPr`. The schema matches OOXML; the field names are camelCase rather than Java's PascalCase.
-- **`AxesManager`** — ExcelTS' axis model is inline on `addChart` options (`categoryAxis`, `valueAxis`, `secondaryValueAxis`, `secondaryCategoryAxis`) plus post-creation mutation via `chart.categoryAxis` / `chart.valueAxis` getters.
+- **`XDDFLineProperties` / `XDDFShapeProperties`** — Documonster exposes equivalent fields on `series[i].spPr` (fill/line/effects) and `dataLabels.spPr`. The schema matches OOXML; the field names are camelCase rather than Java's PascalCase.
+- **`AxesManager`** — Documonster' axis model is inline on `addChart` options (`categoryAxis`, `valueAxis`, `secondaryValueAxis`, `secondaryCategoryAxis`) plus post-creation mutation via `chart.categoryAxis` / `chart.valueAxis` getters.
 - **`ChartShapeProperties.setFillProperties(...)`** — pass `spPr: { solidFill: { srgbClr: "4472C4" } }` directly on the chart options or per-series.
-- **`XSSFChart.getEmbedded()`** — POI's escape hatch to the raw CT. ExcelTS' equivalent is `chart.chartModel` (structured) + `chart.mutate(...)` (patching) + `chart.userShapesXml` (overlay bytes).
+- **`XSSFChart.getEmbedded()`** — POI's escape hatch to the raw CT. Documonster' equivalent is `chart.chartModel` (structured) + `chart.mutate(...)` (patching) + `chart.userShapesXml` (overlay bytes).
 
 If you hit a gap in the mapping, open an issue with the POI snippet and we'll add the translation.

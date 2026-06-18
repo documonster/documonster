@@ -177,7 +177,7 @@ export interface WorkbookModel {
    */
   persons?: ThreadedCommentPerson[];
   /**
-   * Raw-passthrough slicer parts keyed by zip-relative path. Excelts
+   * Raw-passthrough slicer parts keyed by zip-relative path. Documonster
    * does not structurally model slicers yet but preserves the bytes on
    * round-trip so dashboards continue to work.
    */

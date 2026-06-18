@@ -398,7 +398,7 @@ worksheet.columns.forEach(column => {
 
 ## Charts
 
-ExcelTS includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
+Documonster includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
 
 > **Setup:** No install or registration step is required. The chart APIs
 > (`Chart.add`, the per-type shortcuts, chart load/write, etc.) pull the chart
@@ -806,7 +806,7 @@ Preview rendering is intentionally deterministic and dependency-free. Browser PN
 
 ### Template Preservation
 
-Loaded chart XML is preserved byte-for-byte when not modified. For safe high-level mutations, ExcelTS patches only known XML blocks and keeps unsupported extensions intact:
+Loaded chart XML is preserved byte-for-byte when not modified. For safe high-level mutations, Documonster patches only known XML blocks and keeps unsupported extensions intact:
 
 - classic charts: title, legend, series references, series formatting, markers, data points, data labels, trendlines, error bars, axes, plot layout
 - ChartEx charts: chart data, title, legend, auto-title deletion, chart/plot shapes, plot-region layout, series visibility/name/axis bindings, series data references, layout properties (including `extLst` passthrough), data labels, data points, and axes
@@ -847,26 +847,26 @@ Every generated workbook in these harnesses also runs an OOXML package audit bef
 
 ```bash
 # LibreOffice visual/PDF export oracle
-EXCELTS_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
+DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # LibreOffice open/convert validation for generated workbooks
-EXCELTS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # Proprietary Office/Aspose-style CLI validation hook. The command must accept
-# {input} and {outDir} placeholders via EXCELTS_OFFICE_OPEN_ARGS.
-EXCELTS_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
-EXCELTS_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
+# {input} and {outDir} placeholders via DOCUMONSTER_OFFICE_OPEN_ARGS.
+DOCUMONSTER_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
+DOCUMONSTER_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # Enterprise corpus round-trip harness
-EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+DOCUMONSTER_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # Enterprise corpus plus LibreOffice open validation
-EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
-EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+DOCUMONSTER_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 ```
 
@@ -892,7 +892,7 @@ An optional `manifest.json` in the corpus directory can mark expected structures
 }
 ```
 
-Excel, WPS, and Aspose can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. ExcelTS itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
+Excel, WPS, and Aspose can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. Documonster itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
 
 ### Compatibility Matrix
 
@@ -967,7 +967,7 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 
 - **Classic PNG content assertions** are generic: every type hits the PNG pipeline, but only `bar` has a hash golden because binary-level stability across chart types would over-couple tests to renderer internals.
 - **Classic PDF content assertions** exist only where the PDF path diverges meaningfully from SVG (alpha via `/ExtGState`, pie leader lines, marker geometry). Other types re-use the same call graph, so one SVG assertion and the generic `drawChartPdf` smoke are considered sufficient.
-- **LibreOffice visual oracle** is gated on `EXCELTS_LIBREOFFICE_VISUAL_ORACLE` and CI does not install LibreOffice by default to keep matrix jobs fast; direct per-type open-validation is provided for `bar` (solo) and the combo/chartsheet/ChartEx-treemap/funnel fixture, with the full catalogue reachable via the `EXCELTS_ENTERPRISE_CORPUS_DIR` opt-in (see `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`).
+- **LibreOffice visual oracle** is gated on `DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE` and CI does not install LibreOffice by default to keep matrix jobs fast; direct per-type open-validation is provided for `bar` (solo) and the combo/chartsheet/ChartEx-treemap/funnel fixture, with the full catalogue reachable via the `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` opt-in (see `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`).
 - **ChartEx PDF vector path** (`drawChartExPdf`) covers every ChartEx layout the builder currently emits; see the dedicated note.
 
 **3D note:** `bar3D` renders as a **true extruded box** whose axonometric projection is driven by `view3D.rotX` / `view3D.rotY` / `view3D.rAngAx` — three shaded faces (top + front + right) per bar, with depth scaled to bar width so the 3D effect stays readable across chart sizes. The default fallback (`rotX=15°, rotY=20°, rAngAx=true`) matches Excel's new-chart defaults. `line3D`, `pie3D`, `area3D`, `surface3D` and the richer `view3D` / `Scene3D` / `ShapeProperties3D` metadata are **preserved in XML** so clean round-trips and Excel re-opens survive intact, but the preview still renders those types as their 2D equivalents — there is no projection matrix, no light rig, no depth sort for non-bar 3D. This is a preview-grade renderer, not a 3D engine; use Excel or LibreOffice for commercial-grade 3D output.
@@ -994,27 +994,27 @@ These features would require multi-week investments with a low payoff for a prev
 
 Use `chartToPdf(chart, options)` from `documonster/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
 
-**Pivot chart note:** ExcelTS supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
+**Pivot chart note:** Documonster supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
 
 **Strict template mode:** Writers accept `{ templateMode: "strict" }` (or `{ strictTemplateMode: true }`) to refuse any chart/ChartEx edit that would force a structural rebuild. When a rebuild is unavoidable the error message now lists any unstructured XML elements the parser observed (available as `ChartExModel.unknownElements`) so vendor extensions can never disappear silently from a loaded template.
 
 **Testing scope boundaries (what this library does _not_ test):**
 
 - **No pixel-level visual diff.** Preview output is tested through SVG-structure assertions and PNG header/signature hashes — a true RMS/SSIM pixel diff would require bundling a PNG decoder and a diff algorithm, and the preview is explicitly not pixel-perfect anyway (see the rendering notes above). If your workflow needs pixel parity with Excel, run `chartToPdf(chart)` through LibreOffice's headless PDF export and compare there.
-- **No in-tree Excel/WPS/Aspose-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by ExcelTS itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `EXCELTS_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape and `scripts/compatibility-report.ts` (`pnpm compatibility:report`) for the report generator.
-- **No automated Excel / WPS runtime.** CI gates open-validation on LibreOffice only. Excel and WPS binaries are not shipped in any CI runner, and GUI-driven validation of those apps is out of scope. The `EXCELTS_OFFICE_OPEN_VALIDATION` + `EXCELTS_OFFICE_OPEN_ARGS` hook lets a self-hosted runner with Office installed participate in the same check pattern.
+- **No in-tree Excel/WPS/Aspose-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by Documonster itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape and `scripts/compatibility-report.ts` (`pnpm compatibility:report`) for the report generator.
+- **No automated Excel / WPS runtime.** CI gates open-validation on LibreOffice only. Excel and WPS binaries are not shipped in any CI runner, and GUI-driven validation of those apps is out of scope. The `DOCUMONSTER_OFFICE_OPEN_VALIDATION` + `DOCUMONSTER_OFFICE_OPEN_ARGS` hook lets a self-hosted runner with Office installed participate in the same check pattern.
 
-Compared with ExcelJS, ExcelTS has native chart creation and editing. Compared with xlsx-populate, ExcelTS adds structured chart APIs while still preserving template XML where safe. Compared with XlsxWriter/openpyxl/excelize, ExcelTS adds TypeScript/browser support, ChartEx, pivot chart metadata, chartsheets, and preview renderers.
+Compared with ExcelJS, Documonster has native chart creation and editing. Compared with xlsx-populate, Documonster adds structured chart APIs while still preserving template XML where safe. Compared with XlsxWriter/openpyxl/excelize, Documonster adds TypeScript/browser support, ChartEx, pivot chart metadata, chartsheets, and preview renderers.
 
 ### Migrating from another library
 
 Full API mapping tables are in dedicated docs, one per library:
 
 - **[`docs/FROM_EXCELJS.md`](../../../docs/FROM_EXCELJS.md)** — ExcelJS had no native chart creation API; this guide shows how to convert "export template unchanged" and "hand-edited chart XML" flows into structured `addChart` / `mutate` calls, plus the preview-render helpers ExcelJS lacks. Now covers chartsheet, pivot chart, user shapes, ChartEx, `unknownElements`, data table, and a migration checklist.
-- **[`docs/FROM_XLSXWRITER.md`](../../../docs/FROM_XLSXWRITER.md)** — XlsxWriter (Python) is the reference for ergonomic chart options; ExcelTS models its option shapes after XlsxWriter's with additions for reading, editing, ChartEx, and preview rendering. 6 end-to-end translation examples.
-- **[`docs/FROM_OPENPYXL.md`](../../../docs/FROM_OPENPYXL.md)** — openpyxl (Python) uses class-based chart construction (`BarChart()`, `Reference()`); this guide translates 6 example workflows into ExcelTS' options-object style and covers loaded-chart editing, which openpyxl does unreliably.
-- **[`docs/FROM_EXCELIZE.md`](../../../docs/FROM_EXCELIZE.md)** — excelize (Go) has a JSON-ish chart API close in spirit to ExcelTS; this guide covers the `Chart{...}` → `addChart({...})` translation, per-point colours, combo charts, and the modern ChartEx types excelize cannot author.
-- **[`docs/FROM_POI.md`](../../../docs/FROM_POI.md)** — Apache POI (Java) is the deepest open-source chart library before ExcelTS; this guide maps `XSSFChart` / `XDDFChartData` / `CTPlotArea` / `XDDFDataSourcesFactory` onto ExcelTS' options objects, with ChartEx authoring as the main capability expansion.
+- **[`docs/FROM_XLSXWRITER.md`](../../../docs/FROM_XLSXWRITER.md)** — XlsxWriter (Python) is the reference for ergonomic chart options; Documonster models its option shapes after XlsxWriter's with additions for reading, editing, ChartEx, and preview rendering. 6 end-to-end translation examples.
+- **[`docs/FROM_OPENPYXL.md`](../../../docs/FROM_OPENPYXL.md)** — openpyxl (Python) uses class-based chart construction (`BarChart()`, `Reference()`); this guide translates 6 example workflows into Documonster' options-object style and covers loaded-chart editing, which openpyxl does unreliably.
+- **[`docs/FROM_EXCELIZE.md`](../../../docs/FROM_EXCELIZE.md)** — excelize (Go) has a JSON-ish chart API close in spirit to Documonster; this guide covers the `Chart{...}` → `addChart({...})` translation, per-point colours, combo charts, and the modern ChartEx types excelize cannot author.
+- **[`docs/FROM_POI.md`](../../../docs/FROM_POI.md)** — Apache POI (Java) is the deepest open-source chart library before Documonster; this guide maps `XSSFChart` / `XDDFChartData` / `CTPlotArea` / `XDDFDataSourcesFactory` onto Documonster' options objects, with ChartEx authoring as the main capability expansion.
 - **Compatibility matrix:** [`docs/COMPATIBILITY.md`](../../../docs/COMPATIBILITY.md) — per-type support grid + cross-cutting features + side-by-side comparison against ExcelJS / SheetJS / xlsxwriter / openpyxl / excelize / POI / EPPlus / ClosedXML / Aspose.Cells.
 - Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json).
 
@@ -1249,7 +1249,7 @@ const url = URL.createObjectURL(blob);
 ```html
 <script src="https://unpkg.com/documonster/dist/iife/documonster.iife.min.js"></script>
 <script>
-  const { Workbook } = ExcelTS;
+  const { Workbook } = Documonster;
   const wb = Workbook.create();
 </script>
 ```

@@ -2510,7 +2510,7 @@ function preserveSeriesBlocks(
       break;
     }
     xml += block.slice(cursor, range.start);
-    const placeholder = `__EXCELTS_SER_${seriesBlocks.length}__`;
+    const placeholder = `__DOCUMONSTER_SER_${seriesBlocks.length}__`;
     seriesBlocks.push(transform(block.slice(range.start, range.end)));
     xml += placeholder;
     cursor = range.end;
@@ -2520,7 +2520,7 @@ function preserveSeriesBlocks(
 
 function restoreSeriesBlocks(block: string, seriesBlocks: string[]): string {
   return seriesBlocks.reduce(
-    (xml, seriesBlock, i) => xml.replace(`__EXCELTS_SER_${i}__`, seriesBlock),
+    (xml, seriesBlock, i) => xml.replace(`__DOCUMONSTER_SER_${i}__`, seriesBlock),
     block
   );
 }
@@ -7553,8 +7553,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   prepareModel(model: any, options: any): void {
-    model.creator = model.creator ?? "ExcelTS";
-    model.lastModifiedBy = model.lastModifiedBy ?? "ExcelTS";
+    model.creator = model.creator ?? "Documonster";
+    model.lastModifiedBy = model.lastModifiedBy ?? "Documonster";
     model.created = model.created ?? new Date();
     model.modified = model.modified ?? new Date();
 

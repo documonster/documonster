@@ -8,7 +8,7 @@ const ws = Workbook.addWorksheet(wb, "Foo");
 
 Cell.setValue(ws, "A1", {
   hyperlink: "https://www.npmjs.com/package/documonster",
-  text: "ExcelTS",
+  text: "Documonster",
   tooltip: "https://www.npmjs.com/package/documonster"
 });
 

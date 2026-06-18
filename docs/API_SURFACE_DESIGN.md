@@ -241,7 +241,7 @@ exports are its product, not leakage.
 
 ## 5. IIFE / browser globals — one IIFE per module
 
-Current state (wrong): a single `ExcelTS` global built from `index.browser`
+Current state (wrong): a single `Documonster` global built from `index.browser`
 that drags in **all** modules (excel+word+pdf+formula+…), no per-module
 opt-in.
 
@@ -259,7 +259,7 @@ namespace, under a shared `Documonster` global namespace:
 
 There is **no** whole-family IIFE (mirrors "no root aggregate entry" — a
 single global carrying every module is the same phantom need, and it is what
-the current single `ExcelTS` IIFE wrongly does today).
+the current single `Documonster` IIFE wrongly does today).
 
 CDN users load only the script(s) they need. Global shape == ESM shape.
 This also removes the class of browser-smoke breakage caused by an

@@ -6666,11 +6666,11 @@ function assignEffectFilters(
     const key = JSON.stringify(structured);
     let id = keyToId.get(key);
     if (!id) {
-      const xml = buildEffectFilter(`excelts-fx-${filters.length + 1}`, structured);
+      const xml = buildEffectFilter(`documonster-fx-${filters.length + 1}`, structured);
       if (!xml) {
         continue;
       }
-      id = `excelts-fx-${filters.length + 1}`;
+      id = `documonster-fx-${filters.length + 1}`;
       keyToId.set(key, id);
       filters.push({ id, xml });
     }

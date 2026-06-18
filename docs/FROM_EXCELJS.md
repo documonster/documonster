@@ -1,12 +1,12 @@
 # Migrating from ExcelJS
 
-ExcelTS started life as a fork of [ExcelJS](https://github.com/exceljs/exceljs) and keeps the same workbook/worksheet/cell object graph at the top. This guide covers the **chart-related** API differences, which is where ExcelTS diverges most sharply: ExcelJS has **no native chart creation API**, so most migration work for chart code is translating ExcelJS "export the Excel unchanged" usage into ExcelTS structured chart authoring.
+Documonster started life as a fork of [ExcelJS](https://github.com/exceljs/exceljs) and keeps the same workbook/worksheet/cell object graph at the top. This guide covers the **chart-related** API differences, which is where Documonster diverges most sharply: ExcelJS has **no native chart creation API**, so most migration work for chart code is translating ExcelJS "export the Excel unchanged" usage into Documonster structured chart authoring.
 
-The rest of the API (workbook metadata, worksheets, rows, cells, styles, merges, data validations, images, conditional formatting, tables, defined names, print setup) is **source-compatible in the common cases** — see `MIGRATION.md` for the full cross-version delta within ExcelTS itself.
+The rest of the API (workbook metadata, worksheets, rows, cells, styles, merges, data validations, images, conditional formatting, tables, defined names, print setup) is **source-compatible in the common cases** — see `MIGRATION.md` for the full cross-version delta within Documonster itself.
 
-## What ExcelJS does not do, and ExcelTS does
+## What ExcelJS does not do, and Documonster does
 
-| Capability                            | ExcelJS                                                   | ExcelTS                                                                                                                         |
+| Capability                            | ExcelJS                                                   | Documonster                                                                                                                     |
 | ------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Create chart programmatically         | ✗ no public API                                           | `worksheet.addChart(options, range)`                                                                                            |
 | Parse chart XML into a model          | partial (keeps as opaque blob)                            | full `ChartModel` / `ChartExModel` with round-trip                                                                              |
@@ -22,7 +22,7 @@ The rest of the API (workbook metadata, worksheets, rows, cells, styles, merges,
 
 ### Create a bar chart (ExcelJS had no direct equivalent)
 
-ExcelTS:
+Documonster:
 
 ```typescript
 import { Workbook } from "documonster";
@@ -48,11 +48,11 @@ ws.addChart(
 await wb.xlsx.writeBuffer();
 ```
 
-ExcelJS workflow for the same result — either hand-edit the exported `chartN.xml` after `writeBuffer`, or use a template file with the chart already in place and patch cell values. Both are error-prone and break on edits. ExcelTS replaces them with structured authoring.
+ExcelJS workflow for the same result — either hand-edit the exported `chartN.xml` after `writeBuffer`, or use a template file with the chart already in place and patch cell values. Both are error-prone and break on edits. Documonster replaces them with structured authoring.
 
 ### Load a template, tweak one series, write it back
 
-ExcelJS had to round-trip the bytes and hope nothing changed. ExcelTS:
+ExcelJS had to round-trip the bytes and hope nothing changed. Documonster:
 
 ```typescript
 const wb = new Workbook();
@@ -72,11 +72,11 @@ chart.mutate(
 await wb.xlsx.writeBuffer();
 ```
 
-`preferRawPatch` keeps every byte Excel wrote that ExcelTS doesn't have a structured setter for, including vendor `c15:` / `c16:` extensions. See `src/modules/excel/README.md` → "Strict template mode" for the opt-in strict error path.
+`preferRawPatch` keeps every byte Excel wrote that Documonster doesn't have a structured setter for, including vendor `c15:` / `c16:` extensions. See `src/modules/excel/README.md` → "Strict template mode" for the opt-in strict error path.
 
 ### Read cached cell values from a loaded chart
 
-ExcelJS exposes nothing here. ExcelTS:
+ExcelJS exposes nothing here. Documonster:
 
 ```typescript
 const chart = wb.getWorksheet("S")!.getCharts()[0];
@@ -89,7 +89,7 @@ for (const group of chart.chartTypes) {
 
 ### Render a chart preview server-side
 
-ExcelJS users historically piped `.xlsx` through LibreOffice headless or `pdfkit`. ExcelTS ships a built-in preview:
+ExcelJS users historically piped `.xlsx` through LibreOffice headless or `pdfkit`. Documonster ships a built-in preview:
 
 ```typescript
 import { writeFileSync } from "node:fs";
@@ -110,20 +110,20 @@ The preview is **intentionally deterministic**, not Excel-pixel-perfect. See REA
 
 ## Behavioural differences worth knowing
 
-- **Byte preservation when clean.** Both libraries preserve the loaded bytes when no user code touches a chart. ExcelTS extends this to include a _raw-patch_ path for narrow edits (title, legend, single series value reference) — ExcelJS re-serialised the whole file.
+- **Byte preservation when clean.** Both libraries preserve the loaded bytes when no user code touches a chart. Documonster extends this to include a _raw-patch_ path for narrow edits (title, legend, single series value reference) — ExcelJS re-serialised the whole file.
 - **Chart references are live.** `worksheet.getCharts()` returns `Chart` instances wired to the workbook; mutating them is how you edit. ExcelJS returned inert bytes.
 - **PivotChart is metadata-only.** See README → "Pivot chart note". The user-visible rendering is still Excel's job.
 - **No `chart.set_x_axis` / `set_y_axis` setter.** Use `chart.categoryAxis` / `chart.valueAxis` (getters) with direct property assignment, or pass `valueAxis: { … }` to `addChart` at creation time. See `FROM_XLSXWRITER.md` for a full mapping.
 
-## Features ExcelJS has that ExcelTS intentionally does not
+## Features ExcelJS has that Documonster intentionally does not
 
-- **No auto-generated charts from `.set({ chart: true })` shortcut.** ExcelJS never had this; some forks do. ExcelTS requires an explicit `addChart({ type, series, … })` call to keep the schema check straightforward.
+- **No auto-generated charts from `.set({ chart: true })` shortcut.** ExcelJS never had this; some forks do. Documonster requires an explicit `addChart({ type, series, … })` call to keep the schema check straightforward.
 
-Nothing in the non-chart ExcelJS surface has been removed — if a call site works in ExcelJS, it generally works in ExcelTS unless noted in `MIGRATION.md`.
+Nothing in the non-chart ExcelJS surface has been removed — if a call site works in ExcelJS, it generally works in Documonster unless noted in `MIGRATION.md`.
 
 ## Chartsheet migration
 
-ExcelJS treats chartsheets as unsupported — it loads the workbook but the chartsheet's chart body is inaccessible and lost on write. ExcelTS exposes them as first-class objects:
+ExcelJS treats chartsheets as unsupported — it loads the workbook but the chartsheet's chart body is inaccessible and lost on write. Documonster exposes them as first-class objects:
 
 ```typescript
 // Create a chartsheet (a sheet with exactly one chart, no grid)
@@ -158,7 +158,7 @@ Chartsheets round-trip losslessly through `wb.xlsx.load` → `writeBuffer` inclu
 
 ## Pivot chart migration
 
-ExcelJS has no pivot-chart surface — loaded pivot charts survive as opaque bytes only. ExcelTS gives you structured pivot-chart metadata:
+ExcelJS has no pivot-chart surface — loaded pivot charts survive as opaque bytes only. Documonster gives you structured pivot-chart metadata:
 
 ```typescript
 // Create the pivot table first
@@ -184,11 +184,11 @@ ws.addPivotChart(
 );
 ```
 
-ExcelTS supports `c14:pivotOptions` (field buttons, drop-zone hints, `refreshOnOpen`) and `c16:pivotOptions16` (Office 2019+ expand/collapse buttons). The **rendering** still lives with Excel — ExcelTS preserves the metadata, hosts read it to draw the real chart.
+Documonster supports `c14:pivotOptions` (field buttons, drop-zone hints, `refreshOnOpen`) and `c16:pivotOptions16` (Office 2019+ expand/collapse buttons). The **rendering** still lives with Excel — Documonster preserves the metadata, hosts read it to draw the real chart.
 
 ## ChartEx (modern chart types) migration
 
-This is where ExcelTS diverges most: ExcelJS does not support any Excel-2016+ chart (sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap). These are stored in a separate OOXML namespace (`cx:`) that ExcelJS silently strips.
+This is where Documonster diverges most: ExcelJS does not support any Excel-2016+ chart (sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap). These are stored in a separate OOXML namespace (`cx:`) that ExcelJS silently strips.
 
 ```typescript
 // Waterfall with subtotals
@@ -271,7 +271,7 @@ ChartEx charts round-trip with full preservation of `layoutPr` fields. See `docs
 
 ## Data table migration
 
-ExcelJS has no `c:dTable` API. ExcelTS exposes it on both the builder and the renderer:
+ExcelJS has no `c:dTable` API. Documonster exposes it on both the builder and the renderer:
 
 ```typescript
 ws.addChart(
@@ -293,7 +293,7 @@ The preview renderer (SVG/PNG/PDF) draws the data table as a grid below the plot
 
 ## User-shape overlay migration
 
-ExcelJS preserves the `c:userShapes` reference on clean loads but cannot edit it and silently drops the backing drawing part on most rebuilds. ExcelTS persists the bytes:
+ExcelJS preserves the `c:userShapes` reference on clean loads but cannot edit it and silently drops the backing drawing part on most rebuilds. Documonster persists the bytes:
 
 ```typescript
 const chart = ws.getCharts()[0];
@@ -327,7 +327,7 @@ The library deliberately does not reimplement the DrawingML shape model — the 
 
 ## Unknown-element / strict template migration
 
-ExcelJS' byte-preservation breaks as soon as you touch a chart — the re-serialisation discards any vendor-extension XML (`c15:` from Office 2013, `cx14:` from Office 2016) that didn't map to its structured model. ExcelTS gives you two escape hatches:
+ExcelJS' byte-preservation breaks as soon as you touch a chart — the re-serialisation discards any vendor-extension XML (`c15:` from Office 2013, `cx14:` from Office 2016) that didn't map to its structured model. Documonster gives you two escape hatches:
 
 ```typescript
 // Diagnose before writing — returns c15:/cx14: vendor tags the parser observed
@@ -357,9 +357,9 @@ The strict writer's error message enumerates the specific unknown paths ("The lo
 
 ## Migration checklist
 
-When porting an ExcelJS codebase to ExcelTS, run through this list:
+When porting an ExcelJS codebase to Documonster, run through this list:
 
-- [ ] Any `chart.` property access? ExcelJS only exposes `chart.name` — ExcelTS adds `title`, `legend`, `chartTypes[]`, `categoryAxis`, `valueAxis`, `chartModel`, `chartExModel`, `unknownElements`.
+- [ ] Any `chart.` property access? ExcelJS only exposes `chart.name` — Documonster adds `title`, `legend`, `chartTypes[]`, `categoryAxis`, `valueAxis`, `chartModel`, `chartExModel`, `unknownElements`.
 - [ ] Template-driven charts (load → write unchanged)? Works identically with byte-level round-trip.
 - [ ] Template + one edit? Use `chart.mutate(fn, { preferRawPatch: true })` to keep unknown XML intact.
 - [ ] Post-write validation? Add `{ templateMode: "strict" }` to catch silent extension loss in CI.

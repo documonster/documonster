@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ExcelTS Browser Test</title>
+    <title>Documonster Browser Test</title>
     <style>
       * {
         box-sizing: border-box;
@@ -92,7 +92,7 @@
     </style>
   </head>
   <body>
-    <h1>📊 ExcelTS Browser Test</h1>
+    <h1>📊 Documonster Browser Test</h1>
 
     <div class="card">
       <h2>Bundle Info</h2>
@@ -173,8 +173,8 @@
         const loadTime = (performance.now() - startTime).toFixed(0);
         document.getElementById("loadTime").textContent = loadTime + "ms";
         document.getElementById("testStatus").textContent = "✅";
-        log("ExcelTS loaded successfully!", "success");
-        log(`Available exports: ${Object.keys(window.ExcelTS).join(", ")}`);
+        log("Documonster loaded successfully!", "success");
+        log(`Available exports: ${Object.keys(window.Documonster).join(", ")}`);
 
         // Fetch bundle size
         fetch("../../../../dist/iife/documonster.excel.iife.min.js")
@@ -185,7 +185,7 @@
       };
       script.onerror = () => {
         document.getElementById("testStatus").textContent = "❌";
-        log("Failed to load ExcelTS bundle!", "error");
+        log("Failed to load Documonster bundle!", "error");
       };
       document.head.appendChild(script);
 
@@ -194,9 +194,9 @@
         const result = document.getElementById("createResult");
         try {
           log("Creating workbook...");
-          const { Workbook } = ExcelTS;
+          const { Workbook } = Documonster;
           const wb = Workbook.create();
-          wb.creator = "ExcelTS Browser Test";
+          wb.creator = "Documonster Browser Test";
           wb.created = new Date();
 
           const ws = wb.addWorksheet("Sample Data");
@@ -271,7 +271,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = "excelts-test.xlsx";
+          a.download = "documonster-test.xlsx";
           a.click();
           URL.revokeObjectURL(url);
 
@@ -299,7 +299,7 @@
           log(`Reading file: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
 
           const arrayBuffer = await file.arrayBuffer();
-          const { Workbook } = ExcelTS;
+          const { Workbook } = Documonster;
           const wb = Workbook.create();
           await wb.xlsx.load(arrayBuffer);
 
@@ -337,7 +337,7 @@
         const result = document.getElementById("protectedResult");
         try {
           log("Creating protected workbook...");
-          const { Workbook } = ExcelTS;
+          const { Workbook } = Documonster;
           const wb = Workbook.create();
           const ws = wb.addWorksheet("Protected Sheet");
 
@@ -362,7 +362,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = "excelts-protected.xlsx";
+          a.download = "documonster-protected.xlsx";
           a.click();
           URL.revokeObjectURL(url);
 
@@ -380,7 +380,7 @@
         const result = document.getElementById("roundtripResult");
         try {
           log("Starting roundtrip test...");
-          const { Workbook } = ExcelTS;
+          const { Workbook } = Documonster;
 
           // Create
           const wb1 = Workbook.create();

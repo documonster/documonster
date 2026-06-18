@@ -133,13 +133,13 @@
   "tables": [],
   "headerFooter": {
     "oddHeader": "&C&KCCCCCC&\"Aril\"2 documonster",
-    "oddFooter": "&Lexcelts&C&F&RPage &P",
-    "firstHeader": "Hello Excelts",
+    "oddFooter": "&Ldocumonster&C&F&RPage &P",
+    "firstHeader": "Hello Documonster",
     "firstFooter": "Hello World",
     "differentFirst": true,
     "differentOddEven": true,
     "evenHeader": "&C&KCCCCCC&\"Aril\"3 documonster evenHeader",
-    "evenFooter": "&Lexcelts&C&F&RPage &P evenHeader"
+    "evenFooter": "&Ldocumonster&C&F&RPage &P evenHeader"
   },
   "conditionalFormattings": []
 }

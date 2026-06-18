@@ -1,5 +1,5 @@
 /**
- * Type definitions for ExcelTS
+ * Type definitions for Documonster
  * This file exports all public types used by the library
  */
 

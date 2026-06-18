@@ -1,19 +1,19 @@
 # Migrating from excelize (Go)
 
-[excelize](https://xuri.me/excelize/en/) is Go's mainline Excel library. Its chart API is a single `AddChart` call that takes a JSON-ish options struct — closer in spirit to ExcelTS than openpyxl, but with a smaller chart-type coverage (no ChartEx, no pivot chart metadata, partial combo support).
+[excelize](https://xuri.me/excelize/en/) is Go's mainline Excel library. Its chart API is a single `AddChart` call that takes a JSON-ish options struct — closer in spirit to Documonster than openpyxl, but with a smaller chart-type coverage (no ChartEx, no pivot chart metadata, partial combo support).
 
 Companion guides: [`FROM_XLSXWRITER.md`](./FROM_XLSXWRITER.md) · [`FROM_OPENPYXL.md`](./FROM_OPENPYXL.md) · [`FROM_POI.md`](./FROM_POI.md) · [`FROM_EXCELJS.md`](./FROM_EXCELJS.md)
 
 ## Why migrate
 
-- **ChartEx**: excelize has no `cx:` support; ExcelTS ships all 8 modern chart types.
-- **Edit loaded charts**: excelize can add and delete charts but cannot mutate an existing chart's structured fields; ExcelTS exposes `chart.mutate(fn, { preferRawPatch })`.
-- **Preview rendering**: excelize has no built-in renderer. ExcelTS ships zero-dependency SVG/PNG/PDF previews.
-- **Runtime**: if your pipeline already calls Node for other Excel work, consolidating on ExcelTS removes the Go dependency.
+- **ChartEx**: excelize has no `cx:` support; Documonster ships all 8 modern chart types.
+- **Edit loaded charts**: excelize can add and delete charts but cannot mutate an existing chart's structured fields; Documonster exposes `chart.mutate(fn, { preferRawPatch })`.
+- **Preview rendering**: excelize has no built-in renderer. Documonster ships zero-dependency SVG/PNG/PDF previews.
+- **Runtime**: if your pipeline already calls Node for other Excel work, consolidating on Documonster removes the Go dependency.
 
 ## Cheat sheet — creation
 
-| Task               | excelize (Go)                     | ExcelTS (TypeScript)                                                      |
+| Task               | excelize (Go)                     | Documonster (TypeScript)                                                  |
 | ------------------ | --------------------------------- | ------------------------------------------------------------------------- |
 | Create a workbook  | `f := excelize.NewFile()`         | `const wb = new Workbook()`                                               |
 | Add a worksheet    | `f.NewSheet("Sheet2")`            | `wb.addWorksheet("Sheet2")`                                               |
@@ -105,7 +105,7 @@ await wb.xlsx.writeFile("out.xlsx");
 - `Series.Name` as `"Sheet!$B$1"` → `name: { formula: "Sheet1!$B$1" }` (cell-sourced). For literal strings: `name: "Revenue"`.
 - `Legend.Position: "bottom"` → `legend: { legendPos: "b" }`. Values: `"t"`, `"b"`, `"l"`, `"r"`, `"tr"` (top-right).
 - `Title []RichTextRun` → plain `title: "..."` for simple text, `title: { paragraphs: [...] }` for rich text with formatting.
-- Chart anchor in excelize is a single cell; ExcelTS uses a range to size the chart (`"E1:L15"`).
+- Chart anchor in excelize is a single cell; Documonster uses a range to size the chart (`"E1:L15"`).
 
 ## Example 2 — Line chart with markers
 
@@ -157,7 +157,7 @@ Marker symbols accepted: `circle`, `dash`, `diamond`, `dot`, `none`, `picture`, 
 
 ## Example 3 — Combo chart (column + line)
 
-excelize supports combos but requires the less ergonomic `ChartType: excelize.Combo` with the secondary chart nested in `PlotArea`. ExcelTS is explicit:
+excelize supports combos but requires the less ergonomic `ChartType: excelize.Combo` with the secondary chart nested in `PlotArea`. Documonster is explicit:
 
 ```typescript
 ws.addComboChart(
@@ -209,7 +209,7 @@ f.AddChart("Sheet1", "E1", &excelize.Chart{
 })
 ```
 
-excelize has no per-point colour override — you have to edit the raw XML. ExcelTS:
+excelize has no per-point colour override — you have to edit the raw XML. Documonster:
 
 ```typescript
 ws.addChart(
@@ -239,7 +239,7 @@ ws.addChart(
 
 ## Example 5 — Read existing chart and render
 
-excelize 2.8+ can read chart _info_ but not mutate structured fields. ExcelTS:
+excelize 2.8+ can read chart _info_ but not mutate structured fields. Documonster:
 
 ```typescript
 import { readFileSync } from "node:fs";
@@ -315,12 +315,12 @@ ws.addChartEx(
 
 ## Behavioural differences
 
-- **Chart sizing.** excelize uses `Dimension{Width: 480, Height: 260}` in pixels; ExcelTS uses a range like `"E1:M20"` that follows the worksheet's column widths / row heights. For fixed pixel sizing, look at `chart.rangeFromOffset({ x, y, width, height })` in the Excel module API.
-- **Data reference format.** excelize accepts `"Sheet1!$B$1"` and `[sheet, col, row]` forms; ExcelTS uses A1-only. Always sheet-qualified is safest.
-- **Series name source.** excelize treats `Name` as a formula when it starts with `=` and as a literal otherwise. ExcelTS is explicit: `name: "literal"` or `name: { formula: "Sheet1!$B$1" }`.
-- **Plot area styling.** excelize's `PlotArea` carries `ShowXxx` boolean toggles. ExcelTS folds these into each series' `dataLabels: { showCatName, showVal, ... }` + the chart-level `legend`, which matches the OOXML structure.
+- **Chart sizing.** excelize uses `Dimension{Width: 480, Height: 260}` in pixels; Documonster uses a range like `"E1:M20"` that follows the worksheet's column widths / row heights. For fixed pixel sizing, look at `chart.rangeFromOffset({ x, y, width, height })` in the Excel module API.
+- **Data reference format.** excelize accepts `"Sheet1!$B$1"` and `[sheet, col, row]` forms; Documonster uses A1-only. Always sheet-qualified is safest.
+- **Series name source.** excelize treats `Name` as a formula when it starts with `=` and as a literal otherwise. Documonster is explicit: `name: "literal"` or `name: { formula: "Sheet1!$B$1" }`.
+- **Plot area styling.** excelize's `PlotArea` carries `ShowXxx` boolean toggles. Documonster folds these into each series' `dataLabels: { showCatName, showVal, ... }` + the chart-level `legend`, which matches the OOXML structure.
 
-## Features ExcelTS has that excelize does not
+## Features Documonster has that excelize does not
 
 - **ChartEx** (all 8 modern chart types).
 - **Pivot chart metadata** (`addPivotChart`, `c14:pivotOptions`, `c16:pivotOptions16`).
@@ -333,7 +333,7 @@ ws.addChartEx(
 
 ## Features excelize has that are marked elsewhere
 
-- **`AddPictureFromBytes` / `AddShape`** — ExcelTS' `ws.addImage({ buffer, extension }, range)` and `ws.addShape(...)` are the equivalents, not chart-related.
-- **Sparklines** — ExcelTS has `ws.addSparkline({ ... })`; covered in the main README.
+- **`AddPictureFromBytes` / `AddShape`** — Documonster' `ws.addImage({ buffer, extension }, range)` and `ws.addShape(...)` are the equivalents, not chart-related.
+- **Sparklines** — Documonster has `ws.addSparkline({ ... })`; covered in the main README.
 
 If you hit a gap in the mapping, open an issue with the excelize snippet and we'll add the translation.

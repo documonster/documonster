@@ -1,7 +1,7 @@
 /**
  * Best-effort ChartEx parser for Office 2016+ cx: chart XML.
  *
- * The parser captures the structured fields that ExcelTS can render and keeps
+ * The parser captures the structured fields that Documonster can render and keeps
  * the original XML on the model so clean round-trips can still use raw bytes.
  */
 

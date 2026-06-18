@@ -94,7 +94,7 @@ function printResult(
   const winner = ratio > 1 ? "documonster" : "fxp";
   const factor = ratio > 1 ? ratio : 1 / ratio;
   console.log(`  ${label}`);
-  console.log(`    excelts:  avg ${formatMs(ours.avg)}, min ${formatMs(ours.min)}`);
+  console.log(`    documonster:  avg ${formatMs(ours.avg)}, min ${formatMs(ours.min)}`);
   console.log(`    fxp:      avg ${formatMs(theirs.avg)}, min ${formatMs(theirs.min)}`);
   console.log(`    → ${winner} is ${factor.toFixed(2)}x faster (by min)`);
   console.log();
@@ -102,7 +102,7 @@ function printResult(
 
 function printSoloResult(label: string, result: { avg: number; min: number }) {
   console.log(`  ${label}`);
-  console.log(`    excelts:  avg ${formatMs(result.avg)}, min ${formatMs(result.min)}`);
+  console.log(`    documonster:  avg ${formatMs(result.avg)}, min ${formatMs(result.min)}`);
   console.log(`    fxp:      N/A (no SAX/streaming mode)`);
   console.log();
 }

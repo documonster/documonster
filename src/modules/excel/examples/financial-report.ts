@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   const wb = Workbook.create();
   wb.title = "FY25 Annual Report";
   wb.subject = "Financial Statements";
-  wb.creator = "ExcelTS financial-report example";
+  wb.creator = "Documonster financial-report example";
   wb.company = "Acme Worldwide Inc.";
   wb.keywords = "income, balance, cashflow, annual";
 

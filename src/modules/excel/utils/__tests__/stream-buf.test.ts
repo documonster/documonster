@@ -19,7 +19,7 @@ function uint8ToString(data: Uint8Array | null): string {
 
 describe("StreamBuf", () => {
   // StreamBuf is designed as a general-purpose writable-readable stream
-  // However its use in ExcelTS is primarily as a memory buffer between
+  // However its use in Documonster is primarily as a memory buffer between
   // the streaming writers and the archive, hence the tests here will
   // focus just on that.
   it("writes strings as UTF8", () => {
