@@ -23,6 +23,12 @@ import type {
   Trendline
 } from "@excel/chart/model/types";
 import {
+  loadSystemFont,
+  rasterizeGlyph,
+  type RasterFont
+} from "@excel/chart/render/glyph-rasterizer";
+import { STROKE_FONT } from "@excel/chart/render/stroke-font";
+import {
   AXIS_COLOR,
   COLORS,
   DEFAULT_HEIGHT,
@@ -45,20 +51,14 @@ import {
   valueToY,
   withAlpha,
   type PdfColor
-} from "@excel/chart/render/chart-utils";
-import {
-  loadSystemFont,
-  rasterizeGlyph,
-  type RasterFont
-} from "@excel/chart/render/glyph-rasterizer";
-import { STROKE_FONT } from "@excel/chart/render/stroke-font";
+} from "@excel/chart/shared/chart-utils";
 import {
   parseSpPr,
   parseTxPr,
   getSpPrFill,
   getSpPrLine,
   getTxPrFontSize
-} from "@excel/chart/serialize/shape-properties";
+} from "@excel/chart/shared/shape-properties";
 import { measureTextWidthPx } from "@excel/utils/text-metrics";
 
 export type { PdfColor };
@@ -66,7 +66,7 @@ export type { PdfColor };
 /**
  * Legacy name — kept so existing imports
  * (`import { PRESET_COLOR_HEX } from "@excel/chart/render/chart-renderer"`) continue to
- * resolve. Prefer importing directly from `@excel/chart/render/chart-utils` in new code.
+ * resolve. Prefer importing directly from `@excel/chart/shared/chart-utils` in new code.
  */
 export const PRESET_COLOR_HEX = PRESET_COLOR_HEX_TABLE;
 

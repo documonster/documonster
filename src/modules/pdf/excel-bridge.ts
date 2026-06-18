@@ -30,6 +30,7 @@ import type {
 // only when the bundler can reach it (i.e. when `excelToPdf` is used). No
 // install step is required.
 import { fillChartExCaches } from "@excel/chart/build/cache-populator";
+import { chartChartExModel, chartChartModel } from "@excel/chart/chart-handle";
 import {
   canRenderChartExAsVectorPdf,
   drawChartExPdf,
@@ -37,7 +38,6 @@ import {
 } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf, renderChartPng } from "@excel/chart/render/chart-renderer";
 import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
-import { chartChartExModel, chartChartModel } from "@excel/chart/serialize/chart-handle";
 import {
   chartsheetChartExModel,
   chartsheetChartModel,

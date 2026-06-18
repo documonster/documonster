@@ -79,7 +79,7 @@ import type {
   PictureOptions,
   SeriesAxis
 } from "@excel/chart/model/types";
-import { escapeXml } from "@excel/chart/render/chart-utils";
+import { escapeXml } from "@excel/chart/shared/chart-utils";
 import { ChartOptionsError } from "@excel/errors";
 
 const EMU_PER_POINT = 12700;

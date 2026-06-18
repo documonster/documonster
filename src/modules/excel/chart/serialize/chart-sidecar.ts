@@ -6,7 +6,7 @@
  * These files are normally written and read as opaque XML; this module offers
  * structured access for users who want to inspect or rewrite the palette.
  */
-import { escapeXmlAttr } from "@excel/chart/render/chart-utils";
+import { escapeXmlAttr } from "@excel/chart/shared/chart-utils";
 
 /** indexOf-based attribute extraction — no backtracking risk. */
 function extractAttr(xml: string, tagName: string, attrName: string): string | undefined {

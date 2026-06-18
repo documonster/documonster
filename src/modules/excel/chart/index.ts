@@ -18,7 +18,7 @@
  * root `sideEffects: false` contract keeps this guarantee intact.
  */
 
-export { buildChartModel } from "@excel/chart/serialize/chart-handle";
+export { buildChartModel } from "@excel/chart/chart-handle";
 export type { ChartHandle } from "@excel/worksheet-core";
 export { buildComboChartModel } from "@excel/chart/build/chart-builder";
 export {
@@ -298,4 +298,4 @@ export {
   buildTxPr,
   setSpPrFill,
   setSpPrLine
-} from "@excel/chart/serialize/shape-properties";
+} from "@excel/chart/shared/shape-properties";

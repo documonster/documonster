@@ -39,8 +39,8 @@ import {
   fmtNumAttr,
   fmtNumText,
   themeIndexToName
-} from "@excel/chart/render/chart-utils";
-import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/serialize/shape-properties";
+} from "@excel/chart/shared/chart-utils";
+import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
 import { ChartOptionsError } from "@excel/errors";
 
 /**

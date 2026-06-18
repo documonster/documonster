@@ -33,7 +33,7 @@ import type {
 } from "@excel/chart/model/types";
 import { resolvePendingChartImages } from "@excel/chart/serialize/chart-images";
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
-import { parseTxPr } from "@excel/chart/serialize/shape-properties";
+import { parseTxPr } from "@excel/chart/shared/shape-properties";
 import { ChartOptionsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import {

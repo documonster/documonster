@@ -83,8 +83,8 @@ import type {
   UpDownBars,
   PictureOptions
 } from "@excel/chart/model/types";
-import { escapeXml, themeIndexToName } from "@excel/chart/render/chart-utils";
-import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/serialize/shape-properties";
+import { escapeXml, themeIndexToName } from "@excel/chart/shared/chart-utils";
+import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
 import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 

@@ -34,6 +34,7 @@ import type {
 } from "@excel/chart/build/chart-api";
 import { buildChartModel, buildComboChartModel } from "@excel/chart/build/chart-builder";
 import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+import { createChart, registerChart, registerChartEx } from "@excel/chart/chart-handle";
 import type { AddChartExOptions } from "@excel/chart/model/chart-ex-types";
 import { applyChartExPreset, applyChartPreset } from "@excel/chart/model/chart-presets";
 import type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/model/chart-presets";
@@ -47,7 +48,6 @@ import type {
   AddSurfaceChartOptions,
   ChartAnchorModel
 } from "@excel/chart/model/types";
-import { createChart, registerChart, registerChartEx } from "@excel/chart/serialize/chart-handle";
 import {
   type ColumnData,
   type ColumnModel,

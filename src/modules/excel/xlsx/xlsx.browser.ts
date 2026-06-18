@@ -14,7 +14,6 @@ import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
 import type { ChartEntry } from "@excel/chart/model/types";
-import { themeIndexToName } from "@excel/chart/render/chart-utils";
 import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 import {
   renderChartEx,
@@ -26,6 +25,7 @@ import {
 // there is no import cycle, and a consumer that never reads/writes a workbook
 // containing charts gets this code tree-shaken out by the bundler.
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
+import { themeIndexToName } from "@excel/chart/shared/chart-utils";
 import { definedNamesAddHidden, definedNamesModel } from "@excel/defined-names";
 import {
   ExcelStreamStateError,

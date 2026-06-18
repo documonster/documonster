@@ -92,7 +92,7 @@ export {
   chartRemoveUserShapes as removeUserShapes,
   chartCopyTo as copyTo,
   chartClone as clone
-} from "@excel/chart/serialize/chart-handle";
+} from "@excel/chart/chart-handle";
 
 // Rendering ops live in a separate leaf module so the heavy SVG/PNG renderers
 // stay off the chart creation path (worksheet → chart-handle). Only consumers

@@ -13,17 +13,17 @@
  * renderers stay behind a leaf module that nothing on the create path pulls in.
  */
 
+import {
+  _chartRefreshChartExCaches,
+  chartChartExModel,
+  chartChartModel
+} from "@excel/chart/chart-handle";
 import { renderChartExPng, renderChartExSvg } from "@excel/chart/render/chart-ex-renderer";
 import {
   renderChartPng,
   renderChartSvg,
   type ChartRenderOptions
 } from "@excel/chart/render/chart-renderer";
-import {
-  _chartRefreshChartExCaches,
-  chartChartExModel,
-  chartChartModel
-} from "@excel/chart/serialize/chart-handle";
 import { ChartOptionsError } from "@excel/errors";
 import type { ChartHandle } from "@excel/worksheet-core";
 

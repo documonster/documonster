@@ -27,7 +27,7 @@ import {
   renderChartSvg,
   seriesFromColumns
 } from "@excel/chart";
-import { createChart } from "@excel/chart/serialize/chart-handle";
+import { createChart } from "@excel/chart/chart-handle";
 import {
   chartsheetId,
   chartsheetModel,
@@ -1188,7 +1188,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("gradient scaled attribute round-trips (default absent vs. explicit 0/1)", async () => {
-    const { parseSpPr } = await import("@excel/chart/serialize/shape-properties");
+    const { parseSpPr } = await import("@excel/chart/shared/shape-properties");
     // Author-side value forwarded through the parser — this is the
     // path a file loaded from disk takes. The parser was previously
     // missing the `scaled` attribute entirely, so `parseSpPr` always

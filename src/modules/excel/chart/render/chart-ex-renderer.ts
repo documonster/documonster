@@ -24,6 +24,11 @@ import {
   type RegionMapMatchRule
 } from "@excel/chart/render/chart-renderer";
 import {
+  resolveTopologyObject,
+  type ResolvedRing,
+  type TopologyLike
+} from "@excel/chart/render/topojson";
+import {
   COLORS,
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
@@ -41,13 +46,8 @@ import {
   withAlpha,
   type ChartRect,
   type PdfColor
-} from "@excel/chart/render/chart-utils";
-import {
-  resolveTopologyObject,
-  type ResolvedRing,
-  type TopologyLike
-} from "@excel/chart/render/topojson";
-import { getSpPrFill } from "@excel/chart/serialize/shape-properties";
+} from "@excel/chart/shared/chart-utils";
+import { getSpPrFill } from "@excel/chart/shared/shape-properties";
 import { ChartOptionsError } from "@excel/errors";
 
 /**

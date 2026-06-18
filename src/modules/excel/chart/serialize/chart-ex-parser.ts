@@ -20,8 +20,8 @@ import type {
   ChartTitle,
   ShapeProperties
 } from "@excel/chart/model/types";
-import { escapeXml, escapeXmlAttr } from "@excel/chart/render/chart-utils";
-import { parseSpPr, parseTxPr } from "@excel/chart/serialize/shape-properties";
+import { escapeXml, escapeXmlAttr } from "@excel/chart/shared/chart-utils";
+import { parseSpPr, parseTxPr } from "@excel/chart/shared/shape-properties";
 import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
 import type { XmlElement, XmlNode } from "@xml/types";
 
