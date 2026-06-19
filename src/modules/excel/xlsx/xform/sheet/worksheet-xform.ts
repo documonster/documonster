@@ -46,7 +46,7 @@ import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
 import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
 import { StdDocAttributes } from "@xml/writer";
 
-const mergeRule = (rule, extRule) => {
+function mergeRule(rule, extRule) {
   Object.keys(extRule).forEach(key => {
     const value = rule[key];
     const extValue = extRule[key];
@@ -54,9 +54,9 @@ const mergeRule = (rule, extRule) => {
       rule[key] = extValue;
     }
   });
-};
+}
 
-const mergeConditionalFormattings = (model, extModel) => {
+function mergeConditionalFormattings(model, extModel) {
   // conditional formattings are rendered in worksheet.conditionalFormatting and also in
   // worksheet.extLst.ext.x14:conditionalFormattings
   // some (e.g. dataBar) are even spread across both!
@@ -101,7 +101,7 @@ const mergeConditionalFormattings = (model, extModel) => {
 
   // need to cope with rules in extModel that don't exist in model
   return model;
-};
+}
 
 class WorkSheetXform extends BaseXform {
   declare public map: { [key: string]: any };

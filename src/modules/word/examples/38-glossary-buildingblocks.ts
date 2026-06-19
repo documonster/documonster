@@ -88,11 +88,11 @@ const d = Document.create();
 Document.useDefaultStyles(d);
 Document.addHeading(d, "Letter assembled from building blocks", 1);
 
-const insertBlock = (block: BuildingBlock): void => {
+function insertBlock(block: BuildingBlock): void {
   for (const item of block.content) {
     Document.addContent(d, item as BodyContent);
   }
-};
+}
 insertBlock(greeting);
 Document.addParagraph(d, "Body of the letter goes here. " + "Lorem ipsum… ".repeat(8));
 insertBlock(signoff);

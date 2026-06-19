@@ -38,10 +38,10 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 const lines: string[] = [];
-const log = (s: string): void => {
+function log(s: string): void {
   console.log(s);
   lines.push(s);
-};
+}
 
 // ---------------------------------------------------------------------------
 // 1. AGILE_BLOCK_KEYS — exposed for deriveEncryptionKey() callers

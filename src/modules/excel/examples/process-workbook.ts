@@ -5,7 +5,7 @@ const [, , inputFile, outputFile] = process.argv;
 const wb = Workbook.create();
 
 let passed = true;
-const assert = function (value, failMessage, passMessage) {
+function assert(value, failMessage, passMessage) {
   if (!value) {
     if (failMessage) {
       console.error(failMessage);
@@ -14,7 +14,7 @@ const assert = function (value, failMessage, passMessage) {
   } else if (passMessage) {
     console.log(passMessage);
   }
-};
+}
 
 // assuming file created by testBookOut
 Workbook.getXlsxIo(wb)

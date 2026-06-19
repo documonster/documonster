@@ -11,7 +11,9 @@ type EventListener = (...args: any[]) => void;
 type ListenerList = EventListener[];
 type ListenerValue = EventListener | ListenerList;
 
-const isListenerList = (value: ListenerValue): value is ListenerList => Array.isArray(value);
+function isListenerList(value: ListenerValue): value is ListenerList {
+  return Array.isArray(value);
+}
 
 export class EventEmitter {
   // Brand for Documonster browser stream objects.

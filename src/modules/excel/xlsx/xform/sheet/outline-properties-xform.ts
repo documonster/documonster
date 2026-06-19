@@ -1,6 +1,8 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
-const isDefined = (attr: any): boolean => typeof attr !== "undefined";
+function isDefined(attr: any): boolean {
+  return typeof attr !== "undefined";
+}
 
 interface OutlinePropertiesModel {
   summaryBelow?: boolean;

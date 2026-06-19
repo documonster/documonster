@@ -29,7 +29,7 @@ export { isPipelineOptions } from "@stream/core/options";
 
 type PipelineStream = PipelineStreamLike;
 
-export const toNodePipelineStream = (stream: PipelineStream): unknown => {
+export function toNodePipelineStream(stream: PipelineStream): unknown {
   // Node native streams (Readable/Transform/Duplex/Writable) are already compatible.
   if (
     stream instanceof Readable ||
@@ -51,7 +51,7 @@ export const toNodePipelineStream = (stream: PipelineStream): unknown => {
   }
 
   return stream;
-};
+}
 
 /**
  * Pipeline streams together with proper error handling and cleanup.

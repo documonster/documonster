@@ -267,9 +267,9 @@ export function createReadableFromPromise<T>(
 }
 
 // Reusable empty read function
-const emptyRead = function (this: Readable): void {
+function emptyRead(this: Readable): void {
   this.push(null);
-};
+}
 
 /**
  * Create a readable stream that emits nothing and immediately ends
@@ -284,13 +284,13 @@ export function createEmptyReadable<_T = Uint8Array>(
 }
 
 // Reusable null write function
-const nullWrite = (
+function nullWrite(
   _chunk: unknown,
   _encoding: string,
   callback: (error?: Error | null) => void
-): void => {
+): void {
   callback();
-};
+}
 
 /**
  * Create a writable stream that discards all data (like /dev/null)

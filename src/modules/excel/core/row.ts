@@ -146,7 +146,9 @@ export function rowDimensions(r: RowData): RowDimensions | null {
   return min > 0 ? { min, max } : null;
 }
 
-export const rowNumFmt = (r: RowData): string | NumFmt | undefined => r.style.numFmt;
+export function rowNumFmt(r: RowData): string | NumFmt | undefined {
+  return r.style.numFmt;
+}
 
 export function rowSetNumFmt(r: RowData, value: string | undefined): void {
   if (value !== undefined) {
@@ -154,7 +156,9 @@ export function rowSetNumFmt(r: RowData, value: string | undefined): void {
   }
 }
 
-export const rowFont = (r: RowData): Partial<Font> | undefined => r.style.font;
+export function rowFont(r: RowData): Partial<Font> | undefined {
+  return r.style.font;
+}
 
 export function rowSetFont(r: RowData, value: Partial<Font> | undefined): void {
   if (value !== undefined) {
@@ -162,7 +166,9 @@ export function rowSetFont(r: RowData, value: Partial<Font> | undefined): void {
   }
 }
 
-export const rowAlignment = (r: RowData): Partial<Alignment> | undefined => r.style.alignment;
+export function rowAlignment(r: RowData): Partial<Alignment> | undefined {
+  return r.style.alignment;
+}
 
 export function rowSetAlignment(r: RowData, value: Partial<Alignment> | undefined): void {
   if (value !== undefined) {
@@ -170,7 +176,9 @@ export function rowSetAlignment(r: RowData, value: Partial<Alignment> | undefine
   }
 }
 
-export const rowProtection = (r: RowData): Partial<Protection> | undefined => r.style.protection;
+export function rowProtection(r: RowData): Partial<Protection> | undefined {
+  return r.style.protection;
+}
 
 export function rowSetProtection(r: RowData, value: Partial<Protection> | undefined): void {
   if (value !== undefined) {
@@ -178,7 +186,9 @@ export function rowSetProtection(r: RowData, value: Partial<Protection> | undefi
   }
 }
 
-export const rowBorder = (r: RowData): Partial<Borders> | undefined => r.style.border;
+export function rowBorder(r: RowData): Partial<Borders> | undefined {
+  return r.style.border;
+}
 
 export function rowSetBorder(r: RowData, value: Partial<Borders> | undefined): void {
   if (value !== undefined) {
@@ -186,7 +196,9 @@ export function rowSetBorder(r: RowData, value: Partial<Borders> | undefined): v
   }
 }
 
-export const rowFill = (r: RowData): Fill | undefined => r.style.fill;
+export function rowFill(r: RowData): Fill | undefined {
+  return r.style.fill;
+}
 
 export function rowSetFill(r: RowData, value: Fill | undefined): void {
   if (value !== undefined) {
@@ -195,7 +207,9 @@ export function rowSetFill(r: RowData, value: Fill | undefined): void {
 }
 
 /** Read the row's style record. */
-export const rowGetStyle = (r: RowData): Partial<Style> => r.style;
+export function rowGetStyle(r: RowData): Partial<Style> {
+  return r.style;
+}
 
 /** Merge a partial style into the row (propagates to existing cells). */
 export function rowSetStyle(r: RowData, style: Partial<Style>): void {
@@ -207,20 +221,25 @@ export function rowSetStyle(r: RowData, style: Partial<Style>): void {
   });
 }
 
-export const rowHidden = (r: RowData): boolean => !!r.hidden;
+export function rowHidden(r: RowData): boolean {
+  return !!r.hidden;
+}
 
 export function rowSetHidden(r: RowData, value: boolean): void {
   r.hidden = value;
 }
 
-export const rowOutlineLevel = (r: RowData): number => r.outlineLevel ?? 0;
+export function rowOutlineLevel(r: RowData): number {
+  return r.outlineLevel ?? 0;
+}
 
 export function rowSetOutlineLevel(r: RowData, value: number): void {
   r.outlineLevel = value;
 }
 
-export const rowCollapsed = (r: RowData): boolean =>
-  !!(r.outlineLevel && r.outlineLevel >= (r.worksheet.properties.outlineLevelRow ?? 0));
+export function rowCollapsed(r: RowData): boolean {
+  return !!(r.outlineLevel && r.outlineLevel >= (r.worksheet.properties.outlineLevelRow ?? 0));
+}
 
 export function rowGetModel(r: RowData): RowModel | null {
   const cells: CellModel[] = [];

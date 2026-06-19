@@ -14,7 +14,7 @@ export interface PipelineOptions {
   end?: boolean;
 }
 
-export const isPipelineOptions = (value: unknown): value is PipelineOptions => {
+export function isPipelineOptions(value: unknown): value is PipelineOptions {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -34,7 +34,7 @@ export const isPipelineOptions = (value: unknown): value is PipelineOptions => {
     Object.prototype.hasOwnProperty.call(value, "signal") ||
     Object.prototype.hasOwnProperty.call(value, "end")
   );
-};
+}
 
 // =============================================================================
 // Finished Options

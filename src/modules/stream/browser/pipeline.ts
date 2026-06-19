@@ -24,29 +24,29 @@ export { isPipelineOptions } from "@stream/core/options";
 
 type PipelineStream = PipelineStreamLike;
 
-const supportsReadableSide = (stream: any): boolean => {
+function supportsReadableSide(stream: any): boolean {
   // Check for readable-side properties/methods.  Writable.pipe() is a no-op
   // that emits ERR_STREAM_CANNOT_PIPE, so `typeof pipe === "function"` alone
   // is not sufficient — we must also see an actual readable indicator.
   return "readableEnded" in stream || "readable" in stream || typeof stream.read === "function";
-};
+}
 
-const supportsWritableSide = (stream: any): boolean => {
+function supportsWritableSide(stream: any): boolean {
   return "writableFinished" in stream || "writable" in stream || typeof stream.write === "function";
-};
+}
 
-const isStreamCompleted = (stream: any): boolean => {
+function isStreamCompleted(stream: any): boolean {
   const readableDone = !supportsReadableSide(stream) || !!stream.readableEnded;
   const writableDone = !supportsWritableSide(stream) || !!stream.writableFinished;
   return readableDone && writableDone;
-};
+}
 
-const createPrematureCloseError = (): Error & { code: string } => {
+function createPrematureCloseError(): Error & { code: string } {
   const err = new Error("Premature close") as Error & { code: string };
   err.code = "ERR_STREAM_PREMATURE_CLOSE";
   err.name = "Error [ERR_STREAM_PREMATURE_CLOSE]";
   return err;
-};
+}
 
 /**
  * Wait for a stream's 'close' event after it has finished/ended.
@@ -54,11 +54,11 @@ const createPrematureCloseError = (): Error & { code: string } => {
  * Otherwise resolve immediately (matching Node.js pipeline behavior where
  * autoDestroy:false streams don't wait for close).
  */
-const waitForClose = (
+function waitForClose(
   stream: any,
   done: (err?: Error) => void,
   registry: { once: (emitter: any, event: string, listener: (...args: any[]) => void) => void }
-): void => {
+): void {
   const s = stream as any;
   // Already closed — resolve immediately.
   if (s.closed || s._closed) {
@@ -72,9 +72,9 @@ const waitForClose = (
   } else {
     done();
   }
-};
+}
 
-export const toBrowserPipelineStream = (stream: PipelineStream): any => {
+export function toBrowserPipelineStream(stream: PipelineStream): any {
   if (
     stream instanceof Readable ||
     stream instanceof Writable ||
@@ -95,30 +95,28 @@ export const toBrowserPipelineStream = (stream: PipelineStream): any => {
   }
 
   return stream;
-};
+}
 
 /**
  * Check if a pipeline stage is a generator/async generator function.
  * These are used as transform stages: fn(source) => AsyncIterable.
  */
-const isGeneratorFunction = (
-  fn: any
-): fn is (source: any) => AsyncIterable<any> | Iterable<any> => {
+function isGeneratorFunction(fn: any): fn is (source: any) => AsyncIterable<any> | Iterable<any> {
   return typeof fn === "function" && !(fn instanceof Readable) && !(fn instanceof Writable);
-};
+}
 
 /**
  * Apply a generator function as a transform stage.
  * Consumes the source stream via its async iterator, passes it through the
  * generator function, and produces a new Readable from the resulting iterable.
  */
-const applyGeneratorStage = (
+function applyGeneratorStage(
   source: any,
   fn: (source: any) => AsyncIterable<any> | Iterable<any>
-): Readable => {
+): Readable {
   const iterable = fn(source);
   return Readable.from(iterable as AsyncIterable<any>);
-};
+}
 
 /**
  * Pipeline streams together with proper error handling and cleanup.

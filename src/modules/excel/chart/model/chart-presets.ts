@@ -20,7 +20,7 @@ interface PresetConfig {
 // is passed the type is always forced to "bar3D" (cone/cylinder/pyramid
 // require 3D). The previous code had two nearly-identical factories
 // (`barPreset` / `bar3DPreset`) that differed only in the default type.
-const barPreset = (
+function barPreset(
   barDir: NonNullable<AddChartOptions["barDir"]>,
   grouping: Extract<
     NonNullable<AddChartOptions["grouping"]>,
@@ -28,18 +28,22 @@ const barPreset = (
   >,
   shape?: NonNullable<AddChartOptions["shape"]>,
   type: "bar" | "bar3D" = "bar"
-): PresetConfig => ({
-  options: shape ? { type: "bar3D", barDir, grouping, shape } : { type, barDir, grouping }
-});
+): PresetConfig {
+  return {
+    options: shape ? { type: "bar3D", barDir, grouping, shape } : { type, barDir, grouping }
+  };
+}
 
-const bar3DPreset = (
+function bar3DPreset(
   barDir: NonNullable<AddChartOptions["barDir"]>,
   grouping: Extract<
     NonNullable<AddChartOptions["grouping"]>,
     "clustered" | "stacked" | "percentStacked"
   >,
   shape?: NonNullable<AddChartOptions["shape"]>
-): PresetConfig => barPreset(barDir, grouping, shape, "bar3D");
+): PresetConfig {
+  return barPreset(barDir, grouping, shape, "bar3D");
+}
 
 export const CHART_PRESETS = {
   columnClustered: barPreset("col", "clustered"),

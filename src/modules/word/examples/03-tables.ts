@@ -53,11 +53,12 @@ Document.addTable(
 // 2. Custom column widths in twips, header shading, striped body
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "2. Striped table with custom widths", 2);
-const headerCell = (label: string): TableCell =>
-  Build.cell([Build.textParagraph(label, { run: { bold: true, color: "FFFFFF" } })], {
+function headerCell(label: string): TableCell {
+  return Build.cell([Build.textParagraph(label, { run: { bold: true, color: "FFFFFF" } })], {
     shading: { fill: "1F4E79", pattern: "clear" },
     verticalAlign: "center"
   });
+}
 const stripedRows: TableRow[] = [
   Build.row(
     [headerCell("Region"), headerCell("Q1"), headerCell("Q2"), headerCell("Q3"), headerCell("Q4")],

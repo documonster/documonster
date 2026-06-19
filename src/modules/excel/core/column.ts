@@ -60,10 +60,13 @@ export interface ColumnData {
  * Column namespace — free functions over the plain-data {@link ColumnData}.
  * Replaces the former `Column` class.
  */
-export const columnLetter = (c: ColumnData): string => colCache.n2l(c.number);
+export function columnLetter(c: ColumnData): string {
+  return colCache.n2l(c.number);
+}
 
-export const columnIsCustomWidth = (c: ColumnData): boolean =>
-  c.width !== undefined && c.width !== DEFAULT_COLUMN_WIDTH;
+export function columnIsCustomWidth(c: ColumnData): boolean {
+  return c.width !== undefined && c.width !== DEFAULT_COLUMN_WIDTH;
+}
 
 export function columnDefn(c: ColumnData): ColumnDefn {
   return {
@@ -87,20 +90,25 @@ export function columnHeaders(c: ColumnData): CellValue[] {
   return [];
 }
 
-export const columnHidden = (c: ColumnData): boolean => !!c.hidden;
+export function columnHidden(c: ColumnData): boolean {
+  return !!c.hidden;
+}
 
 export function columnSetHidden(c: ColumnData, value: boolean): void {
   c.hidden = value;
 }
 
-export const columnOutlineLevel = (c: ColumnData): number => c.outlineLevel ?? 0;
+export function columnOutlineLevel(c: ColumnData): number {
+  return c.outlineLevel ?? 0;
+}
 
 export function columnSetOutlineLevel(c: ColumnData, value: number | undefined): void {
   c.outlineLevel = value;
 }
 
-export const columnCollapsed = (c: ColumnData): boolean =>
-  !!(c.outlineLevel && c.outlineLevel >= (c.worksheet.properties.outlineLevelCol ?? 0));
+export function columnCollapsed(c: ColumnData): boolean {
+  return !!(c.outlineLevel && c.outlineLevel >= (c.worksheet.properties.outlineLevelCol ?? 0));
+}
 
 export function columnToString(c: ColumnData): string {
   const headers = columnHeaders(c);
@@ -150,7 +158,9 @@ export function columnIsDefault(c: ColumnData): boolean {
   return true;
 }
 
-export const columnHeaderCount = (c: ColumnData): number => columnHeaders(c).length;
+export function columnHeaderCount(c: ColumnData): number {
+  return columnHeaders(c).length;
+}
 
 export function columnAddPageBreak(c: ColumnData, top?: number, bottom?: number): void {
   const ws = c.worksheet;
@@ -163,18 +173,29 @@ export function columnAddPageBreak(c: ColumnData, top?: number, bottom?: number)
   ws.colBreaks.push(pb);
 }
 
-export const columnNumFmt = (c: ColumnData): string | NumFmt | undefined => c.style.numFmt;
+export function columnNumFmt(c: ColumnData): string | NumFmt | undefined {
+  return c.style.numFmt;
+}
 
-export const columnFont = (c: ColumnData): Partial<Font> | undefined => c.style.font;
+export function columnFont(c: ColumnData): Partial<Font> | undefined {
+  return c.style.font;
+}
 
-export const columnAlignment = (c: ColumnData): Partial<Alignment> | undefined => c.style.alignment;
+export function columnAlignment(c: ColumnData): Partial<Alignment> | undefined {
+  return c.style.alignment;
+}
 
-export const columnProtection = (c: ColumnData): Partial<Protection> | undefined =>
-  c.style.protection;
+export function columnProtection(c: ColumnData): Partial<Protection> | undefined {
+  return c.style.protection;
+}
 
-export const columnBorder = (c: ColumnData): Partial<Borders> | undefined => c.style.border;
+export function columnBorder(c: ColumnData): Partial<Borders> | undefined {
+  return c.style.border;
+}
 
-export const columnFill = (c: ColumnData): Fill | undefined => c.style.fill;
+export function columnFill(c: ColumnData): Fill | undefined {
+  return c.style.fill;
+}
 
 export function columnToModel(columns: ColumnData[]): ColumnModel[] | undefined {
   const cols: ColumnModel[] = [];

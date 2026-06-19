@@ -169,13 +169,21 @@ export function rangeSetTLBR(
   setTLBR(r, t, l, b, rt, s);
 }
 
-export const rangeTop = (r: RangeData): number => r.top || 1;
+export function rangeTop(r: RangeData): number {
+  return r.top || 1;
+}
 
-export const rangeLeft = (r: RangeData): number => r.left || 1;
+export function rangeLeft(r: RangeData): number {
+  return r.left || 1;
+}
 
-export const rangeBottom = (r: RangeData): number => r.bottom || 1;
+export function rangeBottom(r: RangeData): number {
+  return r.bottom || 1;
+}
 
-export const rangeRight = (r: RangeData): number => r.right || 1;
+export function rangeRight(r: RangeData): number {
+  return r.right || 1;
+}
 
 export function rangeExpand(
   r: RangeData,
@@ -214,32 +222,45 @@ export function rangeExpandToAddress(r: RangeData, addressStr: string): void {
   }
 }
 
-export const rangeTl = (r: RangeData): string => colCache.n2l(rangeLeft(r)) + rangeTop(r);
+export function rangeTl(r: RangeData): string {
+  return colCache.n2l(rangeLeft(r)) + rangeTop(r);
+}
 
-export const rangeAbsoluteTopLeft = (r: RangeData): string =>
-  `$${colCache.n2l(rangeLeft(r))}$${rangeTop(r)}`;
+export function rangeAbsoluteTopLeft(r: RangeData): string {
+  return `$${colCache.n2l(rangeLeft(r))}$${rangeTop(r)}`;
+}
 
-export const rangeBr = (r: RangeData): string => colCache.n2l(rangeRight(r)) + rangeBottom(r);
+export function rangeBr(r: RangeData): string {
+  return colCache.n2l(rangeRight(r)) + rangeBottom(r);
+}
 
-export const rangeAbsoluteBottomRight = (r: RangeData): string =>
-  `$${colCache.n2l(rangeRight(r))}$${rangeBottom(r)}`;
+export function rangeAbsoluteBottomRight(r: RangeData): string {
+  return `$${colCache.n2l(rangeRight(r))}$${rangeBottom(r)}`;
+}
 
-export const rangeRange = (r: RangeData): string =>
-  `${serialisedSheetName(r) + rangeTl(r)}:${rangeBr(r)}`;
+export function rangeRange(r: RangeData): string {
+  return `${serialisedSheetName(r) + rangeTl(r)}:${rangeBr(r)}`;
+}
 
-export const rangeAbsolute = (r: RangeData): string =>
-  `${serialisedSheetName(r) + rangeAbsoluteTopLeft(r)}:${rangeAbsoluteBottomRight(r)}`;
+export function rangeAbsolute(r: RangeData): string {
+  return `${serialisedSheetName(r) + rangeAbsoluteTopLeft(r)}:${rangeAbsoluteBottomRight(r)}`;
+}
 
-export const rangeShortRange = (r: RangeData): string =>
-  rangeCount(r) > 1 ? rangeRange(r) : serialisedSheetName(r) + rangeTl(r);
+export function rangeShortRange(r: RangeData): string {
+  return rangeCount(r) > 1 ? rangeRange(r) : serialisedSheetName(r) + rangeTl(r);
+}
 
-export const rangeAbsoluteShort = (r: RangeData): string =>
-  rangeCount(r) > 1 ? rangeAbsolute(r) : serialisedSheetName(r) + rangeAbsoluteTopLeft(r);
+export function rangeAbsoluteShort(r: RangeData): string {
+  return rangeCount(r) > 1 ? rangeAbsolute(r) : serialisedSheetName(r) + rangeAbsoluteTopLeft(r);
+}
 
-export const rangeCount = (r: RangeData): number =>
-  (1 + rangeBottom(r) - rangeTop(r)) * (1 + rangeRight(r) - rangeLeft(r));
+export function rangeCount(r: RangeData): number {
+  return (1 + rangeBottom(r) - rangeTop(r)) * (1 + rangeRight(r) - rangeLeft(r));
+}
 
-export const rangeToString = (r: RangeData): string => rangeRange(r);
+export function rangeToString(r: RangeData): string {
+  return rangeRange(r);
+}
 
 export function rangeIntersects(r: RangeData, other: RangeData): boolean {
   if (other.sheetName && r.sheetName && other.sheetName !== r.sheetName) {

@@ -101,7 +101,7 @@ function createUnknownEncodingError(enc: string): Error & { code: string } {
 /**
  * Normalize a binary-like value into Uint8Array.
  */
-export const toBinaryChunk = (value: unknown): Uint8Array | null => {
+export function toBinaryChunk(value: unknown): Uint8Array | null {
   if (value instanceof Uint8Array) {
     return value;
   }
@@ -113,7 +113,7 @@ export const toBinaryChunk = (value: unknown): Uint8Array | null => {
     return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   }
   return null;
-};
+}
 
 /**
  * Convert any stream chunk to bytes for text decoding.
@@ -122,7 +122,7 @@ export const toBinaryChunk = (value: unknown): Uint8Array | null => {
  *
  * Shared by both Node.js and browser streamToString / streamToBuffer.
  */
-export const toStreamBytes = (chunk: unknown): Uint8Array | null => {
+export function toStreamBytes(chunk: unknown): Uint8Array | null {
   if (typeof chunk === "string") {
     return stringToUint8Array(chunk);
   }
@@ -134,13 +134,13 @@ export const toStreamBytes = (chunk: unknown): Uint8Array | null => {
     return binary;
   }
   return toArrayLikeBytes(chunk);
-};
+}
 
 /**
  * Convert an array-like object (e.g. {0: 65, 1: 66, length: 2}) to Uint8Array.
  * Returns null if the value is not a valid array-like of numbers.
  */
-const toArrayLikeBytes = (chunk: unknown): Uint8Array | null => {
+function toArrayLikeBytes(chunk: unknown): Uint8Array | null {
   if (chunk == null || typeof chunk !== "object") {
     return null;
   }
@@ -166,4 +166,4 @@ const toArrayLikeBytes = (chunk: unknown): Uint8Array | null => {
   }
 
   return result;
-};
+}

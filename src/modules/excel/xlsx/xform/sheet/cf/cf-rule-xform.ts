@@ -13,7 +13,7 @@ const extIcons = {
   "5Boxes": true
 };
 
-const getTextFormula = model => {
+function getTextFormula(model) {
   if (model.formulae && model.formulae[0]) {
     return model.formulae[0];
   }
@@ -34,9 +34,9 @@ const getTextFormula = model => {
     default:
       return undefined;
   }
-};
+}
 
-const getTimePeriodFormula = model => {
+function getTimePeriodFormula(model) {
   if (model.formulae && model.formulae[0]) {
     return model.formulae[0];
   }
@@ -67,9 +67,9 @@ const getTimePeriodFormula = model => {
     default:
       return undefined;
   }
-};
+}
 
-const opType = attributes => {
+function opType(attributes) {
   const { type, operator } = attributes;
   switch (type) {
     case "containsText":
@@ -85,7 +85,7 @@ const opType = attributes => {
     default:
       return { type, operator };
   }
-};
+}
 
 class CfRuleXform extends CompositeXform {
   databarXform: DatabarXform;

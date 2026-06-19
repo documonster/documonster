@@ -36,7 +36,7 @@ type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 // CONCATENATE / CONCAT
 // ============================================================================
 
-export const fnCONCATENATE: NativeFn = args => {
+export function fnCONCATENATE(args: RuntimeValue[]): RuntimeValue {
   const parts: string[] = [];
   for (const a of args) {
     if (isArray(a)) {
@@ -58,7 +58,7 @@ export const fnCONCATENATE: NativeFn = args => {
     }
   }
   return rvString(parts.join(""));
-};
+}
 
 // CONCAT has the same semantics as CONCATENATE
 export const fnCONCAT: NativeFn = fnCONCATENATE;
@@ -67,7 +67,7 @@ export const fnCONCAT: NativeFn = fnCONCATENATE;
 // TEXTJOIN
 // ============================================================================
 
-export const fnTEXTJOIN: NativeFn = args => {
+export function fnTEXTJOIN(args: RuntimeValue[]): RuntimeValue {
   if (args.length < 3) {
     return ERRORS.VALUE;
   }
@@ -111,13 +111,13 @@ export const fnTEXTJOIN: NativeFn = args => {
     }
   }
   return rvString(parts.join(delimiter));
-};
+}
 
 // ============================================================================
 // LEFT / RIGHT / MID / LEN
 // ============================================================================
 
-export const fnLEFT: NativeFn = args => {
+export function fnLEFT(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -144,9 +144,9 @@ export const fnLEFT: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvString(text.slice(0, Math.trunc(n)));
-};
+}
 
-export const fnRIGHT: NativeFn = args => {
+export function fnRIGHT(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -171,9 +171,9 @@ export const fnRIGHT: NativeFn = args => {
     return rvString("");
   }
   return rvString(text.slice(-k));
-};
+}
 
-export const fnMID: NativeFn = args => {
+export function fnMID(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -198,9 +198,9 @@ export const fnMID: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvString(text.slice(startNum - 1, startNum - 1 + numChars));
-};
+}
 
-export const fnLEN: NativeFn = args => {
+export function fnLEN(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -210,13 +210,13 @@ export const fnLEN: NativeFn = args => {
   // intersection via `topLeft` so `LEN(A1:A2)` behaves like Excel's
   // legacy implicit-intersection semantics (pick the first cell).
   return rvNumber(toStringRV(topLeft(args[0])).length);
-};
+}
 
 // ============================================================================
 // TRIM / LOWER / UPPER / PROPER
 // ============================================================================
 
-export const fnTRIM: NativeFn = args => {
+export function fnTRIM(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -230,25 +230,25 @@ export const fnTRIM: NativeFn = args => {
       .replace(/^ +| +$/g, "")
       .replace(/ +/g, " ")
   );
-};
+}
 
-export const fnLOWER: NativeFn = args => {
+export function fnLOWER(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   return rvString(toStringRV(topLeft(args[0])).toLowerCase());
-};
+}
 
-export const fnUPPER: NativeFn = args => {
+export function fnUPPER(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   return rvString(toStringRV(topLeft(args[0])).toUpperCase());
-};
+}
 
-export const fnPROPER: NativeFn = args => {
+export function fnPROPER(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -259,13 +259,13 @@ export const fnPROPER: NativeFn = args => {
       word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     )
   );
-};
+}
 
 // ============================================================================
 // SUBSTITUTE / REPLACE
 // ============================================================================
 
-export const fnSUBSTITUTE: NativeFn = args => {
+export function fnSUBSTITUTE(args: RuntimeValue[]): RuntimeValue {
   const err0 = checkError(args[0]);
   if (err0) {
     return err0;
@@ -308,9 +308,9 @@ export const fnSUBSTITUTE: NativeFn = args => {
     );
   }
   return rvString(text.split(oldText).join(newText));
-};
+}
 
-export const fnREPLACE: NativeFn = args => {
+export function fnREPLACE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -339,13 +339,13 @@ export const fnREPLACE: NativeFn = args => {
   }
   const newText = toStringRV(topLeft(args[3]));
   return rvString(text.slice(0, startNum - 1) + newText + text.slice(startNum - 1 + numChars));
-};
+}
 
 // ============================================================================
 // FIND / SEARCH
 // ============================================================================
 
-export const fnFIND: NativeFn = args => {
+export function fnFIND(args: RuntimeValue[]): RuntimeValue {
   const err0 = checkError(args[0]);
   if (err0) {
     return err0;
@@ -375,9 +375,9 @@ export const fnFIND: NativeFn = args => {
   }
   const idx = withinText.indexOf(findText, startNum - 1);
   return idx === -1 ? ERRORS.VALUE : rvNumber(idx + 1);
-};
+}
 
-export const fnSEARCH: NativeFn = args => {
+export function fnSEARCH(args: RuntimeValue[]): RuntimeValue {
   const err0 = checkError(args[0]);
   if (err0) {
     return err0;
@@ -416,13 +416,13 @@ export const fnSEARCH: NativeFn = args => {
     const idx = withinText.toLowerCase().indexOf(findText, startNum - 1);
     return idx === -1 ? ERRORS.VALUE : rvNumber(idx + 1);
   }
-};
+}
 
 // ============================================================================
 // REPT
 // ============================================================================
 
-export const fnREPT: NativeFn = args => {
+export function fnREPT(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -444,13 +444,13 @@ export const fnREPT: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvString(text.repeat(times));
-};
+}
 
 // ============================================================================
 // TEXT (complex number/date formatting)
 // ============================================================================
 
-export const fnTEXT: NativeFn = args => {
+export function fnTEXT(args: RuntimeValue[]): RuntimeValue {
   const rawVal = topLeft(args[0]);
   if (isError(rawVal)) {
     return rawVal;
@@ -496,7 +496,7 @@ export const fnTEXT: NativeFn = args => {
   const useVal = sections.length >= 2 && val < 0 ? Math.abs(val) : val;
 
   return rvString(formatWithCode(useVal, activeFmt, rawVal));
-};
+}
 
 /**
  * Split format string on `;` separators, respecting quoted strings.
@@ -1156,7 +1156,7 @@ function isAdjacentTimeContext(
 // VALUE / EXACT
 // ============================================================================
 
-export const fnVALUE: NativeFn = args => {
+export function fnVALUE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1165,9 +1165,9 @@ export const fnVALUE: NativeFn = args => {
   // whitespace-only / Infinity / NaN / hex forms the way Excel does, which
   // a naive `Number(s)` would accept silently.
   return toNumberRV(topLeft(args[0]));
-};
+}
 
-export const fnEXACT: NativeFn = args => {
+export function fnEXACT(args: RuntimeValue[]): RuntimeValue {
   const err0 = checkError(args[0]);
   if (err0) {
     return err0;
@@ -1177,22 +1177,22 @@ export const fnEXACT: NativeFn = args => {
     return err1;
   }
   return rvBoolean(toStringRV(topLeft(args[0])) === toStringRV(topLeft(args[1])));
-};
+}
 
 // ============================================================================
 // Additional Text Functions
 // ============================================================================
 
-export const fnCODE: NativeFn = args => {
+export function fnCODE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   const text = toStringRV(topLeft(args[0]));
   return text.length > 0 ? rvNumber(text.charCodeAt(0)) : ERRORS.VALUE;
-};
+}
 
-export const fnCHAR: NativeFn = args => {
+export function fnCHAR(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1209,9 +1209,9 @@ export const fnCHAR: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvString(String.fromCharCode(code));
-};
+}
 
-export const fnCLEAN: NativeFn = args => {
+export function fnCLEAN(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1225,21 +1225,21 @@ export const fnCLEAN: NativeFn = args => {
     }
   }
   return rvString(result);
-};
+}
 
-export const fnT: NativeFn = args => {
+export function fnT(args: RuntimeValue[]): RuntimeValue {
   const v = topLeft(args[0]);
   if (isError(v)) {
     return v;
   }
   return v.kind === RVKind.String ? v : rvString("");
-};
+}
 
 // ============================================================================
 // More Text Functions
 // ============================================================================
 
-export const fnUNICHAR: NativeFn = args => {
+export function fnUNICHAR(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1257,9 +1257,9 @@ export const fnUNICHAR: NativeFn = args => {
   } catch {
     return ERRORS.VALUE;
   }
-};
+}
 
-export const fnUNICODE: NativeFn = args => {
+export function fnUNICODE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1270,17 +1270,17 @@ export const fnUNICODE: NativeFn = args => {
   }
   const cp = text.codePointAt(0);
   return cp !== undefined ? rvNumber(cp) : ERRORS.VALUE;
-};
+}
 
-export const fnBAHTTEXT: NativeFn = args => {
+export function fnBAHTTEXT(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   return rvString(toStringRV(topLeft(args[0])));
-};
+}
 
-export const fnDOLLAR: NativeFn = args => {
+export function fnDOLLAR(args: RuntimeValue[]): RuntimeValue {
   const numRV = toNumberRV(topLeft(args[0]));
   if (isError(numRV)) {
     return numRV;
@@ -1309,9 +1309,9 @@ export const fnDOLLAR: NativeFn = args => {
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const result = parts.join(".");
   return rvString(num < 0 ? `($${result})` : `$${result}`);
-};
+}
 
-export const fnFIXED: NativeFn = args => {
+export function fnFIXED(args: RuntimeValue[]): RuntimeValue {
   const numRV = toNumberRV(topLeft(args[0]));
   if (isError(numRV)) {
     return numRV;
@@ -1352,9 +1352,9 @@ export const fnFIXED: NativeFn = args => {
     result = parts.join(".");
   }
   return rvString(result);
-};
+}
 
-export const fnASC: NativeFn = args => {
+export function fnASC(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1363,20 +1363,22 @@ export const fnASC: NativeFn = args => {
   return rvString(
     text.replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
   );
-};
+}
 
-export const fnDBCS: NativeFn = args => {
+export function fnDBCS(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   const text = toStringRV(topLeft(args[0]));
   return rvString(text.replace(/[!-~]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0xfee0)));
-};
+}
 
-export const fnJIS: NativeFn = args => fnDBCS(args);
+export function fnJIS(args: RuntimeValue[]): RuntimeValue {
+  return fnDBCS(args);
+}
 
-export const fnPHONETIC: NativeFn = args => {
+export function fnPHONETIC(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -1384,9 +1386,9 @@ export const fnPHONETIC: NativeFn = args => {
   // Implicit intersection: array → top-left cell, matching the rest of
   // the text-function family.
   return rvString(toStringRV(topLeft(args[0])));
-};
+}
 
-export const fnNUMBERVALUE: NativeFn = args => {
+export function fnNUMBERVALUE(args: RuntimeValue[]): RuntimeValue {
   const e0 = checkError(args[0]);
   if (e0) {
     return e0;
@@ -1432,7 +1434,7 @@ export const fnNUMBERVALUE: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvNumber(pctCount > 0 ? n / Math.pow(100, pctCount) : n);
-};
+}
 
 // ============================================================================
 // Excel 365 Text Functions: TEXTBEFORE, TEXTAFTER, TEXTSPLIT
@@ -1489,7 +1491,7 @@ function parseTextBeforeAfterTail(
   return { inst, matchMode, matchEnd, ifNotFound };
 }
 
-export const fnTEXTBEFORE: NativeFn = args => {
+export function fnTEXTBEFORE(args: RuntimeValue[]): RuntimeValue {
   const e0 = checkError(args[0]);
   if (e0) {
     return e0;
@@ -1542,9 +1544,9 @@ export const fnTEXTBEFORE: NativeFn = args => {
     }
   }
   return rvString(text.slice(0, pos));
-};
+}
 
-export const fnTEXTAFTER: NativeFn = args => {
+export function fnTEXTAFTER(args: RuntimeValue[]): RuntimeValue {
   const e0 = checkError(args[0]);
   if (e0) {
     return e0;
@@ -1593,9 +1595,9 @@ export const fnTEXTAFTER: NativeFn = args => {
     }
   }
   return rvString(text.slice(pos + delimiter.length));
-};
+}
 
-export const fnTEXTSPLIT: NativeFn = args => {
+export function fnTEXTSPLIT(args: RuntimeValue[]): RuntimeValue {
   const e0 = checkError(args[0]);
   if (e0) {
     return e0;
@@ -1729,7 +1731,7 @@ export const fnTEXTSPLIT: NativeFn = args => {
     }
   }
   return rvArray(result);
-};
+}
 
 // ============================================================================
 // REGEX family (Excel 365, 2024)
@@ -1785,7 +1787,7 @@ function resolveCaseSensitivity(
  * REGEXTEST(text, pattern, [case_sensitivity]) — returns TRUE iff the
  * regex matches any substring of `text`.
  */
-export const fnREGEXTEST: NativeFn = args => {
+export function fnREGEXTEST(args: RuntimeValue[]): RuntimeValue {
   const textV = toStringRV(topLeft(args[0]));
   const patternV = toStringRV(topLeft(args[1]));
   const cs = resolveCaseSensitivity(args[2]);
@@ -1801,7 +1803,7 @@ export const fnREGEXTEST: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvBoolean(re.test(textV));
-};
+}
 
 /**
  * REGEXEXTRACT(text, pattern, [return_mode], [case_sensitivity]) —
@@ -1809,7 +1811,7 @@ export const fnREGEXTEST: NativeFn = args => {
  *   return_mode = 1 → all matches as a 1-column array
  *   return_mode = 2 → capture groups of the first match as a 1-row array
  */
-export const fnREGEXEXTRACT: NativeFn = args => {
+export function fnREGEXEXTRACT(args: RuntimeValue[]): RuntimeValue {
   const textV = toStringRV(topLeft(args[0]));
   const patternV = toStringRV(topLeft(args[1]));
   const errCheck = checkError(args[0]) ?? checkError(args[1]);
@@ -1871,7 +1873,7 @@ export const fnREGEXEXTRACT: NativeFn = args => {
     row.push(rvString(m[i] ?? ""));
   }
   return rvArray([row]);
-};
+}
 
 /**
  * REGEXREPLACE(text, pattern, replacement, [occurrence], [case_sensitivity]) —
@@ -1879,7 +1881,7 @@ export const fnREGEXEXTRACT: NativeFn = args => {
  *   occurrence = n (positive) → replace only the n-th match
  *   occurrence = n (negative) → replace only the n-th-last match
  */
-export const fnREGEXREPLACE: NativeFn = args => {
+export function fnREGEXREPLACE(args: RuntimeValue[]): RuntimeValue {
   const textV = toStringRV(topLeft(args[0]));
   const patternV = toStringRV(topLeft(args[1]));
   const replacementV = toStringRV(topLeft(args[2]));
@@ -1931,7 +1933,7 @@ export const fnREGEXREPLACE: NativeFn = args => {
   }
   const { start, end } = ranges[idx];
   return rvString(textV.slice(0, start) + replacementV + textV.slice(end));
-};
+}
 
 // ============================================================================
 // VALUETOTEXT / ARRAYTOTEXT (Excel 365)
@@ -1974,7 +1976,7 @@ function scalarToText(v: ScalarValue, strict: boolean): string {
  * For multi-cell arrays, this applies implicit intersection at the
  * evaluator layer — so by the time we see args[0] it is already scalar.
  */
-export const fnVALUETOTEXT: NativeFn = args => {
+export function fnVALUETOTEXT(args: RuntimeValue[]): RuntimeValue {
   const formatV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(formatV)) {
     return formatV;
@@ -1985,7 +1987,7 @@ export const fnVALUETOTEXT: NativeFn = args => {
   }
   const strict = fmt === 1;
   return rvString(scalarToText(topLeft(args[0]), strict));
-};
+}
 
 /**
  * ARRAYTOTEXT(array, [format]) — flatten an array to a delimited text
@@ -1995,7 +1997,7 @@ export const fnVALUETOTEXT: NativeFn = args => {
  * Format 1 (strict): wraps output in `{…}`, rows separated by `;`,
  *   cells by `,`; strings inside quoted.
  */
-export const fnARRAYTOTEXT: NativeFn = args => {
+export function fnARRAYTOTEXT(args: RuntimeValue[]): RuntimeValue {
   const formatV = args.length > 1 ? toNumberRV(topLeft(args[1])) : rvNumber(0);
   if (isError(formatV)) {
     return formatV;
@@ -2029,7 +2031,7 @@ export const fnARRAYTOTEXT: NativeFn = args => {
     rowStrs.push(cellStrs.join(","));
   }
   return rvString(`{${rowStrs.join(";")}}`);
-};
+}
 
 // ============================================================================
 // ENCODEURL
@@ -2043,11 +2045,11 @@ export const fnARRAYTOTEXT: NativeFn = args => {
  * `%HH` using the UTF-8 byte sequence. This is exactly what JavaScript's
  * `encodeURIComponent` does, so we delegate to it.
  */
-export const fnENCODEURL: NativeFn = args => {
+export function fnENCODEURL(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   const s = toStringRV(topLeft(args[0]));
   return rvString(encodeURIComponent(s));
-};
+}

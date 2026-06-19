@@ -99,11 +99,13 @@ const detailsId = Document.nextBookmarkId(doc);
 // match what Word writes after F9 (and thus give a correctly-styled link
 // even before update) we wrap the field in an explicit <w:hyperlink>
 // element, which is the runtime form Word produces internally for \h.
-const wrapAsLink = (anchor: string, run: ReturnType<typeof Build.refField>) => ({
-  type: "hyperlink" as const,
-  anchor,
-  children: [run]
-});
+function wrapAsLink(anchor: string, run: ReturnType<typeof Build.refField>) {
+  return {
+    type: "hyperlink" as const,
+    anchor,
+    children: [run]
+  };
+}
 
 Document.addParagraphElement(
   doc,

@@ -33,8 +33,6 @@ import {
 // Local Helpers
 // ============================================================================
 
-type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
-
 /**
  * Extract a boolean from a single arg. Returns the boolean or ErrorValue.
  */
@@ -108,7 +106,7 @@ function quickselect(arr: number[], k: number): number {
   return arr[k];
 }
 
-export const fnMEDIAN: NativeFn = args => {
+export function fnMEDIAN(args: RuntimeValue[]): RuntimeValue {
   const values = toNumberArray(args);
   if (!Array.isArray(values)) {
     return values;
@@ -135,9 +133,9 @@ export const fnMEDIAN: NativeFn = args => {
     }
   }
   return rvNumber((lo + hi) / 2);
-};
+}
 
-export const fnLARGE: NativeFn = args => {
+export function fnLARGE(args: RuntimeValue[]): RuntimeValue {
   const nums = flattenNumbers([args[0]]);
   const err = firstError(nums);
   if (err) {
@@ -192,9 +190,9 @@ export const fnLARGE: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(quickselect(values, values.length - kInt));
-};
+}
 
-export const fnSMALL: NativeFn = args => {
+export function fnSMALL(args: RuntimeValue[]): RuntimeValue {
   const nums = flattenNumbers([args[0]]);
   const err = firstError(nums);
   if (err) {
@@ -244,9 +242,9 @@ export const fnSMALL: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(quickselect(values, kInt - 1));
-};
+}
 
-export const fnRANK: NativeFn = args => {
+export function fnRANK(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (num.kind === RVKind.Error) {
     return num;
@@ -273,7 +271,7 @@ export const fnRANK: NativeFn = args => {
           .sort((a, b) => a - b);
   const idx = sorted.indexOf(num.value);
   return idx === -1 ? ERRORS.NA : rvNumber(idx + 1);
-};
+}
 
 // ============================================================================
 // STDEV, STDEVP, VAR, VARP
@@ -323,7 +321,7 @@ function toNumberArray(args: RuntimeValue[]): number[] | ErrorValue {
   return err ?? out;
 }
 
-export const fnSTDEV: NativeFn = args => {
+export function fnSTDEV(args: RuntimeValue[]): RuntimeValue {
   const nums = toNumberArray(args);
   if (!Array.isArray(nums)) {
     return nums;
@@ -333,9 +331,9 @@ export const fnSTDEV: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.sqrt(stats.sumSq / (stats.n - 1)));
-};
+}
 
-export const fnSTDEVP: NativeFn = args => {
+export function fnSTDEVP(args: RuntimeValue[]): RuntimeValue {
   const nums = toNumberArray(args);
   if (!Array.isArray(nums)) {
     return nums;
@@ -345,9 +343,9 @@ export const fnSTDEVP: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.sqrt(stats.sumSq / stats.n));
-};
+}
 
-export const fnVAR: NativeFn = args => {
+export function fnVAR(args: RuntimeValue[]): RuntimeValue {
   const nums = toNumberArray(args);
   if (!Array.isArray(nums)) {
     return nums;
@@ -357,9 +355,9 @@ export const fnVAR: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(stats.sumSq / (stats.n - 1));
-};
+}
 
-export const fnVARP: NativeFn = args => {
+export function fnVARP(args: RuntimeValue[]): RuntimeValue {
   const nums = toNumberArray(args);
   if (!Array.isArray(nums)) {
     return nums;
@@ -369,7 +367,7 @@ export const fnVARP: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(stats.sumSq / stats.n);
-};
+}
 
 // ============================================================================
 // Advanced Statistical Functions — private math helpers
@@ -469,7 +467,7 @@ function normSPdf(x: number): number {
 // Normal Distribution Functions
 // ============================================================================
 
-export const fnNORMSDIST: NativeFn = args => {
+export function fnNORMSDIST(args: RuntimeValue[]): RuntimeValue {
   const z = argToNumber(args[0]);
   if (z.kind === RVKind.Error) {
     return z;
@@ -483,9 +481,9 @@ export const fnNORMSDIST: NativeFn = args => {
     return rvNumber(cum.value ? normSDist(z.value) : normSPdf(z.value));
   }
   return rvNumber(normSDist(z.value));
-};
+}
 
-export const fnNORMDIST: NativeFn = args => {
+export function fnNORMDIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -510,9 +508,9 @@ export const fnNORMDIST: NativeFn = args => {
     return rvNumber(normSDist(zVal));
   }
   return rvNumber(normSPdf(zVal) / stddev.value);
-};
+}
 
-export const fnNORMSINV: NativeFn = args => {
+export function fnNORMSINV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -521,9 +519,9 @@ export const fnNORMSINV: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(normSInv(p.value));
-};
+}
 
-export const fnNORMINV: NativeFn = args => {
+export function fnNORMINV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -540,13 +538,13 @@ export const fnNORMINV: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(mean.value + stddev.value * normSInv(p.value));
-};
+}
 
 // ============================================================================
 // PERCENTILE, QUARTILE, MODE
 // ============================================================================
 
-export const fnPERCENTILE: NativeFn = args => {
+export function fnPERCENTILE(args: RuntimeValue[]): RuntimeValue {
   // Propagate errors from within the range — `flattenNumbers` returns
   // both numbers and errors, and previously we silently filtered errors
   // out by `.kind === Number`, producing a bogus percentile on ranges
@@ -574,9 +572,9 @@ export const fnPERCENTILE: NativeFn = args => {
   const upper = Math.ceil(rank);
   const frac = rank - lower;
   return rvNumber(nums[lower] + frac * (nums[upper] - nums[lower]));
-};
+}
 
-export const fnPERCENTILEEXC: NativeFn = args => {
+export function fnPERCENTILEEXC(args: RuntimeValue[]): RuntimeValue {
   const raw = flattenNumbers([args[0]]);
   const err = firstError(raw);
   if (err) {
@@ -602,9 +600,9 @@ export const fnPERCENTILEEXC: NativeFn = args => {
   return rvNumber(
     nums[Math.max(0, lower)] + frac * (nums[Math.min(n - 1, upper)] - nums[Math.max(0, lower)])
   );
-};
+}
 
-export const fnQUARTILE: NativeFn = args => {
+export function fnQUARTILE(args: RuntimeValue[]): RuntimeValue {
   const quart = argToNumber(args[1]);
   if (quart.kind === RVKind.Error) {
     return quart;
@@ -613,9 +611,9 @@ export const fnQUARTILE: NativeFn = args => {
     return ERRORS.NUM;
   }
   return fnPERCENTILE([args[0], rvNumber(quart.value / 4)]);
-};
+}
 
-export const fnQUARTILEEXC: NativeFn = args => {
+export function fnQUARTILEEXC(args: RuntimeValue[]): RuntimeValue {
   const quart = argToNumber(args[1]);
   if (quart.kind === RVKind.Error) {
     return quart;
@@ -624,9 +622,9 @@ export const fnQUARTILEEXC: NativeFn = args => {
     return ERRORS.NUM;
   }
   return fnPERCENTILEEXC([args[0], rvNumber(quart.value / 4)]);
-};
+}
 
-export const fnMODE: NativeFn = args => {
+export function fnMODE(args: RuntimeValue[]): RuntimeValue {
   const all = flattenNumbers(args);
   const err = firstError(all);
   if (err) {
@@ -648,14 +646,14 @@ export const fnMODE: NativeFn = args => {
     }
   }
   return maxCount > 1 ? rvNumber(mode) : ERRORS.NA;
-};
+}
 
 /**
  * MODE.MULT — returns a vertical array of every mode (dynamic array).
  * When the dataset is multimodal Excel spills all of them; for a single
  * mode it behaves like MODE.SNGL.
  */
-export const fnMODE_MULT: NativeFn = args => {
+export function fnMODE_MULT(args: RuntimeValue[]): RuntimeValue {
   const all = flattenNumbers(args);
   const err = firstError(all);
   if (err) {
@@ -688,7 +686,7 @@ export const fnMODE_MULT: NativeFn = args => {
     }
   }
   return rvArray(modes.map(m => [rvNumber(m)]));
-};
+}
 
 // ============================================================================
 // Paired-array functions: CORREL, SLOPE, INTERCEPT, RSQ, FORECAST
@@ -790,7 +788,7 @@ function pairedSums(xs: readonly number[], ys: readonly number[]): PairedSums | 
   return { n, meanX, meanY, sxy, sxx, syy };
 }
 
-export const fnCORREL: NativeFn = args => {
+export function fnCORREL(args: RuntimeValue[]): RuntimeValue {
   const paired = pairedNumbers(args, 0, 1);
   if ("code" in paired) {
     return paired;
@@ -802,9 +800,9 @@ export const fnCORREL: NativeFn = args => {
   }
   const denom = Math.sqrt(s.sxx * s.syy);
   return denom === 0 ? ERRORS.DIV0 : rvNumber(s.sxy / denom);
-};
+}
 
-export const fnSLOPE: NativeFn = args => {
+export function fnSLOPE(args: RuntimeValue[]): RuntimeValue {
   // SLOPE(known_y, known_x) — note the argument order (y first, x second).
   const paired = pairedNumbers(args, 0, 1);
   if ("code" in paired) {
@@ -816,9 +814,9 @@ export const fnSLOPE: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return s.sxx === 0 ? ERRORS.DIV0 : rvNumber(s.sxy / s.sxx);
-};
+}
 
-export const fnINTERCEPT: NativeFn = args => {
+export function fnINTERCEPT(args: RuntimeValue[]): RuntimeValue {
   const paired = pairedNumbers(args, 0, 1);
   if ("code" in paired) {
     return paired;
@@ -833,15 +831,15 @@ export const fnINTERCEPT: NativeFn = args => {
   }
   const slope = s.sxy / s.sxx;
   return rvNumber(s.meanY - slope * s.meanX);
-};
+}
 
-export const fnRSQ: NativeFn = args => {
+export function fnRSQ(args: RuntimeValue[]): RuntimeValue {
   const r = fnCORREL(args);
   if (isError(r)) {
     return r;
   }
   return rvNumber((r as NumberValue).value ** 2);
-};
+}
 
 /**
  * STEYX(known_y, known_x) — standard error of the predicted y-value for
@@ -849,7 +847,7 @@ export const fnRSQ: NativeFn = args => {
  *   SE = sqrt((1/(n-2)) × (S_yy − S_xy² / S_xx))
  * where S_xx, S_yy, S_xy are centred sums of squares / cross-product.
  */
-export const fnSTEYX: NativeFn = args => {
+export function fnSTEYX(args: RuntimeValue[]): RuntimeValue {
   // STEYX(known_y, known_x) — y-first ordering, like SLOPE/INTERCEPT.
   const paired = pairedNumbers(args, 0, 1);
   if ("code" in paired) {
@@ -869,9 +867,9 @@ export const fnSTEYX: NativeFn = args => {
     return rvNumber(0);
   }
   return rvNumber(Math.sqrt(numer / (s.n - 2)));
-};
+}
 
-export const fnFORECAST: NativeFn = args => {
+export function fnFORECAST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -892,7 +890,7 @@ export const fnFORECAST: NativeFn = args => {
   const slope = s.sxy / s.sxx;
   const intercept = s.meanY - slope * s.meanX;
   return rvNumber(intercept + slope * x.value);
-};
+}
 
 // ============================================================================
 // FACT, FACTDOUBLE, COMBIN, COMBINA, PERMUT
@@ -905,7 +903,7 @@ export { fnFACT, fnFACTDOUBLE, fnCOMBIN, fnCOMBINA, fnPERMUT } from "@formula/fu
 // GEOMEAN, HARMEAN, TRIMMEAN, DEVSQ, AVEDEV
 // ============================================================================
 
-export const fnGEOMEAN: NativeFn = args => {
+export function fnGEOMEAN(args: RuntimeValue[]): RuntimeValue {
   let logSum = 0;
   let count = 0;
   let outOfRange = false;
@@ -924,9 +922,9 @@ export const fnGEOMEAN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.exp(logSum / count));
-};
+}
 
-export const fnHARMEAN: NativeFn = args => {
+export function fnHARMEAN(args: RuntimeValue[]): RuntimeValue {
   let recipSum = 0;
   let count = 0;
   let outOfRange = false;
@@ -945,9 +943,9 @@ export const fnHARMEAN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(count / recipSum);
-};
+}
 
-export const fnTRIMMEAN: NativeFn = args => {
+export function fnTRIMMEAN(args: RuntimeValue[]): RuntimeValue {
   const all = flattenNumbers([args[0]]);
   const err = firstError(all);
   if (err) {
@@ -968,9 +966,9 @@ export const fnTRIMMEAN: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(trimmed.reduce((a, b) => a + b, 0) / trimmed.length);
-};
+}
 
-export const fnDEVSQ: NativeFn = args => {
+export function fnDEVSQ(args: RuntimeValue[]): RuntimeValue {
   const rawNums = flattenNumbers(args);
   const err = firstError(rawNums);
   if (err) {
@@ -990,9 +988,9 @@ export const fnDEVSQ: NativeFn = args => {
     result += (n.value - mean) ** 2;
   }
   return rvNumber(result);
-};
+}
 
-export const fnAVEDEV: NativeFn = args => {
+export function fnAVEDEV(args: RuntimeValue[]): RuntimeValue {
   const rawNums = flattenNumbers(args);
   const err = firstError(rawNums);
   if (err) {
@@ -1012,13 +1010,13 @@ export const fnAVEDEV: NativeFn = args => {
     result += Math.abs(n.value - mean);
   }
   return rvNumber(result / nums.length);
-};
+}
 
 // ============================================================================
 // CONFIDENCE, FISHER, AVERAGEA, MAXA, MINA
 // ============================================================================
 
-export const fnCONFIDENCENORM: NativeFn = args => {
+export function fnCONFIDENCENORM(args: RuntimeValue[]): RuntimeValue {
   const alpha = argToNumber(args[0]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
@@ -1035,13 +1033,13 @@ export const fnCONFIDENCENORM: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((normSInv(1 - alpha.value / 2) * stddev.value) / Math.sqrt(size.value));
-};
+}
 
 /**
  * CONFIDENCE.T — confidence interval half-width for the mean using the
  * Student's t distribution (small sample / unknown population variance).
  */
-export const fnCONFIDENCE_T: NativeFn = args => {
+export function fnCONFIDENCE_T(args: RuntimeValue[]): RuntimeValue {
   const alpha = argToNumber(args[0]);
   if (alpha.kind === RVKind.Error) {
     return alpha;
@@ -1065,7 +1063,7 @@ export const fnCONFIDENCE_T: NativeFn = args => {
   }
   const t = (tCrit as NumberValue).value;
   return rvNumber((t * stddev.value) / Math.sqrt(size.value));
-};
+}
 
 /**
  * Shared helper: walk two numeric arrays element-wise, filtering to
@@ -1106,7 +1104,7 @@ function pairedNumericValues(
 }
 
 /** COVARIANCE.P — population covariance. */
-export const fnCOVARIANCE_P: NativeFn = args => {
+export function fnCOVARIANCE_P(args: RuntimeValue[]): RuntimeValue {
   const pairs = pairedNumericValues(args[0], args[1]);
   if ((pairs as ErrorValue).kind === RVKind.Error) {
     return pairs as ErrorValue;
@@ -1129,10 +1127,10 @@ export const fnCOVARIANCE_P: NativeFn = args => {
     s += (xs[i] - mx) * (ys[i] - my);
   }
   return rvNumber(s / n);
-};
+}
 
 /** COVARIANCE.S — sample covariance (divide by n-1). */
-export const fnCOVARIANCE_S: NativeFn = args => {
+export function fnCOVARIANCE_S(args: RuntimeValue[]): RuntimeValue {
   const pairs = pairedNumericValues(args[0], args[1]);
   if ((pairs as ErrorValue).kind === RVKind.Error) {
     return pairs as ErrorValue;
@@ -1155,13 +1153,13 @@ export const fnCOVARIANCE_S: NativeFn = args => {
     s += (xs[i] - mx) * (ys[i] - my);
   }
   return rvNumber(s / (n - 1));
-};
+}
 
 /**
  * RANK.AVG — average-tie rank. Identical to RANK.EQ except that tied
  * positions return the average of the ranks they would otherwise span.
  */
-export const fnRANK_AVG: NativeFn = args => {
+export function fnRANK_AVG(args: RuntimeValue[]): RuntimeValue {
   const numberRV = argToNumber(args[0]);
   if (numberRV.kind === RVKind.Error) {
     return numberRV;
@@ -1196,9 +1194,9 @@ export const fnRANK_AVG: NativeFn = args => {
   }
   // Ranks are 1-based; average of first+1 .. last+1.
   return rvNumber((first + last + 2) / 2);
-};
+}
 
-export const fnFISHER: NativeFn = args => {
+export function fnFISHER(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1207,18 +1205,18 @@ export const fnFISHER: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(0.5 * Math.log((1 + x.value) / (1 - x.value)));
-};
+}
 
-export const fnFISHERINV: NativeFn = args => {
+export function fnFISHERINV(args: RuntimeValue[]): RuntimeValue {
   const y = argToNumber(args[0]);
   if (y.kind === RVKind.Error) {
     return y;
   }
   const e2y = Math.exp(2 * y.value);
   return rvNumber((e2y - 1) / (e2y + 1));
-};
+}
 
-export const fnAVERAGEA: NativeFn = args => {
+export function fnAVERAGEA(args: RuntimeValue[]): RuntimeValue {
   const all = flattenAll(args);
   if (all.length === 0) {
     return ERRORS.DIV0;
@@ -1241,13 +1239,15 @@ export const fnAVERAGEA: NativeFn = args => {
     count++;
   }
   return count === 0 ? ERRORS.DIV0 : rvNumber(sum / count);
-};
+}
 
-export const fnMAXA: NativeFn = args =>
-  reduceAValue(args, -Infinity, (best, n) => (n > best ? n : best));
+export function fnMAXA(args: RuntimeValue[]): RuntimeValue {
+  return reduceAValue(args, -Infinity, (best, n) => (n > best ? n : best));
+}
 
-export const fnMINA: NativeFn = args =>
-  reduceAValue(args, Infinity, (best, n) => (n < best ? n : best));
+export function fnMINA(args: RuntimeValue[]): RuntimeValue {
+  return reduceAValue(args, Infinity, (best, n) => (n < best ? n : best));
+}
 
 /**
  * Shared MAXA / MINA reducer. Excel's `*A` variants differ from MAX / MIN
@@ -1419,7 +1419,7 @@ function gammaIncomplete(a: number, x: number): number {
 // More Statistical Distribution Functions
 // ============================================================================
 
-export const fnPOISSON_DIST: NativeFn = args => {
+export function fnPOISSON_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1449,9 +1449,9 @@ export const fnPOISSON_DIST: NativeFn = args => {
     return rvNumber(Math.exp(-mean.value + k * Math.log(mean.value) - lnGamma(k + 1)));
   }
   return rvNumber(1 - gammaIncomplete(k + 1, mean.value));
-};
+}
 
-export const fnBINOM_DIST: NativeFn = args => {
+export function fnBINOM_DIST(args: RuntimeValue[]): RuntimeValue {
   const numS = argToNumber(args[0]);
   if (numS.kind === RVKind.Error) {
     return numS;
@@ -1495,7 +1495,7 @@ export const fnBINOM_DIST: NativeFn = args => {
     sum += pmf(i);
   }
   return rvNumber(sum);
-};
+}
 
 /**
  * BINOM.DIST.RANGE(trials, probability, number_s, [number_s2]) —
@@ -1503,7 +1503,7 @@ export const fnBINOM_DIST: NativeFn = args => {
  * `number_s2` (inclusive). When `number_s2` is omitted, returns the
  * probability of exactly `number_s` successes.
  */
-export const fnBINOM_DIST_RANGE: NativeFn = args => {
+export function fnBINOM_DIST_RANGE(args: RuntimeValue[]): RuntimeValue {
   const trialsV = argToNumber(args[0]);
   if (trialsV.kind === RVKind.Error) {
     return trialsV;
@@ -1550,9 +1550,9 @@ export const fnBINOM_DIST_RANGE: NativeFn = args => {
     sum += pmf(i);
   }
   return rvNumber(sum);
-};
+}
 
-export const fnBINOM_INV: NativeFn = args => {
+export function fnBINOM_INV(args: RuntimeValue[]): RuntimeValue {
   const trials = argToNumber(args[0]);
   if (trials.kind === RVKind.Error) {
     return trials;
@@ -1578,9 +1578,9 @@ export const fnBINOM_INV: NativeFn = args => {
     }
   }
   return rvNumber(n);
-};
+}
 
-export const fnHYPGEOM_DIST: NativeFn = args => {
+export function fnHYPGEOM_DIST(args: RuntimeValue[]): RuntimeValue {
   const sampleS = argToNumber(args[0]);
   if (sampleS.kind === RVKind.Error) {
     return sampleS;
@@ -1625,9 +1625,9 @@ export const fnHYPGEOM_DIST: NativeFn = args => {
     sum += pmf(k);
   }
   return rvNumber(sum);
-};
+}
 
-export const fnNEGBINOM_DIST: NativeFn = args => {
+export function fnNEGBINOM_DIST(args: RuntimeValue[]): RuntimeValue {
   const numF = argToNumber(args[0]);
   if (numF.kind === RVKind.Error) {
     return numF;
@@ -1661,9 +1661,9 @@ export const fnNEGBINOM_DIST: NativeFn = args => {
     sum += pmf(k);
   }
   return rvNumber(sum);
-};
+}
 
-export const fnCHISQ_DIST: NativeFn = args => {
+export function fnCHISQ_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1689,9 +1689,9 @@ export const fnCHISQ_DIST: NativeFn = args => {
   }
   const halfK = df.value / 2;
   return rvNumber(Math.exp((halfK - 1) * Math.log(x.value / 2) - x.value / 2 - lnGamma(halfK)) / 2);
-};
+}
 
-export const fnCHISQ_INV: NativeFn = args => {
+export function fnCHISQ_INV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -1728,9 +1728,9 @@ export const fnCHISQ_INV: NativeFn = args => {
     }
   }
   return rvNumber(x);
-};
+}
 
-export const fnCHISQ_DIST_RT: NativeFn = args => {
+export function fnCHISQ_DIST_RT(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1743,14 +1743,14 @@ export const fnCHISQ_DIST_RT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(1 - gammaIncomplete(df.value / 2, x.value / 2));
-};
+}
 
 /**
  * CHISQ.INV.RT(probability, df) — right-tailed inverse of chi-square.
  * Equivalent to CHISQ.INV(1 - probability, df). Probabilities of 0 or 1
  * return +∞ or 0 respectively; values outside (0, 1] are #NUM!.
  */
-export const fnCHISQ_INV_RT: NativeFn = args => {
+export function fnCHISQ_INV_RT(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -1764,9 +1764,9 @@ export const fnCHISQ_INV_RT: NativeFn = args => {
   }
   // Re-use CHISQ.INV with the complementary probability.
   return fnCHISQ_INV([rvNumber(1 - p.value), df]);
-};
+}
 
-export const fnF_DIST: NativeFn = args => {
+export function fnF_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1799,9 +1799,9 @@ export const fnF_DIST: NativeFn = args => {
     Math.pow(d1 * x.value + d2, (d1 + d2) / 2);
   const denom = x.value * Math.exp(lnGamma(d1 / 2) + lnGamma(d2 / 2) - lnGamma((d1 + d2) / 2));
   return rvNumber(denom === 0 ? 0 : num / denom);
-};
+}
 
-export const fnF_INV: NativeFn = args => {
+export function fnF_INV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -1834,9 +1834,9 @@ export const fnF_INV: NativeFn = args => {
     }
   }
   return rvNumber((lo + hi) / 2);
-};
+}
 
-export const fnT_DIST: NativeFn = args => {
+export function fnT_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1862,9 +1862,9 @@ export const fnT_DIST: NativeFn = args => {
     Math.exp(lnGamma((v + 1) / 2) - lnGamma(v / 2)) /
       (Math.sqrt(v * Math.PI) * Math.pow(1 + (x.value * x.value) / v, (v + 1) / 2))
   );
-};
+}
 
-export const fnT_INV: NativeFn = args => {
+export function fnT_INV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -1895,9 +1895,9 @@ export const fnT_INV: NativeFn = args => {
     }
   }
   return rvNumber(x);
-};
+}
 
-export const fnT_DIST_2T: NativeFn = args => {
+export function fnT_DIST_2T(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1911,9 +1911,9 @@ export const fnT_DIST_2T: NativeFn = args => {
   }
   const v = df.value;
   return rvNumber(betaIncomplete(v / (v + x.value * x.value), v / 2, 0.5));
-};
+}
 
-export const fnT_DIST_RT: NativeFn = args => {
+export function fnT_DIST_RT(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -1931,9 +1931,9 @@ export const fnT_DIST_RT: NativeFn = args => {
   // For x >= 0: right-tail = halfBeta
   // For x < 0: right-tail = 1 - halfBeta
   return rvNumber(x.value >= 0 ? halfBeta : 1 - halfBeta);
-};
+}
 
-export const fnT_INV_2T: NativeFn = args => {
+export function fnT_INV_2T(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -1950,13 +1950,13 @@ export const fnT_INV_2T: NativeFn = args => {
     return result;
   }
   return rvNumber(Math.abs((result as NumberValue).value));
-};
+}
 
 // ============================================================================
 // BETA, GAMMA, EXPON, WEIBULL, LOGNORM distributions
 // ============================================================================
 
-export const fnBETA_DIST: NativeFn = args => {
+export function fnBETA_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -2013,9 +2013,9 @@ export const fnBETA_DIST: NativeFn = args => {
     ) /
       (B - A)
   );
-};
+}
 
-export const fnBETA_INV: NativeFn = args => {
+export function fnBETA_INV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -2061,9 +2061,9 @@ export const fnBETA_INV: NativeFn = args => {
     }
   }
   return rvNumber(A + ((lo + hi) / 2) * (B - A));
-};
+}
 
-export const fnGAMMA: NativeFn = args => {
+export function fnGAMMA(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (n.kind === RVKind.Error) {
     return n;
@@ -2072,9 +2072,9 @@ export const fnGAMMA: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(gammaFn(n.value));
-};
+}
 
-export const fnGAMMALN: NativeFn = args => {
+export function fnGAMMALN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (n.kind === RVKind.Error) {
     return n;
@@ -2083,9 +2083,9 @@ export const fnGAMMALN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(lnGamma(n.value));
-};
+}
 
-export const fnGAMMA_DIST: NativeFn = args => {
+export function fnGAMMA_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -2116,9 +2116,9 @@ export const fnGAMMA_DIST: NativeFn = args => {
         lnGamma(alpha.value)
     )
   );
-};
+}
 
-export const fnGAMMA_INV: NativeFn = args => {
+export function fnGAMMA_INV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -2148,9 +2148,9 @@ export const fnGAMMA_INV: NativeFn = args => {
     }
   }
   return rvNumber((lo + hi) / 2);
-};
+}
 
-export const fnEXPON_DIST: NativeFn = args => {
+export function fnEXPON_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -2171,9 +2171,9 @@ export const fnEXPON_DIST: NativeFn = args => {
       ? 1 - Math.exp(-lambda.value * x.value)
       : lambda.value * Math.exp(-lambda.value * x.value)
   );
-};
+}
 
-export const fnWEIBULL_DIST: NativeFn = args => {
+export function fnWEIBULL_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -2201,9 +2201,9 @@ export const fnWEIBULL_DIST: NativeFn = args => {
       Math.pow(x.value / beta.value, alpha.value - 1) *
       Math.exp(-Math.pow(x.value / beta.value, alpha.value))
   );
-};
+}
 
-export const fnLOGNORM_DIST: NativeFn = args => {
+export function fnLOGNORM_DIST(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -2228,9 +2228,9 @@ export const fnLOGNORM_DIST: NativeFn = args => {
     return rvNumber(normSDist(z));
   }
   return rvNumber(normSPdf(z) / (x.value * stddev.value));
-};
+}
 
-export const fnLOGNORM_INV: NativeFn = args => {
+export function fnLOGNORM_INV(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -2247,17 +2247,17 @@ export const fnLOGNORM_INV: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.exp(mean.value + stddev.value * normSInv(p.value)));
-};
+}
 
-export const fnPHI: NativeFn = args => {
+export function fnPHI(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   return x.kind === RVKind.Error ? x : rvNumber(normSPdf(x.value));
-};
+}
 
-export const fnGAUSS: NativeFn = args => {
+export function fnGAUSS(args: RuntimeValue[]): RuntimeValue {
   const z = argToNumber(args[0]);
   return z.kind === RVKind.Error ? z : rvNumber(normSDist(z.value) - 0.5);
-};
+}
 
 // ============================================================================
 // ERF, ERFC, STANDARDIZE
@@ -2283,7 +2283,7 @@ function erfFn(x: number): number {
   return sign * y;
 }
 
-export const fnERF: NativeFn = args => {
+export function fnERF(args: RuntimeValue[]): RuntimeValue {
   const lower = argToNumber(args[0]);
   if (lower.kind === RVKind.Error) {
     return lower;
@@ -2299,14 +2299,14 @@ export const fnERF: NativeFn = args => {
     return rvNumber(erfFn(upper.value) - erfFn(lower.value));
   }
   return rvNumber(erfFn(lower.value));
-};
+}
 
-export const fnERFC: NativeFn = args => {
+export function fnERFC(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   return x.kind === RVKind.Error ? x : rvNumber(1 - erfFn(x.value));
-};
+}
 
-export const fnSTANDARDIZE: NativeFn = args => {
+export function fnSTANDARDIZE(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -2323,13 +2323,13 @@ export const fnSTANDARDIZE: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((x.value - mean.value) / stddev.value);
-};
+}
 
 // ============================================================================
 // Array-returning functions: FREQUENCY, GROWTH, TREND, LINEST, LOGEST
 // ============================================================================
 
-export const fnFREQUENCY: NativeFn = args => {
+export function fnFREQUENCY(args: RuntimeValue[]): RuntimeValue {
   if (!isArrayArg(args[0]) || !isArrayArg(args[1])) {
     return ERRORS.VALUE;
   }
@@ -2374,7 +2374,7 @@ export const fnFREQUENCY: NativeFn = args => {
     result.push([rvNumber(c)]);
   }
   return rvArray(result);
-};
+}
 
 // ============================================================================
 // Multivariate regression helpers (LINEST / LOGEST / TREND / GROWTH)
@@ -2874,7 +2874,7 @@ function emitPredictions(values: number[], outOrient: Orientation): RuntimeValue
   return rvArray(values.map(v => [rvNumber(v)]));
 }
 
-export const fnGROWTH: NativeFn = args => {
+export function fnGROWTH(args: RuntimeValue[]): RuntimeValue {
   const parsed = parseRegressionInputs(args);
   if (isErr(parsed)) {
     return parsed;
@@ -2902,9 +2902,9 @@ export const fnGROWTH: NativeFn = args => {
     return Math.exp(lp);
   });
   return emitPredictions(preds, newInfo.outOrient);
-};
+}
 
-export const fnTREND: NativeFn = args => {
+export function fnTREND(args: RuntimeValue[]): RuntimeValue {
   const parsed = parseRegressionInputs(args);
   if (isErr(parsed)) {
     return parsed;
@@ -2931,9 +2931,9 @@ export const fnTREND: NativeFn = args => {
     return p;
   });
   return emitPredictions(preds, newInfo.outOrient);
-};
+}
 
-export const fnLINEST: NativeFn = args => {
+export function fnLINEST(args: RuntimeValue[]): RuntimeValue {
   const parsed = parseRegressionInputs(args);
   if (isErr(parsed)) {
     return parsed;
@@ -2965,9 +2965,9 @@ export const fnLINEST: NativeFn = args => {
     return rvArray(buildStatsBlock(lsq));
   }
   return rvArray([lsq.coeffs.map(v => rvNumber(v))]);
-};
+}
 
-export const fnLOGEST: NativeFn = args => {
+export function fnLOGEST(args: RuntimeValue[]): RuntimeValue {
   const parsed = parseRegressionInputs(args);
   if (isErr(parsed)) {
     return parsed;
@@ -3000,7 +3000,7 @@ export const fnLOGEST: NativeFn = args => {
     return rvArray(block);
   }
   return rvArray([lsq.coeffs.map(v => rvNumber(Math.exp(v)))]);
-};
+}
 
 // ============================================================================
 // F.DIST.RT, F.INV.RT — F-distribution right tail
@@ -3014,7 +3014,7 @@ export const fnLOGEST: NativeFn = args => {
  * `I(d2/(d2 + d1*x), d2/2, d1/2)`, which avoids subtracting from 1 and
  * is numerically stable in the upper tail.
  */
-export const fnF_DIST_RT: NativeFn = args => {
+export function fnF_DIST_RT(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (x.kind === RVKind.Error) {
     return x;
@@ -3038,14 +3038,14 @@ export const fnF_DIST_RT: NativeFn = args => {
   const d2 = df2.value;
   // Right tail via symmetry: I(d2/(d2 + d1*x), d2/2, d1/2).
   return rvNumber(betaIncomplete(d2 / (d2 + d1 * x.value), d2 / 2, d1 / 2));
-};
+}
 
 /**
  * F.INV.RT(p, d1, d2) — inverse right-tail of the F-distribution.
  * Returns x such that P(F > x) = p. Implemented via binary search on the
  * right-tail CDF (monotonically decreasing from 1 at x=0 to 0 at x=∞).
  */
-export const fnF_INV_RT: NativeFn = args => {
+export function fnF_INV_RT(args: RuntimeValue[]): RuntimeValue {
   const p = argToNumber(args[0]);
   if (p.kind === RVKind.Error) {
     return p;
@@ -3079,7 +3079,7 @@ export const fnF_INV_RT: NativeFn = args => {
     }
   }
   return rvNumber((lo + hi) / 2);
-};
+}
 
 // ============================================================================
 // SKEW, SKEW.P, KURT
@@ -3089,7 +3089,7 @@ export const fnF_INV_RT: NativeFn = args => {
  * SKEW — sample skewness.
  * Formula: n / ((n-1)(n-2)) * Σ((xi-mean)/s)^3, where s is the sample stdev.
  */
-export const fnSKEW: NativeFn = args => {
+export function fnSKEW(args: RuntimeValue[]): RuntimeValue {
   const xs = toNumberArray(args);
   if (!Array.isArray(xs)) {
     return xs;
@@ -3120,13 +3120,13 @@ export const fnSKEW: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber((n / ((n - 1) * (n - 2))) * (sumCube / (sampleStd * sampleStd * sampleStd)));
-};
+}
 
 /**
  * SKEW.P — population skewness.
  * Formula: (1/n) * Σ((xi-mean)/σ)^3, where σ is the population stdev.
  */
-export const fnSKEW_P: NativeFn = args => {
+export function fnSKEW_P(args: RuntimeValue[]): RuntimeValue {
   const xs = toNumberArray(args);
   if (!Array.isArray(xs)) {
     return xs;
@@ -3153,13 +3153,13 @@ export const fnSKEW_P: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(sumCube / n / (popStd * popStd * popStd));
-};
+}
 
 /**
  * KURT — sample excess kurtosis.
  * Formula: n(n+1) / ((n-1)(n-2)(n-3)) * Σ((xi-mean)/s)^4 - 3(n-1)^2 / ((n-2)(n-3)).
  */
-export const fnKURT: NativeFn = args => {
+export function fnKURT(args: RuntimeValue[]): RuntimeValue {
   const xs = toNumberArray(args);
   if (!Array.isArray(xs)) {
     return xs;
@@ -3192,7 +3192,7 @@ export const fnKURT: NativeFn = args => {
   const term1 = (n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3));
   const term2 = (3 * (n - 1) ** 2) / ((n - 2) * (n - 3));
   return rvNumber(term1 * (sumQuad / (s4 * s4)) - term2);
-};
+}
 
 // ============================================================================
 // PERCENTRANK family
@@ -3332,9 +3332,15 @@ function fnPercentRankImpl(args: RuntimeValue[], inclusive: boolean): RuntimeVal
   return rvNumber(truncated);
 }
 
-export const fnPERCENTRANK: NativeFn = args => fnPercentRankImpl(args, true);
-export const fnPERCENTRANK_INC: NativeFn = args => fnPercentRankImpl(args, true);
-export const fnPERCENTRANK_EXC: NativeFn = args => fnPercentRankImpl(args, false);
+export function fnPERCENTRANK(args: RuntimeValue[]): RuntimeValue {
+  return fnPercentRankImpl(args, true);
+}
+export function fnPERCENTRANK_INC(args: RuntimeValue[]): RuntimeValue {
+  return fnPercentRankImpl(args, true);
+}
+export function fnPERCENTRANK_EXC(args: RuntimeValue[]): RuntimeValue {
+  return fnPercentRankImpl(args, false);
+}
 
 // ============================================================================
 // PROB — probability that values in X-range are between two limits
@@ -3352,7 +3358,7 @@ export const fnPERCENTRANK_EXC: NativeFn = args => fnPercentRankImpl(args, false
  *   - Result is the sum of prob_range entries for which
  *     lower_limit ≤ x_range value ≤ upper_limit
  */
-export const fnPROB: NativeFn = args => {
+export function fnPROB(args: RuntimeValue[]): RuntimeValue {
   if (args.length < 3 || args.length > 4) {
     return ERRORS.VALUE;
   }
@@ -3410,7 +3416,7 @@ export const fnPROB: NativeFn = args => {
     }
   }
   return rvNumber(result);
-};
+}
 
 // ============================================================================
 // Z.TEST, T.TEST, F.TEST, CHISQ.TEST — hypothesis tests
@@ -3440,7 +3446,7 @@ function normalCDF(z: number): number {
  *   z = (mean - x) / (sigma / √n)
  *   Z.TEST = 1 - NORM.S.DIST(z, TRUE)
  */
-export const fnZ_TEST: NativeFn = args => {
+export function fnZ_TEST(args: RuntimeValue[]): RuntimeValue {
   const vals = flattenNumbers([args[0]]);
   const err = firstError(vals);
   if (err) {
@@ -3483,7 +3489,7 @@ export const fnZ_TEST: NativeFn = args => {
 
   const z = (mean - xV.value) / (sigma / Math.sqrt(nums.length));
   return rvNumber(1 - normalCDF(z));
-};
+}
 
 /**
  * F.TEST(array1, array2) — two-tailed F-test probability comparing
@@ -3492,7 +3498,7 @@ export const fnZ_TEST: NativeFn = args => {
  *   F = var(larger) / var(smaller)  (always >= 1)
  *   P = 2 × P(F_dist(df1, df2) > F)
  */
-export const fnF_TEST: NativeFn = args => {
+export function fnF_TEST(args: RuntimeValue[]): RuntimeValue {
   const v1 = flattenNumbers([args[0]]);
   const e1 = firstError(v1);
   if (e1) {
@@ -3535,7 +3541,7 @@ export const fnF_TEST: NativeFn = args => {
   const rightTail = incompleteBeta(x, df2 / 2, df1 / 2);
   const twoTail = 2 * Math.min(rightTail, 1 - rightTail);
   return rvNumber(twoTail);
-};
+}
 
 /**
  * Regularised incomplete beta function I_x(a, b). Lentz's continued
@@ -3609,7 +3615,7 @@ function incompleteBeta(x: number, a: number, b: number): number {
  *   type 2: two-sample, equal variance
  *   type 3: two-sample, unequal variance (Welch's)
  */
-export const fnT_TEST: NativeFn = args => {
+export function fnT_TEST(args: RuntimeValue[]): RuntimeValue {
   const v1 = flattenNumbers([args[0]]);
   const e1 = firstError(v1);
   if (e1) {
@@ -3708,7 +3714,7 @@ export const fnT_TEST: NativeFn = args => {
   const x = df / (df + t * t);
   const oneTail = 0.5 * incompleteBeta(x, df / 2, 0.5);
   return rvNumber(tails === 1 ? oneTail : 2 * oneTail);
-};
+}
 
 /**
  * CHISQ.TEST(actual_range, expected_range) — chi-square independence test.
@@ -3717,7 +3723,7 @@ export const fnT_TEST: NativeFn = args => {
  *   df = (rows-1)(cols-1) for a contingency table, or n-1 for 1-D
  *   p = 1 - CHISQ.DIST(χ², df, TRUE)
  */
-export const fnCHISQ_TEST: NativeFn = args => {
+export function fnCHISQ_TEST(args: RuntimeValue[]): RuntimeValue {
   if (args[0].kind !== RVKind.Array || args[1].kind !== RVKind.Array) {
     return ERRORS.VALUE;
   }
@@ -3759,4 +3765,4 @@ export const fnCHISQ_TEST: NativeFn = args => {
   }
   // p = 1 - CHISQ.DIST.CDF(chi2, df) = right tail
   return rvNumber(1 - gammaIncomplete(df / 2, chi2 / 2));
-};
+}

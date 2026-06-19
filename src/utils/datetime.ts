@@ -47,15 +47,19 @@ const C_DOT = 46;
 
 // Inline digit extraction - avoid function call overhead
 // Using bitwise OR for integer coercion (faster than Math.floor)
-const digit2 = (s: string, i: number) =>
-  ((s.charCodeAt(i) - C_0) * 10 + s.charCodeAt(i + 1) - C_0) | 0;
-const digit4 = (s: string, i: number) =>
-  ((s.charCodeAt(i) - C_0) * 1000 +
-    (s.charCodeAt(i + 1) - C_0) * 100 +
-    (s.charCodeAt(i + 2) - C_0) * 10 +
-    s.charCodeAt(i + 3) -
-    C_0) |
-  0;
+function digit2(s: string, i: number) {
+  return ((s.charCodeAt(i) - C_0) * 10 + s.charCodeAt(i + 1) - C_0) | 0;
+}
+function digit4(s: string, i: number) {
+  return (
+    ((s.charCodeAt(i) - C_0) * 1000 +
+      (s.charCodeAt(i + 1) - C_0) * 100 +
+      (s.charCodeAt(i + 2) - C_0) * 10 +
+      s.charCodeAt(i + 3) -
+      C_0) |
+    0
+  );
+}
 
 // Days in month lookup (index 0 unused, 1-12 for Jan-Dec)
 // Using 31 for Feb; actual validation done by Date constructor

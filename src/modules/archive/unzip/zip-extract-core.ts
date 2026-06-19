@@ -489,7 +489,7 @@ export function processEntryDataStream(
 ): AsyncIterable<Uint8Array> {
   const { password, checkCrc32 = false, validateEntrySizes = true, signal } = options;
 
-  const run = async function* (): AsyncIterable<Uint8Array> {
+  async function* run(): AsyncIterable<Uint8Array> {
     throwIfAborted(signal);
 
     if (entry.type === "directory") {
@@ -584,7 +584,7 @@ export function processEntryDataStream(
     for await (const chunk of outStream) {
       yield chunk;
     }
-  };
+  }
 
   return run();
 }

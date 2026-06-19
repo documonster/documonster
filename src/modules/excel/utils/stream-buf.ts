@@ -172,7 +172,7 @@ interface StreamBufOptions {
 // StreamBuf - Cross-Platform Implementation
 // =============================================================================
 
-const nop = () => {};
+function nop() {}
 
 /**
  * StreamBuf is a multi-purpose read-write stream that works in both

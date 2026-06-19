@@ -29,7 +29,9 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 const baseDate = "2026-05-01T09:00:00Z";
-const rev = (id: number, author = "Alice"): RevisionInfo => ({ id, author, date: baseDate });
+function rev(id: number, author = "Alice"): RevisionInfo {
+  return { id, author, date: baseDate };
+}
 
 const doc = Document.create();
 Document.useDefaultStyles(doc);

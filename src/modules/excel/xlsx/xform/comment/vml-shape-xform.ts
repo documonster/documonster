@@ -133,7 +133,7 @@ class VmlShapeXform extends BaseXform {
     return Number.isFinite(value) ? value : undefined;
   }
 
-  static V_SHAPE_ATTRIBUTES = (model: ShapeModel, index: number): any => {
+  static V_SHAPE_ATTRIBUTES(model: ShapeModel, index: number): any {
     const width = model.note?.width ?? DEFAULT_NOTE_WIDTH_PT;
     const height = model.note?.height ?? DEFAULT_NOTE_HEIGHT_PT;
     return {
@@ -144,7 +144,7 @@ class VmlShapeXform extends BaseXform {
       strokecolor: "none [81]",
       "o:insetmode": model.note.margins && model.note.margins.insetmode
     };
-  };
+  }
 }
 
 export { VmlShapeXform };

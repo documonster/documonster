@@ -9,13 +9,13 @@ const ws = Workbook.addWorksheet(wb, "Foo");
 const now = Date.now();
 const today = now - (now % 86400000);
 
-const getRows = () => {
+function getRows() {
   const rows: (number | Date)[][] = [];
   for (let i = 0; i < 20; i++) {
     rows.push([new Date(today + 86400000 * i), Math.random() * 10]);
   }
   return rows;
-};
+}
 
 Worksheet.setColumns(ws, [{ key: "date", width: 16 }, { key: "number" }]);
 

@@ -2,30 +2,34 @@ interface StyleObject {
   [key: string]: any;
 }
 
-const oneDepthCopy = (obj: StyleObject, nestKeys: string[]): StyleObject => ({
-  ...obj,
-  ...nestKeys.reduce((memo: StyleObject, key: string) => {
-    if (obj[key]) {
-      memo[key] = { ...obj[key] };
-    }
-    return memo;
-  }, {})
-});
+function oneDepthCopy(obj: StyleObject, nestKeys: string[]): StyleObject {
+  return {
+    ...obj,
+    ...nestKeys.reduce((memo: StyleObject, key: string) => {
+      if (obj[key]) {
+        memo[key] = { ...obj[key] };
+      }
+      return memo;
+    }, {})
+  };
+}
 
-const setIfExists = (
+function setIfExists(
   src: StyleObject,
   dst: StyleObject,
   key: string,
   nestKeys: string[] = []
-): void => {
+): void {
   if (src[key]) {
     dst[key] = oneDepthCopy(src[key], nestKeys);
   }
-};
+}
 
-const isEmptyObj = (obj: StyleObject): boolean => Object.keys(obj).length === 0;
+function isEmptyObj(obj: StyleObject): boolean {
+  return Object.keys(obj).length === 0;
+}
 
-const copyStyle = (style: StyleObject | null | undefined): StyleObject | null | undefined => {
+function copyStyle(style: StyleObject | null | undefined): StyleObject | null | undefined {
   if (!style) {
     return style;
   }
@@ -55,6 +59,6 @@ const copyStyle = (style: StyleObject | null | undefined): StyleObject | null | 
   }
 
   return copied;
-};
+}
 
 export { copyStyle };

@@ -707,34 +707,47 @@ export class CsvWorkerSession {
   }
 
   /** Get all data */
-  getData = this._wrap(() => this._pool.getData(this._sessionId).then(r => r.data));
+  getData() {
+    return this._wrap(() => this._pool.getData(this._sessionId).then(r => r.data))();
+  }
 
   /** Sort data in place */
-  sort = (config: SortConfig | SortConfig[]) =>
-    this._wrap(() => this._pool.sort(this._sessionId, config).then(r => r.data))();
+  sort(config: SortConfig | SortConfig[]) {
+    return this._wrap(() => this._pool.sort(this._sessionId, config).then(r => r.data))();
+  }
 
   /** Filter data (resets to original data before filtering) */
-  filter = (config: FilterConfig) => this._wrap(() => this._pool.filter(this._sessionId, config))();
+  filter(config: FilterConfig) {
+    return this._wrap(() => this._pool.filter(this._sessionId, config))();
+  }
 
   /** Search across columns */
-  search = (config: SearchConfig) => this._wrap(() => this._pool.search(this._sessionId, config))();
+  search(config: SearchConfig) {
+    return this._wrap(() => this._pool.search(this._sessionId, config))();
+  }
 
   /** Group by and aggregate */
-  groupBy = (config: GroupByConfig) =>
-    this._wrap(() => this._pool.groupBy(this._sessionId, config))();
+  groupBy(config: GroupByConfig) {
+    return this._wrap(() => this._pool.groupBy(this._sessionId, config))();
+  }
 
   /** Aggregate entire dataset */
-  aggregate = (config: AggregateConfig[]) =>
-    this._wrap(() => this._pool.aggregate(this._sessionId, config))();
+  aggregate(config: AggregateConfig[]) {
+    return this._wrap(() => this._pool.aggregate(this._sessionId, config))();
+  }
 
   /** Get paginated data */
-  getPage = (config: PageConfig) => this._wrap(() => this._pool.getPage(this._sessionId, config))();
+  getPage(config: PageConfig) {
+    return this._wrap(() => this._pool.getPage(this._sessionId, config))();
+  }
 
   /**
    * Execute batch query - multiple operations in single round-trip
    * Order of operations: sort -> filter -> search -> groupBy/aggregate -> page
    */
-  query = (config: QueryConfig) => this._wrap(() => this._pool.query(this._sessionId, config))();
+  query(config: QueryConfig) {
+    return this._wrap(() => this._pool.query(this._sessionId, config))();
+  }
 
   /** Dispose session and free worker memory */
   async dispose(): Promise<void> {

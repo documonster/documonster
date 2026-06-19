@@ -280,13 +280,9 @@ export function createEmptyReadable<T = Uint8Array>(options?: ReadableStreamOpti
 }
 
 // Reusable null write handler
-const nullWrite = (
-  _chunk: any,
-  _encoding: string,
-  callback: (error?: Error | null) => void
-): void => {
+function nullWrite(_chunk: any, _encoding: string, callback: (error?: Error | null) => void): void {
   callback();
-};
+}
 
 /**
  * Create a writable stream that discards all data (like /dev/null)

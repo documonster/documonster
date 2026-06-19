@@ -93,9 +93,9 @@ class AppXform extends BaseXform {
     }
   }
 
-  static DateFormat = function (dt: Date): string {
+  static DateFormat(dt: Date): string {
     return dt.toISOString().replace(/[.]\d{3,6}/, "");
-  };
+  }
 
   static DateAttrs = { "xsi:type": "dcterms:W3CDTF" };
 

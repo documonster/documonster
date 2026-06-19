@@ -55,10 +55,12 @@ const fn2 = Document.addFootnote(doc, [
 ]);
 
 // Reference the footnotes inline
-const footnoteRef = (id: number): Run => ({
-  properties: { vertAlign: "superscript" },
-  content: [{ type: "footnoteRef", id }]
-});
+function footnoteRef(id: number): Run {
+  return {
+    properties: { vertAlign: "superscript" },
+    content: [{ type: "footnoteRef", id }]
+  };
+}
 
 Document.addParagraphElement(
   doc,
@@ -84,10 +86,12 @@ const en2 = Document.addEndnote(doc, [
   ])
 ]);
 
-const endnoteRef = (id: number): Run => ({
-  properties: { vertAlign: "superscript" },
-  content: [{ type: "endnoteRef", id }]
-});
+function endnoteRef(id: number): Run {
+  return {
+    properties: { vertAlign: "superscript" },
+    content: [{ type: "endnoteRef", id }]
+  };
+}
 
 Document.addParagraphElement(
   doc,

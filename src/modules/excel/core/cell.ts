@@ -136,8 +136,9 @@ interface ICellValue {
 export type CellValueType = CellValue;
 export type CellValueInputType = CellValueInput;
 
-const hasOwnKeys = (v: unknown): boolean =>
-  !!v && (typeof v !== "object" || Object.keys(v as object).length > 0);
+function hasOwnKeys(v: unknown): boolean {
+  return !!v && (typeof v !== "object" || Object.keys(v as object).length > 0);
+}
 
 function flattenRichText(runs: readonly RichText[]): string {
   let out = "";
@@ -259,9 +260,13 @@ export function cellCreate(row: RowData, column: ColumnData, address: string): C
   return cell;
 }
 
-export const cellWorksheet = (c: CellData): Worksheet => c.row.worksheet;
+export function cellWorksheet(c: CellData): Worksheet {
+  return c.row.worksheet;
+}
 
-export const cellWorkbook = (c: CellData): Workbook => c.row.worksheet._workbook;
+export function cellWorkbook(c: CellData): Workbook {
+  return c.row.worksheet._workbook;
+}
 
 export function cellDestroy(c: CellData): void {
   c.style = undefined!;
@@ -271,44 +276,58 @@ export function cellDestroy(c: CellData): void {
   c.address = undefined!;
 }
 
-export const cellNumFmt = (c: CellData): string | NumFmt | undefined => c.style.numFmt;
+export function cellNumFmt(c: CellData): string | NumFmt | undefined {
+  return c.style.numFmt;
+}
 
 export function cellSetNumFmt(c: CellData, value: string | undefined): void {
   c.style.numFmt = value;
 }
 
-export const cellFont = (c: CellData): Partial<Font> | undefined => c.style.font;
+export function cellFont(c: CellData): Partial<Font> | undefined {
+  return c.style.font;
+}
 
 export function cellSetFont(c: CellData, value: Partial<Font> | undefined): void {
   c.style.font = value;
 }
 
-export const cellAlignment = (c: CellData): Partial<Alignment> | undefined => c.style.alignment;
+export function cellAlignment(c: CellData): Partial<Alignment> | undefined {
+  return c.style.alignment;
+}
 
 export function cellSetAlignment(c: CellData, value: Partial<Alignment> | undefined): void {
   c.style.alignment = value;
 }
 
-export const cellBorder = (c: CellData): Partial<Borders> | undefined => c.style.border;
+export function cellBorder(c: CellData): Partial<Borders> | undefined {
+  return c.style.border;
+}
 
 export function cellSetBorder(c: CellData, value: Partial<Borders> | undefined): void {
   c.style.border = value;
 }
 
-export const cellFill = (c: CellData): Fill | undefined => c.style.fill;
+export function cellFill(c: CellData): Fill | undefined {
+  return c.style.fill;
+}
 
 export function cellSetFill(c: CellData, value: Fill | undefined): void {
   c.style.fill = value;
 }
 
-export const cellProtection = (c: CellData): Partial<Protection> | undefined => c.style.protection;
+export function cellProtection(c: CellData): Partial<Protection> | undefined {
+  return c.style.protection;
+}
 
 export function cellSetProtection(c: CellData, value: Partial<Protection> | undefined): void {
   c.style.protection = value;
 }
 
 /** Read the cell's full style record (numFmt / font / alignment / border / fill / protection). */
-export const cellGetStyle = (c: CellData): Partial<Style> => c.style;
+export function cellGetStyle(c: CellData): Partial<Style> {
+  return c.style;
+}
 
 /** Merge a partial style into the cell's existing style. */
 export function cellSetStyle(c: CellData, style: Partial<Style>): void {
@@ -332,18 +351,29 @@ export function cellSetStyle(c: CellData, style: Partial<Style>): void {
   }
 }
 
-export const cellRow = (c: CellData): number => c.row.number;
+export function cellRow(c: CellData): number {
+  return c.row.number;
+}
 
-export const cellCol = (c: CellData): number => c.column.number;
+export function cellCol(c: CellData): number {
+  return c.column.number;
+}
 
-export const cellAbsoluteAddress = (c: CellData): string =>
-  `$${colCache.n2l(c.column.number)}$${c.row.number}`;
+export function cellAbsoluteAddress(c: CellData): string {
+  return `$${colCache.n2l(c.column.number)}$${c.row.number}`;
+}
 
-export const cellType = (c: CellData): ValueType => c._value.type;
+export function cellType(c: CellData): ValueType {
+  return c._value.type;
+}
 
-export const cellEffectiveType = (c: CellData): ValueType => c._value.effectiveType;
+export function cellEffectiveType(c: CellData): ValueType {
+  return c._value.effectiveType;
+}
 
-export const cellToCsvString = (c: CellData): string => c._value.toCsvString();
+export function cellToCsvString(c: CellData): string {
+  return c._value.toCsvString();
+}
 
 export function cellGetValue(c: CellData): CellValueType {
   return c._value.value;
@@ -366,8 +396,9 @@ export function cellReleaseMergeRef(c: CellData): void {
   c._mergeCount--;
 }
 
-export const cellIsMerged = (c: CellData): boolean =>
-  c._mergeCount > 0 || cellType(c) === Types.Merge;
+export function cellIsMerged(c: CellData): boolean {
+  return c._mergeCount > 0 || cellType(c) === Types.Merge;
+}
 
 export function cellMerge(c: CellData, master: CellData, ignoreStyle?: boolean): void {
   c._value.release();
@@ -399,9 +430,13 @@ export function cellMaster(c: CellData): CellData {
   return c;
 }
 
-export const cellIsHyperlink = (c: CellData): boolean => c._value.type === Types.Hyperlink;
+export function cellIsHyperlink(c: CellData): boolean {
+  return c._value.type === Types.Hyperlink;
+}
 
-export const cellHyperlink = (c: CellData): string | undefined => c._value.hyperlink;
+export function cellHyperlink(c: CellData): string | undefined {
+  return c._value.hyperlink;
+}
 
 export function cellNote(c: CellData): string | NoteConfig | undefined {
   if (!c._comment) {
@@ -414,7 +449,9 @@ export function cellSetNote(c: CellData, note: string | NoteConfig): void {
   c._comment = noteCreate(note);
 }
 
-export const cellComment = (c: CellData): NoteData | undefined => c._comment;
+export function cellComment(c: CellData): NoteData | undefined {
+  return c._comment;
+}
 
 export function cellSetComment(c: CellData, comment: NoteData | NoteConfig | undefined): void {
   if (comment === undefined) {
@@ -426,10 +463,17 @@ export function cellSetComment(c: CellData, comment: NoteData | NoteConfig | und
   }
 }
 
-export const cellText = (c: CellData): string => c._value.toString();
+export function cellText(c: CellData): string {
+  return c._value.toString();
+}
 
-export const cellDisplayText = (c: CellData): string =>
-  getCellDisplayText({ value: c._value.value, numFmt: c.style.numFmt, text: c._value.toString() });
+export function cellDisplayText(c: CellData): string {
+  return getCellDisplayText({
+    value: c._value.value,
+    numFmt: c.style.numFmt,
+    text: c._value.toString()
+  });
+}
 
 const HTML_ESCAPE_MAP: Record<string, string> = {
   '"': "&quot;",
@@ -439,8 +483,9 @@ const HTML_ESCAPE_MAP: Record<string, string> = {
 };
 const HTML_ESCAPE_RE = /["&<>]/g;
 
-export const cellHtml = (c: CellData): string =>
-  cellText(c).replace(HTML_ESCAPE_RE, ch => HTML_ESCAPE_MAP[ch]);
+export function cellHtml(c: CellData): string {
+  return cellText(c).replace(HTML_ESCAPE_RE, ch => HTML_ESCAPE_MAP[ch]);
+}
 
 export function cellView(c: CellData): {
   readonly value: CellValueType;
@@ -472,7 +517,9 @@ export function cellView(c: CellData): {
   };
 }
 
-export const cellToString = (c: CellData): string => cellText(c);
+export function cellToString(c: CellData): string {
+  return cellText(c);
+}
 
 export function _cellUpgradeToHyperlink(c: CellData, hyperlink: string): void {
   switch (cellType(c)) {
@@ -498,9 +545,13 @@ export function _cellUpgradeToHyperlink(c: CellData, hyperlink: string): void {
   }
 }
 
-export const cellFormula = (c: CellData): string | undefined => c._value.formula;
+export function cellFormula(c: CellData): string | undefined {
+  return c._value.formula;
+}
 
-export const cellResult = (c: CellData): FormulaResult | undefined => c._value.result;
+export function cellResult(c: CellData): FormulaResult | undefined {
+  return c._value.result;
+}
 
 export function cellSetResult(c: CellData, value: FormulaResult | undefined): void {
   if (cellType(c) === Types.Formula) {
@@ -508,8 +559,9 @@ export function cellSetResult(c: CellData, value: FormulaResult | undefined): vo
   }
 }
 
-export const cellFormulaType = (c: CellData): FormulaType =>
-  c._value.formulaType ?? Enums.FormulaType.None;
+export function cellFormulaType(c: CellData): FormulaType {
+  return c._value.formulaType ?? Enums.FormulaType.None;
+}
 
 export function cellFullAddress(c: CellData): FullAddress {
   const { worksheet } = c.row;
@@ -521,7 +573,9 @@ export function cellFullAddress(c: CellData): FullAddress {
   };
 }
 
-export const cellName = (c: CellData): string => cellNames(c)[0];
+export function cellName(c: CellData): string {
+  return cellNames(c)[0];
+}
 
 export function cellSetName(c: CellData, value: string): void {
   cellSetNames(c, [value]);
