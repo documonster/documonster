@@ -1,17 +1,11 @@
+import { loadIife } from "@test/browser/load-iife";
 import { beforeAll } from "vitest";
 
+// Eagerly load the Excel IIFE so the legacy `Documonster.Excel` smoke test
+// (which reads the global without loading it itself) keeps working. Other
+// per-bundle smoke tests load their own bundle via `loadIife(...)`.
 beforeAll(async () => {
-  const script = document.createElement("script");
-  script.src = "/dist/iife/documonster.excel.iife.min.js";
-
-  await new Promise((resolve, reject) => {
-    script.onload = resolve;
-    script.onerror = e => {
-      console.error("Failed to load Documonster.Excel:", e);
-      reject(e);
-    };
-    document.head.appendChild(script);
-  });
-
-  console.log("Documonster.Excel loaded:", typeof (globalThis as any).Documonster?.Excel);
+  const Excel = await loadIife("excel", "Excel");
+  // eslint-disable-next-line no-console
+  console.log("Documonster.Excel loaded:", typeof Excel);
 }, 60000);
