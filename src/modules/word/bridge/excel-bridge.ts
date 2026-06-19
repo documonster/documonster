@@ -89,6 +89,7 @@ import type {
   Alignment as ExcelAlignment,
   Color as ExcelColor
 } from "@excel/types";
+import { CELL_THEME_PALETTE } from "@utils/theme-colors";
 import type { Mutable } from "@word/core/internal-utils";
 import { extractParagraphText } from "@word/core/text-utils";
 import type {
@@ -111,7 +112,7 @@ import type {
   Border,
   Shading
 } from "@word/types";
-import { EMU_PER_INCH } from "@word/units";
+import { EMU_PER_INCH, charWidthToPixel, pixelToPoints, ptToTwips } from "@word/units";
 
 // =============================================================================
 // Public API
@@ -317,12 +318,15 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
     return null;
   }
 
-  // Column widths from worksheet definitions (Excel char width → twips)
+  // Column widths from worksheet definitions (Excel char width → twips),
+  // via the shared char-width→pixel→point chain so the table column widths
+  // match the Excel / PDF column geometry. MDW = 7 (Calibri 11pt default).
   const columnWidths: number[] = [];
   for (let c = 1; c <= maxCol; c++) {
     const col = getColumn(ws, c);
     const charWidth = col.width ?? 10;
-    columnWidths.push(Math.round(charWidth * 140));
+    const pt = pixelToPoints(charWidthToPixel(charWidth, 7));
+    columnWidths.push(ptToTwips(pt));
   }
 
   const tableProps: TableProperties = {
@@ -623,19 +627,7 @@ function excelColorToHex(color: Partial<ExcelColor> | undefined): string | undef
     return argb.length === 8 ? argb.slice(2) : argb;
   }
   if (color.theme !== undefined) {
-    const defaults: Record<number, string> = {
-      0: "FFFFFF",
-      1: "000000",
-      2: "44546A",
-      3: "E7E6E6",
-      4: "4472C4",
-      5: "ED7D31",
-      6: "A5A5A5",
-      7: "FFC000",
-      8: "5B9BD5",
-      9: "70AD47"
-    };
-    return defaults[color.theme] ?? "000000";
+    return CELL_THEME_PALETTE[color.theme] ?? "000000";
   }
   return undefined;
 }

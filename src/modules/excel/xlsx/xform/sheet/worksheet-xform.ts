@@ -44,6 +44,7 @@ import { SheetPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-properties-x
 import { SheetProtectionXform } from "@excel/xlsx/xform/sheet/sheet-protection-xform";
 import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
 import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
+import { emuToPx } from "@utils/units";
 import { StdDocAttributes } from "@xml/writer";
 
 function mergeRule(rule, extRule) {
@@ -392,18 +393,17 @@ class WorkSheetXform extends BaseXform {
           // `<xdr:ext cx="NaN" cy="NaN"/>` because `ext` carried
           // `{ cx, cy }` keys but ExtXform looked for `{ width,
           // height }`.
-          const emuToPixel = 9525; // EMU_PER_PIXEL_AT_96_DPI
           const normalizedRange: Record<string, unknown> = { ...chartAnchor.range };
           if (chartAnchor.range.pos) {
             normalizedRange.pos = {
-              x: chartAnchor.range.pos.x / emuToPixel,
-              y: chartAnchor.range.pos.y / emuToPixel
+              x: emuToPx(chartAnchor.range.pos.x),
+              y: emuToPx(chartAnchor.range.pos.y)
             };
           }
           if (chartAnchor.range.ext && chartAnchor.range.ext.cx !== undefined) {
             normalizedRange.ext = {
-              width: chartAnchor.range.ext.cx / emuToPixel,
-              height: chartAnchor.range.ext.cy / emuToPixel
+              width: emuToPx(chartAnchor.range.ext.cx),
+              height: emuToPx(chartAnchor.range.ext.cy)
             };
           }
           const chartRId = nextRid(drawing.rels);

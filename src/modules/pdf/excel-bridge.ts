@@ -57,6 +57,8 @@ import {
   chartsheetState
 } from "@excel/core/chartsheet";
 import { ValueType } from "@excel/core/enums";
+import { computeSparklineGeometry } from "@excel/core/sparkline";
+import type { SparklineGroup } from "@excel/core/sparkline";
 import { getChartsheets, getImage, getWorksheets } from "@excel/core/workbook";
 // Use the browser base class so the public `excelToPdf(workbook)` signature is
 // callable from both the Node entry (where `Workbook` is the Node subclass —
@@ -105,6 +107,8 @@ import type {
   PdfCellTypeValue
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
+import { hexToRgb01 } from "@utils/theme-colors";
+import { emuToPx } from "@utils/units";
 import { base64ToUint8Array } from "@utils/utils.base";
 
 // =============================================================================
@@ -1045,9 +1049,11 @@ function resolveSparklineData(ws: Worksheet, dataRef: string): number[] {
 }
 
 /**
- * Draw a single sparkline into a PDF rect. Mirrors the logic of
- * `renderSparklineSvg` but emits PDF drawing primitives via the
- * chart surface.
+ * Draw a single sparkline into a PDF rect. Delegates all geometry (axis
+ * ranging, marker placement, bar/line layout) to the shared
+ * `computeSparklineGeometry` so the PDF output matches the SVG preview
+ * exactly — the y-down geometry coordinates are flipped into the PDF page's
+ * y-up space here.
  */
 function drawSparklinePdf(
   surface: {
@@ -1073,30 +1079,7 @@ function drawSparklinePdf(
       fill?: { r: number; g: number; b: number };
     }): unknown;
   },
-  group: {
-    type?: string;
-    negative?: boolean;
-    colorSeries?: any;
-    colorNegative?: any;
-    lineWeight?: number;
-    displayXAxis?: boolean;
-    rightToLeft?: boolean;
-    markers?: boolean;
-    high?: boolean;
-    low?: boolean;
-    first?: boolean;
-    last?: boolean;
-    colorHigh?: any;
-    colorLow?: any;
-    colorFirst?: any;
-    colorLast?: any;
-    colorMarkers?: any;
-    colorAxis?: any;
-    minAxisType?: string;
-    maxAxisType?: string;
-    manualMin?: number;
-    manualMax?: number;
-  },
+  group: SparklineGroup,
   values: number[],
   rect: { x: number; y: number; width: number; height: number }
 ): void {
@@ -1105,128 +1088,63 @@ function drawSparklinePdf(
     return;
   }
 
-  const padding = 2;
-  const innerX = x + padding;
-  const innerY = y + padding;
-  const innerW = width - padding * 2;
-  const innerH = height - padding * 2;
-  if (innerW <= 0 || innerH <= 0) {
-    return;
-  }
+  const primitives = computeSparklineGeometry(group, values, {
+    width,
+    height,
+    padding: 2
+  });
 
-  // Compute axis range
-  const finiteValues = values.filter(v => Number.isFinite(v));
-  if (finiteValues.length === 0) {
-    return;
-  }
-  let min = Math.min(...finiteValues);
-  let max = Math.max(...finiteValues);
-  if (group.minAxisType === "custom" && group.manualMin !== undefined) {
-    min = group.manualMin;
-  }
-  if (group.maxAxisType === "custom" && group.manualMax !== undefined) {
-    max = group.manualMax;
-  }
-  if (min === max) {
-    min -= 1;
-    max += 1;
-  }
-  const span = max - min;
-
-  const rtl = group.rightToLeft === true;
-  const n = values.length;
-  const xAt = (i: number): number => {
-    const t = n <= 1 ? 0.5 : i / (n - 1);
-    const shifted = rtl ? 1 - t : t;
-    return innerX + shifted * innerW;
-  };
-  // PDF y-up: higher values → higher y
-  const yAt = (v: number): number => {
-    if (!Number.isFinite(v)) {
-      return innerY;
-    }
-    const t = (v - min) / span;
-    return innerY + t * innerH;
+  // Geometry is box-local and y-down; the PDF page is y-up with `rect.y` at
+  // the bottom edge, so flip vertically and translate into page space.
+  const px = (gx: number): number => x + gx;
+  const py = (gy: number): number => y + (height - gy);
+  const rgb = (hex: string): { r: number; g: number; b: number } | undefined => {
+    const c = hexToRgb01(hex);
+    return c ? { r: c.r, g: c.g, b: c.b } : undefined;
   };
 
-  const lineColor = resolveSpkColor(group.colorSeries) ?? { r: 0.22, g: 0.38, b: 0.57 };
-  const negColor = resolveSpkColor(group.colorNegative) ?? { r: 0.82, g: 0, b: 0 };
-
-  if (group.type === "column" || group.type === "stacked") {
-    const barW = Math.max(1, (innerW / Math.max(n, 1)) * 0.8);
-    for (let i = 0; i < n; i++) {
-      const v = values[i];
-      if (!Number.isFinite(v) || v === 0) {
-        continue;
-      }
-      const cx = xAt(i);
-      const bx = cx - barW / 2;
-      const color = v < 0 && group.negative === true ? negColor : lineColor;
-
-      let barY: number;
-      let barH: number;
-      if (group.type === "stacked") {
-        const half = innerH / 2;
-        if (v >= 0) {
-          barY = innerY + half;
-          barH = half;
-        } else {
-          barY = innerY;
-          barH = half;
-        }
-      } else {
-        const base = min <= 0 && max >= 0 ? yAt(0) : innerY;
-        const top = yAt(v);
-        barY = Math.min(base, top);
-        barH = Math.abs(top - base);
-      }
-      surface.drawRect({ x: bx, y: barY, width: barW, height: Math.max(barH, 0.5), fill: color });
-    }
-  } else {
-    // Line sparkline
-    const points: Array<{ px: number; py: number }> = [];
-    for (let i = 0; i < n; i++) {
-      if (Number.isFinite(values[i])) {
-        points.push({ px: xAt(i), py: yAt(values[i]) });
-      }
-    }
-    if (points.length >= 2) {
-      for (let i = 1; i < points.length; i++) {
-        surface.drawLine({
-          x1: points[i - 1].px,
-          y1: points[i - 1].py,
-          x2: points[i].px,
-          y2: points[i].py,
-          color: lineColor,
-          lineWidth: group.lineWeight ? group.lineWeight * 0.75 : 0.75
+  for (const p of primitives) {
+    switch (p.kind) {
+      case "rect": {
+        // drawRect's y is the bottom of the rect in y-up space; the
+        // geometry rect's (gx, gy) is its top-left in y-down space.
+        surface.drawRect({
+          x: px(p.x),
+          y: py(p.y + p.height),
+          width: p.width,
+          height: p.height,
+          fill: rgb(p.color)
         });
+        break;
       }
-    }
-    // Markers
-    if (group.markers && surface.drawCircle) {
-      const mkColor = resolveSpkColor(group.colorMarkers) ?? lineColor;
-      for (const p of points) {
-        surface.drawCircle({ cx: p.px, cy: p.py, r: 1.2, fill: mkColor });
+      case "polyline": {
+        for (let i = 1; i < p.points.length; i++) {
+          surface.drawLine({
+            x1: px(p.points[i - 1].x),
+            y1: py(p.points[i - 1].y),
+            x2: px(p.points[i].x),
+            y2: py(p.points[i].y),
+            color: rgb(p.color),
+            lineWidth: p.width
+          });
+        }
+        break;
       }
+      case "circle":
+        surface.drawCircle?.({ cx: px(p.cx), cy: py(p.cy), r: p.r, fill: rgb(p.color) });
+        break;
+      case "axis":
+        surface.drawLine({
+          x1: px(p.x1),
+          y1: py(p.y1),
+          x2: px(p.x2),
+          y2: py(p.y2),
+          color: rgb(p.color),
+          lineWidth: 0.5
+        });
+        break;
     }
   }
-}
-
-/** Resolve a SparklineColor to a PdfColor-like {r,g,b}. */
-function resolveSpkColor(c: any): { r: number; g: number; b: number } | undefined {
-  if (!c) {
-    return undefined;
-  }
-  if (c.rgb) {
-    const hex = c.rgb.replace(/^#/, "").replace(/^FF/i, "");
-    const r = parseInt(hex.slice(0, 2), 16) / 255;
-    const g = parseInt(hex.slice(2, 4), 16) / 255;
-    const b = parseInt(hex.slice(4, 6), 16) / 255;
-    if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
-      return { r, g, b };
-    }
-  }
-  return undefined;
 }
 
 /**
@@ -1332,12 +1250,12 @@ function estimateChartPixelSize(range: PdfAnchorRange): {
   heightPx: number;
 } {
   if (range.ext && range.extUnit === "emu") {
-    const widthPt = range.ext.width / 9525;
-    const heightPt = range.ext.height / 9525;
-    // 1 pt = 1/72 in ≈ 96/72 px at 96 dpi
+    const widthPx = emuToPx(range.ext.width);
+    const heightPx = emuToPx(range.ext.height);
+    // 1 px at 96 dpi → 1/72-inch points, then back to px at 96 dpi (96/72).
     return {
-      widthPx: Math.max(120, Math.round(widthPt * (96 / 72))),
-      heightPx: Math.max(80, Math.round(heightPt * (96 / 72)))
+      widthPx: Math.max(120, Math.round(widthPx * (96 / 72))),
+      heightPx: Math.max(80, Math.round(heightPx * (96 / 72)))
     };
   }
   return { widthPx: 640, heightPx: 420 };

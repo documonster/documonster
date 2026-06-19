@@ -1,5 +1,6 @@
 import type { Worksheet } from "@excel/core/worksheet";
 import { colCache } from "@excel/utils/col-cache";
+import { EMU_PER_PX, EMU_PER_POINT } from "@utils/units";
 
 /**
  * Form Control Checkbox - Legacy checkbox control compatible with Office 2007+ and WPS/LibreOffice
@@ -10,14 +11,8 @@ import { colCache } from "@excel/utils/col-cache";
  */
 
 // ============================================================================
-// Constants (exported for use by xforms)
+// Constants
 // ============================================================================
-
-/** EMU (English Metric Units) to pixels conversion factor at 96 DPI */
-export const EMU_PER_PIXEL = 9525;
-
-/** EMU to points conversion factor */
-export const EMU_PER_POINT = 12700;
 
 /** Default column offset in EMUs (~15 pixels) */
 const DEFAULT_COL_OFF = 142875;
@@ -388,10 +383,10 @@ export function formCheckboxSetText(fc: FormCheckboxData, value: string): void {
  */
 export function formCheckboxVmlAnchor(model: FormCheckboxModel): string {
   const { tl, br } = model;
-  const tlColOff = Math.round(tl.colOff / EMU_PER_PIXEL);
-  const tlRowOff = Math.round(tl.rowOff / EMU_PER_PIXEL);
-  const brColOff = Math.round(br.colOff / EMU_PER_PIXEL);
-  const brRowOff = Math.round(br.rowOff / EMU_PER_PIXEL);
+  const tlColOff = Math.round(tl.colOff / EMU_PER_PX);
+  const tlRowOff = Math.round(tl.rowOff / EMU_PER_PX);
+  const brColOff = Math.round(br.colOff / EMU_PER_PX);
+  const brRowOff = Math.round(br.rowOff / EMU_PER_PX);
   return `${tl.col}, ${tlColOff}, ${tl.row}, ${tlRowOff}, ${br.col}, ${brColOff}, ${br.row}, ${brRowOff}`;
 }
 

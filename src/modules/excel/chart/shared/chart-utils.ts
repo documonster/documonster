@@ -31,6 +31,8 @@
  */
 
 import type { ChartColor, ChartFill, ChartLine } from "@excel/chart/model/types";
+import { CHART_THEME_PALETTE, DEFAULT_OFFICE_THEME } from "@utils/theme-colors";
+import { emuToPt } from "@utils/units";
 import { stripXmlIllegalChars as sharedStripXmlIllegalChars } from "@xml/encode";
 
 // ============================================================================
@@ -80,9 +82,18 @@ export const DEFAULT_HEIGHT = 360;
 /**
  * Default series colour rotation. Matches the Excel 2019+ Office theme
  * accent1..accent6 palette so a brand-new workbook with no theme XML
- * still renders with the colours Excel would have used.
+ * still renders with the colours Excel would have used. Derived from the
+ * shared {@link DEFAULT_OFFICE_THEME} so it stays in sync with the rest of
+ * the toolkit's default-theme colours.
  */
-export const COLORS = ["#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"];
+export const COLORS = [
+  `#${DEFAULT_OFFICE_THEME.accent1}`,
+  `#${DEFAULT_OFFICE_THEME.accent2}`,
+  `#${DEFAULT_OFFICE_THEME.accent3}`,
+  `#${DEFAULT_OFFICE_THEME.accent4}`,
+  `#${DEFAULT_OFFICE_THEME.accent5}`,
+  `#${DEFAULT_OFFICE_THEME.accent6}`
+];
 
 /** Dark grey for axis lines / frame strokes. */
 export const AXIS_COLOR = "#444444";
@@ -90,30 +101,17 @@ export const AXIS_COLOR = "#444444";
 export const GRID_COLOR = "#D9D9D9";
 
 /**
- * Preview-grade DrawingML theme palette (`CT_ColorMapping` order:
- * `dk1` / `lt1` / `dk2` / `lt2` / `accent1..6` / `hlink` / `folHlink`).
- * Values match the Office defaults Excel 2019+ ships with (the "Office"
- * theme). The renderer only consults this when a chart references a
- * theme colour but no `<a:clrScheme>` has been resolved — the full
- * theme lookup chain requires the workbook's `theme.xml`, which the
- * preview path deliberately does not load. Authors who need exact
- * theme-accurate colours should rasterise with a tool that resolves
- * the theme.
+ * Preview-grade DrawingML theme palette in `CT_ColorMapping` order, sourced
+ * from the shared default Office theme ({@link CHART_THEME_PALETTE}). The
+ * renderer only consults this when a chart references a theme colour but no
+ * `<a:clrScheme>` has been resolved — the full theme lookup chain requires the
+ * workbook's `theme.xml`, which the preview path deliberately does not load.
+ * Authors who need exact theme-accurate colours should rasterise with a tool
+ * that resolves the theme.
  */
-const THEME_PREVIEW_PALETTE: readonly string[] = Object.freeze([
-  "#000000", // dk1 / tx1
-  "#FFFFFF", // lt1 / bg1
-  "#44546A", // dk2 / tx2
-  "#E7E6E6", // lt2 / bg2
-  "#4472C4", // accent1
-  "#ED7D31", // accent2
-  "#A5A5A5", // accent3
-  "#FFC000", // accent4
-  "#5B9BD5", // accent5
-  "#70AD47", // accent6
-  "#0563C1", // hlink
-  "#954F72" // folHlink
-]);
+const THEME_PREVIEW_PALETTE: readonly string[] = Object.freeze(
+  CHART_THEME_PALETTE.map(hex => `#${hex}`)
+);
 
 /**
  * DrawingML theme slot names in the canonical order used by
@@ -697,7 +695,7 @@ export function previewShapeLineColor(line: ChartLine | undefined): string | und
  * width still renders as a visible stroke.
  */
 export function previewShapeLineWidthPx(line: ChartLine | undefined): number | undefined {
-  return typeof line?.width === "number" ? Math.max(0.5, line.width / 12700) : undefined;
+  return typeof line?.width === "number" ? Math.max(0.5, emuToPt(line.width)) : undefined;
 }
 
 // ============================================================================

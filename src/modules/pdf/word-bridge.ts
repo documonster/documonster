@@ -36,6 +36,7 @@
 import type { PdfPageBuilder } from "@pdf/builder/document-builder";
 import type { RenderLayoutOptions } from "@pdf/word-layout-to-pdf";
 import { renderLayoutDocumentToPdf } from "@pdf/word-layout-to-pdf";
+import { twipsToPt } from "@utils/units";
 import type { FullLayoutOptions, PageGeometryOverride } from "@word/layout/layout-full";
 import { layoutDocumentFull } from "@word/layout/layout-full";
 import type { LayoutChart } from "@word/layout/layout-model";
@@ -272,10 +273,6 @@ function mapToLayoutOptions(
     layoutOpts.pageGeometry = pageGeometry;
   }
   return layoutOpts;
-}
-
-function twipsToPt(twips: number): number {
-  return twips / 20;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };

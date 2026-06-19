@@ -5,6 +5,7 @@
  * Extracted from the original `metadata-parsers.ts`.
  */
 
+import { DEFAULT_OFFICE_THEME } from "@utils/theme-colors";
 import type { Mutable } from "@word/core/internal-utils";
 import { findChildNs, serializeElement } from "@word/reader/parse-utils";
 import type {
@@ -41,20 +42,7 @@ export function parseThemeXml(xmlStr: string): DocumentTheme {
 
   const defaultScheme = {
     name: "Office",
-    colors: {
-      dk1: "000000",
-      lt1: "FFFFFF",
-      dk2: "44546A",
-      lt2: "E7E6E6",
-      accent1: "4472C4",
-      accent2: "ED7D31",
-      accent3: "A5A5A5",
-      accent4: "FFC000",
-      accent5: "5B9BD5",
-      accent6: "70AD47",
-      hlink: "0563C1",
-      folHlink: "954F72"
-    } as Record<ThemeColorName, string>
+    colors: { ...DEFAULT_OFFICE_THEME } as Record<ThemeColorName, string>
   };
   const defaultFontScheme = { name: "Office", majorFont: "Calibri Light", minorFont: "Calibri" };
 

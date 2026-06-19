@@ -74,7 +74,7 @@ import type {
   TableOfContents,
   TextBox
 } from "@word/types";
-import { EMU_PER_POINT } from "@word/units";
+import { EMU_PER_POINT, twipsToPt } from "@word/units";
 
 // =============================================================================
 // Public API
@@ -353,10 +353,6 @@ function availableSlotForLine(
     }
   }
   return { xOffset: best.x, width: best.width };
-}
-
-function twipsToPt(twips: number): number {
-  return twips / 20;
 }
 
 /**

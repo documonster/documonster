@@ -81,8 +81,8 @@ import type {
 } from "@excel/chart/model/types";
 import { escapeXml } from "@excel/chart/shared/chart-utils";
 import { ChartOptionsError } from "@excel/errors";
+import { EMU_PER_POINT, EMU_PER_PX } from "@utils/units";
 
-const EMU_PER_POINT = 12700;
 const DEFAULT_AXIS_START_ID = 100000000;
 const AXIS_CHART_TYPES = new Set<AddChartOptions["type"]>([
   "bar",
@@ -947,7 +947,7 @@ export function toShapeProperties(
       // without an explicit width, fall back to 9525 EMU (0.75pt).
       // Without this DrawingML readers treat `<a:ln>` as hairline,
       // which typically disappears on screen.
-      spPr.line.width = 9525;
+      spPr.line.width = EMU_PER_PX;
     }
   }
   return Object.keys(spPr).length > 0 ? spPr : undefined;
@@ -1033,7 +1033,7 @@ function buildSeriesSpPr(opts: AddChartSeriesOptions): ShapeProperties | undefin
       // DrawingML readers treat `<a:ln>` as hairline, which disappears
       // at typical screen DPI and is never what the user means by
       // `line: "#FF0000"`.
-      line.width = 9525;
+      line.width = EMU_PER_PX;
     }
     if (opts.lineDash) {
       line.dash = opts.lineDash;
@@ -1061,7 +1061,7 @@ function buildMarkerFromOpts(opts: AddChartMarkerOptions): ChartMarker {
       // DrawingML treats the outline as hairline and the marker ring
       // typically vanishes at on-screen DPI. Matches the other
       // builder paths that default to the same width.
-      mSpPr.line = { color: hexToColor(opts.border), width: 9525 };
+      mSpPr.line = { color: hexToColor(opts.border), width: EMU_PER_PX };
     }
     m.spPr = mSpPr;
   }
@@ -1303,7 +1303,7 @@ function buildDataPointFromOpts(opts: AddDataPointOptions): DataPoint {
       spPr.fill = { solid: hexToColor(opts.fill) };
     }
     if (opts.border) {
-      spPr.line = { color: hexToColor(opts.border), width: 9525 };
+      spPr.line = { color: hexToColor(opts.border), width: EMU_PER_PX };
     }
     dp.spPr = spPr;
   }

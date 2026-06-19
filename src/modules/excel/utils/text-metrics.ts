@@ -320,63 +320,19 @@ export function getMaxDigitWidth(font?: Partial<Font>): number {
 }
 
 /**
- * Calculate Pixel Padding (PP) from MDW.
- * Formula: PP = 2 * CEIL(MDW / 4) + 1
+ * Column-width / pixel / point conversions live in the shared, dependency-free
+ * `@utils/units` module so the PDF layout engine can reuse the exact same
+ * formulae. Re-exported here to preserve the historical `@excel/utils/text-metrics`
+ * import surface.
  */
-export function getPixelPadding(mdw: number): number {
-  return 2 * Math.ceil(mdw / 4) + 1;
-}
-
-/**
- * Convert pixel width to Excel column character width (stored in XLSX).
- *
- * Formula: TRUNC(pixels / MDW * 256) / 256
- * This gives the column width in MDW-based character units with 1/256 precision.
- */
-export function pixelToCharWidth(pixels: number, mdw: number): number {
-  if (mdw <= 0) {
-    return 0;
-  }
-  return Math.trunc((pixels / mdw) * 256) / 256;
-}
-
-/**
- * Convert Excel character width to pixel width.
- *
- * The formula differs for widths below 1 character:
- * - width < 1: pixels = ROUND(width * (MDW + PP))
- * - width >= 1: pixels = ROUND(width * MDW) + PP
- */
-export function charWidthToPixel(width: number, mdw: number): number {
-  if (mdw <= 0) {
-    return 0;
-  }
-  const pp = getPixelPadding(mdw);
-  if (width === 0) {
-    return 0;
-  }
-  if (width < 1) {
-    return Math.round(width * (mdw + pp));
-  }
-  return Math.round(width * mdw) + pp;
-}
-
-/**
- * Convert pixel height to points.
- * 1 point = 1/72 inch, 1 pixel = 1/DPI inch
- * points = pixels * 72 / DPI
- */
-export function pixelToPoints(pixels: number): number {
-  return (pixels * 72) / DPI;
-}
-
-/**
- * Convert points to pixels.
- * pixels = points * DPI / 72
- */
-export function pointsToPixel(points: number): number {
-  return (points * DPI) / 72;
-}
+export {
+  getPixelPadding,
+  pixelToCharWidth,
+  charWidthToPixel,
+  pixelToPoints,
+  pointsToPixel
+} from "@utils/units";
+import { getPixelPadding, pixelToCharWidth, charWidthToPixel, pixelToPoints } from "@utils/units";
 
 // =============================================================================
 // Auto-Fit Column Width

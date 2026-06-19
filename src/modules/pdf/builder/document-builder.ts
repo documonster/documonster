@@ -30,6 +30,7 @@ import { iterateSystemFontCandidates } from "@pdf/font/system-fonts";
 import { parseTtf } from "@pdf/font/ttf-parser";
 import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
 import type { PdfColor, PdfExportOptions } from "@pdf/types";
+import { hexToRgb01 } from "@utils/theme-colors";
 
 // =============================================================================
 // Types
@@ -2482,21 +2483,7 @@ function svgColorToPdf(value: string): PdfColor | undefined {
     return color;
   }
   const hex = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
-  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
-    return {
-      r: parseInt(hex[0] + hex[0], 16) / 255,
-      g: parseInt(hex[1] + hex[1], 16) / 255,
-      b: parseInt(hex[2] + hex[2], 16) / 255
-    };
-  }
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return undefined;
-  }
-  return {
-    r: parseInt(hex.slice(0, 2), 16) / 255,
-    g: parseInt(hex.slice(2, 4), 16) / 255,
-    b: parseInt(hex.slice(4, 6), 16) / 255
-  };
+  return hexToRgb01(hex) ?? undefined;
 }
 
 /**

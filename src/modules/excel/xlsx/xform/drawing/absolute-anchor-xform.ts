@@ -5,9 +5,7 @@ import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
-
-/** https://en.wikipedia.org/wiki/Office_Open_XML_file_formats#DrawingML */
-const EMU_PER_PIXEL_AT_96_DPI = 9525;
+import { EMU_PER_PX } from "@utils/units";
 
 interface PosModel {
   x: number;
@@ -33,16 +31,16 @@ class PosXform extends BaseXform<PosModel> {
 
   render(xmlStream: any, model: PosModel): void {
     xmlStream.leafNode(this.tag, {
-      x: Math.floor(model.x * EMU_PER_PIXEL_AT_96_DPI),
-      y: Math.floor(model.y * EMU_PER_PIXEL_AT_96_DPI)
+      x: Math.floor(model.x * EMU_PER_PX),
+      y: Math.floor(model.y * EMU_PER_PX)
     });
   }
 
   parseOpen(node: any): boolean {
     if (node.name === this.tag) {
       this.model = {
-        x: parseInt(node.attributes.x ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI,
-        y: parseInt(node.attributes.y ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI
+        x: parseInt(node.attributes.x ?? "0", 10) / EMU_PER_PX,
+        y: parseInt(node.attributes.y ?? "0", 10) / EMU_PER_PX
       };
       return true;
     }

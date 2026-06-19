@@ -17,6 +17,7 @@ import type {
 } from "@excel/chart/model/chart-ex-types";
 import type { ChartRichText } from "@excel/chart/model/types";
 import { ChartOptionsError } from "@excel/errors";
+import { EMU_PER_PX } from "@utils/units";
 
 /**
  * Parse a single-column range reference of the form `Sheet!$A$2:$A$8`
@@ -725,7 +726,7 @@ function buildSeriesAndData(
       // colour on an invisible line.
       series.spPr.line = {
         color: hexToColor(so.border),
-        width: 9525
+        width: EMU_PER_PX
       };
     }
   }

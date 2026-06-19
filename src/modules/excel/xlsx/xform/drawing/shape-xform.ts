@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { EMU_PER_POINT } from "@utils/units";
 
 /** Fill specification for a drawing shape. */
 export interface ShapeFill {
@@ -35,8 +36,6 @@ export interface ShapeRenderModel {
   /** Optional text label centred in the shape. */
   text?: string;
 }
-
-const EMU_PER_POINT = 12700;
 
 /**
  * Normalize a user-supplied colour to the bare 6-digit RGB hex that OOXML's

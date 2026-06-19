@@ -23,6 +23,7 @@
 import type { PdfPageBuilder } from "@pdf/builder/document-builder";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import type { PdfColor } from "@pdf/types";
+import { hexToRgb01 } from "@utils/theme-colors";
 import type {
   LayoutAltChunk,
   LayoutChart,
@@ -270,20 +271,7 @@ function toPdfX(geometry: PageGeometry, layoutX: number): number {
 }
 
 function hexToColor(hex: string | undefined): PdfColor | undefined {
-  if (!hex) {
-    return undefined;
-  }
-  const cleaned = hex.startsWith("#") ? hex.slice(1) : hex;
-  if (cleaned.length !== 6) {
-    return undefined;
-  }
-  const r = parseInt(cleaned.slice(0, 2), 16);
-  const g = parseInt(cleaned.slice(2, 4), 16);
-  const b = parseInt(cleaned.slice(4, 6), 16);
-  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
-    return undefined;
-  }
-  return { r: r / 255, g: g / 255, b: b / 255 };
+  return hexToRgb01(hex) ?? undefined;
 }
 
 // =============================================================================

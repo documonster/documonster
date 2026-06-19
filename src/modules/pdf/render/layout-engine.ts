@@ -25,7 +25,6 @@ import {
   LINE_HEIGHT_FACTOR,
   INDENT_WIDTH,
   MAX_DIGIT_WIDTH_PX,
-  EXCEL_COLUMN_PADDING_PX,
   PX_TO_PT
 } from "@pdf/render/constants";
 import { wrapTextLines } from "@pdf/render/page-renderer";
@@ -57,6 +56,7 @@ import type {
   LayoutRichTextRun
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
+import { emuToPt, emuToPx, charWidthToPixel } from "@utils/units";
 import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================
@@ -643,7 +643,7 @@ function computeColumnWidths(
       continue;
     }
     const excelWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
-    const pixelWidth = excelWidth * MAX_DIGIT_WIDTH_PX + EXCEL_COLUMN_PADDING_PX;
+    const pixelWidth = charWidthToPixel(excelWidth, MAX_DIGIT_WIDTH_PX);
     const pointWidth = Math.max(pixelWidth * PX_TO_PT, MIN_COLUMN_WIDTH);
     columnWidths.push(pointWidth);
     visibleCols.push(c);
@@ -787,8 +787,7 @@ function countWrapLines(
 
   const col = sheet.columns.get(cell.col);
   const colWidth = col?.width ?? DEFAULT_COLUMN_WIDTH;
-  const scaledColPts =
-    (colWidth * MAX_DIGIT_WIDTH_PX + EXCEL_COLUMN_PADDING_PX) * PX_TO_PT * scaleFactor;
+  const scaledColPts = charWidthToPixel(colWidth, MAX_DIGIT_WIDTH_PX) * PX_TO_PT * scaleFactor;
   const indent = cell.style.alignment.indent ?? 0;
   const borderLeft = cell.style?.border?.left?.style
     ? borderStyleToLineWidth(cell.style.border.left.style) / 2
@@ -1413,9 +1412,9 @@ function resolveAnchorRect(
       targetPage.options.margins.top -
       (targetPage.options.showSheetNames ? 20 : 0);
 
-  // Apply sub-cell offsets (EMU: 1pt = 12700 EMU), scaled to match page layout
-  const tlColOff = ((tl.nativeColOff ?? 0) / 12700 || 0) * scaleFactor;
-  const tlRowOff = ((tl.nativeRowOff ?? 0) / 12700 || 0) * scaleFactor;
+  // Apply sub-cell offsets, scaled to match page layout.
+  const tlColOff = (emuToPt(tl.nativeColOff ?? 0) || 0) * scaleFactor;
+  const tlRowOff = (emuToPt(tl.nativeRowOff ?? 0) || 0) * scaleFactor;
   const x = baseX + tlColOff;
   const yTop = baseY - tlRowOff;
 
@@ -1425,9 +1424,9 @@ function resolveAnchorRect(
   const extUnit = range.extUnit ?? "px";
   if (range.ext) {
     if (extUnit === "emu") {
-      // EMU → pt (1 pt = 9525 EMU, same as the Excel drawing ext.cx/cy).
-      width = (range.ext.width / 9525) * scaleFactor;
-      height = (range.ext.height / 9525) * scaleFactor;
+      // EMU → px (the Excel drawing ext.cx/cy convention at 96 DPI).
+      width = emuToPx(range.ext.width) * scaleFactor;
+      height = emuToPx(range.ext.height) * scaleFactor;
     } else {
       // Legacy pixel → pt (0.75 factor = 72/96 dpi)
       width = range.ext.width * 0.75 * scaleFactor;

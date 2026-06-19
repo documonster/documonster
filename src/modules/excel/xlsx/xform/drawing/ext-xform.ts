@@ -1,7 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-
-/** https://en.wikipedia.org/wiki/Office_Open_XML_file_formats#DrawingML */
-const EMU_PER_PIXEL_AT_96_DPI = 9525;
+import { EMU_PER_PX } from "@utils/units";
 
 interface ExtModel {
   width: number;
@@ -23,8 +21,8 @@ class ExtXform extends BaseXform<ExtModel> {
   render(xmlStream: any, model: ExtModel): void {
     xmlStream.openNode(this.tag);
 
-    const width = Math.floor(model.width * EMU_PER_PIXEL_AT_96_DPI);
-    const height = Math.floor(model.height * EMU_PER_PIXEL_AT_96_DPI);
+    const width = Math.floor(model.width * EMU_PER_PX);
+    const height = Math.floor(model.height * EMU_PER_PX);
 
     xmlStream.addAttribute("cx", width);
     xmlStream.addAttribute("cy", height);
@@ -35,8 +33,8 @@ class ExtXform extends BaseXform<ExtModel> {
   parseOpen(node: any): boolean {
     if (node.name === this.tag) {
       this.model = {
-        width: parseInt(node.attributes.cx ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI,
-        height: parseInt(node.attributes.cy ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI
+        width: parseInt(node.attributes.cx ?? "0", 10) / EMU_PER_PX,
+        height: parseInt(node.attributes.cy ?? "0", 10) / EMU_PER_PX
       };
       return true;
     }

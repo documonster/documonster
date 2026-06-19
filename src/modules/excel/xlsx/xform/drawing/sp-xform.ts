@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { EMU_PER_PX } from "@utils/units";
 
 export interface ShapeModel {
   /** Drawing object id (must be unique within drawing part) */
@@ -75,7 +76,7 @@ class SpXform extends BaseXform {
     xmlStream.closeNode(); // a:ext
     xmlStream.openNode("a:ext", { uri: "{91240B29-F687-4F45-9708-019B960494DF}" });
     xmlStream.openNode("a14:hiddenLine", {
-      w: 9525,
+      w: EMU_PER_PX,
       "xmlns:a14": "http://schemas.microsoft.com/office/drawing/2010/main"
     });
     xmlStream.openNode("a:solidFill");
