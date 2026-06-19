@@ -14,17 +14,12 @@ import {
 } from "@excel/core/column";
 import {
   getColumn,
-  columnSetAlignment,
-  columnSetBorder,
-  columnSetFill,
-  columnSetFont,
   columnSetHeader,
   columnSetKey,
-  columnSetNumFmt,
-  columnSetProtection
+  columnSetStyle
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
+import type { Style } from "@excel/types";
 
 export type Sheet = WorksheetData;
 type ColRef = string | number;
@@ -74,23 +69,5 @@ export function getStyle(ws: Sheet, col: ColRef): Partial<Style> {
   return getColumn(ws, col).style;
 }
 export function setStyle(ws: Sheet, col: ColRef, style: Partial<Style>): void {
-  const c = getColumn(ws, col);
-  if (style.numFmt !== undefined) {
-    columnSetNumFmt(c, style.numFmt as string);
-  }
-  if (style.font !== undefined) {
-    columnSetFont(c, style.font as Partial<Font>);
-  }
-  if (style.alignment !== undefined) {
-    columnSetAlignment(c, style.alignment as Partial<Alignment>);
-  }
-  if (style.border !== undefined) {
-    columnSetBorder(c, style.border as Partial<Borders>);
-  }
-  if (style.fill !== undefined) {
-    columnSetFill(c, style.fill as Fill);
-  }
-  if (style.protection !== undefined) {
-    columnSetProtection(c, style.protection as Partial<Protection>);
-  }
+  columnSetStyle(getColumn(ws, col), style);
 }

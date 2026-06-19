@@ -84,13 +84,19 @@ type Addr = string | number;
 export function getValue(ws: Sheet, addr: Addr, col?: number): CellValueType {
   return cellGetValue(getCell(ws, addr, col));
 }
+/** Set a cell value by "A1" address. */
+export function setValue(ws: Sheet, addr: string, value: CellValueInputType): void;
+/** Set a cell value by 1-based (row, col). */
+export function setValue(ws: Sheet, row: number, col: number, value: CellValueInputType): void;
 export function setValue(
   ws: Sheet,
   addr: Addr,
   valueOrCol: CellValueInputType,
   value?: CellValueInputType
 ): void {
-  // Supports both `(ws, "A1", value)` and `(ws, row, col, value)`.
+  // The 4-arg (ws, row, col, value) form passes valueOrCol as the column; the
+  // 3-arg (ws, addr, value) form passes it as the value. arguments.length is
+  // reliable here (named function declaration, never an arrow / bound fn).
   if (arguments.length >= 4) {
     cellSetValue(getCell(ws, addr, valueOrCol as number), value as CellValueInputType);
     return;
@@ -124,13 +130,19 @@ export function getResult(ws: Sheet, addr: Addr, col?: number): FormulaResult | 
 export function getStyle(ws: Sheet, addr: Addr, col?: number): Partial<Style> {
   return cellGetStyle(getCell(ws, addr, col));
 }
+/** Merge a partial style into the cell at "A1" address. */
+export function setStyle(ws: Sheet, addr: string, style: Partial<Style>): void;
+/** Merge a partial style into the cell at 1-based (row, col). */
+export function setStyle(ws: Sheet, row: number, col: number, style: Partial<Style>): void;
 export function setStyle(
   ws: Sheet,
   addr: Addr,
   styleOrCol: Partial<Style> | number,
   style?: Partial<Style>
 ): void {
-  // Supports `(ws, "A1", style)` and `(ws, row, col, style)`.
+  // The 4-arg (ws, row, col, style) form passes styleOrCol as the column; the
+  // 3-arg (ws, addr, style) form passes it as the style. arguments.length is
+  // reliable here (named function declaration, never an arrow / bound fn).
   if (arguments.length >= 4) {
     cellSetStyle(getCell(ws, addr, styleOrCol as number), style as Partial<Style>);
     return;
@@ -172,6 +184,15 @@ export function addName(ws: Sheet, addr: Addr, name: string): void {
 }
 export function removeName(ws: Sheet, addr: Addr, name: string): void {
   cellRemoveName(getCell(ws, addr), name);
+}
+export function setName(ws: Sheet, addr: Addr, name: string): void {
+  cellSetName(getCell(ws, addr), name);
+}
+export function setNames(ws: Sheet, addr: Addr, names: string[]): void {
+  cellSetNames(getCell(ws, addr), names);
+}
+export function removeAllNames(ws: Sheet, addr: Addr): void {
+  cellRemoveAllNames(getCell(ws, addr));
 }
 
 // --- data validation ---
@@ -242,18 +263,6 @@ export function setComment(
   comment: NoteData | NoteConfig | undefined
 ): void {
   cellSetComment(getCell(ws, addr), comment);
-}
-
-// --- defined names (set / bulk) ---
-
-export function setName(ws: Sheet, addr: Addr, name: string): void {
-  cellSetName(getCell(ws, addr), name);
-}
-export function setNames(ws: Sheet, addr: Addr, names: string[]): void {
-  cellSetNames(getCell(ws, addr), names);
-}
-export function removeAllNames(ws: Sheet, addr: Addr): void {
-  cellRemoveAllNames(getCell(ws, addr));
 }
 
 // --- formula result / full address ---

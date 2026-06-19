@@ -248,15 +248,16 @@ export function cellCreate(row: RowData, column: ColumnData, address: string): C
     throw new ExcelError("A Cell needs a Row");
   }
   colCache.validateAddress(address);
+  // `mergeStyle` builds and returns the cell's own style object in one pass, so
+  // we set it directly rather than allocating a throwaway `{}` literal first.
   const cell = {
     row,
     column,
     address,
-    style: {},
+    style: mergeStyle(row.style, column.style, {}),
     _mergeCount: 0
   } as CellData;
   cell._value = Value.create(Types.Null, cell);
-  cell.style = mergeStyle(row.style, column.style, {});
   return cell;
 }
 
@@ -349,6 +350,34 @@ export function cellSetStyle(c: CellData, style: Partial<Style>): void {
   if (style.protection !== undefined) {
     c.style.protection = style.protection;
   }
+}
+
+/**
+ * Assign a single style facet onto `target`, deep-cloning the value so the
+ * target never aliases a shared sub-object (`numFmt` is a primitive and is
+ * effectively copied by value). The generic `K` keeps the key and value types
+ * linked — a widened `keyof Style` loop variable would collapse the index type
+ * to the intersection of all facet types and break assignment.
+ */
+export function setFacetCloned<K extends keyof Style>(
+  target: Partial<Style>,
+  key: K,
+  value: Style[K] | undefined
+): void {
+  target[key] = typeof value === "object" && value !== null ? structuredClone(value) : value;
+}
+
+/**
+ * Assign a single style facet onto `target` by reference (no clone). Companion
+ * to {@link setFacetCloned}; the generic `K` exists for the same reason — to
+ * keep the key/value index types linked across a `keyof Style` assignment.
+ */
+export function setFacet<K extends keyof Style>(
+  target: Partial<Style>,
+  key: K,
+  value: Style[K] | undefined
+): void {
+  target[key] = value;
 }
 
 export function cellRow(c: CellData): number {

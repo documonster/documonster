@@ -27,7 +27,7 @@ import {
   rowSetValues
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import type { Alignment, Borders, Fill, Font, RowValues, Style } from "@excel/types";
+import type { Alignment, Borders, CellValue, Fill, Font, RowValues, Style } from "@excel/types";
 
 export type Sheet = WorksheetData;
 
@@ -68,13 +68,28 @@ export function setStyle(ws: Sheet, row: number, style: Partial<Style>): void {
 
 // --- values ---
 
-export function getValues(ws: Sheet, row: number): unknown[] {
+/**
+ * Read the row's cell values as a **0-based** dense array: the value of column
+ * A is at index `0`, column B at index `1`, and so on. Empty cells are holes.
+ * This is the recommended form for plain JavaScript indexing.
+ *
+ * Contrast with {@link values}, which returns a **1-based** array.
+ */
+export function getValues(ws: Sheet, row: number): CellValue[] {
   return rowGetValues(getRow(ws, row));
 }
 export function setValues(ws: Sheet, row: number, values: RowValues): void {
   rowSetValues(getRow(ws, row), values);
 }
-export function values(ws: Sheet, row: number): unknown[] {
+/**
+ * Read the row's cell values as a **1-based** array: index `0` is always an
+ * empty leading slot, the value of column A is at index `1`, column B at `2`,
+ * and so on. This mirrors Excel's 1-based column numbering (and the historical
+ * ExcelJS `row.values` shape).
+ *
+ * Prefer {@link getValues} for ordinary 0-based array access.
+ */
+export function values(ws: Sheet, row: number): CellValue[] {
   return rowValues(getRow(ws, row));
 }
 

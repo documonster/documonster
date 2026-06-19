@@ -40,7 +40,9 @@ import {
   cellSetNumFmt,
   cellSetProtection,
   cellSetValue,
-  cellType
+  cellType,
+  setFacet,
+  setFacetCloned
 } from "@excel/core/cell";
 import type { ColumnData, ColumnDefn, ColumnHeaderValue, ColumnModel } from "@excel/core/column";
 import { columnHeaders } from "@excel/core/column";
@@ -599,6 +601,34 @@ export function columnSetFill(c: ColumnData, value: Fill | undefined): void {
   c.style.fill = value;
   columnEachCell(c, cell => {
     cellSetFill(cell, value ? structuredClone(value) : value);
+  });
+}
+
+/**
+ * Merge a partial style into the column, propagating each provided facet to
+ * every existing cell in the column. Mirrors {@link cellSetStyle} /
+ * `rowSetStyle`: only facets present on `style` are applied; omitted facets are
+ * left untouched.
+ *
+ * Walks the column's cells a single time applying every provided facet, rather
+ * than one full column pass per facet (the per-facet `columnSet*` setters each
+ * iterate the whole column, so delegating to all six would scan the column up
+ * to six times).
+ */
+export function columnSetStyle(c: ColumnData, style: Partial<Style>): void {
+  const keys = (Object.keys(style) as (keyof Style)[]).filter(k => style[k] !== undefined);
+  if (keys.length === 0) {
+    return;
+  }
+  // The column's own style holds each facet by reference; every cell gets a
+  // deep-cloned copy so cells never alias the column's style sub-objects.
+  for (const k of keys) {
+    setFacet(c.style, k, style[k]);
+  }
+  columnEachCell(c, cell => {
+    for (const k of keys) {
+      setFacetCloned(cell.style, k, style[k]);
+    }
   });
 }
 

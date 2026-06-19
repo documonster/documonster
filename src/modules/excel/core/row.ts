@@ -1,5 +1,12 @@
 import type { CellData, CellModel } from "@excel/core/cell";
-import { cellCol, cellGetModel, cellGetValue, cellType } from "@excel/core/cell";
+import {
+  cellCol,
+  cellGetModel,
+  cellGetValue,
+  cellType,
+  setFacet,
+  setFacetCloned
+} from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
 import type { Worksheet } from "@excel/core/worksheet";
 import type {
@@ -53,8 +60,7 @@ function applyStyle<K extends keyof Style>(r: RowData, name: K, value: Style[K])
   r.style[name] = value;
   r.cells.forEach(cell => {
     if (cell) {
-      cell.style[name] =
-        typeof value === "object" && value !== null ? structuredClone(value) : value;
+      setFacetCloned(cell.style, name, value);
     }
   });
 }
@@ -213,10 +219,20 @@ export function rowGetStyle(r: RowData): Partial<Style> {
 
 /** Merge a partial style into the row (propagates to existing cells). */
 export function rowSetStyle(r: RowData, style: Partial<Style>): void {
-  (Object.keys(style) as (keyof Style)[]).forEach(k => {
-    const v = style[k];
-    if (v !== undefined) {
-      applyStyle(r, k, v as Style[keyof Style]);
+  // Collect the provided facets once, then walk the cells a single time —
+  // applying every facet per cell — instead of one full pass per facet.
+  const keys = (Object.keys(style) as (keyof Style)[]).filter(k => style[k] !== undefined);
+  if (keys.length === 0) {
+    return;
+  }
+  for (const k of keys) {
+    setFacet(r.style, k, style[k]);
+  }
+  r.cells.forEach(cell => {
+    if (cell) {
+      for (const k of keys) {
+        setFacetCloned(cell.style, k, style[k]);
+      }
     }
   });
 }
