@@ -1221,9 +1221,3 @@ const data = collector.toUint8Array();
 | **`readableBuffer` / `writableBuffer`** | 返回 Node.js 内部 `BufferList`（链表结构，具有 `.head`、`.length`）                               | 返回普通 `T[]` 数组                                   | 请勿依赖 `BufferList` 特有属性。两者都返回可迭代的数据块集合。                                     |
 | **事件调度**                            | `process.nextTick`（在微任务之前执行）                                                            | `queueMicrotask`（本身就是微任务）                    | 相对于 `Promise.then()` 的事件顺序在边界情况下可能不同。共享测试套件已验证所有常见模式的行为一致。 |
 | **`_readableState` / `_writableState`** | 可访问（Node.js 内部状态对象）                                                                    | 不存在（状态存储在各个私有字段中）                    | 请勿依赖内部状态对象。请使用公开的属性访问器。                                                     |
-
----
-
-## 许可证
-
-MIT

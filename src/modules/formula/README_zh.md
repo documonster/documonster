@@ -232,7 +232,3 @@ Pratt parser — 从 token 流构建类型化 AST。结构错误抛异常。
 - **隐式相交** — 在非动态数组位置应用,和 Excel 365 一致
 - **迭代计算** — 默认关闭;通过 `workbook.calcProperties = { iterate: true, iterateCount: 100, iterateDelta: 0.001 }` 开启
 - **外部引用** — `[book.xlsx]Sheet!A1` 被解析为 `#REF!`;不读取缓存值
-
-## 许可证
-
-MIT — 与主包一致。

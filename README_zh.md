@@ -204,5 +204,5 @@ const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer
 - 📋 [更新日志](CHANGELOG.md)
 - 🔄 [迁移指南](MIGRATION.md)
 - 🗺️ [路线图](ROADMAP.md)
-- 📄 [许可证 (MIT)](LICENSE)
+- 📄 [许可证 (Apache-2.0)](LICENSE)
 - 📦 [第三方声明](THIRD_PARTY_NOTICES.md)

@@ -219,5 +219,5 @@ For older browsers without native `CompressionStream` API, Documonster automatic
 - 📋 [Changelog](CHANGELOG.md)
 - 🔄 [Migration Guide](MIGRATION.md)
 - 🗺️ [Roadmap](ROADMAP.md)
-- 📄 [License (MIT)](LICENSE)
+- 📄 [License (Apache-2.0)](LICENSE)
 - 📦 [Third-Party Notices](THIRD_PARTY_NOTICES.md)

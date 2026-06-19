@@ -1,12 +1,22 @@
 # Third-Party Notices
 
-This project includes software developed by third parties. The following notices are provided for attribution and license compliance.
+documonster as a whole is licensed under the Apache License, Version 2.0
+(see the LICENSE file). The notices below apply only to the specific
+third-party components identified, and do not affect the licensing of the
+remainder of the project.
+
+The PDF, Word, Formula, CSV, Markdown, XML, Archive, and Stream modules, as
+well as the parts of the Excel module not listed below, are original works of
+the documonster authors and are licensed under the Apache License, Version 2.0.
 
 ---
 
-## Third-party component
+## ExcelJS (Excel module)
 
-ExcelJS is licensed under the MIT License:
+Portions of the Excel (XLSX) module are derived from ExcelJS. That derivative
+code remains subject to the ExcelJS MIT License, reproduced below. The
+following copyright notice and permission notice are retained in compliance
+with that license.
 
 The MIT License (MIT)
 

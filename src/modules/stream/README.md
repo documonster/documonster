@@ -1222,9 +1222,3 @@ differences are **inherent to the platforms** and cannot be eliminated:
 | **`readableBuffer` / `writableBuffer`** | Returns Node.js internal `BufferList` (linked list with `.head`, `.length`)                         | Returns plain `T[]` array                                 | Do not rely on `BufferList`-specific properties. Both return an iterable collection of chunks.                                                     |
 | **Event scheduling**                    | `process.nextTick` (runs before microtasks)                                                         | `queueMicrotask` (IS a microtask)                         | Event ordering relative to `Promise.then()` may differ in edge cases. The shared test suite validates that all common patterns behave identically. |
 | **`_readableState` / `_writableState`** | Accessible (internal Node.js state objects)                                                         | Not present (state is in individual private fields)       | Do not rely on internal state objects. Use the public property getters instead.                                                                    |
-
----
-
-## License
-
-MIT

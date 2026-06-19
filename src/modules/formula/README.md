@@ -280,7 +280,3 @@ structural errors.
   `workbook.calcProperties = { iterate: true, iterateCount: 100, iterateDelta: 0.001 }`.
 - **External references** — `[book.xlsx]Sheet!A1` is parsed as `#REF!`;
   cached values are not followed.
-
-## License
-
-MIT — same as the parent package.
