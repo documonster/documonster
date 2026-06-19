@@ -39,14 +39,9 @@ export default defineConfig({
       "src/modules/word/**/__tests__/**/*.test.ts"
     ],
     exclude: [
-      // Formula's Excel-oracle reference suite reads fixture files from disk.
-      "src/modules/formula/__tests__/reference/**",
-      // Word streaming writer is built on Node streams — exercised in Node only.
-      "src/modules/word/__tests__/streaming.test.ts",
-      "src/modules/word/__tests__/streaming-sink.test.ts",
-      "src/modules/word/__tests__/bug-fixes.test.ts",
-      // gap-closure-v2 pulls in Node-only APIs.
-      "src/modules/word/__tests__/gap-closure-v2.test.ts"
+      // Formula's Excel-oracle reference suite reads fixture files from disk
+      // (Node `fs`), so it cannot run in the browser.
+      "src/modules/formula/__tests__/reference/**"
     ]
   }
 });

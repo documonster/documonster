@@ -274,6 +274,16 @@ export class StreamingDocxWriter {
    * `addAsync` / `finalize` await the chain.
    */
   private _pendingDrain: Promise<void> = Promise.resolve();
+  /**
+   * Resolves when the `Zip` archive emits its terminal callback (`final`).
+   * In the browser the deflate pipeline (CompressionStream) is asynchronous,
+   * so `_zip.end()` returns before the trailing chunks and central directory
+   * have been produced; `finalize()` awaits this before reading
+   * `_outputChunks` / closing the sink. In Node the deflate is synchronous and
+   * this resolves before `_zip.end()` returns, so the await is a no-op.
+   */
+  private _zipComplete!: Promise<void>;
+  private _resolveZipComplete!: () => void;
   private _documentStream!: StreamBuf;
   private _documentZipFile!: InstanceType<typeof ZipDeflate>;
   private _headerWritten = false;
@@ -506,6 +516,12 @@ export class StreamingDocxWriter {
     // `_streamError`; surface them as a rejection.
     this._zip.end();
 
+    // Wait for the archive to fully drain. On the browser deflate path the
+    // trailing chunks + central directory are produced asynchronously after
+    // `end()` returns; without this the buffered output would be assembled
+    // from an empty / partial `_outputChunks`. No-op on Node's sync path.
+    await this._zipComplete;
+
     // In sink mode the Zip callback queued every chunk onto _pendingDrain;
     // wait for that promise chain to complete before declaring the writer
     // finished. In buffered mode this is a no-op (resolved promise).
@@ -582,6 +598,9 @@ export class StreamingDocxWriter {
       imageRIdRemap: new Map(),
       hyperlinkRIds: new WeakMap()
     });
+    this._zipComplete = new Promise<void>(resolve => {
+      this._resolveZipComplete = resolve;
+    });
     this._zip = new Zip((err, data, _final) => {
       // The ZIP callback reports compression / framing errors out-of-band.
       // Capture only the first error; subsequent callbacks may still be
@@ -614,6 +633,12 @@ export class StreamingDocxWriter {
         } else {
           this._outputChunks.push(data);
         }
+      }
+      // Terminal callback: the archive (incl. trailing central directory) is
+      // fully emitted. On the async browser deflate path this fires after
+      // `_zip.end()` returns, so `finalize()` must await `_zipComplete`.
+      if (_final || err) {
+        this._resolveZipComplete?.();
       }
     });
 

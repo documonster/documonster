@@ -117,11 +117,11 @@ describe("StreamingDocxWriter — sink mode", () => {
   });
 
   it("synchronous add() throws after a sink write has already failed", async () => {
-    // Build two writers fed from the same failing-sink template. The
-    // first observes the failure via finalize(); we then construct a
-    // second one with the *same* failing pattern, drain it asynchronously
-    // until the sink write rejects, and then assert the synchronous
-    // add() path surfaces that captured failure.
+    // A sink whose every write throws. We drive the writer with `addAsync`
+    // (which awaits the sink-write drain chain and surfaces `_streamError`)
+    // until the failure is observed, rather than racing a fixed timeout —
+    // this is deterministic on both the Node (sync deflate) and browser
+    // (async CompressionStream deflate) paths.
     const failingSinkOpts = {
       sink: new WritableStream<Uint8Array>({
         write(_chunk): void {
@@ -130,24 +130,22 @@ describe("StreamingDocxWriter — sink mode", () => {
       })
     };
     const writer = Streaming.createDocxStream(failingSinkOpts);
-    // Inject content and push past the zip buffer so a chunk reaches
-    // the sink. Catch and discard the eventual finalize-time rejection
-    // so the test can continue.
-    for (let i = 0; i < 500; i++) {
-      writer.add(Build.textParagraph(`P${i}`));
-    }
-    // Drive the pending sink writes to completion. We don't await
-    // finalize because finalize() also wants to write more bytes and
-    // the failure model is a once-error-anywhere-fails-everywhere
-    // contract; instead we let the microtask + macrotask queue drain
-    // a few times so the sink's WritableStream rejection lands in
-    // `_streamError`. 200 ms is a generous upper bound for slow CI;
-    // the actual flush completes in <5 ms locally.
-    await new Promise(r => setTimeout(r, 200));
 
-    // By now the sink callback has rejected at least once; the
-    // adapter captured it into `_streamError`. Synchronous add() must
-    // throw rather than queue more doomed work.
+    // Feed elements via addAsync until a sink write has actually failed and
+    // been captured. The first compressed chunk reaching the sink rejects;
+    // addAsync surfaces it. Bounded so a logic regression can't hang.
+    let sinkFailed = false;
+    for (let i = 0; i < 2000 && !sinkFailed; i++) {
+      try {
+        await writer.addAsync(Build.textParagraph(`P${i}`));
+      } catch {
+        sinkFailed = true;
+      }
+    }
+    expect(sinkFailed).toBe(true);
+
+    // Once the sink has failed, the synchronous add() path must throw
+    // rather than queue more doomed work.
     let threw = false;
     try {
       writer.add(Build.textParagraph("never reaches sink"));
