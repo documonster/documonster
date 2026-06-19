@@ -9,8 +9,7 @@ import { ArchiveError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import { normalizeZipPath } from "@archive/zip-spec/zip-path";
-
-import type { ZipEntryOptions } from "./index";
+import type { ZipEntryOptions } from "@archive/zip/index";
 
 // =============================================================================
 // Types

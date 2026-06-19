@@ -11,7 +11,7 @@
  *      ▼
  *   LayoutDocument (positioned PageContent variants)
  *      │
- *      │  renderLayoutDocumentToPdf()  ← ./render-layout-to-pdf
+ *      │  renderLayoutDocumentToPdf()  ← ./word-layout-to-pdf
  *      ▼
  *   PdfDocumentBuilder → bytes
  *
@@ -34,12 +34,17 @@
  */
 
 import type { PdfPageBuilder } from "@pdf/builder/document-builder";
-import type { RenderLayoutOptions } from "@pdf/render-layout-to-pdf";
-import { renderLayoutDocumentToPdf } from "@pdf/render-layout-to-pdf";
+import type { RenderLayoutOptions } from "@pdf/word-layout-to-pdf";
+import { renderLayoutDocumentToPdf } from "@pdf/word-layout-to-pdf";
 import type { FullLayoutOptions, PageGeometryOverride } from "@word/layout/layout-full";
 import { layoutDocumentFull } from "@word/layout/layout-full";
 import type { LayoutChart } from "@word/layout/layout-model";
 import type { Chart, ChartContent, ChartExContent, DocxDocument } from "@word/types";
+
+// Re-export the Word document type used in this bridge's public signature so
+// the `Pdf` surface can type its lazy `fromDocx` wrapper without importing
+// from `@word` directly — only bridge files may cross into `@word`.
+export type { DocxDocument } from "@word/types";
 
 /** Options for DOCX → PDF conversion. */
 export interface DocxToPdfOptions {
@@ -144,7 +149,7 @@ export async function docxToPdf(
       ) => boolean | void)
     | undefined;
   try {
-    const mod = await import("@pdf/excel-bridge");
+    const mod = await import("@pdf/word-chart-bridge");
     if (typeof mod.createWordLayoutChartPdfRenderer === "function") {
       builtInLayoutRenderer = mod.createWordLayoutChartPdfRenderer();
     }

@@ -49,18 +49,17 @@ import type {
 import { escapeXml, escapeXmlAttr } from "@excel/chart/shared/chart-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {
+  C14_PIVOT_OPTIONS_EXT_URI,
+  C15_DATA_LABELS_RANGE_EXT_URI,
+  C16_PIVOT_OPTIONS16_EXT_URI
+} from "@excel/xlsx/xform/chart/chart-space-constants";
+import { renderChartSpace } from "@excel/xlsx/xform/chart/chart-space-render";
+import {
   parseXsdBoolean as sharedParseXsdBoolean,
   parseXsdInt as sharedParseXsdInt,
   parseXsdFloat as sharedParseXsdFloat
 } from "@excel/xlsx/xform/xsd-values";
 import type { XmlSink } from "@xml/types";
-
-import {
-  C14_PIVOT_OPTIONS_EXT_URI,
-  C15_DATA_LABELS_RANGE_EXT_URI,
-  C16_PIVOT_OPTIONS16_EXT_URI
-} from "./chart-space-constants";
-import { renderChartSpace } from "./chart-space-render";
 
 // ============================================================================
 // Raw XML capture helper

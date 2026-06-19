@@ -15,16 +15,15 @@ import type { ArchiveSink } from "@archive/io/archive-sink";
 import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { toAsyncIterable, toUint8Array, isInMemoryArchiveSource } from "@archive/io/archive-source";
+import type { TarType } from "@archive/tar/tar-constants";
+import { TAR_TYPE, DEFAULT_TAR_MODE, DEFAULT_TAR_DIR_MODE } from "@archive/tar/tar-constants";
+import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
+import { isDataEntry, isDirectory } from "@archive/tar/tar-entry-info";
+import type { TarHeaderOptions } from "@archive/tar/tar-header";
+import { encodeHeader, createPadding, createEndOfArchive } from "@archive/tar/tar-header";
+import type { TarParseOptions } from "@archive/tar/tar-parser";
+import { parseTar, parseTarStream } from "@archive/tar/tar-parser";
 import { concatUint8Arrays, textEncoder, getTextDecoder } from "@utils/binary";
-
-import type { TarType } from "./tar-constants";
-import { TAR_TYPE, DEFAULT_TAR_MODE, DEFAULT_TAR_DIR_MODE } from "./tar-constants";
-import type { TarEntryInfo } from "./tar-entry-info";
-import { isDataEntry, isDirectory } from "./tar-entry-info";
-import type { TarHeaderOptions } from "./tar-header";
-import { encodeHeader, createPadding, createEndOfArchive } from "./tar-header";
-import type { TarParseOptions } from "./tar-parser";
-import { parseTar, parseTarStream } from "./tar-parser";
 
 // ============================================================================
 // Types

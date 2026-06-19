@@ -1,9 +1,12 @@
 /**
- * LayoutDocument → PDF translation layer.
+ * Word `LayoutDocument` → PDF translation layer.
  *
+ * Part of the Word→PDF bridge family (used only by `word-bridge.ts`).
  * Consumes the fully-positioned `LayoutDocument` produced by
  * `@word/layout/layout-full` and emits PDF operators via
- * `PdfDocumentBuilder`. Coordinate translation is the only logic
+ * `PdfDocumentBuilder`. Because it consumes Word's layout model, this
+ * file is one of the bridge files permitted to import from `@word`
+ * (see AGENTS.md). Coordinate translation is the only logic
  * here — every flow decision (line wrapping, page breaks, table cell
  * sizing, float positioning, footnote placement) has already been
  * resolved by the layout engine.

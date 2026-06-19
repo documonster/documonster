@@ -31,9 +31,7 @@
  *     rejects even though MC substitution permits it in theory.
  */
 
-import type { XmlElement } from "@xml/types";
-
-import type { ValidationContext } from "./context";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
 import {
   attrByLocalName,
   collectDescendantsLocal,
@@ -41,7 +39,8 @@ import {
   findChildrenLocal,
   hasDescendantLocal,
   matchesLocal
-} from "./xml-utils";
+} from "@excel/utils/ooxml-validator/xml-utils";
+import type { XmlElement } from "@xml/types";
 
 const DRAWING_PATH_RE = /^xl\/drawings\/drawing\d+\.xml$/;
 

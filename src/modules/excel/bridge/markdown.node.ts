@@ -10,5 +10,9 @@ export {
   readMarkdownAll,
   writeMarkdown,
   writeMarkdownBuffer
-} from "./markdown-bridge";
-export { readMarkdownFile, readMarkdownAllFile, writeMarkdownFile } from "./markdown-bridge.node";
+} from "@excel/bridge/markdown-bridge";
+export {
+  readMarkdownFile,
+  readMarkdownAllFile,
+  writeMarkdownFile
+} from "@excel/bridge/markdown-bridge.node";

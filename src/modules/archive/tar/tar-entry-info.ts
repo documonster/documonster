@@ -4,8 +4,8 @@
  * Represents metadata about a single entry in a TAR archive.
  */
 
-import type { TarType } from "./tar-constants";
-import { TAR_TYPE } from "./tar-constants";
+import type { TarType } from "@archive/tar/tar-constants";
+import { TAR_TYPE } from "@archive/tar/tar-constants";
 
 export interface TarEntryInfo {
   /** File path/name */

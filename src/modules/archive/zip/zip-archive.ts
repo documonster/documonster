@@ -29,6 +29,7 @@ import {
   UINT32_MAX,
   writeLocalFileHeaderInto
 } from "@archive/zip-spec/zip-records";
+import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 import { ZipDeflateFile } from "@archive/zip/stream";
 import type { ZipCentralDirectoryEntryInput } from "@archive/zip/writer-core";
 import {
@@ -38,11 +39,9 @@ import {
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { buildZipEntryMetadata } from "@archive/zip/zip-entry-metadata";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
+import { createZipOperation } from "@archive/zip/zip-output-pipeline";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { isNode } from "@utils/env";
-
-import type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
-import { createZipOperation } from "./zip-output-pipeline";
 
 /** Archive options */
 export interface ZipOptions {
@@ -135,7 +134,7 @@ export interface ZipEntryOptions {
   encoding?: ZipStringEncoding;
 }
 
-export type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
+export type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 
 type ZipInput = {
   name: string;

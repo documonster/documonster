@@ -11,11 +11,10 @@ import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
 import { collect } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { toUint8Array, isInMemoryArchiveSource, toAsyncIterable } from "@archive/io/archive-source";
-
-import type { TarArchiveOptions } from "./tar-archive";
-import { TarArchive, addEntries } from "./tar-archive";
-import type { TarEntry, TarParseOptions } from "./tar-parser";
-import { parseTar, untar } from "./tar-parser";
+import type { TarArchiveOptions } from "@archive/tar/tar-archive";
+import { TarArchive, addEntries } from "@archive/tar/tar-archive";
+import type { TarEntry, TarParseOptions } from "@archive/tar/tar-parser";
+import { parseTar, untar } from "@archive/tar/tar-parser";
 
 export interface TarGzOptions extends TarArchiveOptions {
   /** Compression level (0-9, default: 6) */

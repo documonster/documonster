@@ -44,13 +44,15 @@ import {
 } from "@archive/zip-spec/zip-records";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import { isProbablyIncompressible } from "@archive/zip/compressibility";
+import {
+  measureCentralDirectoryAndEocd,
+  writeCentralDirectoryAndEocdInto
+} from "@archive/zip/writer-core";
 import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
 import {
   buildZipEntryMetadata,
   resolveZipCompressionMethod
 } from "@archive/zip/zip-entry-metadata";
-
-import { measureCentralDirectoryAndEocd, writeCentralDirectoryAndEocdInto } from "./writer-core";
 
 interface ProcessedEntry {
   name: Uint8Array;
@@ -120,9 +122,9 @@ export interface ZipEntry {
 }
 
 // Re-export ZipRawEntry from shared module
-export type { ZipRawEntry } from "./raw-entry";
-import type { ZipRawEntry } from "./raw-entry";
-import { isZipRawEntry } from "./raw-entry";
+export type { ZipRawEntry } from "@archive/zip/raw-entry";
+import type { ZipRawEntry } from "@archive/zip/raw-entry";
+import { isZipRawEntry } from "@archive/zip/raw-entry";
 
 export type ZipBuildEntry = ZipEntry | ZipRawEntry;
 

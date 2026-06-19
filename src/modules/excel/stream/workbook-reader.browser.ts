@@ -855,7 +855,9 @@ class WorkbookReader extends WorkbookReaderBase<
       }
       this._totalBufferedBytes += bytes.length;
       if (this._totalBufferedBytes > this._maxBufferedBytes) {
-        throw new Error(
+        throw new ExcelFileError(
+          "<ReadableStream>",
+          "read",
           `Buffered worksheet data exceeds limit of ${this._maxBufferedBytes} bytes. ` +
             "The XLSX file may be malicious (adversarial ZIP entry ordering) or too large " +
             "for streaming. Increase maxBufferedWorksheetBytes if this is expected."

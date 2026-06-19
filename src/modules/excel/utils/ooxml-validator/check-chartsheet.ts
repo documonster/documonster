@@ -6,8 +6,8 @@
  * Without it, Excel shows an empty chart sheet.
  */
 
-import type { ValidationContext } from "./context";
-import { hasDescendantLocal } from "./xml-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import { hasDescendantLocal } from "@excel/utils/ooxml-validator/xml-utils";
 
 const CHARTSHEET_PATH_RE = /^xl\/chartsheets\/sheet\d+\.xml$/;
 

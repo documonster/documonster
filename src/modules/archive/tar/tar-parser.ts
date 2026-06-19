@@ -7,11 +7,10 @@
 
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { ArchiveError, FileTooLargeError, createAbortError } from "@archive/core/errors";
+import { TAR_BLOCK_SIZE, TAR_TYPE } from "@archive/tar/tar-constants";
+import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
+import { decodeHeader, isZeroBlock, calculatePadding } from "@archive/tar/tar-header";
 import { textDecoder } from "@utils/binary";
-
-import { TAR_BLOCK_SIZE, TAR_TYPE } from "./tar-constants";
-import type { TarEntryInfo } from "./tar-entry-info";
-import { decodeHeader, isZeroBlock, calculatePadding } from "./tar-header";
 
 // Helper to strip trailing null characters without using control char regex
 const NULL_CHAR = String.fromCharCode(0);

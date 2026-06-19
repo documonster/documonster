@@ -474,7 +474,7 @@ class CsvWorkerPool {
 
   private _createWorker(): PoolWorker {
     if (!this._workerUrl) {
-      throw new Error("Worker pool not initialized. Call _ensureInitialized() first.");
+      throw new CsvWorkerError("Worker pool not initialized. Call _ensureInitialized() first.");
     }
 
     const id = this._nextWorkerId++;

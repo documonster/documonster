@@ -11,10 +11,8 @@ import { decodeZipPath, decodeZipComment, resolveZipStringCodec } from "@archive
 import type { AesKeyStrength } from "@archive/crypto/aes";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import { resolveZipLastModifiedDateFromUnixSeconds } from "@archive/zip-spec/timestamps";
+import type { ZipEntryInfo, ZipEntryEncryptionMethod } from "@archive/zip-spec/zip-entry-info";
 import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import { uint8ArrayToString as decodeUtf8 } from "@utils/binary";
-
-import type { ZipEntryInfo, ZipEntryEncryptionMethod } from "./zip-entry-info";
 import {
   CENTRAL_DIR_HEADER_SIG,
   COMPRESSION_AES,
@@ -26,7 +24,8 @@ import {
   getUnixModeFromExternalAttributes,
   isSymlinkMode,
   isDirectoryMode
-} from "./zip-records";
+} from "@archive/zip-spec/zip-records";
+import { uint8ArrayToString as decodeUtf8 } from "@utils/binary";
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------

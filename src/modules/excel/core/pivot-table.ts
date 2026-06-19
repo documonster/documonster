@@ -1,5 +1,23 @@
 import type { PivotChartOptions } from "@excel/chart/model/types";
 import type { ColumnData } from "@excel/core/column";
+import type {
+  CacheField,
+  DataField,
+  ParsedCacheDefinition,
+  ParsedCacheRecords,
+  PivotError,
+  PivotTableChartFormat,
+  PivotTableSubtotal,
+  RecordValue,
+  SharedItemValue
+} from "@excel/core/pivot-table-types";
+import {
+  METRIC_DISPLAY_NAMES,
+  pivotError,
+  isPivotError,
+  formatPivotError,
+  VALID_SUBTOTALS
+} from "@excel/core/pivot-table-types";
 import type { RangeData } from "@excel/core/range";
 import { rangeCreate, rangeExpand } from "@excel/core/range";
 import type { RowData } from "@excel/core/row";
@@ -17,25 +35,6 @@ import {
 import { PivotTableError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { range, toSortedArray } from "@utils/utils";
-
-import type {
-  CacheField,
-  DataField,
-  ParsedCacheDefinition,
-  ParsedCacheRecords,
-  PivotError,
-  PivotTableChartFormat,
-  PivotTableSubtotal,
-  RecordValue,
-  SharedItemValue
-} from "./pivot-table-types";
-import {
-  METRIC_DISPLAY_NAMES,
-  pivotError,
-  isPivotError,
-  formatPivotError,
-  VALID_SUBTOTALS
-} from "./pivot-table-types";
 
 // Re-export the pure OOXML data types/constants that were relocated to
 // pivot-table-types.ts, preserving backward compatibility for existing
@@ -316,7 +315,7 @@ function createTableSourceAdapter(table: TableData): PivotTableSource {
   // Calculate the range reference for the table
   const tl = tblModel.tl;
   if (!tl) {
-    throw new Error(`Table "${tblModel.name}" is missing top-left cell address (tl)`);
+    throw new PivotTableError(`Table "${tblModel.name}" is missing top-left cell address (tl)`);
   }
   const startRow = tl.row;
   const startCol = tl.col;
@@ -382,7 +381,7 @@ function resolveSource(model: PivotTableModel): PivotTableSource {
     return createTableSourceAdapter(model.sourceTable);
   }
   if (!model.sourceSheet) {
-    throw new Error("Either sourceSheet or sourceTable must be provided.");
+    throw new PivotTableError("Either sourceSheet or sourceTable must be provided.");
   }
   // A de-classed worksheet (WorksheetData record) is identified structurally
   // by its `_rows` field; a pre-built PivotTableSource adapter has none.
@@ -451,7 +450,7 @@ function makePivotTable(
   const resolveIndex = (fieldName: string, role: string): number => {
     const idx = nameToIndex[fieldName];
     if (idx === undefined) {
-      throw new Error(`${role} field "${fieldName}" not found in cache fields`);
+      throw new PivotTableError(`${role} field "${fieldName}" not found in cache fields`);
     }
     return idx;
   };
@@ -557,7 +556,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   for (let i = 0; i < headerNames.length; i++) {
     const h = headerNames[i];
     if (h === null || h === undefined || h === "" || (typeof h === "string" && h.trim() === "")) {
-      throw new Error(
+      throw new PivotTableError(
         `Empty or missing header name at column ${i + 1} in ${source.name}. Pivot tables require all columns to have non-empty headers.`
       );
     }
@@ -568,7 +567,7 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   for (const h of headerNames) {
     const name = String(h);
     if (headerDupCheck.has(name)) {
-      throw new Error(
+      throw new PivotTableError(
         `Duplicate header name "${name}" found in ${source.name}. Pivot tables require unique column names.`
       );
     }
@@ -607,11 +606,11 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
     for (const field of area.fields) {
       const existing = fieldToAxis.get(field);
       if (existing === area.name) {
-        throw new Error(
+        throw new PivotTableError(
           `Duplicate field "${field}" in ${area.name}. Each field can only appear once per axis area.`
         );
       } else if (existing) {
-        throw new Error(
+        throw new PivotTableError(
           `Field "${field}" cannot appear in both ${existing} and ${area.name}. Each field can only be assigned to one axis area.`
         );
       }
@@ -630,14 +629,14 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
 
   // Validate metric values at runtime (guards against `as any` bypasses)
   if (model.metric !== undefined && !VALID_SUBTOTALS.has(model.metric)) {
-    throw new Error(
+    throw new PivotTableError(
       `Invalid metric "${model.metric}". Must be one of: ${[...VALID_SUBTOTALS].join(", ")}.`
     );
   }
   for (const v of model.values) {
     const perMetric = resolveValueMetric(v);
     if (perMetric !== undefined && !VALID_SUBTOTALS.has(perMetric)) {
-      throw new Error(
+      throw new PivotTableError(
         `Invalid metric "${perMetric}" on value field "${resolveValueName(v)}". Must be one of: ${[...VALID_SUBTOTALS].join(", ")}.`
       );
     }
@@ -647,7 +646,9 @@ function validate(model: PivotTableModel, source: PivotTableSource): void {
   const valueDupCheck = new Set<string>();
   for (const name of valueNames) {
     if (valueDupCheck.has(name)) {
-      throw new Error(`Duplicate value field "${name}". Each value field name must be unique.`);
+      throw new PivotTableError(
+        `Duplicate value field "${name}". Each value field name must be unique.`
+      );
     }
     valueDupCheck.add(name);
   }

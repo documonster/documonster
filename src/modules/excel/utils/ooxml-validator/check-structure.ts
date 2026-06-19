@@ -12,8 +12,8 @@
  * the same cached result.
  */
 
-import type { ValidationContext } from "./context";
-import { isXmlLike } from "./path-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import { isXmlLike } from "@excel/utils/ooxml-validator/path-utils";
 
 const REQUIRED_PARTS = [
   "[Content_Types].xml",

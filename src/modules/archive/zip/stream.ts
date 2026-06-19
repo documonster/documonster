@@ -50,17 +50,19 @@ import {
   isSymlinkMode
 } from "@archive/zip-spec/zip-records";
 import { isProbablyIncompressibleChunks } from "@archive/zip/compressibility";
+import type { ZipCentralDirEntry, ZipWritableFile } from "@archive/zip/writable-file";
+import {
+  measureCentralDirectoryAndEocd,
+  writeCentralDirectoryAndEocdInto
+} from "@archive/zip/writer-core";
 import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
 import {
   buildZipEntryMetadata,
   resolveZipCompressionMethod
 } from "@archive/zip/zip-entry-metadata";
 
-import type { ZipCentralDirEntry, ZipWritableFile } from "./writable-file";
-import { measureCentralDirectoryAndEocd, writeCentralDirectoryAndEocdInto } from "./writer-core";
-
 export type { Zip64Mode } from "@archive/zip-spec/zip-records";
-export type { ZipCentralDirEntry, ZipWritableFile } from "./writable-file";
+export type { ZipCentralDirEntry, ZipWritableFile } from "@archive/zip/writable-file";
 
 const SMART_STORE_DECIDE_BYTES = 16 * 1024;
 

@@ -31,12 +31,11 @@ import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/p
 import { ZipDeflateFile, ZipRawFile } from "@archive/zip/stream";
 import type { ZipRawEntry, ZipEntry } from "@archive/zip/zip-bytes";
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
+import type { ZipEditPlan } from "@archive/zip/zip-edit-plan";
+import type { SetViewEntry } from "@archive/zip/zip-edit-view";
+import { ZipEditView } from "@archive/zip/zip-edit-view";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
-
-import type { ZipEditPlan } from "./zip-edit-plan";
-import type { SetViewEntry } from "./zip-edit-view";
-import { ZipEditView } from "./zip-edit-view";
-import { createZipOperation } from "./zip-output-pipeline";
+import { createZipOperation } from "@archive/zip/zip-output-pipeline";
 
 // -----------------------------------------------------------------------------
 // Types

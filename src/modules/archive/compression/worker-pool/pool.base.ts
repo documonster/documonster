@@ -4,7 +4,7 @@
  * Environment-agnostic interfaces and utilities for worker pool management.
  */
 
-import type { WorkerPoolOptions } from "./types";
+import type { WorkerPoolOptions } from "@archive/compression/worker-pool/types";
 
 export type { WorkerPoolOptions };
 

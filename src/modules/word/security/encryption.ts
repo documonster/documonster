@@ -168,7 +168,7 @@ export async function deriveEncryptionKey(
   // error.
   const keyBytes = info.keyBits / 8;
   if (h.length < keyBytes) {
-    throw new Error(
+    throw new DocxDecryptionError(
       `deriveEncryptionKey: hash output of ${h.length} bytes is too ` +
         `short for keyBits=${info.keyBits} (need ${keyBytes}). ` +
         `Use a hash algorithm with a larger digest size (e.g. SHA-512 ` +

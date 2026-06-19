@@ -5,7 +5,7 @@ import { Stream, Workbook, Worksheet } from "@excel/index";
 
 if (process.argv[2] === "help") {
   console.log("Usage:");
-  console.log("    node testBigBookIn filename reader plan");
+  console.log("    node test-big-book-in filename reader plan");
   console.log("Where:");
   console.log("    reader is one of [stream, document]");
   console.log("    plan is one of [zero, one, two, hyperlinks]");

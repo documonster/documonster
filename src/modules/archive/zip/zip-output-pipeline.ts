@@ -12,9 +12,8 @@ import { createLinkedAbortController, createAbortError, toError } from "@archive
 import { ProgressEmitter } from "@archive/core/progress";
 import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
+import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 import { StreamingZip } from "@archive/zip/stream";
-
-import type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
 
 // =============================================================================
 // Types

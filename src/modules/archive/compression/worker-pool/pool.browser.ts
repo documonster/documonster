@@ -13,14 +13,12 @@
  * - Graceful error handling and recovery
  */
 
-import { ArchiveError } from "@archive/core/errors";
-
 import {
   resolvePoolOptions,
   getPriorityValue,
   hasWorkerSupport,
   createAbortError
-} from "./pool.base";
+} from "@archive/compression/worker-pool/pool.base";
 import type {
   WorkerPoolOptions,
   WorkerPoolStats,
@@ -30,8 +28,12 @@ import type {
   WorkerRequestMessage,
   WorkerResponseMessage,
   TaskPriority
-} from "./types";
-import { getWorkerBlobUrl, releaseWorkerBlobUrl } from "./worker-script";
+} from "@archive/compression/worker-pool/types";
+import {
+  getWorkerBlobUrl,
+  releaseWorkerBlobUrl
+} from "@archive/compression/worker-pool/worker-script";
+import { ArchiveError } from "@archive/core/errors";
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };
 export { hasWorkerSupport };
@@ -862,7 +864,7 @@ export class WorkerPool {
       const worker = sessionWorker ?? (await ensureWorker());
       const session = worker.streamSession;
       if (!session || session.ended) {
-        throw new Error("Streaming session is not active");
+        throw new ArchiveError("Streaming session is not active");
       }
 
       // Serialize writes to guarantee ordering and keep a single in-flight ack.

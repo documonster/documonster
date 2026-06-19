@@ -7,14 +7,13 @@
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { FileTooLargeError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
-import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import { parseZipArchiveFromBuffer } from "@archive/zip-spec/zip-parser-core";
-
 import {
   processEntryData,
   processEntryDataSync,
   readEntryCompressedData
-} from "./zip-extract-core";
+} from "@archive/unzip/zip-extract-core";
+import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
+import { parseZipArchiveFromBuffer } from "@archive/zip-spec/zip-parser-core";
 
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 

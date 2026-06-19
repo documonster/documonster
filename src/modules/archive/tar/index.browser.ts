@@ -6,7 +6,7 @@
  */
 
 // Constants
-export { TAR_BLOCK_SIZE, TAR_TYPE, type TarType } from "./tar-constants";
+export { TAR_BLOCK_SIZE, TAR_TYPE, type TarType } from "@archive/tar/tar-constants";
 
 // Entry info
 export {
@@ -16,7 +16,7 @@ export {
   isSymlink as isTarSymlink,
   isHardLink as isTarHardLink,
   isDataEntry as isTarDataEntry
-} from "./tar-entry-info";
+} from "@archive/tar/tar-entry-info";
 
 // Header utilities
 export {
@@ -28,10 +28,16 @@ export {
   createPadding,
   createEndOfArchive,
   type TarHeaderOptions
-} from "./tar-header";
+} from "@archive/tar/tar-header";
 
 // Parser (low-level)
-export { parseTar, parseTarStream, untar, type TarEntry, type TarParseOptions } from "./tar-parser";
+export {
+  parseTar,
+  parseTarStream,
+  untar,
+  type TarEntry,
+  type TarParseOptions
+} from "@archive/tar/tar-parser";
 
 // Unified archive API (high-level, ZIP-compatible interface)
 export {
@@ -52,7 +58,7 @@ export {
   type TarReaderProgress,
   type TarReaderStreamOptions,
   type TarReaderOperation
-} from "./tar-archive";
+} from "@archive/tar/tar-archive";
 
 // Note: Gzip support (TarGzArchive, targz, etc.) is NOT available in browser
 // because it depends on Node.js zlib module.

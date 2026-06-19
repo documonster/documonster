@@ -13,8 +13,12 @@
  * because Excel uses the type string to route parsing.
  */
 
-import type { ValidationContext } from "./context";
-import { getExtension, isLegalPartName, stripLeadingSlash } from "./path-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import {
+  getExtension,
+  isLegalPartName,
+  stripLeadingSlash
+} from "@excel/utils/ooxml-validator/path-utils";
 
 // -----------------------------------------------------------------------------
 // Well-known content types

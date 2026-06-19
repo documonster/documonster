@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 
-import type { ArchiveSource } from "./archive-source";
-import { toAsyncIterable } from "./archive-source";
+import type { ArchiveSource } from "@archive/io/archive-source";
+import { toAsyncIterable } from "@archive/io/archive-source";
 
 /**
  * Convert an ArchiveSource into a Node.js Readable stream.

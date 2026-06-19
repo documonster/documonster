@@ -5,7 +5,7 @@
  * adds the Node variants of the two platform-specific namespaces:
  * `Workbook` (file-path IO) and `Stream`.
  */
-export * from "./index.base";
+export * from "@excel/index.base";
 
 export * as Workbook from "@excel/surface/workbook";
 export * as Stream from "@excel/surface/stream";

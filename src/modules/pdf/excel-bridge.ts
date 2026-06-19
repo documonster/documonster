@@ -2,8 +2,11 @@
  * Excel-to-PDF Bridge
  *
  * Converts Excel Workbook data into the PDF module's independent data model.
- * This is the ONLY file in the PDF module that imports from @excel.
- * It also imports from @word/bridge/excel-bridge for Word chart → ChartModel mapping.
+ * Among the PDF module's files, this one (together with `word-bridge.ts`
+ * and `word-chart-bridge.ts`) is permitted to reach across module
+ * boundaries; this file imports only from `@excel`. Word-chart rendering
+ * (which needs both `@word` types and the `@excel` chart engine) lives in
+ * `word-chart-bridge.ts`.
  *
  * @example
  * ```typescript
@@ -35,7 +38,6 @@ import {
   renderChartExPng
 } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf, renderChartPng } from "@excel/chart/render/chart-renderer";
-import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 import { anchorCol, anchorRow } from "@excel/core/anchor";
 import {
   cellCol,
@@ -78,7 +80,6 @@ import {
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
 import { formatCellValue } from "@excel/utils/cell-format";
-import type { PdfPageBuilder } from "@pdf/builder/document-builder";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { exportPdf } from "@pdf/render/pdf-exporter";
 import type {
@@ -105,17 +106,17 @@ import type {
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
 import { base64ToUint8Array } from "@utils/utils.base";
-import { wordChartToChartModel } from "@word/bridge/excel-bridge";
-import type { LayoutChart } from "@word/layout/layout-model";
-import type {
-  Chart as WordChart,
-  ChartContent as WordChartContent,
-  ChartExContent as WordChartExContent
-} from "@word/types";
 
 // =============================================================================
 // Public API
 // =============================================================================
+
+// Re-export the Excel object-model types used in this bridge's public
+// signatures so the `Pdf` surface can type its lazy converter wrappers
+// (`fromExcel`/`fromChart`) without importing from `@excel` directly —
+// only bridge files may cross into `@excel`.
+export type { Workbook } from "@excel/core/workbook.browser";
+export type { ChartHandle } from "@excel/core/worksheet-core";
 
 /**
  * Export an Excel Workbook directly to PDF.
@@ -1443,98 +1444,5 @@ async function convertChartsheet(cs: ChartsheetData): Promise<PdfChartsheetData>
     orientation,
     chart,
     pageSetup
-  };
-}
-
-// =============================================================================
-// Word Chart → PDF Integration
-// =============================================================================
-
-/**
- * Create a chart renderer callback for use with `docxToPdf`.
- *
- * This factory returns a function that converts Word Chart definitions
- * into Excel's internal ChartModel and renders them using the full
- * Excel chart rendering engine (8000+ lines of vector drawing logic).
- *
- * @example
- * ```typescript
- * import { docxToPdf, createWordChartPdfRenderer } from "documonster/pdf";
- *
- * const pdfBytes = await docxToPdf(doc, {
- *   chartRenderer: createWordChartPdfRenderer()
- * });
- * ```
- */
-export function createWordChartPdfRenderer(): (
-  chart: WordChart,
-  page: PdfPageBuilder,
-  rect: { x: number; y: number; width: number; height: number }
-) => void {
-  return (chart, page, rect) => {
-    const model = wordChartToChartModel(chart);
-    drawChartPdf(page, model, rect);
-  };
-}
-
-/**
- * Create a layout-aware chart renderer for use as the internal
- * `RenderLayoutOptions.chartRenderer` of the Word→PDF bridge.
- *
- * Unlike {@link createWordChartPdfRenderer} (which only sees the inner
- * classic `Chart` model), this renderer receives the full
- * {@link LayoutChart} and therefore handles **both** chart families
- * with the full Excel rendering engine:
- *
- * - Classic `<c:chart>` (`chartKind === "chart"`) → `wordChartToChartModel`
- *   → `drawChartPdf` (vector).
- * - Modern `<cx:chartSpace>` ChartEx (`chartKind === "chartEx"`,
- *   e.g. sunburst / treemap / waterfall / funnel / boxWhisker /
- *   histogram / pareto / regionMap) → `parseChartEx` → `drawChartExPdf`
- *   (vector) when the layout is vector-capable, otherwise the
- *   pre-rendered SVG carried on the `LayoutChart` is left for the
- *   translator's fallback.
- *
- * Returns `false` to decline a chart so the translator's built-in
- * fallback (inline SVG, then a titled placeholder box) takes over. This
- * keeps "fail soft" behaviour: a chart the engine can't draw still
- * renders *something* rather than a blank slot.
- */
-export function createWordLayoutChartPdfRenderer(): (
-  chart: LayoutChart,
-  page: PdfPageBuilder,
-  rect: { x: number; y: number; width: number; height: number }
-) => boolean | void {
-  return (layoutChart, page, rect) => {
-    const source = layoutChart.source as WordChartContent | WordChartExContent | undefined;
-
-    if (layoutChart.chartKind === "chart") {
-      // Classic chart: prefer the structured source, fall back to nothing.
-      if (source && source.type === "chart") {
-        drawChartPdf(page, wordChartToChartModel(source.chart), rect);
-        return;
-      }
-      return false;
-    }
-
-    // ChartEx. Parse the carried `cx:chartSpace` XML into a ChartExModel
-    // and render it as vector PDF when the layout IDs are supported.
-    if (source && source.type === "chartEx" && source.chartExXml) {
-      let model;
-      try {
-        model = parseChartEx(source.chartExXml);
-      } catch {
-        return false; // Malformed XML — let the fallback path handle it.
-      }
-      if (model && canRenderChartExAsVectorPdf(model)) {
-        drawChartExPdf(page, model, rect, {
-          title: layoutChart.title
-        });
-        return;
-      }
-    }
-    // Not vector-capable (or no source): decline so the translator
-    // falls back to the inline SVG / placeholder.
-    return false;
   };
 }

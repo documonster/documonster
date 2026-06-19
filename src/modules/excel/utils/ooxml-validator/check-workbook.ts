@@ -16,8 +16,13 @@
  *     the XSD sequence order.
  */
 
-import type { ValidationContext } from "./context";
-import { attrByLocalName, findChildLocal, findChildrenLocal, localName } from "./xml-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import {
+  attrByLocalName,
+  findChildLocal,
+  findChildrenLocal,
+  localName
+} from "@excel/utils/ooxml-validator/xml-utils";
 
 const WORKBOOK_PATH = "xl/workbook.xml";
 const WORKBOOK_RELS_PATH = "xl/_rels/workbook.xml.rels";

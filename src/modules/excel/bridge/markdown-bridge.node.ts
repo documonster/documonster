@@ -5,13 +5,12 @@
  * `@utils/fs`.
  */
 
+import { readMarkdown, readMarkdownAll, writeMarkdown } from "@excel/bridge/markdown-bridge";
 import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
 import { ExcelFileError } from "@excel/errors";
 import type { MarkdownOptions } from "@markdown/types";
 import { fileExists, readFileText, writeFileText } from "@utils/fs";
-
-import { readMarkdown, readMarkdownAll, writeMarkdown } from "./markdown-bridge";
 
 /** Read a Markdown table from a file path into a new worksheet (Node.js only). */
 export async function readMarkdownFile(

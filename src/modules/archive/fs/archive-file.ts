@@ -39,6 +39,33 @@ import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { ArchiveError, createAbortError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import type { ArchiveFormat } from "@archive/core/types";
+import type {
+  AddFileOptions,
+  AddDirectoryOptions,
+  AddGlobOptions,
+  AddTarFileOptions,
+  AddTarDirectoryOptions,
+  AddTarGlobOptions,
+  ExtractToOptions,
+  ArchiveFileOptions,
+  ArchiveFileOptionsZip,
+  ArchiveFileOptionsTar,
+  OpenArchiveOptions,
+  OpenArchiveOptionsZip,
+  OpenArchiveOptionsTar,
+  WriteZipOptions,
+  WriteArchiveOptions,
+  ArchiveEntryInfo,
+  ZipEntryInfo,
+  ZipFileOptions,
+  OverwriteStrategy,
+  ArchiveWarning,
+  ArchiveStreamOptions,
+  ArchiveStreamProgress,
+  ArchiveStreamOperation,
+  TransformFunction,
+  TransformEntryData
+} from "@archive/fs/types";
 import type { ArchiveSink } from "@archive/io/archive-sink";
 import { pipeIterableToSink } from "@archive/io/archive-sink";
 import { collectUint8ArrayStream, toAsyncIterable } from "@archive/io/archive-source";
@@ -77,34 +104,6 @@ import {
   chmodSync,
   supportsUnixPermissions
 } from "@utils/fs";
-
-import type {
-  AddFileOptions,
-  AddDirectoryOptions,
-  AddGlobOptions,
-  AddTarFileOptions,
-  AddTarDirectoryOptions,
-  AddTarGlobOptions,
-  ExtractToOptions,
-  ArchiveFileOptions,
-  ArchiveFileOptionsZip,
-  ArchiveFileOptionsTar,
-  OpenArchiveOptions,
-  OpenArchiveOptionsZip,
-  OpenArchiveOptionsTar,
-  WriteZipOptions,
-  WriteArchiveOptions,
-  ArchiveEntryInfo,
-  ZipEntryInfo,
-  ZipFileOptions,
-  OverwriteStrategy,
-  ArchiveWarning,
-  ArchiveStreamOptions,
-  ArchiveStreamProgress,
-  ArchiveStreamOperation,
-  TransformFunction,
-  TransformEntryData
-} from "./types";
 
 // =============================================================================
 // Transform Helpers (internal)

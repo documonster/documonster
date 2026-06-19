@@ -28,10 +28,13 @@
  * high-value check.
  */
 
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import {
+  attrByLocalName,
+  findChildLocal,
+  findChildrenLocal
+} from "@excel/utils/ooxml-validator/xml-utils";
 import type { XmlElement } from "@xml/types";
-
-import type { ValidationContext } from "./context";
-import { attrByLocalName, findChildLocal, findChildrenLocal } from "./xml-utils";
 
 const TABLE_PATH_RE = /^xl\/tables\/table\d+\.xml$/;
 

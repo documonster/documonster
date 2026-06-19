@@ -13,6 +13,7 @@ import type { ArchiveSink } from "@archive/io/archive-sink";
 import { pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { isInMemoryArchiveSource, toAsyncIterable, toUint8Array } from "@archive/io/archive-source";
+import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "@archive/unzip/progress";
 import type { ParseOptions, ZipEntry as ParseZipEntry } from "@archive/unzip/stream";
 import { createParse } from "@archive/unzip/stream";
 import {
@@ -28,8 +29,6 @@ import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
 import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
 import { isWritableStream } from "@stream/core/type-guards";
 import { getTextDecoder } from "@utils/binary";
-
-import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
 
 function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   let cleanedUp = false;
@@ -175,7 +174,7 @@ export interface UnzipOptions {
   progressIntervalMs?: number;
 }
 
-export type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
+export type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "@archive/unzip/progress";
 
 export class UnzipEntry {
   readonly path: string;

@@ -12,8 +12,12 @@
  * entry.
  */
 
-import type { ValidationContext } from "./context";
-import { attrByLocalName, findChildLocal, findChildrenLocal } from "./xml-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import {
+  attrByLocalName,
+  findChildLocal,
+  findChildrenLocal
+} from "@excel/utils/ooxml-validator/xml-utils";
 
 const STYLES_PATH = "xl/styles.xml";
 

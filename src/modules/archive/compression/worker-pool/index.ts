@@ -13,9 +13,9 @@ export type {
   TaskOptions,
   TaskResult,
   WorkerTaskType
-} from "./types";
+} from "@archive/compression/worker-pool/types";
 
-export { hasWorkerSupport, createAbortError } from "./pool.base";
+export { hasWorkerSupport, createAbortError } from "@archive/compression/worker-pool/pool.base";
 
 import { ArchiveError } from "@archive/core/errors";
 

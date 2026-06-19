@@ -845,7 +845,7 @@ class WorksheetWriter {
           }
         };
       }
-      throw new Error(`Invalid image range: "${range}". Expected a range like "A1:C3".`);
+      throw new ImageError(`Invalid image range: "${range}". Expected a range like "A1:C3".`);
     }
 
     // Absolute positioning (pos + ext, no cell anchors)

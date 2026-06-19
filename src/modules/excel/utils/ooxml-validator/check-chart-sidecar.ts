@@ -32,8 +32,8 @@
  * case is a strong writer-bug signature.
  */
 
-import type { ValidationContext } from "./context";
-import { resolveRelTarget } from "./path-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import { resolveRelTarget } from "@excel/utils/ooxml-validator/path-utils";
 
 const CHARTEX_PART_RE = /^xl\/charts\/chartEx\d+\.xml$/;
 

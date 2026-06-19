@@ -6,7 +6,7 @@
  * `Workbook` (cross-platform IO only, no Node file-path operations) and
  * `Stream`.
  */
-export * from "./index.base";
+export * from "@excel/index.base";
 
 export * as Workbook from "@excel/surface/workbook.browser";
 export * as Stream from "@excel/surface/stream.browser";

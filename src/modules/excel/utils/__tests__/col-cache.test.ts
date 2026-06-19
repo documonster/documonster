@@ -274,46 +274,46 @@ describe("colCache", () => {
   describe("input validation", () => {
     describe("decodeAddress", () => {
       it("throws on undefined", () => {
-        expect(() => colCache.decodeAddress(undefined as any)).toThrow("Invalid Address");
+        expect(() => colCache.decodeAddress(undefined as any)).toThrow("Invalid address");
       });
       it("throws on null", () => {
-        expect(() => colCache.decodeAddress(null as any)).toThrow("Invalid Address");
+        expect(() => colCache.decodeAddress(null as any)).toThrow("Invalid address");
       });
       it("throws on empty string", () => {
-        expect(() => colCache.decodeAddress("")).toThrow("Invalid Address");
+        expect(() => colCache.decodeAddress("")).toThrow("Invalid address");
       });
       it("throws on non-string type", () => {
-        expect(() => colCache.decodeAddress(42 as any)).toThrow("Invalid Address");
+        expect(() => colCache.decodeAddress(42 as any)).toThrow("Invalid address");
       });
     });
 
     describe("decode", () => {
       it("throws on undefined", () => {
-        expect(() => colCache.decode(undefined as any)).toThrow("Invalid Address");
+        expect(() => colCache.decode(undefined as any)).toThrow("Invalid address");
       });
       it("throws on null", () => {
-        expect(() => colCache.decode(null as any)).toThrow("Invalid Address");
+        expect(() => colCache.decode(null as any)).toThrow("Invalid address");
       });
       it("throws on empty string", () => {
-        expect(() => colCache.decode("")).toThrow("Invalid Address");
+        expect(() => colCache.decode("")).toThrow("Invalid address");
       });
       it("throws on non-string type", () => {
-        expect(() => colCache.decode(42 as any)).toThrow("Invalid Address");
+        expect(() => colCache.decode(42 as any)).toThrow("Invalid address");
       });
     });
 
     describe("decodeEx", () => {
       it("throws on undefined", () => {
-        expect(() => colCache.decodeEx(undefined as any)).toThrow("Invalid Address");
+        expect(() => colCache.decodeEx(undefined as any)).toThrow("Invalid address");
       });
       it("throws on null", () => {
-        expect(() => colCache.decodeEx(null as any)).toThrow("Invalid Address");
+        expect(() => colCache.decodeEx(null as any)).toThrow("Invalid address");
       });
       it("throws on empty string", () => {
-        expect(() => colCache.decodeEx("")).toThrow("Invalid Address");
+        expect(() => colCache.decodeEx("")).toThrow("Invalid address");
       });
       it("throws on non-string type", () => {
-        expect(() => colCache.decodeEx(42 as any)).toThrow("Invalid Address");
+        expect(() => colCache.decodeEx(42 as any)).toThrow("Invalid address");
       });
     });
   });

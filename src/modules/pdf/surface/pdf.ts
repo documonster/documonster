@@ -15,13 +15,11 @@
  * tree-shakeable — a consumer who never calls a converter never bundles the
  * source module. (Verified by scripts/treeshake-verify.ts.)
  */
-import type { Workbook } from "@excel/core/workbook.browser";
-import type { ChartHandle } from "@excel/core/worksheet-core";
 import { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "@pdf/builder/document-builder";
-import type { ChartToPdfOptions } from "@pdf/excel-bridge";
+import type { ChartHandle, ChartToPdfOptions, Workbook } from "@pdf/excel-bridge";
 import type { PdfExportOptions } from "@pdf/types";
-import type { DocxToPdfOptions } from "@pdf/word-bridge";
-import type { Chart as WordChart, DocxDocument } from "@word/types";
+import type { DocxDocument, DocxToPdfOptions } from "@pdf/word-bridge";
+import type { WordChart } from "@pdf/word-chart-bridge";
 
 // --- Writing (core engine, statically linked) ---
 export { pdf as create } from "@pdf/pdf";
@@ -74,7 +72,8 @@ export async function fromDocx(doc: DocxDocument, options?: DocxToPdfOptions): P
 
 /**
  * Build the Word-chart → PDF renderer callback for `docxToPdf`'s
- * `chartRenderer` option. Dynamically loads the excel bridge (chart engine).
+ * `chartRenderer` option. Dynamically loads the word-chart bridge
+ * (Word chart types + the Excel chart engine).
  */
 export async function wordChartRenderer(): Promise<
   (
@@ -83,6 +82,6 @@ export async function wordChartRenderer(): Promise<
     rect: { x: number; y: number; width: number; height: number }
   ) => void
 > {
-  const { createWordChartPdfRenderer } = await import("@pdf/excel-bridge");
+  const { createWordChartPdfRenderer } = await import("@pdf/word-chart-bridge");
   return createWordChartPdfRenderer();
 }

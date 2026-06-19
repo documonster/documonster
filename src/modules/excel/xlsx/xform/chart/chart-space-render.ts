@@ -85,9 +85,6 @@ import type {
 } from "@excel/chart/model/types";
 import { escapeXml, themeIndexToName } from "@excel/chart/shared/chart-utils";
 import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
-import type { XmlSink } from "@xml/types";
-import { StdDocAttributes } from "@xml/writer";
-
 import {
   C14_PIVOT_OPTIONS_EXT_URI,
   C14_CHART_NAMESPACE,
@@ -95,7 +92,9 @@ import {
   C16_CHART_NAMESPACE,
   C15_DATA_LABELS_RANGE_EXT_URI,
   C15_CHART_NAMESPACE
-} from "./chart-space-constants";
+} from "@excel/xlsx/xform/chart/chart-space-constants";
+import type { XmlSink } from "@xml/types";
+import { StdDocAttributes } from "@xml/writer";
 
 // ============================================================================
 // MS Office extension URIs / namespaces — defined in ./chart-space-constants

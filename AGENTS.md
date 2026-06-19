@@ -52,7 +52,7 @@ src/
 │   ├── excel/          # core/ (Workbook, Worksheet, Cell, …) surface/ stream/ xlsx/
 │   ├── word/           # DocxDocument, DocumentBuilder, readDocx, packageDocx
 │   ├── formula/        # Tokenizer, parser, evaluator, 433 functions, spill engine
-│   ├── pdf/            # core/ builder/ font/ render/ reader/ + excel-bridge.ts + word-bridge.ts
+│   ├── pdf/            # core/ builder/ font/ render/ reader/ + excel-bridge.ts + word-bridge.ts + word-chart-bridge.ts + word-layout-to-pdf.ts
 │   ├── csv/            # Parsing/formatting + streaming
 │   ├── markdown/       # GFM table parsing/formatting
 │   ├── xml/            # SAX/DOM parser, query engine, writer
@@ -65,7 +65,7 @@ src/
 ## Module Dependency Layers
 
 ```
-Layer 5:  pdf      → excel (only excel-bridge.ts), word (only word-bridge.ts), archive, utils
+Layer 5:  pdf      → excel (only excel-bridge.ts + word-chart-bridge.ts), word (only word-bridge.ts + word-chart-bridge.ts + word-layout-to-pdf.ts), archive, utils
 Layer 4:  excel, word → formula, archive, xml, csv, markdown, stream, utils
 Layer 3:  formula  → utils    (independent calc engine; no excel imports)
 Layer 2:  csv, archive → stream, utils
@@ -75,11 +75,13 @@ Layer 0:  utils    (no module dependencies)
 
 - Modules may only import from **lower** layers — never sideways or upward.
 - **Sole exceptions**:
-  - `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may.
-  - `pdf/word-bridge.ts` may import from `@word/`. No other file in `pdf/` may.
+  - `pdf/excel-bridge.ts` may import from `@excel/`. No other file in `pdf/` may import `@excel/` except `pdf/word-chart-bridge.ts` (Word charts rendered by the Excel chart engine).
+  - `pdf/word-bridge.ts`, `pdf/word-chart-bridge.ts`, and `pdf/word-layout-to-pdf.ts` may import from `@word/` (the Word→PDF bridge family). No other file in `pdf/` may.
   - `word/bridge/excel-bridge.ts` may import from `@excel/`. No other file in `word/` may.
   - `formula/` defines structural interfaces (`WorkbookLike`, `WorksheetLike`, `CellLike`) that `excel/` implements; `formula/` never imports concrete types from `@excel/*`.
 - `utils/` must never import from any module.
+
+These rules are **machine-enforced** by `scripts/verify-layers.ts` (run via `pnpm verify:layers`, included in `pnpm check`). It scans every production `.ts` import and fails on any forbidden cross-module import. A new bridge file that legitimately needs a cross-module import must be registered in that script's `EXCEPTIONS` map and documented above.
 
 ## Path Aliases
 

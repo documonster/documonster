@@ -18,4 +18,4 @@ export {
   type TaskOptions,
   type TaskResult,
   type WorkerTaskType
-} from "./pool.browser";
+} from "@archive/compression/worker-pool/pool.browser";

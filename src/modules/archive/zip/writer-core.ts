@@ -21,8 +21,7 @@ import {
   VERSION_NEEDED,
   VERSION_ZIP64
 } from "@archive/zip-spec/zip-records";
-
-import type { ZipCentralDirEntry } from "./writable-file";
+import type { ZipCentralDirEntry } from "@archive/zip/writable-file";
 
 /**
  * Input type for building Central Directory entries.
