@@ -46,73 +46,74 @@ export interface FillFromSourceOptions extends TemplateOptions {
 }
 
 // =============================================================================
-// JsonDataSource
+// Internal: shared path resolution
 // =============================================================================
 
-/**
- * Data source that reads from a JSON string or object.
- *
- * @stability experimental
- */
-export class JsonDataSource implements DataSource {
-  private readonly data: Record<string, unknown>;
-
-  /**
-   * @param input - A JSON string or an existing object.
-   */
-  constructor(input: string | Record<string, unknown>) {
-    if (typeof input === "string") {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(input);
-      } catch (cause) {
-        throw new DocxError(
-          `JsonDataSource: failed to parse input as JSON (${(cause as Error).message})`,
-          { cause }
-        );
-      }
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new DocxError(
-          "JsonDataSource: input must parse to a JSON object (not array or null)"
-        );
-      }
-      this.data = parsed as Record<string, unknown>;
-    } else {
-      this.data = input;
+/** Resolve a dot-separated path against a record. Pure, no state. */
+function resolveDataPath(data: Record<string, unknown>, path: string): unknown {
+  const parts = path.split(".");
+  let current: unknown = data;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== "object") {
+      return undefined;
     }
+    current = (current as Record<string, unknown>)[part];
   }
+  return current;
+}
 
-  getData(): Record<string, unknown> {
-    return this.data;
-  }
-
-  getArray(key: string): unknown[] {
-    const value = this.resolvePath(key);
-    if (Array.isArray(value)) {
-      return value;
+/** Build a `DataSource` view over a pre-flattened record. Pure, no state. */
+function dataSourceFromRecord(data: Record<string, unknown>): DataSource {
+  return {
+    getData() {
+      return data;
+    },
+    getArray(key: string) {
+      const value = resolveDataPath(data, key);
+      return Array.isArray(value) ? value : [];
+    },
+    getValue(path: string) {
+      return resolveDataPath(data, path);
     }
-    return [];
-  }
-
-  getValue(path: string): unknown {
-    return this.resolvePath(path);
-  }
-
-  private resolvePath(path: string): unknown {
-    const parts = path.split(".");
-    let current: unknown = this.data;
-    for (const part of parts) {
-      if (current === null || current === undefined || typeof current !== "object") {
-        return undefined;
-      }
-      current = (current as Record<string, unknown>)[part];
-    }
-    return current;
-  }
+  };
 }
 
 // =============================================================================
-// XmlDataSource
+// createJsonDataSource
+// =============================================================================
+
+/**
+ * Create a data source from a JSON string or object.
+ *
+ * @param input - A JSON string or an existing object.
+ * @stability experimental
+ */
+export function createJsonDataSource(input: string | Record<string, unknown>): DataSource {
+  let data: Record<string, unknown>;
+  if (typeof input === "string") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(input);
+    } catch (cause) {
+      throw new DocxError(
+        `createJsonDataSource: failed to parse input as JSON (${(cause as Error).message})`,
+        { cause }
+      );
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new DocxError(
+        "createJsonDataSource: input must parse to a JSON object (not array or null)"
+      );
+    }
+    data = parsed as Record<string, unknown>;
+  } else {
+    data = input;
+  }
+  return dataSourceFromRecord(data);
+}
+
+// =============================================================================
+// createXmlDataSource
 // =============================================================================
 
 /**
@@ -132,50 +133,16 @@ export class JsonDataSource implements DataSource {
  * ```
  * Produces: `{ name: "John", "address.city": "NY", address: { city: "NY" }, item: ["A", "B"] }`
  *
+ * @param xml - An XML string to parse.
+ * @param rootTag - Optional root element name to skip. If not provided, the first element is used.
  * @stability experimental
  */
-export class XmlDataSource implements DataSource {
-  private readonly data: Record<string, unknown>;
-
-  /**
-   * @param xml - An XML string to parse.
-   * @param rootTag - Optional root element name to skip. If not provided, the first element is used.
-   */
-  constructor(xml: string, rootTag?: string) {
-    this.data = parseXmlToRecord(xml, rootTag);
-  }
-
-  getData(): Record<string, unknown> {
-    return this.data;
-  }
-
-  getArray(key: string): unknown[] {
-    const value = this.resolvePath(key);
-    if (Array.isArray(value)) {
-      return value;
-    }
-    return [];
-  }
-
-  getValue(path: string): unknown {
-    return this.resolvePath(path);
-  }
-
-  private resolvePath(path: string): unknown {
-    const parts = path.split(".");
-    let current: unknown = this.data;
-    for (const part of parts) {
-      if (current === null || current === undefined || typeof current !== "object") {
-        return undefined;
-      }
-      current = (current as Record<string, unknown>)[part];
-    }
-    return current;
-  }
+export function createXmlDataSource(xml: string, rootTag?: string): DataSource {
+  return dataSourceFromRecord(parseXmlToRecord(xml, rootTag));
 }
 
 // =============================================================================
-// CsvDataSource
+// createCsvDataSource
 // =============================================================================
 
 /**
@@ -202,56 +169,26 @@ export class XmlDataSource implements DataSource {
  * }
  * ```
  *
+ * @param csv - A CSV string.
+ * @param options - Optional parsing configuration.
  * @stability experimental
  */
-export class CsvDataSource implements DataSource {
-  private readonly data: Record<string, unknown>;
-
-  /**
-   * @param csv - A CSV string.
-   * @param options - Optional parsing configuration.
-   */
-  constructor(
-    csv: string,
-    options?: {
-      /** Delimiter character (default: ","). */
-      readonly delimiter?: string;
-      /** Key for the rows array (default: "rows"). */
-      readonly rowsKey?: string;
-    }
-  ) {
-    const delimiter = options?.delimiter ?? ",";
-    const rowsKey = options?.rowsKey ?? "rows";
-    this.data = parseCsvToRecord(csv, delimiter, rowsKey);
+export function createCsvDataSource(
+  csv: string,
+  options?: {
+    /** Delimiter character (default: ","). */
+    readonly delimiter?: string;
+    /** Key for the rows array (default: "rows"). */
+    readonly rowsKey?: string;
   }
-
-  getData(): Record<string, unknown> {
-    return this.data;
-  }
-
-  getArray(key: string): unknown[] {
-    const value = this.data[key];
-    if (Array.isArray(value)) {
-      return value;
-    }
-    return [];
-  }
-
-  getValue(path: string): unknown {
-    const parts = path.split(".");
-    let current: unknown = this.data;
-    for (const part of parts) {
-      if (current === null || current === undefined || typeof current !== "object") {
-        return undefined;
-      }
-      current = (current as Record<string, unknown>)[part];
-    }
-    return current;
-  }
+): DataSource {
+  const delimiter = options?.delimiter ?? ",";
+  const rowsKey = options?.rowsKey ?? "rows";
+  return dataSourceFromRecord(parseCsvToRecord(csv, delimiter, rowsKey));
 }
 
 // =============================================================================
-// CompositeDataSource
+// createCompositeDataSource
 // =============================================================================
 
 /**
@@ -260,65 +197,61 @@ export class CsvDataSource implements DataSource {
  * Sources added later take precedence over earlier ones for conflicting keys.
  * Arrays can optionally be merged instead of overwritten.
  *
+ * @param sources - Data sources to combine (later sources take precedence).
+ * @param options - Configuration options.
  * @stability experimental
  */
-export class CompositeDataSource implements DataSource {
-  private readonly sources: readonly DataSource[];
-  private readonly mergeArrays: boolean;
+export function createCompositeDataSource(
+  sources: readonly DataSource[],
+  options?: { readonly mergeArrays?: boolean }
+): DataSource {
+  const mergeArrays = options?.mergeArrays ?? false;
 
-  /**
-   * @param sources - Data sources to combine (later sources take precedence).
-   * @param options - Configuration options.
-   */
-  constructor(sources: readonly DataSource[], options?: { readonly mergeArrays?: boolean }) {
-    this.sources = sources;
-    this.mergeArrays = options?.mergeArrays ?? false;
-  }
-
-  getData(): Record<string, unknown> {
-    const result: Record<string, unknown> = {};
-    for (const source of this.sources) {
-      const data = source.getData();
-      for (const key of Object.keys(data)) {
-        if (this.mergeArrays && Array.isArray(result[key]) && Array.isArray(data[key])) {
-          result[key] = [...(result[key] as unknown[]), ...(data[key] as unknown[])];
-        } else {
-          result[key] = data[key];
+  return {
+    getData() {
+      const result: Record<string, unknown> = {};
+      for (const source of sources) {
+        const data = source.getData();
+        for (const key of Object.keys(data)) {
+          if (mergeArrays && Array.isArray(result[key]) && Array.isArray(data[key])) {
+            result[key] = [...(result[key] as unknown[]), ...(data[key] as unknown[])];
+          } else {
+            result[key] = data[key];
+          }
         }
       }
-    }
-    return result;
-  }
+      return result;
+    },
 
-  getArray(key: string): unknown[] {
-    if (this.mergeArrays) {
-      const merged: unknown[] = [];
-      for (const source of this.sources) {
-        const arr = source.getArray(key);
-        merged.push(...arr);
+    getArray(key: string) {
+      if (mergeArrays) {
+        const merged: unknown[] = [];
+        for (const source of sources) {
+          merged.push(...source.getArray(key));
+        }
+        return merged;
       }
-      return merged;
-    }
-    // Last source with a non-empty array wins
-    for (let i = this.sources.length - 1; i >= 0; i--) {
-      const arr = this.sources[i].getArray(key);
-      if (arr.length > 0) {
-        return arr;
+      // Last source with a non-empty array wins.
+      for (let i = sources.length - 1; i >= 0; i--) {
+        const arr = sources[i].getArray(key);
+        if (arr.length > 0) {
+          return arr;
+        }
       }
-    }
-    return [];
-  }
+      return [];
+    },
 
-  getValue(path: string): unknown {
-    // Last source with a defined value wins
-    for (let i = this.sources.length - 1; i >= 0; i--) {
-      const value = this.sources[i].getValue(path);
-      if (value !== undefined) {
-        return value;
+    getValue(path: string) {
+      // Last source with a defined value wins.
+      for (let i = sources.length - 1; i >= 0; i--) {
+        const value = sources[i].getValue(path);
+        if (value !== undefined) {
+          return value;
+        }
       }
+      return undefined;
     }
-    return undefined;
-  }
+  };
 }
 
 // =============================================================================

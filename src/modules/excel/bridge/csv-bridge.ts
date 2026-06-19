@@ -32,7 +32,7 @@ import { pipeline } from "@stream";
 import type { IReadable, IWritable } from "@stream/types";
 import { readableStreamToAsyncIterable } from "@stream/utils.base";
 import type { DateFormat } from "@utils/datetime";
-import { DateParser, DateFormatter } from "@utils/datetime";
+import { createDateParser, createDateFormatter, createIsoDateFormatter } from "@utils/datetime";
 
 import type { CellValue, CellErrorValue } from "../types";
 
@@ -145,7 +145,7 @@ function createDefaultValueMapper(
   dateFormats: readonly DateFormat[],
   options?: { decimalSeparator?: DecimalSeparator }
 ): (datum: CellValue) => CellValue {
-  const dateParser = DateParser.create(dateFormats);
+  const dateParser = createDateParser(dateFormats);
   const decimalSeparator: DecimalSeparator = options?.decimalSeparator ?? ".";
 
   return function mapValue(datum: CellValue): CellValue {
@@ -186,8 +186,8 @@ function createDefaultWriteMapper(
   dateUTC?: boolean
 ): (value: CellValue) => CellValue {
   const formatter = dateFormat
-    ? DateFormatter.create(dateFormat, { utc: dateUTC })
-    : DateFormatter.iso(dateUTC);
+    ? createDateFormatter(dateFormat, { utc: dateUTC })
+    : createIsoDateFormatter(dateUTC);
 
   return function mapValue(value: CellValue): CellValue {
     if (value === null || value === undefined) {

@@ -165,14 +165,17 @@ const VALID_DLBL_POSITIONS_BY_TYPE: Partial<
  * Simple axis ID allocator — scoped per buildChartModel call.
  * Axis IDs only need to be unique within a single chart.
  */
-class AxIdAllocator {
-  private next: number;
-  constructor(start = DEFAULT_AXIS_START_ID) {
-    this.next = start;
-  }
-  alloc(): number {
-    return this.next++;
-  }
+interface AxIdAllocator {
+  alloc(): number;
+}
+
+function createAxIdAllocator(start = DEFAULT_AXIS_START_ID): AxIdAllocator {
+  let next = start;
+  return {
+    alloc() {
+      return next++;
+    }
+  };
 }
 
 function makeNumRef(formula: string): NumberReference {
@@ -2620,7 +2623,7 @@ function applyLegendOptions(legend: ChartLegend, opts: AddLegendOptions): void {
 export function buildChartModel(opts: AddChartOptions): ChartModel {
   validateChartOptions(opts);
   const seriesOpts = opts.series ?? [];
-  const axIds = new AxIdAllocator();
+  const axIds = createAxIdAllocator();
   const { group: chartTypeGroup, axes } = buildChartTypeGroup(opts, seriesOpts, axIds);
 
   const plotArea: PlotArea = {
@@ -2641,7 +2644,7 @@ export function buildChartModel(opts: AddChartOptions): ChartModel {
  */
 export function buildComboChartModel(opts: AddComboChartOptions): ChartModel {
   validateComboChartOptions(opts);
-  const axIds = new AxIdAllocator();
+  const axIds = createAxIdAllocator();
   const chartTypeGroups: ChartTypeGroup[] = [];
   const allAxes: ChartAxis[] = [];
 

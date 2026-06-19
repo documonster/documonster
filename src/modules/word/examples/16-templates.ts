@@ -8,7 +8,7 @@
  *   - Custom delimiters
  *   - Image / rich-text / sub-document / chart / HTML chunk placeholders
  *   - listTemplateTags() — introspection
- *   - fillTemplateFromSource using JsonDataSource / XmlDataSource / CsvDataSource
+ *   - fillTemplateFromSource using createJsonDataSource / createXmlDataSource / createCsvDataSource
  *   - patchDocument (the lower-level placeholder API)
  *   - Edge case: missing variable in non-strict mode, nested loops, deep paths
  *
@@ -180,7 +180,7 @@ function buildTemplate(): DocxDocument {
 // ---------------------------------------------------------------------------
 {
   const tpl = buildTemplate();
-  const json = new Template.JsonDataSource({
+  const json = Template.createJsonDataSource({
     customer: { name: "JSON Co." },
     date: "json-date",
     project: "from JSON",
@@ -198,7 +198,7 @@ function buildTemplate(): DocxDocument {
 
 {
   const tpl = buildTemplate();
-  const xml = new Template.XmlDataSource(`<?xml version="1.0"?>
+  const xml = Template.createXmlDataSource(`<?xml version="1.0"?>
     <root>
       <customer><name>XML Co.</name></customer>
       <date>xml-date</date>
@@ -217,7 +217,7 @@ function buildTemplate(): DocxDocument {
 {
   // CSV gives an array under a key (default "rows", here "items" via rowsKey);
   // useful for #each loops.
-  const csvSource = new Template.CsvDataSource(
+  const csvSource = Template.createCsvDataSource(
     "name,qty,price,total\nWidget,2,12.5,25\nGadget,5,4,20\n",
     {
       rowsKey: "items"

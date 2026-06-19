@@ -1,5 +1,5 @@
 import { zip } from "@archive/create-archive";
-import { BufferReader } from "@archive/io/random-access";
+import { createBufferReader } from "@archive/io/random-access";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipEditWarning } from "@archive/zip";
 import { editZip, editZipUrl, ZipEditPlan } from "@archive/zip";
@@ -201,7 +201,10 @@ export function runZipEditTests(): void {
         const originalRaw = originalParser.getRawCompressedData("big.txt");
         expect(originalRaw).not.toBeNull();
 
-        const editor = await editZip(new BufferReader(original), { level: 6, reproducible: true });
+        const editor = await editZip(createBufferReader(original), {
+          level: 6,
+          reproducible: true
+        });
         editor.rename("big.txt", "moved.txt");
         const out = await editor.bytes();
 

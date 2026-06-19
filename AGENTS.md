@@ -96,6 +96,22 @@ Use aliases for **all** module imports — both cross-module (`@archive/...` fro
 - **Formatting**: Handled entirely by Prettier — just run `pnpm format`.
 - **Tests**: Vitest, in `__tests__/*.test.ts`. Timeout: 30s.
 
+## Functions, Arrow Functions & Classes
+
+Choose the form by purpose, not by preference. Do **not** make everything an arrow function — each form exists for a reason.
+
+- **Top-level named functions → `function` declarations.** Use `function foo() {}` for module-level functions. They are hoisted (free ordering, no top-of-file dependency dance), carry a real name in stack traces, and support recursion cleanly.
+- **Callbacks & inline functions → arrow functions.** Use arrows for `map`/`filter`/`forEach`, promise chains, event handlers, and anywhere lexical `this` is wanted. Keep bodies expression-form when possible (`x => x * 2`, not `x => { return x * 2; }`).
+- **Overloads & generators → must be `function`.** Multiple call signatures (TS overloads) and `function*` generators cannot be expressed as arrows.
+- **Class members → method syntax, never arrow fields.** Write `load() {}`, not `load = () => {}`. Methods live on the prototype and are shared across instances; arrow fields allocate a fresh function per instance (measured ~5× memory on hot value types like `Cell`/`Token`/XML nodes) and add per-`new` construction cost. Only use an arrow field when a method is detached and passed as a callback that genuinely needs bound `this`.
+- **Avoid named function expressions** (`const foo = function bar() {}`); prefer a `function` declaration or an arrow.
+
+### Prefer plain functions over classes
+
+- **Don't reach for `class` by default.** If a unit of behavior is just data + a few transforms, prefer plain functions operating on plain objects/interfaces over a class. Modules with named exports already give you encapsulation and namespacing.
+- **Use a `class` only when you genuinely need** instance identity with mutable state, inheritance/polymorphism, lifecycle (`implements`/`extends`), or a public API where `new`/methods read more naturally than free functions.
+- **Avoid classes that are just namespaces** — a class with only static members (or a single method) should be plain exported functions instead.
+
 ## Example Output
 
 All runnable examples write output to `tmp/` under the project root. This directory is gitignored.

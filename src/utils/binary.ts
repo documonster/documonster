@@ -102,13 +102,13 @@ export function createStreamDecoder(encoding?: string): StreamDecoder {
   const enc = normalizeEncodingLabel(encoding);
   switch (enc) {
     case "hex":
-      return new HexStreamDecoder();
+      return { decode: hexStreamDecode };
     case "base64":
       return new Base64StreamDecoder(false);
     case "base64url":
       return new Base64StreamDecoder(true);
     case "ascii":
-      return new AsciiStreamDecoder();
+      return { decode: asciiStreamDecode };
     default:
       // All other encodings are handled by TextDecoder.
       return createTextDecoderOrTypeError(enc, { ignoreBOM: true });
@@ -116,16 +116,6 @@ export function createStreamDecoder(encoding?: string): StreamDecoder {
 }
 
 // -- Hex decoder --------------------------------------------------------------
-
-class HexStreamDecoder implements StreamDecoder {
-  decode(input: Uint8Array): string {
-    let result = "";
-    for (let i = 0; i < input.length; i++) {
-      result += hexTable[input[i]!];
-    }
-    return result;
-  }
-}
 
 /** Pre-computed lookup table for byte→hex (avoids per-byte toString(16)). */
 const hexTable: string[] = /* @__PURE__ */ (() => {
@@ -135,6 +125,15 @@ const hexTable: string[] = /* @__PURE__ */ (() => {
   }
   return t;
 })();
+
+/** Decode bytes as a lowercase hex string. Stateless. */
+function hexStreamDecode(input: Uint8Array): string {
+  let result = "";
+  for (let i = 0; i < input.length; i++) {
+    result += hexTable[input[i]!];
+  }
+  return result;
+}
 
 // -- Base64 / Base64url decoder -----------------------------------------------
 
@@ -218,14 +217,13 @@ class Base64StreamDecoder implements StreamDecoder {
 
 // -- ASCII decoder (7-bit masking, matches Node.js StringDecoder) -------------
 
-class AsciiStreamDecoder implements StreamDecoder {
-  decode(input: Uint8Array): string {
-    let result = "";
-    for (let i = 0; i < input.length; i++) {
-      result += String.fromCharCode(input[i]! & 0x7f);
-    }
-    return result;
+/** Decode bytes as ASCII (7-bit masked). Stateless. */
+function asciiStreamDecode(input: Uint8Array): string {
+  let result = "";
+  for (let i = 0; i < input.length; i++) {
+    result += String.fromCharCode(input[i]! & 0x7f);
   }
+  return result;
 }
 
 // =============================================================================

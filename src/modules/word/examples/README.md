@@ -78,7 +78,7 @@ Output is written to `tmp/word-examples/`.
 | `37-svg-render.ts`               | `layoutDocument` / `layoutDocumentFull` / `renderPageToSvg` / `renderDocumentToSvg`                                           |
 | `38-glossary-buildingblocks.ts`  | `createBuildingBlock` / `createGlossaryDocument` / `getQuickParts`                                                            |
 | `39-ole-vba.ts`                  | `extractOleObjects` / `createOleEmbedding` / `addVbaProject` (.docm round-trip)                                               |
-| `40-templates-advanced.ts`       | `compileTemplate` / `patchTemplate` / `bindChartData` / `CompositeDataSource`                                                 |
+| `40-templates-advanced.ts`       | `compileTemplate` / `patchTemplate` / `bindChartData` / `createCompositeDataSource`                                           |
 | `41-fields-engine.ts`            | `updateFields` / `updateTableOfContents` / `tcField` / `indexEntryField` / `indexField` / `noteRefField`                      |
 | `42-conversion-ir.ts`            | `docxToSemantic` / `createConversionContext`                                                                                  |
 | `43-compat-modes.ts`             | `getCompatibilityMode` / `setCompatibilityMode` for Word 2003-2013+                                                           |

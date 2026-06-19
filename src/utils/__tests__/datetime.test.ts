@@ -1,24 +1,30 @@
-import { getSupportedFormats, DateParser, DateFormatter } from "@utils/datetime";
+import {
+  getSupportedFormats,
+  createDateParser,
+  createIsoDateParser,
+  createDateFormatter,
+  createIsoDateFormatter
+} from "@utils/datetime";
 import { describe, it, expect } from "vitest";
 
 describe("datetime", () => {
   describe("DateParser", () => {
     it("creates a reusable parser with specified formats", () => {
-      const parser = DateParser.create(["YYYY-MM-DD", "MM-DD-YYYY"]);
+      const parser = createDateParser(["YYYY-MM-DD", "MM-DD-YYYY"]);
       expect(parser.parse("2024-12-26")).toBeInstanceOf(Date);
       expect(parser.parse("12-26-2024")).toBeInstanceOf(Date);
       expect(parser.parse("26-12-2024")).toBeNull();
     });
 
     it("creates ISO auto-detect parser", () => {
-      const parser = DateParser.iso();
+      const parser = createIsoDateParser();
       expect(parser.parse("2024-12-26")).toBeInstanceOf(Date);
       expect(parser.parse("2024-12-26T10:30:00Z")).toBeInstanceOf(Date);
       expect(parser.parse("2024-12-26 10:30:00")).toBeInstanceOf(Date);
     });
 
     it("parses all values in batch", () => {
-      const parser = DateParser.create(["YYYY-MM-DD"]);
+      const parser = createDateParser(["YYYY-MM-DD"]);
       const results = parser.parseAll(["2024-01-01", "invalid", "2024-12-31"]);
       expect(results[0]).toBeInstanceOf(Date);
       expect(results[1]).toBeNull();
@@ -26,7 +32,7 @@ describe("datetime", () => {
     });
 
     it("filters valid dates", () => {
-      const parser = DateParser.create(["YYYY-MM-DD"]);
+      const parser = createDateParser(["YYYY-MM-DD"]);
       const results = parser.parseValid(["2024-01-01", "invalid", "2024-12-31"]);
       expect(results.length).toBe(2);
       expect(results.every(d => d instanceof Date)).toBe(true);
@@ -35,19 +41,19 @@ describe("datetime", () => {
 
   describe("DateFormatter", () => {
     it("creates ISO formatter", () => {
-      const formatter = DateFormatter.iso(true);
+      const formatter = createIsoDateFormatter(true);
       const date = new Date(Date.UTC(2024, 11, 26, 10, 30, 45));
       expect(formatter.format(date)).toBe("2024-12-26T10:30:45.000Z");
     });
 
     it("creates custom format formatter", () => {
-      const formatter = DateFormatter.create("YYYY-MM-DD", { utc: true });
+      const formatter = createDateFormatter("YYYY-MM-DD", { utc: true });
       const date = new Date(Date.UTC(2024, 11, 26));
       expect(formatter.format(date)).toBe("2024-12-26");
     });
 
     it("formats all dates in batch", () => {
-      const formatter = DateFormatter.create("MM/DD/YYYY", { utc: true });
+      const formatter = createDateFormatter("MM/DD/YYYY", { utc: true });
       const dates = [
         new Date(Date.UTC(2024, 0, 1)),
         new Date(Date.UTC(2024, 5, 15)),
@@ -58,7 +64,7 @@ describe("datetime", () => {
     });
 
     it("handles invalid date in formatter", () => {
-      const formatter = DateFormatter.create("YYYY-MM-DD", { utc: true });
+      const formatter = createDateFormatter("YYYY-MM-DD", { utc: true });
       expect(formatter.format(new Date("invalid"))).toBe("");
     });
   });
@@ -75,8 +81,8 @@ describe("datetime", () => {
 
   describe("performance", () => {
     it("handles large batches efficiently", () => {
-      const parser = DateParser.create(["YYYY-MM-DD"]);
-      const formatter = DateFormatter.create("YYYY-MM-DD", { utc: true });
+      const parser = createDateParser(["YYYY-MM-DD"]);
+      const formatter = createDateFormatter("YYYY-MM-DD", { utc: true });
 
       const dateStrings: string[] = [];
       for (let i = 0; i < 10000; i++) {

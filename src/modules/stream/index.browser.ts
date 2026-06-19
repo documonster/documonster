@@ -29,8 +29,8 @@ registerDuplexFrom(source => Duplex.from(source));
 export {
   PullStream,
   BufferedStream,
-  StringChunk,
-  ByteChunk,
+  createStringChunk,
+  createByteChunk,
   createReadable,
   createReadableFromAsyncIterable,
   createReadableFromArray,

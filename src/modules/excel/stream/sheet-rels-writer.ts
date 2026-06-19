@@ -14,16 +14,16 @@ interface Relationship {
   TargetMode?: string;
 }
 
-class HyperlinksProxy {
-  writer: SheetRelsWriter;
+interface HyperlinksProxy {
+  push(hyperlink: Hyperlink): void;
+}
 
-  constructor(sheetRelsWriter: SheetRelsWriter) {
-    this.writer = sheetRelsWriter;
-  }
-
-  push(hyperlink: Hyperlink): void {
-    this.writer.addHyperlink(hyperlink);
-  }
+function createHyperlinksProxy(sheetRelsWriter: SheetRelsWriter): HyperlinksProxy {
+  return {
+    push(hyperlink: Hyperlink) {
+      sheetRelsWriter.addHyperlink(hyperlink);
+    }
+  };
 }
 
 interface SheetRelsWriterOptions {
@@ -69,7 +69,7 @@ class SheetRelsWriter {
   }
 
   get hyperlinksProxy(): HyperlinksProxy {
-    return this._hyperlinksProxy || (this._hyperlinksProxy = new HyperlinksProxy(this));
+    return this._hyperlinksProxy || (this._hyperlinksProxy = createHyperlinksProxy(this));
   }
 
   addHyperlink(hyperlink: Hyperlink): void {

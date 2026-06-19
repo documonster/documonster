@@ -7,7 +7,7 @@
 import { Readable, Transform, Duplex, PassThrough } from "stream";
 import type { TransformCallback as NodeTransformCallback } from "stream";
 
-import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
+import { BufferedStream, createStringChunk, createByteChunk } from "@stream/buffered-stream";
 import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { PullStream } from "@stream/pull-stream";
 import type {
@@ -25,7 +25,7 @@ import type {
 } from "@stream/types";
 
 // Re-export shared stream classes
-export { PullStream, BufferedStream, StringChunk, ByteChunk };
+export { PullStream, BufferedStream, createStringChunk, createByteChunk };
 
 /** Create a pull stream */
 export function createPullStream(options?: PullStreamOptions): PullStream {

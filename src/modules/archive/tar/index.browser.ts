@@ -37,7 +37,8 @@ export { parseTar, parseTarStream, untar, type TarEntry, type TarParseOptions } 
 export {
   TarArchive,
   TarReader,
-  TarReaderEntry,
+  createTarReaderEntry,
+  type TarReaderEntry,
   createTarArchive,
   createTarReader,
   tar,

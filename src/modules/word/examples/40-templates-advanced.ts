@@ -6,7 +6,7 @@
  *     hundreds of patch operations (much faster than patchDocument in a loop).
  *   - fillTemplateFromBuffer — read .docx + fillTemplate + write in one call.
  *   - bindChartData — fill chart series from runtime data (ChartTemplateData).
- *   - CompositeDataSource — combine JSON + XML + CSV sources, with array
+ *   - createCompositeDataSource — combine JSON + XML + CSV sources, with array
  *     merge semantics.
  *
  * Output: tmp/word-examples/40-templates-advanced/...
@@ -67,24 +67,24 @@ fs.writeFileSync(path.join(outDir, "02-from-buffer.docx"), filled);
 console.log(`  → 02-from-buffer.docx (${filled.length} bytes)`);
 
 // ---------------------------------------------------------------------------
-// 4. CompositeDataSource — JSON + XML + CSV combined, array merge
+// 4. createCompositeDataSource — JSON + XML + CSV combined, array merge
 // ---------------------------------------------------------------------------
-const json = new Template.JsonDataSource({
+const json = Template.createJsonDataSource({
   invoiceNo: "JSON-1",
   customer: "Composite Co.",
   notes: ["from json"]
 });
-const xml = new Template.XmlDataSource(`<?xml version="1.0"?>
+const xml = Template.createXmlDataSource(`<?xml version="1.0"?>
 <root>
   <total>$5,000</total>
   <notes>from xml</notes>
 </root>`);
-const csv = new Template.CsvDataSource("name,price\nWidget,10\nGadget,25", {
+const csv = Template.createCsvDataSource("name,price\nWidget,10\nGadget,25", {
   rowsKey: "lineItems"
 });
 
 // keep each source's arrays distinct where keys collide (mergeArrays: false)
-const composite = new Template.CompositeDataSource([json, xml, csv], { mergeArrays: false });
+const composite = Template.createCompositeDataSource([json, xml, csv], { mergeArrays: false });
 console.log(`  composite.getData() keys: ${Object.keys(composite.getData()).join(", ")}`);
 
 const compositeFilled = Template.fillTemplateFromSource(compiled._doc, composite, {

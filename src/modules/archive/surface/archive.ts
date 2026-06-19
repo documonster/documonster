@@ -21,7 +21,7 @@
 export { toAsyncIterable, toReadableStream } from "@archive/io/archive-source";
 
 // Random Access / HTTP Range reading
-export { HttpRangeReader, BufferReader } from "@archive/io/random-access";
+export { HttpRangeReader, createBufferReader } from "@archive/io/random-access";
 
 // Remote ZIP reading over HTTP range requests
 export { RemoteZipReader } from "@archive/unzip/remote-zip-reader";
@@ -41,7 +41,8 @@ export {
   TAR_TYPE,
   TarArchive,
   TarReader,
-  TarReaderEntry,
+  createTarReaderEntry,
+  type TarReaderEntry,
   createTarArchive,
   createTarReader,
   tar,

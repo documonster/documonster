@@ -24,7 +24,7 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "TAR_TYPE",
   "TarArchive",
   "TarReader",
-  "TarReaderEntry",
+  "createTarReaderEntry",
   "createTarArchive",
   "createTarReader",
   "tar",
@@ -40,7 +40,7 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
 
   // Random access / HTTP Range reading
   "HttpRangeReader",
-  "BufferReader",
+  "createBufferReader",
   "RemoteZipReader",
 
   // Abort utilities

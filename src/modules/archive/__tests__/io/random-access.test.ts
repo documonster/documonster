@@ -1,7 +1,7 @@
 import type { RandomAccessReader } from "@archive/io/random-access";
 import {
   HttpRangeReader,
-  BufferReader,
+  createBufferReader,
   RangeNotSupportedError,
   HttpRangeError
 } from "@archive/io/random-access";
@@ -10,19 +10,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 describe("BufferReader", () => {
   it("should provide correct size", () => {
     const data = new Uint8Array([1, 2, 3, 4, 5]);
-    const reader = new BufferReader(data);
+    const reader = createBufferReader(data);
     expect(reader.size).toBe(5);
   });
 
   it("should accept ArrayBuffer", () => {
     const buffer = new ArrayBuffer(10);
-    const reader = new BufferReader(buffer);
+    const reader = createBufferReader(buffer);
     expect(reader.size).toBe(10);
   });
 
   it("should read a range correctly", async () => {
     const data = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-    const reader = new BufferReader(data);
+    const reader = createBufferReader(data);
 
     const result = await reader.read(2, 5);
     expect(result).toEqual(new Uint8Array([2, 3, 4]));
@@ -30,7 +30,7 @@ describe("BufferReader", () => {
 
   it("should read from start", async () => {
     const data = new Uint8Array([10, 20, 30, 40, 50]);
-    const reader = new BufferReader(data);
+    const reader = createBufferReader(data);
 
     const result = await reader.read(0, 3);
     expect(result).toEqual(new Uint8Array([10, 20, 30]));
@@ -38,7 +38,7 @@ describe("BufferReader", () => {
 
   it("should read to end", async () => {
     const data = new Uint8Array([10, 20, 30, 40, 50]);
-    const reader = new BufferReader(data);
+    const reader = createBufferReader(data);
 
     const result = await reader.read(3, 5);
     expect(result).toEqual(new Uint8Array([40, 50]));
@@ -46,31 +46,31 @@ describe("BufferReader", () => {
 
   it("should read entire buffer", async () => {
     const data = new Uint8Array([1, 2, 3]);
-    const reader = new BufferReader(data);
+    const reader = createBufferReader(data);
 
     const result = await reader.read(0, 3);
     expect(result).toEqual(data);
   });
 
   it("should throw on invalid range - negative start", async () => {
-    const reader = new BufferReader(new Uint8Array(10));
+    const reader = createBufferReader(new Uint8Array(10));
     await expect(reader.read(-1, 5)).rejects.toThrow(RangeError);
   });
 
   it("should throw on invalid range - end beyond size", async () => {
-    const reader = new BufferReader(new Uint8Array(10));
+    const reader = createBufferReader(new Uint8Array(10));
     await expect(reader.read(5, 15)).rejects.toThrow(RangeError);
   });
 
   it("should throw on invalid range - start >= end", async () => {
-    const reader = new BufferReader(new Uint8Array(10));
+    const reader = createBufferReader(new Uint8Array(10));
     await expect(reader.read(5, 5)).rejects.toThrow(RangeError);
     await expect(reader.read(6, 5)).rejects.toThrow(RangeError);
   });
 
   it("close should be a no-op", async () => {
-    const reader = new BufferReader(new Uint8Array(10));
-    await expect(reader.close()).resolves.toBeUndefined();
+    const reader = createBufferReader(new Uint8Array(10));
+    await expect(reader.close!()).resolves.toBeUndefined();
   });
 });
 
@@ -379,7 +379,7 @@ describe("HttpRangeReader", () => {
 
 describe("RandomAccessReader interface", () => {
   it("BufferReader implements RandomAccessReader", () => {
-    const reader: RandomAccessReader = new BufferReader(new Uint8Array(10));
+    const reader: RandomAccessReader = createBufferReader(new Uint8Array(10));
     expect(reader.size).toBe(10);
     expect(typeof reader.read).toBe("function");
   });

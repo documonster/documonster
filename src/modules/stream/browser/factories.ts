@@ -8,7 +8,7 @@ import { PassThrough } from "@stream/browser/passthrough";
 import { Readable, pumpAsyncIterableToReadable } from "@stream/browser/readable";
 import { Transform } from "@stream/browser/transform";
 import { Writable } from "@stream/browser/writable";
-import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
+import { BufferedStream, createStringChunk, createByteChunk } from "@stream/buffered-stream";
 import { PullStream } from "@stream/pull-stream";
 import type {
   ReadableStreamOptions,
@@ -25,7 +25,7 @@ import type {
 } from "@stream/types";
 
 // Re-export shared stream classes
-export { PullStream, BufferedStream, StringChunk, ByteChunk };
+export { PullStream, BufferedStream, createStringChunk, createByteChunk };
 
 /** Create a pull stream */
 export function createPullStream(options?: PullStreamOptions): PullStream {

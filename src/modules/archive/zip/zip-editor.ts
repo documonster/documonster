@@ -18,7 +18,7 @@ import {
   resolveArchiveSourceToBuffer
 } from "@archive/io/archive-source";
 import type { RandomAccessReader, HttpRangeReaderOptions } from "@archive/io/random-access";
-import { BufferReader, HttpRangeReader } from "@archive/io/random-access";
+import { createBufferReader, HttpRangeReader } from "@archive/io/random-access";
 import { RemoteZipReader } from "@archive/unzip/remote-zip-reader";
 import type { ZipEntryOptions } from "@archive/zip";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
@@ -320,7 +320,7 @@ export class ZipEditor {
     // (via BufferReader) for a single unified read path.
     const bytes = await resolveArchiveSourceToBuffer(source, { signal: options.signal });
 
-    return ZipEditor.openReader(new BufferReader(bytes), options);
+    return ZipEditor.openReader(createBufferReader(bytes), options);
   }
 
   static async openReader(

@@ -35,8 +35,8 @@ export { Collector, createCollector } from "@stream/node/collector";
 export {
   PullStream,
   BufferedStream,
-  StringChunk,
-  ByteChunk,
+  createStringChunk,
+  createByteChunk,
   createReadable,
   createReadableFromAsyncIterable,
   createReadableFromArray,

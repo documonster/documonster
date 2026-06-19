@@ -442,56 +442,46 @@ export class TarArchive {
 // TarReaderEntry - Entry from TAR archive (matches UnzipEntry interface)
 // ============================================================================
 
-export class TarReaderEntry {
+export interface TarReaderEntry {
   readonly path: string;
   readonly isDirectory: boolean;
   readonly info: TarEntryInfo;
+  /** Get entry data as Uint8Array (matches UnzipEntry.bytes) */
+  bytes(): Promise<Uint8Array>;
+  /** Get entry data as string (matches UnzipEntry.text) */
+  text(encoding?: string): Promise<string>;
+  /** Stream entry data (matches UnzipEntry.stream) */
+  stream(): AsyncIterable<Uint8Array>;
+  /** Pipe entry to sink (matches UnzipEntry.pipeTo) */
+  pipeTo(sink: ArchiveSink): Promise<void>;
+  /** Discard entry (matches UnzipEntry.discard) */
+  discard(): void;
+}
 
-  private readonly _data: Uint8Array;
-
-  constructor(info: TarEntryInfo, data: Uint8Array) {
-    this.info = info;
-    this.path = info.path;
-    this.isDirectory = isDirectory(info) || info.path.endsWith("/");
-    this._data = data;
-  }
-
-  /**
-   * Get entry data as Uint8Array (matches UnzipEntry.bytes)
-   */
-  async bytes(): Promise<Uint8Array> {
-    return this._data;
-  }
-
-  /**
-   * Get entry data as string (matches UnzipEntry.text)
-   */
-  async text(encoding?: string): Promise<string> {
-    return getTextDecoder(encoding).decode(this._data);
-  }
-
-  /**
-   * Stream entry data (matches UnzipEntry.stream)
-   */
-  async *stream(): AsyncIterable<Uint8Array> {
-    if (this._data.length > 0) {
-      yield this._data;
+export function createTarReaderEntry(info: TarEntryInfo, data: Uint8Array): TarReaderEntry {
+  const entry: TarReaderEntry = {
+    info,
+    path: info.path,
+    isDirectory: isDirectory(info) || info.path.endsWith("/"),
+    async bytes(): Promise<Uint8Array> {
+      return data;
+    },
+    async text(encoding?: string): Promise<string> {
+      return getTextDecoder(encoding).decode(data);
+    },
+    async *stream(): AsyncIterable<Uint8Array> {
+      if (data.length > 0) {
+        yield data;
+      }
+    },
+    async pipeTo(sink: ArchiveSink): Promise<void> {
+      await pipeIterableToSink(entry.stream(), sink);
+    },
+    discard(): void {
+      // No-op for TAR (data already loaded)
     }
-  }
-
-  /**
-   * Pipe entry to sink (matches UnzipEntry.pipeTo)
-   */
-  async pipeTo(sink: ArchiveSink): Promise<void> {
-    await pipeIterableToSink(this.stream(), sink);
-  }
-
-  /**
-   * Discard entry (matches UnzipEntry.discard)
-   */
-  discard(): void {
-    // No-op for TAR (data already loaded)
-  }
+  };
+  return entry;
 }
 
 // ============================================================================
@@ -569,7 +559,7 @@ export class TarReader {
               isDirectory: isDirectory(entry.info)
             };
 
-            const readerEntry = new TarReaderEntry(entry.info, entryData);
+            const readerEntry = createTarReaderEntry(entry.info, entryData);
 
             // Cache for get() method
             if (!parsedEntriesRef.entries) {
@@ -603,7 +593,7 @@ export class TarReader {
               isDirectory: isDirectory(entry.info)
             };
 
-            const readerEntry = new TarReaderEntry(entry.info, entryData);
+            const readerEntry = createTarReaderEntry(entry.info, entryData);
             yield readerEntry;
 
             progress.entriesDone++;

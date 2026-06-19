@@ -19,7 +19,7 @@ import { addRow, eachRow } from "@excel/core/worksheet";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
 import type { MarkdownOptions, MarkdownAlignment, MarkdownParseResult } from "@markdown/types";
-import { DateFormatter } from "@utils/datetime";
+import { createDateFormatter, createIsoDateFormatter } from "@utils/datetime";
 
 // =============================================================================
 // Stringify
@@ -30,8 +30,8 @@ function createMarkdownStringify(
   dateUTC?: boolean
 ): (value: unknown) => string {
   const formatter = dateFormat
-    ? DateFormatter.create(dateFormat, { utc: dateUTC })
-    : DateFormatter.iso(dateUTC);
+    ? createDateFormatter(dateFormat, { utc: dateUTC })
+    : createIsoDateFormatter(dateUTC);
 
   return function stringify(value: unknown): string {
     if (value === null || value === undefined) {
