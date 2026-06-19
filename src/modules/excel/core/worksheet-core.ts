@@ -60,10 +60,10 @@ import {
   rowValues,
   resolveColumnKeyValue
 } from "@excel/core/row";
+import type { SparklineGroup } from "@excel/core/sparkline";
 import type { TableData } from "@excel/core/table";
 import type { Workbook } from "@excel/core/workbook";
 import { ExcelError } from "@excel/errors";
-import type { SparklineGroup } from "@excel/sparkline";
 import type {
   Alignment,
   AutoFilter,

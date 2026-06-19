@@ -1,4 +1,4 @@
-import { renderSparklineGroups, parseSparklineGroups } from "@excel/sparkline";
+import { renderSparklineGroups, parseSparklineGroups } from "@excel/core/sparkline";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ConditionalFormattingsExtXform } from "@excel/xlsx/xform/sheet/cf-ext/conditional-formattings-ext-xform";
 

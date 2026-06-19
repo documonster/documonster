@@ -75,6 +75,8 @@ import {
   rowHidden,
   rowValues
 } from "@excel/core/row";
+import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/core/sparkline";
+import { buildSparklineGroup } from "@excel/core/sparkline";
 import type { TableData, TableModel } from "@excel/core/table";
 import { createTable, tableModel, tableName, tableSetModel } from "@excel/core/table";
 import type { Workbook } from "@excel/core/workbook";
@@ -110,8 +112,6 @@ import {
   rowSplice
 } from "@excel/core/worksheet-core";
 import { ImageError, MergeConflictError, TableError } from "@excel/errors";
-import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
-import { buildSparklineGroup } from "@excel/sparkline";
 import type {
   AddImageRange,
   AddShapeOptions,

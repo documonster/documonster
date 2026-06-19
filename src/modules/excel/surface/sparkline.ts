@@ -8,4 +8,4 @@ export {
   removeSparklineGroup as remove
 } from "@excel/core/worksheet";
 
-export type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
+export type { AddSparklineGroupOptions, SparklineGroup } from "@excel/core/sparkline";

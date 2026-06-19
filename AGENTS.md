@@ -39,7 +39,7 @@ pnpm test                 # All tests
 pnpm build                # Production build
 
 # Single test file
-pnpm exec vitest run src/modules/excel/__tests__/cell.test.ts
+pnpm exec vitest run src/modules/excel/core/__tests__/cell.test.ts
 # Pattern match
 pnpm exec vitest run -t "should handle empty cells"
 ```
@@ -95,6 +95,9 @@ Use aliases for **all** module imports — both cross-module (`@archive/...` fro
 - **Files**: kebab-case. **Browser variants**: `*.browser.ts`.
 - **Formatting**: Handled entirely by Prettier — just run `pnpm format`.
 - **Tests**: Vitest, in `__tests__/*.test.ts`. Timeout: 30s.
+  - **Co-locate tests next to the code they cover.** A test lives in the `__tests__/` directory of the module subfolder it exercises — e.g. `core/__tests__/`, `surface/__tests__/`, `stream/__tests__/`, `chart/__tests__/`, `bridge/__tests__/`, `utils/__tests__/`, `xlsx/__tests__/`. The `xlsx/__tests__/` tree mirrors the `xlsx/xform/` source layout. Do not pile module tests into a single top-level `__tests__/`.
+  - **Shared fixtures stay centralized.** Cross-cutting test assets — `data/` (binary `.xlsx`/`.png`/`.csv` fixtures), `helpers/` (e.g. `expect-valid-xlsx`, `zip-text`, `external-oracle`), and `shared/` (reusable sheet builders) — live in `src/modules/excel/__tests__/` and are imported via the `@excel/__tests__/...` alias from any co-located test. A test that is private to one subfolder may keep a private helper beside it (e.g. `chart/__tests__/chart-builder.helpers.ts`).
+  - **Browser tests** stay under a `__tests__/browser/` directory (matched by `vitest.browser.config.ts`); keep their `__screenshots__/` baselines alongside them.
 
 ## Functions, Arrow Functions & Classes
 

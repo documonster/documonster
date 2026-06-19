@@ -2989,9 +2989,8 @@ async function main(): Promise<void> {
   // 22. Sparklines — in-cell mini charts (x14:sparklineGroups).
   // ---------------------------------------------------------------------------
   //
-  // Sparklines live in a separate module (@excel/sparkline) because they
-  // are not proper chart parts — they are stored inside the worksheet's
-  // extension list, and Excel renders them as cell-level graphics.
+  // Sparklines are not proper chart parts — they are stored inside the
+  // worksheet's extension list, and Excel renders them as cell-level graphics.
   // Three types are supported: line / column / stacked (win-loss).
 
   const spark = Workbook.addWorksheet(wb, "22-Sparklines");
