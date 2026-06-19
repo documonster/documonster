@@ -12,15 +12,14 @@
  * to prevent UI blocking for large files.
  */
 
+import type { CompressOptions } from "@archive/compression/compress.base";
 import {
-  type CompressOptions,
   compressWithStream,
   decompressWithStream,
   transformWithStream,
   hasCompressionStream,
   hasDeflateRawCompressionStream,
   hasDeflateRawDecompressionStream,
-  // GZIP
   GZIP_ID1,
   GZIP_ID2,
   GZIP_CM_DEFLATE,
@@ -31,14 +30,12 @@ import {
   GZIP_MIN_SIZE,
   hasGzipCompressionStream,
   hasGzipDecompressionStream,
-  // Zlib
   ZLIB_CM_DEFLATE,
   ZLIB_CINFO_MAX,
   ZLIB_MIN_SIZE,
   isZlibData,
   detectCompressionFormat,
   adler32,
-  // Zlib helpers (shared)
   hasDeflateCompressionStream,
   hasDeflateDecompressionStream,
   getZlibHeader,
@@ -58,8 +55,8 @@ import {
   inflateWithPool,
   hasWorkerSupport
 } from "@archive/compression/worker-pool/index.browser";
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
-import { createAbortError, isAbortError, throwIfAborted } from "@archive/shared/errors";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import { ArchiveError, createAbortError, isAbortError, throwIfAborted } from "@archive/core/errors";
 import { readUint32LE } from "@archive/zip-spec/binary";
 import { concatUint8Arrays } from "@utils/binary";
 
@@ -264,13 +261,13 @@ function parseGzipPayload(data: Uint8Array): {
   expectedSize: number;
 } {
   if (data.length < GZIP_MIN_SIZE) {
-    throw new Error("Invalid gzip data (too small)");
+    throw new ArchiveError("Invalid gzip data (too small)");
   }
   if (data[0] !== GZIP_ID1 || data[1] !== GZIP_ID2) {
-    throw new Error("Invalid gzip header (magic mismatch)");
+    throw new ArchiveError("Invalid gzip header (magic mismatch)");
   }
   if (data[2] !== GZIP_CM_DEFLATE) {
-    throw new Error("Unsupported gzip compression method");
+    throw new ArchiveError("Unsupported gzip compression method");
   }
 
   const flags = data[3];
@@ -278,7 +275,7 @@ function parseGzipPayload(data: Uint8Array): {
 
   if (flags & GZIP_FLAG_FEXTRA) {
     if (offset + 2 > data.length) {
-      throw new Error("Invalid gzip extra field");
+      throw new ArchiveError("Invalid gzip extra field");
     }
     const extraLen = data[offset] | (data[offset + 1] << 8);
     offset += 2 + extraLen;
@@ -304,7 +301,7 @@ function parseGzipPayload(data: Uint8Array): {
   }
 
   if (offset > data.length - 8) {
-    throw new Error("Invalid gzip data (truncated payload)");
+    throw new ArchiveError("Invalid gzip data (truncated payload)");
   }
 
   const trailerOffset = data.length - 8;
@@ -323,10 +320,10 @@ function verifyGzipOutput(out: Uint8Array, expectedCrc32: number, expectedSize: 
   const actualSize = out.length >>> 0;
 
   if (actualCrc32 !== expectedCrc32) {
-    throw new Error("Invalid gzip data (CRC32 mismatch)");
+    throw new ArchiveError("Invalid gzip data (CRC32 mismatch)");
   }
   if (actualSize !== expectedSize) {
-    throw new Error("Invalid gzip data (ISIZE mismatch)");
+    throw new ArchiveError("Invalid gzip data (ISIZE mismatch)");
   }
 }
 

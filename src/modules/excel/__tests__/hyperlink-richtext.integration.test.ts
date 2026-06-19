@@ -19,10 +19,10 @@ import {
   cellType,
   cellGetModel,
   cellToString
-} from "@excel/cell";
-import { ValueType } from "@excel/enums";
+} from "@excel/core/cell";
+import { ValueType } from "@excel/core/enums";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

@@ -2,7 +2,7 @@ import type {
   ArchiveProgressPhase,
   ArchiveStreamOptions,
   ArchiveOperationBase
-} from "@archive/shared/progress";
+} from "@archive/core/progress";
 import type { ZipEntryType } from "@archive/zip-spec/zip-entry-info";
 
 import type { UnzipEntry } from "./index";

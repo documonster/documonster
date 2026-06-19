@@ -1,12 +1,14 @@
-import { type CellValueInputType, cellSetValue } from "@excel/cell";
 import type { AddChartExOptions, AddChartExSeriesOptions } from "@excel/chart/model/chart-ex-types";
 import type { AddChartOptions, AddChartSeriesOptions } from "@excel/chart/model/types";
+import type { CellValueInputType } from "@excel/core/cell";
+import { cellSetValue } from "@excel/core/cell";
+import type { TableData } from "@excel/core/table";
+import { tableModel } from "@excel/core/table";
+import type { Worksheet } from "@excel/core/worksheet";
+import { getCell, getSheetName, getTable } from "@excel/core/worksheet-core";
 import { ChartOptionsError } from "@excel/errors";
-import { tableModel, type TableData } from "@excel/table";
 import { quoteSheetName } from "@excel/utils/address";
 import { colCache } from "@excel/utils/col-cache";
-import type { Worksheet } from "@excel/worksheet";
-import { getCell, getSheetName, getTable } from "@excel/worksheet-core";
 
 export interface SeriesFromColumnsOptions {
   categories?: string;

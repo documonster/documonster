@@ -12,8 +12,8 @@
 //
 // This file is typechecked by `pnpm type` (tsgo) but is NOT executed by Vitest.
 
-import type { Workbook as NodeWorkbook } from "@excel/workbook";
-import type { Workbook as BrowserWorkbook } from "@excel/workbook.browser";
+import type { Workbook as NodeWorkbook } from "@excel/core/workbook";
+import type { Workbook as BrowserWorkbook } from "@excel/core/workbook.browser";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { excelToDocx } from "@word/bridge/excel-bridge";
 

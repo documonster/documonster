@@ -8,7 +8,7 @@ import { Readable, Transform, Duplex, PassThrough } from "stream";
 import type { TransformCallback as NodeTransformCallback } from "stream";
 
 import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { PullStream } from "@stream/pull-stream";
 import type {
   ReadableStreamOptions,

@@ -1,3 +1,4 @@
+import { ArchiveError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { resolveArchiveSourceToBuffer } from "@archive/io/archive-source";
 import type { ZipEntryOptions } from "@archive/zip";
@@ -210,7 +211,7 @@ export class ZipEditPlan {
    */
   static deserialize(data: SerializedZipEditPlan): ZipEditPlan {
     if (data.version !== 1) {
-      throw new Error(`Unsupported ZipEditPlan version: ${data.version}`);
+      throw new ArchiveError(`Unsupported ZipEditPlan version: ${data.version}`);
     }
 
     const ops: ZipEditOp[] = data.ops.map(op => {

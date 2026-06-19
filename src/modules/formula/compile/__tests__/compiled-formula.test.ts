@@ -12,7 +12,7 @@
  * NOW/RAND across iterations.
  */
 
-import { toWorkbookLike } from "@excel/formula-adapter";
+import { toWorkbookLike } from "@excel/core/formula-adapter";
 import { Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 

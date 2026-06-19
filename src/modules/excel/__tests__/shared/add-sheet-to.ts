@@ -1,5 +1,5 @@
-import { addWorksheet } from "@excel/workbook";
-import { getCell, mergeCells } from "@excel/worksheet";
+import { addWorksheet } from "@excel/core/workbook";
+import { getCell, mergeCells } from "@excel/core/worksheet";
 
 /**
  * Add a worksheet to either a plain `WorkbookData` (flat `addWorksheet`) or a

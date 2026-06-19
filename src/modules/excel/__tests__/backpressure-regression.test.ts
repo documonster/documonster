@@ -1,10 +1,10 @@
 import { Writable, PassThrough } from "node:stream";
 
 import { createCsvReadStream, writeCsv } from "@excel/bridge/csv-bridge";
-import { cellSetValue } from "@excel/cell";
+import { cellSetValue } from "@excel/core/cell";
+import { rowCommit, rowGetCell } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
-import { rowCommit, rowGetCell } from "@excel/worksheet";
 /**
  * Backpressure regression tests for streaming xlsx writers.
  *

@@ -16,6 +16,13 @@ export class FormulaError extends BaseError {
   override name = "FormulaError";
 }
 
+/**
+ * Check if an error is a FormulaError.
+ */
+export function isFormulaError(err: unknown): err is FormulaError {
+  return err instanceof FormulaError;
+}
+
 // =============================================================================
 // Parse Errors
 // =============================================================================

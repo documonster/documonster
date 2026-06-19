@@ -1,8 +1,8 @@
 import fs from "fs";
 import { promisify } from "util";
 
+import type { WorkbookData } from "@excel/core/workbook-core";
 import { Column, Workbook, Worksheet } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
 import { describe, it, expect } from "vitest";
 
 const fsReadFileAsync = promisify(fs.readFile);
@@ -18,7 +18,7 @@ const PIVOT_TABLE_FILEPATHS = [
   "xl/pivotTables/_rels/pivotTable1.xml.rels"
 ];
 
-import { addPivotTable, addTable } from "@excel/worksheet";
+import { addPivotTable, addTable } from "@excel/core/worksheet";
 import { testFilePath } from "@test/utils";
 
 const TEST_XLSX_FILEPATH = testFilePath("workbook-pivot.test");

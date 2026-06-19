@@ -3,7 +3,7 @@
  */
 
 import { Writable } from "@stream/browser/writable";
-import { toBinaryChunk } from "@stream/common/binary-chunk";
+import { toBinaryChunk } from "@stream/core/binary-chunk";
 import { StreamTypeError } from "@stream/errors";
 import type { ICollector, WritableStreamOptions } from "@stream/types";
 import { concatUint8Arrays, chunksToString } from "@utils/binary";

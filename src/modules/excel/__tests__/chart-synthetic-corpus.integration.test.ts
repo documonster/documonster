@@ -14,20 +14,20 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
+import { addChart, addChartEx, getCharts } from "@excel/core/worksheet";
 import { Chart, Workbook, Worksheet } from "@excel/index";
-import { addChart, addChartEx, getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { runLibreOfficeOpenValidationAuto } from "./helpers/external-oracle";
+import type { SyntheticFixture } from "./helpers/synthetic-fixtures";
 import {
   buildChartExFixtures,
   buildClassicPresetFixtures,
   buildComboAxisFixtures,
   buildChartsheetFixtures,
   buildPivotChartFixtures,
-  CHART_EX_TYPES,
-  type SyntheticFixture
+  CHART_EX_TYPES
 } from "./helpers/synthetic-fixtures";
 import { entryText } from "./helpers/zip-text";
 

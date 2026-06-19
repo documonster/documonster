@@ -5,9 +5,9 @@
  * to verify TRUE streaming behavior.
  */
 
-import { cellSetValue } from "@excel/cell";
-import { rowValues } from "@excel/row";
-import { rowCommit, rowGetCell } from "@excel/worksheet";
+import { cellSetValue } from "@excel/core/cell";
+import { rowValues } from "@excel/core/row";
+import { rowCommit, rowGetCell } from "@excel/core/worksheet";
 import {
   yieldToEventLoop,
   generateLargeText

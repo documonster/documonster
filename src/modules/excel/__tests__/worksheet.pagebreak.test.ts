@@ -1,7 +1,7 @@
-import { columnAddPageBreak } from "@excel/column";
+import { columnAddPageBreak } from "@excel/core/column";
+import { rowAddPageBreak } from "@excel/core/row";
+import { getColumn, getSheetModel } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowAddPageBreak } from "@excel/row";
-import { getColumn, getSheetModel } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {

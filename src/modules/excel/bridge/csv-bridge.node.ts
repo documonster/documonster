@@ -5,12 +5,13 @@
  * `@utils/fs`. These functions read/write CSV directly from/to a file path.
  */
 
+import type { Workbook } from "@excel/core/workbook.browser";
+import type { Worksheet } from "@excel/core/worksheet";
 import { ExcelFileError } from "@excel/errors";
-import type { Workbook } from "@excel/workbook.browser";
-import type { Worksheet } from "@excel/worksheet";
 import { fileExists, createReadStream, createWriteStream } from "@utils/fs";
 
-import { readCsvStream, writeCsvStream, type CsvOptions } from "./csv-bridge";
+import type { CsvOptions } from "./csv-bridge";
+import { readCsvStream, writeCsvStream } from "./csv-bridge";
 
 /**
  * Read CSV from a file path into a new worksheet (Node.js only).

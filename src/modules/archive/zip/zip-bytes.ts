@@ -8,26 +8,30 @@
  * For true streaming (push chunks while reading sources), use `zip()` / `ZipArchive.stream()`.
  */
 
-import { compress, compressSync, type CompressOptions } from "@archive/compression/compress";
+import type { CompressOptions } from "@archive/compression/compress";
+import { compress, compressSync } from "@archive/compression/compress";
 import { crc32 } from "@archive/compression/crc32";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import {
+  DEFAULT_ZIP_LEVEL,
+  DEFAULT_ZIP_TIMESTAMPS,
+  REPRODUCIBLE_ZIP_MOD_TIME
+} from "@archive/core/defaults";
+import { ArchiveError } from "@archive/core/errors";
+import type { ZipStringEncoding } from "@archive/core/text";
+import { encodeZipString } from "@archive/core/text";
+import type { ZipEncryptionMethod } from "@archive/crypto";
 import {
   zipCryptoEncrypt,
   aesEncrypt,
   buildAesExtraField,
   randomBytes,
-  type ZipEncryptionMethod,
   isAesEncryption,
   getAesKeyStrength
 } from "@archive/crypto";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import {
-  DEFAULT_ZIP_LEVEL,
-  DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
-} from "@archive/shared/defaults";
-import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
-import { type ZipTimestampMode } from "@archive/zip-spec/timestamps";
-import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { normalizeZipPath } from "@archive/zip-spec/zip-path";
 import {
   FLAG_ENCRYPTED,
   COMPRESSION_AES,
@@ -117,7 +121,8 @@ export interface ZipEntry {
 
 // Re-export ZipRawEntry from shared module
 export type { ZipRawEntry } from "./raw-entry";
-import { type ZipRawEntry, isZipRawEntry } from "./raw-entry";
+import type { ZipRawEntry } from "./raw-entry";
+import { isZipRawEntry } from "./raw-entry";
 
 export type ZipBuildEntry = ZipEntry | ZipRawEntry;
 
@@ -167,10 +172,10 @@ function validateEncryptionOptions(
   isSync: boolean
 ): void {
   if (encryptionMethod !== "none" && !password) {
-    throw new Error("Password is required when encryption is enabled");
+    throw new ArchiveError("Password is required when encryption is enabled");
   }
   if (isSync && isAesEncryption(encryptionMethod)) {
-    throw new Error(
+    throw new ArchiveError(
       "AES encryption requires async API. Use createZip() instead of createZipSync()."
     );
   }
@@ -517,7 +522,7 @@ function encryptDataSync(
   }
 
   if (isAesEncryption(encryptionMethod)) {
-    throw new Error(
+    throw new ArchiveError(
       "AES encryption requires async API. Use createZip() instead of createZipSync()."
     );
   }

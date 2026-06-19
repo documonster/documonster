@@ -21,7 +21,8 @@ import { PdfDict, pdfName, pdfRef } from "@pdf/core/pdf-object";
 import { hasNonWinAnsiChars, isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
 import type { PdfWriter } from "@pdf/core/pdf-writer";
 import { PdfFontError } from "@pdf/errors";
-import { embedTtfFont, type EmbeddedFont } from "@pdf/font/font-embedder";
+import type { EmbeddedFont } from "@pdf/font/font-embedder";
+import { embedTtfFont } from "@pdf/font/font-embedder";
 import {
   measureText as measureType1Text,
   getFontAscent as getType1Ascent,

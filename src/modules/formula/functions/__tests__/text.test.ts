@@ -11,6 +11,13 @@
 
 import { describe, it, expect } from "vitest";
 
+import type {
+  ArrayValue,
+  BooleanValue,
+  NumberValue,
+  RuntimeValue,
+  StringValue
+} from "../../runtime/values";
 import {
   ERRORS,
   RVKind,
@@ -18,12 +25,7 @@ import {
   rvArray,
   rvBoolean,
   rvNumber,
-  rvString,
-  type ArrayValue,
-  type BooleanValue,
-  type NumberValue,
-  type RuntimeValue,
-  type StringValue
+  rvString
 } from "../../runtime/values";
 import {
   fnLEFT,

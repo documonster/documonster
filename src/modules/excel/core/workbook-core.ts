@@ -20,9 +20,16 @@ import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
  * No file below this one imports the heavy `workbook.browser`.
  */
 import type { ChartEntry } from "@excel/chart/model/types";
-import type { DefinedNamesData } from "@excel/defined-names";
+import type { DefinedNamesData } from "@excel/core/defined-names";
+import type { PivotTable } from "@excel/core/pivot-table";
+import type {
+  WorkbookMedia,
+  WorkbookProtectionModel,
+  ExternalLinkModel
+} from "@excel/core/workbook.browser";
+import type { Worksheet } from "@excel/core/worksheet";
+import { getSheetName } from "@excel/core/worksheet-core";
 import { ImageError, WorksheetNameError } from "@excel/errors";
-import type { PivotTable } from "@excel/pivot-table";
 import type {
   Font,
   ImageData,
@@ -31,13 +38,6 @@ import type {
   WorkbookView,
   ThreadedCommentPerson
 } from "@excel/types";
-import type {
-  WorkbookMedia,
-  WorkbookProtectionModel,
-  ExternalLinkModel
-} from "@excel/workbook.browser";
-import type { Worksheet } from "@excel/worksheet";
-import { getSheetName } from "@excel/worksheet-core";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { XLSX } from "@excel/xlsx/xlsx.browser";

@@ -4,11 +4,11 @@ import {
   cellSetFill,
   cellSetFont,
   cellSetValue
-} from "@excel/cell";
+} from "@excel/core/cell";
+import { rowAddPageBreak, rowSetHidden } from "@excel/core/row";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addImage, getCell } from "@excel/core/worksheet";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { rowAddPageBreak, rowSetHidden } from "@excel/row";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addImage, getCell } from "@excel/worksheet";
 import { PdfError } from "@pdf/errors";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { pdf as standalonePdf } from "@pdf/pdf";

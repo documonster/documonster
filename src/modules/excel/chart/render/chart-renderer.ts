@@ -22,12 +22,10 @@ import type {
   StringReference,
   Trendline
 } from "@excel/chart/model/types";
-import {
-  loadSystemFont,
-  rasterizeGlyph,
-  type RasterFont
-} from "@excel/chart/render/glyph-rasterizer";
+import type { RasterFont } from "@excel/chart/render/glyph-rasterizer";
+import { loadSystemFont, rasterizeGlyph } from "@excel/chart/render/glyph-rasterizer";
 import { STROKE_FONT } from "@excel/chart/render/stroke-font";
+import type { PdfColor } from "@excel/chart/shared/chart-utils";
 import {
   AXIS_COLOR,
   COLORS,
@@ -48,8 +46,7 @@ import {
   resolveChartColor,
   valueToX,
   valueToY,
-  withAlpha,
-  type PdfColor
+  withAlpha
 } from "@excel/chart/shared/chart-utils";
 import {
   parseSpPr,

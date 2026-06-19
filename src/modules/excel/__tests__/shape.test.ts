@@ -8,9 +8,9 @@
  */
 
 import { unzip } from "@archive/read-archive";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addChart, addImage, addShape, getShapes, getSheetModel } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addChart, addImage, addShape, getShapes, getSheetModel } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

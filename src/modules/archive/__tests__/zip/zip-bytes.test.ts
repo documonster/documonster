@@ -1,6 +1,7 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
 function parseEntries(zipData: Uint8Array) {

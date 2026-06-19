@@ -1,11 +1,7 @@
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { TarReader } from "@archive/tar/tar-archive";
-import {
-  ZipReader,
-  type UnzipOptions,
-  type UnzipOptionsTar,
-  type UnzipOptionsZip
-} from "@archive/unzip/zip-reader";
+import type { UnzipOptions, UnzipOptionsTar, UnzipOptionsZip } from "@archive/unzip/zip-reader";
+import { ZipReader } from "@archive/unzip/zip-reader";
 
 /**
  * Open an archive for reading

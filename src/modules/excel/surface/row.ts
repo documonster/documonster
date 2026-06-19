@@ -1,4 +1,4 @@
-import type { CellData } from "@excel/cell";
+import type { CellData } from "@excel/core/cell";
 /**
  * `Row` namespace surface — row-level operations addressed by row number.
  *
@@ -18,10 +18,16 @@ import {
   rowSetOutlineLevel,
   rowSetStyle,
   rowValues
-} from "@excel/row";
+} from "@excel/core/row";
+import {
+  getRow,
+  rowCommit,
+  rowEachCell,
+  rowGetCell,
+  rowSetValues
+} from "@excel/core/worksheet-core";
+import type { WorksheetData } from "@excel/core/worksheet-core";
 import type { Alignment, Borders, Fill, Font, RowValues, Style } from "@excel/types";
-import { getRow, rowCommit, rowEachCell, rowGetCell, rowSetValues } from "@excel/worksheet-core";
-import type { WorksheetData } from "@excel/worksheet-core";
 
 export type Sheet = WorksheetData;
 

@@ -22,9 +22,10 @@
  * would lose access to the Node-only file APIs — issue #160.
  */
 
-import { Parse, type ZipEntry } from "@archive/unzip/stream";
+import type { ZipEntry } from "@archive/unzip/stream";
+import { Parse } from "@archive/unzip/stream";
+import type { Workbook } from "@excel/core/workbook";
 import { ExcelFileError } from "@excel/errors";
-import type { Workbook } from "@excel/workbook";
 import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
 import { XLSX as XLSXBase } from "@excel/xlsx/xlsx.browser";
 import { Writable, pipeline } from "@stream";

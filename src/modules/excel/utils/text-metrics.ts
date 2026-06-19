@@ -1,4 +1,4 @@
-import { ValueType } from "@excel/enums";
+import { ValueType } from "@excel/core/enums";
 /**
  * Text measurement engine for auto-fit column width and row height calculation.
  *
@@ -24,6 +24,7 @@ import { ValueType } from "@excel/enums";
  */
 import type { Font, Alignment, NumFmt, RichText } from "@excel/types";
 import { getCellDisplayText } from "@excel/utils/cell-format";
+import type { FontMetrics } from "@excel/utils/font-data";
 import {
   getCalibri11PtPixelWidth,
   getFontMetrics,
@@ -31,8 +32,7 @@ import {
   getCharAdvance,
   getFontWidthFactors,
   isWideCharacter,
-  hasBoldMetrics,
-  type FontMetrics
+  hasBoldMetrics
 } from "@excel/utils/font-data";
 
 // =============================================================================

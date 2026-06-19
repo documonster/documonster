@@ -1,5 +1,5 @@
-import type { CacheField, SharedItemValue } from "@excel/pivot-table-types";
-import { pivotError } from "@excel/pivot-table-types";
+import type { CacheField, SharedItemValue } from "@excel/core/pivot-table-types";
+import { pivotError } from "@excel/core/pivot-table-types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
 import { parseOoxmlDate } from "@utils/utils";

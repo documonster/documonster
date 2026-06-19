@@ -8,11 +8,13 @@ import { join } from "path";
 
 import type { ZipEntry } from "@archive/unzip/stream";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
+import type {
+  CommonInput,
+  WorkbookReaderOptions,
+  WorksheetReadyEvent
+} from "@excel/stream/workbook-reader.browser";
 import {
   WorkbookReaderBase,
-  type CommonInput,
-  type WorkbookReaderOptions,
-  type WorksheetReadyEvent,
   WorkbookReaderOptionsSchema
 } from "@excel/stream/workbook-reader.browser";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";

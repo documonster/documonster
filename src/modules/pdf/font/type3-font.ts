@@ -15,7 +15,8 @@
 import { PdfDict, pdfName, pdfRef, pdfNumber, pdfArray } from "@pdf/core/pdf-object";
 import { PdfContentStream } from "@pdf/core/pdf-stream";
 import type { PdfWriter } from "@pdf/core/pdf-writer";
-import { lookupGlyph, NOTDEF_GLYPH, type GlyphDef, type GlyphPen } from "@pdf/font/type3-glyphs";
+import type { GlyphDef, GlyphPen } from "@pdf/font/type3-glyphs";
+import { lookupGlyph, NOTDEF_GLYPH } from "@pdf/font/type3-glyphs";
 
 // =============================================================================
 // Constants

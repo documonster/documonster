@@ -35,7 +35,7 @@ export {
   chartsheetSetWorkbookViewId as setWorkbookViewId,
   chartsheetZoomToFit as zoomToFit,
   chartsheetSetZoomToFit as setZoomToFit
-} from "@excel/chartsheet";
+} from "@excel/core/chartsheet";
 
 /** A chartsheet handle. */
-export type { ChartsheetData as Handle } from "@excel/chartsheet";
+export type { ChartsheetData as Handle } from "@excel/core/chartsheet";

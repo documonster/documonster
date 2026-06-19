@@ -11,6 +11,7 @@
  * - Chrome < 103
  */
 
+import { ArchiveError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 
 // ============================================================================
@@ -177,7 +178,7 @@ class BitReader {
   readBits(n: number): number {
     while (this.bitCount < n) {
       if (this.pos >= this.data.length) {
-        throw new Error("Unexpected end of DEFLATE data");
+        throw new ArchiveError("Unexpected end of DEFLATE data");
       }
       this.bitBuf |= this.data[this.pos++] << this.bitCount;
       this.bitCount += 8;
@@ -197,7 +198,7 @@ class BitReader {
       const bit = this.readBits(1);
       node = bit === 0 ? node.left! : node.right!;
       if (!node) {
-        throw new Error("Invalid Huffman code");
+        throw new ArchiveError("Invalid Huffman code");
       }
     }
     return node.symbol;
@@ -216,7 +217,7 @@ class BitReader {
    */
   readByte(): number {
     if (this.pos >= this.data.length) {
-      throw new Error("Unexpected end of data");
+      throw new ArchiveError("Unexpected end of data");
     }
     return this.data[this.pos++];
   }
@@ -252,7 +253,7 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
       const nlen = reader.readUint16();
 
       if ((len ^ nlen) !== 0xffff) {
-        throw new Error("Invalid stored block length");
+        throw new ArchiveError("Invalid stored block length");
       }
 
       for (let i = 0; i < len; i++) {
@@ -342,7 +343,7 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
         }
       }
     } else {
-      throw new Error("Invalid DEFLATE block type: " + blockType);
+      throw new ArchiveError("Invalid DEFLATE block type: " + blockType);
     }
   }
 

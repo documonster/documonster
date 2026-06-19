@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import type { NumberValue, RuntimeValue, ScalarValue } from "../../runtime/values";
 import {
   BLANK,
   ERRORS,
@@ -16,10 +17,7 @@ import {
   rvArray,
   rvBoolean,
   rvNumber,
-  rvString,
-  type NumberValue,
-  type RuntimeValue,
-  type ScalarValue
+  rvString
 } from "../../runtime/values";
 import {
   fnDSUM,

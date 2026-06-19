@@ -9,7 +9,8 @@
  * - Callback safety
  */
 
-import { Csv, type CsvRecordError } from "@csv/index";
+import type { CsvRecordError } from "@csv/index";
+import { Csv } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
 import { describe, it, expect } from "vitest";
 

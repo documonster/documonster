@@ -1,13 +1,8 @@
-import {
-  anchorClone,
-  anchorCreate,
-  anchorModel,
-  type AnchorData,
-  type AnchorModel
-} from "@excel/anchor";
+import type { AnchorData, AnchorModel } from "@excel/core/anchor";
+import { anchorClone, anchorCreate, anchorModel } from "@excel/core/anchor";
+import type { Worksheet } from "@excel/core/worksheet";
 import { ImageError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
-import type { Worksheet } from "@excel/worksheet";
 
 interface ImageHyperlinks {
   hyperlink?: string;

@@ -15,7 +15,8 @@
 
 import { CsvError } from "@csv/errors";
 import type { CsvRecordError, OnSkipCallback } from "@csv/types";
-import { deduplicateHeadersWithRenames, type HeaderArray } from "@csv/utils/row";
+import type { HeaderArray } from "@csv/utils/row";
+import { deduplicateHeadersWithRenames } from "@csv/utils/row";
 
 // =============================================================================
 // Types

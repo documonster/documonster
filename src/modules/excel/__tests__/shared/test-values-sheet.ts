@@ -21,12 +21,12 @@ import {
   cellSetFont,
   cellSetNumFmt,
   cellType
-} from "@excel/cell";
-import { columnCollapsed } from "@excel/column";
-import { ValueType } from "@excel/enums";
+} from "@excel/core/cell";
+import { columnCollapsed } from "@excel/core/column";
+import { ValueType } from "@excel/core/enums";
+import { rowCollapsed, rowOutlineLevel, rowSetOutlineLevel } from "@excel/core/row";
+import { rowCommit, rowGetCell, getColumn, fillFormula } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { rowCollapsed, rowOutlineLevel, rowSetOutlineLevel } from "@excel/row";
-import { rowCommit, rowGetCell, getColumn, fillFormula } from "@excel/worksheet";
 
 const testValues = fix(testValuesJson);
 const styles = fix(stylesJson);

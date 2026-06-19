@@ -1,8 +1,8 @@
-import { columnCollapsed, columnOutlineLevel, columnSetOutlineLevel } from "@excel/column";
+import { columnCollapsed, columnOutlineLevel, columnSetOutlineLevel } from "@excel/core/column";
+import { rowCollapsed, rowSetOutlineLevel } from "@excel/core/row";
+import { getColumn } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowCollapsed, rowSetOutlineLevel } from "@excel/row";
 import type { WorksheetViewFrozen, WorksheetViewSplit } from "@excel/types";
-import { getColumn } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {

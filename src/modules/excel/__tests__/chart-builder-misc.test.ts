@@ -16,12 +16,12 @@ import {
   buildChartExModel,
   renderChartEx
 } from "@excel/chart";
-import { chartsheetChart } from "@excel/chartsheet";
+import { chartsheetChart } from "@excel/core/chartsheet";
+import { getChartEntry } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addChart, addChartEx, getCharts } from "@excel/core/worksheet";
+import type { WorksheetData } from "@excel/core/worksheet-core";
 import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
-import { getChartEntry } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addChart, addChartEx, getCharts } from "@excel/worksheet";
-import type { WorksheetData } from "@excel/worksheet-core";
 import { describe, it, expect } from "vitest";
 
 import { VALUES_B, baseSeries, bubbleSeries, ctg, scatterSeries } from "./chart-builder.helpers";

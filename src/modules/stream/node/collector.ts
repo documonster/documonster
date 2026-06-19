@@ -4,7 +4,7 @@
  * A writable stream that collects all chunks.
  */
 
-import { toBinaryChunk } from "@stream/common/binary-chunk";
+import { toBinaryChunk } from "@stream/core/binary-chunk";
 import { StreamTypeError } from "@stream/errors";
 import { Writable } from "@stream/node/writable";
 import type { WritableStreamOptions, ICollector } from "@stream/types";

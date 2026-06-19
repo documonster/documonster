@@ -1,9 +1,9 @@
-import { cellGetValue, cellResult } from "@excel/cell";
-import { calculateFormulas } from "@excel/formula-adapter";
+import { cellGetValue, cellResult } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { addTable, getCell } from "@excel/core/worksheet";
+import type { WorksheetData } from "@excel/core/worksheet-core";
 import { Cell, Row, Workbook } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
-import { addTable, getCell } from "@excel/worksheet";
-import type { WorksheetData } from "@excel/worksheet-core";
 import { describe, expect, it } from "vitest";
 
 /**

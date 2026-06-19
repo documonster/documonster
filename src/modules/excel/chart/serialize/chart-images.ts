@@ -25,7 +25,8 @@ import type {
   SeriesBase,
   ShapeProperties
 } from "@excel/chart/model/types";
-import { type WorkbookData, addWorkbookImage, getImage } from "@excel/workbook-core";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { addWorkbookImage, getImage } from "@excel/core/workbook-core";
 
 /**
  * Rel information that {@link resolvePendingChartImages} appends to the

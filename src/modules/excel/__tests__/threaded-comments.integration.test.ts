@@ -17,9 +17,9 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
+import { getPersons } from "@excel/core/workbook";
 import { Cell, Workbook } from "@excel/index";
 import type { ThreadedComment } from "@excel/types";
-import { getPersons } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

@@ -4,7 +4,7 @@
  * of `FormulaInstance` objects for the compile pipeline to chew on.
  */
 
-import { toWorkbookLike } from "@excel/formula-adapter";
+import { toWorkbookLike } from "@excel/core/formula-adapter";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 

@@ -1,4 +1,5 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
+import type { WorkbookData } from "@excel/core/workbook-core";
 /**
  * Integration test for external workbook links ([Book]Sheet!Ref formulas).
  *
@@ -25,7 +26,6 @@ import { ZipParser } from "@archive/unzip/zip-parser";
  * silently fall back to %USERPROFILE%\Documents.
  */
 import { Cell, Workbook } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
 import { describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

@@ -9,7 +9,7 @@
  * Re-exports them for backward compatibility.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, findChildNs } from "@word/reader/parse-utils";
 import type { PersonInfo, WebSettings } from "@word/types";
 import { parseXml } from "@xml/dom";

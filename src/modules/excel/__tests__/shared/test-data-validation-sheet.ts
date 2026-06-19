@@ -1,9 +1,14 @@
 import { addSheetTo } from "@excel/__tests__/shared/add-sheet-to";
 import dataValidationsJson from "@excel/__tests__/shared/data/data-validations.json" with { type: "json" };
 import { fix, concatenateFormula } from "@excel/__tests__/shared/tools";
-import { cellDataValidation, cellSetDataValidation, cellSetValue, cellSetName } from "@excel/cell";
+import {
+  cellDataValidation,
+  cellSetDataValidation,
+  cellSetValue,
+  cellSetName
+} from "@excel/core/cell";
+import { getCell } from "@excel/core/worksheet";
 import { Workbook } from "@excel/index";
-import { getCell } from "@excel/worksheet";
 
 const self = {
   dataValidations: fix(dataValidationsJson),

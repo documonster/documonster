@@ -35,7 +35,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
  */
 import { resolve } from "node:path";
 
-import { type ChartRichText } from "@excel/chart/index";
+import type { ChartRichText } from "@excel/chart/index";
 import { Address, Cell, Chart, Column, DefinedNames, Row, Workbook, Worksheet } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 

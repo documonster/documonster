@@ -1,4 +1,4 @@
-import type { FormCheckboxModel } from "@excel/form-control";
+import type { FormCheckboxModel } from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { XmlWriter } from "@xml/writer";
 

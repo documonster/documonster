@@ -5,7 +5,7 @@
  * CSEWrite / SpillErrorWrite / CleanupWrite operations.
  */
 
-import { calculateFormulas } from "@excel/formula-adapter";
+import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 

@@ -9,7 +9,7 @@
 import { promisify } from "util";
 import * as nodeZlib from "zlib";
 
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
 import { uint8ArrayToNodeBufferView } from "@utils/binary";
 
 // Re-export shared types and utilities

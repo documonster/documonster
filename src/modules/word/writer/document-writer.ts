@@ -37,11 +37,8 @@ import { renderFloatingImage } from "@word/writer/image-writer";
 import { renderMathBlock } from "@word/writer/math-writer";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import { renderDocumentBackground } from "@word/writer/parts-writer";
-import {
-  createRenderContext,
-  type RenderHelpers,
-  type WordRenderContext
-} from "@word/writer/render-context";
+import type { RenderHelpers, WordRenderContext } from "@word/writer/render-context";
+import { createRenderContext } from "@word/writer/render-context";
 import { renderRun } from "@word/writer/run-writer";
 import { renderSdtPr } from "@word/writer/sdt-writer";
 import { renderSectionProperties } from "@word/writer/section-writer";

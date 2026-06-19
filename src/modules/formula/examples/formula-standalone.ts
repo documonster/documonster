@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/formula-adapter";
+import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook } from "@excel/index";
 
 /**

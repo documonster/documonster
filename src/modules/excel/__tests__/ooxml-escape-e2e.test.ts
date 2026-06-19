@@ -2,9 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
+import { getWorksheets } from "@excel/core/workbook";
+import { addTable, getTable } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { getWorksheets } from "@excel/workbook";
-import { addTable, getTable } from "@excel/worksheet";
 /**
  * End-to-end test for OOXML _xHHHH_ escape decoding in table column headers.
  *

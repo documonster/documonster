@@ -7,13 +7,15 @@
 
 import { gunzip } from "@archive/compression/compress";
 import { createGzipStream } from "@archive/compression/streaming-compress";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
 import { collect } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { toUint8Array, isInMemoryArchiveSource, toAsyncIterable } from "@archive/io/archive-source";
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
 
-import { TarArchive, addEntries, type TarArchiveOptions } from "./tar-archive";
-import { parseTar, untar, type TarEntry, type TarParseOptions } from "./tar-parser";
+import type { TarArchiveOptions } from "./tar-archive";
+import { TarArchive, addEntries } from "./tar-archive";
+import type { TarEntry, TarParseOptions } from "./tar-parser";
+import { parseTar, untar } from "./tar-parser";
 
 export interface TarGzOptions extends TarArchiveOptions {
   /** Compression level (0-9, default: 6) */

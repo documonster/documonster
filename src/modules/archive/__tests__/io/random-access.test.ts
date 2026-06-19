@@ -1,9 +1,9 @@
+import type { RandomAccessReader } from "@archive/io/random-access";
 import {
   HttpRangeReader,
   BufferReader,
   RangeNotSupportedError,
-  HttpRangeError,
-  type RandomAccessReader
+  HttpRangeError
 } from "@archive/io/random-access";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 

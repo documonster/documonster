@@ -1,10 +1,10 @@
-import { cellGetValue, cellSetValue } from "@excel/cell";
-import { getCell, rowGetCell } from "@excel/worksheet";
+import { cellGetValue, cellSetValue } from "@excel/core/cell";
+import { getCell, rowGetCell } from "@excel/core/worksheet";
 import { describe, it, expect } from "vitest";
 describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
   it("should read a workbook from ReadableStream<Uint8Array>", async () => {
-    const { createWorkbook, addWorksheet } = await import("@excel/workbook.browser");
-    const { toBuffer } = await import("@excel/xlsx-io.browser");
+    const { createWorkbook, addWorksheet } = await import("@excel/core/workbook.browser");
+    const { toBuffer } = await import("@excel/core/xlsx-io.browser");
     const { WorkbookReader } = await import("@excel/stream/workbook-reader.browser");
 
     const wb = createWorkbook();

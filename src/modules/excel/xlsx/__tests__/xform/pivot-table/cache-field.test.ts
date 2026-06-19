@@ -1,4 +1,4 @@
-import { pivotError } from "@excel/pivot-table";
+import { pivotError } from "@excel/core/pivot-table";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { describe, it, expect } from "vitest";
 

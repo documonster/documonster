@@ -539,7 +539,7 @@ export interface PdfExportOptions {
    * ```typescript
    * import { readFileSync } from "fs";
    * const font = readFileSync("NotoSansSC-Regular.ttf");
-   * excelToPdf(workbook, { font });
+   * Pdf.fromExcel(workbook, { font });
    * ```
    */
   font?: Uint8Array;
@@ -549,7 +549,7 @@ export interface PdfExportOptions {
    *
    * @example
    * ```typescript
-   * excelToPdf(workbook, {
+   * Pdf.fromExcel(workbook, {
    *   encryption: {
    *     ownerPassword: "secret",
    *     userPassword: "open",

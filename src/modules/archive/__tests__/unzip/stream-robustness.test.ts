@@ -15,7 +15,8 @@ import { Readable } from "stream";
 import { crc32 } from "@archive/compression/crc32";
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
-import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
+import type { ZipEntry } from "@archive/unzip/stream";
+import { Parse, createParse } from "@archive/unzip/stream";
 import { describe, it, expect } from "vitest";
 
 import { delay, chunkBytes, createDataDescriptorZip, concatChunks } from "./test-helpers";

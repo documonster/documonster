@@ -6,12 +6,14 @@
  */
 
 import { bytesToBase64 } from "@word/core/internal-utils";
-import { applyPatchesToDocument, type PatchOperation } from "@word/patcher";
+import type { PatchOperation } from "@word/patcher";
+import { applyPatchesToDocument } from "@word/patcher";
 import { readDocx } from "@word/reader/docx-reader";
 import { fillTemplate } from "@word/template/template-engine";
 import type { TemplateOptions } from "@word/template/template-engine";
 import type { DocxDocument } from "@word/types";
-import { packageDocx, type PackageDocxOptions } from "@word/writer/docx-packager";
+import type { PackageDocxOptions } from "@word/writer/docx-packager";
+import { packageDocx } from "@word/writer/docx-packager";
 
 // Re-export patch types for backward compatibility
 export type { PatchContent, PatchOperation } from "@word/patcher";

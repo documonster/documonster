@@ -8,11 +8,11 @@
  * This is about determinism/correctness, not performance.
  */
 
-import { cellSetValue, cellGetValue } from "@excel/cell";
+import { cellSetValue, cellGetValue } from "@excel/core/cell";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { getCell } from "@excel/core/worksheet";
 import { Workbook } from "@excel/index";
 import { StreamBuf } from "@excel/utils/stream-buf";
-import type { WorkbookData } from "@excel/workbook-core";
-import { getCell } from "@excel/worksheet";
 import { describe, it, expect, beforeAll } from "vitest";
 
 interface StreamLike {

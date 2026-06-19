@@ -5,10 +5,10 @@
  * right shape of the live workbook.
  */
 
-import { definedNamesAdd } from "@excel/defined-names";
-import { toWorkbookLike } from "@excel/formula-adapter";
+import { definedNamesAdd } from "@excel/core/defined-names";
+import { toWorkbookLike } from "@excel/core/formula-adapter";
+import { getDefinedNames } from "@excel/core/workbook";
 import { Cell, Row, Workbook } from "@excel/index";
-import { getDefinedNames } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
 
 import { buildWorkbookSnapshot } from "../workbook-adapter";

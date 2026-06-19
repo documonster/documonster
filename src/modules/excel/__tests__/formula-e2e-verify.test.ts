@@ -1,8 +1,8 @@
-import { definedNamesAdd } from "@excel/defined-names";
-import { calculateFormulas } from "@excel/formula-adapter";
+import { definedNamesAdd } from "@excel/core/defined-names";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getDefinedNames } from "@excel/core/workbook";
+import { addTable } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { getDefinedNames } from "@excel/workbook";
-import { addTable } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 /**

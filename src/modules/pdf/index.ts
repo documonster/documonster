@@ -16,13 +16,13 @@
  *
  * @example From Excel Workbook:
  * ```typescript
- * import { Workbook } from "documonster";
- * import { excelToPdf } from "documonster/pdf";
+ * import { Workbook, Worksheet } from "documonster/excel";
+ * import { Pdf } from "documonster/pdf";
  *
- * const workbook = new Workbook();
- * const sheet = workbook.addWorksheet("Sales");
- * sheet.addRow(["Product", "Revenue"]);
- * const bytes = await excelToPdf(workbook);
+ * const workbook = Workbook.create();
+ * const sheet = Workbook.addWorksheet(workbook, "Sales");
+ * Worksheet.addRow(sheet, ["Product", "Revenue"]);
+ * const bytes = await Pdf.fromExcel(workbook);
  * ```
  *
  * @example Read PDF — extract text, images, and metadata:

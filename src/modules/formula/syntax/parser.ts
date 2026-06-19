@@ -15,21 +15,16 @@
  */
 
 import { FormulaParseError } from "@formula/errors";
-import {
-  NodeType,
-  type AstNode,
-  type CellRefNode,
-  type RangeRefNode,
-  type FunctionCallNode,
-  type ArrayNode
+import type {
+  AstNode,
+  CellRefNode,
+  RangeRefNode,
+  FunctionCallNode,
+  ArrayNode
 } from "@formula/syntax/ast";
-import {
-  TokenType,
-  type Token,
-  type CellRefToken,
-  type RangeToken,
-  type FunctionToken
-} from "@formula/syntax/token-types";
+import { NodeType } from "@formula/syntax/ast";
+import type { Token, CellRefToken, RangeToken, FunctionToken } from "@formula/syntax/token-types";
+import { TokenType } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Operator Precedence

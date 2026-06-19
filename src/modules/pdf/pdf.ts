@@ -48,17 +48,17 @@
  */
 
 import { exportPdf } from "@pdf/render/pdf-exporter";
-import {
-  PdfCellType,
-  type PdfWorkbook,
-  type PdfSheetData,
-  type PdfRowData,
-  type PdfCellData,
-  type PdfColumnData,
-  type PdfCellStyle,
-  type PdfSheetImage,
-  type PdfExportOptions
+import type {
+  PdfWorkbook,
+  PdfSheetData,
+  PdfRowData,
+  PdfCellData,
+  PdfColumnData,
+  PdfCellStyle,
+  PdfSheetImage,
+  PdfExportOptions
 } from "@pdf/types";
+import { PdfCellType } from "@pdf/types";
 
 // =============================================================================
 // Input Types

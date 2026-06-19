@@ -8,11 +8,11 @@ import {
   cellToString,
   cellGetModel,
   cellToCsvString
-} from "@excel/cell";
-import { Enums } from "@excel/enums";
+} from "@excel/core/cell";
+import { Enums } from "@excel/core/enums";
+import { getXlsxIo } from "@excel/core/workbook";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { getXlsxIo } from "@excel/workbook";
-import { getCell } from "@excel/worksheet";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { describe, it, expect } from "vitest";
 

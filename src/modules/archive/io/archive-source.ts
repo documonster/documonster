@@ -1,6 +1,6 @@
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { createAbortError } from "@archive/shared/errors";
-import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { createAbortError, ArchiveError } from "@archive/core/errors";
+import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
 import { stringToUint8Array as encodeUtf8, concatUint8Arrays } from "@utils/binary";
 
 export type ArchiveSource =
@@ -297,5 +297,5 @@ export async function* toAsyncIterable(
     return;
   }
 
-  throw new Error("Unsupported archive source");
+  throw new ArchiveError("Unsupported archive source");
 }

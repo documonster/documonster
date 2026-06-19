@@ -13,7 +13,7 @@
  * through `Formula.calculate`, so consumers who never call it never pay for it.
  *
  * For PDF export recalculation, pass `Formula.calculate` to
- * `excelToPdf(wb, { recalculate: Formula.calculate })`.
+ * `Pdf.fromExcel(wb, { recalculate: Formula.calculate })`.
  */
 
 // Public value API — the `Formula` domain namespace. Tree-shaken per-member
@@ -22,7 +22,7 @@
 export * as Formula from "@formula/surface/formula";
 
 // Errors — extend BaseError, consistent with every other module's errors.ts.
-export { FormulaError, FormulaParseError } from "@formula/errors";
+export { FormulaError, FormulaParseError, isFormulaError } from "@formula/errors";
 
 // Structural types callers may need to describe their host workbook.
 export type {

@@ -9,16 +9,14 @@
  * bundles.
  */
 
-import {
-  WorkbookReader,
-  type WorkbookReaderOptions,
-  type NodeInput
-} from "@excel/stream/workbook-reader";
+import type { WorkbookReaderOptions, NodeInput } from "@excel/stream/workbook-reader";
+import { WorkbookReader } from "@excel/stream/workbook-reader";
 import type { WorkbookReader as WorkbookReaderBrowser } from "@excel/stream/workbook-reader.browser";
-import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer";
+import type { WorkbookWriterOptions } from "@excel/stream/workbook-writer";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import type { WorkbookWriter as WorkbookWriterBrowser } from "@excel/stream/workbook-writer.browser";
 
-export * from "@excel/workbook.browser";
+export * from "@excel/core/workbook.browser";
 
 // Cross-platform + Node-only xlsx IO (read / readFile / writeFile / toBuffer /
 // readStream / writeStream + getXlsxIo). Node binding via xlsx-io.ts.
@@ -30,7 +28,7 @@ export {
   readStream,
   writeStream,
   getXlsxIo
-} from "@excel/xlsx-io";
+} from "@excel/core/xlsx-io";
 
 /** Node streaming workbook writer factory (accepts `{ filename }`). */
 export function createStreamWriter(options?: WorkbookWriterOptions): WorkbookWriterBrowser {
@@ -52,10 +50,10 @@ export type {
   WorkbookProtectionModel,
   ExternalLinkModel,
   ExternalLinkCachedSheet
-} from "@excel/workbook.browser";
+} from "@excel/core/workbook.browser";
 export type {
   AddChartsheetOptions,
   AddPivotChartsheetOptions,
   ChartsheetOptions,
   ChartsheetViewOptions
-} from "@excel/chartsheet";
+} from "@excel/core/chartsheet";

@@ -7,7 +7,7 @@
  * them through the namespace (`Pivot.Value`, `Pivot.Model`, …) instead of an
  * internal module path.
  */
-export { addPivotTable as add } from "@excel/worksheet";
+export { addPivotTable as add } from "@excel/core/worksheet";
 
 export type {
   PivotTable as Handle,
@@ -21,4 +21,4 @@ export type {
   SharedItemValue,
   ParsedCacheDefinition,
   RecordValue
-} from "@excel/pivot-table";
+} from "@excel/core/pivot-table";

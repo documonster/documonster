@@ -8,25 +8,27 @@
 
 import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
 import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
-import { ByteQueue } from "@archive/shared/byte-queue";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { toError } from "@archive/shared/errors";
-import {
-  DATA_DESCRIPTOR_SIGNATURE_BYTES,
-  type CrxHeader,
-  type EntryProps,
-  type EntryVars,
-  type ParseDriverState,
-  type ParseOptions
+import { ByteQueue } from "@archive/core/byte-queue";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { toError } from "@archive/core/errors";
+import type {
+  CrxHeader,
+  EntryProps,
+  EntryVars,
+  ParseDriverState,
+  ParseOptions
 } from "@archive/unzip/parser-core";
+import { DATA_DESCRIPTOR_SIGNATURE_BYTES } from "@archive/unzip/parser-core";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
+import type {
+  PullStreamPublicApi,
+  InflateFactory,
+  ParseEmitter,
+  ParseIO,
+  ZipEntry
+} from "@archive/unzip/stream.base";
 import {
   runParseLoop,
-  type PullStreamPublicApi,
-  type InflateFactory,
-  type ParseEmitter,
-  type ParseIO,
-  type ZipEntry,
   DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK,
   streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";

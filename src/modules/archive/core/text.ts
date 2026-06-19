@@ -11,7 +11,7 @@
  */
 
 import { crc32 } from "@archive/compression/crc32";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import type { ZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
 import { stringToUint8Array as encodeUtf8, uint8ArrayToString as decodeUtf8 } from "@utils/binary";
 

@@ -2,7 +2,7 @@
  * Shared helpers for building ZipDeflateFile options.
  */
 
-import type { ZipStringEncoding } from "@archive/shared/text";
+import type { ZipStringEncoding } from "@archive/core/text";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";

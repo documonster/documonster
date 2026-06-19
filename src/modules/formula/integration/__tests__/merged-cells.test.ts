@@ -11,8 +11,8 @@
  * and counts it twice).
  */
 
-import { ValueType } from "@excel/enums";
-import { calculateFormulas } from "@excel/formula-adapter";
+import { ValueType } from "@excel/core/enums";
+import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 

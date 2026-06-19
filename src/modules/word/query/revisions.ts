@@ -4,7 +4,7 @@
  * Functions for accepting or rejecting tracked changes in a DocxDocument.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import type {
   DocxDocument,
   BodyContent,

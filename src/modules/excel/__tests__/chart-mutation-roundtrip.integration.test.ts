@@ -20,18 +20,16 @@
  * structured re-rendering.
  */
 
-import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
+import type { ExtractedFile } from "@archive/unzip/extract";
+import { extractAll } from "@archive/unzip/extract";
+import { getCharts } from "@excel/core/worksheet";
 import { Chart, Workbook } from "@excel/index";
-import { getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
 import { runLibreOfficeOpenValidationAuto } from "./helpers/external-oracle";
-import {
-  buildClassicPresetFixtures,
-  buildChartExFixtures,
-  type SyntheticFixture
-} from "./helpers/synthetic-fixtures";
+import type { SyntheticFixture } from "./helpers/synthetic-fixtures";
+import { buildClassicPresetFixtures, buildChartExFixtures } from "./helpers/synthetic-fixtures";
 import { bytesEqual, entryText, loadRoundTripDiff } from "./helpers/zip-text";
 
 let classicFixtures: SyntheticFixture[];

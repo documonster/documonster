@@ -1,7 +1,7 @@
 import { readCsv, writeCsv, writeCsvBuffer } from "@excel/bridge/csv-bridge";
 import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
+import { getSheetName } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { getSheetName } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 

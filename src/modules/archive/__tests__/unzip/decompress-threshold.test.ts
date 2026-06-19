@@ -2,7 +2,8 @@ import { createReadStream } from "fs";
 import { join } from "path";
 
 import { DEFAULT_COMPRESS_THRESHOLD_BYTES } from "@archive/compression/compress.base";
-import { createParse, type ZipEntry } from "@archive/unzip/stream";
+import type { ZipEntry } from "@archive/unzip/stream";
+import { createParse } from "@archive/unzip/stream";
 import { createZipSync } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 

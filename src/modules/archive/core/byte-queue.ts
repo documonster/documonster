@@ -1,4 +1,4 @@
-import { EMPTY_UINT8ARRAY, indexOfUint8ArrayPattern } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY, indexOfUint8ArrayPattern } from "@archive/core/bytes";
 
 export class ByteQueue {
   // Store data as immutable chunks to avoid copying on append.

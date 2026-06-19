@@ -4,7 +4,7 @@ import {
   createLinkedAbortController,
   isAbortError,
   throwIfAborted
-} from "@archive/shared/errors";
+} from "@archive/core/errors";
 import { describe, expect, it } from "vitest";
 
 describe("abort utils", () => {

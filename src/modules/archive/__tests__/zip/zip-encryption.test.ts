@@ -10,7 +10,8 @@
  */
 
 import { ZipParser } from "@archive/unzip/zip-parser";
-import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
 describe("ZIP Encryption End-to-End", () => {

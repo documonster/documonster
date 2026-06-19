@@ -1,10 +1,6 @@
 import { TarArchive } from "@archive/tar/tar-archive";
-import {
-  ZipArchive,
-  type ZipOptions,
-  type ZipOptionsTar,
-  type ZipOptionsZip
-} from "@archive/zip/zip-archive";
+import type { ZipOptions, ZipOptionsTar, ZipOptionsZip } from "@archive/zip/zip-archive";
+import { ZipArchive } from "@archive/zip/zip-archive";
 
 /**
  * Create a new archive

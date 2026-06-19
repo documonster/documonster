@@ -37,8 +37,7 @@ import {
   chartsheetSetPageSetup,
   chartsheetSetZoomScale,
   chartsheetZoomScale
-} from "@excel/chartsheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+} from "@excel/core/chartsheet";
 import {
   addPivotChartsheet,
   getChartEntry,
@@ -49,7 +48,7 @@ import {
   replaceChartsheetChart,
   renameChartsheet,
   copyChartsheet
-} from "@excel/workbook";
+} from "@excel/core/workbook";
 import {
   addChart,
   addChartEx,
@@ -58,7 +57,8 @@ import {
   addPivotTable,
   getCharts,
   removeChart
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 import { VALUES_A, VALUES_B, baseSeries, stableHash } from "./chart-builder.helpers";

@@ -12,7 +12,8 @@
 
 import { extractParagraphText, isRun } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
-import { layoutDocument, type LayoutOptions, type LayoutResult } from "@word/layout/layout";
+import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
+import { layoutDocument } from "@word/layout/layout";
 import type {
   BodyContent,
   BookmarkStart,

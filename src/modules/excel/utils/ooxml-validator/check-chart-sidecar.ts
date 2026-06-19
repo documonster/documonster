@@ -32,7 +32,7 @@
  * case is a strong writer-bug signature.
  */
 
-import { type ValidationContext } from "./context";
+import type { ValidationContext } from "./context";
 import { resolveRelTarget } from "./path-utils";
 
 const CHARTEX_PART_RE = /^xl\/charts\/chartEx\d+\.xml$/;

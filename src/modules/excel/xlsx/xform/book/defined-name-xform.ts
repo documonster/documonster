@@ -1,4 +1,4 @@
-import type { DefinedNameModel } from "@excel/defined-names";
+import type { DefinedNameModel } from "@excel/core/defined-names";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 class DefinedNamesXform extends BaseXform {

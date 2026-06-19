@@ -1,4 +1,4 @@
-import { rangeCreate, rangeTl } from "@excel/range";
+import { rangeCreate, rangeTl } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ColorScaleXform } from "@excel/xlsx/xform/sheet/cf/color-scale-xform";

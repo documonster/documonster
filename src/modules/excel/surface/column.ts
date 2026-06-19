@@ -5,14 +5,13 @@
  * `import { Column } from "documonster/excel"` → `Column.setWidth(ws, "A", 20)`,
  * `Column.setHeader(ws, 1, "Name")`, `Column.setStyle(ws, "B", { numFmt })`.
  */
+import type { ColumnHeaderValue } from "@excel/core/column";
 import {
-  type ColumnHeaderValue,
   columnHidden,
   columnOutlineLevel,
   columnSetHidden,
   columnSetOutlineLevel
-} from "@excel/column";
-import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
+} from "@excel/core/column";
 import {
   getColumn,
   columnSetAlignment,
@@ -23,8 +22,9 @@ import {
   columnSetKey,
   columnSetNumFmt,
   columnSetProtection
-} from "@excel/worksheet-core";
-import type { WorksheetData } from "@excel/worksheet-core";
+} from "@excel/core/worksheet-core";
+import type { WorksheetData } from "@excel/core/worksheet-core";
+import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
 
 export type Sheet = WorksheetData;
 type ColRef = string | number;

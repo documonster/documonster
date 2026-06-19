@@ -1,9 +1,9 @@
-import { Cell, Workbook } from "@excel/index";
-import { buildSparklineGroup, parseSparklineGroups, renderSparklineGroups } from "@excel/sparkline";
 /**
  * Sparkline tests.
  */
-import { addSparklineGroup, getSparklineGroups, removeSparklineGroup } from "@excel/worksheet";
+import { addSparklineGroup, getSparklineGroups, removeSparklineGroup } from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+import { buildSparklineGroup, parseSparklineGroups, renderSparklineGroups } from "@excel/sparkline";
 import { describe, expect, it } from "vitest";
 
 describe("Sparkline data model", () => {

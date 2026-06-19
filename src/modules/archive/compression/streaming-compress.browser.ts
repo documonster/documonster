@@ -29,7 +29,7 @@ import {
   hasWorkerSupport,
   getDefaultWorkerPool
 } from "@archive/compression/worker-pool/index.browser";
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
 import { concatUint8Arrays } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
 
@@ -40,14 +40,14 @@ export type {
   StreamCompressOptions,
   SyncDeflaterLike
 } from "@archive/compression/streaming-compress.base";
-import {
-  toError,
-  type DeflateStream,
-  type InflateStream,
-  type StreamCallback,
-  type StreamCompressOptions
+import type {
+  DeflateStream,
+  InflateStream,
+  StreamCallback,
+  StreamCompressOptions
 } from "@archive/compression/streaming-compress.base";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { toError } from "@archive/compression/streaming-compress.base";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 
 export { hasWorkerSupport };
 

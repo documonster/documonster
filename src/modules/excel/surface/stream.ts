@@ -31,7 +31,7 @@ export {
   cellSetNumFmt as setCellNumFmt,
   cellSetNote as setCellNote,
   cellSetComment as setCellComment
-} from "@excel/cell";
+} from "@excel/core/cell";
 
 // --- streaming row handle operations (operate on a `RowData`) ---
 export {
@@ -40,10 +40,10 @@ export {
   rowSetFill as setRowFill,
   rowSetBorder as setRowBorder,
   rowSetAlignment as setRowAlignment
-} from "@excel/row";
-export { rowGetCell as rowCell, rowCommit as commitRow } from "@excel/worksheet-core";
+} from "@excel/core/row";
+export { rowGetCell as rowCell, rowCommit as commitRow } from "@excel/core/worksheet-core";
 
 /** A streaming cell handle. */
-export type { CellData as CellHandle } from "@excel/cell";
+export type { CellData as CellHandle } from "@excel/core/cell";
 /** A streaming row handle. */
-export type { RowData as RowHandle } from "@excel/row";
+export type { RowData as RowHandle } from "@excel/core/row";

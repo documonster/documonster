@@ -19,13 +19,10 @@ import {
   chartChartModel
 } from "@excel/chart/chart-handle";
 import { renderChartExPng, renderChartExSvg } from "@excel/chart/render/chart-ex-renderer";
-import {
-  renderChartPng,
-  renderChartSvg,
-  type ChartRenderOptions
-} from "@excel/chart/render/chart-renderer";
+import type { ChartRenderOptions } from "@excel/chart/render/chart-renderer";
+import { renderChartPng, renderChartSvg } from "@excel/chart/render/chart-renderer";
+import type { ChartHandle } from "@excel/core/worksheet-core";
 import { ChartOptionsError } from "@excel/errors";
-import type { ChartHandle } from "@excel/worksheet-core";
 
 /**
  * Render this chart as a **zero-dependency deterministic preview** SVG.

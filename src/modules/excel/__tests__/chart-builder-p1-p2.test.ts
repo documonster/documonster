@@ -62,8 +62,7 @@ import type {
   ChartExType,
   SeriesFromColumnsOptions
 } from "@excel/chart/index";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
-import { tableSetName } from "@excel/table";
+import { tableSetName } from "@excel/core/table";
 import {
   addAreaChart,
   addBarChart,
@@ -93,7 +92,8 @@ import {
   addTreemapChart,
   addWaterfallChart,
   getCharts
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import {
   validateXmlName as rootValidateXmlName,
   xmlEncodeAttr as rootXmlEncodeAttr

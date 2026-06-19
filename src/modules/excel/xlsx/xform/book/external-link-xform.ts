@@ -47,7 +47,7 @@
  * `cachedValues`.
  */
 
-import type { ExternalLinkCachedSheet, ExternalLinkModel } from "@excel/workbook.browser";
+import type { ExternalLinkCachedSheet, ExternalLinkModel } from "@excel/core/workbook.browser";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";

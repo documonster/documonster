@@ -2,13 +2,11 @@ import fs from "fs";
 import { promisify } from "util";
 
 import { testUtils } from "@excel/__tests__/shared";
-import type { NoteConfig } from "@excel/cell";
-import { cellSetNote, cellSetValue, cellGetValue, cellName, cellSetName } from "@excel/cell";
-import { columnAlignment, columnFont } from "@excel/column";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
-import { rowFont, rowSetFont } from "@excel/row";
-import { WorkbookWriter } from "@excel/stream/workbook-writer";
-import { getImage } from "@excel/workbook";
+import type { NoteConfig } from "@excel/core/cell";
+import { cellSetNote, cellSetValue, cellGetValue, cellName, cellSetName } from "@excel/core/cell";
+import { columnAlignment, columnFont } from "@excel/core/column";
+import { rowFont, rowSetFont } from "@excel/core/row";
+import { getImage } from "@excel/core/workbook";
 import {
   getBackgroundImageId,
   getCell,
@@ -16,7 +14,9 @@ import {
   getImages,
   rowCommit,
   rowGetCell
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 

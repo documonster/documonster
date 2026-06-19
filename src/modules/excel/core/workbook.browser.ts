@@ -25,42 +25,22 @@ import type {
 import type { AddComboChartOptions, ChartEntry, ChartModel } from "@excel/chart/model/types";
 import { resolvePendingChartImages } from "@excel/chart/serialize/chart-images";
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
-import {
-  chartsheetModel,
-  createChartsheet,
-  type ChartsheetData,
-  type AddChartsheetOptions,
-  type AddPivotChartsheetOptions
-} from "@excel/chartsheet";
+import type {
+  ChartsheetData,
+  AddChartsheetOptions,
+  AddPivotChartsheetOptions
+} from "@excel/core/chartsheet";
+import { chartsheetModel, createChartsheet } from "@excel/core/chartsheet";
+import type { DefinedNameModel, SyntaxProbe } from "@excel/core/defined-names";
 import {
   createDefinedNames,
   definedNamesModel,
-  definedNamesSetModel,
-  type DefinedNameModel,
-  type SyntaxProbe
-} from "@excel/defined-names";
-import { withPivotChartSource } from "@excel/pivot-chart";
-import type { PivotTable } from "@excel/pivot-table";
+  definedNamesSetModel
+} from "@excel/core/defined-names";
+import { withPivotChartSource } from "@excel/core/pivot-chart";
+import type { PivotTable } from "@excel/core/pivot-table";
+import type { WorkbookData } from "@excel/core/workbook-core";
 import {
-  WorkbookReader,
-  type WorkbookReaderOptions,
-  type CommonInput
-} from "@excel/stream/workbook-reader.browser";
-import { WorkbookWriter, type WorkbookWriterOptions } from "@excel/stream/workbook-writer.browser";
-import type {
-  AddWorksheetOptions,
-  CalculationProperties,
-  Font,
-  ThreadedCommentPerson,
-  WorkbookProperties,
-  WorkbookProtection,
-  WorkbookView,
-  Buffer as ExcelBuffer
-} from "@excel/types";
-import { synthGuid } from "@excel/utils/guid";
-import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
-import {
-  type WorkbookData,
   addChartEntry,
   addChartExStructuredEntry,
   getChartEntry,
@@ -76,17 +56,32 @@ import {
   setChartColors,
   setChartStyle,
   validateSheetName
-} from "@excel/workbook-core";
+} from "@excel/core/workbook-core";
+import type { Worksheet, WorksheetModel } from "@excel/core/worksheet";
 import {
-  type Worksheet,
-  type WorksheetModel,
   createWorksheet,
   destroy,
   getSheetModel,
   getSheetName,
   getSheetWorkbook,
   setSheetModel
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import type { WorkbookReaderOptions, CommonInput } from "@excel/stream/workbook-reader.browser";
+import { WorkbookReader } from "@excel/stream/workbook-reader.browser";
+import type { WorkbookWriterOptions } from "@excel/stream/workbook-writer.browser";
+import { WorkbookWriter } from "@excel/stream/workbook-writer.browser";
+import type {
+  AddWorksheetOptions,
+  CalculationProperties,
+  Font,
+  ThreadedCommentPerson,
+  WorkbookProperties,
+  WorkbookProtection,
+  WorkbookView,
+  Buffer as ExcelBuffer
+} from "@excel/types";
+import { synthGuid } from "@excel/utils/guid";
+import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
 // =============================================================================
@@ -1287,4 +1282,4 @@ export {
   getWorksheets,
   copyChartSidecars,
   copyChartExSidecars
-} from "@excel/workbook-core";
+} from "@excel/core/workbook-core";

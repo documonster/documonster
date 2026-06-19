@@ -7,10 +7,10 @@
  * This module extracts that shared boilerplate into a single reusable function.
  */
 
-import { createAsyncQueue } from "@archive/shared/async-queue";
-import { createLinkedAbortController, createAbortError, toError } from "@archive/shared/errors";
-import { ProgressEmitter } from "@archive/shared/progress";
-import type { ZipStringCodec, ZipStringEncoding } from "@archive/shared/text";
+import { createAsyncQueue } from "@archive/core/async-queue";
+import { createLinkedAbortController, createAbortError, toError } from "@archive/core/errors";
+import { ProgressEmitter } from "@archive/core/progress";
+import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import { StreamingZip } from "@archive/zip/stream";
 

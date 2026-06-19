@@ -4,7 +4,8 @@
  * All stream-related errors extend StreamError.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import type { BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 // Re-export abort utility used by browser/readable
 export { createAbortError } from "@utils/errors";
@@ -17,6 +18,13 @@ export class StreamError extends BaseError {
     super(message, options);
     this.name = "StreamError";
   }
+}
+
+/**
+ * Check if an error is a StreamError.
+ */
+export function isStreamError(err: unknown): err is StreamError {
+  return err instanceof StreamError;
 }
 
 /**

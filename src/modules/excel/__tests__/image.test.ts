@@ -8,10 +8,10 @@
  * - Hyperlinks handling
  */
 
-import { applyImageModel, imageClone, imageCreate, imageModel } from "@excel/image";
+import { applyImageModel, imageClone, imageCreate, imageModel } from "@excel/core/image";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import type { WorksheetData } from "@excel/core/worksheet-core";
 import { Workbook } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
-import type { WorksheetData } from "@excel/worksheet-core";
 import { describe, it, expect, beforeEach } from "vitest";
 
 // =============================================================================

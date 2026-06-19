@@ -1,11 +1,6 @@
-import { Enums } from "@excel/enums";
-import {
-  type RangeData,
-  rangeCreate,
-  rangeExpandToAddress,
-  rangeRange,
-  rangeTl
-} from "@excel/range";
+import { Enums } from "@excel/core/enums";
+import type { RangeData } from "@excel/core/range";
+import { rangeCreate, rangeExpandToAddress, rangeRange, rangeTl } from "@excel/core/range";
 import { colCache } from "@excel/utils/col-cache";
 
 interface MergeData {

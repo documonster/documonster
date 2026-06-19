@@ -34,7 +34,8 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
-import { SinkAdapter, type AnySink } from "@stream/internal/sink-adapter";
+import type { AnySink } from "@stream/core/sink-adapter";
+import { SinkAdapter } from "@stream/core/sink-adapter";
 import {
   ContentType,
   RelType,
@@ -100,15 +101,16 @@ import {
   collectImageRidsFromContent,
   collectImageRidsFromNotes
 } from "@word/writer/reference-scanners";
+import type { RelationshipsState } from "@word/writer/relationships";
 import {
   createRelationships,
   addRelationship,
   addRelationshipWithId,
   getRelationshipCount,
-  renderRelationships,
-  type RelationshipsState
+  renderRelationships
 } from "@word/writer/relationships";
-import { createRenderContext, type WordRenderContext } from "@word/writer/render-context";
+import type { WordRenderContext } from "@word/writer/render-context";
+import { createRenderContext } from "@word/writer/render-context";
 import { renderSectionProperties } from "@word/writer/section-writer";
 import { StreamBuf } from "@word/writer/stream-buf";
 import { StringBuf } from "@word/writer/string-buf";

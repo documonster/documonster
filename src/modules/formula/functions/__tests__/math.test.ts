@@ -12,10 +12,11 @@
  * implementation under test.
  */
 
-import { calculateFormulas } from "@excel/formula-adapter";
+import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
+import type { ArrayValue, NumberValue, RuntimeValue, StringValue } from "../../runtime/values";
 import {
   BLANK,
   ERRORS,
@@ -24,11 +25,7 @@ import {
   rvBoolean,
   rvError,
   rvNumber,
-  rvString,
-  type ArrayValue,
-  type NumberValue,
-  type RuntimeValue,
-  type StringValue
+  rvString
 } from "../../runtime/values";
 import {
   fnROUND,

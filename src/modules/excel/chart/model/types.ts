@@ -6,7 +6,7 @@
  * which holds a `c:plotArea` with one or more chart type groups.
  */
 
-import type { AnchorModel } from "@excel/anchor";
+import type { AnchorModel } from "@excel/core/anchor";
 
 // ============================================================================
 // Chart Type Enums

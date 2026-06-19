@@ -7,17 +7,15 @@
  *
  * @example
  * ```typescript
- * import { Workbook } from "documonster";
+ * import { Workbook } from "documonster/excel";
  * import { excelToPdf } from "documonster/pdf";
  *
- * const workbook = new Workbook();
+ * const workbook = Workbook.create();
  * // ... build workbook ...
  * const pdf = await excelToPdf(workbook);
  * ```
  */
 
-import { anchorCol, anchorRow } from "@excel/anchor";
-import { cellCol, cellGetValue, cellHyperlink, cellResult, cellText, cellType } from "@excel/cell";
 import type {
   ChartHandle,
   ChartExModel,
@@ -38,25 +36,33 @@ import {
 } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf, renderChartPng } from "@excel/chart/render/chart-renderer";
 import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
+import { anchorCol, anchorRow } from "@excel/core/anchor";
+import {
+  cellCol,
+  cellGetValue,
+  cellHyperlink,
+  cellResult,
+  cellText,
+  cellType
+} from "@excel/core/cell";
+import type { ChartsheetData } from "@excel/core/chartsheet";
 import {
   chartsheetChartExModel,
   chartsheetChartModel,
   chartsheetModel,
   chartsheetName,
   chartsheetPageSetup,
-  chartsheetState,
-  type ChartsheetData
-} from "@excel/chartsheet";
-import { ValueType } from "@excel/enums";
-import { formatCellValue } from "@excel/utils/cell-format";
-import { getChartsheets, getImage, getWorksheets } from "@excel/workbook";
+  chartsheetState
+} from "@excel/core/chartsheet";
+import { ValueType } from "@excel/core/enums";
+import { getChartsheets, getImage, getWorksheets } from "@excel/core/workbook";
 // Use the browser base class so the public `excelToPdf(workbook)` signature is
 // callable from both the Node entry (where `Workbook` is the Node subclass —
 // trivially assignable to the base) and the browser entry (where `Workbook` is
 // already the base). Importing the Node alias `@excel/workbook` would force
 // browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
 // XLSX surface intentionally omits — see issue #160.
-import type { Workbook } from "@excel/workbook.browser";
+import type { Workbook } from "@excel/core/workbook.browser";
 import {
   findRow,
   getCell,
@@ -69,33 +75,35 @@ import {
   getSheetWorkbook,
   getSparklineGroups,
   rowEachCell
-} from "@excel/worksheet";
-import type { Worksheet } from "@excel/worksheet";
-import { PdfDocumentBuilder, type PdfPageBuilder } from "@pdf/builder/document-builder";
+} from "@excel/core/worksheet";
+import type { Worksheet } from "@excel/core/worksheet";
+import { formatCellValue } from "@excel/utils/cell-format";
+import type { PdfPageBuilder } from "@pdf/builder/document-builder";
+import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { exportPdf } from "@pdf/render/pdf-exporter";
-import {
-  PdfCellType,
-  type PdfWorkbook,
-  type PdfSheetData,
-  type PdfWorkbookSheet,
-  type PdfChartsheetData,
-  type PdfRowData,
-  type PdfCellData,
-  type PdfColumnData,
-  type PdfCellStyle,
-  type PdfFillData,
-  type PdfColorData,
-  type PdfFontStyle,
-  type PdfBordersData,
-  type PdfBorderSideData,
-  type PdfAlignmentData,
-  type PdfPageSetupData,
-  type PdfSheetImage,
-  type PdfSheetChart,
-  type PdfAnchorRange,
-  type PdfExportOptions,
-  type PdfCellTypeValue
+import type {
+  PdfWorkbook,
+  PdfSheetData,
+  PdfWorkbookSheet,
+  PdfChartsheetData,
+  PdfRowData,
+  PdfCellData,
+  PdfColumnData,
+  PdfCellStyle,
+  PdfFillData,
+  PdfColorData,
+  PdfFontStyle,
+  PdfBordersData,
+  PdfBorderSideData,
+  PdfAlignmentData,
+  PdfPageSetupData,
+  PdfSheetImage,
+  PdfSheetChart,
+  PdfAnchorRange,
+  PdfExportOptions,
+  PdfCellTypeValue
 } from "@pdf/types";
+import { PdfCellType } from "@pdf/types";
 import { base64ToUint8Array } from "@utils/utils.base";
 import { wordChartToChartModel } from "@word/bridge/excel-bridge";
 import type { LayoutChart } from "@word/layout/layout-model";

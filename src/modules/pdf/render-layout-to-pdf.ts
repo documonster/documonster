@@ -17,7 +17,8 @@
  * paragraph variants and per-line for paragraphs.
  */
 
-import { PdfDocumentBuilder, type PdfPageBuilder } from "@pdf/builder/document-builder";
+import type { PdfPageBuilder } from "@pdf/builder/document-builder";
+import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import type { PdfColor } from "@pdf/types";
 import type {
   LayoutAltChunk,

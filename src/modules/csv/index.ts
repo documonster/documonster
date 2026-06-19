@@ -92,4 +92,4 @@ export type { DecimalSeparator } from "@csv/utils/number";
 // Errors
 // =============================================================================
 
-export { CsvError, CsvWorkerError } from "@csv/errors";
+export { CsvError, CsvWorkerError, isCsvError } from "@csv/errors";

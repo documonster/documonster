@@ -1,4 +1,7 @@
-import { type CellData, cellGetValue, cellSetValue } from "@excel/cell";
+import type { CellData } from "@excel/core/cell";
+import { cellGetValue, cellSetValue } from "@excel/core/cell";
+import { getRow, getSheetWorkbook, rowGetCell } from "@excel/core/worksheet-core";
+import type { WorksheetData as Worksheet } from "@excel/core/worksheet-core";
 import { TableError } from "@excel/errors";
 import type {
   Address,
@@ -9,8 +12,6 @@ import type {
   TableStyleProperties
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
-import { getRow, getSheetWorkbook, rowGetCell } from "@excel/worksheet-core";
-import type { WorksheetData as Worksheet } from "@excel/worksheet-core";
 
 interface TableModel {
   ref: string;

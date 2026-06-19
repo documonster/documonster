@@ -1,6 +1,6 @@
+import { rowSetFont } from "@excel/core/row";
+import type { WorkbookData } from "@excel/core/workbook-core";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowSetFont } from "@excel/row";
-import type { WorkbookData } from "@excel/workbook-core";
 /**
  * Tests for the Word ↔ Excel bridge helpers exposed at `documonster/word/excel`.
  *

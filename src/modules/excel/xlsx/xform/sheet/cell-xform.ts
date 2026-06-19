@@ -1,6 +1,6 @@
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
+import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/core/range";
 import { InvalidValueTypeError, ExcelError } from "@excel/errors";
-import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/range";
 import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";

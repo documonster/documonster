@@ -8,11 +8,11 @@ import {
   cellType,
   cellName,
   cellSetName
-} from "@excel/cell";
-import { ValueType } from "@excel/enums";
+} from "@excel/core/cell";
+import { ValueType } from "@excel/core/enums";
+import { rowSetAlignment, rowSetBorder, rowValues } from "@excel/core/row";
+import { getCell, setColumns } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { rowSetAlignment, rowSetBorder, rowValues } from "@excel/row";
-import { getCell, setColumns } from "@excel/worksheet";
 import { expect } from "vitest";
 
 export const splice = {

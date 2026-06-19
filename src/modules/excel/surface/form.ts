@@ -10,7 +10,7 @@
 export {
   addFormCheckbox as addCheckbox,
   getFormCheckboxes as listCheckboxes
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
 
 export {
   isFormCheckbox as isCheckbox,
@@ -25,7 +25,7 @@ export {
   formCheckboxVmlAnchor as vmlAnchor,
   formCheckboxVmlStyle as vmlStyle,
   formCheckboxVmlCheckedValue as vmlCheckedValue
-} from "@excel/form-control";
+} from "@excel/core/form-control";
 
 /** A form-checkbox handle. */
-export type { FormCheckboxData as Handle } from "@excel/form-control";
+export type { FormCheckboxData as Handle } from "@excel/core/form-control";

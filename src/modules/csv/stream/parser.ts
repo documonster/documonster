@@ -16,7 +16,8 @@ import {
   shouldSkipRow as shouldSkipRowCore
 } from "@csv/parse/row-processor";
 // Import Scanner for efficient batch scanning
-import { createScanner, type Scanner } from "@csv/parse/scanner";
+import type { Scanner } from "@csv/parse/scanner";
+import { createScanner } from "@csv/parse/scanner";
 import type { ParseState } from "@csv/parse/state";
 import { createParseState, getUnquotedArray } from "@csv/parse/state";
 import type {

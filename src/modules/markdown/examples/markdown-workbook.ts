@@ -25,9 +25,9 @@ import {
   readMarkdownFile,
   writeMarkdownFile
 } from "@excel/bridge/markdown-bridge.node";
-import { cellGetValue } from "@excel/cell";
+import { cellGetValue } from "@excel/core/cell";
+import { getSheetName, rowGetCell } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { getSheetName, rowGetCell } from "@excel/worksheet";
 
 import { Markdown, MarkdownParseError } from "../index";
 

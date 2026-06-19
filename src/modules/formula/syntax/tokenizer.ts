@@ -8,7 +8,8 @@
  */
 
 import { FormulaParseError } from "@formula/errors";
-import { TokenType, type Token } from "@formula/syntax/token-types";
+import type { Token } from "@formula/syntax/token-types";
+import { TokenType } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Character Helpers

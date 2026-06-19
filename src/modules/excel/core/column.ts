@@ -1,3 +1,4 @@
+import type { Worksheet } from "@excel/core/worksheet";
 import type {
   Style,
   NumFmt,
@@ -10,7 +11,6 @@ import type {
   ColBreak
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
-import type { Worksheet } from "@excel/worksheet";
 import { deepEqual } from "@utils/object";
 
 /** Header value type - can be a single value or array for multi-row headers */

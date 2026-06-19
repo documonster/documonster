@@ -15,8 +15,8 @@
  * tree-shakeable — a consumer who never calls a converter never bundles the
  * source module. (Verified by scripts/treeshake-verify.ts.)
  */
-import type { Workbook } from "@excel/workbook.browser";
-import type { ChartHandle } from "@excel/worksheet-core";
+import type { Workbook } from "@excel/core/workbook.browser";
+import type { ChartHandle } from "@excel/core/worksheet-core";
 import { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "@pdf/builder/document-builder";
 import type { ChartToPdfOptions } from "@pdf/excel-bridge";
 import type { PdfExportOptions } from "@pdf/types";

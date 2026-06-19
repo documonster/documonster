@@ -1,4 +1,4 @@
-import type { ZipStringEncoding } from "@archive/shared/text";
+import type { ZipStringEncoding } from "@archive/core/text";
 
 /**
  * Shared types for raw ZIP entries.

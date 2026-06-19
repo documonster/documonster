@@ -19,7 +19,7 @@
  */
 
 export { buildChartModel } from "@excel/chart/chart-handle";
-export type { ChartHandle } from "@excel/worksheet-core";
+export type { ChartHandle } from "@excel/core/worksheet-core";
 export { buildComboChartModel } from "@excel/chart/build/chart-builder";
 export {
   fillChartCaches,

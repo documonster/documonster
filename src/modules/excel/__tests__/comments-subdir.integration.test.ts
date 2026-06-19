@@ -7,10 +7,10 @@
  */
 
 import { ZipArchive } from "@archive/zip";
-import { cellNote, cellComment, cellSetComment } from "@excel/cell";
+import { cellNote, cellComment, cellSetComment } from "@excel/core/cell";
+import { noteCreate, noteModel } from "@excel/core/note";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { noteCreate, noteModel } from "@excel/note";
-import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

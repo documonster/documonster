@@ -4,7 +4,8 @@
  * All Excel-related errors extend ExcelError.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import type { BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 /**
  * Base class for all Excel-related errors.

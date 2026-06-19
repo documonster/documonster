@@ -21,21 +21,19 @@ import { createChartSurface } from "@pdf/render/chart-surface";
 import { layoutChartsheet, layoutSheet } from "@pdf/render/layout-engine";
 import { renderPage, alphaGsName, renderWatermark } from "@pdf/render/page-renderer";
 import { argbToPdfColor } from "@pdf/render/style-converter";
-import {
-  PageSizes,
-  PdfCellType,
-  isPdfChartsheet,
-  type PdfWorkbook,
-  type PdfWorkbookSheet,
-  type PdfExportOptions,
-  type ResolvedPdfOptions,
-  type PdfPageSize,
-  type PdfMargins,
-  type PdfColor,
-  type PdfOrientation,
-  type LayoutPage,
-  type PdfWatermark
+import type {
+  PdfWorkbook,
+  PdfWorkbookSheet,
+  PdfExportOptions,
+  ResolvedPdfOptions,
+  PdfPageSize,
+  PdfMargins,
+  PdfColor,
+  PdfOrientation,
+  LayoutPage,
+  PdfWatermark
 } from "@pdf/types";
+import { PageSizes, PdfCellType, isPdfChartsheet } from "@pdf/types";
 import { yieldToEventLoop } from "@utils/utils.base";
 
 // =============================================================================

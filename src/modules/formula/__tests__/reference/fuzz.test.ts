@@ -19,7 +19,7 @@
  * stability, and error-routing gaps.
  */
 
-import { calculateFormulas } from "@excel/formula-adapter";
+import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 

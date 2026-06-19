@@ -10,9 +10,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { getWorksheets } from "@excel/core/workbook";
+import { getSheetName } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { getWorksheets } from "@excel/workbook";
-import { getSheetName } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 const TEST_DATA_DIR = path.join(__dirname, "data");

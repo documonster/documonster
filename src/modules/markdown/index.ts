@@ -40,4 +40,4 @@ export * as Markdown from "@markdown/surface/markdown";
 // Errors
 // =============================================================================
 
-export { MarkdownError, MarkdownParseError } from "@markdown/errors";
+export { MarkdownError, MarkdownParseError, isMarkdownError } from "@markdown/errors";

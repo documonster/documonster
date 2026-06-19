@@ -7,7 +7,8 @@
  */
 
 import { parseDefinedNameRange } from "@formula/compile/address-utils";
-import { bind, type BindingContext } from "@formula/compile/binder";
+import type { BindingContext } from "@formula/compile/binder";
+import { bind } from "@formula/compile/binder";
 import type {
   BoundExpr,
   BoundCellRef,

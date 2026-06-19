@@ -1,4 +1,5 @@
-import { type RangeData, rangeRange } from "@excel/range";
+import type { RangeData } from "@excel/core/range";
+import { rangeRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 
 class DimensionXform extends BaseXform {

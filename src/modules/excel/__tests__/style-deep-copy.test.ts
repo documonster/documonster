@@ -1,5 +1,4 @@
-import { cellAlignment, cellBorder, cellFill, cellFont, cellProtection } from "@excel/cell";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { cellAlignment, cellBorder, cellFill, cellFont, cellProtection } from "@excel/core/cell";
 import {
   columnSetAlignment,
   columnSetBorder,
@@ -10,7 +9,8 @@ import {
   getColumn,
   getRow,
   rowSplice
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Style fixes", () => {

@@ -15,9 +15,9 @@
 // The fix makes `XLSX` generic over its workbook type so the Node subclass
 // extends `XLSX<NodeWorkbook>` and the inherited methods narrow naturally.
 
-import type { Workbook as NodeWorkbook } from "@excel/workbook";
-import { getXlsxIo } from "@excel/workbook";
-import type { Workbook as BrowserWorkbook } from "@excel/workbook.browser";
+import type { Workbook as NodeWorkbook } from "@excel/core/workbook";
+import { getXlsxIo } from "@excel/core/workbook";
+import type { Workbook as BrowserWorkbook } from "@excel/core/workbook.browser";
 import type { XLSX as NodeXlsx } from "@excel/xlsx/xlsx";
 import type { XLSX as BrowserXlsx } from "@excel/xlsx/xlsx.browser";
 

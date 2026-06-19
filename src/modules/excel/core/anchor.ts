@@ -1,7 +1,7 @@
-import { columnIsCustomWidth } from "@excel/column";
+import { columnIsCustomWidth } from "@excel/core/column";
+import type { WorksheetData as Worksheet } from "@excel/core/worksheet-core";
+import { getColumn, getRow } from "@excel/core/worksheet-core";
 import { colCache } from "@excel/utils/col-cache";
-import type { WorksheetData as Worksheet } from "@excel/worksheet-core";
-import { getColumn, getRow } from "@excel/worksheet-core";
 
 interface AnchorModel {
   nativeCol: number;

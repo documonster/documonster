@@ -1,4 +1,5 @@
-import { runZipE2ETests, type ZipE2EModuleImports } from "@archive/__tests__/zip/zip-e2e.v2.shared";
+import type { ZipE2EModuleImports } from "@archive/__tests__/zip/zip-e2e.v2.shared";
+import { runZipE2ETests } from "@archive/__tests__/zip/zip-e2e.v2.shared";
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
 import { describe } from "vitest";

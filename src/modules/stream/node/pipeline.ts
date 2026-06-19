@@ -13,19 +13,15 @@ import {
 } from "stream";
 import { pipeline as nodePipeline } from "stream/promises";
 
-import { createFinishedAll } from "@stream/common/finished-all";
-import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/common/options";
-import { isPipelineOptions } from "@stream/common/options";
-import {
-  isReadableStream,
-  isTransformStream,
-  isWritableStream
-} from "@stream/internal/type-guards";
+import { createFinishedAll } from "@stream/core/finished-all";
+import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/core/options";
+import { isPipelineOptions } from "@stream/core/options";
+import { isReadableStream, isTransformStream, isWritableStream } from "@stream/core/type-guards";
 import type { PipelineStreamLike } from "@stream/types";
 
 // Re-export for consumers
-export type { PipelineOptions, FinishedOptions } from "@stream/common/options";
-export { isPipelineOptions } from "@stream/common/options";
+export type { PipelineOptions, FinishedOptions } from "@stream/core/options";
+export { isPipelineOptions } from "@stream/core/options";
 
 // =============================================================================
 // Pipeline

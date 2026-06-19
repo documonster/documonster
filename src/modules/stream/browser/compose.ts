@@ -14,7 +14,7 @@
 
 import { createListenerRegistry } from "@stream/browser/helpers";
 import { Transform } from "@stream/browser/transform";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import type { ITransform } from "@stream/types";
 
 // =============================================================================

@@ -1,8 +1,8 @@
 import { inflateSync } from "node:zlib";
 
-import { cellSetAlignment, cellSetFont, cellSetValue } from "@excel/cell";
+import { cellSetAlignment, cellSetFont, cellSetValue } from "@excel/core/cell";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Column, Workbook } from "@excel/index";
-import { getCell } from "@excel/worksheet";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { describe, it, expect } from "vitest";
 

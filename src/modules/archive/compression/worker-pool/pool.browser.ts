@@ -13,6 +13,8 @@
  * - Graceful error handling and recovery
  */
 
+import { ArchiveError } from "@archive/core/errors";
+
 import {
   resolvePoolOptions,
   getPriorityValue,
@@ -260,11 +262,11 @@ export class WorkerPool {
     options?: TaskOptions & { level?: number }
   ): Promise<TaskResult> {
     if (this._terminated) {
-      throw new Error("Worker pool has been terminated");
+      throw new ArchiveError("Worker pool has been terminated");
     }
 
     if (!hasWorkerSupport()) {
-      throw new Error("Web Workers are not supported in this environment");
+      throw new ArchiveError("Web Workers are not supported in this environment");
     }
 
     // Check if already aborted
@@ -767,10 +769,10 @@ export class WorkerPool {
     } = DEFAULT_STREAM_HANDLERS
   ): WorkerPoolStream {
     if (this._terminated) {
-      throw new Error("Worker pool has been terminated");
+      throw new ArchiveError("Worker pool has been terminated");
     }
     if (!hasWorkerSupport()) {
-      throw new Error("Web Workers are not supported in this environment");
+      throw new ArchiveError("Web Workers are not supported in this environment");
     }
 
     const taskId = this._nextTaskId++;

@@ -109,6 +109,20 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import type {
+  AddChartSeriesOptions,
+  AddChartOptions,
+  ChartStyleModel,
+  ChartColorsModel,
+  ChartRichText,
+  AddTrendlineOptions,
+  AddErrorBarsOptions,
+  ChartMarker,
+  RegionMapDataOptions,
+  TopologyLike,
+  NumberReference,
+  StringReference
+} from "@excel/chart/index";
 import {
   EXCEL_CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
@@ -148,19 +162,7 @@ import {
   buildChartScene,
   buildEffectFilter,
   applyAxisTransform,
-  VECTOR_PDF_CHART_EX_LAYOUT_IDS,
-  type AddChartSeriesOptions,
-  type AddChartOptions,
-  type ChartStyleModel,
-  type ChartColorsModel,
-  type ChartRichText,
-  type AddTrendlineOptions,
-  type AddErrorBarsOptions,
-  type ChartMarker,
-  type RegionMapDataOptions,
-  type TopologyLike,
-  type NumberReference,
-  type StringReference
+  VECTOR_PDF_CHART_EX_LAYOUT_IDS
 } from "@excel/chart/index";
 import { drawChartExPdf } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf } from "@excel/chart/render/chart-renderer";

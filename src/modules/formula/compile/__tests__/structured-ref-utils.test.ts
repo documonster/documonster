@@ -6,11 +6,11 @@
 
 import { describe, expect, it } from "vitest";
 
+import type { TableLike } from "../structured-ref-utils";
 import {
   buildTableGeometry,
   resolveStructuredRefColumns,
-  resolveStructuredRefRows,
-  type TableLike
+  resolveStructuredRefRows
 } from "../structured-ref-utils";
 
 function mkTable(opts: {

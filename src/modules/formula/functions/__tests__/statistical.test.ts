@@ -6,10 +6,11 @@
  * included here per the task brief).
  */
 
-import { calculateFormulas } from "@excel/formula-adapter";
+import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
+import type { ArrayValue, NumberValue, RuntimeValue } from "../../runtime/values";
 import {
   BLANK,
   ERRORS,
@@ -18,10 +19,7 @@ import {
   rvBoolean,
   rvError,
   rvNumber,
-  rvString,
-  type ArrayValue,
-  type NumberValue,
-  type RuntimeValue
+  rvString
 } from "../../runtime/values";
 import { fnAVERAGEIF, fnCOUNTIFS } from "../conditional";
 import {

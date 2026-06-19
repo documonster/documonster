@@ -16,10 +16,9 @@ import {
   cellSetProtection,
   cellSetValue,
   cellType
-} from "@excel/cell";
-import { columnHeaders } from "@excel/column";
-import { ValueType } from "@excel/enums";
-import { Cell, Workbook } from "@excel/index";
+} from "@excel/core/cell";
+import { columnHeaders } from "@excel/core/column";
+import { ValueType } from "@excel/core/enums";
 import {
   rowAddPageBreak,
   rowSetAlignment,
@@ -28,9 +27,7 @@ import {
   rowSetFont,
   rowSetNumFmt,
   rowValues
-} from "@excel/row";
-import { WorkbookWriter } from "@excel/stream/workbook-writer";
-import type { CellFormulaValue } from "@excel/types";
+} from "@excel/core/row";
 import {
   columnSetAlignment,
   columnSetBorder,
@@ -43,7 +40,10 @@ import {
   getCell,
   rowCommit,
   rowGetCell
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
+import type { CellFormulaValue } from "@excel/types";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 

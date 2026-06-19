@@ -1,9 +1,9 @@
 import type { ExtractedFile } from "@archive/unzip/extract";
 import { extractAll } from "@archive/unzip/extract";
 import { ZipArchive } from "@archive/zip";
+import { addFormCheckbox } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
-import { addFormCheckbox } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 const textDecoder = new TextDecoder();

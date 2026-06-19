@@ -6,7 +6,6 @@
  * standalone chart XML part.
  */
 
-import { anchorCreate, anchorModel, type AnchorData, type AnchorModel } from "@excel/anchor";
 import { fillChartCaches, fillChartExCaches } from "@excel/chart/build/cache-populator";
 import {
   applyChartSeriesOptionsPatch,
@@ -34,8 +33,8 @@ import type {
 import { resolvePendingChartImages } from "@excel/chart/serialize/chart-images";
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
 import { parseTxPr } from "@excel/chart/shared/shape-properties";
-import { ChartOptionsError } from "@excel/errors";
-import { colCache } from "@excel/utils/col-cache";
+import type { AnchorData, AnchorModel } from "@excel/core/anchor";
+import { anchorCreate, anchorModel } from "@excel/core/anchor";
 import {
   addChartEntry,
   addChartExStructuredEntry,
@@ -47,9 +46,11 @@ import {
   nextChartNumber,
   setChartColors,
   setChartStyle
-} from "@excel/workbook-core";
-import type { ChartAnchorRange, ChartHandle, WorksheetData } from "@excel/worksheet-core";
-import { getSheetWorkbook } from "@excel/worksheet-core";
+} from "@excel/core/workbook-core";
+import type { ChartAnchorRange, ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
+import { getSheetWorkbook } from "@excel/core/worksheet-core";
+import { ChartOptionsError } from "@excel/errors";
+import { colCache } from "@excel/utils/col-cache";
 import { RelType } from "@excel/xlsx/rel-type";
 
 /**

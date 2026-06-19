@@ -21,10 +21,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { cellSetNumFmt } from "@excel/cell";
+import { cellSetNumFmt } from "@excel/core/cell";
+import { rowSetFill, rowSetFont } from "@excel/core/row";
+import { rowGetCell } from "@excel/core/worksheet";
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
-import { rowSetFill, rowSetFont } from "@excel/row";
-import { rowGetCell } from "@excel/worksheet";
 
 import { Pdf } from "../index";
 import { pdf } from "../pdf";

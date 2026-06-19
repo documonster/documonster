@@ -1,5 +1,5 @@
+import { createWorkbook, addWorksheet } from "@excel/core/workbook";
 import { Cell } from "@excel/index";
-import { createWorkbook, addWorksheet } from "@excel/workbook";
 import { PdfFontError } from "@pdf/errors";
 import { FontManager } from "@pdf/font/font-manager";
 import { parseTtf } from "@pdf/font/ttf-parser";

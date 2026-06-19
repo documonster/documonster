@@ -17,9 +17,9 @@ import {
   buildEffectFilter,
   renderChartSvg
 } from "@excel/chart";
-import { type ChartSceneSeries } from "@excel/chart/index";
+import type { ChartSceneSeries } from "@excel/chart/index";
+import { addChart, addChartEx, addComboChart, getCharts } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
-import { addChart, addChartEx, addComboChart, getCharts } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import {

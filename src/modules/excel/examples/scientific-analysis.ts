@@ -38,7 +38,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { type AddTrendlineOptions, type ChartRichText } from "@excel/chart/index";
+import type { AddTrendlineOptions, ChartRichText } from "@excel/chart/index";
 import {
   Address,
   Cell,

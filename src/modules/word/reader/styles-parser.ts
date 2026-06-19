@@ -6,7 +6,7 @@
  * (`styles-writer.ts` and `numbering-writer.ts` are already separate).
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
 import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
 import { parseRunProperties, parseShading } from "@word/reader/properties-parsers";

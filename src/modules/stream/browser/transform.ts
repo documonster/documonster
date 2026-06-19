@@ -7,7 +7,7 @@ import { createListenerRegistry } from "@stream/browser/helpers";
 import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
 import { Readable } from "@stream/browser/readable";
 import { Writable } from "@stream/browser/writable";
-import { parseEndArgs } from "@stream/common/end-args";
+import { parseEndArgs } from "@stream/core/end-args";
 import type { DuplexStreamOptions, IDuplex, WritableLike } from "@stream/types";
 import { createAbortError, toError } from "@utils/errors";
 import { EventEmitter } from "@utils/event-emitter";

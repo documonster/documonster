@@ -2,7 +2,7 @@ import fs from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";

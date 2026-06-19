@@ -1,7 +1,7 @@
-import { cellGetValue } from "@excel/cell";
+import { cellGetValue } from "@excel/core/cell";
+import { tableAddRow, tableModel } from "@excel/core/table";
+import { getCell } from "@excel/core/worksheet";
 import { Table, Workbook } from "@excel/index";
-import { tableAddRow, tableModel } from "@excel/table";
-import { getCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

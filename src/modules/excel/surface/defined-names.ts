@@ -17,7 +17,7 @@ export {
   definedNamesGetAllEntries as getAllEntries,
   definedNamesModel as model,
   definedNamesSetModel as setModel
-} from "@excel/defined-names";
+} from "@excel/core/defined-names";
 
 /** A defined-names handle. */
-export type { DefinedNamesData as Handle } from "@excel/defined-names";
+export type { DefinedNamesData as Handle } from "@excel/core/defined-names";

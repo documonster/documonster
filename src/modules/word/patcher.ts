@@ -17,7 +17,7 @@
  * of which container holds it.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { isHyperlink, isRun } from "@word/core/text-utils";
 import type {
   BodyContent,

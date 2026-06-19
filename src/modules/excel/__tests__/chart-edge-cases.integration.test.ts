@@ -13,12 +13,13 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
+import { addChart, getCharts, removeChart } from "@excel/core/worksheet";
 import { Chart, Workbook, Worksheet } from "@excel/index";
-import { addChart, getCharts, removeChart } from "@excel/worksheet";
 import { describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
-import { entryText, loadRoundTrip, type EntryMap } from "./helpers/zip-text";
+import type { EntryMap } from "./helpers/zip-text";
+import { entryText, loadRoundTrip } from "./helpers/zip-text";
 
 /**
  * Build a minimal workbook with N classic bar charts on the same

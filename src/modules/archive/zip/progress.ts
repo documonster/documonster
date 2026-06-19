@@ -2,7 +2,7 @@ import type {
   ArchiveProgressPhase,
   ArchiveStreamOptions,
   ArchiveOperationBase
-} from "@archive/shared/progress";
+} from "@archive/core/progress";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 
 /**

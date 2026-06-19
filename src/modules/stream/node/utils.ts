@@ -6,13 +6,18 @@
 
 import { Readable, Transform, Duplex } from "stream";
 
-import { createAddAbortSignal } from "@stream/common/add-abort-signal";
-import { toStreamBytes } from "@stream/common/binary-chunk";
-import { createConsumers } from "@stream/common/consumers";
-import { createIsTransform, createIsDuplex, createIsStream } from "@stream/common/type-guards";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { createAddAbortSignal } from "@stream/core/add-abort-signal";
+import { toStreamBytes } from "@stream/core/binary-chunk";
+import { createConsumers } from "@stream/core/consumers";
+import {
+  createIsTransform,
+  createIsDuplex,
+  createIsStream,
+  isAsyncIterable,
+  isReadableStream
+} from "@stream/core/type-guards";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { UnsupportedStreamTypeError } from "@stream/errors";
-import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
 import { pipeline, finished } from "@stream/node/pipeline";
 import { Writable } from "@stream/node/writable";
 import type {

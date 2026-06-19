@@ -6,7 +6,7 @@
  * `createReadableFromArray`, `createTransform` and `consumers` bindings.
  */
 
-import { isReadableStream } from "@stream/internal/type-guards";
+import { isReadableStream } from "@stream/core/type-guards";
 import type { IReadable, ITransform } from "@stream/types";
 import { stringToUint8Array as _stringToUint8Array } from "@utils/binary";
 

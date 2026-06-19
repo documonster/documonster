@@ -5,7 +5,7 @@
  * These are pure parsers that don't depend on ReaderContext.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { parseOutline, parseSrcRect, parseSvgBlip, parseXfrm } from "@word/reader/drawing-helpers";
 import { safeParseInt, serializeElement } from "@word/reader/parse-utils";
 import type { FloatingImage, InlineImageContent, OpaqueRunContent, RunContent } from "@word/types";

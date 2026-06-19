@@ -1,5 +1,5 @@
-import { indexOfUint8ArrayPattern } from "@archive/shared/bytes";
-import type { ZipStringEncoding } from "@archive/shared/text";
+import { indexOfUint8ArrayPattern } from "@archive/core/bytes";
+import type { ZipStringEncoding } from "@archive/core/text";
 import {
   parseFormattedTyped as parseBuffer,
   readUint32LE,
@@ -9,11 +9,8 @@ import {
   parseDosDateTimeUTC,
   resolveZipLastModifiedDateFromUnixSeconds
 } from "@archive/zip-spec/timestamps";
-import {
-  parseZipExtraFields,
-  type ZipExtraFields,
-  type ZipVars
-} from "@archive/zip-spec/zip-extra-fields";
+import type { ZipExtraFields, ZipVars } from "@archive/zip-spec/zip-extra-fields";
+import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
 import {
   CENTRAL_DIR_HEADER_SIG,
   DATA_DESCRIPTOR_SIG,

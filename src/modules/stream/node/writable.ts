@@ -6,7 +6,7 @@
 
 import { Writable as NodeWritable } from "stream";
 
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import type { WritableStreamOptions, WritableLike } from "@stream/types";
 
 // =============================================================================

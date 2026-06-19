@@ -12,6 +12,12 @@ import {
   SyncDeflater,
   hasNativeAsyncDeflate
 } from "@archive/compression/streaming-compress";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { DEFAULT_ZIP_LEVEL, DEFAULT_ZIP_TIMESTAMPS } from "@archive/core/defaults";
+import { createAbortError, toError, ArchiveError } from "@archive/core/errors";
+import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
+import { encodeZipStringWithCodec, resolveZipStringCodec } from "@archive/core/text";
+import type { ZipCryptoState, AesKeyStrength, ZipEncryptionMethod } from "@archive/crypto";
 import {
   zipCryptoInitKeys,
   zipCryptoCreateHeader,
@@ -19,24 +25,14 @@ import {
   aesEncrypt,
   buildAesExtraField,
   randomBytes,
-  type ZipCryptoState,
-  type AesKeyStrength,
-  type ZipEncryptionMethod,
   isAesEncryption,
   getAesKeyStrength
 } from "@archive/crypto";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { DEFAULT_ZIP_LEVEL, DEFAULT_ZIP_TIMESTAMPS } from "@archive/shared/defaults";
-import { createAbortError, toError } from "@archive/shared/errors";
-import {
-  encodeZipStringWithCodec,
-  resolveZipStringCodec,
-  type ZipStringCodec,
-  type ZipStringEncoding
-} from "@archive/shared/text";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { normalizeZipPath } from "@archive/zip-spec/zip-path";
+import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildDataDescriptor,
   buildDataDescriptorZip64,
@@ -51,8 +47,7 @@ import {
   FLAG_UTF8,
   COMPRESSION_AES,
   getUnixModeFromExternalAttributes,
-  isSymlinkMode,
-  type Zip64Mode
+  isSymlinkMode
 } from "@archive/zip-spec/zip-records";
 import { isProbablyIncompressibleChunks } from "@archive/zip/compressibility";
 import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
@@ -211,7 +206,7 @@ export class ZipDeflateFile {
     this._encryptionMethod = options?.encryptionMethod ?? "none";
     this._password = options?.password;
     if (this._encryptionMethod !== "none" && !this._password) {
-      throw new Error("Password is required for encryption");
+      throw new ArchiveError("Password is required for encryption");
     }
     if (isAesEncryption(this._encryptionMethod)) {
       this._aesKeyStrength = getAesKeyStrength(this._encryptionMethod);
@@ -948,7 +943,7 @@ export class ZipDeflateFile {
    */
   private _pushSyncPath(data: Uint8Array, final = false): void {
     if (this._finalized) {
-      throw new Error("Cannot push to finalized ZipDeflateFile");
+      throw new ArchiveError("Cannot push to finalized ZipDeflateFile");
     }
 
     // Ensure native CRC32 is available before the first _writeDataSync call.
@@ -1003,7 +998,7 @@ export class ZipDeflateFile {
 
     // AES encryption requires async crypto — not supported for sync path
     if (this._aesKeyStrength && this._aesBufferSize > 0) {
-      throw new Error("AES encryption is not supported with synchronous push");
+      throw new ArchiveError("AES encryption is not supported with synchronous push");
     }
 
     // Finalize the sync deflater if it has pending data
@@ -1500,12 +1495,12 @@ export class StreamingZip {
 
   add(file: ZipWritableFile): void {
     if (this.ended) {
-      throw new Error("Cannot add files after calling end() ");
+      throw new ArchiveError("Cannot add files after calling end() ");
     }
 
     // Fail fast: if ZIP64 is forbidden, classic ZIP can't exceed 65535 entries.
     if (this.zip64Mode === false && this.addedEntryCount >= UINT16_MAX) {
-      throw new Error("ZIP64 is required but zip64=false");
+      throw new ArchiveError("ZIP64 is required but zip64=false");
     }
     this.addedEntryCount++;
 

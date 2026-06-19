@@ -1,4 +1,5 @@
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ArchiveError } from "@archive/core/errors";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildEndOfCentralDirectory,
@@ -170,7 +171,7 @@ export function measureCentralDirectoryAndEocd(
   const usedZip64 = forceZip64 || needsZip64EOCDFromArchive || centralDirSize > UINT32_MAX;
 
   if (forbidZip64 && usedZip64) {
-    throw new Error("ZIP64 is required but zip64=false");
+    throw new ArchiveError("ZIP64 is required but zip64=false");
   }
 
   const trailerSize = usedZip64
@@ -340,7 +341,7 @@ export function buildCentralDirectoryAndEocd(
 
   const usedZip64 = forceZip64 || needsZip64EOCDFromArchive || centralDirSize > UINT32_MAX;
   if (forbidZip64 && usedZip64) {
-    throw new Error("ZIP64 is required but zip64=false");
+    throw new ArchiveError("ZIP64 is required but zip64=false");
   }
 
   if (usedZip64) {

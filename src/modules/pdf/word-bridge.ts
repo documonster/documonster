@@ -34,12 +34,10 @@
  */
 
 import type { PdfPageBuilder } from "@pdf/builder/document-builder";
-import { renderLayoutDocumentToPdf, type RenderLayoutOptions } from "@pdf/render-layout-to-pdf";
-import {
-  layoutDocumentFull,
-  type FullLayoutOptions,
-  type PageGeometryOverride
-} from "@word/layout/layout-full";
+import type { RenderLayoutOptions } from "@pdf/render-layout-to-pdf";
+import { renderLayoutDocumentToPdf } from "@pdf/render-layout-to-pdf";
+import type { FullLayoutOptions, PageGeometryOverride } from "@word/layout/layout-full";
+import { layoutDocumentFull } from "@word/layout/layout-full";
 import type { LayoutChart } from "@word/layout/layout-model";
 import type { Chart, ChartContent, ChartExContent, DocxDocument } from "@word/types";
 

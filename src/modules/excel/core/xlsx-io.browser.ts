@@ -6,14 +6,14 @@
  * workbook ↔ xlsx import cycle). Selected over `xlsx-io.ts` (Node) via the
  * `.browser` same-name swap at build/test time.
  */
-import type { WorkbookData } from "@excel/workbook-core";
-import {
-  XLSX,
-  type XlsxReadOptions,
-  type XlsxWriteOptions,
-  type IParseStream,
-  type IWritableStream
+import type { WorkbookData } from "@excel/core/workbook-core";
+import type {
+  XlsxReadOptions,
+  XlsxWriteOptions,
+  IParseStream,
+  IWritableStream
 } from "@excel/xlsx/xlsx.browser";
+import { XLSX } from "@excel/xlsx/xlsx.browser";
 
 /** Get (or lazily create) the xlsx IO handle bound to a workbook. */
 export function getXlsxIo(wb: WorkbookData): XLSX {

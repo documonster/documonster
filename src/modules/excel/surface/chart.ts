@@ -48,7 +48,7 @@ export {
   seriesFromColumns,
   getCharts as get,
   removeChart as remove
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
 
 // Chart-handle operations (formerly methods on the `Chart` class). Re-exported
 // from the chart implementation under unprefixed namespace names so the public

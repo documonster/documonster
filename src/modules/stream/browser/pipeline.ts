@@ -7,20 +7,16 @@ import { createListenerRegistry } from "@stream/browser/helpers";
 import { Readable } from "@stream/browser/readable";
 import { Transform } from "@stream/browser/transform";
 import { Writable } from "@stream/browser/writable";
-import { createFinishedAll } from "@stream/common/finished-all";
-import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/common/options";
-import { isPipelineOptions } from "@stream/common/options";
+import { createFinishedAll } from "@stream/core/finished-all";
+import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/core/options";
+import { isPipelineOptions } from "@stream/core/options";
+import { isReadableStream, isTransformStream, isWritableStream } from "@stream/core/type-guards";
 import { createAbortError } from "@stream/errors";
-import {
-  isReadableStream,
-  isTransformStream,
-  isWritableStream
-} from "@stream/internal/type-guards";
 import type { PipelineStreamLike } from "@stream/types";
 
 // Re-export for consumers
-export type { PipelineOptions, FinishedOptions } from "@stream/common/options";
-export { isPipelineOptions } from "@stream/common/options";
+export type { PipelineOptions, FinishedOptions } from "@stream/core/options";
+export { isPipelineOptions } from "@stream/core/options";
 
 // =============================================================================
 // Pipeline

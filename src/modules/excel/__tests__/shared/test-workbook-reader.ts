@@ -1,9 +1,9 @@
 import testValuesJson from "@excel/__tests__/shared/data/sheet-values.json" with { type: "json" };
 import { fix } from "@excel/__tests__/shared/tools";
-import { cellGetValue, cellType } from "@excel/cell";
-import { rowGetCell } from "@excel/worksheet";
+import { cellGetValue, cellType } from "@excel/core/cell";
+import { rowGetCell } from "@excel/core/worksheet";
 const testValues = fix(testValuesJson);
-import { ValueType } from "@excel/enums";
+import { ValueType } from "@excel/core/enums";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { dateToExcel } from "@utils/utils";
 

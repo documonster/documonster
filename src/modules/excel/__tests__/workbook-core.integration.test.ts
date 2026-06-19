@@ -13,18 +13,17 @@ import {
   cellSetName,
   cellAddName,
   cellRemoveName
-} from "@excel/cell";
-import { definedNamesGetRanges, definedNamesModel } from "@excel/defined-names";
-import { ValueType } from "@excel/enums";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+} from "@excel/core/cell";
+import { definedNamesGetRanges, definedNamesModel } from "@excel/core/defined-names";
+import { ValueType } from "@excel/core/enums";
 import {
   getDefinedNames,
   getWorkbookModel,
   getWorksheets,
   setWorkbookModel
-} from "@excel/workbook";
-import type { CsvOptions } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
+} from "@excel/core/workbook";
+import type { CsvOptions } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
 import {
   addImage,
   getCell,
@@ -32,7 +31,8 @@ import {
   getLastColumn,
   getSheetName,
   rowGetCell
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 

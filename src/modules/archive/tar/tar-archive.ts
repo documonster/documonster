@@ -5,26 +5,26 @@
  * as ZipArchive and ZipReader, allowing seamless format switching.
  */
 
-import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
-import type { ArchiveSource } from "@archive/io/archive-source";
-import { toAsyncIterable, toUint8Array, isInMemoryArchiveSource } from "@archive/io/archive-source";
-import { createLinkedAbortController } from "@archive/shared/errors";
+import { ArchiveError, createAbortError, createLinkedAbortController } from "@archive/core/errors";
 import type {
   ArchiveProgressPhase,
   ArchiveStreamOptions,
   ArchiveOperationBase
-} from "@archive/shared/progress";
+} from "@archive/core/progress";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveSource } from "@archive/io/archive-source";
+import { toAsyncIterable, toUint8Array, isInMemoryArchiveSource } from "@archive/io/archive-source";
 import { concatUint8Arrays, textEncoder, getTextDecoder } from "@utils/binary";
 
-import { TAR_TYPE, DEFAULT_TAR_MODE, DEFAULT_TAR_DIR_MODE, type TarType } from "./tar-constants";
-import { type TarEntryInfo, isDataEntry, isDirectory } from "./tar-entry-info";
-import {
-  encodeHeader,
-  createPadding,
-  createEndOfArchive,
-  type TarHeaderOptions
-} from "./tar-header";
-import { parseTar, parseTarStream, type TarParseOptions } from "./tar-parser";
+import type { TarType } from "./tar-constants";
+import { TAR_TYPE, DEFAULT_TAR_MODE, DEFAULT_TAR_DIR_MODE } from "./tar-constants";
+import type { TarEntryInfo } from "./tar-entry-info";
+import { isDataEntry, isDirectory } from "./tar-entry-info";
+import type { TarHeaderOptions } from "./tar-header";
+import { encodeHeader, createPadding, createEndOfArchive } from "./tar-header";
+import type { TarParseOptions } from "./tar-parser";
+import { parseTar, parseTarStream } from "./tar-parser";
 
 // ============================================================================
 // Types
@@ -182,10 +182,10 @@ export class TarArchive {
    */
   add(name: string, source: ArchiveSource | null, options?: TarArchiveEntryOptions): this {
     if (this._sealed) {
-      throw new Error("Cannot add entries after output has started");
+      throw new ArchiveError("Cannot add entries after output has started");
     }
     if (!name) {
-      throw new Error("Entry name is required");
+      throw new ArchiveError("Entry name is required");
     }
 
     // Normalize directory names
@@ -266,7 +266,7 @@ export class TarArchive {
         for (let i = 0; i < entries.length; i++) {
           if (signal.aborted) {
             progress.phase = "aborted";
-            throw new Error("TAR creation aborted");
+            throw createAbortError();
           }
 
           const { name, source, options: entryOpts } = entries[i];
@@ -388,7 +388,7 @@ export class TarArchive {
       } else if (source instanceof ArrayBuffer) {
         data = new Uint8Array(source);
       } else {
-        throw new Error("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
+        throw new ArchiveError("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
       }
 
       const size = isDataEntry(options?.type) ? data.length : 0;
@@ -559,7 +559,7 @@ export class TarReader {
           for (const entry of entries) {
             if (signal.aborted) {
               progress.phase = "aborted";
-              throw new Error("TAR parsing aborted");
+              throw createAbortError();
             }
 
             const entryData = await entry.data();
@@ -592,7 +592,7 @@ export class TarReader {
           )) {
             if (signal.aborted) {
               progress.phase = "aborted";
-              throw new Error("TAR parsing aborted");
+              throw createAbortError();
             }
 
             const entryData = await entry.data();

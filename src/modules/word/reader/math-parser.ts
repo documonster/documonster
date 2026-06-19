@@ -6,7 +6,7 @@
  * corresponding model interface (MathFraction, MathRadical, MathDelimiter, etc).
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import {
   attrLocal as mathAttrVal,
   findChildLocal as findMathChild,

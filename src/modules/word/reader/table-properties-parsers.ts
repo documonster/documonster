@@ -5,7 +5,7 @@
  * Used by both the inline table parser and the styles parser.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, findChildNs, safeParseInt } from "@word/reader/parse-utils";
 import {
   parseBorder,

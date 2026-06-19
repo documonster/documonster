@@ -22,40 +22,33 @@
  */
 
 import { parseRefRange } from "@formula/compile/address-utils";
-import { bind, type BindingContext } from "@formula/compile/binder";
+import type { BindingContext } from "@formula/compile/binder";
+import { bind } from "@formula/compile/binder";
+import type { NameDepResolver, CompiledFormula } from "@formula/compile/compiled-formula";
 import {
   extractStaticDeps,
   analyzeExpr,
   detectDynamicArrayFunction,
-  detectSubtotalOutput,
-  type NameDepResolver,
-  type CompiledFormula
+  detectSubtotalOutput
 } from "@formula/compile/compiled-formula";
+import type { DependencyGraph } from "@formula/compile/dependency-analysis";
 import {
   buildDependencyGraphFromDeps,
   topologicalSort,
-  mergeDynamicDeps,
-  type DependencyGraph
+  mergeDynamicDeps
 } from "@formula/compile/dependency-analysis";
 import { setDate1904 } from "@formula/functions/_date-context";
 import { applyWritebackPlan } from "@formula/integration/apply-writeback-plan";
 import { collectFormulaInstances } from "@formula/integration/formula-instance";
 import type { FormulaInstance } from "@formula/integration/formula-instance";
 import { buildWorkbookSnapshot } from "@formula/integration/workbook-adapter";
-import {
-  formulaCellKey,
-  resolveDefinedName,
-  type WorkbookSnapshot
-} from "@formula/integration/workbook-snapshot";
+import type { WorkbookSnapshot } from "@formula/integration/workbook-snapshot";
+import { formulaCellKey, resolveDefinedName } from "@formula/integration/workbook-snapshot";
 import { buildWritebackPlan } from "@formula/materialize/build-writeback-plan";
 import { getPersistentSpillMap, getGhostSnapshots } from "@formula/materialize/spill-engine";
 import type { WorkbookLike } from "@formula/materialize/types";
-import {
-  EvalSession,
-  evaluateFormula,
-  evaluateFormulaRaw,
-  type EvalContext
-} from "@formula/runtime/evaluator";
+import type { EvalContext } from "@formula/runtime/evaluator";
+import { EvalSession, evaluateFormula, evaluateFormulaRaw } from "@formula/runtime/evaluator";
 import type { FunctionDescriptor } from "@formula/runtime/function-registry";
 import type { RuntimeValue } from "@formula/runtime/values";
 import { RVKind, rvNumber, BLANK, ERRORS } from "@formula/runtime/values";

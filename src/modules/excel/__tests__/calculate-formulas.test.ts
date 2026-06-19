@@ -1,14 +1,14 @@
-import { cellGetValue } from "@excel/cell";
+import { cellGetValue } from "@excel/core/cell";
 import {
   definedNamesAdd,
   definedNamesAddFormula,
   definedNamesGetAllNames,
   definedNamesSetModel
-} from "@excel/defined-names";
-import { calculateFormulas } from "@excel/formula-adapter";
+} from "@excel/core/defined-names";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getDefinedNames } from "@excel/core/workbook";
+import { addTable, findCell, setSheetName } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { getDefinedNames } from "@excel/workbook";
-import { addTable, findCell, setSheetName } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 /** Cell value, or null when the cell is absent — preserves the original `findCell(...)?.value ?? null` semantics. */
@@ -2774,7 +2774,7 @@ describe("calculateFormulas", () => {
 
       // Check snapshot construction
       const { buildWorkbookSnapshot } = await import("@formula/integration/workbook-adapter");
-      const { toWorkbookLike } = await import("@excel/formula-adapter");
+      const { toWorkbookLike } = await import("@excel/core/formula-adapter");
       const snapshot = buildWorkbookSnapshot(toWorkbookLike(wb));
 
       // Verify we have both entries in the snapshot
@@ -2842,7 +2842,7 @@ describe("calculateFormulas", () => {
       ]);
 
       const { buildWorkbookSnapshot } = await import("@formula/integration/workbook-adapter");
-      const { toWorkbookLike } = await import("@excel/formula-adapter");
+      const { toWorkbookLike } = await import("@excel/core/formula-adapter");
       const snapshot = buildWorkbookSnapshot(toWorkbookLike(wb));
 
       // Verify distinct entries exist and don't cross-contaminate

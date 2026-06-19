@@ -35,21 +35,26 @@ import * as path from "node:path";
 
 import { gzipSync, gunzipSync } from "@archive/compression/compress";
 import { createGzipStream } from "@archive/compression/streaming-compress";
-import { pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ArchiveError, createAbortError } from "@archive/core/errors";
+import type { ZipStringEncoding } from "@archive/core/text";
+import type { ArchiveFormat } from "@archive/core/types";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { pipeIterableToSink } from "@archive/io/archive-sink";
 import { collectUint8ArrayStream, toAsyncIterable } from "@archive/io/archive-source";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import type { ZipStringEncoding } from "@archive/shared/text";
-import type { ArchiveFormat } from "@archive/shared/types";
 import { TarArchive, TarReader } from "@archive/tar/tar-archive";
 import { isDirectory as isTarDirectory } from "@archive/tar/tar-entry-info";
-import { ZipParser, type ZipEntryInfo as ParserEntryInfo } from "@archive/unzip/zip-parser";
-import { joinZipPath, normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import type { ZipEntryInfo as ParserEntryInfo } from "@archive/unzip/zip-parser";
+import { ZipParser } from "@archive/unzip/zip-parser";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { joinZipPath, normalizeZipPath } from "@archive/zip-spec/zip-path";
 import { ZipArchive } from "@archive/zip/zip-archive";
-import { createZip, createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { ZipEditView } from "@archive/zip/zip-edit-view";
 import { textEncoder as utf8Encoder } from "@utils/binary";
+import type { FileEntry } from "@utils/fs";
 import {
-  type FileEntry,
   traverseDirectory,
   traverseDirectorySync,
   glob as globFiles,
@@ -277,7 +282,7 @@ function buildDirectoryEntry(
  */
 function assertNoPathTraversal(targetPath: string, baseDir: string, entryPath: string): void {
   if (!targetPath.startsWith(baseDir + path.sep) && targetPath !== baseDir) {
-    throw new Error(`Path traversal detected: ${entryPath}`);
+    throw new ArchiveError(`Path traversal detected: ${entryPath}`);
   }
 }
 
@@ -308,7 +313,7 @@ function getEffectiveMode(mode: number, kind: "file" | "directory"): number {
  */
 function assertZipFormat(format: ArchiveFormat, methodName: string): asserts format is "zip" {
   if (format !== "zip") {
-    throw new Error(`${methodName} is only available for ZIP archives`);
+    throw new ArchiveError(`${methodName} is only available for ZIP archives`);
   }
 }
 
@@ -316,7 +321,7 @@ function assertZipFormat(format: ArchiveFormat, methodName: string): asserts for
  * Throw a descriptive error for TAR methods that don't support sync operations.
  */
 function throwTarSyncNotSupported(methodName: string): never {
-  throw new Error(`${methodName} is not supported for TAR archives (use async version)`);
+  throw new ArchiveError(`${methodName} is not supported for TAR archives (use async version)`);
 }
 
 const DEFAULT_IO_CONCURRENCY = 8;
@@ -444,7 +449,7 @@ function shouldExtractCore(
       return true;
 
     case "error":
-      throw new Error(`File already exists: ${targetPath}`);
+      throw new ArchiveError(`File already exists: ${targetPath}`);
 
     case "newer": {
       const stats = getStats();
@@ -455,7 +460,7 @@ function shouldExtractCore(
     }
 
     default:
-      throw new Error(`Unknown overwrite strategy: ${strategy}`);
+      throw new ArchiveError(`Unknown overwrite strategy: ${strategy}`);
   }
 }
 
@@ -633,12 +638,12 @@ function checkOverwriteStrategy(
     case "skip":
       return false;
     case "error":
-      throw new Error(`File already exists: ${targetPath}`);
+      throw new ArchiveError(`File already exists: ${targetPath}`);
     case "overwrite":
     case "newer":
       return true;
     default:
-      throw new Error(`Unknown overwrite strategy: ${overwrite}`);
+      throw new ArchiveError(`Unknown overwrite strategy: ${overwrite}`);
   }
 }
 
@@ -794,7 +799,7 @@ async function processZipPendingEntry(
 
     case "stream": {
       if (!fsOps.collectStream) {
-        throw new Error("Stream entries cannot be processed synchronously.");
+        throw new ArchiveError("Stream entries cannot be processed synchronously.");
       }
       const data = await fsOps.collectStream(pending.stream);
       ctx.entries.push(
@@ -1853,7 +1858,9 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   async getEntries(): Promise<ArchiveEntryInfo[]> {
     if (this._format === "zip") {
       if (!this._zipParser) {
-        throw new Error("Cannot read entries: archive not loaded. Use fromFile() or fromBuffer().");
+        throw new ArchiveError(
+          "Cannot read entries: archive not loaded. Use fromFile() or fromBuffer()."
+        );
       }
 
       const zipEntries = this._zip_parser!.getEntries();
@@ -1864,7 +1871,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       return entries;
     } else {
       if (!this._tarReader) {
-        throw new Error("Cannot read entries: archive is in write mode");
+        throw new ArchiveError("Cannot read entries: archive is in write mode");
       }
       const entries: ArchiveEntryInfo[] = [];
       for await (const entry of (this._tarReader as TarReader).entries()) {
@@ -1893,7 +1900,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   getEntriesSync(): ArchiveEntryInfo[] {
     if (this._format === "zip") {
       if (!this._zipParser) {
-        throw new Error("Cannot read entries: archive not loaded.");
+        throw new ArchiveError("Cannot read entries: archive not loaded.");
       }
       const zipEntries = this._zip_parser!.getEntries();
       const entries = new Array<ArchiveEntryInfo>(zipEntries.length);
@@ -1928,7 +1935,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   getEntry(entryPath: string): ZipEntryInfo | null {
     assertZipFormat(this._format, "getEntry()");
     if (!this._zip_parser) {
-      throw new Error("Cannot read entries: archive not loaded.");
+      throw new ArchiveError("Cannot read entries: archive not loaded.");
     }
 
     const entry = this._zip_parser.getEntry(entryPath);
@@ -1945,12 +1952,12 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   async readEntry(entryPath: string, password?: string | Uint8Array): Promise<Uint8Array | null> {
     if (this._format === "zip") {
       if (!this._zipParser) {
-        throw new Error("Cannot read entry: archive not loaded.");
+        throw new ArchiveError("Cannot read entry: archive not loaded.");
       }
       return this._zip_parser!.extract(entryPath, password ?? this._zip_password);
     } else {
       if (!this._tarReader) {
-        throw new Error("Cannot read entry: archive is in write mode");
+        throw new ArchiveError("Cannot read entry: archive is in write mode");
       }
       return (this._tarReader as TarReader).bytes(entryPath);
     }
@@ -1962,7 +1969,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   readEntrySync(entryPath: string, password?: string | Uint8Array): Uint8Array | null {
     if (this._format === "zip") {
       if (!this._zipParser) {
-        throw new Error("Cannot read entry: archive not loaded.");
+        throw new ArchiveError("Cannot read entry: archive not loaded.");
       }
       return this._zip_parser!.extractSync(entryPath, password ?? this._zip_password);
     } else {
@@ -2030,7 +2037,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     assertZipFormat(this._format, "extractEntryTo()");
 
     if (!this._zipParser) {
-      throw new Error("Cannot extract: archive not loaded.");
+      throw new ArchiveError("Cannot extract: archive not loaded.");
     }
 
     const entry = this._zip_parser!.getEntry(entryPath);
@@ -2075,7 +2082,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     assertZipFormat(this._format, "extractEntryToSync()");
 
     if (!this._zipParser) {
-      throw new Error("Cannot extract: archive not loaded.");
+      throw new ArchiveError("Cannot extract: archive not loaded.");
     }
 
     const entry = this._zip_parser!.getEntry(entryPath);
@@ -2216,7 +2223,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
     // Helper to check abort status
     const checkAbort = () => {
       if (signal.aborted) {
-        throw new Error("Operation aborted");
+        throw createAbortError();
       }
     };
 
@@ -2307,7 +2314,9 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       }
     }
     if (hasStreamEntry) {
-      throw new Error("Stream entries cannot be processed synchronously. Use toBuffer() instead.");
+      throw new ArchiveError(
+        "Stream entries cannot be processed synchronously. Use toBuffer() instead."
+      );
     }
 
     const globalOptions = this._zip_options;
@@ -2424,7 +2433,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       }
 
       case "stream": {
-        throw new Error("Stream entries cannot be processed synchronously.");
+        throw new ArchiveError("Stream entries cannot be processed synchronously.");
       }
 
       case "symlink": {
@@ -2506,7 +2515,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
   private async _extractZip(targetDir: string, options: ExtractToOptions): Promise<void> {
     if (!this._zipParser) {
-      throw new Error("Cannot extract: archive not loaded. Use fromFile() or fromBuffer().");
+      throw new ArchiveError("Cannot extract: archive not loaded. Use fromFile() or fromBuffer().");
     }
 
     const parser = this._zip_parser!;
@@ -2542,7 +2551,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       const entry = entries[i]!;
       // Check abort signal
       if (signal?.aborted) {
-        throw new Error("Extraction aborted");
+        throw createAbortError();
       }
 
       // Apply filter (pass isDirectory for both dirs and symlinks pointing to dirs)
@@ -2698,7 +2707,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       const deferred = deferredSymlinks[i]!;
       const { entry, targetPath, linkTarget } = deferred;
       if (signal?.aborted) {
-        throw new Error("Extraction aborted");
+        throw createAbortError();
       }
 
       // Check overwrite strategy for symlink
@@ -2754,7 +2763,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
   private _extractZipSync(targetDir: string, options: ExtractToOptions): void {
     if (!this._zipParser) {
-      throw new Error("Cannot extract: archive not loaded.");
+      throw new ArchiveError("Cannot extract: archive not loaded.");
     }
 
     const parser = this._zip_parser!;
@@ -2790,7 +2799,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       const entry = entries[i]!;
       // Check abort signal
       if (signal?.aborted) {
-        throw new Error("Extraction aborted");
+        throw createAbortError();
       }
 
       // Apply filter
@@ -2938,7 +2947,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       const deferred = deferredSymlinks[i]!;
       const { entry, targetPath, linkTarget } = deferred;
       if (signal?.aborted) {
-        throw new Error("Extraction aborted");
+        throw createAbortError();
       }
 
       let shouldWrite: boolean;
@@ -3182,7 +3191,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       }
 
       case "stream": {
-        throw new Error("Stream entries cannot be processed synchronously");
+        throw new ArchiveError("Stream entries cannot be processed synchronously");
       }
 
       case "symlink": {
@@ -3617,7 +3626,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
   private async _extractTar(targetDir: string, options: ExtractToOptions): Promise<void> {
     if (!this._tarReader) {
-      throw new Error("Cannot extract: archive is in write mode");
+      throw new ArchiveError("Cannot extract: archive is in write mode");
     }
 
     const reader = this._tarReader as TarReader;
@@ -3637,7 +3646,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
 
     for await (const entry of reader.entries()) {
       if (signal?.aborted) {
-        throw new Error("Extraction aborted");
+        throw createAbortError();
       }
 
       const entryPath = entry.path;

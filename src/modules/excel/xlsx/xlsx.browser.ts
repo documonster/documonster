@@ -26,7 +26,19 @@ import {
 // containing charts gets this code tree-shaken out by the bundler.
 import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
 import { themeIndexToName } from "@excel/chart/shared/chart-utils";
-import { definedNamesAddHidden, definedNamesModel } from "@excel/defined-names";
+import { definedNamesAddHidden, definedNamesModel } from "@excel/core/defined-names";
+import type {
+  PivotTable,
+  PivotTableSubtotal,
+  ParsedCacheDefinition
+} from "@excel/core/pivot-table";
+import type { Workbook, ExternalLinkModel } from "@excel/core/workbook.browser";
+import {
+  _collectExternalLinksForWrite,
+  _recordAutoExternalLink,
+  getWorkbookModel,
+  setWorkbookModel
+} from "@excel/core/workbook.browser";
 import {
   ExcelStreamStateError,
   ExcelFileError,
@@ -36,7 +48,6 @@ import {
   TableError,
   ChartOptionsError
 } from "@excel/errors";
-import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
@@ -118,18 +129,9 @@ import {
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
 import { StreamBuf } from "@excel/utils/stream-buf";
-import type { Workbook, ExternalLinkModel } from "@excel/workbook.browser";
-import {
-  _collectExternalLinksForWrite,
-  _recordAutoExternalLink,
-  getWorkbookModel,
-  setWorkbookModel
-} from "@excel/workbook.browser";
 import { RelType } from "@excel/xlsx/rel-type";
-import {
-  ExternalLinkXform,
-  type ParsedExternalLink
-} from "@excel/xlsx/xform/book/external-link-xform";
+import type { ParsedExternalLink } from "@excel/xlsx/xform/book/external-link-xform";
+import { ExternalLinkXform } from "@excel/xlsx/xform/book/external-link-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import {
@@ -149,7 +151,8 @@ import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
-import { PassThrough, type IEventEmitter } from "@stream";
+import type { IEventEmitter } from "@stream";
+import { PassThrough } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
 import { bufferToString, base64ToUint8Array } from "@utils/utils";
 import { uuidV4 } from "@utils/uuid";

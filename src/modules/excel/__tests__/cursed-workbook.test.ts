@@ -27,8 +27,8 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createZip } from "@archive/zip/zip-bytes";
+import { getWorksheets } from "@excel/core/workbook";
 import { Cell, Workbook } from "@excel/index";
-import { getWorksheets } from "@excel/workbook";
 import { describe, expect, it } from "vitest";
 
 const enc = (s: string) => new TextEncoder().encode(s);

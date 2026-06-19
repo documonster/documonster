@@ -4,9 +4,9 @@
 
 import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
 import { Readable } from "@stream/browser/readable";
-import { stringToEncodedBytes } from "@stream/common/binary-chunk";
-import { parseEndArgs } from "@stream/common/end-args";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { stringToEncodedBytes } from "@stream/core/binary-chunk";
+import { parseEndArgs } from "@stream/core/end-args";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { StreamStateError } from "@stream/errors";
 import type { WritableStreamOptions, WritableLike } from "@stream/types";
 import { decodeBytesToString } from "@utils/binary";

@@ -4,7 +4,7 @@ import type {
   PivotChartOptions as PivotChartMetadataOptions,
   PivotChartSource
 } from "@excel/chart/model/types";
-import type { PivotTable } from "@excel/pivot-table";
+import type { PivotTable } from "@excel/core/pivot-table";
 import { quoteSheetName } from "@excel/utils/address";
 
 const DEFAULT_PIVOT_CHART_PIVOT_AREA_XML =

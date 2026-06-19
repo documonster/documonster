@@ -1,4 +1,6 @@
 import { extractAll } from "@archive/unzip/extract";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { getCharts } from "@excel/core/worksheet";
 /**
  * Combo / axis matrix integration tests.
  *
@@ -8,13 +10,13 @@ import { extractAll } from "@archive/unzip/extract";
  * uniqueness, scatter+line combos, and 3D combo groups.
  */
 import { Chart, Workbook } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
-import { getCharts } from "@excel/worksheet";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
-import { buildComboAxisFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
-import { entryText, type EntryMap } from "./helpers/zip-text";
+import type { SyntheticFixture } from "./helpers/synthetic-fixtures";
+import { buildComboAxisFixtures } from "./helpers/synthetic-fixtures";
+import type { EntryMap } from "./helpers/zip-text";
+import { entryText } from "./helpers/zip-text";
 
 let comboAxisFixtures: SyntheticFixture[];
 

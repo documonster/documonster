@@ -16,9 +16,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { rowSetFill, rowSetFont } from "@excel/core/row";
+import { columnSetNumFmt, getColumn } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowSetFill, rowSetFont } from "@excel/row";
-import { columnSetNumFmt, getColumn } from "@excel/worksheet";
 
 import {
   excelToDocx,

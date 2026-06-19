@@ -1,4 +1,4 @@
-import type { CellData } from "@excel/cell";
+import type { CellData } from "@excel/core/cell";
 import {
   cellSetValue,
   cellEffectiveType,
@@ -29,16 +29,16 @@ import {
   cellIsHyperlink,
   cellGetModel,
   cellDestroy
-} from "@excel/cell";
-import type { ColumnData } from "@excel/column";
-import { Enums } from "@excel/enums";
+} from "@excel/core/cell";
+import type { ColumnData } from "@excel/core/column";
+import { Enums } from "@excel/core/enums";
+import type { RowData } from "@excel/core/row";
+import { rowSetFont } from "@excel/core/row";
+import { findRow, getCell, getRow, rowGetCell } from "@excel/core/worksheet";
+import { findCell, getColumn } from "@excel/core/worksheet-core";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import type { RowData } from "@excel/row";
-import { rowSetFont } from "@excel/row";
 import type { CellHyperlinkValue } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
-import { findRow, getCell, getRow, rowGetCell } from "@excel/worksheet";
-import { findCell, getColumn } from "@excel/worksheet-core";
 import { describe, it, expect, beforeEach } from "vitest";
 
 // A thin facade over a real worksheet record so the existing test bodies

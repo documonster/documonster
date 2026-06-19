@@ -22,8 +22,8 @@ import type {
   ChartTypeGroup,
   PlotArea
 } from "@excel/chart";
+import { addChart, getCharts } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
-import { addChart, getCharts } from "@excel/worksheet";
 import { expect } from "vitest";
 
 const textDecoder = new TextDecoder();

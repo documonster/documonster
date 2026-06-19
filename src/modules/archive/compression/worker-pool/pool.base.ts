@@ -78,4 +78,4 @@ export function hasWorkerSupport(): boolean {
 }
 
 // Re-export from shared errors module
-export { createAbortError } from "@archive/shared/errors";
+export { createAbortError } from "@archive/core/errors";

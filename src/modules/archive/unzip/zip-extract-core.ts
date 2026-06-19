@@ -13,6 +13,18 @@
 import { decompress, decompressSync } from "@archive/compression/compress";
 import { crc32, crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { createInflateStream } from "@archive/compression/streaming-compress";
+import { createAsyncQueue } from "@archive/core/async-queue";
+import {
+  ArchiveError,
+  Crc32MismatchError,
+  DecryptionError,
+  EntrySizeMismatchError,
+  FileTooLargeError,
+  PasswordRequiredError,
+  UnsupportedCompressionError,
+  throwIfAborted,
+  toError
+} from "@archive/core/errors";
 import {
   ZIP_CRYPTO_HEADER_SIZE,
   aesDecrypt,
@@ -21,16 +33,6 @@ import {
   zipCryptoInitKeys
 } from "@archive/crypto";
 import { collect } from "@archive/io/archive-sink";
-import { createAsyncQueue } from "@archive/shared/async-queue";
-import {
-  Crc32MismatchError,
-  DecryptionError,
-  EntrySizeMismatchError,
-  PasswordRequiredError,
-  UnsupportedCompressionError,
-  throwIfAborted,
-  toError
-} from "@archive/shared/errors";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
 import {
@@ -95,8 +97,9 @@ export async function processEntryData(
   // but does NOT protect against ZIP bombs that lie about their size (for that, use
   // the streaming path processEntryDataStream which validates actual output bytes).
   if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
-    throw new Error(
-      `Entry "${entry.path}" declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+    throw new FileTooLargeError(
+      entry.path,
+      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
         `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
         "Use the streaming API for large entries."
     );
@@ -182,8 +185,9 @@ export function processEntryDataSync(
 
   // Pre-decompression size check (same as async version)
   if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
-    throw new Error(
-      `Entry "${entry.path}" declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+    throw new FileTooLargeError(
+      entry.path,
+      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
         `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
         "Use the streaming API for large entries."
     );
@@ -197,7 +201,7 @@ export function processEntryDataSync(
 
     if (entry.encryptionMethod === "aes") {
       // AES requires async Web Crypto API
-      throw new Error(
+      throw new ArchiveError(
         `File "${entry.path}" uses AES encryption. Use the async extract() method instead of extractSync().`
       );
     } else if (entry.encryptionMethod === "zipcrypto") {
@@ -611,7 +615,7 @@ function decompressDataSync(data: Uint8Array, compressionMethod: number, path: s
 export function readLocalHeaderDataOffset(reader: BinaryReader, expectedOffset: number): number {
   const sig = reader.readUint32();
   if (sig !== LOCAL_FILE_HEADER_SIG) {
-    throw new Error(`Invalid local file header signature at offset ${expectedOffset}`);
+    throw new ArchiveError(`Invalid local file header signature at offset ${expectedOffset}`);
   }
 
   reader.skip(2); // version needed

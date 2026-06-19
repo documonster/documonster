@@ -5,9 +5,9 @@
  * `@utils/fs`.
  */
 
+import type { Workbook } from "@excel/core/workbook.browser";
+import type { Worksheet } from "@excel/core/worksheet";
 import { ExcelFileError } from "@excel/errors";
-import type { Workbook } from "@excel/workbook.browser";
-import type { Worksheet } from "@excel/worksheet";
 import type { MarkdownOptions } from "@markdown/types";
 import { fileExists, readFileText, writeFileText } from "@utils/fs";
 

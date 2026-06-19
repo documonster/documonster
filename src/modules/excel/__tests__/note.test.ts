@@ -8,7 +8,7 @@
  * - Structural guard (`isNoteData`)
  */
 
-import { isNoteData, noteCreate, noteFromModel, noteModel } from "@excel/note";
+import { isNoteData, noteCreate, noteFromModel, noteModel } from "@excel/core/note";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================

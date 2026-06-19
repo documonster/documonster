@@ -1,5 +1,5 @@
+import type { RangeData } from "@excel/core/range";
 import {
-  type RangeData,
   rangeAbsolute,
   rangeAbsoluteBottomRight,
   rangeAbsoluteShort,
@@ -17,7 +17,7 @@ import {
   rangeTl,
   rangeToString,
   rangeTop
-} from "@excel/range";
+} from "@excel/core/range";
 import { describe, it, expect } from "vitest";
 
 describe("Range", () => {

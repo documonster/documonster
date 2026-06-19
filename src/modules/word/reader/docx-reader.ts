@@ -7,7 +7,8 @@
 
 import { unzip } from "@archive/read-archive";
 import { RelType, ContentType } from "@word/constants";
-import { type Mutable, utf8Decoder } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import { utf8Decoder } from "@word/core/internal-utils";
 import { isRun } from "@word/core/text-utils";
 import {
   DocxError,
@@ -81,7 +82,8 @@ import {
 } from "@word/reader/table-properties-parsers";
 import { detectWatermarkFromRoot } from "@word/reader/watermark-parser";
 import { decryptDocx } from "@word/security/encryption";
-import { resolveSecurityPolicy, type WordSecurityPolicy } from "@word/security/policy";
+import type { WordSecurityPolicy } from "@word/security/policy";
+import { resolveSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
   BodyContent,

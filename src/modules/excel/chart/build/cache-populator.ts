@@ -1,4 +1,3 @@
-import { cellGetValue } from "@excel/cell";
 import type { ChartExModel } from "@excel/chart/model/chart-ex-types";
 /**
  * Chart cache populator.
@@ -26,13 +25,14 @@ import type {
   StringReference,
   MultiLevelStringReference
 } from "@excel/chart/model/types";
-import { definedNamesGetRangesScoped } from "@excel/defined-names";
-import { tableDisplayName, tableModel, tableName } from "@excel/table";
+import { cellGetValue } from "@excel/core/cell";
+import { definedNamesGetRangesScoped } from "@excel/core/defined-names";
+import { tableDisplayName, tableModel, tableName } from "@excel/core/table";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { getDefinedNames, getWorksheet, getWorksheets } from "@excel/core/workbook-core";
+import type { WorksheetData } from "@excel/core/worksheet-core";
+import { getCell, getSheetName, getTables } from "@excel/core/worksheet-core";
 import { colCache } from "@excel/utils/col-cache";
-import type { WorkbookData } from "@excel/workbook-core";
-import { getDefinedNames, getWorksheet, getWorksheets } from "@excel/workbook-core";
-import type { WorksheetData } from "@excel/worksheet-core";
-import { getCell, getSheetName, getTables } from "@excel/worksheet-core";
 import { dateToExcel } from "@utils/utils.base";
 
 /**

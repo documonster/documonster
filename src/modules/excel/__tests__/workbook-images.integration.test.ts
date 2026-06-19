@@ -1,12 +1,17 @@
 import fs from "fs";
 import { promisify } from "util";
 
-import { anchorCol, anchorRow } from "@excel/anchor";
-import { cellSetValue } from "@excel/cell";
+import { anchorCol, anchorRow } from "@excel/core/anchor";
+import { cellSetValue } from "@excel/core/cell";
+import { getImage } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import {
+  addBackgroundImage,
+  addImage,
+  getBackgroundImageId,
+  getImages
+} from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { getImage } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addBackgroundImage, addImage, getBackgroundImageId, getImages } from "@excel/worksheet";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 

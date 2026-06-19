@@ -24,10 +24,10 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { extractAll } from "@archive/unzip/extract";
+import { getWorksheets } from "@excel/core/workbook";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { getCharts, getSheetName } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook } from "@excel/index";
-import { getWorksheets } from "@excel/workbook";
-import type { WorkbookData } from "@excel/workbook-core";
-import { getCharts, getSheetName } from "@excel/worksheet";
 import { describe, it, expect, beforeAll } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

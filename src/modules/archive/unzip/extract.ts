@@ -4,8 +4,10 @@
  * Works in both Node.js and browser environments
  */
 
-import { ZipParser, type ZipEntryInfo } from "@archive/unzip/zip-parser";
-import { type ZipEntryType, isSymlink as isSymlinkType } from "@archive/zip-spec/zip-entry-info";
+import type { ZipEntryInfo } from "@archive/unzip/zip-parser";
+import { ZipParser } from "@archive/unzip/zip-parser";
+import type { ZipEntryType } from "@archive/zip-spec/zip-entry-info";
+import { isSymlink as isSymlinkType } from "@archive/zip-spec/zip-entry-info";
 import { getTextDecoder } from "@utils/binary";
 
 /**

@@ -16,9 +16,9 @@ import {
   defaultFormulaSyntaxProbe,
   definedNamesModel,
   definedNamesSetModel
-} from "@excel/defined-names";
+} from "@excel/core/defined-names";
+import { getDefinedNames } from "@excel/core/workbook";
 import { Workbook } from "@excel/index";
-import { getDefinedNames } from "@excel/workbook";
 import { describe, expect, it } from "vitest";
 
 describe("DefinedNames — default-probe classification (no install step)", () => {

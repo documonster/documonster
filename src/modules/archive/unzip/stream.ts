@@ -1,20 +1,18 @@
 import zlib from "zlib";
 
-import {
-  DATA_DESCRIPTOR_SIGNATURE_BYTES,
-  type CrxHeader,
-  type ParseDriverState,
-  type ParseOptions
-} from "@archive/unzip/parser-core";
+import type { CrxHeader, ParseDriverState, ParseOptions } from "@archive/unzip/parser-core";
+import { DATA_DESCRIPTOR_SIGNATURE_BYTES } from "@archive/unzip/parser-core";
+import type {
+  PullStreamPublicApi,
+  InflateFactory,
+  ParseEmitter,
+  ParseIO,
+  ZipEntry
+} from "@archive/unzip/stream.base";
 import {
   PullStream,
-  type PullStreamPublicApi,
   runParseLoop,
-  streamUntilValidatedDataDescriptor,
-  type InflateFactory,
-  type ParseEmitter,
-  type ParseIO,
-  type ZipEntry
+  streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";
 import type { Duplex, PassThrough, Transform } from "@stream";
 

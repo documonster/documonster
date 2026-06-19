@@ -1,11 +1,11 @@
 import fs from "fs";
 import path from "path";
 
-import { cellDataValidation, cellSetDataValidation } from "@excel/cell";
-import { dataValidationFind, dataValidationRemove } from "@excel/data-validations";
+import { cellDataValidation, cellSetDataValidation } from "@excel/core/cell";
+import { dataValidationFind, dataValidationRemove } from "@excel/core/data-validations";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
 import type { DataValidationWithFormulae } from "@excel/types";
-import { getCell } from "@excel/worksheet";
 import { testOutDir } from "@test/utils";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 

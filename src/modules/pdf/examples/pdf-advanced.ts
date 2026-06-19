@@ -20,9 +20,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  rowAddPageBreak,
+  rowSetAlignment,
+  rowSetFill,
+  rowSetFont,
+  rowSetHidden
+} from "@excel/core/row";
+import { columnSetNumFmt, getColumn } from "@excel/core/worksheet";
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
-import { rowAddPageBreak, rowSetAlignment, rowSetFill, rowSetFont, rowSetHidden } from "@excel/row";
-import { columnSetNumFmt, getColumn } from "@excel/worksheet";
 
 import { Pdf } from "../index";
 

@@ -1,36 +1,32 @@
-import { pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
 import {
-  isInMemoryArchiveSource,
-  toAsyncIterable,
-  toUint8Array,
-  type ArchiveSource
-} from "@archive/io/archive-source";
-import {
+  ArchiveError,
   createAbortError,
   createLinkedAbortController,
   throwIfAborted,
   toError,
   suppressUnhandledRejection
-} from "@archive/shared/errors";
-import { ProgressEmitter } from "@archive/shared/progress";
-import type { ZipStringEncoding } from "@archive/shared/text";
-import type { ArchiveFormat } from "@archive/shared/types";
-import {
-  createParse,
-  type ParseOptions,
-  type ZipEntry as ParseZipEntry
-} from "@archive/unzip/stream";
+} from "@archive/core/errors";
+import { ProgressEmitter } from "@archive/core/progress";
+import type { ZipStringEncoding } from "@archive/core/text";
+import type { ArchiveFormat } from "@archive/core/types";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveSource } from "@archive/io/archive-source";
+import { isInMemoryArchiveSource, toAsyncIterable, toUint8Array } from "@archive/io/archive-source";
+import type { ParseOptions, ZipEntry as ParseZipEntry } from "@archive/unzip/stream";
+import { createParse } from "@archive/unzip/stream";
 import {
   processEntryData,
   processEntryDataStream,
   readEntryCompressedData
 } from "@archive/unzip/zip-extract-core";
-import { ZipParser, type ZipEntryInfo, type ZipParseOptions } from "@archive/unzip/zip-parser";
+import type { ZipEntryInfo, ZipParseOptions } from "@archive/unzip/zip-parser";
+import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipEntryEncryptionMethod, ZipEntryType } from "@archive/zip-spec/zip-entry-info";
 import { isSymlink } from "@archive/zip-spec/zip-entry-info";
 import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
-import { eventedReadableToAsyncIterableNoDestroy } from "@stream/internal/evented-readable-to-async-iterable";
-import { isWritableStream } from "@stream/internal/type-guards";
+import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
+import { isWritableStream } from "@stream/core/type-guards";
 import { getTextDecoder } from "@utils/binary";
 
 import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
@@ -643,7 +639,7 @@ export class ZipReader {
       return { parser: this._bufferParser, data: bytes };
     }
 
-    throw new Error("This ZIP source is streaming; random access is not available");
+    throw new ArchiveError("This ZIP source is streaming; random access is not available");
   }
 
   async get(path: string): Promise<UnzipEntry | null> {

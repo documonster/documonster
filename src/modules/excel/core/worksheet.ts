@@ -1,18 +1,3 @@
-import {
-  type CellData,
-  type FormulaResult,
-  type FormulaValueData,
-  cellAlignment,
-  cellCol,
-  cellGetValue,
-  cellIsMerged,
-  cellMaster,
-  cellMerge,
-  cellSetValue,
-  cellType,
-  cellUnmerge,
-  cellView
-} from "@excel/cell";
 // Chart runtime is imported directly (static). The chart modules depend only
 // on the `*-core` data layer (never on this heavy `worksheet.ts`), so the
 // dependency graph stays acyclic: `worksheet → chart → *-core`. A consumer
@@ -48,39 +33,40 @@ import type {
   AddSurfaceChartOptions,
   ChartAnchorModel
 } from "@excel/chart/model/types";
+import type { CellData, FormulaResult, FormulaValueData } from "@excel/core/cell";
 import {
-  type ColumnData,
-  type ColumnModel,
-  type ColumnDefn,
-  columnDefn,
-  columnToModel
-} from "@excel/column";
-import { createDataValidations } from "@excel/data-validations";
-import { definedNamesSpliceColumns, definedNamesSpliceRows } from "@excel/defined-names";
-import { Enums } from "@excel/enums";
-import { ImageError, MergeConflictError, TableError } from "@excel/errors";
+  cellAlignment,
+  cellCol,
+  cellGetValue,
+  cellIsMerged,
+  cellMaster,
+  cellMerge,
+  cellSetValue,
+  cellType,
+  cellUnmerge,
+  cellView
+} from "@excel/core/cell";
+import type { ColumnData, ColumnModel, ColumnDefn } from "@excel/core/column";
+import { columnDefn, columnToModel } from "@excel/core/column";
+import { createDataValidations } from "@excel/core/data-validations";
+import { definedNamesSpliceColumns, definedNamesSpliceRows } from "@excel/core/defined-names";
+import { Enums } from "@excel/core/enums";
+import type {
+  FormCheckboxData,
+  FormCheckboxModel,
+  FormCheckboxOptions,
+  FormControlRange
+} from "@excel/core/form-control";
+import { formCheckboxCreate, formCheckboxFromModel } from "@excel/core/form-control";
+import type { ImageData, ImageModel } from "@excel/core/image";
+import { imageClone, imageCreate, imageModel } from "@excel/core/image";
+import { withPivotChartSource } from "@excel/core/pivot-chart";
+import type { PivotTable, PivotTableModel } from "@excel/core/pivot-table";
+import { makePivotTable } from "@excel/core/pivot-table";
+import type { RangeData, RangeInput } from "@excel/core/range";
+import { rangeCreate, rangeExpand, rangeIntersects, rangeRange } from "@excel/core/range";
+import type { RowData, RowModel } from "@excel/core/row";
 import {
-  formCheckboxCreate,
-  formCheckboxFromModel,
-  type FormCheckboxData,
-  type FormCheckboxModel,
-  type FormCheckboxOptions,
-  type FormControlRange
-} from "@excel/form-control";
-import { imageClone, imageCreate, imageModel, type ImageData, type ImageModel } from "@excel/image";
-import { withPivotChartSource } from "@excel/pivot-chart";
-import { makePivotTable, type PivotTable, type PivotTableModel } from "@excel/pivot-table";
-import {
-  type RangeData,
-  type RangeInput,
-  rangeCreate,
-  rangeExpand,
-  rangeIntersects,
-  rangeRange
-} from "@excel/range";
-import {
-  type RowData,
-  type RowModel,
   rowCellCount,
   rowCreate,
   rowDimensions,
@@ -88,17 +74,44 @@ import {
   rowGetModel,
   rowHidden,
   rowValues
-} from "@excel/row";
+} from "@excel/core/row";
+import type { TableData, TableModel } from "@excel/core/table";
+import { createTable, tableModel, tableName, tableSetModel } from "@excel/core/table";
+import type { Workbook } from "@excel/core/workbook";
+import {
+  getDefinedNames,
+  getImage,
+  removeChartEntry,
+  removeChartExStructuredEntry,
+  removeWorksheetEx,
+  validateSheetName
+} from "@excel/core/workbook-core";
+import type { WorksheetData, SheetProtection, ChartHandle } from "@excel/core/worksheet-core";
+import {
+  _copyStyle,
+  _setStyleOption,
+  columnCreate,
+  columnFromModel,
+  columnSetDefn,
+  eachRow,
+  findCell,
+  findRow,
+  getCell,
+  getColumn,
+  get_lastRowNumber,
+  getRow,
+  getRows,
+  getSheetName,
+  getSheetWorkbook,
+  rowEachCell,
+  rowGetCell,
+  rowSetModel,
+  rowSetValues,
+  rowSplice
+} from "@excel/core/worksheet-core";
+import { ImageError, MergeConflictError, TableError } from "@excel/errors";
 import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
 import { buildSparklineGroup } from "@excel/sparkline";
-import {
-  createTable,
-  tableModel,
-  tableName,
-  tableSetModel,
-  type TableData,
-  type TableModel
-} from "@excel/table";
 import type {
   AddImageRange,
   AddShapeOptions,
@@ -121,9 +134,11 @@ import type {
   WorksheetState,
   WorksheetView
 } from "@excel/types";
-import { decodeCell, decodeRange, encodeCol, type Origin } from "@excel/utils/address";
+import type { Origin } from "@excel/utils/address";
+import { decodeCell, decodeRange, encodeCol } from "@excel/utils/address";
 import { getCellDisplayText } from "@excel/utils/cell-format";
-import { colCache, type DecodedRange } from "@excel/utils/col-cache";
+import type { DecodedRange } from "@excel/utils/col-cache";
+import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
 import { isExternalImage } from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
@@ -135,40 +150,6 @@ import {
   getCellTextWidthPx,
   getCellHeightPt
 } from "@excel/utils/text-metrics";
-import type { Workbook } from "@excel/workbook";
-import {
-  getDefinedNames,
-  getImage,
-  removeChartEntry,
-  removeChartExStructuredEntry,
-  removeWorksheetEx,
-  validateSheetName
-} from "@excel/workbook-core";
-import {
-  type WorksheetData,
-  type SheetProtection,
-  type ChartHandle,
-  _copyStyle,
-  _setStyleOption,
-  columnCreate,
-  columnFromModel,
-  columnSetDefn,
-  eachRow,
-  findCell,
-  findRow,
-  getCell,
-  getColumn,
-  get_lastRowNumber,
-  getRow,
-  getRows,
-  getSheetName,
-  getSheetWorkbook,
-  rowEachCell,
-  rowGetCell,
-  rowSetModel,
-  rowSetValues,
-  rowSplice
-} from "@excel/worksheet-core";
 
 // Type for data validation model - maps address to validation
 type DataValidationModel = { [address: string]: DataValidation | undefined };
@@ -2430,4 +2411,4 @@ export {
   columnSetProtection,
   columnSetBorder,
   columnSetFill
-} from "@excel/worksheet-core";
+} from "@excel/core/worksheet-core";

@@ -1,4 +1,6 @@
-import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
+import type { ExtractedFile } from "@archive/unzip/extract";
+import { extractAll } from "@archive/unzip/extract";
+import type { WorkbookData } from "@excel/core/workbook-core";
 /**
  * Shared ZIP/text helpers for chart integration tests.
  *
@@ -7,7 +9,6 @@ import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
  * pasted across every chart integration test file.
  */
 import { Workbook } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
 
 const decoder = new TextDecoder();
 

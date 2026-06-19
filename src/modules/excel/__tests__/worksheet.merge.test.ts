@@ -1,9 +1,9 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { cellGetValue, cellMaster, cellSetValue, cellType } from "@excel/cell";
-import { Enums } from "@excel/enums";
+import { cellGetValue, cellMaster, cellSetValue, cellType } from "@excel/core/cell";
+import { Enums } from "@excel/core/enums";
+import { rangeBottom, rangeCreate, rangeLeft, rangeRight, rangeTop } from "@excel/core/range";
+import { getCell, getSheetModel } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rangeBottom, rangeCreate, rangeLeft, rangeRight, rangeTop } from "@excel/range";
-import { getCell, getSheetModel } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {

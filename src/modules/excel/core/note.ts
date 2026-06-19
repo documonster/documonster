@@ -1,4 +1,4 @@
-import type { NoteConfig, NoteModel } from "@excel/cell";
+import type { NoteConfig, NoteModel } from "@excel/core/cell";
 import { deepMerge } from "@utils/object";
 
 /**

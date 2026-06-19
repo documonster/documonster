@@ -5,7 +5,8 @@
  * Supports POSIX ustar, GNU tar (long filenames), and PAX extensions.
  */
 
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ArchiveError, FileTooLargeError, createAbortError } from "@archive/core/errors";
 import { textDecoder } from "@utils/binary";
 
 import { TAR_BLOCK_SIZE, TAR_TYPE } from "./tar-constants";
@@ -154,8 +155,9 @@ export function parseTar(data: Uint8Array, options: TarParseOptions = {}): TarEn
 
     // Check file size limit
     if (dataSize > maxFileSize) {
-      throw new Error(
-        `TAR entry "${info.path}" exceeds maximum file size (${dataSize} > ${maxFileSize})`
+      throw new FileTooLargeError(
+        info.path,
+        `exceeds maximum file size (${dataSize} > ${maxFileSize})`
       );
     }
 
@@ -208,7 +210,7 @@ export async function* parseTarStream(
   async function* readFromSource(): AsyncGenerator<Uint8Array> {
     for await (const chunk of source) {
       if (signal?.aborted) {
-        throw new Error("TAR parsing aborted");
+        throw createAbortError();
       }
       yield chunk;
     }
@@ -309,7 +311,7 @@ export async function* parseTarStream(
     // Handle special entry types
     if (info.type === TAR_TYPE.GNU_LONG_NAME) {
       if (!(await ensureBuffer(dataSize + padding))) {
-        throw new Error("Unexpected end of TAR archive in long name");
+        throw new ArchiveError("Unexpected end of TAR archive in long name");
       }
       const nameData = readBytes(dataSize);
       if (padding > 0) {
@@ -321,7 +323,7 @@ export async function* parseTarStream(
 
     if (info.type === TAR_TYPE.GNU_LONG_LINK) {
       if (!(await ensureBuffer(dataSize + padding))) {
-        throw new Error("Unexpected end of TAR archive in long link");
+        throw new ArchiveError("Unexpected end of TAR archive in long link");
       }
       const linkData = readBytes(dataSize);
       if (padding > 0) {
@@ -333,7 +335,7 @@ export async function* parseTarStream(
 
     if (info.type === TAR_TYPE.PAX_EXTENDED || info.type === TAR_TYPE.PAX_GLOBAL) {
       if (!(await ensureBuffer(dataSize + padding))) {
-        throw new Error("Unexpected end of TAR archive in PAX header");
+        throw new ArchiveError("Unexpected end of TAR archive in PAX header");
       }
       const paxData = textDecoder.decode(readBytes(dataSize));
       if (padding > 0) {
@@ -362,12 +364,12 @@ export async function* parseTarStream(
 
     // Check file size limit
     if (dataSize > maxFileSize) {
-      throw new Error(`TAR entry "${info.path}" exceeds maximum file size`);
+      throw new FileTooLargeError(info.path, `exceeds maximum file size`);
     }
 
     // Read entry data
     if (!(await ensureBuffer(dataSize + padding))) {
-      throw new Error(`Unexpected end of TAR archive reading "${info.path}"`);
+      throw new ArchiveError(`Unexpected end of TAR archive reading "${info.path}"`);
     }
 
     const entryData = readBytes(dataSize);

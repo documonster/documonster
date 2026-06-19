@@ -1,7 +1,7 @@
-import { cellSetAlignment, cellSetValue } from "@excel/cell";
-import { calculateFormulas } from "@excel/formula-adapter";
+import { cellSetAlignment, cellSetValue } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { getCell } from "@excel/worksheet";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { pdf as standalonePdf } from "@pdf/pdf";
 import { readPdf } from "@pdf/reader/pdf-reader";

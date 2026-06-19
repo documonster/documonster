@@ -1,4 +1,5 @@
-import { isPivotError, type PivotError } from "@excel/pivot-table";
+import type { PivotError } from "@excel/core/pivot-table";
+import { isPivotError } from "@excel/core/pivot-table";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";
 import { describe, it, expect } from "vitest";

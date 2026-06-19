@@ -6,7 +6,8 @@
  */
 
 import { zip } from "@archive/create-archive";
-import { createParse, type ZipEntry } from "@archive/unzip/stream.browser";
+import type { ZipEntry } from "@archive/unzip/stream.browser";
+import { createParse } from "@archive/unzip/stream.browser";
 import { describe, it, expect } from "vitest";
 
 describe("parse.browser - createParse streaming", () => {

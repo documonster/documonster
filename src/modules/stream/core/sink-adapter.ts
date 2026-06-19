@@ -21,7 +21,7 @@
  *     emit callback can still feed the adapter without blocking.
  */
 
-import { onceEvent } from "@stream/internal/event-utils";
+import { onceEvent } from "@stream/core/event-utils";
 import type { EventEmitterLike } from "@stream/types";
 
 /**

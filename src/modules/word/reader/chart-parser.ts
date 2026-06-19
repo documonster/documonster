@@ -6,7 +6,7 @@
  * opaque chart drawings with parsed Chart instances.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import {
   findChildLocal as findChartChild,
   findChildrenLocal as findAllChartChildren,

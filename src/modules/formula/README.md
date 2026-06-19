@@ -6,18 +6,19 @@ Standalone Excel-compatible formula engine — tokenizer, parser, compiler, eval
 
 ## Two usage modes
 
-This module ships **two complementary entry points**. Pick whichever
-matches your integration style — you never pay for the one you don't
-import.
+This module exposes a single functional entry — `Formula.calculate(wb)` —
+that works in two complementary ways. You never pay for the engine
+unless you import it.
 
-| Mode                        | Entry point              | Use when                                                                                            |
-| --------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------- |
-| **Paired with `Workbook`**  | `installFormulaEngine()` | You use the excel module's `Workbook` class and want `wb.calculateFormulas()` + PDF auto-recalc.    |
-| **Standalone / functional** | `calculateFormulas(wb)`  | You operate on a `WorkbookLike` object (custom host, server-side recalc, tests) — no excel runtime. |
+| Mode                        | How                               | Use when                                                                                            |
+| --------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Paired with `Workbook`**  | `Formula.calculate(wb)`           | You use the excel module's `Workbook` and want to recompute its formulas (and PDF export recalc).   |
+| **Standalone / functional** | `Formula.calculate(workbookLike)` | You operate on a `WorkbookLike` object (custom host, server-side recalc, tests) — no excel runtime. |
 
-The engine code itself is identical; only the host glue differs. See
-[Why a separate subpath?](#why-a-separate-subpath) for the tree-shake
-numbers.
+The engine code itself is identical; only the data you hand it differs.
+There is **no install or registration step** — `Formula.calculate` is
+used directly. See [Why a separate subpath?](#why-a-separate-subpath)
+for the tree-shake numbers.
 
 ## Features
 
@@ -126,13 +127,13 @@ cost.
 
 The subpath gives you three tree-shaking outcomes:
 
-| Imports                                             | Excel module | Formula engine |
-| --------------------------------------------------- | ------------ | -------------- |
-| `Workbook` from root only                           | ✓            | ✗              |
-| `calculateFormulas` from `/formula`                 | ✗            | ✓              |
-| `Workbook` + `installFormulaEngine` from `/formula` | ✓            | ✓              |
+| Imports                                          | Excel module | Formula engine |
+| ------------------------------------------------ | ------------ | -------------- |
+| `Workbook` from root only                        | ✓            | ✗              |
+| `Formula.calculate` from `/formula`              | ✗            | ✓              |
+| `Workbook` + `Formula.calculate` from `/formula` | ✓            | ✓              |
 
-The functional `calculateFormulas` API operates on the structural
+The functional `Formula.calculate` API operates on the structural
 `WorkbookLike` interface and pulls **no** excel runtime code — you can
 hand it any object shaped like a workbook. Server-side recalculation of
 a cached XLSX loaded by the excel module works too; the excel import
@@ -141,8 +142,8 @@ stays in the excel bundle.
 > **IIFE note:** The script-tag IIFE bundle
 > (`dist/iife/documonster.iife.min.js`) intentionally excludes the formula
 > engine so it stays lean. Script-tag users who need formula
-> calculation should switch to ESM and call `installFormulaEngine()`
-> from this subpath.
+> calculation should switch to ESM and import `Formula` from this
+> subpath, then call `Formula.calculate(wb)`.
 
 ## Examples
 
@@ -161,7 +162,7 @@ Runnable examples live in `src/modules/formula/examples/`:
 | `formula-database.ts`        | `DSUM`/`DCOUNT`/`DAVERAGE` with criteria ranges                |
 | `formula-engineering.ts`     | Base conversions, bitwise, complex numbers, ERF/BESSELJ        |
 | `formula-standalone.ts`      | Functional API + `tokenize`/`parse` without evaluation         |
-| `formula-pdf-integration.ts` | Automatic recalc during `excelToPdf()`                         |
+| `formula-pdf-integration.ts` | Automatic recalc during `Pdf.fromExcel()`                      |
 
 Run any example:
 
@@ -193,56 +194,80 @@ that implements those interfaces can drive the engine.
 
 ## API Surface
 
-### `installFormulaEngine(): void`
+### `Formula.calculate(workbook: WorkbookLike): void`
 
-Wires `calculateFormulas` into `Workbook.calculateFormulas()` and into
-`excelToPdf()`'s automatic pre-render recalculation, and installs a
-default syntax probe so XLSX defined names classify strictly. Safe to
-call multiple times (last registration wins). Required only if you use
-the excel module's `Workbook` class.
+The sole functional entry point for evaluation. Walks every formula cell
+in `workbook`, evaluates it with full dependency resolution, writes
+results back onto each cell's `result` property, and materialises
+dynamic-array spills onto ghost cells. Mutates the workbook in place.
+Zero global side effects; safe for concurrent calls on different
+workbooks. There is **no install or registration step** and **no
+`Workbook.calculateFormulas()` method** — call `Formula.calculate(wb)`
+directly. Works on any `WorkbookLike`; the excel module is not required,
+but a `Workbook` created by the excel module is structurally compatible
+and can be passed as-is.
 
-### `uninstallFormulaEngine(): void`
+### PDF export recalculation
 
-Symmetric reset of both slots populated by `installFormulaEngine()` —
-engine and default probe. After calling this, `Workbook.calculateFormulas()`
-throws and defined-name classification falls back to the conservative
-"opaque" path. Primarily useful for tests that exercise the cold-start
-classification path.
+`Pdf.fromExcel` does not depend on the formula engine. To recompute
+formulas before rendering, inject `Formula.calculate` via the
+`recalculate` option — only opt-in callers pull the ~200 KB engine into
+their bundle. Without it, the cached XLSX results are used (the safe
+default for files written by Excel itself).
 
-### `calculateFormulas(workbook: WorkbookLike): void`
+```typescript
+import { Pdf } from "documonster/pdf";
+import { Formula } from "documonster/formula";
 
-Functional entry — the core of the **standalone** mode. Walks every
-formula cell in `workbook`, evaluates it with full dependency
-resolution, writes results back onto each cell's `result` property, and
-materialises dynamic-array spills onto ghost cells. Mutates the
-workbook in place. Zero global side effects; safe for concurrent calls
-on different workbooks. Works on any `WorkbookLike` — the excel module
-is not required.
+const bytes = await Pdf.fromExcel(wb, { recalculate: Formula.calculate });
+```
 
-### `createFormulaSyntaxProbe(): SyntaxProbe`
+### Defined-name syntax classification
 
-Build a standalone tokenizer+parser probe — a function that returns
-`true` when its string argument parses as a formula expression.
-Injecting this via `new Workbook({ formulaSyntaxProbe })` or
-`new DefinedNames(probe)` makes defined-name classification strict for
-that instance **without** touching process-global state. Useful for
-tests and multi-host scenarios.
+When the excel module loads an XLSX, it classifies defined names using a
+built-in syntax probe that reuses this engine's `tokenize` + `parse`.
+This is automatic — no setup required, and a `Workbook` that never loads
+XLSX never pulls the tokenizer/parser in. To override classification per
+instance (e.g. for a custom host), pass your own probe — a
+`(text: string) => boolean` — to `Workbook.create({ formulaSyntaxProbe })`.
+You can build one from this module's primitives:
 
-### `tokenize(source: string): Token[]`
+```typescript
+import { Workbook } from "documonster/excel";
+import { Formula } from "documonster/formula";
+
+const probe = (text: string): boolean => {
+  try {
+    Formula.parse(Formula.tokenize(text));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const wb = Workbook.create({ formulaSyntaxProbe: probe });
+```
+
+### `Formula.tokenize(source: string): Token[]`
 
 Pure lexer — accepts a formula string (with or without leading `=`) and
 returns a flat token stream. Throws on invalid characters.
 
-### `parse(tokens: Token[]): AstNode`
+### `Formula.parse(tokens: Token[]): AstNode`
 
 Pratt parser — builds a typed AST from a token stream. Throws on
 structural errors.
+
+### Errors
+
+`FormulaError` (base), `FormulaParseError` (carries an optional 0-based
+`position`), and the `isFormulaError` type guard.
 
 ### Structural types
 
 `WorkbookLike`, `WorksheetLike`, `CellLike`, `RowLike`, `CellErrorValueLike`,
 `FormulaResultLike`, `DefinedNameEntry`, `DefinedNamesLike`,
-`DimensionsLike`, `SpillRegion`, `SyntaxProbe`.
+`DimensionsLike`, `SpillRegion`.
 
 ## Compatibility Notes
 

@@ -4,7 +4,8 @@
  * All archive-related errors extend ArchiveError.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import type { BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 // Re-export common utilities from base
 export {
@@ -55,11 +56,11 @@ export class ZipParseError extends ArchiveError {
 export class InvalidZipSignatureError extends ZipParseError {
   override name = "InvalidZipSignatureError";
 
-  constructor(expected: string, actual: number, context?: string) {
+  constructor(expected: string, actual: number, context?: string, options?: BaseErrorOptions) {
     const msg = context
       ? `Invalid ${context}: expected ${expected}, got 0x${actual.toString(16).padStart(8, "0")}`
       : `Invalid signature: expected ${expected}, got 0x${actual.toString(16).padStart(8, "0")}`;
-    super(msg);
+    super(msg, options);
   }
 }
 
@@ -69,8 +70,8 @@ export class InvalidZipSignatureError extends ZipParseError {
 export class EocdNotFoundError extends ZipParseError {
   override name = "EocdNotFoundError";
 
-  constructor() {
-    super("Invalid ZIP file: End of Central Directory not found");
+  constructor(options?: BaseErrorOptions) {
+    super("Invalid ZIP file: End of Central Directory not found", options);
   }
 }
 
@@ -87,10 +88,12 @@ export class Crc32MismatchError extends ArchiveError {
   constructor(
     public readonly path: string,
     public readonly expected: number,
-    public readonly actual: number
+    public readonly actual: number,
+    options?: BaseErrorOptions
   ) {
     super(
-      `CRC32 mismatch for "${path}": expected 0x${expected.toString(16).padStart(8, "0")}, got 0x${actual.toString(16).padStart(8, "0")}`
+      `CRC32 mismatch for "${path}": expected 0x${expected.toString(16).padStart(8, "0")}, got 0x${actual.toString(16).padStart(8, "0")}`,
+      options
     );
   }
 }
@@ -117,13 +120,14 @@ export class EntrySizeMismatchError extends ArchiveError {
     public readonly path: string,
     public readonly expected: number,
     public readonly actual: number,
-    public readonly reason: EntrySizeMismatchReason
+    public readonly reason: EntrySizeMismatchReason,
+    options?: BaseErrorOptions
   ) {
     const msg =
       reason === "too-many-bytes"
         ? `Entry "${path}" produced more bytes than declared: expected ${expected}, got at least ${actual}`
         : `Entry "${path}" produced fewer bytes than declared: expected ${expected}, got ${actual}`;
-    super(msg);
+    super(msg, options);
   }
 
   /**
@@ -151,11 +155,12 @@ export class EntrySizeMismatchError extends ArchiveError {
 export class DecryptionError extends ArchiveError {
   override name = "DecryptionError";
 
-  constructor(path: string, details?: string) {
+  constructor(path: string, details?: string, options?: BaseErrorOptions) {
     super(
       details
         ? `Failed to decrypt "${path}": ${details}`
-        : `Failed to decrypt "${path}": incorrect password or corrupted data`
+        : `Failed to decrypt "${path}": incorrect password or corrupted data`,
+      options
     );
   }
 }
@@ -166,8 +171,8 @@ export class DecryptionError extends ArchiveError {
 export class PasswordRequiredError extends ArchiveError {
   override name = "PasswordRequiredError";
 
-  constructor(path: string) {
-    super(`File "${path}" is encrypted. Please provide a password to extract.`);
+  constructor(path: string, options?: BaseErrorOptions) {
+    super(`File "${path}" is encrypted. Please provide a password to extract.`, options);
   }
 }
 
@@ -181,8 +186,8 @@ export class PasswordRequiredError extends ArchiveError {
 export class RangeNotSupportedError extends ArchiveError {
   override name = "RangeNotSupportedError";
 
-  constructor(url: string) {
-    super(`Server does not support Range requests for: ${url}`);
+  constructor(url: string, options?: BaseErrorOptions) {
+    super(`Server does not support Range requests for: ${url}`, options);
   }
 }
 
@@ -195,9 +200,10 @@ export class HttpRangeError extends ArchiveError {
   constructor(
     public readonly url: string,
     public readonly status: number,
-    public readonly statusText: string
+    public readonly statusText: string,
+    options?: BaseErrorOptions
   ) {
-    super(`HTTP ${status} ${statusText} for: ${url}`);
+    super(`HTTP ${status} ${statusText} for: ${url}`, options);
   }
 }
 
@@ -211,8 +217,8 @@ export class HttpRangeError extends ArchiveError {
 export class FileTooLargeError extends ArchiveError {
   override name = "FileTooLargeError";
 
-  constructor(path: string, reason: string) {
-    super(`File "${path}" is too large to extract into memory (${reason})`);
+  constructor(path: string, reason: string, options?: BaseErrorOptions) {
+    super(`File "${path}" is too large to extract into memory (${reason})`, options);
   }
 }
 
@@ -226,7 +232,7 @@ export class FileTooLargeError extends ArchiveError {
 export class UnsupportedCompressionError extends ArchiveError {
   override name = "UnsupportedCompressionError";
 
-  constructor(method: number) {
-    super(`Unsupported compression method: ${method}`);
+  constructor(method: number, options?: BaseErrorOptions) {
+    super(`Unsupported compression method: ${method}`, options);
   }
 }

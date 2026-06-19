@@ -2,8 +2,8 @@
  * WorkbookWriter/WorkbookReader Accuracy Tests - Node.js
  */
 
-import { rowValues } from "@excel/row";
-import { rowCommit } from "@excel/worksheet";
+import { rowValues } from "@excel/core/row";
+import { rowCommit } from "@excel/core/worksheet";
 import { PassThrough, Readable } from "@stream";
 import { createWorkbookRoundtripAccuracyTests } from "@stream/__tests__/streaming/workbook-roundtrip-accuracy-tests";
 import { beforeAll } from "vitest";

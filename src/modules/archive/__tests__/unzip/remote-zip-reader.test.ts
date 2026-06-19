@@ -1,6 +1,7 @@
 import { BufferReader } from "@archive/io/random-access";
 import { RemoteZipReader, Crc32MismatchError } from "@archive/unzip/remote-zip-reader";
-import { createZip, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, it, expect, vi } from "vitest";
 

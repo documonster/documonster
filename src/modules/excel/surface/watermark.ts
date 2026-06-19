@@ -8,4 +8,4 @@ export {
   addWatermark as add,
   getWatermark as get,
   removeWatermark as remove
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";

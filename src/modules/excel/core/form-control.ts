@@ -1,5 +1,5 @@
+import type { Worksheet } from "@excel/core/worksheet";
 import { colCache } from "@excel/utils/col-cache";
-import type { Worksheet } from "@excel/worksheet";
 
 /**
  * Form Control Checkbox - Legacy checkbox control compatible with Office 2007+ and WPS/LibreOffice

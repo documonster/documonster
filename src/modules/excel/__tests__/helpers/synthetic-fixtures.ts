@@ -1,4 +1,5 @@
-import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
+import type { ExtractedFile } from "@archive/unzip/extract";
+import { extractAll } from "@archive/unzip/extract";
 /**
  * Synthetic chart fixture builders.
  *
@@ -28,21 +29,17 @@ import { extractAll, type ExtractedFile } from "@archive/unzip/extract";
  * passthrough with extension XML).
  */
 import { createZip } from "@archive/zip/zip-bytes";
-import {
-  applyChartPreset,
-  EXCEL_CHART_PRESETS,
-  type ChartExType,
-  type ExcelChartPreset
-} from "@excel/chart";
-import { Workbook, Worksheet } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
+import type { ChartExType, ExcelChartPreset } from "@excel/chart";
+import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
+import type { WorkbookData } from "@excel/core/workbook-core";
 import {
   addChart,
   addChartEx,
   addComboChart,
   addPivotChart,
   addPivotTable
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Workbook, Worksheet } from "@excel/index";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();

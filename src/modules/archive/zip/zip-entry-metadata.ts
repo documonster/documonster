@@ -1,15 +1,7 @@
-import {
-  encodeZipStringWithCodec,
-  resolveZipStringCodec,
-  type ZipStringCodec,
-  type ZipStringEncoding
-} from "@archive/shared/text";
-import {
-  buildZipTimestampExtraField,
-  dateToZipDos,
-  type ZipExtraTimestamps,
-  type ZipTimestampMode
-} from "@archive/zip-spec/timestamps";
+import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
+import { encodeZipStringWithCodec, resolveZipStringCodec } from "@archive/core/text";
+import type { ZipExtraTimestamps, ZipTimestampMode } from "@archive/zip-spec/timestamps";
+import { buildZipTimestampExtraField, dateToZipDos } from "@archive/zip-spec/timestamps";
 import {
   buildUnicodeCommentExtraField,
   buildUnicodePathExtraField

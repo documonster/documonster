@@ -4,16 +4,18 @@
  * Works in both Node.js and Browser.
  */
 
-import { cellGetValue, cellNumFmt, cellSetValue } from "@excel/cell";
-import { type ColumnData } from "@excel/column";
+import { cellGetValue, cellNumFmt, cellSetValue } from "@excel/core/cell";
+import type { ColumnData } from "@excel/core/column";
+import type { RangeData } from "@excel/core/range";
+import { rangeCreate, rangeExpandRow } from "@excel/core/range";
+import type { RowData } from "@excel/core/row";
+import { rowCreate, rowDimensions } from "@excel/core/row";
+import { columnCreate, columnFromModel, rowGetCell } from "@excel/core/worksheet";
 import { ExcelStreamStateError } from "@excel/errors";
-import { type RangeData, rangeCreate, rangeExpandRow } from "@excel/range";
-import { type RowData, rowCreate, rowDimensions } from "@excel/row";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
 import type { WorksheetState, CellErrorValue } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
-import { columnCreate, columnFromModel, rowGetCell } from "@excel/worksheet";
 import { EventEmitter } from "@utils/event-emitter";
 import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser } from "@xml/sax";

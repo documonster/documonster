@@ -1,5 +1,5 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { cellGetValue, cellFont, cellNumFmt, cellSetValue } from "@excel/cell";
+import { cellGetValue, cellFont, cellNumFmt, cellSetValue } from "@excel/core/cell";
 import {
   columnCollapsed,
   columnEquivalentTo,
@@ -12,8 +12,7 @@ import {
   columnSetHidden,
   columnSetOutlineLevel,
   columnToModel
-} from "@excel/column";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+} from "@excel/core/column";
 import {
   columnEachCell,
   columnSetDefn,
@@ -29,7 +28,8 @@ import {
   getColumn,
   rowSetValues,
   getColumns
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Column", () => {

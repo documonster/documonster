@@ -1,7 +1,5 @@
-import { Cell, Workbook } from "@excel/index";
-import { createTextWatermarkImage } from "@excel/utils/watermark-image";
-import { getWorksheets } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
+import { getWorksheets } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
 import {
   addImage,
   addWatermark,
@@ -10,7 +8,9 @@ import {
   getWatermark,
   removeWatermark,
   setSheetModel
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+import { createTextWatermarkImage } from "@excel/utils/watermark-image";
 /**
  * Tests for Excel watermark feature.
  *

@@ -10,9 +10,9 @@ import {
   definedNamesSetModel,
   definedNamesSpliceColumns,
   definedNamesSpliceRows
-} from "@excel/defined-names";
+} from "@excel/core/defined-names";
+import { getDefinedNames } from "@excel/core/workbook";
 import { Cell, Workbook } from "@excel/index";
-import { getDefinedNames } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
 
 describe("DefinedNames", () => {

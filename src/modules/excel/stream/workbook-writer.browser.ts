@@ -9,7 +9,8 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
-import { createDefinedNames, definedNamesModel, type DefinedNamesData } from "@excel/defined-names";
+import type { DefinedNamesData } from "@excel/core/defined-names";
+import { createDefinedNames, definedNamesModel } from "@excel/core/defined-names";
 import { ExcelNotSupportedError, ImageError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import type {

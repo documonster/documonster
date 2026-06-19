@@ -5,6 +5,7 @@
  * Each write() immediately produces compressed output without waiting for end().
  */
 
+import type { Gunzip, Inflate } from "zlib";
 import {
   createDeflateRaw,
   createInflateRaw,
@@ -13,13 +14,12 @@ import {
   createDeflate,
   createInflate,
   deflateRawSync,
-  constants,
-  type Gunzip,
-  type Inflate
+  constants
 } from "zlib";
 
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
-import { Transform, type TransformCallback } from "@stream";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import type { TransformCallback } from "@stream";
+import { Transform } from "@stream";
 
 export type {
   DeflateStream,

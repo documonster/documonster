@@ -1,7 +1,7 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { cellSetNote, cellSetNumFmt, cellSetValue } from "@excel/cell";
+import { cellSetNote, cellSetNumFmt, cellSetValue } from "@excel/core/cell";
+import { addTable, getCell } from "@excel/core/worksheet";
 import { Form, Image, Pivot, Table, Workbook, Worksheet } from "@excel/index";
-import { addTable, getCell } from "@excel/worksheet";
 import { makeTestDataPath } from "@test/utils";
 import { describe, it } from "vitest";
 

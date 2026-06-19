@@ -1,7 +1,9 @@
-import { rangeAbsoluteShort, rangeCreate, type RangeData } from "@excel/range";
+import type { RangeData } from "@excel/core/range";
+import { rangeAbsoluteShort, rangeCreate } from "@excel/core/range";
 import type { Address } from "@excel/types";
 import { CellMatrix } from "@excel/utils/cell-matrix";
-import { colCache, type DecodedRange } from "@excel/utils/col-cache";
+import type { DecodedRange } from "@excel/utils/col-cache";
+import { colCache } from "@excel/utils/col-cache";
 import { parse } from "@formula/syntax/parser";
 import { tokenize } from "@formula/syntax/tokenizer";
 

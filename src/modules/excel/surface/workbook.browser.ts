@@ -34,9 +34,9 @@ export {
   setWorkbookModel as setModel,
   createStreamWriter,
   createStreamReader
-} from "@excel/workbook.browser";
+} from "@excel/core/workbook.browser";
 
-export { toBuffer, read, readStream, writeStream, getXlsxIo } from "@excel/xlsx-io";
+export { toBuffer, read, readStream, writeStream, getXlsxIo } from "@excel/core/xlsx-io";
 
 /** A workbook handle (opaque to consumers). */
-export type { WorkbookData as Handle } from "@excel/workbook-core";
+export type { WorkbookData as Handle } from "@excel/core/workbook-core";

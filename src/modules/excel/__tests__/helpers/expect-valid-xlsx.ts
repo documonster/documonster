@@ -18,10 +18,10 @@
  * OOXML conformance audit.
  */
 
+import type { WorkbookData } from "@excel/core/workbook-core";
 import { Workbook } from "@excel/index";
 import type { OoxmlValidateOptions } from "@excel/utils/ooxml-validator";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
-import type { WorkbookData } from "@excel/workbook-core";
 import { expect } from "vitest";
 
 export interface ExpectValidXlsxOptions extends OoxmlValidateOptions {

@@ -1,9 +1,13 @@
 import { createChart } from "@excel/chart/chart-handle";
 import type { AddChartExOptions, ChartExModel } from "@excel/chart/model/chart-ex-types";
 import type { AddChartOptions, AddComboChartOptions, ChartModel } from "@excel/chart/model/types";
-import { getChartEntry, getChartExStructuredEntry, validateSheetName } from "@excel/workbook-core";
-import type { WorkbookData } from "@excel/workbook-core";
-import type { ChartHandle, WorksheetData } from "@excel/worksheet-core";
+import {
+  getChartEntry,
+  getChartExStructuredEntry,
+  validateSheetName
+} from "@excel/core/workbook-core";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import type { ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
 /**

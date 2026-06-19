@@ -1,7 +1,16 @@
 import { extractAll } from "@archive/unzip/extract";
-import { formCheckboxSetText, formCheckboxVmlAnchor, isFormCheckbox } from "@excel/form-control";
+import {
+  formCheckboxSetText,
+  formCheckboxVmlAnchor,
+  isFormCheckbox
+} from "@excel/core/form-control";
+import {
+  addFormCheckbox,
+  getFormCheckboxes,
+  getSheetModel,
+  setSheetModel
+} from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { addFormCheckbox, getFormCheckboxes, getSheetModel, setSheetModel } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

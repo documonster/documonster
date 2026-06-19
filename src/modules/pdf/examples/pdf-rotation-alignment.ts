@@ -13,9 +13,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { cellSetAlignment, cellSetBorder, cellSetValue } from "@excel/cell";
+import { cellSetAlignment, cellSetBorder, cellSetValue } from "@excel/core/cell";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import { getCell } from "@excel/worksheet";
 
 import { Pdf } from "../index";
 

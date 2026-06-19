@@ -1,7 +1,5 @@
-import { cellDataValidation, cellGetValue, cellSetDataValidation } from "@excel/cell";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
-import type { CellValue, WorksheetViewFrozen } from "@excel/types";
-import { getWorksheets } from "@excel/workbook";
+import { cellDataValidation, cellGetValue, cellSetDataValidation } from "@excel/core/cell";
+import { getWorksheets } from "@excel/core/workbook";
 import {
   addAOA,
   addJSON,
@@ -10,7 +8,9 @@ import {
   getSheetName,
   toAOA,
   toJSON
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import type { CellValue, WorksheetViewFrozen } from "@excel/types";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {

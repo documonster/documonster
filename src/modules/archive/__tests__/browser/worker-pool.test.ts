@@ -12,14 +12,14 @@
  * - Worker idle timeout and cleanup
  */
 
+import type { WorkerPoolOptions } from "@archive/compression/worker-pool/index.browser";
 import {
   WorkerPool,
   getDefaultWorkerPool,
   terminateDefaultWorkerPool,
   deflateWithPool,
   inflateWithPool,
-  hasWorkerSupport,
-  type WorkerPoolOptions
+  hasWorkerSupport
 } from "@archive/compression/worker-pool/index.browser";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 

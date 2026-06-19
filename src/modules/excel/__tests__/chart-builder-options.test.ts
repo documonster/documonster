@@ -27,10 +27,10 @@ import {
   definedNamesAdd,
   definedNamesAddFormula,
   definedNamesSetModel
-} from "@excel/defined-names";
+} from "@excel/core/defined-names";
+import { getDefinedNames } from "@excel/core/workbook";
+import { addChart, addChartEx, addComboChart, getCharts, removeChart } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
-import { getDefinedNames } from "@excel/workbook";
-import { addChart, addChartEx, addComboChart, getCharts, removeChart } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 import { CATEGORIES, VALUES_B, baseSeries, ctg, pa } from "./chart-builder.helpers";

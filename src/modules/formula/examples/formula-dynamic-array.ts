@@ -1,7 +1,7 @@
-import { cellFormula, cellGetValue, cellResult } from "@excel/cell";
-import { calculateFormulas } from "@excel/formula-adapter";
+import { cellFormula, cellGetValue, cellResult } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { findCell, getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
-import { findCell, getCell } from "@excel/worksheet";
 
 /**
  * Example: Dynamic Array Formulas (Excel 365)

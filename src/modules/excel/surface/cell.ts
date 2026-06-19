@@ -8,13 +8,15 @@
  * This is a flat-named-export module; `excel/index.ts` re-exports it via
  * `export * as Cell`, which tree-shakes per-member on rolldown / rspack.
  */
+import type {
+  CellData,
+  CellModel,
+  CellValueInputType,
+  CellValueType,
+  FormulaResult,
+  NoteConfig
+} from "@excel/core/cell";
 import {
-  type CellData,
-  type CellModel,
-  type CellValueInputType,
-  type CellValueType,
-  type FormulaResult,
-  type NoteConfig,
   cellAddName,
   cellAlignment,
   cellBorder,
@@ -56,9 +58,11 @@ import {
   cellSetValue,
   cellText,
   cellType
-} from "@excel/cell";
-import type { ValueType } from "@excel/enums";
-import type { NoteData } from "@excel/note";
+} from "@excel/core/cell";
+import type { ValueType } from "@excel/core/enums";
+import type { NoteData } from "@excel/core/note";
+import { getCell } from "@excel/core/worksheet-core";
+import type { WorksheetData } from "@excel/core/worksheet-core";
 import type {
   Alignment,
   Borders,
@@ -69,8 +73,6 @@ import type {
   Protection,
   Style
 } from "@excel/types";
-import { getCell } from "@excel/worksheet-core";
-import type { WorksheetData } from "@excel/worksheet-core";
 
 /** A worksheet handle (opaque to consumers). */
 export type Sheet = WorksheetData;

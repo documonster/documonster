@@ -26,10 +26,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { getWorksheets } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addImage } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { getWorksheets } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addImage } from "@excel/worksheet";
 
 import { PdfStructureError } from "../errors";
 import { Pdf } from "../index";

@@ -41,7 +41,7 @@ export type {
 } from "@archive/unzip/remote-zip-reader";
 
 // High-level ZIP API types
-export type { ArchiveFormat } from "@archive/shared/types";
+export type { ArchiveFormat } from "@archive/core/types";
 export type {
   ZipOptions,
   ZipEntryOptions,
@@ -110,4 +110,4 @@ export {
   EntrySizeMismatchError,
   // Error types
   type EntrySizeMismatchReason
-} from "@archive/shared/errors";
+} from "@archive/core/errors";

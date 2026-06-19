@@ -1,8 +1,10 @@
 import { zip } from "@archive/create-archive";
 import { BufferReader } from "@archive/io/random-access";
 import { ZipParser } from "@archive/unzip/zip-parser";
-import { editZip, editZipUrl, ZipEditPlan, type ZipEditWarning } from "@archive/zip";
-import { createZip, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEditWarning } from "@archive/zip";
+import { editZip, editZipUrl, ZipEditPlan } from "@archive/zip";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, it, expect, vi } from "vitest";
 

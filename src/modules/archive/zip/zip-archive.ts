@@ -1,37 +1,39 @@
 import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
-import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
+import { ByteQueue } from "@archive/core/byte-queue";
+import {
+  DEFAULT_ZIP_LEVEL,
+  DEFAULT_ZIP_TIMESTAMPS,
+  REPRODUCIBLE_ZIP_MOD_TIME
+} from "@archive/core/defaults";
+import { throwIfAborted, ArchiveError } from "@archive/core/errors";
+import type { ZipStringEncoding } from "@archive/core/text";
+import { encodeZipString } from "@archive/core/text";
+import type { ArchiveFormat } from "@archive/core/types";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveSource } from "@archive/io/archive-source";
 import {
   toAsyncIterable,
   toUint8Array,
   toUint8ArraySync,
   isSyncArchiveSource,
-  isInMemoryArchiveSource,
-  type ArchiveSource
+  isInMemoryArchiveSource
 } from "@archive/io/archive-source";
-import { ByteQueue } from "@archive/shared/byte-queue";
-import {
-  DEFAULT_ZIP_LEVEL,
-  DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
-} from "@archive/shared/defaults";
-import { throwIfAborted } from "@archive/shared/errors";
-import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
-import type { ArchiveFormat } from "@archive/shared/types";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildDataDescriptor,
   FLAG_DATA_DESCRIPTOR,
   UINT16_MAX,
   UINT32_MAX,
-  writeLocalFileHeaderInto,
-  type Zip64Mode
+  writeLocalFileHeaderInto
 } from "@archive/zip-spec/zip-records";
 import { ZipDeflateFile } from "@archive/zip/stream";
+import type { ZipCentralDirectoryEntryInput } from "@archive/zip/writer-core";
 import {
   measureCentralDirectoryAndEocd,
-  writeCentralDirectoryAndEocdInto,
-  type ZipCentralDirectoryEntryInput
+  writeCentralDirectoryAndEocdInto
 } from "@archive/zip/writer-core";
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { buildZipEntryMetadata } from "@archive/zip/zip-entry-metadata";
@@ -194,10 +196,10 @@ export class ZipArchive {
 
   add(name: string, source: ArchiveSource, options?: ZipEntryOptions): this {
     if (this._sealed) {
-      throw new Error("Cannot add entries after output has started");
+      throw new ArchiveError("Cannot add entries after output has started");
     }
     if (!name) {
-      throw new Error("Entry name is required");
+      throw new ArchiveError("Entry name is required");
     }
     this._entries.push({ name, source, options });
     return this;
@@ -531,7 +533,7 @@ export class ZipArchive {
         !(entry.source instanceof ArrayBuffer) &&
         typeof entry.source !== "string"
       ) {
-        throw new Error("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
+        throw new ArchiveError("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
       }
       return {
         name: entry.name,

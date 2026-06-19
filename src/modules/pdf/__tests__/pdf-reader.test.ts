@@ -5,9 +5,9 @@
  * image extraction, and metadata reading using roundtrip tests (write then read).
  */
 
-import { cellSetValue } from "@excel/cell";
+import { cellSetValue } from "@excel/core/cell";
+import { rowGetCell } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowGetCell } from "@excel/worksheet";
 import { aesCbcDecrypt, sha256 } from "@utils/crypto";
 import { describe, it, expect, beforeAll } from "vitest";
 

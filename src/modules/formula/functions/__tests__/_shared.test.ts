@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import type { NumberValue } from "../../runtime/values";
 import {
   BLANK,
   ERRORS,
@@ -15,8 +16,7 @@ import {
   rvArray,
   rvBoolean,
   rvNumber,
-  rvString,
-  type NumberValue
+  rvString
 } from "../../runtime/values";
 import {
   argToNumber,

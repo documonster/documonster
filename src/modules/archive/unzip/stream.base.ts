@@ -1,8 +1,9 @@
-import { ByteQueue } from "@archive/shared/byte-queue";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { decodeZipPath, resolveZipStringCodec } from "@archive/shared/text";
+import { ByteQueue } from "@archive/core/byte-queue";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { decodeZipPath, resolveZipStringCodec } from "@archive/core/text";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
-import { Duplex, PassThrough, Transform, pipeline, finished, type Readable } from "@stream";
+import type { Readable } from "@stream";
+import { Duplex, PassThrough, Transform, pipeline, finished } from "@stream";
 import { concatUint8Arrays, textEncoder as utf8Encoder } from "@utils/binary";
 import { toError } from "@utils/errors";
 
@@ -47,6 +48,15 @@ async function awaitEntryCompletion(entry: PassThrough): Promise<void> {
   }
 }
 
+import type {
+  CrxHeader,
+  EntryProps,
+  EntryVars,
+  ParseDriverState,
+  ParseOptions,
+  ZipExtraFields,
+  ZipVars
+} from "@archive/unzip/parser-core";
 import {
   DEFAULT_PARSE_THRESHOLD_BYTES,
   buildZipEntryProps,
@@ -58,14 +68,7 @@ import {
   readLocalFileHeader,
   resolveZipEntryLastModifiedDateTime,
   runParseLoopCore,
-  isValidZipRecordSignature,
-  type CrxHeader,
-  type EntryProps,
-  type EntryVars,
-  type ParseDriverState,
-  type ParseOptions,
-  type ZipExtraFields,
-  type ZipVars
+  isValidZipRecordSignature
 } from "@archive/unzip/parser-core";
 
 export const DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK = 256 * 1024;

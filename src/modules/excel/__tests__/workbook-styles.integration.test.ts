@@ -1,6 +1,6 @@
-import { columnAlignment, columnFont } from "@excel/column";
+import { columnAlignment, columnFont } from "@excel/core/column";
+import { rowFont, rowSetFont } from "@excel/core/row";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowFont, rowSetFont } from "@excel/row";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
@@ -13,8 +13,8 @@ const TEST_XLSX_FILE_NAME = testFilePath("workbook-styles.test");
 import { richTextSample } from "@excel/__tests__/data/rich-text-sample";
 import richTextSampleA1 from "@excel/__tests__/data/rich-text-sample-a1.json" with { type: "json" };
 import { testUtils } from "@excel/__tests__/shared";
-import { getWorksheets } from "@excel/workbook";
-import { getColumn } from "@excel/worksheet";
+import { getWorksheets } from "@excel/core/workbook";
+import { getColumn } from "@excel/core/worksheet";
 import { PassThrough } from "@stream";
 
 // =============================================================================

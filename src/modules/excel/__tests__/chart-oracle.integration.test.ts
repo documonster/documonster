@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { extractAll } from "@archive/unzip/extract";
+import { addChart, addChartEx, addComboChart } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { addChart, addChartEx, addComboChart } from "@excel/worksheet";
 import { describe, expect, it } from "vitest";
 
 import {

@@ -1,3 +1,4 @@
+import { getColumn, getRow } from "@excel/core/worksheet";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { getCalibri11PtPixelWidth } from "@excel/utils/font-data";
 import {
@@ -13,7 +14,6 @@ import {
   calculateWrappedLineCount,
   pixelToPoints
 } from "@excel/utils/text-metrics";
-import { getColumn, getRow } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================

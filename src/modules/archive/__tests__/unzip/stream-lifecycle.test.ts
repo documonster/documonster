@@ -17,7 +17,8 @@ import { Readable } from "stream";
 
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
-import { Parse, createParse, type ZipEntry } from "@archive/unzip/stream";
+import type { ZipEntry } from "@archive/unzip/stream";
+import { Parse, createParse } from "@archive/unzip/stream";
 import { PassThrough } from "@stream";
 import { describe, it, expect } from "vitest";
 

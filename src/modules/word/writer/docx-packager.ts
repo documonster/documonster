@@ -9,12 +9,14 @@
 
 import { zip } from "@archive/create-archive";
 import { ContentType, RelType, PartPath, STD_DOC_ATTRIBUTES } from "@word/constants";
-import { type Mutable, sanitizeMediaFileName, sanitizeUrl } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import { sanitizeMediaFileName, sanitizeUrl } from "@word/core/internal-utils";
 import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
 import { isRun } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import { DocxWriteError } from "@word/errors";
-import { resolveSecurityPolicy, type WordSecurityPolicy } from "@word/security/policy";
+import type { WordSecurityPolicy } from "@word/security/policy";
+import { resolveSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
   BodyContent,

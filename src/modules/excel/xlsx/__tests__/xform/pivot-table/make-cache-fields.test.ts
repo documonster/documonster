@@ -1,5 +1,5 @@
+import { addPivotTable, addTable } from "@excel/core/worksheet";
 import { Workbook } from "@excel/index";
-import { addPivotTable, addTable } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 describe("makeCacheFields", () => {

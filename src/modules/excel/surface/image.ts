@@ -6,7 +6,7 @@
  * `Image.setBackground(ws, imageId)` sets a sheet background;
  * `Image.list(ws)` lists a sheet's images.
  */
-export { addWorkbookImage as add } from "@excel/workbook-core";
+export { addWorkbookImage as add } from "@excel/core/workbook-core";
 export {
   addImage as place,
   getImages as list,
@@ -14,13 +14,13 @@ export {
   getBackgroundImageId as getBackground,
   addShape,
   getShapes
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
 export {
   imageCreate as create,
   imageModel as model,
   imageClone as clone,
   applyImageModel as applyModel
-} from "@excel/image";
+} from "@excel/core/image";
 
 /** An image handle. */
-export type { ImageData as Handle } from "@excel/image";
+export type { ImageData as Handle } from "@excel/core/image";

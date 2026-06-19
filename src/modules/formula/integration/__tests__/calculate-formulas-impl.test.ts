@@ -19,10 +19,10 @@
  *   - Empty workbook / no-formula no-ops
  */
 
-import { cellGetValue } from "@excel/cell";
-import { calculateFormulas } from "@excel/formula-adapter";
+import { cellGetValue } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { findCell } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { findCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 // ============================================================================

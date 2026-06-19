@@ -6,6 +6,6 @@ export {
   addSparklineGroup as add,
   getSparklineGroups as list,
   removeSparklineGroup as remove
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
 
 export type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";

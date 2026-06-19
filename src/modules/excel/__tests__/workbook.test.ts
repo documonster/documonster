@@ -3,10 +3,9 @@ import {
   definedNamesAdd,
   definedNamesAddFormula,
   definedNamesGetRanges
-} from "@excel/defined-names";
-import { ValueType } from "@excel/enums";
-import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowFont, rowNumFmt, rowSetFont, rowSetNumFmt, rowValues } from "@excel/row";
+} from "@excel/core/defined-names";
+import { ValueType } from "@excel/core/enums";
+import { rowFont, rowNumFmt, rowSetFont, rowSetNumFmt, rowValues } from "@excel/core/row";
 import {
   clearThemes,
   getDefaultFont,
@@ -19,9 +18,10 @@ import {
   setDefaultFont,
   setWorkbookModel,
   unprotectWorkbook
-} from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { getSheetName, setSheetName } from "@excel/worksheet";
+} from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { getSheetName, setSheetName } from "@excel/core/worksheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================

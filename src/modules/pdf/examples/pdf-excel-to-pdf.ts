@@ -14,9 +14,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { getWorksheets } from "@excel/core/workbook";
+import { columnSetNumFmt, getColumn } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { getWorksheets } from "@excel/workbook";
-import { columnSetNumFmt, getColumn } from "@excel/worksheet";
 
 import { Pdf } from "../index";
 

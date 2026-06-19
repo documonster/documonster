@@ -6,7 +6,7 @@
  * embed section properties); they're co-located here.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
   attrVal,

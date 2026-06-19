@@ -54,7 +54,8 @@ import {
   promises,
   promisify
 } from "@stream";
-import { runStreamTests, type StreamModuleImports } from "@stream/__tests__/stream.shared";
+import type { StreamModuleImports } from "@stream/__tests__/stream.shared";
+import { runStreamTests } from "@stream/__tests__/stream.shared";
 import {
   stringToUint8Array,
   uint8ArrayToString,

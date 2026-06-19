@@ -14,7 +14,7 @@ export {
   rangeExpandToAddress as expandToAddress,
   rangeToString as toString,
   rangeCount as count
-} from "@excel/range";
+} from "@excel/core/range";
 
 /** A range handle. */
-export type { RangeData as Handle } from "@excel/range";
+export type { RangeData as Handle } from "@excel/core/range";

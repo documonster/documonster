@@ -1,4 +1,4 @@
-import { cellSetValue } from "@excel/cell";
+import { cellSetValue } from "@excel/core/cell";
 import { Cell, Workbook } from "@excel/index";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";

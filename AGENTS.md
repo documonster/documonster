@@ -49,15 +49,15 @@ pnpm exec vitest run -t "should handle empty cells"
 ```
 src/
 ├── modules/
-│   ├── excel/          # Workbook, Worksheet, Cell; stream/ xlsx/
+│   ├── excel/          # core/ (Workbook, Worksheet, Cell, …) surface/ stream/ xlsx/
 │   ├── word/           # DocxDocument, DocumentBuilder, readDocx, packageDocx
 │   ├── formula/        # Tokenizer, parser, evaluator, 433 functions, spill engine
 │   ├── pdf/            # core/ builder/ font/ render/ reader/ + excel-bridge.ts + word-bridge.ts
 │   ├── csv/            # Parsing/formatting + streaming
 │   ├── markdown/       # GFM table parsing/formatting
 │   ├── xml/            # SAX/DOM parser, query engine, writer
-│   ├── archive/        # ZIP/TAR compression
-│   └── stream/         # Cross-platform streaming primitives
+│   ├── archive/        # ZIP/TAR compression; core/ shared primitives
+│   └── stream/         # Cross-platform streaming primitives; core/ shared primitives
 ├── utils/              # Shared: errors, datetime, fs, binary, crypto
 └── test/               # Test utilities and fixtures
 ```

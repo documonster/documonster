@@ -13,7 +13,7 @@ export {
   getTable as get,
   getTables as list,
   removeTable as remove
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
 
 export {
   createTable as create,
@@ -59,7 +59,7 @@ export {
   tableColumnSetTotalsRowResult as columnSetTotalsRowResult,
   tableColumnTotalsRowFormula as columnTotalsRowFormula,
   tableColumnSetTotalsRowFormula as columnSetTotalsRowFormula
-} from "@excel/table";
+} from "@excel/core/table";
 
 /** A table handle. */
-export type { TableData as Handle } from "@excel/table";
+export type { TableData as Handle } from "@excel/core/table";

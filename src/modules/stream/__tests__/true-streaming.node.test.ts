@@ -4,8 +4,8 @@
  * Uses Node.js-specific APIs to verify TRUE streaming behavior.
  */
 
-import { rowValues } from "@excel/row";
-import { rowCommit } from "@excel/worksheet";
+import { rowValues } from "@excel/core/row";
+import { rowCommit } from "@excel/core/worksheet";
 import { PassThrough, Readable } from "@stream";
 import { createTrueStreamingTests } from "@stream/__tests__/streaming/true-streaming-tests";
 import { beforeAll } from "vitest";

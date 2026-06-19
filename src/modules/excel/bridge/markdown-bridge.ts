@@ -11,11 +11,11 @@
  * `./markdown-bridge.node.ts`.
  */
 
-import { rowValues } from "@excel/row";
-import { addWorksheet, getWorksheet } from "@excel/workbook";
-import type { Workbook } from "@excel/workbook.browser";
-import type { Worksheet } from "@excel/worksheet";
-import { addRow, eachRow } from "@excel/worksheet";
+import { rowValues } from "@excel/core/row";
+import { addWorksheet, getWorksheet } from "@excel/core/workbook";
+import type { Workbook } from "@excel/core/workbook.browser";
+import type { Worksheet } from "@excel/core/worksheet";
+import { addRow, eachRow } from "@excel/core/worksheet";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
 import type { MarkdownOptions, MarkdownAlignment, MarkdownParseResult } from "@markdown/types";

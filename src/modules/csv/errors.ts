@@ -12,6 +12,13 @@ export class CsvError extends BaseError {
 }
 
 /**
+ * Check if an error is a CsvError.
+ */
+export function isCsvError(err: unknown): err is CsvError {
+  return err instanceof CsvError;
+}
+
+/**
  * Error thrown when CSV worker operations fail.
  */
 export class CsvWorkerError extends CsvError {

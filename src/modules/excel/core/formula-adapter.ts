@@ -10,26 +10,21 @@
  *
  * Excel (layer 4) may import formula (layer 3); this is the sanctioned seam.
  */
+import type { CellData } from "@excel/core/cell";
 import {
-  type CellData,
   cellFormula,
   cellGetValue,
   cellResult,
   cellSetResult,
   cellSetValue,
   cellType
-} from "@excel/cell";
-import { definedNamesGetAllEntries, definedNamesGetAllNames } from "@excel/defined-names";
-import { type RowData } from "@excel/row";
-import { type WorkbookData, getWorksheets } from "@excel/workbook.browser";
-import {
-  type WorksheetData,
-  eachRow,
-  findCell,
-  getCell,
-  getSheetDimensions,
-  getTables
-} from "@excel/worksheet";
+} from "@excel/core/cell";
+import { definedNamesGetAllEntries, definedNamesGetAllNames } from "@excel/core/defined-names";
+import type { RowData } from "@excel/core/row";
+import type { WorkbookData } from "@excel/core/workbook.browser";
+import { getWorksheets } from "@excel/core/workbook.browser";
+import type { WorksheetData } from "@excel/core/worksheet";
+import { eachRow, findCell, getCell, getSheetDimensions, getTables } from "@excel/core/worksheet";
 import { calculateFormulas as calculateFormulasEngine } from "@formula/integration/calculate-formulas";
 import type {
   CellLike,

@@ -6,7 +6,7 @@
  * and layers the Node-only file-path free functions on top. Selected over the
  * browser variant via the `.browser` same-name swap at build/test time.
  */
-import type { WorkbookData } from "@excel/workbook-core";
+import type { WorkbookData } from "@excel/core/workbook-core";
 import { XLSX } from "@excel/xlsx/xlsx";
 import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
 

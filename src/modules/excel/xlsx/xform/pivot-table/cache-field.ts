@@ -1,5 +1,5 @@
-import type { CacheField as CacheFieldType, SharedItemValue } from "@excel/pivot-table-types";
-import { isPivotError } from "@excel/pivot-table-types";
+import type { CacheField as CacheFieldType, SharedItemValue } from "@excel/core/pivot-table-types";
+import { isPivotError } from "@excel/core/pivot-table-types";
 import { xmlEncode } from "@xml/encode";
 
 /**

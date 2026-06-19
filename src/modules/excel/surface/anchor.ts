@@ -18,7 +18,7 @@ export {
   anchorModel as model,
   anchorSetModel as setModel,
   anchorClone as clone
-} from "@excel/anchor";
+} from "@excel/core/anchor";
 
 /** An anchor handle. */
-export type { AnchorData as Handle } from "@excel/anchor";
+export type { AnchorData as Handle } from "@excel/core/anchor";

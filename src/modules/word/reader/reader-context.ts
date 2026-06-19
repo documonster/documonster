@@ -6,7 +6,8 @@
  */
 
 import { STRICT_TO_TRANSITIONAL_REL } from "@word/constants";
-import { DEFAULT_SECURITY_POLICY, type WordSecurityPolicy } from "@word/security/policy";
+import type { WordSecurityPolicy } from "@word/security/policy";
+import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 import type { FormField, RunProperties } from "@word/types";
 import { parseXml } from "@xml/dom";
 

@@ -6,15 +6,14 @@
 
 ## 两种使用方式
 
-本模块提供**两个互补的入口**,按你的集成方式选一个就行 — 没用到的那个会被 tree-shake 完全摇掉。
+本模块只暴露一个函数式入口 — `Formula.calculate(wb)` — 它能以两种互补的方式工作。不 import 引擎就不会为它付出任何代价。
 
-| 模式                   | 入口                     | 适用场景                                                                                  |
-| ---------------------- | ------------------------ | ----------------------------------------------------------------------------------------- |
-| **配合 `Workbook` 用** | `installFormulaEngine()` | 你使用 excel 模块的 `Workbook` 类,想要 `wb.calculateFormulas()` 和 PDF 自动重算。         |
-| **单独使用 / 函数式**  | `calculateFormulas(wb)`  | 你操作的是 `WorkbookLike` 对象(自定义宿主、服务端重算、测试)— **完全不用 excel 运行时**。 |
+| 模式                   | 用法                              | 适用场景                                                                                  |
+| ---------------------- | --------------------------------- | ----------------------------------------------------------------------------------------- |
+| **配合 `Workbook` 用** | `Formula.calculate(wb)`           | 你使用 excel 模块的 `Workbook`,想重算它的公式(以及 PDF 导出时重算)。                      |
+| **单独使用 / 函数式**  | `Formula.calculate(workbookLike)` | 你操作的是 `WorkbookLike` 对象(自定义宿主、服务端重算、测试)— **完全不用 excel 运行时**。 |
 
-两种模式跑的是同一套引擎代码,只是宿主胶水不一样。tree-shake 数字见
-[为什么单独一个 subpath?](#为什么单独一个-subpath)。
+两种模式跑的是同一套引擎代码,只是传进去的数据不同。**没有任何安装或注册步骤** — 直接调用 `Formula.calculate`。tree-shake 数字见[为什么单独一个 subpath?](#为什么单独一个-subpath)。
 
 ## 特性
 
@@ -54,68 +53,61 @@
 ### 配合 `Workbook` 用(最常见)
 
 ```typescript
-import { Workbook } from "documonster";
-import { installFormulaEngine } from "documonster/formula";
+import { Workbook, Cell } from "documonster/excel";
+import { Formula } from "documonster/formula";
 
-// 启动时调用一次 — 让 Workbook.calculateFormulas()、PDF bridge 自动重算,
-// 以及 XLSX 加载时的 defined-name 严格分类生效。
-installFormulaEngine();
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Sheet1");
+Cell.setValue(ws, "A1", 10);
+Cell.setValue(ws, "A2", 20);
+Cell.setValue(ws, "A3", 30);
+Cell.setValue(ws, "A4", { formula: "SUM(A1:A3)" });
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Sheet1");
-ws.getCell("A1").value = 10;
-ws.getCell("A2").value = 20;
-ws.getCell("A3").value = 30;
-ws.getCell("A4").value = { formula: "SUM(A1:A3)" };
-
-wb.calculateFormulas();
-console.log(ws.getCell("A4").result); // 60
+Formula.calculate(wb);
+console.log(Cell.getResult(ws, "A4")); // 60
 ```
 
 ### 单独使用 / 函数式
 
-引擎接受任何形状符合 `WorkbookLike` 的对象 — **完全不需要** excel 模块。只 import
-`calculateFormulas` 的 bundle 里**零** excel 运行时代码。
+引擎接受任何形状符合 `WorkbookLike` 的对象 — 你**完全不必**使用 excel 模块。只 import `Formula.calculate` 的 bundle 里**零** excel 运行时代码。
 
 ```typescript
-import { calculateFormulas, type WorkbookLike } from "documonster/formula";
+import { Formula, type WorkbookLike } from "documonster/formula";
 
 // 你自己的数据结构 — 只要实现 WorkbookLike 就行。
-// 不需要 Workbook 类,也不需要 installFormulaEngine()。
+// 不需要 Workbook 类。
 const wb: WorkbookLike = buildMyWorkbookLike();
 
-calculateFormulas(wb); // 纯函数,零全局副作用
+Formula.calculate(wb); // 纯函数,零全局副作用
 ```
 
-适用场景:
+这种模式适合:
 
 - 服务端对已缓存 XLSX 的重算
 - 已有自己数据模型的自定义表格宿主
 - 需要每实例独立行为的测试和 benchmark
 - 并发求值多个 workbook,不污染进程全局状态
 
-### 针对单个 Workbook 的 syntax probe
+### 重算已加载的工作簿
 
-如果你用 `Workbook` 但只想让**某个实例**走严格的 defined-name 分类,而不污染全局状态,
-显式注入 probe:
+用 excel 模块加载 XLSX,然后函数式地重算它的公式。没有任何安装或注册步骤。
 
 ```typescript
-import { Workbook } from "documonster";
-import { createFormulaSyntaxProbe } from "documonster/formula";
+import { Workbook } from "documonster/excel";
+import { Formula } from "documonster/formula";
 
-const wb = new Workbook({ formulaSyntaxProbe: createFormulaSyntaxProbe() });
-await wb.xlsx.load(buffer);
-// defined names 用注入的 probe 严格分类;
-// 不需要调 installFormulaEngine()。
+const wb = Workbook.create();
+await Workbook.read(wb, buffer);
+Formula.calculate(wb); // defined names 完成分类,公式被重算
 ```
 
 ### 不求值,只 tokenize / parse
 
 ```typescript
-import { tokenize, parse } from "documonster/formula";
+import { Formula } from "documonster/formula";
 
-const tokens = tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
-const ast = parse(tokens); // 语法错误时抛异常
+const tokens = Formula.tokenize("SUM(A1:B10) + VLOOKUP(key, table, 2, FALSE)");
+const ast = Formula.parse(tokens); // 语法错误时抛异常
 ```
 
 ## 为什么单独一个 subpath?
@@ -124,18 +116,18 @@ const ast = parse(tokens); // 语法错误时抛异常
 
 subpath 给你三种 tree-shaking 结果:
 
-| 导入方式                                                 | Excel 模块 | Formula 引擎 |
-| -------------------------------------------------------- | ---------- | ------------ |
-| 只从根路径 import `Workbook`                             | ✓          | ✗            |
-| 从 `/formula` import `calculateFormulas`                 | ✗          | ✓            |
-| import `Workbook` + `/formula` 的 `installFormulaEngine` | ✓          | ✓            |
+| 导入方式                                              | Excel 模块 | Formula 引擎 |
+| ----------------------------------------------------- | ---------- | ------------ |
+| 只从根路径 import `Workbook`                          | ✓          | ✗            |
+| 从 `/formula` import `Formula.calculate`              | ✗          | ✓            |
+| import `Workbook` + `/formula` 的 `Formula.calculate` | ✓          | ✓            |
 
-函数式 `calculateFormulas` API 通过 `WorkbookLike` 结构化接口工作，**不引入任何 excel 运行时代码** — 只要对象形状符合 workbook 接口就能传进去。服务端对已缓存的 XLSX 做重算也可以：excel 的 import 留在 excel bundle 里。
+函数式 `Formula.calculate` API 通过 `WorkbookLike` 结构化接口工作,**不引入任何 excel 运行时代码** — 只要对象形状符合 workbook 接口就能传进去。服务端对已缓存的 XLSX 做重算也可以:excel 的 import 留在 excel bundle 里。
 
 > **IIFE 说明:** `<script>` 标签的 IIFE 产物
 > (`dist/iife/documonster.iife.min.js`) 刻意不包含公式引擎,保持精简。
-> 如果通过 `<script>` 标签使用时需要公式计算,请改用 ESM 并调用本
-> subpath 的 `installFormulaEngine()`。
+> 如果通过 `<script>` 标签使用时需要公式计算,请改用 ESM,从本 subpath
+> import `Formula`,然后调用 `Formula.calculate(wb)`。
 
 ## 示例
 
@@ -154,7 +146,7 @@ subpath 给你三种 tree-shaking 结果:
 | `formula-database.ts`        | `DSUM`/`DCOUNT`/`DAVERAGE` + 条件区域                          |
 | `formula-engineering.ts`     | 进制转换、位运算、复数、ERF/BESSELJ                            |
 | `formula-standalone.ts`      | 函数式 API + 不求值的 `tokenize`/`parse`                       |
-| `formula-pdf-integration.ts` | `excelToPdf()` 中的自动重算                                    |
+| `formula-pdf-integration.ts` | `Pdf.fromExcel()` 中的自动重算                                 |
 
 运行任意示例:
 
@@ -182,33 +174,56 @@ npx tsx src/modules/formula/examples/formula-pdf-integration.ts
 
 ## API
 
-### `installFormulaEngine(): void`
+### `Formula.calculate(workbook: WorkbookLike): void`
 
-把 `calculateFormulas` 接到 `Workbook.calculateFormulas()` 和 `excelToPdf()` 的预渲染自动重算上,并安装默认 syntax probe 让 XLSX 的 defined names 走严格分类。可多次调用(最后一次注册生效)。仅在你使用 excel 模块的 `Workbook` 类时需要。
+唯一的函数式求值入口。遍历 workbook 所有公式单元格,完整解析依赖后求值,把结果写回每个单元格的 `result` 属性,并将动态数组 spill 物化到幽灵单元格。就地修改 workbook。零全局副作用;对不同 workbook 的并发调用是安全的。**没有安装或注册步骤**,也**没有 `Workbook.calculateFormulas()` 方法** — 直接调用 `Formula.calculate(wb)`。接受任何 `WorkbookLike`;不需要 excel 模块,但 excel 模块创建的 `Workbook` 在结构上是兼容的,可直接传入。
 
-### `uninstallFormulaEngine(): void`
+### PDF 导出重算
 
-对称地重置 `installFormulaEngine()` 设置的两个槽位 — engine 和默认 probe。调用后 `Workbook.calculateFormulas()` 会抛,defined-name 分类回退到保守的 "opaque" 路径。主要用于测试里验证冷启动分类行为。
+`Pdf.fromExcel` 不依赖公式引擎。要在渲染前重算公式,通过 `recalculate` 选项注入 `Formula.calculate` — 只有主动选用的调用方才会把约 200 KB 的引擎打进 bundle。不传时使用缓存在 XLSX 里的结果(对 Excel 自己写出的文件而言是安全的默认行为)。
 
-### `calculateFormulas(workbook: WorkbookLike): void`
+```typescript
+import { Pdf } from "documonster/pdf";
+import { Formula } from "documonster/formula";
 
-函数式入口 — **单独使用**模式的核心。遍历 workbook 所有公式单元格,完整解析依赖后求值,把结果写回 `cell.result`,并将动态数组 spill 物化到幽灵单元格。就地修改 workbook。零全局副作用;对不同 workbook 的并发调用是安全的。接受任何 `WorkbookLike`,**不需要** excel 模块。
+const bytes = await Pdf.fromExcel(wb, { recalculate: Formula.calculate });
+```
 
-### `createFormulaSyntaxProbe(): SyntaxProbe`
+### 定义名称的语法分类
 
-构造一个独立的 tokenizer+parser probe — 返回一个函数,参数字符串能解析为公式表达式时返回 `true`。通过 `new Workbook({ formulaSyntaxProbe })` 或 `new DefinedNames(probe)` 注入,让**该实例**的 defined-name 分类走严格路径,**不**触碰进程全局状态。适合测试和多宿主场景。
+excel 模块加载 XLSX 时,会用一个内置 syntax probe 对定义名称分类,该 probe 复用本引擎的 `tokenize` + `parse`。这是自动的 — 无需任何设置,而且从不加载 XLSX 的 `Workbook` 永远不会把 tokenizer/parser 拉进来。要按实例覆盖分类行为(例如自定义宿主),把你自己的 probe —— 一个 `(text: string) => boolean` —— 传给 `Workbook.create({ formulaSyntaxProbe })`。你可以用本模块的原语构造一个:
 
-### `tokenize(source: string): Token[]`
+```typescript
+import { Workbook } from "documonster/excel";
+import { Formula } from "documonster/formula";
+
+const probe = (text: string): boolean => {
+  try {
+    Formula.parse(Formula.tokenize(text));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const wb = Workbook.create({ formulaSyntaxProbe: probe });
+```
+
+### `Formula.tokenize(source: string): Token[]`
 
 纯词法分析 — 接受公式字符串(带不带前导 `=` 都行),返回扁平 token 流。遇到非法字符抛异常。
 
-### `parse(tokens: Token[]): AstNode`
+### `Formula.parse(tokens: Token[]): AstNode`
 
 Pratt parser — 从 token 流构建类型化 AST。结构错误抛异常。
 
+### 错误
+
+`FormulaError`(基类)、`FormulaParseError`(携带可选的 0-based `position`),以及 `isFormulaError` 类型守卫。
+
 ### 结构化类型
 
-`WorkbookLike`、`WorksheetLike`、`CellLike`、`RowLike`、`CellErrorValueLike`、`FormulaResultLike`、`DefinedNameEntry`、`DefinedNamesLike`、`DimensionsLike`、`SpillRegion`、`SyntaxProbe`。
+`WorkbookLike`、`WorksheetLike`、`CellLike`、`RowLike`、`CellErrorValueLike`、`FormulaResultLike`、`DefinedNameEntry`、`DefinedNamesLike`、`DimensionsLike`、`SpillRegion`。
 
 ## 兼容性说明
 

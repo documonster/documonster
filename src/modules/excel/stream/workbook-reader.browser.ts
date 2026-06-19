@@ -12,7 +12,8 @@
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
 import { ExcelFileError } from "@excel/errors";
-import { HyperlinkReader, type Hyperlink } from "@excel/stream/hyperlink-reader";
+import type { Hyperlink } from "@excel/stream/hyperlink-reader";
+import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
 import type { WorksheetState, Font, WorkbookProperties } from "@excel/types";
 import { iterateStream } from "@excel/utils/iterate-stream";

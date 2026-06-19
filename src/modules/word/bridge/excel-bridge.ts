@@ -6,27 +6,15 @@
  *
  * @example
  * ```typescript
- * import { Workbook } from "documonster";
+ * import { Workbook } from "documonster/excel";
  * import { excelToDocx } from "documonster/word/excel";
  *
- * const wb = new Workbook();
+ * const wb = Workbook.create();
  * await Workbook.read(wb, buffer);
  * const doc = excelToDocx(wb);
  * ```
  */
 
-import {
-  type CellData as ExcelCell,
-  cellAlignment,
-  cellBorder,
-  cellFill,
-  cellFont,
-  cellGetValue,
-  cellHyperlink,
-  cellSetValue,
-  cellText,
-  cellType
-} from "@excel/cell";
 import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
 import type {
   AddChartExOptions,
@@ -61,9 +49,38 @@ import type {
 } from "@excel/chart/model/types";
 import { renderChartSvg } from "@excel/chart/render/chart-renderer";
 import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
-import { ValueType } from "@excel/enums";
+import type { CellData as ExcelCell } from "@excel/core/cell";
+import {
+  cellAlignment,
+  cellBorder,
+  cellFill,
+  cellFont,
+  cellGetValue,
+  cellHyperlink,
+  cellSetValue,
+  cellText,
+  cellType
+} from "@excel/core/cell";
+import { ValueType } from "@excel/core/enums";
+import { rowCellCount } from "@excel/core/row";
+import { addWorksheet, getWorksheets } from "@excel/core/workbook";
+// Use the browser base class so the public `excelToDocx(workbook)` signature
+// is callable from both the Node entry (where `Workbook` is the Node subclass
+// — trivially assignable to the base) and the browser entry (where `Workbook`
+// is already the base). Importing the Node alias `@excel/workbook` would force
+// browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
+// XLSX surface intentionally omits — see issue #160.
+import type { WorkbookData } from "@excel/core/workbook.browser";
+import {
+  getCell,
+  getColumn,
+  getRow,
+  getRowCount,
+  getSheetName,
+  rowGetCell
+} from "@excel/core/worksheet";
+import type { Worksheet } from "@excel/core/worksheet";
 import { Workbook } from "@excel/index";
-import { rowCellCount } from "@excel/row";
 import type {
   Font as ExcelFont,
   Fill as ExcelFill,
@@ -72,24 +89,7 @@ import type {
   Alignment as ExcelAlignment,
   Color as ExcelColor
 } from "@excel/types";
-import { addWorksheet, getWorksheets } from "@excel/workbook";
-// Use the browser base class so the public `excelToDocx(workbook)` signature
-// is callable from both the Node entry (where `Workbook` is the Node subclass
-// — trivially assignable to the base) and the browser entry (where `Workbook`
-// is already the base). Importing the Node alias `@excel/workbook` would force
-// browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
-// XLSX surface intentionally omits — see issue #160.
-import type { WorkbookData } from "@excel/workbook.browser";
-import {
-  getCell,
-  getColumn,
-  getRow,
-  getRowCount,
-  getSheetName,
-  rowGetCell
-} from "@excel/worksheet";
-import type { Worksheet } from "@excel/worksheet";
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { extractParagraphText } from "@word/core/text-utils";
 import type {
   Alignment,
@@ -760,7 +760,7 @@ export function renderWordChartSvg(chart: Chart): string {
 export async function generateChartEmbeddedXlsx(
   series: readonly { name: string; categories: readonly string[]; values: readonly number[] }[]
 ): Promise<Uint8Array> {
-  const { createWorkbook } = await import("@excel/workbook");
+  const { createWorkbook } = await import("@excel/core/workbook");
   const wb = createWorkbook();
   const ws = addWorksheet(wb, "Sheet1");
 

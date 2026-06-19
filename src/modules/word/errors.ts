@@ -4,7 +4,8 @@
  * All DOCX-related errors extend DocxError.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import type { BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 /**
  * Base class for all DOCX-related errors.

@@ -1,40 +1,45 @@
 import type { PivotChartOptions } from "@excel/chart/model/types";
-import { type ColumnData } from "@excel/column";
-import { PivotTableError } from "@excel/errors";
-import { type RangeData, rangeCreate, rangeExpand } from "@excel/range";
-import { type RowData, rowDimensions, rowValues } from "@excel/row";
-import { tableModel, type TableData } from "@excel/table";
-import { colCache } from "@excel/utils/col-cache";
+import type { ColumnData } from "@excel/core/column";
+import type { RangeData } from "@excel/core/range";
+import { rangeCreate, rangeExpand } from "@excel/core/range";
+import type { RowData } from "@excel/core/row";
+import { rowDimensions, rowValues } from "@excel/core/row";
+import type { TableData } from "@excel/core/table";
+import { tableModel } from "@excel/core/table";
+import type { WorksheetData } from "@excel/core/worksheet-core";
 import {
-  type WorksheetData,
   columnValues,
   getColumn,
   getRow,
   getSheetName,
   getSheetValues
-} from "@excel/worksheet-core";
+} from "@excel/core/worksheet-core";
+import { PivotTableError } from "@excel/errors";
+import { colCache } from "@excel/utils/col-cache";
 import { range, toSortedArray } from "@utils/utils";
 
+import type {
+  CacheField,
+  DataField,
+  ParsedCacheDefinition,
+  ParsedCacheRecords,
+  PivotError,
+  PivotTableChartFormat,
+  PivotTableSubtotal,
+  RecordValue,
+  SharedItemValue
+} from "./pivot-table-types";
 import {
-  type CacheField,
-  type DataField,
   METRIC_DISPLAY_NAMES,
-  type ParsedCacheDefinition,
-  type ParsedCacheRecords,
-  type PivotError,
   pivotError,
   isPivotError,
   formatPivotError,
-  type PivotTableChartFormat,
-  type PivotTableSubtotal,
-  type RecordValue,
-  type SharedItemValue,
   VALID_SUBTOTALS
 } from "./pivot-table-types";
 
 // Re-export the pure OOXML data types/constants that were relocated to
 // pivot-table-types.ts, preserving backward compatibility for existing
-// `import { X } from "@excel/pivot-table"` call sites (worksheet.ts,
+// `import { X } from "@excel/core/pivot-table"` call sites (worksheet.ts,
 // surface/pivot.ts, etc.).
 export {
   type CacheField,

@@ -17,7 +17,7 @@ import {
   UnsupportedCompressionError,
   toError,
   suppressUnhandledRejection
-} from "@archive/shared/errors";
+} from "@archive/core/errors";
 import { describe, it, expect } from "vitest";
 
 describe("errors", () => {

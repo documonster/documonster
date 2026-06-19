@@ -1,6 +1,5 @@
 import { extractAll } from "@archive/unzip/extract";
-import { cellGetValue } from "@excel/cell";
-import { Cell, Table, Workbook, Worksheet } from "@excel/index";
+import { cellGetValue } from "@excel/core/cell";
 import {
   sanitizeTableName,
   tableAddColumn,
@@ -18,9 +17,10 @@ import {
   tableSetName,
   tableSetRef,
   tableSetTotalsRow
-} from "@excel/table";
+} from "@excel/core/table";
+import { getCell, getTable, removeTable, rowGetCell } from "@excel/core/worksheet";
+import { Cell, Table, Workbook, Worksheet } from "@excel/index";
 import { colCache } from "@excel/utils/col-cache";
-import { getCell, getTable, removeTable, rowGetCell } from "@excel/worksheet";
 import { describe, it, expect } from "vitest";
 
 const spliceArray = (a: any[], index: number, count: number, ...rest: any[]) => {

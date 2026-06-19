@@ -15,10 +15,10 @@ import {
   writeMarkdownBuffer
 } from "@excel/bridge/markdown-bridge";
 import { readMarkdownFile } from "@excel/bridge/markdown-bridge.node";
-import { cellGetValue, cellSetValue } from "@excel/cell";
+import { cellGetValue, cellSetValue } from "@excel/core/cell";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { getSheetName, rowGetCell } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
-import { getSheetName, rowGetCell } from "@excel/worksheet";
 import { MarkdownParseError } from "@markdown/errors";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";

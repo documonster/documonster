@@ -35,9 +35,8 @@ import {
   chartsheetSetName,
   chartsheetWorkbookViewId,
   chartsheetZoomToFit
-} from "@excel/chartsheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
-import { getChartEntry, getWorksheets } from "@excel/workbook";
+} from "@excel/core/chartsheet";
+import { getChartEntry, getWorksheets } from "@excel/core/workbook";
 import {
   addBarChart,
   addChart,
@@ -50,7 +49,8 @@ import {
   addPieChart,
   addScatterChart,
   getCharts
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 const textDecoder = new TextDecoder();

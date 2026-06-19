@@ -1,6 +1,9 @@
-import type { PivotTableSource } from "@excel/pivot-table";
-import type { CacheField as CacheFieldType, ParsedCacheDefinition } from "@excel/pivot-table-types";
-import { rangeShortRange } from "@excel/range";
+import type { PivotTableSource } from "@excel/core/pivot-table";
+import type {
+  CacheField as CacheFieldType,
+  ParsedCacheDefinition
+} from "@excel/core/pivot-table-types";
+import { rangeShortRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";

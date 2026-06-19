@@ -1,8 +1,8 @@
 import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
-import { cellGetValue, cellType } from "@excel/cell";
-import { ValueType } from "@excel/enums";
+import { cellGetValue, cellType } from "@excel/core/cell";
+import { ValueType } from "@excel/core/enums";
+import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { getCell } from "@excel/worksheet";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 

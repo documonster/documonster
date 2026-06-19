@@ -13,7 +13,7 @@
  * - `parseRevisionInfo` (w:ins/w:del/w:rPrChange/etc. revision metadata)
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, boolToggle, findChildNs, safeParseInt } from "@word/reader/parse-utils";
 import type {
   Border,

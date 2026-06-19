@@ -5,7 +5,7 @@
  * Extracted from the original `metadata-parsers.ts`.
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
   attrVal,

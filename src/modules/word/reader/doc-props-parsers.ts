@@ -8,7 +8,7 @@
  * - word/fontTable.xml (FontDef[] — embedded font references)
  */
 
-import { type Mutable } from "@word/core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import { attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
 import type {
   AppProperties,

@@ -34,11 +34,11 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import {
-  type AddChartSeriesOptions,
-  type ChartRichText,
-  type ChartStyleModel,
-  type ChartColorsModel
+import type {
+  AddChartSeriesOptions,
+  ChartRichText,
+  ChartStyleModel,
+  ChartColorsModel
 } from "@excel/chart/index";
 import {
   Address,

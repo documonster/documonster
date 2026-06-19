@@ -1,14 +1,14 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { Cell, Workbook } from "@excel/index";
-import type { WorkbookData } from "@excel/workbook-core";
-import { addWorkbookImage } from "@excel/workbook-core";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { addWorkbookImage } from "@excel/core/workbook-core";
 import {
   addBackgroundImage,
   addFormCheckbox,
   addImage,
   addPivotTable,
   addTable
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
 import { makeTestDataPath } from "@test/utils";
 import { describe, it } from "vitest";
 

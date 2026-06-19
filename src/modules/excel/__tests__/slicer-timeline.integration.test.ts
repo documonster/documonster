@@ -19,8 +19,8 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { ZipEditor } from "@archive/zip";
+import { getWorkbookModel } from "@excel/core/workbook";
 import { Cell, Workbook } from "@excel/index";
-import { getWorkbookModel } from "@excel/workbook";
 import { describe, it, expect } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";

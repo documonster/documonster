@@ -5,12 +5,8 @@
  * Works identically in both Node.js and Browser environments.
  */
 
-import {
-  createFormatConfig,
-  formatRowWithLookup,
-  type FormatConfig,
-  type FormatRowOptions
-} from "@csv/format";
+import type { FormatConfig, FormatRowOptions } from "@csv/format";
+import { createFormatConfig, formatRowWithLookup } from "@csv/format";
 import type { CsvFormatOptions, Row } from "@csv/types";
 import {
   extractRowValues,

@@ -1,8 +1,8 @@
 import { Writable } from "node:stream";
 
-import { cellSetValue } from "@excel/cell";
+import { cellSetValue } from "@excel/core/cell";
+import { rowCommit, rowGetCell } from "@excel/core/worksheet";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
-import { rowCommit, rowGetCell } from "@excel/worksheet";
 /**
  * Memory bounds verification for WorkbookWriter under a paced sink.
  *

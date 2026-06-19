@@ -5,8 +5,9 @@
  */
 
 import { crc32 } from "@archive/compression/crc32";
-import { decodeCp437, decodeZipPath } from "@archive/shared/text";
-import { parseExtraField, type ZipVars } from "@archive/unzip/parser-core";
+import { decodeCp437, decodeZipPath } from "@archive/core/text";
+import type { ZipVars } from "@archive/unzip/parser-core";
+import { parseExtraField } from "@archive/unzip/parser-core";
 import { FLAG_UTF8 } from "@archive/zip-spec/zip-records";
 import { describe, it, expect } from "vitest";
 

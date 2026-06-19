@@ -36,7 +36,8 @@ import type {
   TransformResult
 } from "@csv/types";
 import { startsWithFormulaChar } from "@csv/utils/detect";
-import { formatNumberForCsv, type DecimalSeparator } from "@csv/utils/number";
+import type { DecimalSeparator } from "@csv/utils/number";
+import { formatNumberForCsv } from "@csv/utils/number";
 import {
   deduplicateHeaders,
   isRowHashArray,

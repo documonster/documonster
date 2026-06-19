@@ -71,7 +71,10 @@
         "typescript/no-empty-interface": 2,
         "typescript/no-non-null-asserted-optional-chain": 2,
         "typescript/no-empty-object-type": 2,
-        "typescript/consistent-type-imports": 2,
+        "typescript/consistent-type-imports": [
+          2,
+          { "prefer": "type-imports", "fixStyle": "separate-type-imports" }
+        ],
         "typescript/consistent-type-exports": 2,
         "typescript/no-require-imports": "error",
         "typescript/prefer-ts-expect-error": 2,

@@ -1,17 +1,17 @@
 import { extractAll } from "@archive/unzip/extract";
-import { anchorCol, anchorRow } from "@excel/anchor";
-import { cellSetValue } from "@excel/cell";
-import { Cell, Workbook } from "@excel/index";
-import { WorkbookWriter } from "@excel/stream/workbook-writer";
-import { getImage } from "@excel/workbook";
-import { addWorkbookImage } from "@excel/workbook-core";
+import { anchorCol, anchorRow } from "@excel/core/anchor";
+import { cellSetValue } from "@excel/core/cell";
+import { getImage } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
 import {
   addBackgroundImage,
   addImage,
   addWatermark,
   getImages,
   getWatermark
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { Writable } from "@stream";
 import { describe, it, expect } from "vitest";
 

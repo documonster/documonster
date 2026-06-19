@@ -7,9 +7,9 @@ import {
   anchorRowHeight,
   anchorSetCol,
   anchorSetRow
-} from "@excel/anchor";
+} from "@excel/core/anchor";
+import { getColumn } from "@excel/core/worksheet-core";
 import { Worksheet } from "@excel/index";
-import { getColumn } from "@excel/worksheet-core";
 import { describe, it, expect, beforeEach } from "vitest";
 
 describe("Anchor", () => {

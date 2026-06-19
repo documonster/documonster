@@ -45,7 +45,7 @@ export {
   getColumns as columns,
   getLastColumn as lastColumn,
   getLastRow as lastRow
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
 
 export {
   addRow,
@@ -56,7 +56,7 @@ export {
   findRows,
   eachRow,
   getSheetValues as getValues
-} from "@excel/worksheet-core";
+} from "@excel/core/worksheet-core";
 
 /** A worksheet handle (opaque to consumers). */
-export type { WorksheetData as Handle } from "@excel/worksheet-core";
+export type { WorksheetData as Handle } from "@excel/core/worksheet-core";

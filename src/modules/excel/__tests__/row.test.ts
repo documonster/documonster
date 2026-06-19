@@ -1,9 +1,8 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { cellBorder, cellFont, cellGetValue, cellSetValue, cellType } from "@excel/cell";
-import { Enums } from "@excel/enums";
-import { Worksheet } from "@excel/index";
+import { cellBorder, cellFont, cellGetValue, cellSetValue, cellType } from "@excel/core/cell";
+import { Enums } from "@excel/core/enums";
+import type { RowModel } from "@excel/core/row";
 import {
-  type RowModel,
   rowActualCellCount,
   rowCellCount,
   rowDimensions,
@@ -15,7 +14,7 @@ import {
   rowSetOutlineLevel,
   rowValues,
   rowValuesToString
-} from "@excel/row";
+} from "@excel/core/row";
 import {
   rowEachCell,
   rowGetCell,
@@ -24,7 +23,8 @@ import {
   rowSplice,
   columnSetDefn,
   getColumn
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Row", () => {

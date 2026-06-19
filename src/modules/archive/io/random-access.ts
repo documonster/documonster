@@ -95,8 +95,8 @@ export interface HttpRangeReaderStats {
 /**
  * Error thrown when the server doesn't support Range requests.
  */
-export { RangeNotSupportedError, HttpRangeError } from "@archive/shared/errors";
-import { RangeNotSupportedError, HttpRangeError } from "@archive/shared/errors";
+export { RangeNotSupportedError, HttpRangeError } from "@archive/core/errors";
+import { RangeNotSupportedError, HttpRangeError, ArchiveError } from "@archive/core/errors";
 
 /**
  * Parse total file size from Content-Range header.
@@ -314,7 +314,7 @@ export class HttpRangeReader implements RandomAccessReader {
           return instance;
         }
       } else {
-        throw new Error(
+        throw new ArchiveError(
           contentLength
             ? `Invalid Content-Length "${contentLength}" for: ${url}`
             : `Server did not provide Content-Length for: ${url}`

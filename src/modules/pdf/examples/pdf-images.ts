@@ -12,9 +12,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addImage } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
-import { addWorkbookImage } from "@excel/workbook-core";
-import { addImage } from "@excel/worksheet";
 
 import { Pdf } from "../index";
 import { pdf } from "../pdf";

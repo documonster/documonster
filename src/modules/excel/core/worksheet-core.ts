@@ -1,6 +1,6 @@
 // Type-only imports for the WorksheetData record shape. These are erased at
 // compile time and never create a runtime dependency.
-import type { AnchorData } from "@excel/anchor";
+import type { AnchorData } from "@excel/core/anchor";
 /**
  * worksheet-core — the low-level Worksheet container layer.
  *
@@ -25,10 +25,8 @@ import type { AnchorData } from "@excel/anchor";
  *
  * No file below this one imports the heavy `worksheet.ts`.
  */
+import type { CellData, CellAddress, CellValueType } from "@excel/core/cell";
 import {
-  type CellData,
-  type CellAddress,
-  type CellValueType,
   CellTypes,
   cellComment,
   cellCreate,
@@ -43,32 +41,27 @@ import {
   cellSetProtection,
   cellSetValue,
   cellType
-} from "@excel/cell";
+} from "@excel/core/cell";
+import type { ColumnData, ColumnDefn, ColumnHeaderValue, ColumnModel } from "@excel/core/column";
+import { columnHeaders } from "@excel/core/column";
+import type { DataValidationsData } from "@excel/core/data-validations";
+import { Enums } from "@excel/core/enums";
+import type { FormCheckboxData } from "@excel/core/form-control";
+import type { ImageData } from "@excel/core/image";
+import type { PivotTable } from "@excel/core/pivot-table";
+import type { RangeData } from "@excel/core/range";
+import type { RowData, RowModel } from "@excel/core/row";
 import {
-  type ColumnData,
-  type ColumnDefn,
-  type ColumnHeaderValue,
-  type ColumnModel,
-  columnHeaders
-} from "@excel/column";
-import type { DataValidationsData } from "@excel/data-validations";
-import { Enums } from "@excel/enums";
-import { ExcelError } from "@excel/errors";
-import type { FormCheckboxData } from "@excel/form-control";
-import type { ImageData } from "@excel/image";
-import type { PivotTable } from "@excel/pivot-table";
-import type { RangeData } from "@excel/range";
-import {
-  type RowData,
-  type RowModel,
   rowCreate,
   rowFindCell,
   rowHasValues,
   rowValues,
   resolveColumnKeyValue
-} from "@excel/row";
+} from "@excel/core/row";
+import type { TableData } from "@excel/core/table";
+import type { Workbook } from "@excel/core/workbook";
+import { ExcelError } from "@excel/errors";
 import type { SparklineGroup } from "@excel/sparkline";
-import type { TableData } from "@excel/table";
 import type {
   Alignment,
   AutoFilter,
@@ -94,7 +87,6 @@ import type {
 } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
-import type { Workbook } from "@excel/workbook";
 
 export interface SheetProtection {
   sheet?: boolean;

@@ -1,9 +1,9 @@
+import type { FormCheckboxModel } from "@excel/core/form-control";
 import {
   formCheckboxVmlAnchor,
   formCheckboxVmlCheckedValue,
-  formCheckboxVmlStyle,
-  type FormCheckboxModel
-} from "@excel/form-control";
+  formCheckboxVmlStyle
+} from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { StdDocAttributes } from "@xml/writer";

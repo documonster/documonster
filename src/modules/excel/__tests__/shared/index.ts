@@ -11,7 +11,7 @@ import { splice } from "@excel/__tests__/shared/test-spliced-sheet";
 import { values } from "@excel/__tests__/shared/test-values-sheet";
 import { testWorkbookReader } from "@excel/__tests__/shared/test-workbook-reader";
 import { fix } from "@excel/__tests__/shared/tools";
-import { addWorksheet, createWorkbook } from "@excel/workbook";
+import { addWorksheet, createWorkbook } from "@excel/core/workbook";
 import { expect } from "vitest";
 
 /** Local test helper: dotted-path getter (replaces the retired under-dash `get`). */

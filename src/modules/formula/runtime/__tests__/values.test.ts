@@ -9,6 +9,16 @@
 
 import { describe, it, expect } from "vitest";
 
+import type {
+  ArrayValue,
+  BooleanValue,
+  ErrorValue,
+  NumberValue,
+  ReferenceValue,
+  RuntimeValue,
+  ScalarValue,
+  StringValue
+} from "../values";
 import {
   BLANK,
   ERRORS,
@@ -30,15 +40,7 @@ import {
   toBooleanRV,
   toNumberRV,
   toStringRV,
-  topLeft,
-  type ArrayValue,
-  type BooleanValue,
-  type ErrorValue,
-  type NumberValue,
-  type ReferenceValue,
-  type RuntimeValue,
-  type ScalarValue,
-  type StringValue
+  topLeft
 } from "../values";
 
 describe("values — constructor helpers", () => {

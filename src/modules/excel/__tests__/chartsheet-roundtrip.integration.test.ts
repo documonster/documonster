@@ -21,13 +21,14 @@ import {
   chartsheetTabSelected,
   chartsheetZoomScale,
   chartsheetZoomToFit
-} from "@excel/chartsheet";
+} from "@excel/core/chartsheet";
+import { getChartsheets, getWorksheets } from "@excel/core/workbook";
 import { Chart, Workbook } from "@excel/index";
-import { getChartsheets, getWorksheets } from "@excel/workbook";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expectValidXlsx } from "./helpers/expect-valid-xlsx";
-import { buildChartsheetFixtures, type SyntheticFixture } from "./helpers/synthetic-fixtures";
+import type { SyntheticFixture } from "./helpers/synthetic-fixtures";
+import { buildChartsheetFixtures } from "./helpers/synthetic-fixtures";
 import { entryText, loadRoundTrip } from "./helpers/zip-text";
 
 let chartsheetFixtures: SyntheticFixture[];

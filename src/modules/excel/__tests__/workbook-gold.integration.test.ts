@@ -1,6 +1,6 @@
-import { cellGetValue } from "@excel/cell";
+import { cellGetValue } from "@excel/core/cell";
+import { getColumn, getCell } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
-import { getColumn, getCell } from "@excel/worksheet";
 import { makeTestDataPath } from "@test/utils";
 import { describe, it, expect, beforeAll } from "vitest";
 

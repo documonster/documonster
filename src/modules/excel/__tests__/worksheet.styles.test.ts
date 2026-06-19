@@ -1,7 +1,12 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { cellAlignment, cellFill, cellFont, cellGetValue, cellNumFmt } from "@excel/cell";
-import { Cell, Workbook, Worksheet } from "@excel/index";
-import { rowSetAlignment, rowSetBorder, rowSetFill, rowSetFont, rowSetNumFmt } from "@excel/row";
+import { cellAlignment, cellFill, cellFont, cellGetValue, cellNumFmt } from "@excel/core/cell";
+import {
+  rowSetAlignment,
+  rowSetBorder,
+  rowSetFill,
+  rowSetFont,
+  rowSetNumFmt
+} from "@excel/core/row";
 import {
   columnSetAlignment,
   columnSetBorder,
@@ -11,7 +16,8 @@ import {
   findCell,
   getCell,
   getColumn
-} from "@excel/worksheet";
+} from "@excel/core/worksheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {

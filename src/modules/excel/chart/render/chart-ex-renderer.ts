@@ -15,19 +15,17 @@ import type {
   ChartExSeries
 } from "@excel/chart/model/chart-ex-types";
 import type { ChartTitle, ShapeProperties } from "@excel/chart/model/types";
-import {
-  renderSvgToPng,
-  type ChartPdfDrawingSurface,
-  type ChartPdfPathOp,
-  type ChartRenderOptions,
-  type RegionMapDataOptions,
-  type RegionMapMatchRule
+import type {
+  ChartPdfDrawingSurface,
+  ChartPdfPathOp,
+  ChartRenderOptions,
+  RegionMapDataOptions,
+  RegionMapMatchRule
 } from "@excel/chart/render/chart-renderer";
-import {
-  resolveTopologyObject,
-  type ResolvedRing,
-  type TopologyLike
-} from "@excel/chart/render/topojson";
+import { renderSvgToPng } from "@excel/chart/render/chart-renderer";
+import type { ResolvedRing, TopologyLike } from "@excel/chart/render/topojson";
+import { resolveTopologyObject } from "@excel/chart/render/topojson";
+import type { ChartRect, PdfColor } from "@excel/chart/shared/chart-utils";
 import {
   COLORS,
   DEFAULT_HEIGHT,
@@ -43,9 +41,7 @@ import {
   polar,
   previewShapeFillColor,
   valueToY,
-  withAlpha,
-  type ChartRect,
-  type PdfColor
+  withAlpha
 } from "@excel/chart/shared/chart-utils";
 import { getSpPrFill } from "@excel/chart/shared/shape-properties";
 import { ChartOptionsError } from "@excel/errors";

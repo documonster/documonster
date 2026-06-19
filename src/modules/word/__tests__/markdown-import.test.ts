@@ -4,11 +4,8 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  markdownToDocx,
-  markdownToDocxBody,
-  type MarkdownImageData
-} from "../convert/markdown/markdown-import";
+import type { MarkdownImageData } from "../convert/markdown/markdown-import";
+import { markdownToDocx, markdownToDocxBody } from "../convert/markdown/markdown-import";
 import { Io } from "../index";
 import type { BodyContent, Hyperlink, InlineImageContent, Paragraph, Run, Table } from "../types";
 

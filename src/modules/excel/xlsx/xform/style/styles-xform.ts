@@ -1,4 +1,4 @@
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
 import { ExcelNotSupportedError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";

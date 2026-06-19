@@ -10,7 +10,8 @@
 
 import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, findChildrenNs } from "@word/reader/parse-utils";
-import { type ReaderContext, createFieldState } from "@word/reader/reader-context";
+import type { ReaderContext } from "@word/reader/reader-context";
+import { createFieldState } from "@word/reader/reader-context";
 import type { CommentDef, Paragraph } from "@word/types";
 import { parseXml } from "@xml/dom";
 import type { XmlElement } from "@xml/types";

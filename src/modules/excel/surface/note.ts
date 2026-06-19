@@ -13,7 +13,7 @@ export {
   isNoteData as isNote,
   noteModel as model,
   noteFromModel as fromModel
-} from "@excel/note";
+} from "@excel/core/note";
 
 /** A note handle. */
-export type { NoteData as Handle } from "@excel/note";
+export type { NoteData as Handle } from "@excel/core/note";

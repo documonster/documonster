@@ -27,7 +27,7 @@ export { HttpRangeReader, BufferReader } from "@archive/io/random-access";
 export { RemoteZipReader } from "@archive/unzip/remote-zip-reader";
 
 // Abort helpers
-export { createAbortError, isAbortError, throwIfAborted } from "@archive/shared/errors";
+export { createAbortError, isAbortError, throwIfAborted } from "@archive/core/errors";
 
 // High-level ZIP API
 export { zip } from "@archive/create-archive";

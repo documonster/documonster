@@ -14,7 +14,8 @@
  * Works in both Node.js and browsers using the Web Crypto API.
  */
 
-import { toArrayBuffer } from "@archive/shared/text";
+import { ArchiveError } from "@archive/core/errors";
+import { toArrayBuffer } from "@archive/core/text";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { randomBytes } from "@utils/crypto";
 
@@ -141,7 +142,7 @@ function getWebCrypto(): SubtleCrypto {
   if (typeof globalThis.crypto?.subtle !== "undefined") {
     return globalThis.crypto.subtle;
   }
-  throw new Error("Web Crypto API not available");
+  throw new ArchiveError("Web Crypto API not available");
 }
 
 /**
@@ -389,7 +390,7 @@ export async function aesDecrypt(
 ): Promise<Uint8Array> {
   const components = extractAesComponents(encryptedData, keyStrength);
   if (!components) {
-    throw new Error("Encrypted data too short");
+    throw new ArchiveError("Encrypted data too short");
   }
 
   const { salt, storedVerify, ciphertext, storedHmac } = components;
@@ -399,13 +400,13 @@ export async function aesDecrypt(
 
   // Verify password
   if (!verifyPasswordBytes(keys.passwordVerify, storedVerify)) {
-    throw new Error("Password verification failed");
+    throw new ArchiveError("Password verification failed");
   }
 
   // Verify HMAC (constant-time comparison to prevent timing attacks)
   const computedHmac = await aesComputeHmac(keys.hmacKey, ciphertext);
   if (!constantTimeEqual(computedHmac, storedHmac)) {
-    throw new Error("HMAC verification failed");
+    throw new ArchiveError("HMAC verification failed");
   }
 
   // Decrypt data
@@ -521,7 +522,7 @@ export async function aesCheckSignature(
 ): Promise<boolean> {
   const components = extractAesComponents(encryptedData, keyStrength);
   if (!components) {
-    throw new Error("Encrypted data too short");
+    throw new ArchiveError("Encrypted data too short");
   }
 
   const { salt, storedVerify, ciphertext, storedHmac } = components;
@@ -531,7 +532,7 @@ export async function aesCheckSignature(
 
   // Verify password first
   if (!verifyPasswordBytes(keys.passwordVerify, storedVerify)) {
-    throw new Error("Password verification failed");
+    throw new ArchiveError("Password verification failed");
   }
 
   // Compute and compare HMAC (constant-time)

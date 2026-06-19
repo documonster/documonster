@@ -14,7 +14,8 @@
  * - transform/validate callbacks
  */
 
-import { Csv, type CsvParseResult, type RecordWithInfo } from "@csv/index";
+import type { CsvParseResult, RecordWithInfo } from "@csv/index";
+import { Csv } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
 import { describe, it, expect } from "vitest";
 

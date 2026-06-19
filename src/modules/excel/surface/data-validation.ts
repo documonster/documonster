@@ -13,7 +13,7 @@ export {
   dataValidationAdd as add,
   dataValidationFind as find,
   dataValidationRemove as remove
-} from "@excel/data-validations";
+} from "@excel/core/data-validations";
 
 /** A data-validations handle. */
-export type { DataValidationsData as Handle } from "@excel/data-validations";
+export type { DataValidationsData as Handle } from "@excel/core/data-validations";
