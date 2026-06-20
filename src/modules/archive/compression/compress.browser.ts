@@ -174,7 +174,21 @@ async function processWithStrategy(
 
   // Default: use native stream if supported (fastest, no worker overhead).
   if (canUseNative) {
-    return strategy.native(data);
+    try {
+      return await strategy.native(data);
+    } catch (err) {
+      // Respect aborts — never silently retry an aborted operation.
+      rethrowIfAborted(err, options.signal);
+      // Native CompressionStream / DecompressionStream can intermittently
+      // reject input that is in fact valid (observed in Chromium under heavy
+      // concurrent stream creation: a `DecompressionStream` rejects a deflate
+      // payload that the pure-JS inflater — and a fresh native stream — decode
+      // correctly). Rather than surface a spurious "invalid literal/lengths
+      // set" / corruption error, fall back to the deterministic pure-JS
+      // implementation. If the data is genuinely corrupt the JS path throws
+      // too, so this never masks a real error.
+      return strategy.jsFallback(data, options.level);
+    }
   }
 
   // Use worker in fallback environments (no native deflate-raw) when appropriate.

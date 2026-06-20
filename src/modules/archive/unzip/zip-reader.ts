@@ -324,11 +324,39 @@ export class UnzipEntry {
         password: this._password,
         signal: this._signal
       });
-      for await (const chunk of outStream) {
-        if (this._onBytesOut && chunk.length) {
-          this._onBytesOut(this.path, this.type, chunk.length);
+
+      // Robustness: the browser's native streaming `DecompressionStream` can
+      // intermittently reject input that is in fact valid deflate (observed in
+      // Chromium under heavy concurrent stream creation). The non-streaming
+      // `processEntryData` path already recovers from this by falling back to
+      // the pure-JS inflater. Mirror that here: if the streaming inflate fails
+      // *before producing any output* we have not yielded anything yet, so we
+      // can safely re-decode the whole (already in-memory) entry via the
+      // buffered path and yield the result as a single chunk. Once output has
+      // started flowing we keep streaming; a mid-stream failure on valid data
+      // has not been observed and would indicate genuine corruption.
+      let producedOutput = false;
+      try {
+        for await (const chunk of outStream) {
+          producedOutput = true;
+          if (this._onBytesOut && chunk.length) {
+            this._onBytesOut(this.path, this.type, chunk.length);
+          }
+          yield chunk;
         }
-        yield chunk;
+      } catch (err) {
+        if (producedOutput) {
+          throw err;
+        }
+        // Fall back to the buffered decode (which itself falls back to pure-JS
+        // inflate on native failure). Throws if the data is genuinely corrupt.
+        const recovered = await this.bytes();
+        if (recovered.length) {
+          if (this._onBytesOut) {
+            this._onBytesOut(this.path, this.type, recovered.length);
+          }
+          yield recovered;
+        }
       }
       return;
     }
