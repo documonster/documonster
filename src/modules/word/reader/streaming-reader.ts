@@ -22,7 +22,9 @@
  *     only the first inflate chunk — empirically ~0.5 % of a multi-MB part —
  *     rather than after the whole part has been decompressed. This is what
  *     makes the pipeline genuinely O(largest element) end-to-end (inflate
- *     chunk → SAX → one subtree → yield → discard).
+ *     chunk → SAX → one subtree → yield → discard). This holds on both Node
+ *     (zlib streaming inflate) and the browser (native `DecompressionStream`);
+ *     it is verified in a real Chromium by the streaming-reader browser suite.
  *   - Shared metadata parts (`*.rels`, `styles.xml`, `numbering.xml`) are
  *     small by construction and are buffered before body iteration begins so
  *     hyperlinks / numbering references resolve correctly. This matches the

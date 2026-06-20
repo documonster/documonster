@@ -304,11 +304,23 @@ export class UnzipEntry {
       // `word/document.xml` / xlsx `sheetN.xml`), which is what makes
       // SAX-driven streaming readers genuinely O(largest element) on an
       // in-memory package instead of O(full uncompressed part).
+      //
+      // The compressed bytes are fed in fixed-size slices rather than as a
+      // single chunk. Feeding the whole entry in one `write()` lets the
+      // decompressor (notably the browser's async `DecompressionStream`,
+      // whose read loop runs ahead of the consumer) produce *all* output
+      // before the consumer pulls the first chunk — collapsing the stream
+      // back to O(full uncompressed part). Slicing the input interleaves
+      // production with consumption so output is delivered incrementally on
+      // every platform.
       const compressedData = readEntryCompressedData(this._data, this._info);
-      const single = (async function* () {
-        yield compressedData;
+      const FEED_CHUNK = 65536;
+      const feed = (async function* () {
+        for (let off = 0; off < compressedData.length; off += FEED_CHUNK) {
+          yield compressedData.subarray(off, off + FEED_CHUNK);
+        }
       })();
-      const outStream = processEntryDataStream(this._info, single, {
+      const outStream = processEntryDataStream(this._info, feed, {
         password: this._password,
         signal: this._signal
       });
