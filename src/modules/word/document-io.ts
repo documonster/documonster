@@ -5,10 +5,12 @@
  * plus the public Patch and Template APIs that combine read/patch/write.
  */
 
+import { readFileBytes, writeFileBytes } from "@utils/fs";
 import { bytesToBase64 } from "@word/core/internal-utils";
 import type { PatchOperation } from "@word/patcher";
 import { applyPatchesToDocument } from "@word/patcher";
 import { readDocx } from "@word/reader/docx-reader";
+import type { ReadDocxOptions } from "@word/reader/docx-reader";
 import { fillTemplate } from "@word/template/template-engine";
 import type { TemplateOptions } from "@word/template/template-engine";
 import type { DocxDocument } from "@word/types";
@@ -34,6 +36,47 @@ export async function toBuffer(
 export async function toBase64(doc: DocxDocument, options?: PackageDocxOptions): Promise<string> {
   const bytes = await toBuffer(doc, options);
   return bytesToBase64(bytes);
+}
+
+// =============================================================================
+// File-path IO (Node only)
+// =============================================================================
+//
+// Convenience wrappers that read/write a DOCX directly from/to the filesystem,
+// mirroring the Excel module's `Workbook.readFile` / `Workbook.writeFile`. They
+// delegate byte IO to `@utils/fs`, whose `*.browser` variant throws a helpful
+// "not available" error — so these resolve to no-ops only on Node and fail
+// clearly in the browser without dragging `node:fs` into browser bundles.
+
+/**
+ * Read a DOCX file from a filesystem path and parse it into a `DocxDocument`.
+ *
+ * Node-only. In the browser, read the bytes yourself and use {@link read}.
+ *
+ * @param path - Filesystem path to the `.docx` file.
+ * @param options - Read options (password, security policy).
+ */
+export async function readFile(path: string, options?: ReadDocxOptions): Promise<DocxDocument> {
+  const bytes = await readFileBytes(path);
+  return readDocx(bytes, options);
+}
+
+/**
+ * Package a `DocxDocument` and write it to a filesystem path.
+ *
+ * Node-only. In the browser, use {@link toBuffer} and persist the bytes yourself.
+ *
+ * @param doc - The document model to serialize.
+ * @param path - Destination filesystem path.
+ * @param options - Packaging options.
+ */
+export async function writeFile(
+  doc: DocxDocument,
+  path: string,
+  options?: PackageDocxOptions
+): Promise<void> {
+  const bytes = await toBuffer(doc, options);
+  await writeFileBytes(path, bytes);
 }
 
 // =============================================================================

@@ -1961,119 +1961,151 @@ function parseDocumentXml(
     }
     const name = child.name.replace(/^w:/, "");
 
-    switch (name) {
-      case "p": {
-        // Per OOXML schema (CT_OMathPara is a member of EG_PContent), a
-        // body-level math block is encoded as a paragraph containing a
-        // single m:oMathPara child. Detect that shape and surface it as
-        // a top-level MathBlock so the document model stays flat — the
-        // writer reverses this by re-wrapping math blocks in <w:p>.
-        const mathParaChildren = child.children.filter(
-          c => c.type === "element" && c.name === "m:oMathPara"
-        );
-        const otherChildren = child.children.filter(c => {
-          if (c.type !== "element") {
-            return false;
-          }
-          // pPr is allowed; everything else (runs, hyperlinks, etc.) means
-          // we're NOT a synthetic math wrapper and must keep the paragraph.
-          return c.name !== "w:pPr" && c.name !== "m:oMathPara";
-        });
-        if (mathParaChildren.length > 0 && otherChildren.length === 0) {
-          for (const oMathPara of mathParaChildren) {
-            if (oMathPara.type === "element") {
-              body.push(parseMathBlock(oMathPara));
-            }
-          }
-          break;
-        }
+    // The body-level <w:sectPr> sets the final section properties rather than
+    // contributing a BodyContent entry, so it is handled here directly; every
+    // other element type is delegated to the shared `parseBodyChild` so the
+    // streaming reader can reuse the exact same per-element logic.
+    if (name === "sectPr") {
+      sectionProperties = parseSectionProperties(child);
+      continue;
+    }
 
-        const para = parseParagraph(child, ctx);
-        // Extract floating content from this paragraph element and insert
-        // immediately after it to preserve document position.
-        const pFloatingImages: FloatingImage[] = [];
-        const pDrawingShapes: DrawingShape[] = [];
-        const pOpaqueDrawings: OpaqueDrawing[] = [];
-        extractFloatingContent(child, pFloatingImages, pDrawingShapes, pOpaqueDrawings, ctx);
-
-        // parseDrawingContent (called from parseRunContent) already preserved
-        // every non-picture inline drawing as an `opaqueRun` so the drawing
-        // survives a round-trip even inside cells/headers/footers/SDTs where
-        // this body-level extractor is not invoked. At the body level
-        // extractFloatingContent has now also captured those drawings as
-        // `OpaqueDrawing` entries — that is the form chart-parser is wired
-        // to look for when promoting them to `ChartContent`. To avoid
-        // duplicate output we strip any opaqueRun whose XML embeds a
-        // <wp:inline> drawing from the paragraph here.
-        if (pOpaqueDrawings.length > 0) {
-          stripInlineDrawingOpaqueRuns(para);
-        }
-
-        // If the paragraph is otherwise empty AND we did extract anchored
-        // content out of it, treat the paragraph as a synthetic carrier for
-        // the floating drawing(s) and drop it. Otherwise keeping it would
-        // cause a phantom empty paragraph to accumulate on every round-trip
-        // (writer wraps floating images in their own <w:p>, reader pulls the
-        // anchor out, leaving an empty <w:p> behind).
-        const hasAnchoredContent =
-          pFloatingImages.length > 0 || pDrawingShapes.length > 0 || pOpaqueDrawings.length > 0;
-        const paragraphIsEmpty = isEmptyParagraph(para);
-        if (!(hasAnchoredContent && paragraphIsEmpty)) {
-          body.push(para);
-        }
-
-        for (const fi of pFloatingImages) {
-          body.push(fi);
-        }
-        for (const ds of pDrawingShapes) {
-          body.push(ds);
-        }
-        for (const od of pOpaqueDrawings) {
-          body.push(od);
-        }
-        break;
-      }
-      case "tbl":
-        body.push(parseTable(child, ctx));
-        break;
-      case "sectPr":
-        // Final section properties at the body level
-        sectionProperties = parseSectionProperties(child);
-        break;
-      case "sdt": {
-        const sdtResult = parseSdt(child, ctx);
-        if (sdtResult) {
-          body.push(sdtResult as BodyContent);
-        }
-        break;
-      }
-      case "altChunk": {
-        const rId = child.attributes["r:id"] ?? child.attributes["id"];
-        if (rId) {
-          body.push({ type: "altChunk", rId });
-        }
-        break;
-      }
-      default: {
-        // Check for math namespace
-        if (child.name === "m:oMathPara") {
-          body.push(parseMathBlock(child));
-        } else if (child.name === "m:oMath") {
-          body.push({ type: "math", content: parseMathContent(child) });
-        }
-        // Check for VML pict (textbox)
-        if (name === "pict" || child.name === "w:pict") {
-          const tb = parseTextBox(child, ctx);
-          if (tb) {
-            body.push(tb);
-          }
-        }
-        break;
-      }
+    for (const item of parseBodyChild(child, ctx)) {
+      body.push(item);
     }
   }
 
   return { body, sectionProperties, background };
+}
+
+/**
+ * Parse a single body-level child element into zero or more {@link BodyContent}
+ * entries.
+ *
+ * Extracted from {@link parseDocumentXml}'s body loop so that both the batch
+ * reader and the streaming reader ({@link createDocxStreamReader}) run the
+ * exact same per-element logic — paragraph/table/sdt/altChunk/math/textbox
+ * handling plus per-paragraph floating-content extraction. The caller is
+ * responsible for handling the body-level `<w:sectPr>` (which sets section
+ * properties rather than producing a BodyContent entry); this function never
+ * emits anything for it.
+ *
+ * A single source element can expand to multiple entries: a paragraph carrying
+ * anchored drawings yields the paragraph followed by each extracted floating
+ * image / shape / opaque drawing, preserving document position.
+ */
+export function parseBodyChild(child: XmlElement, ctx: ReaderContext): BodyContent[] {
+  const out: BodyContent[] = [];
+  const name = child.name.replace(/^w:/, "");
+
+  switch (name) {
+    case "p": {
+      // Per OOXML schema (CT_OMathPara is a member of EG_PContent), a
+      // body-level math block is encoded as a paragraph containing a
+      // single m:oMathPara child. Detect that shape and surface it as
+      // a top-level MathBlock so the document model stays flat — the
+      // writer reverses this by re-wrapping math blocks in <w:p>.
+      const mathParaChildren = child.children.filter(
+        c => c.type === "element" && c.name === "m:oMathPara"
+      );
+      const otherChildren = child.children.filter(c => {
+        if (c.type !== "element") {
+          return false;
+        }
+        // pPr is allowed; everything else (runs, hyperlinks, etc.) means
+        // we're NOT a synthetic math wrapper and must keep the paragraph.
+        return c.name !== "w:pPr" && c.name !== "m:oMathPara";
+      });
+      if (mathParaChildren.length > 0 && otherChildren.length === 0) {
+        for (const oMathPara of mathParaChildren) {
+          if (oMathPara.type === "element") {
+            out.push(parseMathBlock(oMathPara));
+          }
+        }
+        break;
+      }
+
+      const para = parseParagraph(child, ctx);
+      // Extract floating content from this paragraph element and insert
+      // immediately after it to preserve document position.
+      const pFloatingImages: FloatingImage[] = [];
+      const pDrawingShapes: DrawingShape[] = [];
+      const pOpaqueDrawings: OpaqueDrawing[] = [];
+      extractFloatingContent(child, pFloatingImages, pDrawingShapes, pOpaqueDrawings, ctx);
+
+      // parseDrawingContent (called from parseRunContent) already preserved
+      // every non-picture inline drawing as an `opaqueRun` so the drawing
+      // survives a round-trip even inside cells/headers/footers/SDTs where
+      // this body-level extractor is not invoked. At the body level
+      // extractFloatingContent has now also captured those drawings as
+      // `OpaqueDrawing` entries — that is the form chart-parser is wired
+      // to look for when promoting them to `ChartContent`. To avoid
+      // duplicate output we strip any opaqueRun whose XML embeds a
+      // <wp:inline> drawing from the paragraph here.
+      if (pOpaqueDrawings.length > 0) {
+        stripInlineDrawingOpaqueRuns(para);
+      }
+
+      // If the paragraph is otherwise empty AND we did extract anchored
+      // content out of it, treat the paragraph as a synthetic carrier for
+      // the floating drawing(s) and drop it. Otherwise keeping it would
+      // cause a phantom empty paragraph to accumulate on every round-trip
+      // (writer wraps floating images in their own <w:p>, reader pulls the
+      // anchor out, leaving an empty <w:p> behind).
+      const hasAnchoredContent =
+        pFloatingImages.length > 0 || pDrawingShapes.length > 0 || pOpaqueDrawings.length > 0;
+      const paragraphIsEmpty = isEmptyParagraph(para);
+      if (!(hasAnchoredContent && paragraphIsEmpty)) {
+        out.push(para);
+      }
+
+      for (const fi of pFloatingImages) {
+        out.push(fi);
+      }
+      for (const ds of pDrawingShapes) {
+        out.push(ds);
+      }
+      for (const od of pOpaqueDrawings) {
+        out.push(od);
+      }
+      break;
+    }
+    case "tbl":
+      out.push(parseTable(child, ctx));
+      break;
+    case "sdt": {
+      const sdtResult = parseSdt(child, ctx);
+      if (sdtResult) {
+        out.push(sdtResult as BodyContent);
+      }
+      break;
+    }
+    case "altChunk": {
+      const rId = child.attributes["r:id"] ?? child.attributes["id"];
+      if (rId) {
+        out.push({ type: "altChunk", rId });
+      }
+      break;
+    }
+    default: {
+      // Check for math namespace
+      if (child.name === "m:oMathPara") {
+        out.push(parseMathBlock(child));
+      } else if (child.name === "m:oMath") {
+        out.push({ type: "math", content: parseMathContent(child) });
+      }
+      // Check for VML pict (textbox)
+      if (name === "pict" || child.name === "w:pict") {
+        const tb = parseTextBox(child, ctx);
+        if (tb) {
+          out.push(tb);
+        }
+      }
+      break;
+    }
+  }
+
+  return out;
 }
 
 // =============================================================================

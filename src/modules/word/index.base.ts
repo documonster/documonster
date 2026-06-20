@@ -451,6 +451,9 @@ export type {
 } from "@word/writer/streaming-writer";
 
 /** @stability experimental */
+export type { StreamingReadOptions, StreamingDocxMetadata } from "@word/reader/streaming-reader";
+
+/** @stability experimental */
 export type {
   ValidationSeverity,
   ValidationIssue,

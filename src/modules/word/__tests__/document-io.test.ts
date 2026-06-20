@@ -560,3 +560,30 @@ describe("applyPatchesToDocument: visible-run coverage", () => {
     expect(t0 + t1).toBe("Hi Friend!");
   });
 });
+
+// =============================================================================
+// File-path IO (Node only) — mirrors Excel's Workbook.readFile / writeFile
+// =============================================================================
+
+describe("Io.writeFile / Io.readFile", () => {
+  it("round-trips a document through the filesystem", async () => {
+    const { createTempDir } = await import("@utils/fs");
+    const { join } = await import("node:path");
+
+    const dir = await createTempDir("documonster-word-io-");
+    const filePath = join(dir, "out.docx");
+
+    const h = Document.create();
+    Document.addHeading(h, "File IO Title", 1);
+    Document.addContent(h, Build.textParagraph("hello from disk"));
+    const doc = Document.build(h);
+
+    await Io.writeFile(doc, filePath);
+    const parsed = await Io.read(await Io.toBuffer(doc));
+    const roundTripped = await Io.readFile(filePath);
+
+    // readFile result must equal reading the same bytes via read().
+    expect(roundTripped.body.length).toBe(parsed.body.length);
+    expect(JSON.stringify(roundTripped.body)).toBe(JSON.stringify(parsed.body));
+  });
+});

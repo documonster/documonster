@@ -288,9 +288,35 @@ export class UnzipEntry {
 
   async *stream(): AsyncIterable<Uint8Array> {
     if (this._data && this._info) {
-      const data = await this.bytes();
-      if (data.length) {
-        yield data;
+      // Symlinks are tiny and their target is resolved by bytes() via
+      // _processExtractedBytes; keep the buffered path for them.
+      if (this._info.type === "symlink") {
+        const data = await this.bytes();
+        if (data.length) {
+          yield data;
+        }
+        return;
+      }
+
+      // True streaming for buffer-backed entries: inflate incrementally rather
+      // than materializing the whole uncompressed entry up-front. This keeps
+      // peak memory at O(inflate chunk) for large entries (e.g. a multi-MB
+      // `word/document.xml` / xlsx `sheetN.xml`), which is what makes
+      // SAX-driven streaming readers genuinely O(largest element) on an
+      // in-memory package instead of O(full uncompressed part).
+      const compressedData = readEntryCompressedData(this._data, this._info);
+      const single = (async function* () {
+        yield compressedData;
+      })();
+      const outStream = processEntryDataStream(this._info, single, {
+        password: this._password,
+        signal: this._signal
+      });
+      for await (const chunk of outStream) {
+        if (this._onBytesOut && chunk.length) {
+          this._onBytesOut(this.path, this.type, chunk.length);
+        }
+        yield chunk;
       }
       return;
     }

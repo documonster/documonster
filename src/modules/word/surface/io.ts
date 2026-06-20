@@ -4,6 +4,7 @@
  *
  * `import { Io } from "documonster/word"` →
  *   `Io.package(doc)`, `Io.read(buffer)`, `Io.toBuffer(doc)`,
+ *   `Io.readFile(path)`, `Io.writeFile(doc, path)` (Node only),
  *   `Io.patchDocument(...)`, `Io.updateFields(doc)`, … — tree-shaken via
  *   `export * as Io`.
  */
@@ -12,6 +13,8 @@ export { readDocx as read } from "@word/reader/docx-reader";
 export {
   toBuffer,
   toBase64,
+  readFile,
+  writeFile,
   patchDocument,
   compileTemplate,
   patchTemplate,
