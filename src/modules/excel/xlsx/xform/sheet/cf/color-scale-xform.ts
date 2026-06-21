@@ -1,9 +1,16 @@
+import type { Color, Cvfo } from "@excel/types";
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfvoXform } from "@excel/xlsx/xform/sheet/cf/cfvo-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class ColorScaleXform extends CompositeXform {
+interface ColorScaleModel {
+  cfvo: Cvfo[];
+  color: Partial<Color>[];
+}
+
+class ColorScaleXform extends CompositeXform<ColorScaleModel> {
   cfvoXform: CfvoXform;
   colorXform: ColorXform;
 
@@ -20,28 +27,28 @@ class ColorScaleXform extends CompositeXform {
     return "colorScale";
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: ColorScaleModel): void {
     xmlStream.openNode(this.tag);
 
-    model.cfvo.forEach((cfvo: any) => {
+    model.cfvo.forEach(cfvo => {
       this.cfvoXform.render(xmlStream, cfvo);
     });
-    model.color.forEach((color: any) => {
+    model.color.forEach(color => {
       this.colorXform.render(xmlStream, color);
     });
 
     xmlStream.closeNode();
   }
 
-  createNewModel(node: any): any {
+  createNewModel(_node?: ParseOpenTag): ColorScaleModel {
     return {
       cfvo: [],
       color: []
     };
   }
 
-  onParserClose(name: string, parser: any): void {
-    this.model[name].push(parser.model);
+  onParserClose(name: string, parser: BaseXform): void {
+    (this.model as unknown as Record<string, unknown[]>)[name].push(parser.model);
   }
 }
 
