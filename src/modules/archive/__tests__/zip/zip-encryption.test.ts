@@ -186,6 +186,61 @@ describe("ZIP Encryption End-to-End", () => {
       );
     });
 
+    // Regression: WinZip AE-2 interop. AE-2 mandates a ZERO CRC-32 field in both
+    // the local file header and the central directory (integrity comes from the
+    // HMAC). Writing the real CRC made strict external readers (WinZip, 7-Zip,
+    // pyzipper) reject the entry. These byte-level assertions lock in the fix
+    // without depending on an external unzip tool.
+    it.each([128, 192, 256] as const)(
+      "writes a zero CRC-32 for AE-2 AES-%i (WinZip interop)",
+      async strength => {
+        const entries: ZipEntry[] = [
+          { name: "a.txt", data: new TextEncoder().encode("first entry payload") },
+          { name: "b.txt", data: new TextEncoder().encode("second entry, a bit longer payload") }
+        ];
+
+        const zip = await createZip(entries, {
+          encryptionMethod: `aes-${strength}` as "aes-128" | "aes-192" | "aes-256",
+          password: "pw"
+        });
+        const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+
+        const LFH_SIG = 0x04034b50;
+        const CDH_SIG = 0x02014b50;
+        const AES_METHOD = 99;
+
+        // Every local file header: method == 99 (AES) and CRC-32 == 0.
+        let localHeaders = 0;
+        for (let i = 0; i + 4 <= zip.length; i++) {
+          if (view.getUint32(i, true) === LFH_SIG) {
+            expect(view.getUint16(i + 8, true)).toBe(AES_METHOD); // compression method
+            expect(view.getUint32(i + 14, true)).toBe(0); // CRC-32 must be zero for AE-2
+            localHeaders++;
+          }
+        }
+        expect(localHeaders).toBe(2);
+
+        // Every central directory header: method == 99 and CRC-32 == 0.
+        let centralHeaders = 0;
+        for (let i = 0; i + 4 <= zip.length; i++) {
+          if (view.getUint32(i, true) === CDH_SIG) {
+            expect(view.getUint16(i + 10, true)).toBe(AES_METHOD); // compression method
+            expect(view.getUint32(i + 16, true)).toBe(0); // CRC-32 must be zero for AE-2
+            centralHeaders++;
+          }
+        }
+        expect(centralHeaders).toBe(2);
+
+        // Round-trips through our own reader regardless of the zeroed CRC.
+        const parser = new ZipParser(zip);
+        const extracted = await parser.extractAll("pw");
+        expect(new TextDecoder().decode(extracted.get("a.txt")!)).toBe("first entry payload");
+        expect(new TextDecoder().decode(extracted.get("b.txt")!)).toBe(
+          "second entry, a bit longer payload"
+        );
+      }
+    );
+
     it("should throw when extracting AES with extractSync", async () => {
       const entries: ZipEntry[] = [
         { name: "aes.txt", data: new TextEncoder().encode("AES content") }

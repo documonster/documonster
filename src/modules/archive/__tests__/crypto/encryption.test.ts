@@ -216,7 +216,7 @@ describe("AES Encryption", () => {
       const keys = await aesDerive(password, salt, 192); // AES-192
 
       expect(keys.encryptionKey).toHaveLength(24); // 192 bits
-      expect(keys.hmacKey).toHaveLength(32);
+      expect(keys.hmacKey).toHaveLength(24); // WinZip AES: HMAC key length == AES key length
       expect(keys.passwordVerify).toHaveLength(2);
     });
 
@@ -227,7 +227,7 @@ describe("AES Encryption", () => {
       const keys = await aesDerive(password, salt, 128); // AES-128
 
       expect(keys.encryptionKey).toHaveLength(16); // 128 bits
-      expect(keys.hmacKey).toHaveLength(32);
+      expect(keys.hmacKey).toHaveLength(16); // WinZip AES: HMAC key length == AES key length
       expect(keys.passwordVerify).toHaveLength(2);
     });
 
