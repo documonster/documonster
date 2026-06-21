@@ -1,3 +1,4 @@
+import type { Color } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { parseBoolean } from "@utils/utils";
@@ -5,7 +6,7 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface EdgeModel {
   style?: string;
-  color?: any;
+  color?: Partial<Color>;
 }
 
 interface BorderModel {
@@ -14,13 +15,13 @@ interface BorderModel {
   bottom?: EdgeModel;
   right?: EdgeModel;
   diagonal?: EdgeModel & { up?: boolean; down?: boolean };
-  color?: any;
+  color?: Partial<Color>;
 }
 
 class EdgeXform extends BaseXform {
   declare private name: string;
   declare public map: { color: ColorXform };
-  declare private defaultColor: any;
+  declare private defaultColor: Partial<Color> | undefined;
   declare public parser?: BaseXform;
 
   constructor(name: string) {
@@ -36,7 +37,7 @@ class EdgeXform extends BaseXform {
     return this.name;
   }
 
-  render(xmlStream: XmlSink, model?: EdgeModel, defaultColor?: any): void {
+  render(xmlStream: XmlSink, model?: EdgeModel, defaultColor?: Partial<Color>): void {
     const color = (model && model.color) || defaultColor || this.defaultColor;
     xmlStream.openNode(this.name);
     if (model && model.style) {
@@ -209,9 +210,13 @@ class BorderXform extends BaseXform {
       return true;
     }
     if (name === "border") {
-      const model: any = {};
+      const model: BorderModel = {};
       let hasContent = false;
-      const add = (key: string, edgeModel: any, extensions?: any): void => {
+      const add = (
+        key: "left" | "right" | "top" | "bottom" | "diagonal",
+        edgeModel: EdgeModel | undefined,
+        extensions?: { up?: boolean; down?: boolean }
+      ): void => {
         if (edgeModel) {
           if (extensions) {
             Object.assign(edgeModel, extensions);

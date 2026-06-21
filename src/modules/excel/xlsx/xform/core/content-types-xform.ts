@@ -24,16 +24,56 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
+/**
+ * The (write-only) model the content-types manifest is rendered from: the set
+ * of parts the package contains. Sub-entries are typed to the fields this
+ * renderer actually reads.
+ */
+interface ContentTypesModel {
+  media?: { type?: string; extension: string }[];
+  worksheets: { fileIndex: number }[];
+  chartsheets?: { sheetNo: number }[];
+  pivotTables?: {
+    tableNumber: number;
+    cacheId: string;
+    cacheRecords?: unknown;
+    isLoaded?: boolean;
+  }[];
+  tables?: { target: string }[];
+  drawings?: { name: string }[];
+  externalLinks?: { index: number }[];
+  chartEntries?: unknown[];
+  chartExEntries?: unknown[];
+  chartExStructuredEntries?: unknown[];
+  chartColors?: unknown[];
+  chartStyles?: unknown[];
+  chartExColors?: unknown[];
+  chartExStyles?: unknown[];
+  commentRefs?: { commentName: string }[];
+  formControlRefs?: (string | number)[];
+  slicerPartPaths?: string[];
+  slicerCachePartPaths?: string[];
+  timelinePartPaths?: string[];
+  timelineCachePartPaths?: string[];
+  threadedCommentSheetIds?: (number | string)[];
+  sharedStrings?: { count?: number };
+  hasChartsheetVml?: boolean;
+  hasCheckboxes?: boolean;
+  hasDynamicArrayFormulas?: boolean;
+  hasHeaderWatermark?: boolean;
+  hasPersons?: boolean;
+}
+
 // used for rendering the [Content_Types].xml file
 // not used for parsing
 class ContentTypesXform extends BaseXform {
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: ContentTypesModel): void {
     xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("Types", ContentTypesXform.PROPERTY_ATTRIBUTES);
 
     const mediaHash: { [key: string]: boolean } = {};
-    (model.media ?? []).forEach((medium: any) => {
+    (model.media ?? []).forEach(medium => {
       if (medium.type === "image") {
         // External (linked) images add no part to the package, so they need
         // no Default content-type registration.
@@ -64,7 +104,7 @@ class ContentTypesXform extends BaseXform {
       ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
     });
 
-    model.worksheets.forEach((worksheet: any) => {
+    model.worksheets.forEach(worksheet => {
       xmlStream.leafNode("Override", {
         PartName: toContentTypesPartName(worksheetPath(worksheet.fileIndex)),
         ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
@@ -72,7 +112,7 @@ class ContentTypesXform extends BaseXform {
     });
 
     if (model.chartsheets) {
-      model.chartsheets.forEach((cs: any) => {
+      model.chartsheets!.forEach(cs => {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(chartsheetPath(cs.sheetNo)),
           ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"
@@ -86,7 +126,7 @@ class ContentTypesXform extends BaseXform {
       const writtenCacheIds = new Set<string>();
 
       // Add content types for each pivot table
-      (model.pivotTables ?? []).forEach((pivotTable: any) => {
+      (model.pivotTables ?? []).forEach(pivotTable => {
         const n = pivotTable.tableNumber;
         const cacheId: string = pivotTable.cacheId;
 
@@ -165,7 +205,7 @@ class ContentTypesXform extends BaseXform {
     }
 
     if (model.tables) {
-      model.tables.forEach((table: any) => {
+      model.tables!.forEach(table => {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(tablePath(table.target)),
           ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"
@@ -174,7 +214,7 @@ class ContentTypesXform extends BaseXform {
     }
 
     if (model.drawings) {
-      model.drawings.forEach((drawing: any) => {
+      model.drawings!.forEach(drawing => {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(drawingPath(drawing.name)),
           ContentType: "application/vnd.openxmlformats-officedocument.drawing+xml"
@@ -295,7 +335,7 @@ class ContentTypesXform extends BaseXform {
     }
 
     if (hasComments) {
-      model.commentRefs.forEach(({ commentName }: { commentName: string }) => {
+      model.commentRefs!.forEach(({ commentName }) => {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(commentsPathFromName(commentName)),
           ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"
@@ -304,7 +344,7 @@ class ContentTypesXform extends BaseXform {
     }
 
     if (hasFormControls) {
-      for (const ctrlPropId of model.formControlRefs) {
+      for (const ctrlPropId of model.formControlRefs!) {
         xmlStream.leafNode("Override", {
           PartName: toContentTypesPartName(ctrlPropPath(ctrlPropId)),
           ContentType: "application/vnd.ms-excel.controlproperties+xml"
