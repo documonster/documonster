@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { decodeOoxmlEscape, encodeOoxmlEscape } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
 
 //   <t xml:space="preserve"> is </t>
 
@@ -8,7 +9,7 @@ class TextXform extends BaseXform {
     return "t";
   }
 
-  render(xmlStream: any, model: string): void {
+  render(xmlStream: XmlSink, model: string): void {
     xmlStream.openNode("t");
     if (/^\s|\n|\s$/.test(model)) {
       xmlStream.addAttribute("xml:space", "preserve");

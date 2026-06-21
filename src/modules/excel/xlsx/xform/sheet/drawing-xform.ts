@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface DrawingModel {
   rId: string;
@@ -9,7 +10,7 @@ class DrawingXform extends BaseXform {
     return "drawing";
   }
 
-  render(xmlStream: any, model?: DrawingModel): void {
+  render(xmlStream: XmlSink, model?: DrawingModel): void {
     if (model) {
       xmlStream.leafNode(this.tag, { "r:id": model.rId });
     }

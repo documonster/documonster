@@ -23,6 +23,7 @@
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { uuidV4 } from "@utils/uuid";
+import type { XmlSink } from "@xml/types";
 
 const CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const CHART_EX_URI = "http://schemas.microsoft.com/office/drawing/2014/chartex";
@@ -67,7 +68,7 @@ class GraphicFrameXform extends BaseXform {
     }
   }
 
-  render(xmlStream: any, model: GraphicFrameModel): void {
+  render(xmlStream: XmlSink, model: GraphicFrameModel): void {
     xmlStream.openNode(this.tag, { macro: "" });
 
     // Non-visual properties

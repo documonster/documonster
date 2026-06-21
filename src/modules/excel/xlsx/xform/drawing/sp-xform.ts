@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { EMU_PER_PX } from "@utils/units";
+import type { XmlSink } from "@xml/types";
 
 export interface ShapeModel {
   /** Drawing object id (must be unique within drawing part) */
@@ -19,7 +20,7 @@ class SpXform extends BaseXform {
     return "xdr:sp";
   }
 
-  render(xmlStream: any, model?: ShapeModel): void {
+  render(xmlStream: XmlSink, model?: ShapeModel): void {
     if (!model) {
       return;
     }

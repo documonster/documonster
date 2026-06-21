@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlClientDataXform } from "@excel/xlsx/xform/comment/vml-client-data-xform";
 import { VmlTextboxXform } from "@excel/xlsx/xform/comment/vml-textbox-xform";
+import type { XmlSink } from "@xml/types";
 
 interface ShapeModel {
   note: {
@@ -35,7 +36,7 @@ class VmlShapeXform extends BaseXform {
     return "v:shape";
   }
 
-  render(xmlStream: any, model: ShapeModel, index?: number): void {
+  render(xmlStream: XmlSink, model: ShapeModel, index?: number): void {
     xmlStream.openNode("v:shape", VmlShapeXform.V_SHAPE_ATTRIBUTES(model, index ?? 0));
 
     xmlStream.leafNode("v:fill", { color2: "infoBackground [80]" });

@@ -1,5 +1,6 @@
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfRuleXform } from "@excel/xlsx/xform/sheet/cf/cf-rule-xform";
+import type { XmlSink } from "@xml/types";
 
 class ConditionalFormattingXform extends CompositeXform {
   constructor() {
@@ -14,7 +15,7 @@ class ConditionalFormattingXform extends CompositeXform {
     return "conditionalFormatting";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     // if there are no primitive rules, exit now
     if (!model.rules.some(CfRuleXform.isPrimitive)) {
       return;

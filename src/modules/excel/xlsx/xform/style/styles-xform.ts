@@ -9,6 +9,7 @@ import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { StyleXform } from "@excel/xlsx/xform/style/style-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // custom numfmt ids start here
@@ -135,7 +136,7 @@ class StylesXform extends BaseXform {
     this.defaultFont = font;
   }
 
-  render(xmlStream: any, model?: StylesModel): void {
+  render(xmlStream: XmlSink, model?: StylesModel): void {
     const renderModel = model || this.model;
     //
     //   <fonts count="2" x14ac:knownFonts="1">

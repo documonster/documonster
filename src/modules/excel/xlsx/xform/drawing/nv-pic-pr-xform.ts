@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CNvPicPrXform } from "@excel/xlsx/xform/drawing/c-nv-pic-pr-xform";
 import { CNvPrXform } from "@excel/xlsx/xform/drawing/c-nv-pr-xform";
+import type { XmlSink } from "@xml/types";
 
 class NvPicPrXform extends BaseXform {
   declare public map: { [key: string]: any };
@@ -20,7 +21,7 @@ class NvPicPrXform extends BaseXform {
     return "xdr:nvPicPr";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openNode(this.tag);
     this.map["xdr:cNvPr"].render(xmlStream, model);
     this.map["xdr:cNvPicPr"].render(xmlStream, model);

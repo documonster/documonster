@@ -4,6 +4,7 @@ import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { UnderlineXform } from "@excel/xlsx/xform/style/underline-xform";
+import type { XmlSink } from "@xml/types";
 
 interface FontModel {
   bold?: boolean;
@@ -81,7 +82,7 @@ class FontXform extends BaseXform {
     return this.options.tagName;
   }
 
-  render(xmlStream: any, model: FontModel): void {
+  render(xmlStream: XmlSink, model: FontModel): void {
     const { map, renderOrder } = this;
 
     xmlStream.openNode(this.options.tagName);

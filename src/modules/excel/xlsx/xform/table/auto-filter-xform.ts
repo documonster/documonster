@@ -1,6 +1,7 @@
 import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { FilterColumnXform } from "@excel/xlsx/xform/table/filter-column-xform";
+import type { XmlSink } from "@xml/types";
 
 interface AutoFilterModel {
   autoFilterRef: string;
@@ -30,7 +31,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     });
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openNode(this.tag, {
       ref: model.autoFilterRef
     });

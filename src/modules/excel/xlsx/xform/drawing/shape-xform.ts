@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { EMU_PER_POINT } from "@utils/units";
+import type { XmlSink } from "@xml/types";
 
 /** Fill specification for a drawing shape. */
 export interface ShapeFill {
@@ -74,7 +75,7 @@ class ShapeXform extends BaseXform {
     return "xdr:sp";
   }
 
-  render(xmlStream: any, model: ShapeRenderModel): void {
+  render(xmlStream: XmlSink, model: ShapeRenderModel): void {
     xmlStream.openNode("xdr:sp", { macro: "", textlink: "" });
 
     // --- Non-visual shape properties ---

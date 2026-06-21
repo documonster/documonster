@@ -1,5 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 class AutoFilterXform extends BaseXform {
   declare public model: any;
@@ -8,7 +9,7 @@ class AutoFilterXform extends BaseXform {
     return "autoFilter";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     if (model) {
       if (typeof model === "string") {
         // assume range

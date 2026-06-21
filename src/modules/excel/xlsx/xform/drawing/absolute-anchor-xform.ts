@@ -6,6 +6,7 @@ import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { EMU_PER_PX } from "@utils/units";
+import type { XmlSink } from "@xml/types";
 
 interface PosModel {
   x: number;
@@ -29,7 +30,7 @@ class PosXform extends BaseXform<PosModel> {
     return "xdr:pos";
   }
 
-  render(xmlStream: any, model: PosModel): void {
+  render(xmlStream: XmlSink, model: PosModel): void {
     xmlStream.leafNode(this.tag, {
       x: Math.floor(model.x * EMU_PER_PX),
       y: Math.floor(model.y * EMU_PER_PX)
@@ -102,7 +103,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:pos"].render(xmlStream, model.range.pos ?? { x: 0, y: 0 });

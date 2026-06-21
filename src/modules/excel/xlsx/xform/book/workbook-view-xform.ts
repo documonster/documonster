@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface WorkbookViewModel {
   x?: number;
@@ -11,7 +12,7 @@ interface WorkbookViewModel {
 }
 
 class WorkbookViewXform extends BaseXform {
-  render(xmlStream: any, model: WorkbookViewModel): void {
+  render(xmlStream: XmlSink, model: WorkbookViewModel): void {
     const attributes: any = {
       xWindow: model.x ?? 0,
       yWindow: model.y ?? 0,

@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface PageMarginsModel {
   left?: number;
@@ -14,7 +15,7 @@ class PageMarginsXform extends BaseXform {
     return "pageMargins";
   }
 
-  render(xmlStream: any, model: PageMarginsModel): void {
+  render(xmlStream: XmlSink, model: PageMarginsModel): void {
     if (model) {
       const attributes = {
         left: model.left,

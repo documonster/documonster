@@ -2,6 +2,7 @@ import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { deepEqual } from "@utils/object";
 import { parseBoolean, dateToExcel, excelToDate } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
 
 function assign(definedName: any, attributes: any, name: string, defaultValue?: any): void {
   const value = attributes[name];
@@ -142,7 +143,7 @@ class DataValidationsXform extends BaseXform {
     return "dataValidations";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     const optimizedModel = optimiseDataValidations(model);
     if (optimizedModel.length) {
       xmlStream.openNode("dataValidations", { count: optimizedModel.length });

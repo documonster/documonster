@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
+import type { XmlSink } from "@xml/types";
 
 // <rPh sb="0" eb="1">
 //   <t>(its pronounciation in KATAKANA)</t>
@@ -30,7 +31,7 @@ class PhoneticTextXform extends BaseXform {
     return "rPh";
   }
 
-  render(xmlStream: any, model: PhoneticTextModel): void {
+  render(xmlStream: XmlSink, model: PhoneticTextModel): void {
     xmlStream.openNode(this.tag, {
       sb: model.sb ?? 0,
       eb: model.eb ?? 0

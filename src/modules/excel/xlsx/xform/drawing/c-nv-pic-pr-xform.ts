@@ -1,11 +1,12 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 class CNvPicPrXform extends BaseXform {
   get tag(): string {
     return "xdr:cNvPicPr";
   }
 
-  render(xmlStream: any): void {
+  render(xmlStream: XmlSink): void {
     xmlStream.openNode(this.tag);
     xmlStream.leafNode("a:picLocks", {
       noChangeAspect: "1"

@@ -3,6 +3,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { CustomFilterXform } from "@excel/xlsx/xform/table/custom-filter-xform";
 import { FilterXform } from "@excel/xlsx/xform/table/filter-xform";
+import type { XmlSink } from "@xml/types";
 
 interface FilterColumnModel {
   colId?: string;
@@ -42,7 +43,7 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
     model.colId = options.index.toString();
   }
 
-  render(xmlStream: any, model: FilterColumnModel): void {
+  render(xmlStream: XmlSink, model: FilterColumnModel): void {
     if (model.customFilters) {
       xmlStream.openNode(this.tag, {
         colId: model.colId,

@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 function isDefined(attr: any): boolean {
   return typeof attr !== "undefined";
@@ -14,7 +15,7 @@ class OutlinePropertiesXform extends BaseXform {
     return "outlinePr";
   }
 
-  render(xmlStream: any, model?: OutlinePropertiesModel): boolean {
+  render(xmlStream: XmlSink, model?: OutlinePropertiesModel): boolean {
     if (model && (isDefined(model.summaryBelow) || isDefined(model.summaryRight))) {
       xmlStream.leafNode(this.tag, {
         summaryBelow: isDefined(model.summaryBelow) ? Number(model.summaryBelow) : undefined,

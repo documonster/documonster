@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { decodeOoxmlEscape, encodeOoxmlAttr } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
 
 interface TableColumnModel {
   id?: number;
@@ -42,7 +43,7 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
     };
   }
 
-  render(xmlStream: any, model: TableColumnModel): void {
+  render(xmlStream: XmlSink, model: TableColumnModel): void {
     // `<totalsRowFormula>` is only valid when `totalsRowFunction="custom"`
     // (or absent entirely, treated as custom). For the built-in
     // functions — `sum` / `average` / `count` / `countNums` / `max` /

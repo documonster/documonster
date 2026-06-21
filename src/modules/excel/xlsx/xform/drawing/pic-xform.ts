@@ -3,6 +3,7 @@ import { BlipFillXform } from "@excel/xlsx/xform/drawing/blip-fill-xform";
 import { NvPicPrXform } from "@excel/xlsx/xform/drawing/nv-pic-pr-xform";
 import { spPrJSON } from "@excel/xlsx/xform/drawing/sp-pr";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { XmlSink } from "@xml/types";
 
 interface PicModel {
   index?: number;
@@ -39,7 +40,7 @@ class PicXform extends BaseXform {
     model.index = options.index + 1;
   }
 
-  render(xmlStream: any, model: PicModel): void {
+  render(xmlStream: XmlSink, model: PicModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:nvPicPr"].render(xmlStream, model);

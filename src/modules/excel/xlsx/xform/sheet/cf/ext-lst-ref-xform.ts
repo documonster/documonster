@@ -1,13 +1,14 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
+import type { XmlSink } from "@xml/types";
 
 class X14IdXform extends BaseXform {
   get tag(): string {
     return "x14:id";
   }
 
-  render(xmlStream: any, model: any): void {
-    xmlStream.leafNode(this.tag, null, model);
+  render(xmlStream: XmlSink, model: any): void {
+    xmlStream.leafNode(this.tag, undefined, model);
   }
 
   parseOpen(): void {
@@ -38,7 +39,7 @@ class ExtXform extends CompositeXform {
     return "ext";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openNode(this.tag, {
       uri: "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}",
       "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
@@ -70,7 +71,7 @@ class ExtLstRefXform extends CompositeXform {
     return "extLst";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     if (!model.x14Id) {
       return;
     }

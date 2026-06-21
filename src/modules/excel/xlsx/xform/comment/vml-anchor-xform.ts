@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface AnchorModel {
   left: number;
@@ -54,12 +55,12 @@ class VmlAnchorXform extends BaseXform {
     return [l, lf, t, tf, r, rf, b, bf];
   }
 
-  render(xmlStream: any, model: RenderModel): void {
+  render(xmlStream: XmlSink, model: RenderModel): void {
     const rect = model.anchor
       ? this.getAnchorRect(model.anchor)
       : this.getDefaultRect(model.refAddress!);
 
-    xmlStream.leafNode("x:Anchor", null, rect.join(", "));
+    xmlStream.leafNode("x:Anchor", undefined, rect.join(", "));
   }
 
   parseOpen(node: any): boolean {

@@ -1,6 +1,7 @@
 import { renderSparklineGroups, parseSparklineGroups } from "@excel/core/sparkline";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ConditionalFormattingsExtXform } from "@excel/xlsx/xform/sheet/cf-ext/conditional-formattings-ext-xform";
+import type { XmlSink } from "@xml/types";
 
 class ExtXform extends CompositeXform {
   declare public map: { [key: string]: any };
@@ -27,7 +28,7 @@ class ExtXform extends CompositeXform {
     this.conditionalFormattings.prepare(model.conditionalFormattings);
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openNode("ext", {
       uri: "{78C0D931-6437-407d-A8EE-F0AAD7539E65}",
       "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
@@ -62,7 +63,7 @@ class SparklineExtXform {
     return Array.isArray(sparklineGroups) && sparklineGroups.length > 0;
   }
 
-  render(xmlStream: any, sparklineGroups: any[]): void {
+  render(xmlStream: XmlSink, sparklineGroups: any[]): void {
     if (!this.hasContent(sparklineGroups)) {
       return;
     }
@@ -119,7 +120,7 @@ class ExtLstXform extends CompositeXform {
     return this.ext.hasContent(model) || this.sparklineExt.hasContent(model?.sparklineGroups);
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     if (!this.hasContent(model)) {
       return;
     }

@@ -5,6 +5,7 @@ import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { XmlSink } from "@xml/types";
 
 interface OneCellModel {
   range: {
@@ -44,7 +45,7 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: any, model: OneCellModel): void {
+  render(xmlStream: XmlSink, model: OneCellModel): void {
     xmlStream.openNode(this.tag, { editAs: model.range.editAs ?? "oneCell" });
 
     this.map["xdr:from"].render(xmlStream, model.range.tl);

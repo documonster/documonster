@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface CalcPropertiesModel {
   fullCalcOnLoad?: boolean;
@@ -8,7 +9,7 @@ interface CalcPropertiesModel {
 }
 
 class WorkbookCalcPropertiesXform extends BaseXform {
-  render(xmlStream: any, model: CalcPropertiesModel): void {
+  render(xmlStream: XmlSink, model: CalcPropertiesModel): void {
     xmlStream.leafNode("calcPr", {
       calcId: 171027,
       fullCalcOnLoad: model.fullCalcOnLoad ? 1 : undefined,

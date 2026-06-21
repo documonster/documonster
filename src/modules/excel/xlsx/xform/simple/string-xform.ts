@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface StringXformOptions {
   tag: string;
@@ -21,7 +22,7 @@ class StringXform extends BaseXform {
     this.text = [];
   }
 
-  render(xmlStream: any, model?: string): void {
+  render(xmlStream: XmlSink, model?: string): void {
     if (model !== undefined) {
       xmlStream.openNode(this.tag);
       if (this.attrs) {

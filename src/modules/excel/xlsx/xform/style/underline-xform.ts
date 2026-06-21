@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 type UnderlineType = boolean | "single" | "double" | "singleAccounting" | "doubleAccounting";
 
@@ -19,7 +20,7 @@ class UnderlineXform extends BaseXform {
     return "u";
   }
 
-  render(xmlStream: any, model?: UnderlineType): void {
+  render(xmlStream: XmlSink, model?: UnderlineType): void {
     model = model || this.model;
 
     if (model === true) {

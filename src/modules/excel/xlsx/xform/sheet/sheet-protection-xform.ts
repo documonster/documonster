@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean, value: string): string | undefined {
   return model ? value : undefined;
@@ -36,7 +37,7 @@ class SheetProtectionXform extends BaseXform {
     return "sheetProtection";
   }
 
-  render(xmlStream: any, model?: SheetProtectionModel): void {
+  render(xmlStream: XmlSink, model?: SheetProtectionModel): void {
     if (model) {
       const attributes: any = {
         sheet: booleanToXml(model.sheet!, "1"),

@@ -5,6 +5,7 @@ import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { XmlSink } from "@xml/types";
 
 interface TwoCellModel {
   range: {
@@ -60,7 +61,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: any, model: TwoCellModel): void {
+  render(xmlStream: XmlSink, model: TwoCellModel): void {
     // ChartEx anchors (sunburst, treemap, funnel, waterfall, boxplot,
     // histogram, region map, …) MUST be wrapped in
     // `<mc:AlternateContent>`. ChartEx is a Microsoft extension that
@@ -186,7 +187,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
    * sizing from the outer `<xdr:from>`/`<xdr:to>` cell range — they
    * do NOT each re-declare the anchor; there is only one anchor.
    */
-  private renderChartExAlternateContent(xmlStream: any, model: TwoCellModel): void {
+  private renderChartExAlternateContent(xmlStream: XmlSink, model: TwoCellModel): void {
     xmlStream.openNode("mc:AlternateContent", {
       "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006"
     });
@@ -223,7 +224,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
    * "drawing shape" validation failure even though the outer
    * twoCellAnchor provides sizing.
    */
-  private renderChartExFallbackShape(xmlStream: any, model: TwoCellModel): void {
+  private renderChartExFallbackShape(xmlStream: XmlSink, model: TwoCellModel): void {
     xmlStream.openNode("xdr:sp", { macro: "", textlink: "" });
 
     xmlStream.openNode("xdr:nvSpPr");

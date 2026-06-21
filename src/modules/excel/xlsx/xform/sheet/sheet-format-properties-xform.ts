@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface SheetFormatPropertiesModel {
   defaultRowHeight: number;
@@ -14,7 +15,7 @@ class SheetFormatPropertiesXform extends BaseXform {
     return "sheetFormatPr";
   }
 
-  render(xmlStream: any, model?: SheetFormatPropertiesModel): void {
+  render(xmlStream: XmlSink, model?: SheetFormatPropertiesModel): void {
     if (model) {
       const attributes: any = {
         defaultRowHeight: model.defaultRowHeight,

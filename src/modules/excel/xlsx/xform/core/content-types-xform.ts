@@ -21,12 +21,13 @@ import {
   worksheetPath
 } from "@excel/utils/ooxml-paths";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // used for rendering the [Content_Types].xml file
 // not used for parsing
 class ContentTypesXform extends BaseXform {
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("Types", ContentTypesXform.PROPERTY_ATTRIBUTES);

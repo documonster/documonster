@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 /**
  * Xform for individual page break (brk element)
@@ -11,7 +12,7 @@ class PageBreaksXform extends BaseXform {
     return "brk";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.leafNode("brk", model);
   }
 

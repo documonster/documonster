@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface TablePartModel {
   rId: string;
@@ -9,7 +10,7 @@ class TablePartXform extends BaseXform {
     return "tablePart";
   }
 
-  render(xmlStream: any, model?: TablePartModel): void {
+  render(xmlStream: XmlSink, model?: TablePartModel): void {
     if (model) {
       xmlStream.leafNode(this.tag, { "r:id": model.rId });
     }

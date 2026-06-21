@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { parseBoolean } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
 
 interface ColModel {
   min: number;
@@ -25,7 +26,7 @@ class ColXform extends BaseXform {
     }
   }
 
-  render(xmlStream: any, model: ColModel): void {
+  render(xmlStream: XmlSink, model: ColModel): void {
     xmlStream.openNode("col");
     xmlStream.addAttribute("min", model.min);
     xmlStream.addAttribute("max", model.max);

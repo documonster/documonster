@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface CustomFilterModel {
   val: string;
@@ -15,7 +16,7 @@ class CustomFilterXform extends BaseXform<CustomFilterModel> {
     return "customFilter";
   }
 
-  render(xmlStream: any, model: CustomFilterModel): void {
+  render(xmlStream: XmlSink, model: CustomFilterModel): void {
     xmlStream.leafNode(this.tag, {
       val: model.val,
       operator: model.operator

@@ -6,6 +6,7 @@ import {
 } from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /**
@@ -56,7 +57,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   /**
    * Render VML drawing containing both notes and form controls
    */
-  render(xmlStream: any, model?: VmlDrawingModel): void {
+  render(xmlStream: XmlSink, model?: VmlDrawingModel): void {
     const renderModel = (model || this.model)!;
     const comments = renderModel.comments;
     const formControls = renderModel.formControls;
@@ -166,7 +167,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   /**
    * Render a header/footer image shape for watermark
    */
-  private _renderHeaderImageShape(xmlStream: any, headerImage: VmlHeaderImageModel): void {
+  private _renderHeaderImageShape(xmlStream: XmlSink, headerImage: VmlHeaderImageModel): void {
     const width = headerImage.width ?? 467.25;
     const height = headerImage.height ?? 311.25;
 
@@ -188,7 +189,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   /**
    * Render a checkbox form control shape
    */
-  private _renderCheckboxShape(xmlStream: any, control: FormCheckboxModel): void {
+  private _renderCheckboxShape(xmlStream: XmlSink, control: FormCheckboxModel): void {
     const shapeAttrs: Record<string, string> = {
       id: `_x0000_s${control.shapeId}`,
       type: "#_x0000_t201",

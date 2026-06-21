@@ -1,9 +1,10 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 // FeaturePropertyBag is used to enable checkbox functionality
 // This is a static XML file that MS Excel requires for checkboxes to work
 class FeaturePropertyBagXform extends BaseXform {
-  render(xmlStream: any): void {
+  render(xmlStream: XmlSink): void {
     xmlStream.openXml({ version: "1.0", encoding: "UTF-8", standalone: "yes" });
 
     xmlStream.openNode("FeaturePropertyBags", {

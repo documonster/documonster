@@ -1,6 +1,7 @@
 import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RelationshipXform } from "@excel/xlsx/xform/core/relationship-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class RelationshipsXform extends BaseXform {
@@ -15,7 +16,7 @@ class RelationshipsXform extends BaseXform {
     };
   }
 
-  render(xmlStream: any, model?: any[]): void {
+  render(xmlStream: XmlSink, model?: any[]): void {
     const renderModel = model || this._values;
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("Relationships", RelationshipsXform.RELATIONSHIPS_ATTRIBUTES);

@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean): string | undefined {
   return model ? "1" : undefined;
@@ -73,7 +74,7 @@ class PageSetupXform extends BaseXform {
     return value;
   }
 
-  render(xmlStream: any, model: PageSetupModel): void {
+  render(xmlStream: XmlSink, model: PageSetupModel): void {
     if (model) {
       const attributes = {
         paperSize: model.paperSize,

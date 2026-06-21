@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlPositionXform } from "@excel/xlsx/xform/comment/style/vml-position-xform";
 import { VmlProtectionXform } from "@excel/xlsx/xform/comment/style/vml-protection-xform";
 import { VmlAnchorXform } from "@excel/xlsx/xform/comment/vml-anchor-xform";
+import type { XmlSink } from "@xml/types";
 
 const POSITION_TYPE = ["twoCells", "oneCells", "absolute"];
 
@@ -53,17 +54,17 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
     return "x:ClientData";
   }
 
-  render(xmlStream: any, model: RenderModel): void {
+  render(xmlStream: XmlSink, model: RenderModel): void {
     const { protection, editAs } = model.note;
     xmlStream.openNode(this.tag, { ObjectType: "Note" });
     this.map["x:MoveWithCells"].render(xmlStream, editAs, POSITION_TYPE);
     this.map["x:SizeWithCells"].render(xmlStream, editAs, POSITION_TYPE);
     this.map["x:Anchor"].render(xmlStream, model);
     this.map["x:Locked"].render(xmlStream, protection.locked);
-    xmlStream.leafNode("x:AutoFill", null, "False");
+    xmlStream.leafNode("x:AutoFill", undefined, "False");
     this.map["x:LockText"].render(xmlStream, protection.lockText);
-    xmlStream.leafNode("x:Row", null, model.refAddress.row - 1);
-    xmlStream.leafNode("x:Column", null, model.refAddress.col - 1);
+    xmlStream.leafNode("x:Row", undefined, model.refAddress.row - 1);
+    xmlStream.leafNode("x:Column", undefined, model.refAddress.col - 1);
     xmlStream.closeNode();
   }
 

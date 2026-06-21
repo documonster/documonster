@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean): string | undefined {
   return model ? "1" : undefined;
@@ -16,7 +17,7 @@ class PrintOptionsXform extends BaseXform {
     return "printOptions";
   }
 
-  render(xmlStream: any, model?: PrintOptionsModel): void {
+  render(xmlStream: XmlSink, model?: PrintOptionsModel): void {
     if (model) {
       const attributes = {
         headings: booleanToXml(model.showRowColHeaders),

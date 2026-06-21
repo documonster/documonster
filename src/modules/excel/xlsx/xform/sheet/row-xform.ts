@@ -3,6 +3,7 @@ import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CellXform } from "@excel/xlsx/xform/sheet/cell-xform";
 import { parseBoolean } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
 
 interface RowXformOptions {
   maxItems?: number;
@@ -61,7 +62,7 @@ class RowXform extends BaseXform<RowModel> {
     });
   }
 
-  render(xmlStream: any, model?: RowModel, options?: any): void {
+  render(xmlStream: XmlSink, model?: RowModel, options?: any): void {
     if (!model) {
       return;
     }

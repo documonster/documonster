@@ -1,7 +1,8 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 class AppHeadingPairsXform extends BaseXform {
-  render(xmlStream: any, model: any[]): void {
+  render(xmlStream: XmlSink, model: any[]): void {
     xmlStream.openNode("HeadingPairs");
     xmlStream.openNode("vt:vector", { size: 2, baseType: "variant" });
 

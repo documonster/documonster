@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { parseBoolean } from "@utils/utils";
+import type { XmlSink } from "@xml/types";
 
 interface EdgeModel {
   style?: string;
@@ -35,7 +36,7 @@ class EdgeXform extends BaseXform {
     return this.name;
   }
 
-  render(xmlStream: any, model?: EdgeModel, defaultColor?: any): void {
+  render(xmlStream: XmlSink, model?: EdgeModel, defaultColor?: any): void {
     const color = (model && model.color) || defaultColor || this.defaultColor;
     xmlStream.openNode(this.name);
     if (model && model.style) {
@@ -142,7 +143,7 @@ class BorderXform extends BaseXform {
     };
   }
 
-  render(xmlStream: any, model: BorderModel): void {
+  render(xmlStream: XmlSink, model: BorderModel): void {
     const { color } = model;
     xmlStream.openNode("border");
     if (model.diagonal && model.diagonal.style) {

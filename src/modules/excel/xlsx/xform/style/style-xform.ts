@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AlignmentXform } from "@excel/xlsx/xform/style/alignment-xform";
 import { ProtectionXform } from "@excel/xlsx/xform/style/protection-xform";
+import type { XmlSink } from "@xml/types";
 
 // <xf numFmtId="[numFmtId]" fontId="[fontId]" fillId="[fillId]" borderId="[xf.borderId]" xfId="[xfId]">
 //   Optional <alignment>
@@ -50,7 +51,7 @@ class StyleXform extends BaseXform {
     return "xf";
   }
 
-  render(xmlStream: any, model: StyleModel): void {
+  render(xmlStream: XmlSink, model: StyleModel): void {
     xmlStream.openNode("xf", {
       numFmtId: model.numFmtId ?? 0,
       fontId: model.fontId ?? 0,

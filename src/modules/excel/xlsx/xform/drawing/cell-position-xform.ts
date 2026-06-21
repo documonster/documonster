@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
+import type { XmlSink } from "@xml/types";
 
 interface PositionModel {
   nativeCol: number;
@@ -26,7 +27,7 @@ class CellPositionXform extends BaseXform<PositionModel> {
     this.model = { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 };
   }
 
-  render(xmlStream: any, model: PositionModel): void {
+  render(xmlStream: XmlSink, model: PositionModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:col"].render(xmlStream, model.nativeCol);

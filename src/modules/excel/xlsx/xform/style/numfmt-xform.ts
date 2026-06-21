@@ -1,5 +1,6 @@
 import { defaultNumFormats } from "@excel/xlsx/defaultnumformats";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface NumFmtModel {
   id: number;
@@ -40,7 +41,7 @@ class NumFmtXform extends BaseXform {
     return "numFmt";
   }
 
-  render(xmlStream: any, model: NumFmtModel): void {
+  render(xmlStream: XmlSink, model: NumFmtModel): void {
     xmlStream.leafNode("numFmt", { numFmtId: model.id, formatCode: model.formatCode });
   }
 

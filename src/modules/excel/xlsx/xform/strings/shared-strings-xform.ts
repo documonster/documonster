@@ -1,6 +1,7 @@
 import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface SharedStringsModel {
@@ -78,7 +79,7 @@ class SharedStringsXform extends BaseXform {
   //   <si><r><rPr></rPr><t></t></r></si>
   // </sst>
 
-  render(xmlStream: any, model?: SharedStringsModel): void {
+  render(xmlStream: XmlSink, model?: SharedStringsModel): void {
     const renderModel = model || this._values;
     xmlStream.openXml(StdDocAttributes);
 

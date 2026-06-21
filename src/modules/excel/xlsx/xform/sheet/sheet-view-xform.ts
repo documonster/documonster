@@ -1,5 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 const VIEW_STATES: { [key: string]: string } = {
   frozen: "frozen",
@@ -45,7 +46,7 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
     }
   }
 
-  render(xmlStream: any, model: SheetViewModel): void {
+  render(xmlStream: XmlSink, model: SheetViewModel): void {
     // Build initial attributes with correct order to match Excel output
     const initialAttrs: any = {};
     if (model.tabSelected) {

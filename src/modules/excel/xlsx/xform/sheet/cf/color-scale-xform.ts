@@ -1,6 +1,7 @@
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfvoXform } from "@excel/xlsx/xform/sheet/cf/cfvo-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import type { XmlSink } from "@xml/types";
 
 class ColorScaleXform extends CompositeXform {
   cfvoXform: CfvoXform;
@@ -19,7 +20,7 @@ class ColorScaleXform extends CompositeXform {
     return "colorScale";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openNode(this.tag);
 
     model.cfvo.forEach((cfvo: any) => {

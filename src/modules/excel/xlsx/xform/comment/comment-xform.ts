@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
+import type { XmlSink } from "@xml/types";
 
 interface NoteText {
   font?: any;
@@ -46,7 +47,7 @@ class CommentXform extends BaseXform<CommentModel> {
     return this._textXform;
   }
 
-  render(xmlStream: any, model?: CommentModel): void {
+  render(xmlStream: XmlSink, model?: CommentModel): void {
     const renderModel = model || this.model;
 
     xmlStream.openNode("comment", {

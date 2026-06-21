@@ -1,11 +1,12 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 class MergeCellXform extends BaseXform {
   get tag(): string {
     return "mergeCell";
   }
 
-  render(xmlStream: any, model: string): void {
+  render(xmlStream: XmlSink, model: string): void {
     xmlStream.leafNode("mergeCell", { ref: model });
   }
 

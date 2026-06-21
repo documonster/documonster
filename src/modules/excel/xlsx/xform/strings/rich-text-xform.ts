@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
+import type { XmlSink } from "@xml/types";
 
 // <r>
 //   <rPr>
@@ -41,7 +42,7 @@ class RichTextXform extends BaseXform {
     return this._fontXform || (this._fontXform = new FontXform(RichTextXform.FONT_OPTIONS));
   }
 
-  render(xmlStream: any, model?: RichTextModel): void {
+  render(xmlStream: XmlSink, model?: RichTextModel): void {
     const renderModel = model || this.model;
 
     xmlStream.openNode("r");

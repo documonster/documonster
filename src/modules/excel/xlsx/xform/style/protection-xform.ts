@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 const validation = {
   boolean(value: boolean | undefined, dflt: boolean): boolean {
@@ -20,7 +21,7 @@ class ProtectionXform extends BaseXform {
     return "protection";
   }
 
-  render(xmlStream: any, model: ProtectionModel): void {
+  render(xmlStream: XmlSink, model: ProtectionModel): void {
     const attrs: Record<string, string> = {};
     const locked = validation.boolean(model.locked, true) ? undefined : "0";
     const hidden = validation.boolean(model.hidden, false) ? "1" : undefined;

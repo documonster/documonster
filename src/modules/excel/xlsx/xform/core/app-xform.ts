@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AppHeadingPairsXform } from "@excel/xlsx/xform/core/app-heading-pairs-xform";
 import { AppTitlesOfPartsXform } from "@excel/xlsx/xform/core/app-titles-of-parts-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface AppModel {
@@ -25,7 +26,7 @@ class AppXform extends BaseXform {
     };
   }
 
-  render(xmlStream: any, model: AppModel): void {
+  render(xmlStream: XmlSink, model: AppModel): void {
     xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("Properties", AppXform.PROPERTY_ATTRIBUTES);

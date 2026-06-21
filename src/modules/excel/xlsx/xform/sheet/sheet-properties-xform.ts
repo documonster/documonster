@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { OutlinePropertiesXform } from "@excel/xlsx/xform/sheet/outline-properties-xform";
 import { PageSetupPropertiesXform } from "@excel/xlsx/xform/sheet/page-setup-properties-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import type { XmlSink } from "@xml/types";
 
 interface SheetPropertiesModel {
   tabColor?: any;
@@ -27,7 +28,7 @@ class SheetPropertiesXform extends BaseXform {
     return "sheetPr";
   }
 
-  render(xmlStream: any, model?: SheetPropertiesModel): void {
+  render(xmlStream: XmlSink, model?: SheetPropertiesModel): void {
     if (!model) {
       return;
     }

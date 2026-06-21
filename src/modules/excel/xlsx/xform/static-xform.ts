@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 interface StaticModel {
@@ -17,7 +18,7 @@ interface StaticModel {
 //   t: 'some text'
 // };
 
-function build(xmlStream: any, model: StaticModel): void {
+function build(xmlStream: XmlSink, model: StaticModel): void {
   xmlStream.openNode(model.tag, model.$);
   if (model.c) {
     model.c.forEach(child => {
@@ -46,7 +47,7 @@ class StaticXform extends BaseXform {
     this._model = model;
   }
 
-  render(xmlStream: any): void {
+  render(xmlStream: XmlSink): void {
     if (!this._xml) {
       const stream = new XmlWriter();
       build(stream, this._model);

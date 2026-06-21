@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface PivotCacheModel {
   cacheId: string;
@@ -6,7 +7,7 @@ interface PivotCacheModel {
 }
 
 class WorkbookPivotCacheXform extends BaseXform {
-  render(xmlStream: any, model: PivotCacheModel): void {
+  render(xmlStream: XmlSink, model: PivotCacheModel): void {
     xmlStream.leafNode("pivotCache", {
       cacheId: model.cacheId,
       "r:id": model.rId

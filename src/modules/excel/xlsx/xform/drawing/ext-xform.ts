@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { EMU_PER_PX } from "@utils/units";
+import type { XmlSink } from "@xml/types";
 
 interface ExtModel {
   width: number;
@@ -18,7 +19,7 @@ class ExtXform extends BaseXform<ExtModel> {
     this.model = { width: 0, height: 0 };
   }
 
-  render(xmlStream: any, model: ExtModel): void {
+  render(xmlStream: XmlSink, model: ExtModel): void {
     xmlStream.openNode(this.tag);
 
     const width = Math.floor(model.width * EMU_PER_PX);

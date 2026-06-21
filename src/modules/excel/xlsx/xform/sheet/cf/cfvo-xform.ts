@@ -1,11 +1,12 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 class CfvoXform extends BaseXform {
   get tag(): string {
     return "cfvo";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.leafNode(this.tag, {
       type: model.type,
       val: model.value

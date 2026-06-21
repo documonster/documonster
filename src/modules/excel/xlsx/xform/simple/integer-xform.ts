@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface IntegerXformOptions {
   tag: string;
@@ -26,17 +27,20 @@ class IntegerXform extends BaseXform {
     this.text = [];
   }
 
-  render(xmlStream: any, model?: number): void {
+  render(xmlStream: XmlSink, model?: number): void {
     // int is different to float in that zero is not rendered
     if (model || this.zero) {
+      // When rendering the zero case (`this.zero` set and model falsy/absent),
+      // emit a concrete 0 rather than letting `undefined` through.
+      const value = model ?? 0;
       xmlStream.openNode(this.tag);
       if (this.attrs) {
         xmlStream.addAttributes(this.attrs);
       }
       if (this.attr) {
-        xmlStream.addAttribute(this.attr, model);
+        xmlStream.addAttribute(this.attr, value);
       } else {
-        xmlStream.writeText(model);
+        xmlStream.writeText(value);
       }
       xmlStream.closeNode();
     }

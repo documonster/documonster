@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface DateXformOptions {
   tag: string;
@@ -42,7 +43,7 @@ class DateXform extends BaseXform {
       };
   }
 
-  render(xmlStream: any, model?: Date): void {
+  render(xmlStream: XmlSink, model?: Date): void {
     if (model) {
       xmlStream.openNode(this.tag);
       if (this.attrs) {

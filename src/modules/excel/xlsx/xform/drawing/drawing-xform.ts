@@ -3,6 +3,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AbsoluteAnchorXform } from "@excel/xlsx/xform/drawing/absolute-anchor-xform";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 function getAnchorType(model: any): string {
@@ -55,7 +56,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
     return "xdr:wsDr";
   }
 
-  render(xmlStream: any, model?: DrawingModel): void {
+  render(xmlStream: XmlSink, model?: DrawingModel): void {
     const renderModel = model || this.model;
     xmlStream.openXml(StdDocAttributes);
     // `<xdr:wsDr>` must declare every namespace prefix any descendant

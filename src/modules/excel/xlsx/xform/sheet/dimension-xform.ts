@@ -1,6 +1,7 @@
 import type { RangeData } from "@excel/core/range";
 import { rangeRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 class DimensionXform extends BaseXform {
   declare public model: any;
@@ -9,7 +10,7 @@ class DimensionXform extends BaseXform {
     return "dimension";
   }
 
-  render(xmlStream: any, model: string | RangeData | undefined): void {
+  render(xmlStream: XmlSink, model: string | RangeData | undefined): void {
     if (model) {
       const ref = typeof model === "string" ? model : rangeRange(model);
       xmlStream.leafNode("dimension", { ref });

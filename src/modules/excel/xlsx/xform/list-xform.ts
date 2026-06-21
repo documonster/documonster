@@ -1,5 +1,6 @@
 import { MaxItemsExceededError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface ListXformOptions {
   tag: string;
@@ -46,7 +47,7 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
     }
   }
 
-  render(xmlStream: any, model?: any[]): void {
+  render(xmlStream: XmlSink, model?: any[]): void {
     if (this.always || (model && model.length)) {
       xmlStream.openNode(this.tag, this.$);
       if (this.count) {

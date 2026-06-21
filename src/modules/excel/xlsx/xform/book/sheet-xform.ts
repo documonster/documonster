@@ -1,5 +1,6 @@
 import type { WorksheetState } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 const VALID_STATES: Set<string> = new Set(["visible", "hidden", "veryHidden"]);
 
@@ -40,7 +41,7 @@ class WorksheetXform extends BaseXform {
   // declares no relationships binding at all.
   relationshipsPrefixes: readonly string[] = ["r"];
 
-  render(xmlStream: any, model: SheetModel): void {
+  render(xmlStream: XmlSink, model: SheetModel): void {
     xmlStream.leafNode("sheet", {
       name: model.name,
       sheetId: model.id,

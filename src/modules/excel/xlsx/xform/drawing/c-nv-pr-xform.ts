@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ExtLstXform } from "@excel/xlsx/xform/drawing/ext-lst-xform";
 import { HLinkClickXform } from "@excel/xlsx/xform/drawing/hlink-click-xform";
+import type { XmlSink } from "@xml/types";
 
 interface CNvPrModel {
   index: number;
@@ -24,7 +25,7 @@ class CNvPrXform extends BaseXform {
     return "xdr:cNvPr";
   }
 
-  render(xmlStream: any, model: CNvPrModel): void {
+  render(xmlStream: XmlSink, model: CNvPrModel): void {
     xmlStream.openNode(this.tag, {
       id: model.index,
       name: `Picture ${model.index}`

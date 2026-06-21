@@ -3,6 +3,7 @@ import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/table/auto-filter-xform";
 import { TableColumnXform } from "@excel/xlsx/xform/table/table-column-xform";
 import { TableStyleInfoXform } from "@excel/xlsx/xform/table/table-style-info-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface TableModel {
@@ -53,7 +54,7 @@ class TableXform extends BaseXform<TableModel> {
     return "table";
   }
 
-  render(xmlStream: any, model: TableModel): void {
+  render(xmlStream: XmlSink, model: TableModel): void {
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, {
       ...TableXform.TABLE_ATTRIBUTES,

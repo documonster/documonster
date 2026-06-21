@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import type { XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface VmlNotesModel {
@@ -24,7 +25,7 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
     return "xml";
   }
 
-  render(xmlStream: any, model?: VmlNotesModel): void {
+  render(xmlStream: XmlSink, model?: VmlNotesModel): void {
     const renderModel = model || this.model;
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, VmlNotesXform.DRAWING_ATTRIBUTES);

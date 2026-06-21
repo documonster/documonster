@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface ColorModel {
   argb?: string;
@@ -22,7 +23,7 @@ class ColorXform extends BaseXform {
     return this.name;
   }
 
-  render(xmlStream: any, model?: ColorModel): boolean {
+  render(xmlStream: XmlSink, model?: ColorModel): boolean {
     if (model) {
       xmlStream.openNode(this.name);
       if (model.argb) {

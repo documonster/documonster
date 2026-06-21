@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import type { XmlSink } from "@xml/types";
 
 interface StopModel {
   position: number;
@@ -44,7 +45,7 @@ class StopXform extends BaseXform {
     return "stop";
   }
 
-  render(xmlStream: any, model: StopModel): void {
+  render(xmlStream: XmlSink, model: StopModel): void {
     xmlStream.openNode("stop");
     xmlStream.addAttribute("position", model.position);
     this.map.color.render(xmlStream, model.color);
@@ -106,7 +107,7 @@ class PatternFillXform extends BaseXform {
     return "patternFill";
   }
 
-  render(xmlStream: any, model: PatternFillModel): void {
+  render(xmlStream: XmlSink, model: PatternFillModel): void {
     xmlStream.openNode("patternFill");
     xmlStream.addAttribute("patternType", model.pattern);
     if (model.fgColor) {
@@ -180,11 +181,11 @@ class GradientFillXform extends BaseXform {
     return "gradientFill";
   }
 
-  render(xmlStream: any, model: GradientFillModel): void {
+  render(xmlStream: XmlSink, model: GradientFillModel): void {
     xmlStream.openNode("gradientFill");
     switch (model.gradient) {
       case "angle":
-        xmlStream.addAttribute("degree", model.degree);
+        xmlStream.addAttribute("degree", model.degree ?? 0);
         break;
       case "path":
         xmlStream.addAttribute("type", "path");
@@ -295,7 +296,7 @@ class FillXform extends BaseXform {
     return "fill";
   }
 
-  render(xmlStream: any, model: FillModel): void {
+  render(xmlStream: XmlSink, model: FillModel): void {
     if (model.type !== "pattern" && model.type !== "gradient") {
       return;
     }

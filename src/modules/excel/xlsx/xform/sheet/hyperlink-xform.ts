@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface HyperlinkModel {
   address: string;
@@ -12,7 +13,7 @@ class HyperlinkXform extends BaseXform {
     return "hyperlink";
   }
 
-  render(xmlStream: any, model: HyperlinkModel): void {
+  render(xmlStream: XmlSink, model: HyperlinkModel): void {
     if (model.target && isInternalLink(model.target)) {
       // Internal link: use location attribute only (no relationship)
       // Strip the leading "#" — OOXML location attribute is without "#"

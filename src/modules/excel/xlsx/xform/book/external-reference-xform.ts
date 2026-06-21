@@ -6,13 +6,14 @@
  */
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 export interface ExternalReferenceModel {
   rId: string;
 }
 
 class ExternalReferenceXform extends BaseXform<ExternalReferenceModel> {
-  render(xmlStream: any, model: ExternalReferenceModel): void {
+  render(xmlStream: XmlSink, model: ExternalReferenceModel): void {
     xmlStream.leafNode("externalReference", { "r:id": model.rId });
   }
 

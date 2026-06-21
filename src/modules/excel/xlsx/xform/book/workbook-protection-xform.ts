@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
 interface WorkbookProtectionModel {
   lockStructure?: boolean;
@@ -17,7 +18,7 @@ class WorkbookProtectionXform extends BaseXform {
     return "workbookProtection";
   }
 
-  render(xmlStream: any, model?: WorkbookProtectionModel): void {
+  render(xmlStream: XmlSink, model?: WorkbookProtectionModel): void {
     if (!model) {
       return;
     }
