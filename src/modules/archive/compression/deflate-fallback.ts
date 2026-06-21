@@ -238,7 +238,27 @@ class BitReader {
  */
 export function inflateRaw(data: Uint8Array): Uint8Array {
   const reader = new BitReader(data);
-  const output: number[] = [];
+  // Output accumulator. DEFLATE has no length prefix, so we grow a typed array
+  // geometrically instead of pushing into a `number[]` (which boxes every byte
+  // at ~8x the memory and forces a final full copy). Seed with a heuristic
+  // based on the compressed size; deflate ratios on OOXML/text are commonly
+  // 3-5x, so 4x is a reasonable starting capacity that avoids most regrowths.
+  let output = new Uint8Array(Math.max(64, data.length * 4));
+  let outLen = 0;
+
+  const ensureCapacity = (additional: number): void => {
+    const required = outLen + additional;
+    if (required <= output.length) {
+      return;
+    }
+    let capacity = output.length;
+    while (capacity < required) {
+      capacity *= 2;
+    }
+    const grown = new Uint8Array(capacity);
+    grown.set(output.subarray(0, outLen));
+    output = grown;
+  };
 
   let isFinal = false;
 
@@ -256,8 +276,9 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
         throw new ArchiveError("Invalid stored block length");
       }
 
+      ensureCapacity(len);
       for (let i = 0; i < len; i++) {
-        output.push(reader.readByte());
+        output[outLen++] = reader.readByte();
       }
     } else if (blockType === 1 || blockType === 2) {
       // Compressed block
@@ -323,7 +344,8 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
 
         if (symbol < 256) {
           // Literal byte
-          output.push(symbol);
+          ensureCapacity(1);
+          output[outLen++] = symbol;
         } else if (symbol === 256) {
           // End of block
           break;
@@ -335,10 +357,13 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
           const distCode = reader.decodeSymbol(distanceTree);
           const distance = DISTANCE_BASE[distCode] + reader.readBits(DISTANCE_EXTRA[distCode]);
 
-          // Copy from output buffer
-          const start = output.length - distance;
+          // Copy from output buffer. Overlapping copies (distance < length) are
+          // intentional and must be done byte-by-byte so repeated runs expand
+          // correctly — do not use set()/copyWithin() here.
+          ensureCapacity(length);
+          const start = outLen - distance;
           for (let i = 0; i < length; i++) {
-            output.push(output[start + i]);
+            output[outLen++] = output[start + i];
           }
         }
       }
@@ -347,7 +372,9 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
     }
   }
 
-  return new Uint8Array(output);
+  // Return an exactly-sized copy so callers never observe the over-allocated
+  // tail and the growth buffer can be garbage-collected.
+  return output.slice(0, outLen);
 }
 
 // ============================================================================
@@ -500,8 +527,12 @@ export function deflateRawCompressed(data: Uint8Array, level = 6): Uint8Array {
  * Bit writer for DEFLATE output
  */
 class BitWriter {
+  private static readonly CHUNK_SIZE = 65536;
   private chunks: Uint8Array[] = [];
-  private buffer: number[] = [];
+  // Current chunk written by index instead of pushing into a `number[]`
+  // (which boxes every byte). Flushed into `chunks` when full.
+  private buffer = new Uint8Array(BitWriter.CHUNK_SIZE);
+  private bufLen = 0;
   private bitBuf = 0;
   private bitCount = 0;
 
@@ -514,19 +545,23 @@ class BitWriter {
     }
   }
 
+  private pushByte(byte: number): void {
+    this.buffer[this.bufLen++] = byte;
+    if (this.bufLen >= BitWriter.CHUNK_SIZE) {
+      this.chunks.push(this.buffer);
+      this.buffer = new Uint8Array(BitWriter.CHUNK_SIZE);
+      this.bufLen = 0;
+    }
+  }
+
   writeBits(value: number, count: number): void {
     this.bitBuf |= value << this.bitCount;
     this.bitCount += count;
 
     while (this.bitCount >= 8) {
-      this.buffer.push(this.bitBuf & 0xff);
+      this.pushByte(this.bitBuf & 0xff);
       this.bitBuf >>= 8;
       this.bitCount -= 8;
-
-      if (this.buffer.length >= 65536) {
-        this.chunks.push(new Uint8Array(this.buffer));
-        this.buffer = [];
-      }
     }
   }
 
@@ -542,14 +577,16 @@ class BitWriter {
   finish(): Uint8Array {
     // Flush remaining bits
     if (this.bitCount > 0) {
-      this.buffer.push(this.bitBuf & 0xff);
+      this.pushByte(this.bitBuf & 0xff);
+      this.bitBuf = 0;
+      this.bitCount = 0;
     }
 
     if (this.chunks.length === 0) {
-      return new Uint8Array(this.buffer);
+      return this.buffer.slice(0, this.bufLen);
     }
 
-    this.chunks.push(new Uint8Array(this.buffer));
+    this.chunks.push(this.buffer.subarray(0, this.bufLen));
     return concatUint8Arrays(this.chunks);
   }
 
@@ -559,19 +596,20 @@ class BitWriter {
    * preserving the bit-stream state for the next block.
    */
   flushBytes(): Uint8Array {
-    if (this.chunks.length === 0 && this.buffer.length === 0) {
+    if (this.chunks.length === 0 && this.bufLen === 0) {
       return new Uint8Array(0);
     }
 
     let result: Uint8Array;
     if (this.chunks.length === 0) {
-      result = new Uint8Array(this.buffer);
+      result = this.buffer.slice(0, this.bufLen);
     } else {
-      this.chunks.push(new Uint8Array(this.buffer));
+      this.chunks.push(this.buffer.subarray(0, this.bufLen));
       result = concatUint8Arrays(this.chunks);
       this.chunks = [];
     }
-    this.buffer = [];
+    this.buffer = new Uint8Array(BitWriter.CHUNK_SIZE);
+    this.bufLen = 0;
     return result;
   }
 }
