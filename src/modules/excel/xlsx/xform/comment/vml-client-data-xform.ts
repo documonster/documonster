@@ -32,7 +32,7 @@ interface RenderModel {
 
 class VmlClientDataXform extends BaseXform<ClientDataModel> {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   /** Name of the current simple leaf element being parsed (e.g. "x:Row"). */
   private _leafName: string | undefined;
   /** Accumulated text for the current leaf element. */

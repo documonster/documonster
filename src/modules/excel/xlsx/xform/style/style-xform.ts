@@ -35,7 +35,7 @@ interface StyleOptions {
 class StyleXform extends BaseXform {
   declare private xfId: boolean;
   declare public map: { alignment: AlignmentXform; protection: ProtectionXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(options?: StyleOptions) {
     super();

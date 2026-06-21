@@ -21,7 +21,7 @@ class EdgeXform extends BaseXform {
   declare private name: string;
   declare public map: { color: ColorXform };
   declare private defaultColor: any;
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(name: string) {
     super();
@@ -127,7 +127,7 @@ class EdgeXform extends BaseXform {
 // Border encapsulates translation from border model to/from xlsx
 class BorderXform extends BaseXform {
   declare public map: { [key: string]: EdgeXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private diagonalUp: boolean | undefined;
   declare private diagonalDown: boolean | undefined;
 

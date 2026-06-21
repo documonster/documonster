@@ -22,7 +22,7 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
   declare public $?: any;
   declare protected childXform: any;
   declare protected maxItems?: number;
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(options: ListXformOptions) {
     super();

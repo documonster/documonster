@@ -5,7 +5,7 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class BlipFillXform extends BaseXform {
   declare public map: { [key: string]: BlipXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare public model: any;
 
   constructor() {

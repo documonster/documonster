@@ -20,7 +20,7 @@ interface CommentModel {
 }
 
 class CommentXform extends BaseXform<CommentModel> {
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private _richTextXform?: RichTextXform;
   declare private _textXform?: TextXform;
 

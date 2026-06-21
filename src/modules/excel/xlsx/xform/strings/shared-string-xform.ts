@@ -15,7 +15,7 @@ type SharedStringModel = string | { richText: any[] };
 
 class SharedStringXform extends BaseXform {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(model?: SharedStringModel) {
     super();

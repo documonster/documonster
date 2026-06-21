@@ -16,7 +16,7 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class WorkbookXform extends BaseXform {
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare public map: { [key: string]: any };
 
   /**

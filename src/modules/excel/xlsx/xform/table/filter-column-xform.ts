@@ -13,7 +13,7 @@ interface FilterColumnModel {
 
 class FilterColumnXform extends BaseXform<FilterColumnModel> {
   declare public map: { [key: string]: ListXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();

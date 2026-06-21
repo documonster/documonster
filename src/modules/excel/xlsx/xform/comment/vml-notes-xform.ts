@@ -11,7 +11,7 @@ interface VmlNotesModel {
 // drawing icons on commented cells
 class VmlNotesXform extends BaseXform<VmlNotesModel> {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();

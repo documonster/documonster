@@ -50,7 +50,7 @@ export interface GraphicFrameModel {
 
 class GraphicFrameXform extends BaseXform {
   declare public model: GraphicFrameModel;
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   // SAX parse state
   private _inNvPr = false;

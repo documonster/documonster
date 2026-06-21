@@ -6,7 +6,7 @@ import type { ParseOpenTag } from "@xml/types";
 // base class for xforms that are composed of other xforms
 // offers some default implementations
 class CompositeXform<TModel = any> extends BaseXform<TModel> {
-  declare public parser?: any;
+  declare public parser?: BaseXform;
 
   createNewModel(_node?: any): any {
     return {};

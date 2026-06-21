@@ -5,7 +5,7 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class RelationshipsXform extends BaseXform {
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private _values?: any[];
 
   constructor() {

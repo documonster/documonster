@@ -19,7 +19,7 @@ interface PicModel {
 
 class PicXform extends BaseXform {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare public model: any;
 
   constructor() {

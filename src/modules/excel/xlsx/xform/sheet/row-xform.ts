@@ -28,7 +28,7 @@ interface RowModel {
 class RowXform extends BaseXform<RowModel> {
   declare private maxItems?: number;
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private numRowsSeen: number;
   declare private lastCellCol: number;
 

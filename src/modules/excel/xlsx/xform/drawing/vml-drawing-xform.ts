@@ -40,7 +40,7 @@ interface VmlDrawingModel {
 
 class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();

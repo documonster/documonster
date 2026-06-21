@@ -13,7 +13,7 @@ interface AppModel {
 
 class AppXform extends BaseXform {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();

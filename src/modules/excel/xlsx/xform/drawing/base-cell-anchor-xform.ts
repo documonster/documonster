@@ -4,7 +4,7 @@ import type { ParseOpenTag } from "@xml/types";
 
 abstract class BaseCellAnchorXform extends BaseXform {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare public model: any;
 
   abstract get tag(): string;

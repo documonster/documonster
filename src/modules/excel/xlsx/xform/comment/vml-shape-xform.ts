@@ -21,7 +21,7 @@ const DEFAULT_NOTE_HEIGHT_PT = 59.1;
 
 class VmlShapeXform extends BaseXform {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare public model: any;
 
   constructor() {

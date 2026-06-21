@@ -21,7 +21,7 @@ interface DrawingModel {
 
 class DrawingXform extends BaseXform<DrawingModel> {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   // mc:AlternateContent parse state
   private _inAlternateContent = false;
