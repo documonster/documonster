@@ -17,7 +17,7 @@ import { StdDocAttributes } from "@xml/writer";
 
 class WorkbookXform extends BaseXform {
   declare public parser?: BaseXform;
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
 
   /**
    * The `<sheet>` xform shared with the `sheets` ListXform. Held as a
