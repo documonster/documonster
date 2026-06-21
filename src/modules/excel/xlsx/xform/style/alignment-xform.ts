@@ -145,10 +145,10 @@ class AlignmentXform extends BaseXform {
   }
 
   parseOpen(node: ParseOpenTag): void {
-    const model: any = {};
+    const model: Record<string, unknown> = {};
 
     let valid = false;
-    function add(truthy: any, name: string, value: any): void {
+    function add(truthy: unknown, name: string, value: unknown): void {
       if (truthy) {
         model[name] = value;
         valid = true;

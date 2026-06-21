@@ -1,3 +1,4 @@
+import type { Font } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
@@ -15,14 +16,14 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 // </r>
 
 interface RichTextModel {
-  font?: any;
+  font?: Partial<Font>;
   text: string;
 }
 
-class RichTextXform extends BaseXform {
+class RichTextXform extends BaseXform<RichTextModel> {
   declare private _textXform?: TextXform;
   declare private _fontXform?: FontXform;
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(model?: RichTextModel) {
     super();
@@ -60,7 +61,8 @@ class RichTextXform extends BaseXform {
     }
     switch (node.name) {
       case "r":
-        this.model = {};
+        // Built incrementally: <t> sets text, <rPr> sets font.
+        this.model = {} as RichTextModel;
         return true;
       case "t":
         this.parser = this.textXform;
@@ -86,11 +88,11 @@ class RichTextXform extends BaseXform {
       case "r":
         return false;
       case "t":
-        this.model.text = this.parser.model;
+        this.model!.text = this.parser!.model as string;
         this.parser = undefined;
         return true;
       case "rPr":
-        this.model.font = this.parser.model;
+        this.model!.font = this.parser!.model as Partial<Font>;
         this.parser = undefined;
         return true;
       default:

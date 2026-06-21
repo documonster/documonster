@@ -1,3 +1,4 @@
+import type { Alignment, Protection } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AlignmentXform } from "@excel/xlsx/xform/style/alignment-xform";
 import { ProtectionXform } from "@excel/xlsx/xform/style/protection-xform";
@@ -14,8 +15,8 @@ interface StyleModel {
   fillId?: number;
   borderId?: number;
   xfId?: number;
-  alignment?: any;
-  protection?: any;
+  alignment?: Partial<Alignment>;
+  protection?: Partial<Protection>;
   checkbox?: boolean;
   xfComplementIndex?: number;
   pivotButton?: boolean;

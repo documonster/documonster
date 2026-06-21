@@ -1,3 +1,4 @@
+import type { Color } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BooleanXform } from "@excel/xlsx/xform/simple/boolean-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
@@ -11,7 +12,7 @@ interface FontModel {
   italic?: boolean;
   underline?: boolean | string;
   charset?: number;
-  color?: any;
+  color?: Partial<Color>;
   condense?: boolean;
   extend?: boolean;
   family?: number;
@@ -32,7 +33,7 @@ interface FontOptions {
 // Font encapsulates translation from font model to xlsx
 class FontXform extends BaseXform {
   declare private options: FontOptions;
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private renderOrder: string[];
 
   constructor(options?: FontOptions) {
@@ -99,7 +100,9 @@ class FontXform extends BaseXform {
     }
     if (this.map![node.name]) {
       this.parser = this.map![node.name].xform;
-      return this.parser!.parseOpen(node);
+      // Child xform parseOpen returns a boolean (BaseXform's base signature is
+      // void); the child here always reports whether it consumed the node.
+      return (this.parser as unknown as { parseOpen(n: ParseOpenTag): boolean }).parseOpen(node);
     }
     switch (node.name) {
       case this.options.tagName:

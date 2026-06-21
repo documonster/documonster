@@ -1,21 +1,20 @@
+import type { AutoFilter } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class AutoFilterXform extends BaseXform {
-  declare public model: any;
-
+class AutoFilterXform extends BaseXform<AutoFilter> {
   get tag(): string {
     return "autoFilter";
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model?: AutoFilter): void {
     if (model) {
       if (typeof model === "string") {
         // assume range
         xmlStream.leafNode("autoFilter", { ref: model });
       } else {
-        const getAddress = function (addr: any): string {
+        const getAddress = function (addr: string | { row: number; col: number }): string {
           if (typeof addr === "string") {
             return addr;
           }
