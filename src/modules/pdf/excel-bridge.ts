@@ -47,6 +47,7 @@ import {
   cellText,
   cellType
 } from "@excel/core/cell";
+import type { CellData } from "@excel/core/cell";
 import type { ChartsheetData } from "@excel/core/chartsheet";
 import {
   chartsheetChartExModel,
@@ -60,6 +61,7 @@ import { ValueType } from "@excel/core/enums";
 import { computeSparklineGeometry } from "@excel/core/sparkline";
 import type { SparklineGroup } from "@excel/core/sparkline";
 import { getChartsheets, getImage, getWorksheets } from "@excel/core/workbook";
+import { getWorksheet } from "@excel/core/workbook-core";
 // Use the browser base class so the public `excelToPdf(workbook)` signature is
 // callable from both the Node entry (where `Workbook` is the Node subclass —
 // trivially assignable to the base) and the browser entry (where `Workbook` is
@@ -70,6 +72,7 @@ import type { Workbook } from "@excel/core/workbook.browser";
 import {
   findRow,
   getCell,
+  getCharts,
   getColumn,
   getImages,
   getHasMerges,
@@ -81,6 +84,16 @@ import {
   rowEachCell
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
+import type {
+  Style,
+  Font,
+  Color,
+  Fill,
+  Border,
+  Borders,
+  Alignment,
+  CellRichTextValue
+} from "@excel/types";
 import { formatCellValue } from "@excel/utils/cell-format";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { exportPdf } from "@pdf/render/pdf-exporter";
@@ -454,13 +467,13 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
         scale: ps.scale,
         printTitlesRow: ps.printTitlesRow,
         showGridLines: ps.showGridLines,
-        printArea: (ps as any).printArea
+        printArea: ps.printArea
       }
     : undefined;
 
   // Convert row/col breaks
-  const rowBreaks: number[] | undefined = (ws as any).rowBreaks?.map((b: { id: number }) => b.id);
-  const colBreaks: number[] | undefined = (ws as any).colBreaks?.map((b: { id: number }) => b.id);
+  const rowBreaks: number[] | undefined = ws.rowBreaks?.map((b: { id: number }) => b.id);
+  const colBreaks: number[] | undefined = ws.colBreaks?.map((b: { id: number }) => b.id);
 
   // Convert images and charts. Both are floating objects anchored to
   // cells, and both need to participate in bounds expansion so the
@@ -538,8 +551,8 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
   return {
     kind: "worksheet",
     name: getSheetName(ws),
-    state: (ws as any).state ?? "visible",
-    orderNo: (ws as any).orderNo,
+    state: ws.state ?? "visible",
+    orderNo: ws.orderNo,
     bounds,
     columns,
     rows,
@@ -556,9 +569,7 @@ async function convertSheet(ws: Worksheet, workbook: Workbook): Promise<PdfSheet
 // Cell Conversion
 // =============================================================================
 
-// Use any-typed cell to avoid importing the Cell class directly
-// (Worksheet.eachCell provides it)
-function convertCell(cell: any): PdfCellData {
+function convertCell(cell: CellData): PdfCellData {
   const type = mapValueType(cellType(cell));
   const text = getCellDisplayText(cell);
   const style = convertCellStyle(cell.style);
@@ -605,7 +616,7 @@ function mapValueType(vt: number): PdfCellTypeValue {
 /**
  * Get display text for a cell, applying numFmt formatting.
  */
-function getCellDisplayText(cell: any): string {
+function getCellDisplayText(cell: CellData): string {
   if (!cell) {
     return "";
   }
@@ -659,15 +670,13 @@ function formatCellValueSafe(
   return String(value);
 }
 
-function convertCellValue(cell: any): unknown {
+function convertCellValue(cell: CellData): unknown {
   if (cellType(cell) === ValueType.RichText) {
     // Preserve richText structure for the PDF engine
-    const rtValue = cellGetValue(cell) as
-      | { richText?: Array<{ text: string; font?: any }> }
-      | undefined;
+    const rtValue = cellGetValue(cell) as CellRichTextValue | undefined;
     if (rtValue?.richText) {
       return {
-        richText: rtValue.richText.map((run: any) => ({
+        richText: rtValue.richText.map(run => ({
           text: run.text,
           font: run.font ? convertFontStyle(run.font) : undefined
         }))
@@ -681,7 +690,7 @@ function convertCellValue(cell: any): unknown {
 // Style Conversion
 // =============================================================================
 
-function convertCellStyle(style: any): Partial<PdfCellStyle> | undefined {
+function convertCellStyle(style: Partial<Style>): Partial<PdfCellStyle> | undefined {
   if (!style) {
     return undefined;
   }
@@ -695,7 +704,7 @@ function convertCellStyle(style: any): Partial<PdfCellStyle> | undefined {
   };
 }
 
-function convertFontStyle(font: any): Partial<PdfFontStyle> {
+function convertFontStyle(font: Partial<Font>): Partial<PdfFontStyle> {
   return {
     name: font.name,
     size: font.size,
@@ -707,7 +716,7 @@ function convertFontStyle(font: any): Partial<PdfFontStyle> {
   };
 }
 
-function convertColor(color: any): PdfColorData {
+function convertColor(color: Partial<Color>): PdfColorData {
   return {
     argb: color.argb,
     theme: color.theme,
@@ -716,30 +725,31 @@ function convertColor(color: any): PdfColorData {
   };
 }
 
-function convertFill(fill: any): PdfFillData {
-  const result: PdfFillData = {
-    type: fill.type ?? "pattern",
+function convertFill(fill: Fill): PdfFillData {
+  if (fill.type === "gradient") {
+    return {
+      type: "gradient",
+      stops: fill.stops.map(s => ({
+        position: s.position,
+        color: convertColor(s.color)
+      }))
+    };
+  }
+  return {
+    type: "pattern",
     pattern: fill.pattern,
     fgColor: fill.fgColor ? convertColor(fill.fgColor) : undefined
   };
-
-  if (fill.stops) {
-    result.stops = fill.stops.map((s: any) => ({
-      color: convertColor(s.color)
-    }));
-  }
-
-  return result;
 }
 
-function convertBorderSide(border: any): Partial<PdfBorderSideData> {
+function convertBorderSide(border: Partial<Border>): Partial<PdfBorderSideData> {
   return {
     style: border.style,
     color: border.color ? convertColor(border.color) : undefined
   };
 }
 
-function convertBorders(borders: any): Partial<PdfBordersData> {
+function convertBorders(borders: Partial<Borders>): Partial<PdfBordersData> {
   return {
     top: borders.top ? convertBorderSide(borders.top) : undefined,
     right: borders.right ? convertBorderSide(borders.right) : undefined,
@@ -748,13 +758,17 @@ function convertBorders(borders: any): Partial<PdfBordersData> {
   };
 }
 
-function convertAlignment(alignment: any): Partial<PdfAlignmentData> {
+function convertAlignment(alignment: Partial<Alignment>): Partial<PdfAlignmentData> {
   return {
     horizontal: alignment.horizontal,
     vertical: alignment.vertical,
     wrapText: alignment.wrapText,
     indent: alignment.indent,
-    textRotation: alignment.textRotation
+    // Excel encodes stacked text as the literal "vertical"; the PDF layout
+    // engine represents it as the sentinel rotation 255 (see layout-engine).
+    // Passing the string straight through (as the old `any` did) silently
+    // dropped vertical rotation because the engine only matches `=== 255`.
+    textRotation: alignment.textRotation === "vertical" ? 255 : alignment.textRotation
   };
 }
 
@@ -860,8 +874,8 @@ function collectImages(ws: Worksheet, workbook: Workbook): PdfSheetImage[] | und
  * other classic chart.
  */
 async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined> {
-  const wsCharts = (ws as any).getCharts?.() as ChartHandle[] | undefined;
-  if (!wsCharts || !Array.isArray(wsCharts) || wsCharts.length === 0) {
+  const wsCharts = getCharts(ws);
+  if (wsCharts.length === 0) {
     return undefined;
   }
 
@@ -1006,7 +1020,7 @@ function resolveSparklineData(ws: Worksheet, dataRef: string): number[] {
     if (sheetName.startsWith("'") && sheetName.endsWith("'")) {
       sheetName = sheetName.slice(1, -1).replace(/''/g, "'");
     }
-    const found = (ws as any).workbook?.getWorksheet?.(sheetName) as Worksheet | undefined;
+    const found = getWorksheet(getSheetWorkbook(ws), sheetName);
     if (found) {
       sourceWs = found;
     }

@@ -33,6 +33,10 @@ export enum PaperSize {
 export interface Color {
   argb: string;
   theme: number;
+  /** Tint applied to a theme color, in `[-1, 1]`. Present on theme-based colors. */
+  tint?: number;
+  /** Legacy indexed-palette color (xlsx `indexed` attribute). */
+  indexed?: number;
 }
 
 // ============================================================================
