@@ -1,9 +1,16 @@
+import type { Color, Cvfo } from "@excel/types";
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfvoXform } from "@excel/xlsx/xform/sheet/cf/cfvo-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import type { XmlSink } from "@xml/types";
 
-class DatabarXform extends CompositeXform {
+interface DatabarModel {
+  cfvo: Cvfo[];
+  color?: Partial<Color>;
+}
+
+class DatabarXform extends CompositeXform<DatabarModel> {
   cfvoXform: CfvoXform;
   colorXform: ColorXform;
 
@@ -20,10 +27,10 @@ class DatabarXform extends CompositeXform {
     return "dataBar";
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: DatabarModel): void {
     xmlStream.openNode(this.tag);
 
-    model.cfvo.forEach((cfvo: any) => {
+    model.cfvo.forEach(cfvo => {
       this.cfvoXform.render(xmlStream, cfvo);
     });
     this.colorXform.render(xmlStream, model.color);
@@ -31,19 +38,19 @@ class DatabarXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel(): any {
+  createNewModel(): DatabarModel {
     return {
       cfvo: []
     };
   }
 
-  onParserClose(name: string, parser: any): void {
+  onParserClose(name: string, parser: BaseXform): void {
     switch (name) {
       case "cfvo":
-        this.model.cfvo.push(parser.model);
+        this.model!.cfvo.push(parser.model as Cvfo);
         break;
       case "color":
-        this.model.color = parser.model;
+        this.model!.color = parser.model as Partial<Color>;
         break;
     }
   }

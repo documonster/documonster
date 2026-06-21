@@ -1,8 +1,10 @@
+import type { ConditionalFormattingOptions, ConditionalFormattingRule } from "@excel/types";
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfRuleXform } from "@excel/xlsx/xform/sheet/cf/cf-rule-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class ConditionalFormattingXform extends CompositeXform {
+class ConditionalFormattingXform extends CompositeXform<ConditionalFormattingOptions> {
   constructor() {
     super();
 
@@ -15,7 +17,7 @@ class ConditionalFormattingXform extends CompositeXform {
     return "conditionalFormatting";
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: ConditionalFormattingOptions): void {
     // if there are no primitive rules, exit now
     if (!model.rules.some(CfRuleXform.isPrimitive)) {
       return;
@@ -23,9 +25,9 @@ class ConditionalFormattingXform extends CompositeXform {
 
     xmlStream.openNode(this.tag, { sqref: model.ref });
 
-    model.rules.forEach((rule: any) => {
+    model.rules.forEach(rule => {
       if (CfRuleXform.isPrimitive(rule)) {
-        rule.ref = model.ref;
+        (rule as ConditionalFormattingRule & { ref?: string }).ref = model.ref;
         this.map!.cfRule.render(xmlStream, rule);
       }
     });
@@ -33,15 +35,15 @@ class ConditionalFormattingXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel({ attributes }: any): any {
+  createNewModel({ attributes }: ParseOpenTag): ConditionalFormattingOptions {
     return {
       ref: attributes.sqref,
       rules: []
     };
   }
 
-  onParserClose(name: string, parser: any): void {
-    this.model!.rules.push(parser.model);
+  onParserClose(name: string, parser: BaseXform): void {
+    this.model!.rules.push(parser.model as ConditionalFormattingRule);
   }
 }
 
