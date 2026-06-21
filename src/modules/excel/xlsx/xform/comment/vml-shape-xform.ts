@@ -3,7 +3,7 @@ import { VmlClientDataXform } from "@excel/xlsx/xform/comment/vml-client-data-xf
 import { VmlTextboxXform } from "@excel/xlsx/xform/comment/vml-textbox-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface ShapeModel {
+export interface ShapeModel {
   note: {
     margins?: {
       insetmode?: string;

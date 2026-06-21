@@ -1,3 +1,4 @@
+import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { PhoneticTextXform } from "@excel/xlsx/xform/strings/phonetic-text-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
@@ -11,9 +12,9 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 //   <t></t>
 // </si>
 
-type SharedStringModel = string | { richText: any[] };
+type SharedStringModel = string | { richText: RichText[] };
 
-class SharedStringXform extends BaseXform {
+class SharedStringXform extends BaseXform<SharedStringModel> {
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
 
@@ -60,7 +61,9 @@ class SharedStringXform extends BaseXform {
       return true;
     }
     if (node.name === this.tag) {
-      this.model = {};
+      // Empty accumulator; `<r>` children attach a richText array, `<t>`
+      // replaces the model with a plain string.
+      this.model = {} as SharedStringModel;
       return true;
     }
     this.parser = this.map[node.name];
@@ -82,11 +85,12 @@ class SharedStringXform extends BaseXform {
       if (!this.parser.parseClose(name)) {
         switch (name) {
           case "r": {
-            let rt = (this.model as any).richText;
+            const richModel = this.model as { richText: RichText[] };
+            let rt = richModel.richText;
             if (!rt) {
-              rt = (this.model as any).richText = [];
+              rt = richModel.richText = [];
             }
-            rt.push(this.parser.model);
+            rt.push(this.parser.model as RichText);
             break;
           }
           case "t":
