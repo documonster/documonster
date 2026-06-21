@@ -1,12 +1,13 @@
 import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RelationshipXform } from "@excel/xlsx/xform/core/relationship-xform";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class RelationshipsXform extends BaseXform {
   declare public parser?: BaseXform;
-  declare private _values?: any[];
+  declare private _values?: RelationshipModel[];
 
   constructor() {
     super();
@@ -16,7 +17,7 @@ class RelationshipsXform extends BaseXform {
     };
   }
 
-  render(xmlStream: XmlSink, model?: any[]): void {
+  render(xmlStream: XmlSink, model?: RelationshipModel[]): void {
     const renderModel = model || this._values;
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("Relationships", RelationshipsXform.RELATIONSHIPS_ATTRIBUTES);

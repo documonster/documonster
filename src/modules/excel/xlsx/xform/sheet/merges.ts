@@ -31,10 +31,19 @@ class Merges {
     return Object.values(this.merges).map((merge: RangeData) => rangeRange(merge));
   }
 
-  reconcile(mergeCells: string[], rows: any[]): void {
+  reconcile(
+    mergeCells: string[],
+    rows: { cells: ({ type: number; master?: string; address?: string } | undefined)[] }[]
+  ): void {
     // reconcile merge list with merge cells
     mergeCells.forEach((merge: string) => {
-      const dimensions: any = colCache.decode(merge);
+      const dimensions = colCache.decode(merge) as {
+        top: number;
+        bottom: number;
+        left: number;
+        right: number;
+        tl: string;
+      };
       for (let i = dimensions.top; i <= dimensions.bottom; i++) {
         const row = rows[i - 1];
         for (let j = dimensions.left; j <= dimensions.right; j++) {

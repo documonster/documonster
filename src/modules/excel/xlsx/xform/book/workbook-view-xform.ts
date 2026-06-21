@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface WorkbookViewModel {
   x?: number;
@@ -13,7 +13,7 @@ interface WorkbookViewModel {
 
 class WorkbookViewXform extends BaseXform {
   render(xmlStream: XmlSink, model: WorkbookViewModel): void {
-    const attributes: any = {
+    const attributes: XmlAttributes = {
       xWindow: model.x ?? 0,
       yWindow: model.y ?? 0,
       windowWidth: model.width ?? 12000,
@@ -29,7 +29,7 @@ class WorkbookViewXform extends BaseXform {
 
   parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "workbookView") {
-      const model: any = (this.model = {});
+      const model: Record<string, unknown> = (this.model = {});
       const addS = function (
         name: string,
         value: string | undefined,
