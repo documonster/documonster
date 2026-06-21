@@ -35,6 +35,7 @@ import type {
   ChartExContent
 } from "@word/types";
 import { EMU_PER_INCH } from "@word/units";
+import { stripXmlIllegalChars } from "@xml/encode";
 
 /** Options for HTML rendering. */
 export interface HtmlRenderOptions {
@@ -1202,7 +1203,20 @@ function renderMathBlockHtml(state: RenderState, block: MathBlock): void {
 // =============================================================================
 
 function escapeHtml(s: string): string {
-  return s
+  // Strip characters that are illegal in XML 1.0 / serialised markup —
+  // forbidden C0 controls (`0x00`-`0x08`, `0x0B`, `0x0C`, `0x0E`-`0x1F`),
+  // DEL (`0x7F`), lone UTF-16 surrogate halves, and the `0xFFFE` / `0xFFFF`
+  // noncharacters — before escaping entities. The input is arbitrary docx
+  // content (titles, authors, alt text, body runs), so a corrupt or hostile
+  // document could otherwise inject control chars / lone surrogates straight
+  // into HTML text and attribute values, producing invalid UTF-8 on encode
+  // and U+FFFD / parser hiccups in the browser.
+  //
+  // We keep the HTML-flavoured entity set (`'` → `&#39;`, NOT `&apos;`) and
+  // do not route through `xmlEncode`: `&apos;` is not a predefined HTML
+  // entity and is unreliable in legacy HTML contexts, so HTML output must
+  // use the numeric reference. Only the illegal-char stripping is shared.
+  return stripXmlIllegalChars(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
