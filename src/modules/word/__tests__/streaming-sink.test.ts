@@ -167,4 +167,45 @@ describe("StreamingDocxWriter — sink mode", () => {
     expect(bytes[0]).toBe(0x50); // 'P'
     expect(bytes[1]).toBe(0x4b); // 'K'
   });
+
+  it("true streaming: bytes reach the sink incrementally, body is not buffered to finalize", async () => {
+    // A large body whose compressed output far exceeds any per-entry buffering.
+    // If the writer were buffering the whole document until finalize(), the
+    // sink would receive (almost) nothing during the addAsync loop and then a
+    // burst at finalize. True streaming delivers compressed bytes continuously.
+    let bytesBeforeFinalize = 0;
+    let totalBytes = 0;
+    let sawFinalize = false;
+    const ws = new WritableStream<Uint8Array>({
+      write(chunk): void {
+        totalBytes += chunk.length;
+        if (!sawFinalize) {
+          bytesBeforeFinalize += chunk.length;
+        }
+      }
+    });
+
+    const writer = Streaming.createDocxStream({ sink: ws });
+
+    // ~6000 paragraphs of incompressible-ish text — multi-MB uncompressed body.
+    const big = "x9q7-streaming-body-".repeat(120); // ~2.4 KB per paragraph
+    for (let i = 0; i < 6000; i++) {
+      await writer.addAsync(Build.textParagraph(`${i}:${big}`));
+    }
+
+    // The decisive assertion: a substantial fraction of the compressed output
+    // must have already been delivered to the sink BEFORE finalize() runs.
+    // (If the body were retained and only flushed at finalize, this would be
+    // ~0.) We require the pre-finalize bytes to be the clear majority.
+    expect(bytesBeforeFinalize).toBeGreaterThan(0);
+
+    sawFinalize = true;
+    await writer.finalize();
+
+    expect(totalBytes).toBeGreaterThan(0);
+    // Pre-finalize delivery should dominate: the document body was streamed
+    // out during addAsync; finalize only appends the small trailing parts
+    // (styles/settings/relationships/central directory).
+    expect(bytesBeforeFinalize).toBeGreaterThan(totalBytes * 0.5);
+  }, 120_000);
 });
