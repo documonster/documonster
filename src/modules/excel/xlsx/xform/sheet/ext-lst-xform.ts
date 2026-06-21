@@ -1,12 +1,19 @@
 import { renderSparklineGroups, parseSparklineGroups } from "@excel/core/sparkline";
+import type { SparklineGroup } from "@excel/core/sparkline";
 import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ConditionalFormattingsExtXform } from "@excel/xlsx/xform/sheet/cf-ext/conditional-formattings-ext-xform";
 import type { XmlSink } from "@xml/types";
 
+/** The worksheet `<extLst>` model: conditional-formatting and sparkline extensions. */
+interface ExtLstModel {
+  conditionalFormattings?: unknown;
+  sparklineGroups?: SparklineGroup[];
+}
+
 class ExtXform extends CompositeXform {
   declare public map: Record<string, BaseXform>;
-  declare public model: any;
+  declare public model: ExtLstModel;
   declare private conditionalFormattings: ConditionalFormattingsExtXform;
 
   constructor() {
@@ -21,15 +28,15 @@ class ExtXform extends CompositeXform {
     return "ext";
   }
 
-  hasContent(model: any): boolean {
+  hasContent(model: ExtLstModel): boolean {
     return this.conditionalFormattings.hasContent(model.conditionalFormattings);
   }
 
-  prepare(model: any): void {
+  prepare(model: ExtLstModel): void {
     this.conditionalFormattings.prepare(model.conditionalFormattings);
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: ExtLstModel): void {
     xmlStream.openNode("ext", {
       uri: "{78C0D931-6437-407d-A8EE-F0AAD7539E65}",
       "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
@@ -40,12 +47,12 @@ class ExtXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel(): any {
+  createNewModel(): ExtLstModel {
     return {};
   }
 
-  onParserClose(name: string, parser: any): void {
-    this.model[name] = parser.model;
+  onParserClose(name: string, parser: BaseXform): void {
+    (this.model as Record<string, unknown>)[name] = parser.model;
   }
 }
 
@@ -54,8 +61,6 @@ class ExtXform extends CompositeXform {
  * Renders/captures `<ext uri="{05C60535-...}">` containing x14:sparklineGroups.
  */
 class SparklineExtXform {
-  private _parsedModel: any = null;
-
   get tag(): string {
     return "ext";
   }
@@ -64,7 +69,7 @@ class SparklineExtXform {
     return Array.isArray(sparklineGroups) && sparklineGroups.length > 0;
   }
 
-  render(xmlStream: XmlSink, sparklineGroups: any[]): void {
+  render(xmlStream: XmlSink, sparklineGroups: SparklineGroup[]): void {
     if (!this.hasContent(sparklineGroups)) {
       return;
     }
@@ -89,14 +94,14 @@ class SparklineExtXform {
     xmlStream.closeNode();
   }
 
-  parse(xml: string): any[] {
+  parse(xml: string): SparklineGroup[] {
     return parseSparklineGroups(xml);
   }
 }
 
 class ExtLstXform extends CompositeXform {
   declare public map: Record<string, BaseXform>;
-  declare public model: any;
+  declare public model: ExtLstModel;
   declare private ext: ExtXform;
   declare private sparklineExt: SparklineExtXform;
 
@@ -113,15 +118,15 @@ class ExtLstXform extends CompositeXform {
     return "extLst";
   }
 
-  prepare(model: any, _options?: any): void {
+  prepare(model: ExtLstModel, _options?: unknown): void {
     this.ext.prepare(model);
   }
 
-  hasContent(model: any): boolean {
+  hasContent(model: ExtLstModel): boolean {
     return this.ext.hasContent(model) || this.sparklineExt.hasContent(model?.sparklineGroups);
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: ExtLstModel): void {
     if (!this.hasContent(model)) {
       return;
     }
@@ -131,17 +136,17 @@ class ExtLstXform extends CompositeXform {
       this.ext.render(xmlStream, model);
     }
     if (this.sparklineExt.hasContent(model?.sparklineGroups)) {
-      this.sparklineExt.render(xmlStream, model.sparklineGroups);
+      this.sparklineExt.render(xmlStream, model.sparklineGroups!);
     }
     xmlStream.closeNode();
   }
 
-  createNewModel(): any {
+  createNewModel(): ExtLstModel {
     return {};
   }
 
-  onParserClose(name: string, parser: any): void {
-    this.model[name] = parser.model;
+  onParserClose(name: string, parser: BaseXform): void {
+    (this.model as Record<string, unknown>)[name] = parser.model;
   }
 }
 
