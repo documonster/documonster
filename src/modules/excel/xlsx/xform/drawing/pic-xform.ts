@@ -5,7 +5,7 @@ import { spPrJSON } from "@excel/xlsx/xform/drawing/sp-pr";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface PicModel {
+export interface PicModel {
   index?: number;
   rId?: string;
   /** Alpha modulation for transparency (OOXML percentage, e.g. 15000 = 15%). */

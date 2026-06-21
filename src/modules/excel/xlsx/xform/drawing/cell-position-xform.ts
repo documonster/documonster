@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface PositionModel {
+export interface PositionModel {
   nativeCol: number;
   nativeColOff: number;
   nativeRow: number;

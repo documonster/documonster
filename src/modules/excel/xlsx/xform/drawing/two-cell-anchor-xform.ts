@@ -1,8 +1,12 @@
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
+import type { PositionModel } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
+import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import type { PicModel } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
+import type { ShapeRenderModel } from "@excel/xlsx/xform/drawing/shape-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -10,15 +14,16 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 interface TwoCellModel {
   range: {
     editAs?: string;
-    tl: any;
-    br: any;
+    tl: PositionModel;
+    br: PositionModel;
   };
-  picture?: any;
-  shape?: any;
+  picture?: PicModel;
+  shape?: ShapeRenderModel;
   /** Graphic frame model (for charts and other embedded objects) */
-  graphicFrame?: any;
+  graphicFrame?: GraphicFrameModel;
   /** Wrap the anchor in mc:AlternateContent for modern drawing clients */
   alternateContent?: { requires: string };
+  medium?: unknown;
 }
 
 class TwoCellAnchorXform extends BaseCellAnchorXform {
@@ -401,7 +406,10 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  reconcile(model: any, options: any): void {
+  reconcile(
+    model: TwoCellModel,
+    options: Parameters<BaseCellAnchorXform["reconcilePicture"]>[1]
+  ): void {
     if (model.picture) {
       model.medium = this.reconcilePicture(model.picture, options);
     }

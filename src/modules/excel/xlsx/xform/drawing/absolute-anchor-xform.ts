@@ -1,9 +1,13 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
+import type { ExtModel } from "@excel/xlsx/xform/drawing/ext-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
+import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import type { PicModel } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
+import type { ShapeRenderModel } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { EMU_PER_PX } from "@utils/units";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -11,6 +15,14 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 interface PosModel {
   x: number;
   y: number;
+}
+
+interface AbsoluteModel {
+  range: { pos?: PosModel; ext?: ExtModel };
+  picture?: PicModel;
+  graphicFrame?: GraphicFrameModel;
+  shape?: ShapeRenderModel;
+  medium?: unknown;
 }
 
 /**
@@ -95,7 +107,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     return "xdr:absoluteAnchor";
   }
 
-  prepare(model: any, options: { index: number }): void {
+  prepare(model: AbsoluteModel, options: { index: number }): void {
     if (model.picture) {
       this.map["xdr:pic"].prepare(model.picture, options);
     } else if (model.graphicFrame) {
@@ -103,7 +115,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: AbsoluteModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:pos"].render(xmlStream, model.range.pos ?? { x: 0, y: 0 });
@@ -139,7 +151,10 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  reconcile(model: any, options: any): void {
+  reconcile(
+    model: AbsoluteModel,
+    options: Parameters<BaseCellAnchorXform["reconcilePicture"]>[1]
+  ): void {
     if (model.picture) {
       model.medium = this.reconcilePicture(model.picture, options);
     }

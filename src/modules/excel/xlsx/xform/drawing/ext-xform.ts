@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { EMU_PER_PX } from "@utils/units";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface ExtModel {
+export interface ExtModel {
   width: number;
   height: number;
 }
