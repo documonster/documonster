@@ -27,7 +27,7 @@ import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/pdf-builder-examples"
+  "../../../../tmp/pdf-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 

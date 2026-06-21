@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -5,8 +6,10 @@ import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { Stream } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
+fs.mkdirSync(outDir, { recursive: true });
 
-const [, , filename] = process.argv;
+const filename = process.argv[2] ?? path.join(outDir, "images-streaming-writer.xlsx");
 
 const wb = new Stream.WorkbookWriter({ filename });
 

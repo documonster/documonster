@@ -18,7 +18,7 @@ import { Cell, Note, Workbook } from "@excel/index";
 
 import { ArchiveFile } from "../../archive/fs/archive-file";
 
-const tmpDir = path.resolve(import.meta.dirname, "../../../../tmp");
+const tmpDir = path.resolve(import.meta.dirname, "../../../../tmp/excel-examples");
 fs.mkdirSync(tmpDir, { recursive: true });
 
 const flatFile = path.join(tmpDir, "comments-flat.xlsx");

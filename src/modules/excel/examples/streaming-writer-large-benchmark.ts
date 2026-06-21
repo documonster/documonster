@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Using WorkbookWriter (streaming) for large data
@@ -17,7 +18,10 @@ async function main() {
   console.log(`Writing ${ROW_COUNT} rows x ${COL_COUNT} columns = ${ROW_COUNT * COL_COUNT} cells`);
 
   // Create workbook writer (streaming mode)
-  const outDir = path.resolve(process.cwd(), "out");
+  const outDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../tmp/excel-examples"
+  );
   fs.mkdirSync(outDir, { recursive: true });
 
   const book = new Stream.WorkbookWriter({

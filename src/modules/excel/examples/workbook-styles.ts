@@ -1,8 +1,17 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 import type { Fill } from "@excel/types";
 
-const [, , filename] = process.argv;
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "workbook-styles.xlsx");
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "blort");

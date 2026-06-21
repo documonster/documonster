@@ -24,15 +24,16 @@
  *   - PDF export with encryption + CJK font embed demo
  *
  * Output:
- *   tmp/mega-dashboard.xlsx
- *   tmp/mega-dashboard.pdf
+ *   tmp/excel-examples/mega-dashboard.xlsx
+ *   tmp/excel-examples/mega-dashboard.pdf
  *
  * Usage:
  *   npx tsx src/modules/excel/examples/mega-dashboard.ts
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   AddChartSeriesOptions,
@@ -56,7 +57,7 @@ import {
 } from "@excel/index";
 import { chartToPdf, excelToPdf } from "@pdf/excel-bridge";
 
-const OUT_DIR = resolve(process.cwd(), "tmp");
+const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
 mkdirSync(OUT_DIR, { recursive: true });
 
 const XLSX_PATH = resolve(OUT_DIR, "mega-dashboard.xlsx");

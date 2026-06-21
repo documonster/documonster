@@ -26,20 +26,21 @@ import { mkdirSync, writeFileSync } from "node:fs";
  *     restricted permissions
  *
  * Output:
- *   tmp/financial-report.xlsx
- *   tmp/financial-report.pdf           — encrypted
- *   tmp/financial-report-public.pdf    — unencrypted
+ *   tmp/excel-examples/financial-report.xlsx
+ *   tmp/excel-examples/financial-report.pdf           — encrypted
+ *   tmp/excel-examples/financial-report-public.pdf    — unencrypted
  *
  * Usage:
  *   npx tsx src/modules/excel/examples/financial-report.ts
  */
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ChartRichText } from "@excel/chart/index";
 import { Address, Cell, Chart, Column, DefinedNames, Row, Workbook, Worksheet } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
-const OUT_DIR = resolve(process.cwd(), "tmp");
+const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
 mkdirSync(OUT_DIR, { recursive: true });
 
 const XLSX_PATH = resolve(OUT_DIR, "financial-report.xlsx");

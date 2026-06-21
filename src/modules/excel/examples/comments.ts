@@ -1,10 +1,13 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Cell, Workbook } from "@excel/index";
 
 const inputFile = fileURLToPath(new URL("./data/comments.xlsx", import.meta.url));
-const outputFile = path.join(path.dirname(inputFile), "comments-out.xlsx");
+const outDir = path.resolve(path.dirname(inputFile), "../../../../../tmp/excel-examples");
+fs.mkdirSync(outDir, { recursive: true });
+const outputFile = path.join(outDir, "comments-out.xlsx");
 
 const wb = Workbook.create();
 

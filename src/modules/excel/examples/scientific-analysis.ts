@@ -28,15 +28,16 @@
  *   - Print layout for scientific reports + header/footer + page breaks
  *
  * Output:
- *   tmp/scientific-analysis.xlsx
- *   tmp/scientific-analysis.pdf
+ *   tmp/excel-examples/scientific-analysis.xlsx
+ *   tmp/excel-examples/scientific-analysis.pdf
  *
  * Usage:
  *   npx tsx src/modules/excel/examples/scientific-analysis.ts
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { AddTrendlineOptions, ChartRichText } from "@excel/chart/index";
 import {
@@ -52,7 +53,7 @@ import {
 } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
-const OUT_DIR = resolve(process.cwd(), "tmp");
+const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
 mkdirSync(OUT_DIR, { recursive: true });
 
 const XLSX_PATH = resolve(OUT_DIR, "scientific-analysis.xlsx");

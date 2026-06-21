@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 /**
  * Auto-Fit Example: Demonstrates autoFitColumns() and autoFitRows()
@@ -8,7 +12,11 @@ import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
  * 3. auto-fit-advanced.xlsx   — Wrap text, multi-line, rich text, merged cells, indent
  */
 
-const outDir = "out";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
 
 // =============================================================================
 // 1. Basic auto-fit: mixed content types
@@ -51,9 +59,9 @@ async function generateBasic() {
   // Auto-fit all columns then all rows
   Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
 
-  const path = `${outDir}/auto-fit-basic.xlsx`;
-  await Workbook.writeFile(wb, path);
-  console.log(`Written: ${path}`);
+  const filePath = `${outDir}/auto-fit-basic.xlsx`;
+  await Workbook.writeFile(wb, filePath);
+  console.log(`Written: ${filePath}`);
 }
 
 // =============================================================================
@@ -103,9 +111,9 @@ async function generateFonts() {
 
   Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
 
-  const path = `${outDir}/auto-fit-fonts.xlsx`;
-  await Workbook.writeFile(wb, path);
-  console.log(`Written: ${path}`);
+  const filePath = `${outDir}/auto-fit-fonts.xlsx`;
+  await Workbook.writeFile(wb, filePath);
+  console.log(`Written: ${filePath}`);
 }
 
 // =============================================================================
@@ -198,9 +206,9 @@ async function generateAdvanced() {
   // Auto-fit all rows (this will use column B's width for wrap calculation)
   Worksheet.autoFitRows(ws);
 
-  const path = `${outDir}/auto-fit-advanced.xlsx`;
-  await Workbook.writeFile(wb, path);
-  console.log(`Written: ${path}`);
+  const filePath = `${outDir}/auto-fit-advanced.xlsx`;
+  await Workbook.writeFile(wb, filePath);
+  console.log(`Written: ${filePath}`);
 }
 
 // =============================================================================

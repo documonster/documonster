@@ -6,8 +6,10 @@ import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { Cell, Image, Workbook } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
+fs.mkdirSync(outDir, { recursive: true });
 
-const filename = process.argv[2];
+const filename = process.argv[2] ?? path.join(outDir, "image-one-cell-anchor.xlsx");
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "blort");

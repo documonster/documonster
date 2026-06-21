@@ -25,15 +25,16 @@
  *   - Print-ready page setup + scaled fit + repeat print titles
  *
  * Output:
- *   tmp/sales-dashboard.xlsx
- *   tmp/sales-dashboard.pdf
+ *   tmp/excel-examples/sales-dashboard.xlsx
+ *   tmp/excel-examples/sales-dashboard.pdf
  *
  * Usage:
  *   npx tsx src/modules/excel/examples/sales-dashboard.ts
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { ChartRichText } from "@excel/chart/index";
 import {
@@ -50,7 +51,7 @@ import {
 } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 
-const OUT_DIR = resolve(process.cwd(), "tmp");
+const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
 mkdirSync(OUT_DIR, { recursive: true });
 
 const XLSX_PATH = resolve(OUT_DIR, "sales-dashboard.xlsx");

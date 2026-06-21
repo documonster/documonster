@@ -1,6 +1,16 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Cell, Workbook, Worksheet } from "@excel/index";
 
-const [, , inputFile, outputFile] = process.argv;
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
+
+fs.mkdirSync(outDir, { recursive: true });
+
+const inputFile = process.argv[2] ?? path.join(exampleDir, "data/test.xlsx");
+const outputFile = process.argv[3] ?? path.join(outDir, "process-workbook-out.xlsx");
 
 const wb = Workbook.create();
 
@@ -26,7 +36,7 @@ Workbook.getXlsxIo(wb)
       console.log(Worksheet.getName(sheet));
     });
 
-    const ws = Workbook.getWorksheet(wb, "Sheet1")!;
+    const ws = Workbook.getWorksheets(wb)[0]!;
 
     assert(ws, "Expected to find a worksheet called sheet1", "");
 

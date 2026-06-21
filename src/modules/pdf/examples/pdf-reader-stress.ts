@@ -38,7 +38,7 @@ import { readPdf } from "../reader/pdf-reader";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/pdf-reader-stress"
+  "../../../../tmp/pdf-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 

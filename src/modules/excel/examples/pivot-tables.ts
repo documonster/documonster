@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Column, Pivot, Table, Workbook, Worksheet } from "@excel/index";
 /**
  * Pivot Table Examples — 25 variations showcasing all supported features
@@ -423,7 +427,12 @@ async function main() {
   });
 
   // Write output
-  const outPath = "out/pivot-tables-example.xlsx";
+  const outDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../tmp/excel-examples"
+  );
+  fs.mkdirSync(outDir, { recursive: true });
+  const outPath = path.join(outDir, "pivot-tables-example.xlsx");
   await Workbook.writeFile(workbook, outPath);
   console.log(`Done! ${rows.length} sales rows + ${empRows.length} employee rows`);
   console.log(`Generated 25 pivot tables -> ${outPath}`);

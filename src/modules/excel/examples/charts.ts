@@ -97,17 +97,18 @@
  * 35.  Loading + mutating a chart (`chart.mutate(fn, { preferRawPatch })`).
  *
  * Output:
- *   tmp/charts-example.xlsx     — one workbook containing every chart
- *   tmp/charts-example-<N>.svg  — per-chart SVG previews
- *   tmp/charts-example-<N>.png  — per-chart PNG previews
- *   tmp/charts-example.pdf      — multi-page PDF of each chart
+ *   tmp/excel-examples/charts-example.xlsx     — one workbook containing every chart
+ *   tmp/excel-examples/charts-example-<N>.svg  — per-chart SVG previews
+ *   tmp/excel-examples/charts-example-<N>.png  — per-chart PNG previews
+ *   tmp/excel-examples/charts-example.pdf      — multi-page PDF of each chart
  *
  * Usage:
  *   pnpm exec tsx src/modules/excel/examples/charts.ts
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   AddChartSeriesOptions,
@@ -183,7 +184,7 @@ import {
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { chartToPdf } from "@pdf/excel-bridge";
 
-const OUT_DIR = resolve(process.cwd(), "tmp");
+const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
 const XLSX_PATH = resolve(OUT_DIR, "charts-example.xlsx");
 const PDF_PATH = resolve(OUT_DIR, "charts-example.pdf");
 
@@ -5177,7 +5178,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // 35. Load + mutate — `chart.mutate(fn, { preferRawPatch })` round-trip.
   //
-  // We first write the workbook to `tmp/charts-example.xlsx`, then load
+  // We first write the workbook to `tmp/excel-examples/charts-example.xlsx`, then load
   // it back and make a narrow, template-safe edit using the raw-patch
   // path (stays byte-preserving for the rest of the chart XML).
   // ---------------------------------------------------------------------------

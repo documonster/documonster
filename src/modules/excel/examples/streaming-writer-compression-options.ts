@@ -1,6 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Stream } from "@excel/index";
 
-const filename = process.argv[2];
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "streaming-writer-compression-best.xlsx");
 console.log(filename);
 const optionsBestCompression = {
   filename,
@@ -42,7 +51,7 @@ wb.commit().then(() => {
   // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });
 
-const filename2 = process.argv[3];
+const filename2 = process.argv[3] ?? path.join(outDir, "streaming-writer-compression-speed.xlsx");
 console.log(filename2);
 const optionsBestSpeed = {
   filename: filename2,
@@ -80,7 +89,7 @@ wb2.commit().then(() => {
   // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });
 
-const filename3 = process.argv[4];
+const filename3 = process.argv[4] ?? path.join(outDir, "streaming-writer-compression-default.xlsx");
 console.log(filename3);
 const options = {
   filename: filename3,

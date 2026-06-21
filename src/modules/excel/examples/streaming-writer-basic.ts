@@ -1,6 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Stream } from "@excel/index";
 
-const filename = process.argv[2];
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "streaming-writer-basic.xlsx");
 
 const wb = new Stream.WorkbookWriter({
   filename,

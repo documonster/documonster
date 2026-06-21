@@ -8,10 +8,19 @@
  *   node src/modules/excel/examples/checkbox.ts [outputPath]
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Cell, Column, Row, Workbook } from "@excel/index";
 
 async function main(): Promise<void> {
-  const outputPath = process.argv[2] || "src/modules/excel/examples/data/checkbox.xlsx";
+  const outDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../tmp/excel-examples"
+  );
+  fs.mkdirSync(outDir, { recursive: true });
+  const outputPath = process.argv[2] || path.join(outDir, "checkbox.xlsx");
 
   const wb = Workbook.create();
   wb.creator = "documonster";

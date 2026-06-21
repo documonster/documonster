@@ -43,8 +43,9 @@ import { Cell, Image, Watermark, Workbook } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 
-// Output file: passed via argv, otherwise written under the project tmp/ dir.
-const filename = process.argv[2] ?? path.join(exampleDir, "../../../../tmp/images-external.xlsx");
+// Output file: passed via argv, otherwise written under the project tmp/excel-examples dir.
+const filename =
+  process.argv[2] ?? path.join(exampleDir, "../../../../tmp/excel-examples/images-external.xlsx");
 fs.mkdirSync(path.dirname(filename), { recursive: true });
 
 // A small real PNG bundled with the examples.
