@@ -12,8 +12,14 @@ interface EventEmitterLike {
  * Intentionally structural so it matches Node `Readable`, zip entry streams,
  * object-mode streams that yield zip entries, and any third-party emitter
  * that raises `data`/`end`/`error`.
+ *
+ * The default chunk type is `Uint8Array | string` — the overwhelmingly common
+ * byte/text stream case — so that `Parameters<typeof iterateStream>[0]` and
+ * other unparameterised references resolve to a concrete chunk type instead of
+ * `unknown`. Object-mode streams (e.g. a zip parser yielding entries) supply
+ * their own concrete `T` via the stream's own type, so they are unaffected.
  */
-export interface IterableStreamLike<T = unknown> extends EventEmitterLike {
+export interface IterableStreamLike<T = Uint8Array | string> extends EventEmitterLike {
   resume(): void;
   pause(): void;
   on(event: "data", listener: (chunk: T) => void): this;

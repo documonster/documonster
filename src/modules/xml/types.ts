@@ -176,10 +176,14 @@ export type SaxEvent =
 /**
  * Loose-typed SAX event for legacy consumers that don't narrow on eventType.
  * New code should use {@link SaxEvent} with proper discriminant checks.
+ *
+ * `value` is the union of every event payload rather than `any`, so a consumer
+ * that ignores `eventType` still gets a checked type (and `any` never leaks out
+ * of the parser into caller code).
  */
 export interface SaxEventAny {
   eventType: "opentag" | "text" | "closetag" | "cdata" | "comment" | "pi" | "error";
-  value: any;
+  value: SaxTag | string | { target: string; body: string } | Error;
 }
 
 /** SAX event handler map. */

@@ -16,7 +16,7 @@
 
 import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
-import type { InvalidCharHandling, SaxEventAny, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
+import type { InvalidCharHandling, SaxEvent, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
 
 // =============================================================================
 // Character Codes
@@ -337,12 +337,17 @@ class SaxParser {
   on(name: "comment", handler: (text: string) => void): void;
   on(name: "pi", handler: (target: string, body: string) => void): void;
   on(name: "error", handler: (err: Error) => void): void;
-  on(name: string, handler: any): void {
-    (this._handlers as any)[name] = handler;
+  on<K extends keyof SaxHandlers>(name: K, handler: SaxHandlers[K]): void {
+    this._handlers[name] = handler;
   }
 
-  off(name: string): void {
-    delete (this._handlers as any)[name];
+  off(name: keyof SaxHandlers): void {
+    delete this._handlers[name];
+  }
+
+  /** Return the currently-registered handler for an event, if any. */
+  getHandler<K extends keyof SaxHandlers>(name: K): SaxHandlers[K] {
+    return this._handlers[name];
   }
 
   // ===========================================================================
@@ -2052,9 +2057,9 @@ class SaxParser {
  * ```
  */
 async function* parseSax(
-  iterable: AsyncIterable<any> | Iterable<any>,
+  iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>,
   options?: SaxOptions
-): AsyncGenerator<SaxEventAny[]> {
+): AsyncGenerator<SaxEvent[]> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parser = new SaxParser(options);
 
@@ -2063,7 +2068,7 @@ async function* parseSax(
     error = err;
   });
 
-  let events: SaxEventAny[] = [];
+  let events: SaxEvent[] = [];
   parser.on("opentag", value => events.push({ eventType: "opentag", value }));
   parser.on("text", value => events.push({ eventType: "text", value }));
   parser.on("closetag", value => events.push({ eventType: "closetag", value }));
@@ -2127,12 +2132,12 @@ async function* parseSax(
  */
 async function saxStream(
   parser: SaxParser,
-  iterable: AsyncIterable<any> | Iterable<any>
+  iterable: AsyncIterable<string | Uint8Array> | Iterable<string | Uint8Array>
 ): Promise<void> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
 
   let error: Error | undefined;
-  const prevErrorHandler = (parser as any)._handlers?.error;
+  const prevErrorHandler = parser.getHandler("error");
   parser.on("error", (err: Error) => {
     error = err;
     prevErrorHandler?.(err);

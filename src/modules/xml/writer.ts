@@ -130,7 +130,7 @@ class XmlWriter implements XmlSink {
     let s = "<" + name;
     if (attributes) {
       for (const key in attributes) {
-        const value = (attributes as any)[key];
+        const value = attributes[key];
         if (value !== undefined) {
           validateXmlName(key);
           s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
@@ -219,7 +219,7 @@ class XmlWriter implements XmlSink {
     let s = "<" + name;
     if (attributes) {
       for (const key in attributes) {
-        const value = (attributes as any)[key];
+        const value = attributes[key];
         if (value !== undefined) {
           validateXmlName(key);
           s += ` ${key}="${xmlEncodeAttr(String(value))}"`;

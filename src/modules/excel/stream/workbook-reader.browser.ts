@@ -17,6 +17,7 @@ import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
 import type { WorksheetState, Font, WorkbookProperties } from "@excel/types";
 import { iterateStream } from "@excel/utils/iterate-stream";
+import type { IterableStreamLike } from "@excel/utils/iterate-stream";
 import {
   getWorksheetNoFromWorksheetPath,
   getWorksheetNoFromWorksheetRelsPath,
@@ -368,7 +369,7 @@ export abstract class WorkbookReaderBase<
     }
   }
 
-  private async _parseRels(entry: Parameters<typeof iterateStream>[0]): Promise<void> {
+  private async _parseRels(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new RelationshipsXform();
     this.workbookRels = await xform.parseStream(iterateStream(entry));
 
@@ -381,7 +382,7 @@ export abstract class WorkbookReaderBase<
     }
   }
 
-  private async _parseWorkbook(entry: Parameters<typeof iterateStream>[0]): Promise<void> {
+  private async _parseWorkbook(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     this._emitEntry({ type: "workbook" });
     const workbook = new WorkbookXform();
     this.model = await workbook.parseStream(iterateStream(entry));
@@ -395,7 +396,7 @@ export abstract class WorkbookReaderBase<
   }
 
   private async *_parseSharedStrings(
-    entry: Parameters<typeof iterateStream>[0]
+    entry: IterableStreamLike<Uint8Array | string>
   ): AsyncIterableIterator<{ index: number; text: SharedStringValue }> {
     this._emitEntry({ type: "shared-strings" });
     switch (this.options.sharedStrings) {
@@ -655,7 +656,7 @@ export abstract class WorkbookReaderBase<
     }
   }
 
-  private async _parseStyles(entry: Parameters<typeof iterateStream>[0]): Promise<void> {
+  private async _parseStyles(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     this._emitEntry({ type: "styles" });
     if (this.options.styles === "cache") {
       this.styles = new StylesXform();
@@ -663,7 +664,7 @@ export abstract class WorkbookReaderBase<
     }
   }
 
-  private async _parseMetadata(entry: Parameters<typeof iterateStream>[0]): Promise<void> {
+  private async _parseMetadata(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new MetadataXform();
     const result = await xform.parseStream(iterateStream(entry));
     if (result) {
