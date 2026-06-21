@@ -19,10 +19,11 @@
 import { formatCsv } from "@csv/format";
 import { parseCsv } from "@csv/parse";
 import { CsvParserStream, CsvFormatterStream } from "@csv/stream";
-import type { CsvParseOptions, CsvFormatOptions } from "@csv/types";
+import type { CsvParseOptions, CsvFormatOptions, Row as CsvRow } from "@csv/types";
 import type { DecimalSeparator } from "@csv/utils/number";
 import { parseNumberFromCsv } from "@csv/utils/number";
 import { rowHasValues, rowValues } from "@excel/core/row";
+import type { RowData } from "@excel/core/row";
 import { addWorksheet, getWorksheet } from "@excel/core/workbook";
 import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
@@ -45,7 +46,7 @@ export type CsvInput =
   | Uint8Array
   | File // Browser File object
   | Blob // Browser Blob object
-  | IReadable<any>; // Readable stream
+  | IReadable<Uint8Array | string>; // Readable stream
 
 type CsvOptionsParseFields = Pick<
   CsvParseOptions,
@@ -208,14 +209,17 @@ function createDefaultWriteMapper(
     if ("formula" in value || "sharedFormula" in value) {
       return (value as { result?: CellValue }).result ?? "";
     }
-    if ("richText" in value && Array.isArray((value as any).richText)) {
-      return (value as any).richText.map((r: { text: string }) => r.text).join("");
+    const richTextValue = value as { richText?: { text: string }[] };
+    if ("richText" in value && Array.isArray(richTextValue.richText)) {
+      return richTextValue.richText.map(r => r.text).join("");
     }
-    if ("checkbox" in value && typeof (value as any).checkbox === "boolean") {
-      return (value as any).checkbox;
+    const checkboxValue = value as { checkbox?: unknown };
+    if ("checkbox" in value && typeof checkboxValue.checkbox === "boolean") {
+      return checkboxValue.checkbox;
     }
-    if ("error" in value && typeof (value as any).error === "string") {
-      return (value as any).error;
+    const errorValue = value as { error?: unknown };
+    if ("error" in value && typeof errorValue.error === "string") {
+      return errorValue.error;
     }
     return JSON.stringify(value);
   };
@@ -237,11 +241,15 @@ function isBlob(input: unknown): input is Blob {
   return typeof Blob !== "undefined" && input instanceof Blob && !isFile(input);
 }
 
-function isReadableStream(input: unknown): input is IReadable<any> {
+function isReadableStream(input: unknown): input is IReadable<Uint8Array | string> {
   if (!input || typeof input !== "object") {
     return false;
   }
-  const obj = input as any;
+  const obj = input as {
+    [Symbol.asyncIterator]?: unknown;
+    pipe?: unknown;
+    on?: unknown;
+  };
   return (
     typeof obj[Symbol.asyncIterator] === "function" ||
     (typeof obj.pipe === "function" && typeof obj.on === "function")
@@ -252,8 +260,10 @@ function isReadableStream(input: unknown): input is IReadable<any> {
 // Stream helpers
 // =============================================================================
 
-function* iterateWorksheetRows(worksheet: any): Generator<{ row: any; rowNumber: number }> {
-  const rows = (worksheet as { _rows?: any[] })._rows;
+function* iterateWorksheetRows(
+  worksheet: Worksheet
+): Generator<{ row: RowData; rowNumber: number }> {
+  const rows = worksheet._rows;
   if (!rows || rows.length === 0) {
     return;
   }
@@ -382,7 +392,7 @@ export function readCsvContent(
 /** @internal — shared by stream read entry points and the Node file variant. */
 export function readCsvStream(
   workbook: Workbook,
-  stream: IReadable<any>,
+  stream: IReadable<Uint8Array | string> | AsyncIterable<Uint8Array | string>,
   options?: CsvOptions
 ): Promise<Worksheet> {
   const worksheet = addWorksheet(workbook, options?.sheetName);
@@ -411,7 +421,10 @@ export function readCsvStream(
       }
     });
 
-    pipeline(stream, parser)
+    // `stream` may be a plain async-iterable (e.g. a Web ReadableStream
+    // adapted via readableStreamToAsyncIterable); pipeline accepts it as a
+    // source at runtime even though its type union lists concrete streams.
+    pipeline(stream as IReadable<Uint8Array | string>, parser)
       .then(() => resolve(worksheet))
       .catch(reject);
   });
@@ -437,7 +450,7 @@ async function readCsvUrl(
 
   if (options?.stream && response.body) {
     const readable = readableStreamToAsyncIterable<Uint8Array>(response.body);
-    return readCsvStream(workbook, readable as any, options);
+    return readCsvStream(workbook, readable, options);
   }
 
   const text = await response.text();
@@ -452,7 +465,7 @@ async function readCsvFileObject(
   const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024;
   if ((options?.stream || file.size > LARGE_FILE_THRESHOLD) && typeof file.stream === "function") {
     const readable = readableStreamToAsyncIterable<Uint8Array>(file.stream());
-    return readCsvStream(workbook, readable as any, options);
+    return readCsvStream(workbook, readable, options);
   }
 
   return new Promise<Worksheet>((resolve, reject) => {
@@ -533,10 +546,10 @@ export function writeCsvString(workbook: Workbook, options?: CsvOptions): string
 
   const map = options?.map || createDefaultWriteMapper(options?.dateFormat, options?.dateUTC);
   const includeEmptyRows = options?.includeEmptyRows !== false;
-  const rows: any[][] = [];
+  const rows: CellValue[][] = [];
   let lastRow = 1;
 
-  eachRow(worksheet, (row: any, rowNumber: number) => {
+  eachRow(worksheet, (row: RowData, rowNumber: number) => {
     if (includeEmptyRows) {
       while (lastRow++ < rowNumber - 1) {
         rows.push([]);
@@ -548,13 +561,13 @@ export function writeCsvString(workbook: Workbook, options?: CsvOptions): string
     lastRow = rowNumber;
   });
 
-  return formatCsv(rows, buildFormatterOptions(options));
+  return formatCsv(rows as CsvRow[], buildFormatterOptions(options));
 }
 
 /** @internal — shared by write entry points and the Node file variant. */
 export async function writeCsvStream(
   workbook: Workbook,
-  stream: IWritable<any>,
+  stream: IWritable<Uint8Array | string>,
   options?: CsvOptions
 ): Promise<void> {
   const worksheet = getWorksheet(workbook, options?.sheetName || options?.sheetId);
@@ -570,8 +583,8 @@ export async function writeCsvStream(
 
   const awaitFormatterDrain = createDrainRacer(formatter);
 
-  const writeAndDrain = async (values: any[]): Promise<void> => {
-    if (!formatter.write(values)) {
+  const writeAndDrain = async (values: CellValue[]): Promise<void> => {
+    if (!formatter.write(values as CsvRow)) {
       await awaitFormatterDrain();
     }
   };
@@ -612,16 +625,16 @@ export async function writeCsvStream(
 export function writeCsv(workbook: Workbook, options?: CsvOptions): string;
 export function writeCsv(
   workbook: Workbook,
-  stream: IWritable<any>,
+  stream: IWritable<Uint8Array | string>,
   options?: CsvOptions
 ): Promise<void>;
 export function writeCsv(
   workbook: Workbook,
-  streamOrOptions?: IWritable<any> | CsvOptions,
+  streamOrOptions?: IWritable<Uint8Array | string> | CsvOptions,
   options?: CsvOptions
 ): string | Promise<void> {
-  if (streamOrOptions && typeof (streamOrOptions as any).write === "function") {
-    return writeCsvStream(workbook, streamOrOptions as IWritable<any>, options);
+  if (streamOrOptions && typeof (streamOrOptions as { write?: unknown }).write === "function") {
+    return writeCsvStream(workbook, streamOrOptions as IWritable<Uint8Array | string>, options);
   }
   return writeCsvString(workbook, streamOrOptions as CsvOptions | undefined);
 }
@@ -639,7 +652,10 @@ export async function writeCsvBuffer(
 // =============================================================================
 
 /** Create a readable stream that outputs the worksheet as CSV. */
-export function createCsvReadStream(workbook: Workbook, options?: CsvOptions): IReadable<any> {
+export function createCsvReadStream(
+  workbook: Workbook,
+  options?: CsvOptions
+): IReadable<Uint8Array | string> {
   const worksheet = getWorksheet(workbook, options?.sheetName || options?.sheetId);
   const map = options?.map || createDefaultWriteMapper(options?.dateFormat, options?.dateUTC);
   const includeEmptyRows = options?.includeEmptyRows !== false;
@@ -652,8 +668,8 @@ export function createCsvReadStream(workbook: Workbook, options?: CsvOptions): I
 
   const awaitFormatterDrain = createDrainRacer(formatter);
 
-  const writeAndDrain = (values: any[]): Promise<void> | void => {
-    if (formatter.write(values)) {
+  const writeAndDrain = (values: CellValue[]): Promise<void> | void => {
+    if (formatter.write(values as CsvRow)) {
       return;
     }
     return awaitFormatterDrain();
@@ -695,7 +711,10 @@ export function createCsvReadStream(workbook: Workbook, options?: CsvOptions): I
 }
 
 /** Create a writable stream that parses CSV into a new worksheet. */
-export function createCsvWriteStream(workbook: Workbook, options?: CsvOptions): IWritable<any> {
+export function createCsvWriteStream(
+  workbook: Workbook,
+  options?: CsvOptions
+): IWritable<Uint8Array | string> {
   const worksheet = addWorksheet(workbook, options?.sheetName);
   const dateFormats = options?.dateFormats ?? DEFAULT_DATE_FORMATS;
   const decimalSeparator = options?.decimalSeparator;
