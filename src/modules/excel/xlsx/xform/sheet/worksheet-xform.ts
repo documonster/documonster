@@ -105,9 +105,9 @@ function mergeConditionalFormattings(model, extModel) {
 }
 
 class WorkSheetXform extends BaseXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare private ignoreNodes: string[];
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   static WORKSHEET_ATTRIBUTES = {
     xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
@@ -117,7 +117,7 @@ class WorkSheetXform extends BaseXform {
     "mc:Ignorable": "x14ac"
   };
 
-  constructor(options?: any) {
+  constructor(options?: { maxRows?: number; maxCols?: number; ignoreNodes?: string[] }) {
     super();
 
     const { maxRows, maxCols, ignoreNodes } = options || {};
@@ -958,7 +958,7 @@ class WorkSheetXform extends BaseXform {
     }
 
     if (node.name === "worksheet") {
-      Object.values(this.map).forEach((xform: any) => {
+      Object.values(this.map).forEach((xform: BaseXform) => {
         xform.reset();
       });
       return true;
