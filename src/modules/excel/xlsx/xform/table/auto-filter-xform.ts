@@ -1,11 +1,12 @@
 import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { FilterColumnXform } from "@excel/xlsx/xform/table/filter-column-xform";
+import type { FilterColumnModel } from "@excel/xlsx/xform/table/filter-column-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface AutoFilterModel {
   autoFilterRef: string;
-  columns: any[];
+  columns: FilterColumnModel[];
 }
 
 class AutoFilterXform extends BaseXform<AutoFilterModel> {
@@ -25,13 +26,13 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     return "autoFilter";
   }
 
-  prepare(model: any): void {
-    model.columns.forEach((column: any, index: number) => {
+  prepare(model: AutoFilterModel): void {
+    model.columns.forEach((column, index) => {
       this.map.filterColumn.prepare(column, { index });
     });
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model: AutoFilterModel): void {
     xmlStream.openNode(this.tag, {
       ref: model.autoFilterRef
     });
@@ -46,7 +47,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     // emitting an empty `<filterColumn hiddenButton="1"/>` for
     // every such column makes Excel reject the table with
     // "Removed Records: Table from /xl/tables/tableN.xml".
-    model.columns.forEach((column: any) => {
+    model.columns.forEach(column => {
       if (
         column?.customFilters !== undefined ||
         column?.filters !== undefined ||

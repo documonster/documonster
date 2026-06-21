@@ -5,10 +5,12 @@ import { CustomFilterXform } from "@excel/xlsx/xform/table/custom-filter-xform";
 import { FilterXform } from "@excel/xlsx/xform/table/filter-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface FilterColumnModel {
+export interface FilterColumnModel {
   colId?: string;
-  filterButton: boolean;
-  customFilters?: any[];
+  filterButton?: boolean;
+  customFilters?: unknown[];
+  filters?: unknown;
+  dynamicFilter?: unknown;
 }
 
 class FilterColumnXform extends BaseXform<FilterColumnModel> {
