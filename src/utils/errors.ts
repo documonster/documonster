@@ -102,7 +102,7 @@ export function createAbortError(reason?: unknown): AbortError {
  * Check if an error is an abort error.
  */
 export function isAbortError(err: unknown): err is { name: string } {
-  return !!err && typeof err === "object" && (err as any).name === "AbortError";
+  return !!err && typeof err === "object" && (err as { name?: unknown }).name === "AbortError";
 }
 
 /**
@@ -115,7 +115,7 @@ export function throwIfAborted(signal?: AbortSignal, reason?: unknown): void {
   if (!signal.aborted) {
     return;
   }
-  const r = reason ?? (signal as any).reason;
+  const r = reason ?? (signal.reason as unknown);
   throw createAbortError(r);
 }
 
@@ -136,13 +136,13 @@ export function createLinkedAbortController(parentSignal?: AbortSignal): {
   }
 
   if (parentSignal.aborted) {
-    controller.abort((parentSignal as any).reason);
+    controller.abort(parentSignal.reason as unknown);
     return { controller, cleanup: () => {} };
   }
 
   const onAbort = (): void => {
     try {
-      controller.abort((parentSignal as any).reason);
+      controller.abort(parentSignal.reason as unknown);
     } catch {
       controller.abort();
     }

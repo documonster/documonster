@@ -161,10 +161,19 @@ function buildFileEntry(
 }
 
 /**
+ * Read the `code` property off an unknown thrown value (Node errors carry it).
+ */
+function errorCode(err: unknown): string | undefined {
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/**
  * Check if an error is ignorable (file not found or permission denied).
  */
-function isIgnorableError(err: any): boolean {
-  return err.code === "ENOENT" || err.code === "EACCES";
+function isIgnorableError(err: unknown): boolean {
+  const code = errorCode(err);
+  return code === "ENOENT" || code === "EACCES";
 }
 
 /**
@@ -185,7 +194,7 @@ export async function* traverseDirectory(
     let entries: nodeFs.Dirent[];
     try {
       entries = await _fsp.readdir(currentPath, { withFileTypes: true });
-    } catch (err: any) {
+    } catch (err) {
       if (isIgnorableError(err)) {
         return;
       }
@@ -202,7 +211,7 @@ export async function* traverseDirectory(
       let stats: nodeFs.Stats;
       try {
         stats = followSymlinks ? await _fsp.stat(absolutePath) : await _fsp.lstat(absolutePath);
-      } catch (err: any) {
+      } catch (err) {
         if (isIgnorableError(err)) {
           continue;
         }
@@ -242,7 +251,7 @@ export function traverseDirectorySync(dirPath: string, options: TraverseOptions 
     let entries: nodeFs.Dirent[];
     try {
       entries = _fs.readdirSync(currentPath, { withFileTypes: true });
-    } catch (err: any) {
+    } catch (err) {
       if (isIgnorableError(err)) {
         return;
       }
@@ -258,7 +267,7 @@ export function traverseDirectorySync(dirPath: string, options: TraverseOptions 
       let stats: nodeFs.Stats;
       try {
         stats = followSymlinks ? _fs.statSync(absolutePath) : _fs.lstatSync(absolutePath);
-      } catch (err: any) {
+      } catch (err) {
         if (isIgnorableError(err)) {
           continue;
         }
@@ -457,8 +466,8 @@ export function fileExistsSync(filePath: string): boolean {
 export async function ensureDir(dirPath: string): Promise<void> {
   try {
     await _fsp.mkdir(dirPath, { recursive: true });
-  } catch (err: any) {
-    if (err.code !== "EEXIST") {
+  } catch (err) {
+    if (errorCode(err) !== "EEXIST") {
       throw err;
     }
   }
@@ -470,8 +479,8 @@ export async function ensureDir(dirPath: string): Promise<void> {
 export function ensureDirSync(dirPath: string): void {
   try {
     _fs.mkdirSync(dirPath, { recursive: true });
-  } catch (err: any) {
-    if (err.code !== "EEXIST") {
+  } catch (err) {
+    if (errorCode(err) !== "EEXIST") {
       throw err;
     }
   }

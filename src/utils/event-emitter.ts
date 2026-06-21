@@ -8,6 +8,15 @@
 /** Generic event listener signature. */
 type EventListener = (...args: any[]) => void;
 
+/**
+ * A listener that may be a `once` wrapper. The wrapper carries the original
+ * user listener on `.listener` so `removeListener(originalFn)` can find and
+ * remove the wrapper (matches Node.js EventEmitter semantics).
+ */
+interface WrappedListener extends EventListener {
+  listener?: EventListener;
+}
+
 type ListenerList = EventListener[];
 type ListenerValue = EventListener | ListenerList;
 
@@ -95,20 +104,20 @@ export class EventEmitter {
   }
 
   once(event: string | symbol, listener: EventListener): this {
-    const onceWrapper = (...args: any[]): void => {
+    const onceWrapper: WrappedListener = (...args: any[]): void => {
       this.off(event, onceWrapper);
       listener.apply(this, args);
     };
-    (onceWrapper as any).listener = listener;
+    onceWrapper.listener = listener;
     return this.on(event, onceWrapper);
   }
 
   prependOnceListener(event: string | symbol, listener: EventListener): this {
-    const onceWrapper = (...args: any[]): void => {
+    const onceWrapper: WrappedListener = (...args: any[]): void => {
       this.off(event, onceWrapper);
       listener.apply(this, args);
     };
-    (onceWrapper as any).listener = listener;
+    onceWrapper.listener = listener;
     return this.prependListener(event, onceWrapper);
   }
 
@@ -125,7 +134,7 @@ export class EventEmitter {
     }
 
     if (!isListenerList(existing)) {
-      if (existing === listener || (existing as any).listener === listener) {
+      if (existing === listener || (existing as WrappedListener).listener === listener) {
         this._listeners.delete(event);
         if (event !== "removeListener" && this._hasListeners("removeListener")) {
           this.emit("removeListener", event, listener);
@@ -148,7 +157,7 @@ export class EventEmitter {
     } else {
       // Slow path: check for once wrapper (search from end for most-recent)
       for (let i = listeners.length - 1; i >= 0; i--) {
-        if ((listeners[i] as any).listener === listener) {
+        if ((listeners[i] as WrappedListener).listener === listener) {
           listeners.splice(i, 1);
           break;
         }
@@ -230,7 +239,7 @@ export class EventEmitter {
           this._listeners.delete(event);
           for (const listener of listeners) {
             // Unwrap once-wrappers to emit the original listener
-            const original = (listener as any).listener ?? listener;
+            const original = (listener as WrappedListener).listener ?? listener;
             this.emit("removeListener", event, original);
           }
           return this;
@@ -251,7 +260,7 @@ export class EventEmitter {
               const listeners = isListenerList(value) ? value.slice() : [value];
               this._listeners.delete(evt);
               for (const listener of listeners) {
-                const original = (listener as any).listener ?? listener;
+                const original = (listener as WrappedListener).listener ?? listener;
                 this.emit("removeListener", evt, original);
               }
             }
@@ -275,7 +284,7 @@ export class EventEmitter {
     // Node.js: listeners() returns the ORIGINAL listener functions,
     // unwrapping once-wrappers. rawListeners() returns the wrappers.
     const raw = isListenerList(value) ? value : [value];
-    return raw.map(fn => (fn as any).listener ?? fn);
+    return raw.map(fn => (fn as WrappedListener).listener ?? fn);
   }
 
   rawListeners(event: string | symbol): EventListener[] {
