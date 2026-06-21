@@ -1,3 +1,4 @@
+import type { Style } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { parseBoolean } from "@utils/utils";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -11,7 +12,15 @@ interface ColModel {
   bestFit?: boolean;
   outlineLevel?: number;
   collapsed?: boolean;
-  style?: any;
+  style?: Partial<Style>;
+}
+
+/** Style-manager surface used by the column xform's prepare/reconcile. */
+interface ColXformOptions {
+  styles: {
+    addStyleModel(model: Partial<Style>): number;
+    getStyleModel(id: number): Style | null;
+  };
 }
 
 class ColXform extends BaseXform {
@@ -19,7 +28,7 @@ class ColXform extends BaseXform {
     return "col";
   }
 
-  prepare(model: ColModel, options: any): void {
+  prepare(model: ColModel, options: ColXformOptions): void {
     const styleId = options.styles.addStyleModel(model.style || {});
     if (styleId) {
       model.styleId = styleId;
@@ -86,10 +95,10 @@ class ColXform extends BaseXform {
     return false;
   }
 
-  reconcile(model: ColModel, options: any): void {
+  reconcile(model: ColModel, options: ColXformOptions): void {
     // reconcile column styles
     if (model.styleId !== undefined) {
-      model.style = options.styles.getStyleModel(model.styleId);
+      model.style = options.styles.getStyleModel(model.styleId) ?? undefined;
     }
   }
 }

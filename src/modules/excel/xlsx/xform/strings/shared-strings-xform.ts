@@ -1,15 +1,16 @@
 import { XlsxParseError } from "@excel/errors";
+import type { SharedStringValue } from "@excel/utils/shared-strings";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { SharedStringXform } from "@excel/xlsx/xform/strings/shared-string-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface SharedStringsModel {
-  values: any[];
+  values: SharedStringValue[];
   count: number;
 }
 
-class SharedStringsXform extends BaseXform {
+class SharedStringsXform extends BaseXform<SharedStringsModel> {
   declare private hash: { [key: string]: number };
   declare private rich: { [key: string]: number };
   declare public parser?: BaseXform;
@@ -31,45 +32,47 @@ class SharedStringsXform extends BaseXform {
     return this._sharedStringXform || (this._sharedStringXform = new SharedStringXform());
   }
 
-  get values(): any[] {
-    return this.model.values;
+  get values(): SharedStringValue[] {
+    return this.model!.values;
   }
 
   get uniqueCount(): number {
-    return this.model.values.length;
+    return this.model!.values.length;
   }
 
   get count(): number {
-    return this.model.count;
+    return this.model!.count;
   }
 
-  getString(index: number): any {
-    return this.model.values[index];
+  getString(index: number): SharedStringValue {
+    return this.model!.values[index];
   }
 
-  add(value: any): number {
-    return value.richText ? this.addRichText(value) : this.addText(value);
+  add(value: SharedStringValue): number {
+    return typeof value !== "string" && value.richText
+      ? this.addRichText(value)
+      : this.addText(value as string);
   }
 
   addText(value: string): number {
     let index = this.hash[value];
     if (index === undefined) {
-      index = this.hash[value] = this.model.values.length;
-      this.model.values.push(value);
+      index = this.hash[value] = this.model!.values.length;
+      this.model!.values.push(value);
     }
-    this.model.count++;
+    this.model!.count++;
     return index;
   }
 
-  addRichText(value: any): number {
+  addRichText(value: { richText: unknown }): number {
     // TODO: add WeakMap here
     const xml = this.sharedStringXform.toXml(value);
     let index = this.rich[xml];
     if (index === undefined) {
-      index = this.rich[xml] = this.model.values.length;
-      this.model.values.push(value);
+      index = this.rich[xml] = this.model!.values.length;
+      this.model!.values.push(value as SharedStringValue);
     }
-    this.model.count++;
+    this.model!.count++;
     return index;
   }
 
@@ -125,8 +128,8 @@ class SharedStringsXform extends BaseXform {
   parseClose(name: string): boolean {
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
-        this.model.values.push(this.parser.model);
-        this.model.count++;
+        this.model!.values.push(this.parser.model as SharedStringValue);
+        this.model!.count++;
         this.parser = undefined;
       }
       return true;
