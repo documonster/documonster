@@ -44,7 +44,7 @@ function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   const onAbort = () => {
     cleanup();
     try {
-      entry.destroy?.(createAbortError((signal as any).reason));
+      entry.destroy?.(createAbortError(signal.reason));
     } catch {
       entry.autodrain?.();
     }
@@ -568,7 +568,7 @@ export class ZipReader {
         suppressUnhandledRejection(parseDonePromise);
 
         const onAbort = () => {
-          const err = createAbortError((signal as any).reason);
+          const err = createAbortError(signal.reason);
           progress.update({ phase: "aborted" });
           try {
             parse.destroy(err);
@@ -654,7 +654,7 @@ export class ZipReader {
         }
       } catch (e) {
         const err = toError(e);
-        if ((err as any).name === "AbortError") {
+        if (err.name === "AbortError") {
           progress.update({ phase: "aborted" });
         } else {
           progress.update({ phase: "error" });

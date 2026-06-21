@@ -133,7 +133,7 @@ export function createZipOperation(
   );
 
   const onAbort = () => {
-    const err = createAbortError((signal as any).reason);
+    const err = createAbortError(signal.reason);
     progress.update({ phase: "aborted" });
     try {
       zip.abort(err);

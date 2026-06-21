@@ -87,7 +87,7 @@ export class ProgressEmitter<T extends object> {
   }
 
   snapshotCopy(): T {
-    return { ...(this._snapshot as any) };
+    return { ...this._snapshot };
   }
 
   update(patch: Partial<T>): void {
@@ -96,7 +96,7 @@ export class ProgressEmitter<T extends object> {
   }
 
   set<K extends keyof T>(key: K, value: T[K]): void {
-    (this._snapshot as any)[key] = value;
+    this._snapshot[key] = value;
     this._schedule();
   }
 

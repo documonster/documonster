@@ -174,7 +174,7 @@ export async function* toAsyncIterable(
 
   const checkAborted = (): void => {
     if (signal?.aborted) {
-      throw createAbortError((signal as any).reason);
+      throw createAbortError(signal?.reason);
     }
   };
 
@@ -247,7 +247,7 @@ export async function* toAsyncIterable(
     try {
       while (true) {
         if (aborted) {
-          throw createAbortError((signal as any).reason);
+          throw createAbortError(signal?.reason);
         }
         checkAborted();
         const { done, value } = await reader.read();
@@ -258,7 +258,7 @@ export async function* toAsyncIterable(
         const chunk = normalizeChunk(value);
         if (chunk) {
           if (aborted) {
-            throw createAbortError((signal as any).reason);
+            throw createAbortError(signal?.reason);
           }
           checkAborted();
           if (onChunk) {

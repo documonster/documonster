@@ -21,7 +21,10 @@ function isPrematureCloseError(err: unknown): boolean {
   if (!(err instanceof Error)) {
     return false;
   }
-  return (err as any).code === "ERR_STREAM_PREMATURE_CLOSE" || err.message === "Premature close";
+  return (
+    (err as { code?: unknown }).code === "ERR_STREAM_PREMATURE_CLOSE" ||
+    err.message === "Premature close"
+  );
 }
 
 /**

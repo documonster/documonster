@@ -13,7 +13,7 @@ export function createAsyncQueue<T>(options: { onCancel?: () => void } = {}): As
 
   const waiters: Array<
     | {
-        resolve: (r: IteratorResult<T>) => void;
+        resolve: (r: IteratorResult<T, undefined>) => void;
         reject: (err: Error) => void;
       }
     | undefined
@@ -37,7 +37,7 @@ export function createAsyncQueue<T>(options: { onCancel?: () => void } = {}): As
       if (!waiter) {
         break;
       }
-      waiter.resolve({ value: undefined as any, done: true });
+      waiter.resolve({ value: undefined, done: true });
     }
 
     try {
@@ -61,7 +61,7 @@ export function createAsyncQueue<T>(options: { onCancel?: () => void } = {}): As
 
   const shiftWaiter = ():
     | {
-        resolve: (r: IteratorResult<T>) => void;
+        resolve: (r: IteratorResult<T, undefined>) => void;
         reject: (err: Error) => void;
       }
     | undefined => {
@@ -128,14 +128,14 @@ export function createAsyncQueue<T>(options: { onCancel?: () => void } = {}): As
       if (!waiter) {
         break;
       }
-      waiter.resolve({ value: undefined as any, done: true });
+      waiter.resolve({ value: undefined, done: true });
     }
   };
 
   const iterable: AsyncIterable<T> = {
-    [Symbol.asyncIterator](): AsyncIterator<T> {
+    [Symbol.asyncIterator](): AsyncIterator<T, undefined> {
       return {
-        next(): Promise<IteratorResult<T>> {
+        next(): Promise<IteratorResult<T, undefined>> {
           if (error) {
             return Promise.reject(error);
           }
@@ -144,15 +144,15 @@ export function createAsyncQueue<T>(options: { onCancel?: () => void } = {}): As
             return Promise.resolve({ value: r.value, done: false });
           }
           if (done) {
-            return Promise.resolve({ value: undefined as any, done: true });
+            return Promise.resolve({ value: undefined, done: true });
           }
           return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
         },
-        return(): Promise<IteratorResult<T>> {
+        return(): Promise<IteratorResult<T, undefined>> {
           cancel();
-          return Promise.resolve({ value: undefined as any, done: true });
+          return Promise.resolve({ value: undefined, done: true });
         },
-        throw(err?: unknown): Promise<IteratorResult<T>> {
+        throw(err?: unknown): Promise<IteratorResult<T, undefined>> {
           cancel();
           return Promise.reject(err);
         }
