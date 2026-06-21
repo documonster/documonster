@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <rPh sb="0" eb="1">
 //   <t>(its pronounciation in KATAKANA)</t>
@@ -47,7 +47,7 @@ class PhoneticTextXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name } = node;
     if (this.parser) {
       this.parser.parseOpen(node);

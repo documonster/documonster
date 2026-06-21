@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag } from "@xml/types";
 
 /* 'virtual' methods used as a form of documentation */
 
@@ -11,7 +12,7 @@ class CompositeXform<TModel = any> extends BaseXform<TModel> {
     return {};
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Typical pattern for composite xform
     this.parser = this.parser || this.map![node.name];
     if (this.parser) {

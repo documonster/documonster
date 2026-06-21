@@ -6,7 +6,7 @@
  */
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 export interface ExternalReferenceModel {
   rId: string;
@@ -17,7 +17,7 @@ class ExternalReferenceXform extends BaseXform<ExternalReferenceModel> {
     xmlStream.leafNode("externalReference", { "r:id": model.rId });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "externalReference") {
       this.model = { rId: node.attributes["r:id"] ?? "" };
       return true;

@@ -1,6 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { EMU_PER_PX } from "@utils/units";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface ExtModel {
   width: number;
@@ -31,7 +31,7 @@ class ExtXform extends BaseXform<ExtModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
         width: parseInt(node.attributes.cx ?? "0", 10) / EMU_PER_PX,

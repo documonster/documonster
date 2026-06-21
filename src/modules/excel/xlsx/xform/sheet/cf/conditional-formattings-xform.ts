@@ -1,6 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ConditionalFormattingXform } from "@excel/xlsx/xform/sheet/cf/conditional-formatting-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class ConditionalFormattingsXform extends BaseXform {
   cfXform: ConditionalFormattingXform;
@@ -56,7 +56,7 @@ class ConditionalFormattingsXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

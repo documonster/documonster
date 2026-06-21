@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface SheetFormatPropertiesModel {
   defaultRowHeight: number;
@@ -42,7 +42,7 @@ class SheetFormatPropertiesXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "sheetFormatPr") {
       this.model = {
         defaultRowHeight: parseFloat(node.attributes.defaultRowHeight ?? "0"),

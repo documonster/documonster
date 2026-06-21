@@ -6,7 +6,7 @@ import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { EMU_PER_PX } from "@utils/units";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface PosModel {
   x: number;
@@ -37,7 +37,7 @@ class PosXform extends BaseXform<PosModel> {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
         x: parseInt(node.attributes.x ?? "0", 10) / EMU_PER_PX,

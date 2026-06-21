@@ -1,7 +1,7 @@
 import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { FilterColumnXform } from "@excel/xlsx/xform/table/filter-column-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface AutoFilterModel {
   autoFilterRef: string;
@@ -60,7 +60,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class VmlPositionXform extends BaseXform<{ [key: string]: boolean }> {
   declare private _model: { tag?: string };
@@ -22,7 +22,7 @@ class VmlPositionXform extends BaseXform<{ [key: string]: boolean }> {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.model = {};

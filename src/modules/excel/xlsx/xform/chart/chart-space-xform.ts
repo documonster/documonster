@@ -59,7 +59,7 @@ import {
   parseXsdInt as sharedParseXsdInt,
   parseXsdFloat as sharedParseXsdFloat
 } from "@excel/xlsx/xform/xsd-values";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // ============================================================================
 // Raw XML capture helper
@@ -589,7 +589,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   // PARSE
   // ============================================================================
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Raw XML capture mode (spPr, txPr)
     if (this.rawCapture) {
       if (node.isSelfClosing) {

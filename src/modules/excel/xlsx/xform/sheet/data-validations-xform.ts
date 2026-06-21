@@ -2,7 +2,7 @@ import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { deepEqual } from "@utils/object";
 import { parseBoolean, dateToExcel, excelToDate } from "@utils/utils";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 function assign(definedName: any, attributes: any, name: string, defaultValue?: any): void {
   const value = attributes[name];
@@ -198,7 +198,7 @@ class DataValidationsXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "dataValidations":
         this.model = {};

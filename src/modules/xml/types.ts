@@ -163,6 +163,16 @@ export interface SaxTag {
   ns?: Record<string, string>;
 }
 
+/**
+ * The subset of a {@link SaxTag} a parser consumer needs at open-tag time:
+ * the element name, its attributes, and (optionally) whether it self-closes.
+ * A full `SaxTag` is assignable to this, while test fixtures can supply just
+ * `{ name, attributes }`. Use this for `parseOpen`-style handler parameters.
+ */
+export type ParseOpenTag = Pick<SaxTag, "name" | "attributes"> & {
+  isSelfClosing?: boolean;
+};
+
 /** SAX event discriminated union. */
 export type SaxEvent =
   | { eventType: "opentag"; value: SaxTag }

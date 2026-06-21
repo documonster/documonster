@@ -6,7 +6,7 @@ import {
 } from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /**
@@ -270,7 +270,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   }
 
   // Parsing - delegate to VmlShapeXform for notes, handle header images directly
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

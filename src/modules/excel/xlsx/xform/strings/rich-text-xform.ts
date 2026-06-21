@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <r>
 //   <rPr>
@@ -53,7 +53,7 @@ class RichTextXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean): string | undefined {
   return model ? "1" : undefined;
@@ -101,7 +101,7 @@ class PageSetupXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.model = {

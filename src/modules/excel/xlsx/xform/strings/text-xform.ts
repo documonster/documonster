@@ -1,6 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { decodeOoxmlEscape, encodeOoxmlEscape } from "@utils/utils";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 //   <t xml:space="preserve"> is </t>
 
@@ -18,7 +18,7 @@ class TextXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "t") {
       this.model = "";
       return true;

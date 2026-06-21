@@ -1,6 +1,6 @@
 import type { DefinedNameModel } from "@excel/core/defined-names";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlAttributes, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 class DefinedNamesXform extends BaseXform {
   declare private _parsedName?: string;
@@ -37,7 +37,7 @@ class DefinedNamesXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "definedName":
         this._parsedName = node.attributes.name;

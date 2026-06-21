@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface ColorModel {
   argb?: string;
@@ -44,7 +44,7 @@ class ColorXform extends BaseXform {
     return false;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.name) {
       if (node.attributes.rgb) {
         this.model = { argb: node.attributes.rgb };

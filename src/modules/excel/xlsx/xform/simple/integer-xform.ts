@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface IntegerXformOptions {
   tag: string;
@@ -46,7 +46,7 @@ class IntegerXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       if (this.attr) {
         this.model = parseInt(node.attributes[this.attr], 10);

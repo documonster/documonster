@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { PhoneticTextXform } from "@excel/xlsx/xform/strings/phonetic-text-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <si>
 //   <r></r><r></r>...
@@ -54,7 +54,7 @@ class SharedStringXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

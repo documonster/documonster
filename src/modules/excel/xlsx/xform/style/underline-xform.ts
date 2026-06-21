@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 type UnderlineType = boolean | "single" | "double" | "singleAccounting" | "doubleAccounting";
 
@@ -33,7 +33,7 @@ class UnderlineXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === "u") {
       this.model = node.attributes.val || true;
     }

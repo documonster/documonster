@@ -1,6 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const VIEW_STATES: { [key: string]: string } = {
   frozen: "frozen",
@@ -130,7 +130,7 @@ class SheetViewXform extends BaseXform<SheetViewModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "sheetView":
         this.sheetView = {

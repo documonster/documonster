@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlClientDataXform } from "@excel/xlsx/xform/comment/vml-client-data-xform";
 import { VmlTextboxXform } from "@excel/xlsx/xform/comment/vml-textbox-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface ShapeModel {
   note: {
@@ -48,7 +48,7 @@ class VmlShapeXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

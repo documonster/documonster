@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 /**
  * Xform for individual page break (brk element)
@@ -16,7 +16,7 @@ class PageBreaksXform extends BaseXform {
     xmlStream.leafNode("brk", model);
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "brk") {
       const { id, max, man, min } = node.attributes;
       this.model = {

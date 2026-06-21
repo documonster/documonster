@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CNvPicPrXform } from "@excel/xlsx/xform/drawing/c-nv-pic-pr-xform";
 import { CNvPrXform } from "@excel/xlsx/xform/drawing/c-nv-pr-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class NvPicPrXform extends BaseXform {
   declare public map: { [key: string]: any };
@@ -28,7 +28,7 @@ class NvPicPrXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

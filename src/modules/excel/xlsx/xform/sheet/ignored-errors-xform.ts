@@ -1,6 +1,6 @@
 import type { IgnoredError } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 /**
  * Boolean attribute names supported on <ignoredError> elements.
@@ -52,7 +52,7 @@ class IgnoredErrorsXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "ignoredErrors":
         this.model = [];

@@ -5,7 +5,7 @@ import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface TwoCellModel {
   range: {
@@ -283,7 +283,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     xmlStream.closeNode(); // xdr:sp
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Swallow everything inside `<mc:Fallback>` — it is a legacy
     // placeholder shape the writer regenerates verbatim.
     if (this._inFallback) {

@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface BooleanXformOptions {
   tag: string;
@@ -24,7 +24,7 @@ class BooleanXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === this.tag) {
       this.model = true;
     }

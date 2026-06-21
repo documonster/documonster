@@ -1,6 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { decodeOoxmlEscape, encodeOoxmlAttr } from "@utils/utils";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface TableColumnModel {
   id?: number;
@@ -74,7 +74,7 @@ class TableColumnXform extends BaseXform<TableColumnModel> {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       const { attributes } = node;
       this.model = {

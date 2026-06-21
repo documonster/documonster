@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class MergeCellXform extends BaseXform {
   get tag(): string {
@@ -10,7 +10,7 @@ class MergeCellXform extends BaseXform {
     xmlStream.leafNode("mergeCell", { ref: model });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "mergeCell") {
       this.model = node.attributes.ref;
       return true;

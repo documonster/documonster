@@ -3,6 +3,7 @@ import { pivotError } from "@excel/core/pivot-table-types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
 import { parseOoxmlDate } from "@utils/utils";
+import type { ParseOpenTag } from "@xml/types";
 
 /** Attribute keys on <cacheField> that are individually parsed (not collected into extraAttrs). */
 const KNOWN_CACHE_FIELD_KEYS = new Set(["name", "numFmtId"]);
@@ -45,7 +46,7 @@ class CacheFieldXform extends BaseXform<CacheField | null> {
     this.fieldGroupCollector.reset();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
     // Collect fieldGroup XML verbatim for roundtrip preservation

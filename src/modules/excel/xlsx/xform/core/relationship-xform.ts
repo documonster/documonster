@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlAttributes, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface RelationshipModel {
   Id?: string;
@@ -15,7 +15,7 @@ class RelationshipXform extends BaseXform {
     xmlStream.leafNode("Relationship", model as XmlAttributes);
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "Relationship":
         this.model = node.attributes;

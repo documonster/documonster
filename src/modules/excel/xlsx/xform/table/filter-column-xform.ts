@@ -3,7 +3,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { CustomFilterXform } from "@excel/xlsx/xform/table/custom-filter-xform";
 import { FilterXform } from "@excel/xlsx/xform/table/filter-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface FilterColumnModel {
   colId?: string;
@@ -61,7 +61,7 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

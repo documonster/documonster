@@ -8,7 +8,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /** Attribute keys on <pivotCacheDefinition> that are individually parsed (not collected into extraRootAttrs). */
@@ -208,7 +208,7 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
     // Collect extLst XML verbatim for roundtrip preservation

@@ -1,6 +1,6 @@
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class AutoFilterXform extends BaseXform {
   declare public model: any;
@@ -31,7 +31,7 @@ class AutoFilterXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === "autoFilter") {
       this.model = node.attributes.ref;
     }

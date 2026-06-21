@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 function isDefined(attr: any): boolean {
   return typeof attr !== "undefined";
@@ -26,7 +26,7 @@ class OutlinePropertiesXform extends BaseXform {
     return false;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
         summaryBelow: isDefined(node.attributes.summaryBelow)

@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const validation = {
   boolean(value: boolean | undefined, dflt: boolean): boolean {
@@ -37,7 +37,7 @@ class ProtectionXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     const model: ProtectionModel = {
       locked: !(node.attributes.locked === "0"),
       hidden: node.attributes.hidden === "1"

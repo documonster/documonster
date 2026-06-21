@@ -1,5 +1,6 @@
 import { inferExternalImageExtension } from "@excel/utils/drawing-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag } from "@xml/types";
 
 abstract class BaseCellAnchorXform extends BaseXform {
   declare public map: { [key: string]: any };
@@ -8,7 +9,7 @@ abstract class BaseCellAnchorXform extends BaseXform {
 
   abstract get tag(): string;
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

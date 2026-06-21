@@ -5,7 +5,7 @@ import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { ProtectionXform } from "@excel/xlsx/xform/style/protection-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <xf numFmtId="[numFmtId]" fontId="[fontId]" fillId="[fillId]" borderId="[xf.borderId]" xfId="[xfId]">
 //   Optional <alignment>
@@ -72,7 +72,7 @@ class DxfXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

@@ -3,7 +3,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AbsoluteAnchorXform } from "@excel/xlsx/xform/drawing/absolute-anchor-xform";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 function getAnchorType(model: any): string {
@@ -89,7 +89,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Inside mc:Fallback — skip everything
     if (this._inFallback) {
       this._fallbackDepth++;

@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ExtLstXform } from "@excel/xlsx/xform/drawing/ext-lst-xform";
 import { HLinkClickXform } from "@excel/xlsx/xform/drawing/hlink-click-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface CNvPrModel {
   index: number;
@@ -35,7 +35,7 @@ class CNvPrXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { DateXform } from "@excel/xlsx/xform/simple/date-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface CoreModel {
@@ -90,7 +90,7 @@ class CoreXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

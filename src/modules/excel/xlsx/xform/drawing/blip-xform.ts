@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface BlipModel {
   rId: string;
@@ -72,7 +72,7 @@ class BlipXform extends BaseXform<BlipModel> {
     xmlStream.closeNode(); // a:blip
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag: {
         // A blip may carry `r:embed` (embedded) or `r:link` (external linked).

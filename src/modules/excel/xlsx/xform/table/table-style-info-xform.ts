@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface TableStyleModel {
   theme?: string | null;
@@ -35,7 +35,7 @@ class TableStyleInfoXform extends BaseXform<TableStyleModel> {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       const { attributes } = node;
       this.model = {

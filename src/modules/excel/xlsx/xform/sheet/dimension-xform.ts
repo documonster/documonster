@@ -1,7 +1,7 @@
 import type { RangeData } from "@excel/core/range";
 import { rangeRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class DimensionXform extends BaseXform {
   declare public model: any;
@@ -17,7 +17,7 @@ class DimensionXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "dimension") {
       this.model = node.attributes.ref;
       return true;

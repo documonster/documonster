@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface WorkbookPropertiesModel {
   date1904?: boolean;
@@ -14,7 +14,7 @@ class WorkbookPropertiesXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "workbookPr") {
       this.model = {
         date1904: node.attributes.date1904 === "1"

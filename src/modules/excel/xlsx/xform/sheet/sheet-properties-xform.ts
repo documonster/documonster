@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { OutlinePropertiesXform } from "@excel/xlsx/xform/sheet/outline-properties-xform";
 import { PageSetupPropertiesXform } from "@excel/xlsx/xform/sheet/page-setup-properties-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface SheetPropertiesModel {
   tabColor?: any;
@@ -50,7 +50,7 @@ class SheetPropertiesXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

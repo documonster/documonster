@@ -12,7 +12,7 @@ import { WorkbookProtectionXform } from "@excel/xlsx/xform/book/workbook-protect
 import { WorkbookViewXform } from "@excel/xlsx/xform/book/workbook-view-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class WorkbookXform extends BaseXform {
@@ -225,7 +225,7 @@ class WorkbookXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

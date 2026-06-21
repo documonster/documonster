@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface CalcPropertiesModel {
   fullCalcOnLoad?: boolean;
@@ -19,7 +19,7 @@ class WorkbookCalcPropertiesXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "calcPr") {
       const attrs = node.attributes ?? {};
       this.model = {

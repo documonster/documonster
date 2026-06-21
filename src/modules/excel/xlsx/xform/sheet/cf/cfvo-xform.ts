@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class CfvoXform extends BaseXform {
   get tag(): string {
@@ -13,7 +13,7 @@ class CfvoXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     this.model = {
       type: node.attributes.type,
       value: BaseXform.toFloatValue(node.attributes.val)

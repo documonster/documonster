@@ -29,7 +29,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { parseXsdBoolean, parseXsdInt } from "@excel/xlsx/xform/xsd-values";
 import { xmlEncode as escapeXml, xmlEncodeAttr } from "@xml/encode";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 export interface ChartsheetModel {
   /** Sheet number (positional index in the XLSX archive) */
@@ -299,7 +299,7 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name } = node;
     const attrs = node.attributes || {};
     const isSelfClosing = !!node.isSelfClosing;
@@ -431,7 +431,7 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
           this.model.pageSetup = {
             paperSize: parseNumber(attrs.paperSize),
             firstPageNumber: parseNumber(attrs.firstPageNumber),
-            orientation: attrs.orientation,
+            orientation: attrs.orientation as "default" | "landscape" | "portrait" | undefined,
             usePrinterDefaults: parseBool(attrs.usePrinterDefaults),
             blackAndWhite: parseBool(attrs.blackAndWhite),
             draft: parseBool(attrs.draft),

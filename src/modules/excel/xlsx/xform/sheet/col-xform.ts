@@ -1,6 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { parseBoolean } from "@utils/utils";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface ColModel {
   min: number;
@@ -52,7 +52,7 @@ class ColXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "col") {
       const model: ColModel = (this.model = {
         min: parseInt(node.attributes.min ?? "0", 10),

@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BlipXform } from "@excel/xlsx/xform/drawing/blip-xform";
 import type { BlipModel } from "@excel/xlsx/xform/drawing/blip-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class BlipFillXform extends BaseXform {
   declare public map: { [key: string]: BlipXform };
@@ -32,7 +32,7 @@ class BlipFillXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface FloatXformOptions {
   tag: string;
@@ -37,7 +37,7 @@ class FloatXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === this.tag) {
       if (this.attr) {
         this.model = parseFloat(node.attributes[this.attr]);

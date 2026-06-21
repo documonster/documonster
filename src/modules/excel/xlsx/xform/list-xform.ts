@@ -1,6 +1,6 @@
 import { MaxItemsExceededError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface ListXformOptions {
   tag: string;
@@ -65,7 +65,7 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

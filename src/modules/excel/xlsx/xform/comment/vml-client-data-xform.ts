@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlPositionXform } from "@excel/xlsx/xform/comment/style/vml-position-xform";
 import { VmlProtectionXform } from "@excel/xlsx/xform/comment/style/vml-protection-xform";
 import { VmlAnchorXform } from "@excel/xlsx/xform/comment/vml-anchor-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const POSITION_TYPE = ["twoCells", "oneCells", "absolute"];
 
@@ -68,7 +68,7 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.reset();

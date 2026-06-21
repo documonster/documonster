@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class VmlProtectionXform extends BaseXform {
   declare private _model: { tag?: string };
@@ -19,7 +19,7 @@ class VmlProtectionXform extends BaseXform {
     xmlStream.leafNode(this.tag, undefined, model);
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.text = "";

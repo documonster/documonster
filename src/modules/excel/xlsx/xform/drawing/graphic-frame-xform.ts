@@ -23,7 +23,7 @@
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { uuidV4 } from "@utils/uuid";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const CHART_EX_URI = "http://schemas.microsoft.com/office/drawing/2014/chartex";
@@ -152,7 +152,7 @@ class GraphicFrameXform extends BaseXform {
     xmlStream.closeNode(); // xdr:graphicFrame
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Raw XML capture mode for extLst
     if (this._extLstCapture) {
       const attrs = Object.entries(node.attributes || {})

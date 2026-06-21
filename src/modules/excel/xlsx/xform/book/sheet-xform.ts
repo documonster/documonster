@@ -1,6 +1,6 @@
 import type { WorksheetState } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const VALID_STATES: Set<string> = new Set(["visible", "hidden", "veryHidden"]);
 
@@ -51,7 +51,7 @@ class WorksheetXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "sheet") {
       this.model = {
         name: node.attributes.name,

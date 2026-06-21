@@ -4,7 +4,7 @@ import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { UnderlineXform } from "@excel/xlsx/xform/style/underline-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface FontModel {
   bold?: boolean;
@@ -92,7 +92,7 @@ class FontXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

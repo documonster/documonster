@@ -49,7 +49,7 @@
 
 import type { ExternalLinkCachedSheet, ExternalLinkModel } from "@excel/core/workbook.browser";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 const NAMESPACE = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -151,7 +151,7 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
   // Parsing
   // ==========================================================================
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const name = node.name as string;
 
     switch (name) {

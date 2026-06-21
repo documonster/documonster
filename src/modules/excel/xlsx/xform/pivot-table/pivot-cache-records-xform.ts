@@ -11,7 +11,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { formatDateForExcel } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { parseOoxmlDate } from "@utils/utils";
 import { xmlEncode } from "@xml/encode";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /** Attribute keys on <pivotCacheRecords> that are individually parsed (not collected into extraRootAttrs). */
@@ -213,7 +213,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
     return `<x v="${sharedItemsIndex}" />`;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
     switch (name) {
