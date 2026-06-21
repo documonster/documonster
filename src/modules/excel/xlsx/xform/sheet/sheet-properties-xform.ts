@@ -1,3 +1,4 @@
+import type { Color } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { OutlinePropertiesXform } from "@excel/xlsx/xform/sheet/outline-properties-xform";
 import { PageSetupPropertiesXform } from "@excel/xlsx/xform/sheet/page-setup-properties-xform";
@@ -5,14 +6,14 @@ import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface SheetPropertiesModel {
-  tabColor?: any;
-  pageSetup?: any;
-  outlineProperties?: any;
+  tabColor?: Partial<Color>;
+  pageSetup?: { fitToPage?: boolean };
+  outlineProperties?: { summaryBelow?: boolean; summaryRight?: boolean };
 }
 
-class SheetPropertiesXform extends BaseXform {
+class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
   declare public map: Record<string, BaseXform>;
-  declare public parser?: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -94,7 +95,7 @@ class SheetPropertiesXform extends BaseXform {
         this.model.outlineProperties = this.map.outlinePr.model;
       }
     } else {
-      this.model = null;
+      this.model = undefined;
     }
     return false;
   }

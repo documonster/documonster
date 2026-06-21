@@ -1,3 +1,4 @@
+import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AlignmentXform } from "@excel/xlsx/xform/style/alignment-xform";
 import { BorderXform } from "@excel/xlsx/xform/style/border-xform";
@@ -13,13 +14,13 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 // </xf>
 
 interface DxfModel {
-  alignment?: any;
-  border?: any;
-  fill?: any;
-  font?: any;
+  alignment?: Partial<Alignment>;
+  border?: Partial<Borders>;
+  fill?: Fill;
+  font?: Partial<Font>;
   numFmt?: string;
   numFmtId?: number;
-  protection?: any;
+  protection?: Partial<Protection>;
 }
 
 // Style assists translation from style model to/from xlsx
