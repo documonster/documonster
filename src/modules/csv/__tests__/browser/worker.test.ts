@@ -141,7 +141,7 @@ describe("CSV Worker Pool - Browser", () => {
 
     describe("format", () => {
       it("should format simple data", async () => {
-        const data: unknown[][] = [
+        const data: Parameters<typeof Csv.format>[0] = [
           ["a", "b", "c"],
           [1, 2, 3]
         ];
@@ -150,7 +150,7 @@ describe("CSV Worker Pool - Browser", () => {
       });
 
       it("should format with custom delimiter", async () => {
-        const data: unknown[][] = [
+        const data: Parameters<typeof Csv.format>[0] = [
           ["a", "b"],
           [1, 2]
         ];
@@ -776,7 +776,7 @@ describe("CSV Worker Pool - Browser", () => {
 
     describe("formatWithPool", () => {
       it("should format data", async () => {
-        const data: unknown[][] = [
+        const data: Parameters<typeof Csv.format>[0] = [
           ["a", "b"],
           [1, 2]
         ];

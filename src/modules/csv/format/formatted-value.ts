@@ -30,7 +30,9 @@ export interface FormattedValue {
  */
 export function isFormattedValue(value: unknown): value is FormattedValue {
   return (
-    value !== null && typeof value === "object" && (value as any)[FORMATTED_VALUE_SYMBOL] === true
+    value !== null &&
+    typeof value === "object" &&
+    (value as Record<typeof FORMATTED_VALUE_SYMBOL, unknown>)[FORMATTED_VALUE_SYMBOL] === true
   );
 }
 

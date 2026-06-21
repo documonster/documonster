@@ -33,6 +33,7 @@
  */
 
 import { CsvWorkerError } from "@csv/errors";
+import type { Row } from "@csv/types";
 import type {
   CsvWorkerPoolOptions,
   CsvWorkerPoolStats,
@@ -95,7 +96,7 @@ interface PendingTask<T> {
   startTime: number;
 }
 
-interface QueuedTask extends PendingTask<any> {
+interface QueuedTask extends PendingTask<unknown> {
   message: CsvWorkerRequestMessage;
   priority: CsvTaskPriority;
 }
@@ -118,7 +119,7 @@ class CsvWorkerPool {
   private readonly _highQueue: QueuedTask[] = [];
   private readonly _normalQueue: QueuedTask[] = [];
   private readonly _lowQueue: QueuedTask[] = [];
-  private readonly _pendingTasks: Map<number, PendingTask<any>> = new Map();
+  private readonly _pendingTasks: Map<number, PendingTask<unknown>> = new Map();
   private _nextTaskId = 1;
   private _nextWorkerId = 1;
   private _terminated = false;
@@ -198,7 +199,7 @@ class CsvWorkerPool {
   }
 
   async format(
-    data: any[][],
+    data: Row[] | Record<string, unknown>[],
     options?: CsvFormatOptions,
     taskOptions?: CsvTaskOptions
   ): Promise<CsvTaskResult<string>> {
@@ -213,7 +214,7 @@ class CsvWorkerPool {
 
   async load(
     sessionId: string,
-    data: any[] | any[][],
+    data: Record<string, unknown>[] | unknown[][],
     headers?: string[],
     taskOptions?: CsvTaskOptions
   ): Promise<CsvTaskResult<{ rowCount: number; headers: string[] }>> {
@@ -230,7 +231,9 @@ class CsvWorkerPool {
   async getData(
     sessionId: string,
     taskOptions?: CsvTaskOptions
-  ): Promise<CsvTaskResult<{ data: Record<string, any>[]; headers: string[]; rowCount: number }>> {
+  ): Promise<
+    CsvTaskResult<{ data: Record<string, unknown>[]; headers: string[]; rowCount: number }>
+  > {
     const message: CsvWorkerRequestMessage = {
       type: "getData",
       taskId: 0,
@@ -387,15 +390,18 @@ class CsvWorkerPool {
       return Promise.reject(createAbortError());
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise<CsvTaskResult<T>>((resolve, reject) => {
       const taskId = this._nextTaskId++;
-      (message as any).taskId = taskId;
+      message.taskId = taskId;
 
       const task: QueuedTask = {
         taskId,
         message,
         priority,
-        resolve,
+        // The queue is heterogeneous (each task has its own T), so it stores
+        // resolvers as `(result: unknown) => void`. Narrowing T back happens at
+        // the typed `_execute<T>` boundary; this single cast erases it safely.
+        resolve: resolve as (result: unknown) => void,
         reject,
         signal,
         startTime: performance.now()
@@ -411,7 +417,7 @@ class CsvWorkerPool {
     });
   }
 
-  private _cleanupTask(task: PendingTask<any>): void {
+  private _cleanupTask(task: PendingTask<unknown>): void {
     if (task.signal && task.abortHandler) {
       task.signal.removeEventListener("abort", task.abortHandler);
     }
@@ -519,7 +525,7 @@ class CsvWorkerPool {
       return;
     }
 
-    const taskId = (msg as any).taskId;
+    const taskId = msg.taskId;
     if (taskId === undefined) {
       return;
     }
@@ -680,7 +686,7 @@ export class CsvWorkerSession {
    * Load CSV string or data into session
    */
   async load(
-    csvOrData: string | any[] | any[][],
+    csvOrData: string | Record<string, unknown>[] | unknown[][],
     options?: CsvParseOptions & { headers?: string[] | boolean }
   ): Promise<{ rowCount: number; headers: string[] }> {
     if (this._disposed) {
@@ -690,9 +696,12 @@ export class CsvWorkerSession {
     if (typeof csvOrData === "string") {
       const parseOptions = { ...options, sessionId: this._sessionId };
       const result = await this._pool.parse(csvOrData, parseOptions);
-      const data = result.data as any;
-      this._headers = data.headers || [];
-      this._rowCount = data.rows?.length ?? (Array.isArray(data) ? data.length : 0);
+      // parse result is either string[][] (array mode) or a CsvParseResult
+      // ({ rows, headers, ... }); read both shapes defensively.
+      const data = result.data as { headers?: string[]; rows?: unknown[] } | unknown[];
+      const asResult = Array.isArray(data) ? undefined : data;
+      this._headers = asResult?.headers ?? [];
+      this._rowCount = asResult?.rows?.length ?? (Array.isArray(data) ? data.length : 0);
       return { rowCount: this._rowCount, headers: this._headers };
     } else {
       const result = await this._pool.load(
@@ -820,7 +829,7 @@ export async function parseWithPool(
 
 /** Format data to CSV using worker pool */
 export async function formatWithPool(
-  data: any[][],
+  data: Row[] | Record<string, unknown>[],
   options?: CsvFormatOptions,
   taskOptions?: CsvTaskOptions
 ): Promise<CsvTaskResult<string>> {

@@ -29,6 +29,7 @@ import type {
   RowValidateCallback,
   ChunkMeta,
   RecordInfo,
+  RecordWithInfo,
   CsvRecordError
 } from "@csv/types";
 import { isSyncTransform, isSyncValidate } from "@csv/types";
@@ -901,7 +902,11 @@ export class CsvParserStream extends Transform {
       const builtRow = this.buildRow(result.row, result.info);
       // Attach extras to the record for columnMismatch.more: 'keep' (consistent with sync parser)
       if (result.extras && result.extras.length > 0) {
-        const record = this.parseConfig.infoOption ? (builtRow as any).record : builtRow;
+        // When info is enabled, buildRow returns a RecordWithInfo whose
+        // actual record lives on `.record`; otherwise builtRow is the record.
+        const record = this.parseConfig.infoOption
+          ? (builtRow as unknown as RecordWithInfo).record
+          : builtRow;
         (record as Record<string, unknown>)._extra = result.extras;
       }
       pendingRows.push(builtRow);

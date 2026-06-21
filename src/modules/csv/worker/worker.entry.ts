@@ -24,12 +24,21 @@ import type {
   PageConfig
 } from "@csv/worker/types";
 
-type SessionData = any[] | any[][];
+/** A CSV cell carries an unknown scalar (string in array mode, parsed value in typed mode). */
+type CsvCell = unknown;
+/**
+ * A worker row, indexable by column key or numeric index. Object rows are
+ * `Record<string, unknown>`; array rows are `unknown[]` (also assignable to a
+ * numeric-indexed record), so this single shape covers both without `any`.
+ */
+type CsvWorkerRow = Record<string | number, CsvCell>;
+
+type SessionData = Record<string, unknown>[] | CsvCell[][];
 
 interface WorkerSession {
-  data: any[];
+  data: CsvWorkerRow[];
   headers: string[] | null;
-  originalData: any[];
+  originalData: CsvWorkerRow[];
 }
 
 const sessions = new Map<string, WorkerSession>();
@@ -42,7 +51,7 @@ function getSession(sessionId: string): WorkerSession {
   return session;
 }
 
-function reply(taskId: number, start: number, data: any): void {
+function reply(taskId: number, start: number, data: unknown): void {
   (self as unknown as Worker).postMessage({
     type: "result",
     taskId,
@@ -64,7 +73,7 @@ function replyError(taskId: number, start: number, error: unknown): void {
 function toObjectRows(
   data: SessionData,
   headers?: string[] | null
-): { rows: any[]; headers: string[] } {
+): { rows: CsvWorkerRow[]; headers: string[] } {
   if (!Array.isArray(data)) {
     return { rows: [], headers: headers ?? [] };
   }
@@ -73,18 +82,18 @@ function toObjectRows(
     return { rows: [], headers: headers ?? [] };
   }
 
-  const first = data[0] as any;
+  const first = data[0];
 
   // Already objects
   if (first && typeof first === "object" && !Array.isArray(first)) {
     const inferredHeaders = headers ?? Object.keys(first);
-    return { rows: data as any[], headers: inferredHeaders };
+    return { rows: data as CsvWorkerRow[], headers: inferredHeaders };
   }
 
   // Array rows
-  const arrayRows = data as any[][];
+  const arrayRows = data as CsvCell[][];
   let resolvedHeaders: string[];
-  let rows: any[][];
+  let rows: CsvCell[][];
 
   if (headers && headers.length > 0) {
     resolvedHeaders = headers;
@@ -95,7 +104,7 @@ function toObjectRows(
   }
 
   const objects = rows.map(row => {
-    const obj: Record<string, any> = Object.create(null) as Record<string, any>;
+    const obj: CsvWorkerRow = Object.create(null) as CsvWorkerRow;
     for (let i = 0; i < resolvedHeaders.length; i++) {
       const key = resolvedHeaders[i];
       if (key !== "__proto__") {
@@ -112,13 +121,13 @@ function toObjectRows(
 // Data operations (sort/filter/search/groupBy/aggregate/page/query)
 // =============================================================================
 
-function sortData(data: any[], configs: SortConfig | SortConfig[]): void {
+function sortData(data: CsvWorkerRow[], configs: SortConfig | SortConfig[]): void {
   const list = Array.isArray(configs) ? configs : [configs];
   data.sort((a, b) => {
     for (const config of list) {
       const { column, order = "asc", comparator = "auto" } = config;
-      const aVal = (a as any)[column as any];
-      const bVal = (b as any)[column as any];
+      const aVal = a[column];
+      const bVal = b[column];
       let result: number;
       if (
         comparator === "number" ||
@@ -126,7 +135,9 @@ function sortData(data: any[], configs: SortConfig | SortConfig[]): void {
       ) {
         result = Number(aVal ?? 0) - Number(bVal ?? 0);
       } else if (comparator === "date") {
-        result = new Date(aVal ?? 0).getTime() - new Date(bVal ?? 0).getTime();
+        result =
+          new Date((aVal ?? 0) as string | number | Date).getTime() -
+          new Date((bVal ?? 0) as string | number | Date).getTime();
       } else {
         result = String(aVal ?? "").localeCompare(String(bVal ?? ""));
       }
@@ -138,17 +149,23 @@ function sortData(data: any[], configs: SortConfig | SortConfig[]): void {
   });
 }
 
-function evaluateCondition(row: any, condition: FilterCondition, compiledRegex?: RegExp): boolean {
+function evaluateCondition(
+  row: CsvWorkerRow,
+  condition: FilterCondition,
+  compiledRegex?: RegExp
+): boolean {
   const { column, operator, value, ignoreCase = false } = condition;
-  let fieldValue: any = row?.[column as any];
-  let compareValue: any = value;
+  let fieldValue: unknown = row?.[column];
+  let compareValue: unknown = value;
 
   if (ignoreCase && typeof fieldValue === "string" && operator !== "regex") {
     fieldValue = fieldValue.toLowerCase();
     if (typeof compareValue === "string") {
       compareValue = compareValue.toLowerCase();
     } else if (Array.isArray(compareValue)) {
-      compareValue = compareValue.map((v: any) => (typeof v === "string" ? v.toLowerCase() : v));
+      compareValue = compareValue.map((v: unknown) =>
+        typeof v === "string" ? v.toLowerCase() : v
+      );
     }
   }
 
@@ -181,7 +198,7 @@ function evaluateCondition(row: any, condition: FilterCondition, compiledRegex?:
       return fv.endsWith(cv);
     }
     case "regex": {
-      const re = compiledRegex ?? new RegExp(compareValue, ignoreCase ? "i" : "");
+      const re = compiledRegex ?? new RegExp(String(compareValue), ignoreCase ? "i" : "");
       return re.test(String(fieldValue));
     }
     case "in":
@@ -197,34 +214,34 @@ function evaluateCondition(row: any, condition: FilterCondition, compiledRegex?:
   }
 }
 
-function filterData(data: any[], config: FilterConfig): any[] {
+function filterData(data: CsvWorkerRow[], config: FilterConfig): CsvWorkerRow[] {
   const { conditions, logic = "and" } = config;
 
   // Pre-compile regex patterns to avoid re-creating RegExp per row
   const compiledRegexMap = new Map<FilterCondition, RegExp>();
   for (const cond of conditions) {
     if (cond.operator === "regex") {
-      compiledRegexMap.set(cond, new RegExp(cond.value as string, cond.ignoreCase ? "i" : ""));
+      compiledRegexMap.set(cond, new RegExp(String(cond.value), cond.ignoreCase ? "i" : ""));
     }
   }
 
   const evaluate =
     logic === "and"
-      ? (row: any) =>
+      ? (row: CsvWorkerRow) =>
           conditions.every(cond => evaluateCondition(row, cond, compiledRegexMap.get(cond)))
-      : (row: any) =>
+      : (row: CsvWorkerRow) =>
           conditions.some(cond => evaluateCondition(row, cond, compiledRegexMap.get(cond)));
   return data.filter(evaluate);
 }
 
-function searchData(data: any[], config: SearchConfig): any[] {
+function searchData(data: CsvWorkerRow[], config: SearchConfig): CsvWorkerRow[] {
   const { query, columns, ignoreCase = true } = config;
   const searchQuery = ignoreCase ? query.toLowerCase() : query;
 
   const resolvedColumns = columns ?? Object.keys(data[0] ?? {});
   return data.filter(row => {
     return resolvedColumns.some(col => {
-      let value = String((row as any)[col as any] ?? "");
+      let value = String(row[col] ?? "");
       if (ignoreCase) {
         value = value.toLowerCase();
       }
@@ -233,18 +250,22 @@ function searchData(data: any[], config: SearchConfig): any[] {
   });
 }
 
-function computeAggregate(rows: any[], column: string | number, fn: AggregateConfig["fn"]): any {
+function computeAggregate(
+  rows: CsvWorkerRow[],
+  column: string | number,
+  fn: AggregateConfig["fn"]
+): unknown {
   if (fn === "count") {
     return rows.length;
   }
   if (fn === "first") {
-    return rows.length > 0 ? rows[0]?.[column as any] : null;
+    return rows.length > 0 ? rows[0]?.[column] : null;
   }
   if (fn === "last") {
-    return rows.length > 0 ? rows[rows.length - 1]?.[column as any] : null;
+    return rows.length > 0 ? rows[rows.length - 1]?.[column] : null;
   }
 
-  const nums = rows.map(r => Number(r?.[column as any])).filter(n => !Number.isNaN(n));
+  const nums = rows.map(r => Number(r?.[column])).filter(n => !Number.isNaN(n));
 
   if (nums.length === 0) {
     return fn === "avg" ? 0 : null;
@@ -265,12 +286,12 @@ function computeAggregate(rows: any[], column: string | number, fn: AggregateCon
   return null;
 }
 
-function groupByData(data: any[], config: GroupByConfig): any[] {
+function groupByData(data: CsvWorkerRow[], config: GroupByConfig): CsvWorkerRow[] {
   const { columns, aggregates } = config;
-  const groups = new Map<string, { keyValues: any[]; rows: any[] }>();
+  const groups = new Map<string, { keyValues: unknown[]; rows: CsvWorkerRow[] }>();
 
   for (const row of data) {
-    const keyValues = columns.map(col => (row as any)[col as any]);
+    const keyValues = columns.map(col => row[col]);
     const key = keyValues.join("\0");
     const existing = groups.get(key);
     if (existing) {
@@ -280,9 +301,9 @@ function groupByData(data: any[], config: GroupByConfig): any[] {
     }
   }
 
-  const result: any[] = [];
+  const result: CsvWorkerRow[] = [];
   for (const group of groups.values()) {
-    const obj: Record<string, any> = Object.create(null) as Record<string, any>;
+    const obj: CsvWorkerRow = Object.create(null) as CsvWorkerRow;
     columns.forEach((col, idx) => {
       const k = String(col);
       if (k !== "__proto__") {
@@ -301,8 +322,8 @@ function groupByData(data: any[], config: GroupByConfig): any[] {
   return result;
 }
 
-function aggregateData(data: any[], configs: AggregateConfig[]): Record<string, any> {
-  const result: Record<string, any> = Object.create(null) as Record<string, any>;
+function aggregateData(data: CsvWorkerRow[], configs: AggregateConfig[]): Record<string, unknown> {
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const config of configs) {
     const { column, fn, alias } = config;
     const key = alias || `${column}_${fn}`;
@@ -314,10 +335,10 @@ function aggregateData(data: any[], configs: AggregateConfig[]): Record<string, 
 }
 
 function getPageData(
-  data: any[],
+  data: CsvWorkerRow[],
   config: PageConfig
 ): {
-  data: any[];
+  data: CsvWorkerRow[];
   page: number;
   pageSize: number;
   totalRows: number;
@@ -338,9 +359,20 @@ function getPageData(
   };
 }
 
-function executeQuery(session: WorkerSession, config: QueryConfig): any {
+interface QueryResultData {
+  data: CsvWorkerRow[];
+  matchCount?: number;
+  groupCount?: number;
+  aggregates?: Record<string, unknown>;
+  page?: number;
+  pageSize?: number;
+  totalRows?: number;
+  totalPages?: number;
+}
+
+function executeQuery(session: WorkerSession, config: QueryConfig): QueryResultData {
   let data = config.sort ? [...session.originalData] : session.originalData;
-  const result: any = { data: [] };
+  const result: QueryResultData = { data: [] };
 
   if (config.sort) {
     sortData(data, config.sort);
@@ -399,14 +431,17 @@ self.addEventListener("message", (event: MessageEvent<CsvWorkerRequestMessage>) 
   try {
     switch (msg.type) {
       case "parse": {
-        const result: any = parseCsv(msg.data, msg.options as any);
+        const result = msg.options ? parseCsv(msg.data, msg.options) : parseCsv(msg.data);
 
         if (msg.sessionId) {
-          const isObj = result && (result as any).headers;
+          const objResult =
+            result && typeof result === "object" && "headers" in result ? result : undefined;
           sessions.set(msg.sessionId, {
-            data: isObj ? (result as any).rows : result,
-            headers: isObj ? (result as any).headers : null,
-            originalData: isObj ? [...(result as any).rows] : [...result]
+            data: (objResult ? objResult.rows : result) as CsvWorkerRow[],
+            headers: objResult ? (objResult.headers ?? null) : null,
+            originalData: (objResult
+              ? [...objResult.rows]
+              : [...(result as unknown[])]) as CsvWorkerRow[]
           });
         }
 
@@ -415,12 +450,12 @@ self.addEventListener("message", (event: MessageEvent<CsvWorkerRequestMessage>) 
       }
 
       case "format": {
-        reply(taskId, start, formatCsv(msg.data as any, msg.options as any));
+        reply(taskId, start, formatCsv(msg.data, msg.options));
         break;
       }
 
       case "load": {
-        const { rows, headers } = toObjectRows(msg.data as any, msg.headers ?? null);
+        const { rows, headers } = toObjectRows(msg.data, msg.headers ?? null);
         sessions.set(msg.sessionId, {
           data: rows,
           headers: headers ?? null,
@@ -513,7 +548,7 @@ self.addEventListener("message", (event: MessageEvent<CsvWorkerRequestMessage>) 
       }
 
       default:
-        throw new Error(`Unknown message type: ${(msg as any).type}`);
+        throw new Error(`Unknown message type: ${(msg as CsvWorkerRequestMessage).type}`);
     }
   } catch (error) {
     replyError(taskId, start, error);
@@ -521,4 +556,4 @@ self.addEventListener("message", (event: MessageEvent<CsvWorkerRequestMessage>) 
 });
 
 // Signal ready
-(self as any).postMessage({ type: "ready" } satisfies CsvWorkerResponseMessage);
+(self as unknown as Worker).postMessage({ type: "ready" } satisfies CsvWorkerResponseMessage);

@@ -99,7 +99,7 @@ export interface TypeTransformMap {
   date?: (value: Date, ctx: TransformContext) => TransformResult;
   number?: (value: number, ctx: TransformContext) => TransformResult;
   bigint?: (value: bigint, ctx: TransformContext) => TransformResult;
-  object?: (value: Record<string, any>, ctx: TransformContext) => TransformResult;
+  object?: (value: Record<string, unknown>, ctx: TransformContext) => TransformResult;
   string?: (value: string, ctx: TransformContext) => TransformResult;
   /** Row-level transform (runs first, return null to skip) */
   row?: (row: Row, sourceIndex: number) => Row | null;
