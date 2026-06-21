@@ -1,3 +1,10 @@
+import type {
+  CellFormulaValue,
+  CellValue,
+  Style,
+  TableColumnProperties,
+  TableStyleProperties
+} from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/table/auto-filter-xform";
@@ -14,10 +21,16 @@ interface TableModel {
   tableRef: string;
   totalsRow?: boolean;
   headerRow?: boolean;
-  columns?: any[];
-  rows?: any[];
+  columns?: TableColumnProperties[];
+  rows?: Array<Array<CellValue | CellFormulaValue>>;
   autoFilterRef?: string;
-  style?: any;
+  style?: TableStyleProperties;
+}
+
+interface TableXformOptions {
+  styles?: {
+    getDxfStyle(id: number): Partial<Style> | undefined;
+  };
 }
 
 class TableXform extends BaseXform<TableModel> {
@@ -45,7 +58,7 @@ class TableXform extends BaseXform<TableModel> {
     };
   }
 
-  prepare(model: TableModel, options: any): void {
+  prepare(model: TableModel, options: TableXformOptions): void {
     this.map.autoFilter.prepare(model);
     this.map.tableColumns.prepare(model.columns, options);
   }
@@ -117,14 +130,21 @@ class TableXform extends BaseXform<TableModel> {
     }
     switch (name) {
       case this.tag:
-        this.model!.columns = this.map!.tableColumns.model;
-        if (this.map!.autoFilter.model) {
-          this.model!.autoFilterRef = this.map!.autoFilter.model.autoFilterRef;
-          this.map!.autoFilter.model.columns.forEach((column: any, index: number) => {
-            this.model!.columns![index].filterButton = column.filterButton;
-          });
+        this.model!.columns = this.map!.tableColumns.model as TableColumnProperties[];
+        {
+          const autoFilterModel = this.map!.autoFilter.model as
+            | { autoFilterRef?: string; columns: { filterButton?: boolean }[] }
+            | undefined;
+          if (autoFilterModel) {
+            this.model!.autoFilterRef = autoFilterModel.autoFilterRef;
+            autoFilterModel.columns.forEach((column, index) => {
+              (
+                this.model!.columns![index] as TableColumnProperties & { filterButton?: boolean }
+              ).filterButton = column.filterButton;
+            });
+          }
         }
-        this.model!.style = this.map!.tableStyleInfo.model;
+        this.model!.style = this.map!.tableStyleInfo.model as TableStyleProperties;
         return false;
       default:
         // could be some unrecognised tags
@@ -132,7 +152,7 @@ class TableXform extends BaseXform<TableModel> {
     }
   }
 
-  reconcile(model: TableModel, options: any): void {
+  reconcile(model: TableModel, options: TableXformOptions): void {
     // Map tableRef to ref for Table constructor compatibility
     if (model.tableRef && !model.ref) {
       model.ref = model.tableRef;
@@ -142,11 +162,16 @@ class TableXform extends BaseXform<TableModel> {
       model.rows = [];
     }
     // fetch the dfxs from styles
-    model.columns!.forEach(column => {
-      if (column.dxfId !== undefined) {
-        column.style = options.styles.getDxfStyle(column.dxfId);
-      }
-    });
+    const styles = options.styles;
+    if (styles) {
+      model.columns!.forEach(columnModel => {
+        // dxfId is a transient (de)serialisation field carried on the column.
+        const column = columnModel as TableColumnProperties & { dxfId?: number };
+        if (column.dxfId !== undefined) {
+          column.style = styles.getDxfStyle(column.dxfId);
+        }
+      });
+    }
   }
 
   static TABLE_ATTRIBUTES = {
