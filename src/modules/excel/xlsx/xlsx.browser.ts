@@ -158,6 +158,7 @@ import { bufferToString, base64ToUint8Array } from "@utils/utils";
 import { uuidV4 } from "@utils/uuid";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import { XmlStreamWriter } from "@xml/stream-writer";
+import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 type StreamListener = Parameters<IEventEmitter["on"]>[1];
@@ -830,7 +831,7 @@ function extractLeadingComments(originalXml: string, openTagRegex: RegExp): stri
  */
 function renderChartWithLeadingComments(
   entry: ChartEntry,
-  xform: { render(xmlStream: any, model?: any): void }
+  xform: { render(xmlStream: XmlSink, model?: unknown): void }
 ): Uint8Array {
   const writer = new XmlWriter();
   xform.render(writer, entry.model);
