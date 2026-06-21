@@ -3,7 +3,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag } from "@xml/types";
 
 abstract class BaseCellAnchorXform extends BaseXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
   declare public model: any;
 

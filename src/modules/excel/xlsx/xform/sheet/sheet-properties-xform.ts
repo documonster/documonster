@@ -11,7 +11,7 @@ interface SheetPropertiesModel {
 }
 
 class SheetPropertiesXform extends BaseXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public parser?: any;
 
   constructor() {

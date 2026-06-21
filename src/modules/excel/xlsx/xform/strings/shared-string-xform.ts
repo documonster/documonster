@@ -14,7 +14,7 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 type SharedStringModel = string | { richText: any[] };
 
 class SharedStringXform extends BaseXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
 
   constructor(model?: SharedStringModel) {

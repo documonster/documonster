@@ -1,10 +1,11 @@
 import { renderSparklineGroups, parseSparklineGroups } from "@excel/core/sparkline";
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ConditionalFormattingsExtXform } from "@excel/xlsx/xform/sheet/cf-ext/conditional-formattings-ext-xform";
 import type { XmlSink } from "@xml/types";
 
 class ExtXform extends CompositeXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public model: any;
   declare private conditionalFormattings: ConditionalFormattingsExtXform;
 
@@ -94,7 +95,7 @@ class SparklineExtXform {
 }
 
 class ExtLstXform extends CompositeXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public model: any;
   declare private ext: ExtXform;
   declare private sparklineExt: SparklineExtXform;

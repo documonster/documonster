@@ -4,7 +4,7 @@ import { CNvPrXform } from "@excel/xlsx/xform/drawing/c-nv-pr-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class NvPicPrXform extends BaseXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
   declare public model: any;
 

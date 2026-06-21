@@ -18,7 +18,7 @@ interface PosModel {
  * Converts between EMU (in XML) and pixels (in model).
  */
 class PosXform extends BaseXform<PosModel> {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
 
   constructor() {
     super();
