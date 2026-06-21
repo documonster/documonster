@@ -6,7 +6,6 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 class NvPicPrXform extends BaseXform {
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
-  declare public model: any;
 
   constructor() {
     super();
@@ -21,7 +20,7 @@ class NvPicPrXform extends BaseXform {
     return "xdr:nvPicPr";
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model?: unknown): void {
     xmlStream.openNode(this.tag);
     this.map["xdr:cNvPr"].render(xmlStream, model);
     this.map["xdr:cNvPicPr"].render(xmlStream, model);

@@ -14,13 +14,12 @@ export interface PicModel {
   external?: boolean;
   /** Relationship id of an SVG companion (asvg:svgBlip extension). */
   svgRId?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
-class PicXform extends BaseXform {
+class PicXform extends BaseXform<PicModel> {
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
-  declare public model: any;
 
   constructor() {
     super();
