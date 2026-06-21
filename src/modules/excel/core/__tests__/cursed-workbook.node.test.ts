@@ -1,10 +1,10 @@
 /**
- * Regression tests for malformed ("cursed") xlsx workbooks — issue #166.
+ * Regression tests for malformed ("cursed") xlsx workbooks.
  *
  * Two layered fixes are exercised:
  *
  * 1. Robust binding of `<sheet>` declarations to worksheet parts
- *    (the actual root cause of issue #166):
+ *    (the actual root cause):
  *      - the relationships namespace prefix is whatever the workbook
  *        root binds, not hard-coded to `r`;
  *      - rel.Target is normalised through `resolveRelTarget` so that
@@ -63,7 +63,7 @@ const sheetXml = (text: string) =>
   </sheetData>
 </worksheet>`;
 
-describe("issue #166 — robust <sheet>↔worksheet binding", () => {
+describe("robust <sheet>↔worksheet binding", () => {
   it("binds <sheet> when the relationships prefix is not 'r'", async () => {
     // Workbook root binds the OOXML relationships namespace to the
     // prefix `rel`. The reader must follow the prefix declared on the
@@ -210,12 +210,12 @@ describe("issue #166 — robust <sheet>↔worksheet binding", () => {
   });
 });
 
-describe("issue #166 — strict <sheets> as authoritative list", () => {
+describe("strict <sheets> as authoritative list", () => {
   it("drops a worksheet part that <sheets> never declares", async () => {
     // workbook.xml has empty <sheets/> — the worksheet part exists in
     // the zip but is not a member of the workbook per OOXML. The
     // reader must not surface it under a synthesised key, which is
-    // what produced `_worksheets[undefined]` (issue #166).
+    // what produced `_worksheets[undefined]`.
     const WORKBOOK_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -320,7 +320,7 @@ describe("issue #166 — strict <sheets> as authoritative list", () => {
     // OOXML requires `sheetId` to be a positive integer. Anything
     // else (empty string, alphabetic, zero, negative) used to flow
     // through `parseInt` and seed `_worksheets["NaN"]` — the same
-    // family of bug as `_worksheets["undefined"]` in issue #166.
+    // family of bug as `_worksheets["undefined"]`.
     const WORKBOOK_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">

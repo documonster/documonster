@@ -4866,7 +4866,7 @@ function escapeAttr(value: string): string {
  * `loadFromFiles()` / etc. to return the Node `Workbook` (which exposes
  * `xlsx.readFile` / `xlsx.writeFile`). Without this, those methods are
  * inherited unchanged and surface the browser `Workbook` type to Node
- * consumers — see issue #160.
+ * consumers.
  *
  * The default type parameter keeps the public XLSX surface unchanged for
  * external callers (`new XLSX(workbook)` is still typed as `XLSX<Workbook>`).

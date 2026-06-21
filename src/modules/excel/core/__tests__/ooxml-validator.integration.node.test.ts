@@ -87,7 +87,7 @@ describe("OOXML validator", () => {
     await expectValidXlsx(buffer);
   });
 
-  it("validates a workbook with table name containing spaces (issue #91)", async () => {
+  it("validates a workbook with table name containing spaces", async () => {
     const wb = Workbook.create();
     const sheet = Workbook.addWorksheet(wb, "test");
     addTable(sheet, {

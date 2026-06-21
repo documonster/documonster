@@ -367,7 +367,7 @@ const expectations = [
     }
   },
   {
-    // Regression test for issue #142:
+    // Regression test:
     // A hyperlink whose display text is rich-text must round-trip with
     //   * `text` flattened to a plain string (public contract),
     //   * `richText` runs preserved for re-writing with formatting intact.

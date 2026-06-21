@@ -377,7 +377,7 @@ class WorkbookXform extends BaseXform {
     // Without pruning, such worksheets propagate downstream with
     // `id`/`name`/`state` all `undefined`, landing under the literal
     // string key `"undefined"` in `Workbook._worksheets` and becoming
-    // unreachable via `getWorksheet(name)` (issue #166). OOXML treats
+    // unreachable via `getWorksheet(name)`. OOXML treats
     // the workbook's `<sheets>` element as the single source of truth
     // for which parts belong to the workbook; we follow that contract
     // strictly. Genuinely-cursed workbooks reach this branch only when

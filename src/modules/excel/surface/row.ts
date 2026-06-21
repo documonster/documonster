@@ -84,8 +84,7 @@ export function setValues(ws: Sheet, row: number, values: RowValues): void {
 /**
  * Read the row's cell values as a **1-based** array: index `0` is always an
  * empty leading slot, the value of column A is at index `1`, column B at `2`,
- * and so on. This mirrors Excel's 1-based column numbering (and the historical
- * ExcelJS `row.values` shape).
+ * and so on. This mirrors Excel's 1-based column numbering.
  *
  * Prefer {@link getValues} for ordinary 0-based array access.
  */

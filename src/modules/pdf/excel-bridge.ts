@@ -65,7 +65,7 @@ import { getChartsheets, getImage, getWorksheets } from "@excel/core/workbook";
 // trivially assignable to the base) and the browser entry (where `Workbook` is
 // already the base). Importing the Node alias `@excel/workbook` would force
 // browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
-// XLSX surface intentionally omits — see issue #160.
+// XLSX surface intentionally omits.
 import type { Workbook } from "@excel/core/workbook.browser";
 import {
   findRow,

@@ -287,7 +287,7 @@ describe("Worksheet", () => {
       expect(formula.startsWith("@")).toBe(false);
     });
 
-    it("loads a table with calculatedColumnFormula without crashing (issue #76)", async () => {
+    it("loads a table with calculatedColumnFormula without crashing", async () => {
       // Create a workbook with a 3-column table
       const wb1 = Workbook.create();
       const ws1: any = Workbook.addWorksheet(wb1, "Data");
@@ -457,7 +457,7 @@ describe("Worksheet", () => {
       expect(sanitizeTableName(long)).toHaveLength(255);
     });
 
-    it("handles the exact reproduction case from issue #91", () => {
+    it("handles the exact reproduction case for table-name sanitization", () => {
       expect(sanitizeTableName("test table")).toBe("test_table");
     });
   });
@@ -494,7 +494,7 @@ describe("Worksheet", () => {
       expect(getTable(ws, "test_table")).toBe(table);
     });
 
-    it("issue #91 reproduction: writeBuffer produces valid OOXML", async () => {
+    it("table-name sanitization: writeBuffer produces valid OOXML", async () => {
       const columns = ["A", "B", "C"];
       const data = [
         ["test", 2, "a4f"],

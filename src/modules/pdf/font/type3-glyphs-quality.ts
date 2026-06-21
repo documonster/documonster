@@ -766,7 +766,7 @@ export const REFINED_SYMBOLS: Record<number, GlyphDef> = {
       p.stroke();
     }
   },
-  // ⧇ SQUARED SMALL CIRCLE — refined (the key character from issue #150!)
+  // ⧇ SQUARED SMALL CIRCLE — refined
   [0x29c7]: {
     width: W,
     draw: (p: GlyphPen) => {

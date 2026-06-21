@@ -57,7 +57,7 @@ Cell.setValue(ws, "F5", { formula: "XMATCH(E1, A2:A4)" }); // 2
 // OFFSET — dynamic anchor (2nd row, 2nd col, 1x1)
 Cell.setValue(ws, "F6", { formula: "OFFSET(A1, 2, 1)" }); // "Gadget"
 
-// INDIRECT — build a reference from a string (issue #140 style)
+// INDIRECT — build a reference from a string
 Cell.setValue(ws, "F7", { formula: 'SUM(C2:INDIRECT("C" & ROWS(A1:A4)))' }); // 27.74
 
 // Metadata

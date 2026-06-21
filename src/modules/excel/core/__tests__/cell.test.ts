@@ -222,7 +222,7 @@ describe("Cell", () => {
     expect(cellType(a1)).toBe(Enums.ValueType.Hyperlink);
   });
 
-  it("upgrades from rich text to hyperlink, preserving runs (issue #142)", () => {
+  it("upgrades from rich text to hyperlink, preserving runs", () => {
     sheetMock.getRow(1);
     sheetMock.getColumn(1);
 
@@ -244,7 +244,7 @@ describe("Cell", () => {
     expect(v.richText).toEqual([{ text: "bold", font: { bold: true } }, { text: "-plain" }]);
   });
 
-  it("hyperlink value setter normalizes rich text into plain-text mirror (issue #142)", () => {
+  it("hyperlink value setter normalizes rich text into plain-text mirror", () => {
     sheetMock.getRow(1);
     sheetMock.getColumn(1);
 
@@ -266,7 +266,7 @@ describe("Cell", () => {
     expect(v.richText).toEqual([{ text: "hello " }, { text: "world", font: { italic: true } }]);
   });
 
-  it("hyperlink cell.text always returns a string, even for rich-text link (issue #142)", () => {
+  it("hyperlink cell.text always returns a string, even for rich-text link", () => {
     sheetMock.getRow(1);
     sheetMock.getColumn(1);
 
@@ -778,7 +778,7 @@ describe("Cell", () => {
     });
 
     it("formats a Date using the cell's numFmt, not cellToString(Date)", () => {
-      // Repro for issue #144: a date cell with numFmt "mm-dd-yy" should render
+      // Repro: a date cell with numFmt "mm-dd-yy" should render
       // as "04-12-19", not the JS Date.cellToString(prototype) output that cell.text
       // would produce.
       const a1 = sheetMock.getCell("A1");

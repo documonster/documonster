@@ -42,7 +42,7 @@ export type FormulaResultLike = number | string | boolean | Date | CellErrorValu
  * host's in-memory model may proxy `cell.value` from slaves to the
  * master (see `MergeValue` in `@excel/cell`), so the snapshot builder
  * must filter merge slaves out — otherwise range aggregates count the
- * master's value once per slave. See issue #162.
+ * master's value once per slave.
  *
  * Kept as inline numeric literals (not an enum) so this file stays free
  * of runtime dependencies. The `const` object and `type` alias share a

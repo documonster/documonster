@@ -8,8 +8,6 @@ import { Cell, Workbook } from "@excel/index";
 /**
  * End-to-end test for OOXML _xHHHH_ escape decoding in table column headers.
  *
- * Issue: https://github.com/documonster/documonster/issues/94
- *
  * Root cause: Excel stores newlines in `<tableColumn name="..."/>` attributes
  * as `_x000a_` (OOXML ST_Xstring escaping). On load, `Table.store()` copies
  * `column.name` into the header row cells, so an undecoded `_x000a_` leaks
@@ -20,7 +18,7 @@ import { describe, it, expect } from "vitest";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-describe("OOXML _xHHHH_ escape in table column headers (issue #94)", () => {
+describe("OOXML _xHHHH_ escape in table column headers", () => {
   it("reads Excel-generated file with _x000a_ in table column header", async () => {
     // This is the exact file attached to the bug report.
     // Inside the XLSX:

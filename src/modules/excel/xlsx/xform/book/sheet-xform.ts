@@ -19,7 +19,7 @@ function parseSheetId(raw: string | undefined): number | undefined {
   // doesn't parse to one — empty string, alphabetic, zero, negative,
   // overflowing — must not propagate as `NaN`/`0`/`-1` because those
   // would later seed pseudo keys like `_worksheets["NaN"]` (the same
-  // family of bug as issue #166's `_worksheets["undefined"]`).
+  // family of bug as `_worksheets["undefined"]`).
   return Number.isInteger(id) && id > 0 ? id : undefined;
 }
 

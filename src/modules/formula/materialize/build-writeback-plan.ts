@@ -505,7 +505,7 @@ function collectStaleGhosts(
       // (whose `cell.value = null` writeback would forward through
       // `MergeValue`'s setter and clobber the master). Either way,
       // cleanup must not touch it. The snapshot builder filters merge
-      // slaves out of `ws.cells` (see issue #162), so the
+      // slaves out of `ws.cells`, so the
       // `isGhostUnmodified` check below would otherwise miss this case
       // — `cell` would be `undefined`, which currently means
       // "unmodified, safe to wipe".

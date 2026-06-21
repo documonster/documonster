@@ -14,7 +14,7 @@ type StreamInput = AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>;
 // Use the `Blob` constructor's own options type (available from both
 // `@types/node` 18+ and the DOM lib) instead of the DOM-only global
 // `BlobPropertyBag`, so the emitted `.d.ts` type-checks in Node-only projects
-// without `lib: ["DOM"]`. See issue #174.
+// without `lib: ["DOM"]`.
 type BlobOptions = NonNullable<ConstructorParameters<typeof Blob>[1]>;
 
 export interface StreamConsumers {

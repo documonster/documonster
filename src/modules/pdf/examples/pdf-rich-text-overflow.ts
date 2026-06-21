@@ -148,7 +148,7 @@ Worksheet.setColumns(ws3, [
   { header: "Expected Layout", width: 40 }
 ]);
 
-// Case from issue: 8pt vs 7pt — only 1pt difference but looks huge
+// 8pt vs 7pt — only 1pt difference but looks huge
 Row.setHeight(ws3, 2, 30);
 Cell.setValue(ws3, "A2", "8pt vs 7pt (wrap)");
 Cell.setValue(ws3, "B2", {

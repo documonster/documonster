@@ -1,11 +1,11 @@
-// Type-only regression test for issue #160 (browser-entry side).
+// Type-only regression test for the browser-entry workbook shape.
 //
 // Both `excelToPdf` and `excelToDocx` are exposed under the browser entry. They
 // must accept the *browser* `Workbook` (the public class browser users get from
 // `import { Workbook } from "documonster"`). Before the fix the
 // bridge files imported `Workbook` from the Node alias `@excel/workbook`, so
 // the parameter type required Node-only `xlsx.readFile` / `writeFile` and
-// browser callers got the issue #160 mismatch:
+// browser callers got the mismatch:
 //
 //     workbook.browser.Workbook is not assignable to workbook.Workbook
 //     XLSX missing readFile, writeFile

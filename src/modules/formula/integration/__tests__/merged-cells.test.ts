@@ -1,5 +1,5 @@
 /**
- * Regression tests for issue #162 — merged cells should not double
+ * Regression tests for merged cells — they should not double
  * their value when included in a SUM / COUNT / AVERAGE range.
  *
  * Excel's behaviour: only the top-left "master" of a merged range
@@ -16,7 +16,7 @@ import { calculateFormulas } from "@excel/core/formula-adapter";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
-describe("calculate-formulas: merged cells (issue #162)", () => {
+describe("calculate-formulas: merged cells", () => {
   it("does not double-count a horizontally merged value in SUM", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
@@ -92,7 +92,7 @@ describe("calculate-formulas: dynamic-array spill vs merged regions", () => {
     // Spill range [B1:B2] tries to land on B2, which is a slave of the
     // merge A2:C2 (master A2). The slave proxies value writes to the
     // master via `MergeValue`, so without merge-aware spill checking
-    // the spill silently corrupts A2 — see issue #162 follow-up.
+    // the spill silently corrupts A2.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A2", "MASTER");

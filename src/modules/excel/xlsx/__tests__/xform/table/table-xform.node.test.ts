@@ -22,7 +22,7 @@ const expectations = [
     tests: ["render", "renderIn", "parse"]
   },
   {
-    title: "table with calculatedColumnFormula child elements (issue #76)",
+    title: "table with calculatedColumnFormula child elements",
     create() {
       return new TableXform();
     },

@@ -27,7 +27,7 @@ describe("SharedStrings", () => {
     expect(ss.getString(iAmpersand)).toBe("&");
   });
 
-  it("De-duplicates rich-text entries by structural equality (issue #142 regression)", () => {
+  it("De-duplicates rich-text entries by structural equality", () => {
     // Before the fix, rich-text payloads were hashed as "[object Object]",
     // causing every rich-text shared string to collide on a single index.
     const ss = new SharedStrings();

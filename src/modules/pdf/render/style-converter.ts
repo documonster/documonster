@@ -274,10 +274,10 @@ export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | n
  * Map border styles to PDF line widths (in points).
  *
  * Values match Excel's actual border weights as used historically by this
- * library (pre-#154). PR #154 doubled every width (0.25 → 0.5, 0.5 → 1,
+ * library. An earlier change doubled every width (0.25 → 0.5, 0.5 → 1,
  * 1 → 2) to make `thin` and `medium` more visually distinct in PDF
- * viewers, but that change made all borders heavier than Excel itself
- * (issue #164). The 2× ratio between thin/medium and the 4× ratio between
+ * viewers, but that change made all borders heavier than Excel itself.
+ * The 2× ratio between thin/medium and the 4× ratio between
  * thin/thick are preserved with the lighter values, so styles remain
  * distinguishable while matching Excel.
  *

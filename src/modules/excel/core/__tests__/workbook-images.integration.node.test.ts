@@ -270,7 +270,7 @@ describe("Workbook", () => {
       expect(Buffer.compare(imageData, image2!.buffer!)).toBe(0);
     });
 
-    describe("read-write round-trip (issue #58)", () => {
+    describe("read-write round-trip", () => {
       it("does not duplicate images after read-write cycles", async () => {
         const wb = Workbook.create();
         const ws = Workbook.addWorksheet(wb, "Sheet1");
@@ -507,7 +507,7 @@ describe("Workbook", () => {
       });
     });
 
-    describe("image duplication during row duplication (issue #57)", () => {
+    describe("image duplication during row duplication", () => {
       it("duplicates images anchored to the source row", () => {
         const wb = Workbook.create();
         const ws = Workbook.addWorksheet(wb, "Sheet1");

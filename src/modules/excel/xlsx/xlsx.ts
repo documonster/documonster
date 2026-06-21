@@ -19,7 +19,7 @@
  * `xlsx.readFile` / `xlsx.writeFile`) instead of the browser base class.
  * Without the generic, the inherited methods would be typed against the
  * browser `Workbook` and Node consumers chaining off the returned value
- * would lose access to the Node-only file APIs — issue #160.
+ * would lose access to the Node-only file APIs.
  */
 
 import type { ZipEntry } from "@archive/unzip/stream";

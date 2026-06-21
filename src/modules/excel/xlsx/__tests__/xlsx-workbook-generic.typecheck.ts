@@ -1,7 +1,7 @@
-// Type-only regression test for https://github.com/documonster/documonster/issues/160
+// Type-only regression test for the Node-vs-browser workbook type contract.
 //
 // This file is typechecked by `pnpm type` (tsgo) but is NOT executed by Vitest.
-// It pins down the type contract that issue #160 was about: under the Node
+// It pins down the type contract: under the Node
 // entry, `Workbook.xlsx` must be the Node `XLSX` (with `readFile`/`writeFile`)
 // and any method that returns the workbook (`load`, `read`, `loadFromFiles`,
 // etc.) must return the *Node* `Workbook` so that chaining off the result

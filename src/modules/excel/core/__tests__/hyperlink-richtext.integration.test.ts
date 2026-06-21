@@ -1,7 +1,7 @@
 /**
  * Hyperlink + RichText integration tests.
  *
- * Regression coverage for https://github.com/documonster/documonster/issues/142:
+ * Regression coverage for hyperlink cells with rich-text display:
  * a hyperlink cell whose display text is rich-text (shared-string `<r>` runs)
  * must round-trip through `writeBuffer` / `load` with:
  *
@@ -26,7 +26,7 @@ import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
-describe("Hyperlink + RichText round-trip (issue #142)", () => {
+describe("Hyperlink + RichText round-trip", () => {
   it("preserves rich-text display on a hyperlink through writeBuffer → load", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");

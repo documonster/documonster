@@ -106,7 +106,7 @@ const expectations = [
 describe("TableColumnXform", () => {
   testXformHelper(expectations);
 
-  it("parses all columns when some have child elements (issue #76)", async () => {
+  it("parses all columns when some have child elements", async () => {
     const xml =
       '<tableColumns count="3">' +
       '<tableColumn id="1" name="Col1"/>' +

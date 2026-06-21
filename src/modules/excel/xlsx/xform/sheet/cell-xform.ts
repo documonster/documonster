@@ -57,8 +57,7 @@ function getEffectiveCellType(cell) {
  *  - `richText`: preserved if the source was a rich-text payload, else undefined
  *
  * This keeps the CellHyperlinkValue.text: string public contract intact while
- * also letting the Hyperlink value class retain the formatted runs
- * (see https://github.com/documonster/documonster/issues/142).
+ * also letting the Hyperlink value class retain the formatted runs.
  */
 function extractHyperlinkDisplay(raw: unknown): { text: string; richText?: RichText[] } {
   if (raw === null || raw === undefined) {
@@ -656,7 +655,7 @@ class CellXform extends BaseXform {
       // CellHyperlinkValue.text is typed as string; if the shared-string
       // resolution produced a rich-text payload ({ richText: [...] }) we must
       // flatten it for `text` AND preserve the runs on `richText` so formatted
-      // display survives round-trip. (See issue #142.)
+      // display survives round-trip.
       let source: unknown;
       if (model.type === Enums.ValueType.Formula) {
         // Formula + hyperlink: surface as a Hyperlink cell whose display is

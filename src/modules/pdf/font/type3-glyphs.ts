@@ -2384,7 +2384,7 @@ const SQUARED: Record<number, GlyphDef> = {
       p.stroke();
     }
   },
-  // ⧇ SQUARED SMALL CIRCLE (key character from the issue!)
+  // ⧇ SQUARED SMALL CIRCLE
   [0x29c7]: {
     width: W,
     draw: p => {

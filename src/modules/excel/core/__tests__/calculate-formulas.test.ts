@@ -187,9 +187,9 @@ describe("calculateFormulas", () => {
   });
 
   // ==========================================================================
-  // The Issue #140 Scenario
+  // Formula values after cell modification
   // ==========================================================================
-  describe("issue #140: formula values after cell modification", () => {
+  describe("formula values after cell modification", () => {
     it("should recalculate SUM after modifying referenced cells", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");

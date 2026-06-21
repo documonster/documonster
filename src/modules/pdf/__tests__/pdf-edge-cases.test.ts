@@ -8,7 +8,7 @@ import { readPdf } from "@pdf/reader/pdf-reader";
 /**
  * Integration tests for PDF rendering edge cases.
  *
- * These tests verify the fixes from PR #131 and related style improvements:
+ * These tests verify the fixes for various rendering edge cases and style improvements:
  * type-based alignment, merge border propagation, text overflow, double borders,
  * zero-value number formats, fitToPage, row heights, error cells, and newline handling.
  */
@@ -559,8 +559,8 @@ describe("PDF Rendering Edge Cases", () => {
       expect(rightFrag!.x).toBeGreaterThan(leftFrag!.x);
     });
 
-    // --- 90° combined: left+bottom vs right+top (issue #133 core scenario) ---
-    it("should handle 90° combined h/v alignment (issue #133)", async () => {
+    // --- 90° combined: left+bottom vs right+top (core scenario) ---
+    it("should handle 90° combined h/v alignment", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Column.setWidth(ws, 1, 20);
@@ -728,8 +728,8 @@ describe("PDF Rendering Edge Cases", () => {
       expect(text).toContain("Neg");
     });
 
-    // --- All 6 combos from issue #133 reproduced ---
-    it("should match Excel alignment for all 6 rotation combos from issue #133", async () => {
+    // --- All 6 combos reproduced ---
+    it("should match Excel alignment for all 6 rotation combos", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       for (let c = 1; c <= 6; c++) {
@@ -737,7 +737,7 @@ describe("PDF Rendering Edge Cases", () => {
       }
       Row.setHeight(ws, 1, 110);
 
-      // The exact combos from the issue's PDF-Test-2.xlsx Row 8
+      // The exact combos from the PDF-Test-2.xlsx Row 8
       const combos: Array<{ value: string; h: string; v?: string }> = [
         { value: "Col1", h: "center", v: "top" },
         { value: "Col2", h: "center", v: "middle" },
