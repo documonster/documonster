@@ -1272,7 +1272,7 @@ function buildChartExAxisRawPatchPlan(
 }
 
 function stripPatchableChartExFields(model: any): any {
-  const clone = JSON.parse(JSON.stringify(model));
+  const clone = structuredClone(model);
   clone.rawXml = undefined;
   // Vendor / extension metadata the parser recorded but the raw patcher
   // does not rewrite. Letting them differ in the diff keeps
@@ -1629,7 +1629,7 @@ function getChartRawPatchPlan(entry: ChartEntry): ChartRawPatchPlan | undefined 
 }
 
 function stripPatchableChartFields(model: any): any {
-  const clone = JSON.parse(JSON.stringify(model));
+  const clone = structuredClone(model);
   // Top-level fields that tryPatchChartRawXml does not rewrite. Allowing
   // them to differ between `previous` and `current` means a caller can
   // load a template that carries c14/c15/c16 extension XML, edit a
