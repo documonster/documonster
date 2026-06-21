@@ -124,7 +124,9 @@ describe("TableColumnXform", () => {
     const stream = new PassThrough();
     stream.write(xml);
     stream.end();
-    const model = await listXform.parse(parseSax(stream));
+    const model = (await listXform.parse(parseSax(stream))) as
+      | { name?: string; calculatedColumnFormula?: string }[]
+      | undefined;
 
     expect(model).toHaveLength(3);
     expect(model![0].name).toBe("Col1");

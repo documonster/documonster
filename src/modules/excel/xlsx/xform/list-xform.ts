@@ -1,6 +1,20 @@
 import { MaxItemsExceededError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
+
+/**
+ * The surface ListXform requires of its child xform. Child renders may take
+ * an optional positional index (e.g. vml-shape-xform), which BaseXform's
+ * 2-arg render doesn't express, so it's modelled structurally here.
+ */
+interface ListChildXform<TChild> {
+  prepare(model: TChild, options?: unknown): void;
+  render(xmlStream: XmlSink, model: TChild, index?: number): void;
+  parseOpen(node: ParseOpenTag): boolean | void;
+  reconcile(model: TChild, options?: unknown): void;
+  reset(): void;
+  model?: unknown;
+}
 
 interface ListXformOptions {
   tag: string;
@@ -8,19 +22,19 @@ interface ListXformOptions {
   count?: boolean;
   empty?: boolean;
   $count?: string;
-  $?: any;
-  childXform: any;
+  $?: XmlAttributes;
+  childXform: ListChildXform<any>;
   maxItems?: number;
 }
 
-class ListXform<TChild = any> extends BaseXform<TChild[]> {
+class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
   declare protected tag: string;
   declare protected always: boolean;
   declare protected count?: boolean;
   declare protected empty?: boolean;
   declare public $count: string;
-  declare public $?: any;
-  declare protected childXform: any;
+  declare public $?: XmlAttributes;
+  declare protected childXform: ListChildXform<TChild>;
   declare protected maxItems?: number;
   declare public parser?: BaseXform;
 
@@ -33,21 +47,21 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
     this.empty = options.empty;
     this.$count = options.$count ?? "count";
     this.$ = options.$;
-    this.childXform = options.childXform;
+    this.childXform = options.childXform as ListChildXform<TChild>;
     this.maxItems = options.maxItems;
   }
 
-  prepare(model: any[], options: any): void {
+  prepare(model: TChild[], options: unknown): void {
     const { childXform } = this;
     if (model) {
       model.forEach((childModel, index) => {
-        options.index = index;
+        (options as { index?: number }).index = index;
         childXform.prepare(childModel, options);
       });
     }
   }
 
-  render(xmlStream: XmlSink, model?: any[]): void {
+  render(xmlStream: XmlSink, model?: TChild[]): void {
     if (this.always || (model && model.length)) {
       xmlStream.openNode(this.tag, this.$);
       if (this.count) {
@@ -75,7 +89,7 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
       return true;
     }
     if (this.childXform.parseOpen(node)) {
-      this.parser = this.childXform;
+      this.parser = this.childXform as unknown as BaseXform;
       return true;
     }
     return false;
@@ -90,11 +104,12 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
   parseClose(name: string): boolean {
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
-        this.model!.push(this.parser.model);
+        this.model!.push(this.parser.model as TChild);
         this.parser = undefined;
 
         if (this.maxItems && this.model!.length > this.maxItems) {
-          throw new MaxItemsExceededError(this.childXform.tag, this.maxItems);
+          const childTag = (this.childXform as unknown as { tag?: string }).tag ?? "";
+          throw new MaxItemsExceededError(childTag, this.maxItems);
         }
       }
       return true;
@@ -103,10 +118,10 @@ class ListXform<TChild = any> extends BaseXform<TChild[]> {
     return false;
   }
 
-  reconcile(model: any[], options: any): void {
+  reconcile(model: TChild[], options: unknown): void {
     if (model) {
       const { childXform } = this;
-      model.forEach((childModel: any) => {
+      model.forEach(childModel => {
         childXform.reconcile(childModel, options);
       });
     }
