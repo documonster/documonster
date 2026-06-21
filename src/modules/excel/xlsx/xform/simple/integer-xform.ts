@@ -1,17 +1,17 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface IntegerXformOptions {
   tag: string;
   attr?: string;
-  attrs?: any;
+  attrs?: XmlAttributes;
   zero?: boolean;
 }
 
 class IntegerXform extends BaseXform {
   declare private tag: string;
   declare private attr?: string;
-  declare private attrs?: any;
+  declare private attrs?: XmlAttributes;
   declare private zero?: boolean;
   declare private text: string[];
 

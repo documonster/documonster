@@ -1,16 +1,16 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface FloatXformOptions {
   tag: string;
   attr?: string;
-  attrs?: any;
+  attrs?: XmlAttributes;
 }
 
 class FloatXform extends BaseXform {
   declare private tag: string;
   declare private attr?: string;
-  declare private attrs?: any;
+  declare private attrs?: XmlAttributes;
   declare private text: string[];
 
   constructor(options: FloatXformOptions) {

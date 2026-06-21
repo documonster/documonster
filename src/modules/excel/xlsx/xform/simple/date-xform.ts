@@ -1,10 +1,10 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface DateXformOptions {
   tag: string;
   attr?: string;
-  attrs?: any;
+  attrs?: XmlAttributes;
   format?: (dt: Date) => string;
   parse?: (str: string) => Date;
 }
@@ -12,7 +12,7 @@ interface DateXformOptions {
 class DateXform extends BaseXform {
   declare private tag: string;
   declare private attr?: string;
-  declare private attrs?: any;
+  declare private attrs?: XmlAttributes;
   declare private text: string[];
   declare private _format: (dt: Date) => string;
   declare private _parse: (str: string) => Date;
