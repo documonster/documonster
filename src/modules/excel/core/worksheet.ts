@@ -689,7 +689,7 @@ export function _mergeCellsInternal(
   // Collect perimeter borders BEFORE merge overwrites slave styles
   const collected = ignoreStyle
     ? undefined
-    : collectMergeBorders(top, left, bottom, right, (r, c) => findCell(ws, r, c) as any);
+    : collectMergeBorders(top, left, bottom, right, (r, c) => findCell(ws, r, c));
 
   // Apply merge — slave cells inherit the master's full style
   const master = getCell(ws, dimensions.top, dimensions.left);
@@ -704,7 +704,7 @@ export function _mergeCellsInternal(
   // Reconstruct position-aware borders (like Excel):
   // outer borders survive, inner borders are cleared.
   if (collected) {
-    applyMergeBorders(top, left, bottom, right, collected, (r, c) => getCell(ws, r, c) as any);
+    applyMergeBorders(top, left, bottom, right, collected, (r, c) => getCell(ws, r, c));
   }
 
   // index merge
@@ -733,16 +733,19 @@ export function _shiftChartAnchors(
   const prop = axis === "row" ? "nativeRow" : "nativeCol";
 
   // Drawing anchors (from loaded file)
-  const drawing = ws._drawing as any;
+  type AnchorPos = { nativeRow?: number; nativeCol?: number };
+  const drawing = ws._drawing as
+    | { anchors?: { range?: { tl?: AnchorPos; br?: AnchorPos } }[] }
+    | undefined;
   if (drawing?.anchors) {
     for (const anchor of drawing.anchors) {
       const tl = anchor.range?.tl;
       const br = anchor.range?.br;
-      if (tl && tl[prop] >= threshold) {
-        tl[prop] = Math.max(0, tl[prop] + delta);
+      if (tl && tl[prop] !== undefined && tl[prop]! >= threshold) {
+        tl[prop] = Math.max(0, tl[prop]! + delta);
       }
-      if (br && br[prop] >= threshold) {
-        br[prop] = Math.max(0, br[prop] + delta);
+      if (br && br[prop] !== undefined && br[prop]! >= threshold) {
+        br[prop] = Math.max(0, br[prop]! + delta);
       }
     }
   }
@@ -1407,7 +1410,7 @@ export function addWatermark(ws: WorksheetData, options: WatermarkOptions): void
       imageId: String(options.imageId),
       opacity: options.opacity
     };
-    ws._media.push(imageCreate(ws, model as any));
+    ws._media.push(imageCreate(ws, model));
   } else {
     // Header mode: add as a "headerImage" media entry for the VML pipeline.
     const model = {
@@ -1417,7 +1420,7 @@ export function addWatermark(ws: WorksheetData, options: WatermarkOptions): void
       headerHeight: options.headerHeight,
       applyTo: options.applyTo
     };
-    ws._media.push(imageCreate(ws, model as any));
+    ws._media.push(imageCreate(ws, model));
   }
 }
 
@@ -2282,15 +2285,21 @@ export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
     ws._charts = value.charts.map((c: ChartAnchorModel) =>
       createChart(ws, { chartNumber: c.chartNumber, chartExNumber: c.chartExNumber }, c.range)
     );
-  } else if ((value.drawing as any)?.anchors) {
+  } else if ((value.drawing as { anchors?: unknown } | undefined)?.anchors) {
     // Extract chart anchors from drawing (loaded from XLSX)
-    ws._charts = ((value.drawing as any).anchors as any[])
-      .filter((a: any) => a.chartNumber || a.chartExNumber)
-      .map((a: any) =>
+    type DrawingChartAnchor = {
+      chartNumber?: number;
+      chartExNumber?: number;
+      range?: Parameters<typeof createChart>[2];
+    };
+    const anchors = (value.drawing as { anchors: DrawingChartAnchor[] }).anchors;
+    ws._charts = anchors
+      .filter(a => a.chartNumber || a.chartExNumber)
+      .map(a =>
         createChart(
           ws,
           { chartNumber: a.chartNumber ?? 0, chartExNumber: a.chartExNumber ?? 0 },
-          a.range
+          a.range!
         )
       );
   } else {
