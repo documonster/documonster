@@ -12,6 +12,7 @@
  */
 
 import { rowValues } from "@excel/core/row";
+import type { RowData } from "@excel/core/row";
 import { addWorksheet, getWorksheet } from "@excel/core/workbook";
 import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
@@ -50,7 +51,14 @@ function createMarkdownStringify(
       return formatter.format(value);
     }
     if (typeof value === "object") {
-      const v = value as any;
+      const v = value as {
+        text?: string;
+        hyperlink?: string;
+        formula?: unknown;
+        result?: unknown;
+        richText?: { text: string }[];
+        error?: string;
+      };
       if (v.text || v.hyperlink) {
         return v.hyperlink || v.text || "";
       }
@@ -58,7 +66,7 @@ function createMarkdownStringify(
         return v.result != null ? String(v.result) : "";
       }
       if (v.richText && Array.isArray(v.richText)) {
-        return v.richText.map((r: { text: string }) => r.text).join("");
+        return v.richText.map(r => r.text).join("");
       }
       if (v.error) {
         return v.error;
@@ -79,7 +87,8 @@ function populateMarkdownWorksheet(
   map?: (value: string, column: number) => unknown
 ): void {
   addRow(worksheet, result.headers);
-  (worksheet as any)._markdownAlignments = result.alignments;
+  (worksheet as { _markdownAlignments?: MarkdownAlignment[] })._markdownAlignments =
+    result.alignments;
   for (const row of result.rows) {
     if (map) {
       addRow(
@@ -174,7 +183,7 @@ export function writeMarkdown(workbook: Workbook, options?: MarkdownOptions): st
   const allRows: unknown[][] = [];
   let lastRow = 1;
 
-  eachRow(worksheet, (row: any, rowNumber: number) => {
+  eachRow(worksheet, (row: RowData, rowNumber: number) => {
     if (includeEmptyRows) {
       while (lastRow++ < rowNumber - 1) {
         allRows.push([]);
@@ -193,7 +202,9 @@ export function writeMarkdown(workbook: Workbook, options?: MarkdownOptions): st
   const headers: string[] = headerRow.map(v => stringify(v));
   const dataRows = allRows.slice(1);
 
-  const storedAlignments: MarkdownAlignment[] | undefined = (worksheet as any)._markdownAlignments;
+  const storedAlignments: MarkdownAlignment[] | undefined = (
+    worksheet as { _markdownAlignments?: MarkdownAlignment[] }
+  )._markdownAlignments;
 
   const columns = options?.columns;
   let resolvedColumns: { header: string; alignment?: MarkdownAlignment }[] | undefined;

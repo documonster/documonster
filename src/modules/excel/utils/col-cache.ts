@@ -213,8 +213,8 @@ const colCache: ColCache = {
 
     // Fast path: parse column letters and row digits directly from char codes.
     // Avoids intermediate string concatenation for the common case.
-    let colNumber = 0;
-    let rowNumber = 0;
+    let colNumber: number | undefined = 0;
+    let rowNumber: number | undefined = 0;
     let hasCol = false;
     let hasRow = false;
     let colEnd = 0; // index where col letters end
@@ -242,13 +242,13 @@ const colCache: ColCache = {
     }
 
     if (!hasCol) {
-      colNumber = undefined as any;
+      colNumber = undefined;
     } else if (colNumber > 16384) {
       const col = value.slice(0, colEnd);
       throw new ColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
     }
     if (!hasRow) {
-      rowNumber = undefined as any;
+      rowNumber = undefined;
     }
 
     // Build canonical address string only when needed
