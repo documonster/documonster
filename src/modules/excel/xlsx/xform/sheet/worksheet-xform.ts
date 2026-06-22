@@ -1,3 +1,4 @@
+import type { ConditionalFormattingRule } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import {
   buildDrawingAnchorsAndRels,
@@ -47,7 +48,7 @@ import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
 import { emuToPx } from "@utils/units";
 import { StdDocAttributes } from "@xml/writer";
 
-function mergeRule(rule, extRule) {
+function mergeRule(rule: Record<string, unknown>, extRule: Record<string, unknown>): void {
   Object.keys(extRule).forEach(key => {
     const value = rule[key];
     const extValue = extRule[key];
@@ -57,7 +58,14 @@ function mergeRule(rule, extRule) {
   });
 }
 
-function mergeConditionalFormattings(model, extModel) {
+/** A CF rule carrying the transient x14Id used to pair classic and ext rules. */
+type MergeableCfRule = ConditionalFormattingRule & { x14Id?: string };
+type MergeableCf = { ref: string; rules: MergeableCfRule[] };
+
+function mergeConditionalFormattings(
+  model: MergeableCf[] | undefined,
+  extModel: MergeableCf[] | undefined
+): MergeableCf[] | undefined {
   // conditional formattings are rendered in worksheet.conditionalFormatting and also in
   // worksheet.extLst.ext.x14:conditionalFormattings
   // some (e.g. dataBar) are even spread across both!
@@ -69,8 +77,8 @@ function mergeConditionalFormattings(model, extModel) {
   }
 
   // index model rules by x14Id
-  const cfMap = {};
-  const ruleMap = {};
+  const cfMap: Record<string, MergeableCf> = {};
+  const ruleMap: Record<string, MergeableCfRule> = {};
   model.forEach(cf => {
     cfMap[cf.ref] = cf;
     cf.rules.forEach(rule => {
@@ -83,10 +91,13 @@ function mergeConditionalFormattings(model, extModel) {
 
   extModel.forEach(extCf => {
     extCf.rules.forEach(extRule => {
-      const rule = ruleMap[extRule.x14Id];
+      const rule = extRule.x14Id ? ruleMap[extRule.x14Id] : undefined;
       if (rule) {
         // merge with matching rule
-        mergeRule(rule, extRule);
+        mergeRule(
+          rule as unknown as Record<string, unknown>,
+          extRule as unknown as Record<string, unknown>
+        );
       } else if (cfMap[extCf.ref]) {
         // reuse existing cf ref
         cfMap[extCf.ref].rules.push(extRule);
