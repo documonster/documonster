@@ -75,9 +75,9 @@ export type WorksheetEvent = RowEvent | HyperlinkEvent;
 // ============================================================================
 
 /** The subset of the streaming workbook reader a worksheet reader consumes. */
-interface WorksheetReaderWorkbook {
+export interface WorksheetReaderWorkbook {
   sharedStrings?: SharedStringValue[];
-  styles: { getStyleModel(id: number): Partial<Style> | undefined };
+  styles: { getStyleModel(id: number): Style | null };
   properties?: { model?: { date1904?: boolean } };
   dynamicArrayCmIndices?: Set<number>;
   hasDynamicArrayMetadata?: boolean;

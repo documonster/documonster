@@ -15,7 +15,14 @@ import { ExcelFileError } from "@excel/errors";
 import type { Hyperlink } from "@excel/stream/hyperlink-reader";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
-import type { WorksheetState, Font, WorkbookProperties } from "@excel/types";
+import type { WorksheetReaderWorkbook } from "@excel/stream/worksheet-reader";
+import type {
+  WorksheetState,
+  Font,
+  WorkbookProperties,
+  RichText,
+  CellRichTextValue
+} from "@excel/types";
 import { iterateStream } from "@excel/utils/iterate-stream";
 import type { IterableStreamLike } from "@excel/utils/iterate-stream";
 import {
@@ -25,6 +32,7 @@ import {
   OOXML_PATHS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
+import type { SharedStringValue } from "@excel/utils/shared-strings";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
@@ -47,11 +55,13 @@ export interface InternalWorksheetOptions {
   entries?: "emit" | "ignore";
 }
 
-export interface SharedStringRichText {
-  richText: Array<{ font: Partial<Font> | null; text: string | null }>;
-}
+/**
+ * A single shared-string rich-text value. Alias of the canonical
+ * `CellRichTextValue` so streaming and in-memory readers agree on one model.
+ */
+export type SharedStringRichText = CellRichTextValue;
 
-export type SharedStringValue = string | SharedStringRichText;
+export type { SharedStringValue };
 
 export interface WorkbookRelationship {
   Id: string;
@@ -112,6 +122,19 @@ export interface WaitingWorksheetEntry {
 
 export type CommonInput = Uint8Array | ArrayBuffer | Readable | ReadableStream<Uint8Array>;
 
+/**
+ * Structural view of the optional cross-platform statics/constructor on
+ * `Readable`. The Node and browser variants expose slightly different surfaces
+ * (browser supports a `{ stream }` constructor option; both expose `from`,
+ * Node 18+ exposes `fromWeb`), so we probe them through this loose shape rather
+ * than the concrete imported type.
+ */
+interface ReadableCrossPlatform {
+  fromWeb?: (stream: ReadableStream<Uint8Array>) => Readable;
+  from(source: Uint8Array[]): Readable;
+  new (options: { stream: ReadableStream<Uint8Array> }): Readable;
+}
+
 export interface WorkbookReaderOptions {
   worksheets?: "emit" | "ignore";
   sharedStrings?: "cache" | "emit" | "ignore";
@@ -148,8 +171,12 @@ export abstract class WorkbookReaderBase<
     id?: number | string;
     name?: string;
     state?: WorksheetState;
+    sheetNo?: number;
   },
-  THyperlinkReader extends EventEmitter & { hyperlinks?: Record<string, Hyperlink> },
+  THyperlinkReader extends EventEmitter & {
+    hyperlinks?: Record<string, Hyperlink>;
+    read?: () => Promise<void>;
+  },
   TWaitingWorksheet = unknown
 > extends EventEmitter {
   input: TInput;
@@ -195,14 +222,14 @@ export abstract class WorkbookReaderBase<
   }
 
   // Reader classes passed by subclass
-  protected WorksheetReaderClass: ReaderConstructor<TWorksheetReader, this>;
-  protected HyperlinkReaderClass: ReaderConstructor<THyperlinkReader, this>;
+  protected WorksheetReaderClass: ReaderConstructor<TWorksheetReader, WorksheetReaderWorkbook>;
+  protected HyperlinkReaderClass: ReaderConstructor<THyperlinkReader, WorksheetReaderWorkbook>;
 
   constructor(
     input: TInput,
     options: WorkbookReaderOptions,
-    WorksheetReaderClass: ReaderConstructor<TWorksheetReader, any>,
-    HyperlinkReaderClass: ReaderConstructor<THyperlinkReader, any>
+    WorksheetReaderClass: ReaderConstructor<TWorksheetReader, WorksheetReaderWorkbook>,
+    HyperlinkReaderClass: ReaderConstructor<THyperlinkReader, WorksheetReaderWorkbook>
   ) {
     super();
     this.input = input;
@@ -235,9 +262,11 @@ export abstract class WorkbookReaderBase<
       typeof input === "object" &&
       typeof (input as unknown as ReadableStream<Uint8Array>).getReader === "function"
     ) {
-      const fromWeb = (Readable as any).fromWeb as
-        | undefined
-        | ((stream: ReadableStream<Uint8Array>) => Readable);
+      // Cross-platform feature detection: the imported `Readable` may resolve to
+      // either the Node or browser variant, whose static/constructor surfaces
+      // differ. Probe the optional members through a structural view.
+      const ReadableCtor = Readable as unknown as ReadableCrossPlatform;
+      const fromWeb = ReadableCtor.fromWeb;
       if (typeof fromWeb === "function") {
         return fromWeb(input as unknown as ReadableStream<Uint8Array>);
       }
@@ -245,7 +274,7 @@ export abstract class WorkbookReaderBase<
       // Browser wrapper supports `{ stream }` constructor option.
       // Node's Readable does not, so this is best-effort.
       try {
-        return new (Readable as any)({
+        return new ReadableCtor({
           stream: input as unknown as ReadableStream<Uint8Array>
         });
       } catch {
@@ -259,7 +288,7 @@ export abstract class WorkbookReaderBase<
     }
     if (data instanceof Uint8Array) {
       // Cross-platform: both Node's Readable and our browser Readable implement `.from()`.
-      return (Readable as any).from([data]) as Readable;
+      return (Readable as unknown as ReadableCrossPlatform).from([data]);
     }
     throw new ExcelFileError(String(input), "read", "Could not recognise input");
   }
@@ -272,7 +301,7 @@ export abstract class WorkbookReaderBase<
 
   protected _cleanupWaitingWorksheets(_waitingWorksheets: TWaitingWorksheet[]): void {
     // Default: attempt best-effort cleanup if the stored object provides it.
-    for (const ws of _waitingWorksheets as any[]) {
+    for (const ws of _waitingWorksheets as { cleanup?: () => void }[]) {
       if (ws && typeof ws.cleanup === "function") {
         ws.cleanup();
       }
@@ -410,7 +439,7 @@ export abstract class WorkbookReaderBase<
     }
 
     let text: string | null = null;
-    let richText: Array<{ font: Partial<Font> | null; text: string | null }> = [];
+    let richText: RichText[] = [];
     let index = 0;
     let font: Partial<Font> | null = null;
     let inRichText = false;
@@ -440,7 +469,7 @@ export abstract class WorkbookReaderBase<
               font.color.argb = node.attributes.val;
             }
             if (node.attributes.theme) {
-              font.color.theme = node.attributes.theme as any;
+              font.color.theme = parseInt(node.attributes.theme, 10);
             }
             break;
           case "family":
@@ -485,7 +514,7 @@ export abstract class WorkbookReaderBase<
             break;
           case "vertAlign":
             font = font || {};
-            font.vertAlign = node.attributes.val as any;
+            font.vertAlign = node.attributes.val as "superscript" | "subscript";
             break;
         }
       });
@@ -503,7 +532,7 @@ export abstract class WorkbookReaderBase<
             break;
           case "r":
             if (inRichText) {
-              richText.push({ font, text });
+              richText.push(font ? { text: text ?? "", font } : { text: text ?? "" });
               font = null;
               text = null;
             }
@@ -547,7 +576,7 @@ export abstract class WorkbookReaderBase<
             font.color.argb = node.attributes.val;
           }
           if (node.attributes.theme) {
-            font.color.theme = node.attributes.theme as any;
+            font.color.theme = parseInt(node.attributes.theme, 10);
           }
           break;
         case "family":
@@ -592,7 +621,7 @@ export abstract class WorkbookReaderBase<
           break;
         case "vertAlign":
           font = font || {};
-          font.vertAlign = node.attributes.val as any;
+          font.vertAlign = node.attributes.val as "superscript" | "subscript";
           break;
       }
     });
@@ -610,7 +639,7 @@ export abstract class WorkbookReaderBase<
           break;
         case "r":
           if (inRichText) {
-            richText.push({ font, text });
+            richText.push(font ? { text: text ?? "", font } : { text: text ?? "" });
             font = null;
             text = null;
           }
@@ -687,7 +716,7 @@ export abstract class WorkbookReaderBase<
 
     // Preserve original sheet index from the zip path. `worksheetReader.id` may be remapped
     // later using workbook metadata.
-    (worksheetReader as any).sheetNo = sheetNoNumber;
+    (worksheetReader as { sheetNo?: number }).sheetNo = sheetNoNumber;
 
     const relId = this._workbookRelIdByTarget?.[worksheetRelTarget(sheetNo)];
     const matchingSheet = relId ? this._sheetByRelId?.[relId] : undefined;
@@ -718,7 +747,7 @@ export abstract class WorkbookReaderBase<
       }
       this._hyperlinkReadersBySheetNo[sheetNo] = hyperlinksReader;
 
-      const readFn = (hyperlinksReader as any).read as undefined | (() => Promise<void>);
+      const readFn = hyperlinksReader.read;
       if (typeof readFn === "function") {
         await readFn.call(hyperlinksReader);
       }
@@ -751,8 +780,8 @@ export abstract class WorkbookReaderBase<
       }
       propagating = true;
       try {
-        if (typeof (stream as any).destroy === "function") {
-          (stream as any).destroy(err);
+        if (typeof stream.destroy === "function") {
+          stream.destroy(err);
         }
       } catch {
         // Best-effort cleanup; original error already on `zip`.
