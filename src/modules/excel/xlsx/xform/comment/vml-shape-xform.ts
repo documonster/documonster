@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlClientDataXform } from "@excel/xlsx/xform/comment/vml-client-data-xform";
 import { VmlTextboxXform } from "@excel/xlsx/xform/comment/vml-textbox-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 export interface ShapeModel {
   note: {
@@ -12,7 +12,7 @@ export interface ShapeModel {
     width?: number;
     height?: number;
   };
-  refAddress?: any;
+  refAddress?: { row: number; col: number };
 }
 
 /** Default comment box geometry in points (matches legacy Excel notes). */
@@ -22,6 +22,10 @@ const DEFAULT_NOTE_HEIGHT_PT = 59.1;
 class VmlShapeXform extends BaseXform {
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
+  // NOTE: the render path consumes a ShapeModel (note geometry) while the
+  // parser incrementally builds a distinct flat note model (margins/anchor/
+  // protection/row/col). The two are genuinely different shapes, so this
+  // field is intentionally left loose rather than forced into one type.
   declare public model: any;
 
   constructor() {
@@ -134,7 +138,7 @@ class VmlShapeXform extends BaseXform {
     return Number.isFinite(value) ? value : undefined;
   }
 
-  static V_SHAPE_ATTRIBUTES(model: ShapeModel, index: number): any {
+  static V_SHAPE_ATTRIBUTES(model: ShapeModel, index: number): XmlAttributes {
     const width = model.note?.width ?? DEFAULT_NOTE_WIDTH_PT;
     const height = model.note?.height ?? DEFAULT_NOTE_HEIGHT_PT;
     return {

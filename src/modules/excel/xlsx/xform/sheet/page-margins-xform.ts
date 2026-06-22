@@ -25,7 +25,7 @@ class PageMarginsXform extends BaseXform {
         header: model.header,
         footer: model.footer
       };
-      if (Object.values(attributes).some((value: any) => value !== undefined)) {
+      if (Object.values(attributes).some((value: unknown) => value !== undefined)) {
         xmlStream.leafNode(this.tag, attributes);
       }
     }
