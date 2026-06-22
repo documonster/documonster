@@ -76,13 +76,13 @@ class RawXmlCapture {
   /** Track self-closing tags so the subsequent parseClose is skipped */
   private skipNextClose = false;
 
-  start(node: any): void {
+  start(node: ParseOpenTag): void {
     this.rootTag = node.name;
     this.depth = 1;
     this.parts = [this._openTag(node)];
   }
 
-  handleOpen(node: any): void {
+  handleOpen(node: ParseOpenTag): void {
     this.depth++;
     this.parts.push(this._openTag(node));
   }
@@ -106,7 +106,7 @@ class RawXmlCapture {
     return true; // still capturing
   }
 
-  handleSelfClose(node: any): void {
+  handleSelfClose(node: ParseOpenTag): void {
     // For self-closing tags encountered during capture.
     // SAX will also fire a closetag event — flag to skip it.
     this.parts.push(this._selfCloseTag(node));
@@ -121,7 +121,7 @@ class RawXmlCapture {
     return this.depth > 0;
   }
 
-  private _openTag(node: any): string {
+  private _openTag(node: ParseOpenTag): string {
     let s = `<${node.name}`;
     if (node.attributes) {
       for (const [k, v] of Object.entries(node.attributes)) {
@@ -136,7 +136,7 @@ class RawXmlCapture {
     return s;
   }
 
-  private _selfCloseTag(node: any): string {
+  private _selfCloseTag(node: ParseOpenTag): string {
     let s = `<${node.name}`;
     if (node.attributes) {
       for (const [k, v] of Object.entries(node.attributes)) {
@@ -899,7 +899,9 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         if (this.currentPrintSettings) {
           this.currentPrintSettings.pageSetup = {};
           if (attrs.orientation) {
-            this.currentPrintSettings.pageSetup.orientation = attrs.orientation as any;
+            this.currentPrintSettings.pageSetup.orientation = attrs.orientation as
+              | "landscape"
+              | "portrait";
           }
           const paperSize = parseXsdInt(attrs.paperSize);
           if (paperSize !== undefined) {
@@ -1666,7 +1668,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     return { axisType: typeMap[tag], axId: 0, axPos: "b", crossAx: 0 };
   }
 
-  private _parseSeriesElement(name: string, attrs: any): void {
+  private _parseSeriesElement(name: string, attrs: Record<string, string>): void {
     if (
       !this.currentSeries &&
       !this.currentChartTypeGroup &&
@@ -2322,7 +2324,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     }
   }
 
-  private _parseAxisElement(name: string, attrs: any): void {
+  private _parseAxisElement(name: string, attrs: Record<string, string>): void {
     if (!this.currentAxis) {
       return;
     }
