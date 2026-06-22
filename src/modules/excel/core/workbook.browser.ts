@@ -82,6 +82,7 @@ import type {
 } from "@excel/types";
 import { synthGuid } from "@excel/utils/guid";
 import { buildWorkbookProtection } from "@excel/utils/workbook-protection";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 
 // =============================================================================
@@ -150,7 +151,7 @@ export interface WorkbookModel {
   /** Chart entries indexed by 1-based chart number */
   chartEntries?: Record<number, ChartEntry>;
   /** Chart rels indexed by chart number — preserved for round-trip */
-  chartRels?: Record<number, unknown[]>;
+  chartRels?: Record<number, RelationshipModel[]>;
   /** Chart style XML raw bytes indexed by style number — preserved for round-trip */
   chartStyles?: Record<number, Uint8Array>;
   /** Chart colors XML raw bytes indexed by colors number — preserved for round-trip */
@@ -160,7 +161,7 @@ export interface WorkbookModel {
   /** ChartEx raw bytes (Office 2016+ extended charts) indexed by chartEx number */
   chartExEntries?: Record<number, Uint8Array>;
   /** ChartEx rels indexed by chartEx number */
-  chartExRels?: Record<number, unknown[]>;
+  chartExRels?: Record<number, RelationshipModel[]>;
   /** Structured chartEx entries (loaded or programmatically built) indexed by chartEx number */
   chartExStructuredEntries?: Record<number, ChartExEntry>;
   /** Chartsheets parsed from the XLSX file — preserved for round-trip */

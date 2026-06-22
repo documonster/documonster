@@ -39,6 +39,7 @@ import type {
   ThreadedCommentPerson
 } from "@excel/types";
 import { RelType } from "@excel/xlsx/rel-type";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { XLSX } from "@excel/xlsx/xlsx.browser";
 
@@ -72,13 +73,13 @@ export interface WorkbookData {
   _writerExternalLinkCache: Map<string, ExternalLinkModel>;
   _tableNames: Set<string>;
   _chartEntries: Record<number, ChartEntry>;
-  _chartRels: Record<number, any[]>;
+  _chartRels: Record<number, RelationshipModel[]>;
   _chartStyles: Record<number, Uint8Array>;
   _chartColors: Record<number, Uint8Array>;
   _chartExStyles: Record<number, Uint8Array>;
   _chartExColors: Record<number, Uint8Array>;
   _chartExEntries: Record<number, Uint8Array>;
-  _chartExRels: Record<number, any[]>;
+  _chartExRels: Record<number, RelationshipModel[]>;
   _chartExStructuredEntries: Record<number, ChartExEntry>;
   _chartsheets: ChartsheetModel[];
   _persons: ThreadedCommentPerson[];
