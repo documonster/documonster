@@ -3,10 +3,9 @@ import { BlipXform } from "@excel/xlsx/xform/drawing/blip-xform";
 import type { BlipModel } from "@excel/xlsx/xform/drawing/blip-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class BlipFillXform extends BaseXform {
+class BlipFillXform extends BaseXform<BlipModel> {
   declare public map: { [key: string]: BlipXform };
   declare public parser?: BaseXform;
-  declare public model: any;
 
   constructor() {
     super();

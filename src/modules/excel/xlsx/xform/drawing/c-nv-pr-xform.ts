@@ -7,10 +7,9 @@ interface CNvPrModel {
   index: number;
 }
 
-class CNvPrXform extends BaseXform {
+class CNvPrXform extends BaseXform<CNvPrModel> {
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
-  declare public model: any;
 
   constructor() {
     super();

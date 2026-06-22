@@ -5,6 +5,7 @@ import {
   formCheckboxVmlStyle
 } from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ShapeModel } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
@@ -31,7 +32,7 @@ interface VmlHeaderImageModel {
 
 interface VmlDrawingModel {
   /** Comment/note shapes */
-  comments?: any[];
+  comments?: ShapeModel[];
   /** Form control checkboxes */
   formControls?: FormCheckboxModel[];
   /** Header/footer image (for watermark in header mode) */
@@ -39,7 +40,7 @@ interface VmlDrawingModel {
 }
 
 class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
 
   constructor() {
@@ -145,7 +146,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     // Render comment shapes
     if (hasComments) {
       for (let i = 0; i < comments.length; i++) {
-        this.map["v:shape"].render(xmlStream, comments[i], i);
+        (this.map["v:shape"] as VmlShapeXform).render(xmlStream, comments[i], i);
       }
     }
 

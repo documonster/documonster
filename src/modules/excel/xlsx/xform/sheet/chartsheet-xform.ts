@@ -27,6 +27,7 @@
  */
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import { parseXsdBoolean, parseXsdInt } from "@excel/xlsx/xform/xsd-values";
 import { xmlEncode as escapeXml, xmlEncodeAttr } from "@xml/encode";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -121,7 +122,7 @@ export interface ChartsheetModel {
   /** Drawing relationship reference */
   drawing?: { rId: string };
   /** Relationships parsed from the chartsheet .rels file */
-  relationships?: any[];
+  relationships?: RelationshipModel[];
   /** Drawing part name without extension (e.g. drawing2) */
   drawingName?: string;
   /** Classic chart number displayed by this chartsheet */
