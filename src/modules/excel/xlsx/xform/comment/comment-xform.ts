@@ -1,10 +1,11 @@
+import type { Font } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface NoteText {
-  font?: any;
+  font?: Partial<Font>;
   text: string;
 }
 
@@ -12,11 +13,13 @@ interface CommentNote {
   texts: NoteText[];
 }
 
-interface CommentModel {
+export interface CommentModel {
   type: string;
   note: CommentNote;
   ref: string;
   authorId?: number;
+  /** Human author name, resolved against the comments-level author list. */
+  author?: string;
 }
 
 class CommentXform extends BaseXform<CommentModel> {

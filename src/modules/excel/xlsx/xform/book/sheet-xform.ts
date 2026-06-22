@@ -72,7 +72,7 @@ class WorksheetXform extends BaseXform {
    * (the workbook reconciler) will treat such a `<sheet>` as a
    * half-broken declaration that can't be bound to a worksheet part.
    */
-  private _extractRelId(node: any): string | undefined {
+  private _extractRelId(node: ParseOpenTag): string | undefined {
     const attrs = node.attributes ?? {};
     for (const prefix of this.relationshipsPrefixes) {
       const value = attrs[`${prefix}:id`];

@@ -1,10 +1,10 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 type UnderlineType = boolean | "single" | "double" | "singleAccounting" | "doubleAccounting";
 
 class UnderlineXform extends BaseXform {
-  static Attributes: { [key: string]: any } = {
+  static Attributes: Record<string, XmlAttributes> = {
     single: {},
     double: { val: "double" },
     singleAccounting: { val: "singleAccounting" },

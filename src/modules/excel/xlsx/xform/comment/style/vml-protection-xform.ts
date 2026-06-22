@@ -15,7 +15,7 @@ class VmlProtectionXform extends BaseXform {
     return this._model?.tag ?? "";
   }
 
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model?: string): void {
     xmlStream.leafNode(this.tag, undefined, model);
   }
 

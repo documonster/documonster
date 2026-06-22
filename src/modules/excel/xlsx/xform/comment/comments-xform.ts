@@ -1,17 +1,18 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
+import type { CommentModel } from "@excel/xlsx/xform/comment/comment-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface CommentsModel {
-  comments: any[];
+  comments: CommentModel[];
 }
 
 const DEFAULT_AUTHOR = "Author";
 
 class CommentsXform extends BaseXform<CommentsModel> {
   declare public map: { [key: string]: CommentXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   /** Authors collected while parsing the <authors> element. */
   private _authors: string[] = [];
@@ -119,7 +120,7 @@ class CommentsXform extends BaseXform<CommentsModel> {
         }
         return false;
       case "comment":
-        this.model!.comments.push(this.parser.model);
+        this.model!.comments.push(this.parser!.model as CommentModel);
         this.parser = undefined;
         return true;
       default:

@@ -2,7 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class AppTitlesOfPartsXform extends BaseXform {
-  render(xmlStream: XmlSink, model: any[]): void {
+  render(xmlStream: XmlSink, model: { name: string }[]): void {
     xmlStream.openNode("TitlesOfParts");
     xmlStream.openNode("vt:vector", { size: model.length, baseType: "lpstr" });
 

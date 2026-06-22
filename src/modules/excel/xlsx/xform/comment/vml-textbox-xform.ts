@@ -1,5 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { ParseOpenTag, XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface Margins {
   inset?: number[] | string;
@@ -35,7 +35,7 @@ class VmlTextboxXform extends BaseXform<TextboxModel> {
   }
 
   render(xmlStream: XmlSink, model: TextboxModel): void {
-    const attributes: any = {
+    const attributes: XmlAttributes = {
       style: "mso-direction-alt:auto"
     };
     if (model && model.note) {

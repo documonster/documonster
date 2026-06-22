@@ -1,3 +1,4 @@
+import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
@@ -11,7 +12,7 @@ interface PhoneticTextModel {
   sb: number;
   eb: number;
   text?: string;
-  richText?: any[];
+  richText?: RichText[];
 }
 
 class PhoneticTextXform extends BaseXform {

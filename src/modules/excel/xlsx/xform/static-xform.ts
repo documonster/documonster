@@ -1,10 +1,10 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { XmlAttributes, XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 interface StaticModel {
   tag: string;
-  $?: any;
+  $?: XmlAttributes;
   c?: StaticModel[];
   t?: string;
 }

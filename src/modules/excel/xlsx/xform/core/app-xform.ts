@@ -6,7 +6,7 @@ import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface AppModel {
-  worksheets: any[];
+  worksheets: { name: string }[];
   company?: string;
   manager?: string;
 }
