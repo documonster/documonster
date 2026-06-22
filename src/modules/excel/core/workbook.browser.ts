@@ -150,7 +150,7 @@ export interface WorkbookModel {
   /** Chart entries indexed by 1-based chart number */
   chartEntries?: Record<number, ChartEntry>;
   /** Chart rels indexed by chart number — preserved for round-trip */
-  chartRels?: Record<number, any[]>;
+  chartRels?: Record<number, unknown[]>;
   /** Chart style XML raw bytes indexed by style number — preserved for round-trip */
   chartStyles?: Record<number, Uint8Array>;
   /** Chart colors XML raw bytes indexed by colors number — preserved for round-trip */
@@ -160,11 +160,11 @@ export interface WorkbookModel {
   /** ChartEx raw bytes (Office 2016+ extended charts) indexed by chartEx number */
   chartExEntries?: Record<number, Uint8Array>;
   /** ChartEx rels indexed by chartEx number */
-  chartExRels?: Record<number, any[]>;
+  chartExRels?: Record<number, unknown[]>;
   /** Structured chartEx entries (loaded or programmatically built) indexed by chartEx number */
   chartExStructuredEntries?: Record<number, ChartExEntry>;
   /** Chartsheets parsed from the XLSX file — preserved for round-trip */
-  chartsheets?: any[];
+  chartsheets?: ChartsheetModel[];
   /**
    * Office 365 threaded-comment person directory, hydrated from
    * `xl/persons/person.xml` on load and serialised back on save when
@@ -477,7 +477,7 @@ export function addWorksheet(
     id,
     name,
     orderNo,
-    workbook: wb as any
+    workbook: wb as unknown as Workbook
   };
 
   const worksheet = createWorksheet(worksheetOptions);
@@ -526,7 +526,7 @@ export function addChartsheet(
     const chartExNumber = nextChartExNumber(wb);
     const model = buildChartExModel(options.chart);
     try {
-      fillChartExCaches(model, wb as any);
+      fillChartExCaches(model, wb);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
@@ -538,7 +538,7 @@ export function addChartsheet(
       ? buildComboChartModel(options.chart)
       : buildChartModel(options.chart);
     try {
-      fillChartCaches(chartModel, wb as any);
+      fillChartCaches(chartModel, wb);
     } catch {
       // Cache population is best-effort; never let it break chart creation.
     }
@@ -555,7 +555,7 @@ export function addChartsheet(
     // `addChartEntry` so the stored entry carries its resolved
     // `entry.rels` from the start.
     try {
-      resolvePendingChartImages(entry, wb as any, chartNumber);
+      resolvePendingChartImages(entry, wb, chartNumber);
     } catch {
       // Image resolution is best-effort; a broken image payload
       // should never take down chart creation — the series keeps
@@ -737,7 +737,7 @@ export function replaceChartsheetChart(
   if (newChartExModel) {
     const chartExNumber = nextChartExNumber(wb);
     try {
-      fillChartExCaches(newChartExModel, wb as any);
+      fillChartExCaches(newChartExModel, wb);
     } catch {
       // Cache population is best-effort; never let it break chart replacement.
     }
@@ -746,7 +746,7 @@ export function replaceChartsheetChart(
   } else if (newChartModel) {
     const chartNumber = nextChartNumber(wb);
     try {
-      fillChartCaches(newChartModel, wb as any);
+      fillChartCaches(newChartModel, wb);
     } catch {
       // Cache population is best-effort; never let it break chart replacement.
     }
@@ -756,7 +756,7 @@ export function replaceChartsheetChart(
     // paths. Previously replacement via `replaceChartsheetChart`
     // silently dropped picture-fill payloads on the floor.
     try {
-      resolvePendingChartImages(entry, wb as any, chartNumber);
+      resolvePendingChartImages(entry, wb, chartNumber);
     } catch {
       // Image resolution is best-effort; a broken image payload
       // should never take down chart replacement.
@@ -1130,7 +1130,7 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
       name,
       orderNo: orderNo !== -1 ? orderNo : undefined,
       state,
-      workbook: wb as any
+      workbook: wb as unknown as Workbook
     }));
     setSheetModel(worksheet, worksheetModel);
   });
@@ -1151,8 +1151,8 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
   wb._chartRels = value.chartRels || {};
   wb._chartStyles = value.chartStyles || {};
   wb._chartColors = value.chartColors || {};
-  wb._chartExStyles = (value as any).chartExStyles || {};
-  wb._chartExColors = (value as any).chartExColors || {};
+  wb._chartExStyles = (value as { chartExStyles?: Record<number, Uint8Array> }).chartExStyles || {};
+  wb._chartExColors = (value as { chartExColors?: Record<number, Uint8Array> }).chartExColors || {};
   wb._chartExEntries = value.chartExEntries || {};
   wb._chartExRels = value.chartExRels || {};
   wb._chartExStructuredEntries = value.chartExStructuredEntries || {};
