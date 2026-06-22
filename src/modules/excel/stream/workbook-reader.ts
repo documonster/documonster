@@ -83,7 +83,10 @@ class WorkbookReader extends WorkbookReaderBase<
       // Track bytes written to detect oversized waiting worksheets.
       // Use an arrow function to capture `this` for cross-sheet accumulation.
       const originalWrite = tempStream.write.bind(tempStream);
-      const trackWrite = (chunk: any, ...args: any[]): boolean => {
+      // `tempStream.write` has several overloads (chunk[, encoding][, callback]);
+      // the trailing args are forwarded verbatim, so they keep the EventEmitter-
+      // style `any[]` shape that the underlying overloads expect.
+      const trackWrite = (chunk: string | Uint8Array, ...args: any[]): boolean => {
         const size = chunk instanceof Uint8Array ? chunk.length : Buffer.byteLength(chunk);
         this._totalBufferedBytes += size;
         if (this._totalBufferedBytes > maxBytes) {
