@@ -81,7 +81,8 @@ import type {
   DataLabelsRange,
   ChartBlipFill,
   UpDownBars,
-  PictureOptions
+  PictureOptions,
+  SeriesBase
 } from "@excel/chart/model/types";
 import { escapeXml, themeIndexToName } from "@excel/chart/shared/chart-utils";
 import { isRawXmlShape, isRawXmlTxPr } from "@excel/chart/shared/shape-properties";
@@ -1004,7 +1005,7 @@ export function renderOfPieChart(xml: XmlSink, g: OfPieChartGroup): void {
 
 // ---- Series rendering ----
 
-export function renderSeriesBase(xml: XmlSink, s: any): void {
+export function renderSeriesBase(xml: XmlSink, s: SeriesBase): void {
   xml.leafNode("c:idx", { val: String(s.index) });
   xml.leafNode("c:order", { val: String(s.order) });
   if (s.tx) {

@@ -23,6 +23,9 @@ interface ListXformOptions {
   empty?: boolean;
   $count?: string;
   $?: XmlAttributes;
+  // The list holds heterogeneous child models; the concrete element type is
+  // recovered through the class generic `TChild`. `any` here lets any concrete
+  // child xform be supplied without forcing every caller to thread the generic.
   childXform: ListChildXform<any>;
   maxItems?: number;
 }
