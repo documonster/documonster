@@ -10,6 +10,7 @@ import { rangeCreate, rangeIntersects, rangeRange } from "@excel/core/range";
 import type { RowData } from "@excel/core/row";
 import { rowCreate, rowFindCell, rowGetModel, rowHasValues } from "@excel/core/row";
 import { columnCreate, columnSetDefn, rowGetCellEx, rowSetValues } from "@excel/core/worksheet";
+import type { WorksheetData } from "@excel/core/worksheet";
 import {
   ExcelStreamStateError,
   ImageError,
@@ -81,18 +82,18 @@ const xform = {
   dataValidations: new DataValidationsXform(),
   sheetProperties: new SheetPropertiesXform(),
   sheetFormatProperties: new SheetFormatPropertiesXform(),
-  columns: new ListXform({ tag: "cols", count: false, childXform: new ColXform() } as any),
+  columns: new ListXform({ tag: "cols", count: false, childXform: new ColXform() }),
   row: new RowXform(),
   hyperlinks: new ListXform({
     tag: "hyperlinks",
     count: false,
     childXform: new HyperlinkXform()
-  } as any),
+  }),
   sheetViews: new ListXform({
     tag: "sheetViews",
     count: false,
     childXform: new SheetViewXform()
-  } as any),
+  }),
   sheetProtection: new SheetProtectionXform(),
   pageMargins: new PageMarginsXform(),
   pageSeteup: new PageSetupXform(),
@@ -160,6 +161,10 @@ interface WriterImageModel {
     pos?: { x: number; y: number };
   };
   hyperlinks?: { hyperlink?: string; tooltip?: string };
+  /** Internal dedup marker for watermark-generated entries (not serialized as-is). */
+  _watermarkTag?: boolean;
+  /** Watermark opacity, carried on watermark entries. */
+  opacity?: number;
 }
 
 class WorksheetWriter {
@@ -176,13 +181,17 @@ class WorksheetWriter {
   }
   state: WorksheetState;
   /** Rows stored while being worked on. Set to null after commit. */
-  private _rows: RowData[] | null;
+  private _rows: (RowData | undefined)[] | null;
   /** Column definitions */
   private _columns: ColumnData[];
   /** Column keys mapping: key => Column */
   private _keys: { [key: string]: ColumnData };
-  /** Merged cell ranges */
-  private _merges: RangeData[];
+  /**
+   * Merged cell ranges. Carries a no-op `add` so code paths that expect the
+   * in-memory worksheet's merge collection (which exposes `.add`) can call it
+   * harmlessly during streaming.
+   */
+  private _merges: RangeData[] & { add?: () => void };
   private _sheetRelsWriter: SheetRelsWriter;
   private _sheetCommentsWriter: SheetCommentsWriter;
   private _dimensions: RangeData;
@@ -259,7 +268,7 @@ class WorksheetWriter {
 
     // keep a record of all row and column pageBreaks
     this._merges = [];
-    (this._merges as any).add = function () {}; // ignore cell instruction
+    this._merges.add = function () {}; // ignore cell instruction
 
     // keep record of all hyperlinks
     this._sheetRelsWriter = new SheetRelsWriter(options);
@@ -388,6 +397,17 @@ class WorksheetWriter {
     return this._workbook;
   }
 
+  /**
+   * The streaming writer impersonates an in-memory `Worksheet` when calling the
+   * shared core factories (`columnCreate`/`rowCreate`/`anchorCreate`), which
+   * only store the reference as a back-pointer on the produced model. The
+   * writer is not a full `WorksheetData`, so this is a deliberate, contained
+   * masquerade rather than a structural guarantee.
+   */
+  private get _asWorksheet(): WorksheetData {
+    return this as unknown as WorksheetData;
+  }
+
   get stream(): InstanceType<typeof StreamBuf> {
     if (!this._stream) {
       this._stream = this._workbook._openStream(worksheetPath(this.id));
@@ -492,7 +512,7 @@ class WorksheetWriter {
     let count = 1;
     const columns: ColumnData[] = (this._columns = []);
     value.forEach(defn => {
-      const column = columnCreate(this as any, count++, false as any);
+      const column = columnCreate(this._asWorksheet, count++, false);
       columns.push(column);
       columnSetDefn(column, defn as ColumnDefn);
     });
@@ -530,7 +550,7 @@ class WorksheetWriter {
     if (c > this._columns.length) {
       let n = this._columns.length + 1;
       while (n <= c) {
-        this._columns.push(columnCreate(this as any, n++));
+        this._columns.push(columnCreate(this._asWorksheet, n++));
       }
     }
     return this._columns[c - 1];
@@ -579,7 +599,7 @@ class WorksheetWriter {
     const rows = this._rows!;
     while (this._rowOffset < rows.length && !found) {
       const row = rows[this._rowOffset];
-      rows[this._rowOffset] = undefined as any;
+      rows[this._rowOffset] = undefined;
       this._rowOffset++;
       this._rowZero++;
       if (row) {
@@ -623,13 +643,13 @@ class WorksheetWriter {
     }
     let row = this._rows![index];
     if (!row) {
-      this._rows![index] = row = rowCreate(this as any, rowNumber);
+      this._rows![index] = row = rowCreate(this._asWorksheet, rowNumber);
     }
     return row;
   }
 
   addRow(value: RowValues): RowData {
-    const row = rowCreate(this as any, this._nextRow);
+    const row = rowCreate(this._asWorksheet, this._nextRow);
     this._rows![row.number - this._rowZero + this._rowOffset] = row;
     rowSetValues(row, value);
     return row;
@@ -781,7 +801,7 @@ class WorksheetWriter {
     }
 
     // Remove existing watermark entries (both stored type tags)
-    this._media = this._media.filter(m => (m as any)._watermarkTag !== true);
+    this._media = this._media.filter(m => m._watermarkTag !== true);
 
     const opacity =
       options.opacity !== undefined ? Math.max(0, Math.min(1, options.opacity)) : 0.15;
@@ -797,7 +817,7 @@ class WorksheetWriter {
 
     if (this._watermark.mode === "overlay") {
       // Coverage range is computed lazily during commit() via _resolveWatermarkRange()
-      const entry = {
+      const entry: WriterImageModel = {
         type: "image",
         imageId: String(options.imageId),
         range: {
@@ -809,7 +829,7 @@ class WorksheetWriter {
         _watermarkTag: true,
         opacity
       };
-      this._media.push(entry as any);
+      this._media.push(entry);
     }
     // Note: header mode for streaming writer is limited — the VML file generation
     // happens in WorkbookWriter.addWorksheets(), which handles worksheet.headerImage.
@@ -828,7 +848,7 @@ class WorksheetWriter {
    */
   removeWatermark(): void {
     this._watermark = null;
-    this._media = this._media.filter(m => (m as any)._watermarkTag !== true);
+    this._media = this._media.filter(m => m._watermarkTag !== true);
   }
 
   /**
@@ -844,9 +864,11 @@ class WorksheetWriter {
           type: "image",
           imageId,
           range: {
-            tl: anchorModel(anchorCreate(this as any, { col: decoded.left, row: decoded.top }, -1)),
+            tl: anchorModel(
+              anchorCreate(this._asWorksheet, { col: decoded.left, row: decoded.top }, -1)
+            ),
             br: anchorModel(
-              anchorCreate(this as any, { col: decoded.right, row: decoded.bottom }, 0)
+              anchorCreate(this._asWorksheet, { col: decoded.right, row: decoded.bottom }, 0)
             ),
             editAs: "oneCell"
           }
@@ -870,10 +892,10 @@ class WorksheetWriter {
     }
 
     // Cell-based positioning (tl/br anchors)
-    const cellRange = range as Exclude<typeof range, string | { pos: any }>;
-    const tl = anchorModel(anchorCreate(this as any, cellRange.tl as any, 0));
+    const cellRange = range as Exclude<typeof range, string | { pos: unknown }>;
+    const tl = anchorModel(anchorCreate(this._asWorksheet, cellRange.tl, 0));
     const br = cellRange.br
-      ? anchorModel(anchorCreate(this as any, cellRange.br as any, 0))
+      ? anchorModel(anchorCreate(this._asWorksheet, cellRange.br, 0))
       : undefined;
     return {
       type: "image",
@@ -937,12 +959,10 @@ class WorksheetWriter {
           defaultRowHeight: properties.defaultRowHeight,
           dyDescent: properties.dyDescent,
           outlineLevelCol: properties.outlineLevelCol,
-          outlineLevelRow: properties.outlineLevelRow
+          outlineLevelRow: properties.outlineLevelRow,
+          ...(properties.defaultColWidth ? { defaultColWidth: properties.defaultColWidth } : {})
         }
       : undefined;
-    if (properties && properties.defaultColWidth) {
-      (sheetFormatPropertiesModel as any).defaultColWidth = properties.defaultColWidth;
-    }
 
     xmlBuf.addText(xform.sheetFormatProperties.toXml(sheetFormatPropertiesModel));
   }
@@ -1120,11 +1140,11 @@ class WorksheetWriter {
     // Resolve watermark coverage range from actual worksheet dimensions
     // (at commit time, all rows have been flushed so _dimensions is accurate)
     for (const entry of this._media) {
-      if ((entry as any)._watermarkTag) {
+      if (entry._watermarkTag) {
         const dims = this._dimensions;
         const maxCol = dims ? Math.max(dims.right ?? 100, 100) : 100;
         const maxRow = dims ? Math.max(dims.bottom ?? 200, 200) : 200;
-        (entry as any).range.br = {
+        entry.range.br = {
           nativeCol: maxCol,
           nativeColOff: 0,
           nativeRow: maxRow,
