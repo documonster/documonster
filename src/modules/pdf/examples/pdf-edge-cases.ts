@@ -25,6 +25,7 @@ import { cellSetNumFmt } from "@excel/core/cell";
 import { rowSetFill, rowSetFont } from "@excel/core/row";
 import { rowGetCell } from "@excel/core/worksheet";
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import type { CellErrorValue } from "@excel/types";
 
 import { Pdf } from "../index";
 import { pdf } from "../pdf";
@@ -220,7 +221,7 @@ Column.setWidth(wsMixed, 1, 30);
 Cell.setValue(wsMixed, "A1", { text: "Click me (hyperlink)", hyperlink: "https://example.com" });
 Cell.setStyle(wsMixed, "A1", { font: { color: { argb: "FF0563C1" }, underline: true } });
 
-Cell.setValue(wsMixed, "A2", { error: "#DIV/0!" } as any);
+Cell.setValue(wsMixed, "A2", { error: "#DIV/0!" } as CellErrorValue);
 
 // Empty row with styling
 const r3 = Worksheet.getRow(wsMixed, 3);

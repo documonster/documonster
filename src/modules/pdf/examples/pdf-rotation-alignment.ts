@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { cellSetAlignment, cellSetBorder, cellSetValue } from "@excel/core/cell";
 import { getCell } from "@excel/core/worksheet";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import type { Alignment } from "@excel/types";
 
 import { Pdf } from "../index";
 
@@ -39,7 +40,7 @@ const thinBorder = {
   right: { style: "thin" as const }
 };
 
-const combos: Array<{ h: string; v: string }> = [
+const combos: Array<{ h: Alignment["horizontal"]; v: Alignment["vertical"] }> = [
   { h: "center", v: "top" },
   { h: "center", v: "middle" },
   { h: "center", v: "bottom" },
@@ -81,9 +82,9 @@ function addSection(
     const cell = getCell(ws, dataRow, c + 1);
     cellSetValue(cell, typeof cellValue === "function" ? cellValue(c) : cellValue);
     cellSetAlignment(cell, {
-      horizontal: combos[c].h as any,
-      vertical: combos[c].v as any,
-      textRotation: rotation as any,
+      horizontal: combos[c].h,
+      vertical: combos[c].v,
+      textRotation: rotation,
       wrapText: wrap
     });
     cellSetBorder(cell, thinBorder);
