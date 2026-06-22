@@ -20,6 +20,7 @@ import {
 } from "@excel/utils/ooxml-paths";
 import { RelType } from "@excel/xlsx/rel-type";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
@@ -207,9 +208,9 @@ class WorkSheetXform extends BaseXform {
     model.mergeCells = options.merges.mergeCells;
 
     // prepare relationships
-    const rels: any[] = (model.rels = []);
+    const rels: RelationshipModel[] = (model.rels = []);
 
-    function nextRid(r) {
+    function nextRid(r: readonly unknown[]) {
       return `rId${r.length + 1}`;
     }
 
@@ -283,7 +284,9 @@ class WorkSheetXform extends BaseXform {
         drawing.name = `drawing${++options.drawingsCount}`;
       }
 
-      // Separate chart anchors from non-chart anchors
+      // Separate chart anchors from non-chart anchors. `a` is a drawing-anchor
+      // model element (a prepare()-model substructure shared with the drawing
+      // xform); kept `any` until that model is typed.
       const chartAnchors = drawing.anchors.filter((a: any) => a.chartNumber || a.chartExNumber);
 
       // Reset anchors — chart anchors will be re-added, image anchors rebuilt below
@@ -360,6 +363,8 @@ class WorkSheetXform extends BaseXform {
         }
       }
 
+      // `c` is a model.charts element (prepare()-model substructure); kept
+      // `any` until that model is typed.
       const newCharts = model.charts.filter((c: any) => {
         if (c.chartNumber && !existingChartNumbers.has(c.chartNumber)) {
           return true;
@@ -453,7 +458,10 @@ class WorkSheetXform extends BaseXform {
       }
     }
 
-    // Process background and image media entries
+    // Process background and image media entries. The element type is the
+    // worksheet media model (a model substructure); `imageMedia` additionally
+    // flows into buildDrawingAnchorsAndRels (which expects its own internal
+    // ImageMedium shape). Kept `any[]` until the prepare() model is typed.
     const backgroundMedia: any[] = [];
     const imageMedia: any[] = [];
     const watermarkMedia: any[] = [];
@@ -595,7 +603,10 @@ class WorkSheetXform extends BaseXform {
         // Mirror the three image anchoring modes. `getAnchorType` (drawing
         // xform) dispatches on `pos`/`br`: absolute when `pos` is present,
         // two-cell when `br` is present, one-cell otherwise (needs `ext`).
-        let range: any;
+        let range:
+          | { pos: unknown; ext: unknown; editAs: "absolute" }
+          | { tl: unknown; br: unknown; editAs: string }
+          | { tl: unknown; ext: unknown; editAs: string };
         if (anchorRange.pos) {
           range = { pos: anchorRange.pos, ext: anchorRange.ext, editAs: "absolute" };
         } else if (anchorRange.br) {
@@ -662,8 +673,8 @@ class WorkSheetXform extends BaseXform {
           model.headerFooter = {};
         }
         const applyTo = medium.applyTo || "all";
-        const insertG = (field: string): string => {
-          const existing = (model.headerFooter as any)[field] || "";
+        const insertG = (field: "oddHeader" | "evenHeader" | "firstHeader"): string => {
+          const existing: string = model.headerFooter[field] || "";
           if (existing.includes("&G")) {
             return existing;
           }
@@ -708,7 +719,7 @@ class WorkSheetXform extends BaseXform {
     });
 
     // prepare pivot tables
-    (model.pivotTables ?? []).forEach((pivotTable: any) => {
+    (model.pivotTables ?? []).forEach((pivotTable: { tableNumber: number }) => {
       rels.push({
         Id: nextRid(rels),
         Type: RelType.PivotTable,
@@ -748,7 +759,7 @@ class WorkSheetXform extends BaseXform {
 
       // Add hidden DrawingML shapes that bridge to the VML shape ids.
       // This mirrors what Excel writes when it "repairs" legacy form controls.
-      const toNativePos = (p: any) => ({
+      const toNativePos = (p: { col: number; colOff: number; row: number; rowOff: number }) => ({
         nativeCol: p.col,
         nativeColOff: p.colOff,
         nativeRow: p.row,
@@ -778,7 +789,7 @@ class WorkSheetXform extends BaseXform {
           alternateContent: { requires: "a14" },
           shape: {
             cNvPrId: control.shapeId,
-            name: (control as any).name || defaultName,
+            name: control.name || defaultName,
             hidden: true,
             spid: `_x0000_s${control.shapeId}`,
             text: control.text
@@ -793,7 +804,7 @@ class WorkSheetXform extends BaseXform {
 
   render(xmlStream, model) {
     xmlStream.openXml(StdDocAttributes);
-    const worksheetAttrs: any = { ...WorkSheetXform.WORKSHEET_ATTRIBUTES };
+    const worksheetAttrs: Record<string, string> = { ...WorkSheetXform.WORKSHEET_ATTRIBUTES };
     if (model.formControls && model.formControls.length > 0) {
       worksheetAttrs["xmlns:x14"] = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
       worksheetAttrs["xmlns:xdr"] =
@@ -802,18 +813,18 @@ class WorkSheetXform extends BaseXform {
     }
     xmlStream.openNode("worksheet", worksheetAttrs);
 
-    const sheetFormatPropertiesModel: any = model.properties
+    const sheetFormatPropertiesModel = model.properties
       ? {
           defaultRowHeight: model.properties.defaultRowHeight,
           dyDescent: model.properties.dyDescent,
           outlineLevelCol: model.properties.outlineLevelCol,
           outlineLevelRow: model.properties.outlineLevelRow,
-          customHeight: model.properties.customHeight
+          customHeight: model.properties.customHeight,
+          ...(model.properties.defaultColWidth
+            ? { defaultColWidth: model.properties.defaultColWidth }
+            : {})
         }
       : undefined;
-    if (model.properties && model.properties.defaultColWidth) {
-      sheetFormatPropertiesModel.defaultColWidth = model.properties.defaultColWidth;
-    }
     const sheetPropertiesModel = {
       outlineProperties: model.properties && model.properties.outlineProperties,
       tabColor: model.properties && model.properties.tabColor,
@@ -913,7 +924,7 @@ class WorkSheetXform extends BaseXform {
         xmlStream.openNode("control", {
           shapeId: control.shapeId,
           "r:id": control.ctrlPropRelId,
-          name: (control as any).name || defaultName
+          name: control.name || defaultName
         });
         xmlStream.openNode("controlPr", {
           locked: 0,
@@ -1089,6 +1100,8 @@ class WorkSheetXform extends BaseXform {
             // Build a ref-keyed map from VML comments for order-independent merge.
             // Fall back to index-based merge if VML entries lack row/col.
             const vmlComments = vmlEntry.comments;
+            // Value type is the VML comment element from `options.vmlDrawings`;
+            // `any` because `options` is the untyped prepare()/render() bag.
             const vmlByRef: Record<string, any> = {};
             let hasRefInfo = false;
             for (const vc of vmlComments) {
@@ -1142,12 +1155,12 @@ class WorkSheetXform extends BaseXform {
 
     // compact the rows and cells — remove any holes from sparse parse results
     if (model.rows) {
-      if (model.rows.includes(undefined as any)) {
+      if (model.rows.includes(undefined)) {
         model.rows = model.rows.filter(Boolean);
       }
       for (let i = 0; i < model.rows.length; i++) {
         const row = model.rows[i];
-        if (row.cells?.includes(undefined as any)) {
+        if (row.cells?.includes(undefined)) {
           row.cells = row.cells.filter(Boolean);
         }
       }
