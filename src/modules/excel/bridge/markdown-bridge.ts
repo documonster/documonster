@@ -17,6 +17,7 @@ import { addWorksheet, getWorksheet } from "@excel/core/workbook";
 import type { Workbook } from "@excel/core/workbook.browser";
 import type { Worksheet } from "@excel/core/worksheet";
 import { addRow, eachRow } from "@excel/core/worksheet";
+import type { CellValue } from "@excel/types";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
 import type { MarkdownOptions, MarkdownAlignment, MarkdownParseResult } from "@markdown/types";
@@ -91,10 +92,9 @@ function populateMarkdownWorksheet(
     result.alignments;
   for (const row of result.rows) {
     if (map) {
-      addRow(
-        worksheet,
-        row.map((v, i) => map(v, i))
-      );
+      // `map` returns user-supplied cell content (typed `unknown` by the
+      // markdown layer, which is unaware of excel's CellValue).
+      addRow(worksheet, row.map((v, i) => map(v, i)) as CellValue[]);
     } else {
       addRow(worksheet, row);
     }

@@ -931,7 +931,13 @@ export type Address = {
 // ============================================================================
 // Row and Column Types
 // ============================================================================
-export type RowValues = CellValue[] | Record<string, any> | undefined | null;
+/**
+ * Row data: either positional cell values, or a key→value bag consumed by
+ * column keys. The keyed form intentionally allows arbitrary nested values
+ * (`unknown`) because column keys may be dotted paths (e.g. `address.city`)
+ * that `resolveColumnKeyValue` walks before the leaf is coerced to a cell value.
+ */
+export type RowValues = CellValue[] | Record<string, unknown> | undefined | null;
 
 // ============================================================================
 // Conditional Formatting Types
