@@ -13,6 +13,17 @@ import { RelType } from "@excel/xlsx/rel-type";
 // Types
 // =============================================================================
 
+/** An anchor's placement: cell anchors (tl/br), absolute (pos/ext), or string ref. */
+type DrawingRange =
+  | string
+  | {
+      tl?: unknown;
+      br?: unknown;
+      pos?: { x: number; y: number };
+      ext?: { cx: number; cy: number } | { width: number; height: number };
+      editAs?: string;
+    };
+
 export interface DrawingAnchor {
   picture: {
     rId: string;
@@ -31,7 +42,7 @@ export interface DrawingAnchor {
      */
     svgRId?: string;
   };
-  range: any;
+  range: DrawingRange;
 }
 
 export interface DrawingRel {
@@ -48,7 +59,7 @@ export interface DrawingModel {
 
 interface ImageMedium {
   imageId: string | number;
-  range: any;
+  range: DrawingRange;
   hyperlinks?: { hyperlink?: string; tooltip?: string };
   /** Opacity 0-1 for watermark overlay mode. */
   opacity?: number;
@@ -265,7 +276,14 @@ export function buildDrawingAnchorsAndRels(
  * Shared between streaming `WorkbookWriterBase.addDrawings()` and
  * non-streaming `XLSX.addDrawings()`.
  */
-export function filterDrawingAnchors(anchors: any[]): any[] {
+export function filterDrawingAnchors<
+  T extends {
+    range?: { pos?: unknown; br?: unknown };
+    picture?: unknown;
+    graphicFrame?: unknown;
+    shape?: unknown;
+  } | null
+>(anchors: T[]): T[] {
   return anchors.filter(a => {
     if (a == null) {
       return false;

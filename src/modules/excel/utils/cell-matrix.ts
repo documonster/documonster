@@ -43,15 +43,15 @@ class CellMatrix {
   }
 
   addCell(addressStr: string): void {
-    this.addCellEx(colCache.decodeEx(addressStr) as any);
+    this.addCellEx(colCache.decodeEx(addressStr) as CellAddress);
   }
 
   getCell(addressStr: string): Cell {
-    return this.findCellEx(colCache.decodeEx(addressStr) as any, true);
+    return this.findCellEx(colCache.decodeEx(addressStr) as CellAddress, true);
   }
 
   findCell(addressStr: string): Cell | undefined {
-    return this.findCellEx(colCache.decodeEx(addressStr) as any, false);
+    return this.findCellEx(colCache.decodeEx(addressStr) as CellAddress, false);
   }
 
   findCellAt(sheetName: string, rowNumber: number, colNumber: number): Cell | undefined {
