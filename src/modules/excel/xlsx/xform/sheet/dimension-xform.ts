@@ -3,9 +3,7 @@ import { rangeRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class DimensionXform extends BaseXform {
-  declare public model: any;
-
+class DimensionXform extends BaseXform<string | RangeData> {
   get tag(): string {
     return "dimension";
   }

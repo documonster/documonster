@@ -1,12 +1,13 @@
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { PageBreaksXform } from "@excel/xlsx/xform/sheet/page-breaks-xform";
+import type { PageBreakModel } from "@excel/xlsx/xform/sheet/page-breaks-xform";
 import type { XmlSink } from "@xml/types";
 
 /**
  * Xform for row page breaks (rowBreaks element in worksheet XML)
  * Used to define manual page breaks between rows when printing.
  */
-class RowBreaksXform extends ListXform {
+class RowBreaksXform extends ListXform<PageBreakModel> {
   constructor() {
     super({
       tag: "rowBreaks",
@@ -16,7 +17,7 @@ class RowBreaksXform extends ListXform {
   }
 
   // Override to add manualBreakCount attribute required by Excel
-  render(xmlStream: XmlSink, model: any): void {
+  render(xmlStream: XmlSink, model?: PageBreakModel[]): void {
     if (model && model.length) {
       xmlStream.openNode(this.tag, this.$);
       xmlStream.addAttribute(this.$count, model.length);

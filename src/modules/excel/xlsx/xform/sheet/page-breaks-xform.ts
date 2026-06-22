@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
-interface PageBreakModel {
+export interface PageBreakModel {
   id: number;
   max: number;
   man: number;

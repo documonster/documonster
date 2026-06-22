@@ -1,7 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-function isDefined(attr: any): boolean {
+function isDefined(attr: unknown): boolean {
   return typeof attr !== "undefined";
 }
 
