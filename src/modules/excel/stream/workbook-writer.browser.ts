@@ -13,14 +13,22 @@ import type { DefinedNamesData } from "@excel/core/defined-names";
 import { createDefinedNames, definedNamesModel } from "@excel/core/defined-names";
 import { ExcelNotSupportedError, ImageError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
+import type { WorkbookWriterLike } from "@excel/stream/worksheet-writer";
 import type {
   Font,
   ImageData,
   WorkbookView,
   WorkbookProtection,
-  AddWorksheetOptions
+  AddWorksheetOptions,
+  WorksheetProperties,
+  WorksheetState,
+  PageSetup,
+  WorksheetView,
+  AutoFilter,
+  HeaderFooter
 } from "@excel/types";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
+import type { DrawingAnchor, DrawingRel } from "@excel/utils/drawing-utils";
 import {
   drawingPath,
   drawingRelsPath,
@@ -160,24 +168,26 @@ export interface WorksheetWriterLike {
   name: string;
   rId?: string;
   committed?: boolean;
-  stream: any;
+  /** Sequential ZIP entry index, assigned to satisfy the content-types contract. */
+  fileIndex?: number;
+  stream: InstanceType<typeof StreamBuf>;
   commit(): void;
   /** Drawing model — populated after commit if images were added */
-  drawing?: { rId: string; name: string; anchors: any[]; rels: any[] };
+  drawing?: { rId: string; name: string; anchors: DrawingAnchor[]; rels: DrawingRel[] };
 }
 
 export interface WorksheetWriterConstructor<T extends WorksheetWriterLike> {
   new (options: {
     id: number;
     name: string;
-    workbook: any;
+    workbook: WorkbookWriterLike;
     useSharedStrings: boolean;
-    properties?: any;
-    state?: any;
-    pageSetup?: any;
-    views?: any;
-    autoFilter?: any;
-    headerFooter?: any;
+    properties?: Partial<WorksheetProperties>;
+    state?: WorksheetState;
+    pageSetup?: Partial<PageSetup>;
+    views?: Partial<WorksheetView>[];
+    autoFilter?: AutoFilter;
+    headerFooter?: Partial<HeaderFooter>;
   }): T;
 }
 
@@ -264,7 +274,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
 
     this.useSharedStrings = options.useSharedStrings ?? false;
     this.sharedStrings = new SharedStrings();
-    this.styles = options.useStyles ? new StylesXform(true) : new (StylesXform as any).Mock(true);
+    this.styles = options.useStyles ? new StylesXform(true) : new StylesXform.Mock(true);
     this._definedNames = createDefinedNames();
     this._worksheets = [];
     this.views = [];
@@ -650,9 +660,12 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
     const useSharedStrings =
       opts.useSharedStrings !== undefined ? opts.useSharedStrings : this.useSharedStrings;
 
-    if ((opts as any).tabColor) {
+    // `tabColor` was a top-level option in older releases; detect the legacy
+    // shape and migrate it into `properties`.
+    const legacyTabColor = (opts as { tabColor?: WorksheetProperties["tabColor"] }).tabColor;
+    if (legacyTabColor) {
       console.trace("tabColor option has moved to { properties: tabColor: {...} }");
-      opts.properties = { tabColor: (opts as any).tabColor, ...opts.properties };
+      opts.properties = { tabColor: legacyTabColor, ...opts.properties };
     }
 
     const id = this.nextId;
@@ -721,7 +734,7 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       const worksheets = this._worksheets.filter(Boolean);
       // In the streaming path, ZIP entries use ws.id which is always sequential.
       // Set fileIndex = id to satisfy the ContentTypesXform contract.
-      worksheets.forEach((ws: any) => {
+      worksheets.forEach(ws => {
         ws.fileIndex = ws.id;
       });
 
