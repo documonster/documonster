@@ -1,3 +1,5 @@
+import type { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
+import type { WorkbookWriterLike } from "@excel/stream/worksheet-writer";
 import { colCache } from "@excel/utils/col-cache";
 import {
   commentsPath,
@@ -5,28 +7,34 @@ import {
   vmlDrawingPath,
   vmlDrawingRelTargetFromWorksheet
 } from "@excel/utils/ooxml-paths";
+import type { StreamBuf } from "@excel/utils/stream-buf";
 import { RelType } from "@excel/xlsx/rel-type";
 import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
+import type { CommentModel } from "@excel/xlsx/xform/comment/comment-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { XmlWriter } from "@xml/writer";
 
 interface SheetCommentsWriterOptions {
   id: number;
-  workbook: any;
+  workbook: WorkbookWriterLike;
 }
 
 class SheetCommentsWriter {
   id: number;
   count: number;
-  private _worksheet: any;
-  private _workbook: any;
-  private _sheetRelsWriter: any;
-  private _commentsStream?: any;
-  private _vmlStream?: any;
+  private _worksheet: { comments?: CommentModel[] };
+  private _workbook: WorkbookWriterLike;
+  private _sheetRelsWriter: SheetRelsWriter;
+  private _commentsStream?: StreamBuf;
+  private _vmlStream?: StreamBuf;
   vmlRelId?: string;
   startedData?: boolean;
 
-  constructor(worksheet: any, sheetRelsWriter: any, options: SheetCommentsWriterOptions) {
+  constructor(
+    worksheet: { comments?: CommentModel[] },
+    sheetRelsWriter: SheetRelsWriter,
+    options: SheetCommentsWriterOptions
+  ) {
     // in a workbook, each sheet will have a number
     this.id = options.id;
     this.count = 0;
@@ -35,14 +43,14 @@ class SheetCommentsWriter {
     this._sheetRelsWriter = sheetRelsWriter;
   }
 
-  get commentsStream(): any {
+  get commentsStream(): StreamBuf {
     if (!this._commentsStream) {
       this._commentsStream = this._workbook._openStream(commentsPath(this.id));
     }
     return this._commentsStream;
   }
 
-  get vmlStream(): any {
+  get vmlStream(): StreamBuf {
     if (!this._vmlStream) {
       this._vmlStream = this._workbook._openStream(vmlDrawingPath(this.id));
     }
@@ -90,7 +98,7 @@ class SheetCommentsWriter {
     );
   }
 
-  private _writeComment(comment: any, index: number): void {
+  private _writeComment(comment: CommentModel, index: number): void {
     const commentXform = new CommentXform();
     const commentsXmlWriter = new XmlWriter();
     commentXform.render(commentsXmlWriter, comment);
@@ -98,7 +106,13 @@ class SheetCommentsWriter {
 
     const vmlShapeXform = new VmlShapeXform();
     const vmlXmlWriter = new XmlWriter();
-    vmlShapeXform.render(vmlXmlWriter, comment, index);
+    // The comment doubles as the VML shape input (it carries note geometry +
+    // refAddress); VmlShapeXform.render reads that subset.
+    vmlShapeXform.render(
+      vmlXmlWriter,
+      comment as unknown as Parameters<VmlShapeXform["render"]>[1],
+      index
+    );
     this.vmlStream.write(vmlXmlWriter.xml);
   }
 
@@ -107,7 +121,7 @@ class SheetCommentsWriter {
     this.vmlStream.write("</xml>");
   }
 
-  addComments(comments: any[]): void {
+  addComments(comments: CommentModel[]): void {
     if (comments && comments.length) {
       if (!this.startedData) {
         this._worksheet.comments = [];

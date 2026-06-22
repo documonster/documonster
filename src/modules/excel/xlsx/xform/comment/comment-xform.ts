@@ -20,6 +20,8 @@ export interface CommentModel {
   authorId?: number;
   /** Human author name, resolved against the comments-level author list. */
   author?: string;
+  /** Decoded cell address, attached during streaming comment writes. */
+  refAddress?: { row: number; col: number };
 }
 
 class CommentXform extends BaseXform<CommentModel> {

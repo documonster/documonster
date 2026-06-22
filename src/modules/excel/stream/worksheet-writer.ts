@@ -32,6 +32,7 @@ import type { SharedStrings } from "@excel/utils/shared-strings";
 import { buildSheetProtection } from "@excel/utils/sheet-protection";
 import type { StreamBuf } from "@excel/utils/stream-buf";
 import { RelType } from "@excel/xlsx/rel-type";
+import type { CommentModel } from "@excel/xlsx/xform/comment/comment-xform";
 import { StringBuf } from "@utils/string-buf";
 
 const xmlBuffer = /* @__PURE__ */ new StringBuf();
@@ -127,6 +128,8 @@ export interface WorkbookWriterLike {
   dynamicArrayCount: number;
   /** Lookup a media (image/chart) by registered id. */
   getImage(id: number): WriterMedium | undefined;
+  /** Accumulated comment-part references (for the content-types manifest). */
+  commentRefs: { commentName: string; vmlDrawing: string }[];
   /** Open a streaming entry in the output zip for the given path. */
   _openStream(path: string): InstanceType<typeof StreamBuf>;
 }
@@ -261,7 +264,11 @@ class WorksheetWriter {
     // keep record of all hyperlinks
     this._sheetRelsWriter = new SheetRelsWriter(options);
 
-    this._sheetCommentsWriter = new SheetCommentsWriter(this, this._sheetRelsWriter, options);
+    this._sheetCommentsWriter = new SheetCommentsWriter(
+      this as unknown as { comments?: CommentModel[] },
+      this._sheetRelsWriter,
+      options
+    );
 
     // keep a record of dimensions
     this._dimensions = rangeCreate();
