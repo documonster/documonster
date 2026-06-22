@@ -142,7 +142,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
         return `<e v="${xmlEncode(value.value)}" />`;
       default: {
         const _exhaustive: never = value;
-        throw new Error(`Unhandled record value type: ${(_exhaustive as any).type}`);
+        throw new Error(`Unhandled record value type: ${(_exhaustive as { type?: string }).type}`);
       }
     }
   }

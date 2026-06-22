@@ -491,7 +491,16 @@ function parseGroupBlock(attrXml: string, inner: string): SparklineGroup {
     }
   }
   // Parse colors
-  const colorTags: Array<keyof SparklineGroup> = [
+  const colorTags: Array<
+    | "colorSeries"
+    | "colorNegative"
+    | "colorAxis"
+    | "colorMarkers"
+    | "colorFirst"
+    | "colorLast"
+    | "colorHigh"
+    | "colorLow"
+  > = [
     "colorSeries",
     "colorNegative",
     "colorAxis",
@@ -502,10 +511,10 @@ function parseGroupBlock(attrXml: string, inner: string): SparklineGroup {
     "colorLow"
   ];
   for (const tag of colorTags) {
-    const re = COLOR_TAG_RES.get(tag as string)!;
+    const re = COLOR_TAG_RES.get(tag)!;
     const cm = re.exec(inner);
     if (cm) {
-      (g as any)[tag] = parseColorAttrs(cm[1]);
+      g[tag] = parseColorAttrs(cm[1]);
     }
   }
   // Parse sparklines
