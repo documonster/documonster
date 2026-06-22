@@ -22,6 +22,7 @@ import type {
   DataTable,
   DataLabels,
   DataLabelEntry,
+  ChartTitle,
   Trendline,
   TrendlineLabel,
   ErrorBars,
@@ -269,6 +270,9 @@ function parseTickMarkFromOoxml(
 
 interface ParseState {
   tag: string;
+  // The SAX state-stack frame's payload varies by tag (a band format, a
+  // gridlines spPr holder, an axis fragment, …). It is intentionally `any`
+  // because each `tag` attaches a structurally different in-progress model.
   context: any;
 }
 
@@ -469,14 +473,22 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   private rawCapture: RawXmlCapture | null = null;
   private textBuf = "";
 
-  // Temporary parse state
+  // Transient parse state
   private chartModel!: ChartModel;
   private chartData!: ChartData;
   private plotArea!: PlotArea;
-  private currentChartTypeGroup: any = null;
-  private currentSeries: any = null;
-  private currentAxis: any = null;
-  private currentTitle: any = null;
+  // The following three are deliberately `any`: while parsing they are
+  // incrementally populated mutable supersets that span every member of a
+  // discriminated union (ChartTypeGroup / series / ChartAxis). OOXML emits the
+  // type-discriminating tag (e.g. `c:barChart`) first and the per-subtype
+  // fields afterwards, so the in-progress object legitimately carries fields
+  // from sibling union members (barDir vs scatterStyle vs holeSize, …) that no
+  // single union member's type would admit. They are cast to the concrete union
+  // member only when pushed onto the model. Do not narrow these.
+  private currentChartTypeGroup: any = null; // -> ChartTypeGroup (union) on push
+  private currentSeries: any = null; // -> ChartSeries (union) on push
+  private currentAxis: any = null; // -> ChartAxis (union) on push
+  private currentTitle: ChartTitle | null = null;
   private currentLegend: ChartLegend | null = null;
   private currentDataLabels: DataLabels | null = null;
   private currentDataLabelEntry: DataLabelEntry | null = null;
@@ -1167,6 +1179,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
       case "c:chart":
         this.chartModel.chart = this.chartData;
+        // Reset the transient (definite-assigned) parse field; `as any` because
+        // `chartData` is typed non-null for the body of a parse.
         this.chartData = null as any;
         break;
 
@@ -1208,7 +1222,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
           if (this.currentAxis) {
             this.currentAxis.title = this.currentTitle;
           } else if (this.chartData && !this.currentAxis && !this.currentChartTypeGroup) {
-            this.chartData.title = this.currentTitle;
+            this.chartData.title = this.currentTitle ?? undefined;
           }
           this.currentTitle = null;
         }
@@ -1462,7 +1476,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
       // Display units (#9)
       case "c:dispUnits":
         if (this.currentAxis && this.currentDisplayUnits) {
-          (this.currentAxis as any).dispUnits = this.currentDisplayUnits;
+          this.currentAxis.dispUnits = this.currentDisplayUnits;
           this.currentDisplayUnits = null;
         }
         break;
@@ -1636,6 +1650,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   // ---- Parse helpers ----
 
+  // Returns the mutable ChartTypeGroup-union superset described on
+  // `currentChartTypeGroup`; intentionally `any` (see that field).
   private _createChartTypeGroup(tag: string): any {
     const typeMap: Record<string, string> = {
       "c:barChart": "bar",
@@ -1658,6 +1674,8 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     return { type: typeMap[tag], series: [], axisIds: [] };
   }
 
+  // Returns the mutable ChartAxis-union superset described on `currentAxis`;
+  // intentionally `any` (see that field).
   private _createAxis(tag: string): any {
     const typeMap: Record<string, string> = {
       "c:catAx": "cat",
@@ -3017,11 +3035,20 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
     return emptyExtLst.test(stripped) ? "" : stripped;
   }
 
-  private _setBoolOnLabels(key: string, value: boolean): void {
+  private _setBoolOnLabels(
+    key:
+      | "showLegendKey"
+      | "showVal"
+      | "showCatName"
+      | "showSerName"
+      | "showPercent"
+      | "showBubbleSize",
+    value: boolean
+  ): void {
     if (this.currentDataLabelEntry) {
-      (this.currentDataLabelEntry as any)[key] = value;
+      this.currentDataLabelEntry[key] = value;
     } else if (this.currentDataLabels) {
-      (this.currentDataLabels as any)[key] = value;
+      this.currentDataLabels[key] = value;
     }
   }
 }
