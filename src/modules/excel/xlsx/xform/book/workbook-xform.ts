@@ -247,7 +247,7 @@ class WorkbookXform extends BaseXform {
     }
   }
 
-  private static _findRelationshipsPrefixes(node: any): readonly string[] {
+  private static _findRelationshipsPrefixes(node: ParseOpenTag): readonly string[] {
     const RELATIONSHIPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     const attrs = node.attributes ?? {};
     const prefixes: string[] = [];
