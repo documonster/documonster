@@ -1,4 +1,6 @@
+import type { WorkbookWriterLike } from "@excel/stream/worksheet-writer";
 import { worksheetRelsPath } from "@excel/utils/ooxml-paths";
+import type { StreamBuf } from "@excel/utils/stream-buf";
 import { RelType } from "@excel/xlsx/rel-type";
 import { isInternalLink } from "@excel/xlsx/xform/sheet/hyperlink-xform";
 import { xmlEncode } from "@xml/encode";
@@ -28,7 +30,7 @@ function createHyperlinksProxy(sheetRelsWriter: SheetRelsWriter): HyperlinksProx
 
 interface SheetRelsWriterOptions {
   id: number;
-  workbook: any;
+  workbook: WorkbookWriterLike;
 }
 
 class SheetRelsWriter {
@@ -36,8 +38,8 @@ class SheetRelsWriter {
   count: number;
   /** @internal */
   _hyperlinks: Array<{ rId?: string; address: string; target?: string }>;
-  private _workbook: any;
-  private _stream?: any;
+  private _workbook: WorkbookWriterLike;
+  private _stream?: StreamBuf;
   private _hyperlinksProxy?: HyperlinksProxy;
 
   constructor(options: SheetRelsWriterOptions) {
@@ -53,7 +55,7 @@ class SheetRelsWriter {
     this._workbook = options.workbook;
   }
 
-  get stream(): any {
+  get stream(): StreamBuf {
     if (!this._stream) {
       this._stream = this._workbook._openStream(worksheetRelsPath(this.id));
     }

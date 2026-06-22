@@ -11,11 +11,13 @@ import { rangeCreate, rangeExpandRow } from "@excel/core/range";
 import type { RowData } from "@excel/core/row";
 import { rowCreate, rowDimensions } from "@excel/core/row";
 import { columnCreate, columnFromModel, rowGetCell } from "@excel/core/worksheet";
+import type { Worksheet } from "@excel/core/worksheet";
 import { ExcelStreamStateError } from "@excel/errors";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
-import type { WorksheetState, CellErrorValue } from "@excel/types";
+import type { WorksheetState, CellErrorValue, Style } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import type { SharedStringValue } from "@excel/utils/shared-strings";
 import { EventEmitter } from "@utils/event-emitter";
 import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser } from "@xml/sax";
@@ -72,15 +74,24 @@ export type WorksheetEvent = RowEvent | HyperlinkEvent;
 // Public Types
 // ============================================================================
 
+/** The subset of the streaming workbook reader a worksheet reader consumes. */
+interface WorksheetReaderWorkbook {
+  sharedStrings?: SharedStringValue[];
+  styles: { getStyleModel(id: number): Partial<Style> | undefined };
+  properties?: { model?: { date1904?: boolean } };
+  dynamicArrayCmIndices?: Set<number>;
+  hasDynamicArrayMetadata?: boolean;
+}
+
 export interface WorksheetReaderOptions {
-  workbook: any;
+  workbook: WorksheetReaderWorkbook;
   id: number;
   iterator: AsyncIterable<unknown>;
   options?: InternalWorksheetOptions;
 }
 
 class WorksheetReader extends EventEmitter {
-  workbook: any;
+  workbook: WorksheetReaderWorkbook;
   id: number | string;
   sheetNo: number;
   iterator: AsyncIterable<unknown>;
@@ -147,7 +158,10 @@ class WorksheetReader extends EventEmitter {
     if (c > this._columns.length) {
       let n = this._columns.length + 1;
       while (n <= c) {
-        this._columns.push(columnCreate(this as any, n++));
+        // The reader structurally masquerades as a Worksheet for the column/row
+        // factories (it implements the subset they touch); a precise type would
+        // require the reader to implement the full Worksheet surface.
+        this._columns.push(columnCreate(this as unknown as Worksheet, n++));
       }
     }
     return this._columns[c - 1];
@@ -272,7 +286,7 @@ class WorksheetReader extends EventEmitter {
           case "row":
             if (inRows) {
               const r = parseInt(node.attributes.r, 10);
-              row = rowCreate(this as any, r);
+              row = rowCreate(this as unknown as Worksheet, r);
               if (node.attributes.ht) {
                 row.height = parseFloat(node.attributes.ht);
               }
@@ -283,7 +297,7 @@ class WorksheetReader extends EventEmitter {
                 const styleId = parseInt(node.attributes.s, 10);
                 const style = styles.getStyleModel(styleId);
                 if (style) {
-                  row.style = (copyStyle(style) as any) ?? {};
+                  row.style = copyStyle(style) ?? {};
                 }
               }
             }
@@ -390,12 +404,16 @@ class WorksheetReader extends EventEmitter {
               if (c.s !== undefined) {
                 const style = styles.getStyleModel(c.s);
                 if (style) {
-                  cell.style = (copyStyle(style) as any) ?? {};
+                  cell.style = copyStyle(style) ?? {};
                 }
               }
 
               if (c.f) {
-                const cellValue: any = {
+                const cellValue: {
+                  formula: string;
+                  result?: string | number;
+                  isDynamicArray?: boolean;
+                } = {
                   formula: c.f.text
                 };
                 if (c.v) {
