@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Cell, Column, Row, Workbook } from "@excel/index";
+import type { Fill, Alignment } from "@excel/types";
 
 async function main(): Promise<void> {
   const outDir = path.resolve(
@@ -59,10 +60,11 @@ async function main(): Promise<void> {
       { position: 0, color: { argb: "FFB3E5FC" } },
       { position: 1, color: { argb: "FFFFFFFF" } }
     ]
-  } as any;
+  } satisfies Fill;
 
-  Cell.getStyle(ws, "A1").alignment = { vertical: "middle", horizontal: "center" } as any;
-  Cell.getStyle(ws, "B1").alignment = { vertical: "middle", horizontal: "center" } as any;
+  const centered: Partial<Alignment> = { vertical: "middle", horizontal: "center" };
+  Cell.getStyle(ws, "A1").alignment = centered;
+  Cell.getStyle(ws, "B1").alignment = centered;
   Cell.setValue(ws, "C1", "Priority");
 
   await Workbook.writeFile(wb, outputPath);

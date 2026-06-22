@@ -5,6 +5,7 @@ import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { dateToExcel, isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
+import type { XmlAttributes } from "@xml/types";
 
 function getValueType(v) {
   if (v === null || v === undefined) {
@@ -212,7 +213,7 @@ class CellXform extends BaseXform {
   }
 
   renderFormula(xmlStream, model) {
-    let attrs: Record<string, any> | null = null;
+    let attrs: XmlAttributes | null = null;
     switch (model.shareType) {
       case "shared":
         attrs = {

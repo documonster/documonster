@@ -1,3 +1,9 @@
+/**
+ * A style-like bag copied generically by key. The `any` index signature is
+ * intentional: this helper performs dynamic, key-driven deep copies
+ * (`{ ...obj[key] }`) over arbitrary nested style objects, which `unknown`
+ * cannot express (it forbids spreading the indexed value).
+ */
 interface StyleObject {
   [key: string]: any;
 }
