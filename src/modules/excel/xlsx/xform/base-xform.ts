@@ -66,8 +66,11 @@ class BaseXform<TModel = any> {
     // convert model to xml
   }
 
-  parseOpen(_node: any): void {
-    // XML node opened
+  parseOpen(_node: any): boolean | void {
+    // XML node opened. Subclasses that participate in a composite parse return
+    // a boolean indicating whether they consumed the node; leaf/standalone
+    // xforms return nothing (void).
+    return false;
   }
 
   parseText(_text: string): void {

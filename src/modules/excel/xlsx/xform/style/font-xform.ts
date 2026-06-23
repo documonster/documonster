@@ -99,10 +99,10 @@ class FontXform extends BaseXform {
       return true;
     }
     if (this.map![node.name]) {
-      this.parser = this.map![node.name].xform;
-      // Child xform parseOpen returns a boolean (BaseXform's base signature is
-      // void); the child here always reports whether it consumed the node.
-      return (this.parser as unknown as { parseOpen(n: ParseOpenTag): boolean }).parseOpen(node);
+      const parser = this.map![node.name].xform;
+      this.parser = parser;
+      // The child xform reports whether it consumed the node (void → false).
+      return parser.parseOpen(node) ?? false;
     }
     switch (node.name) {
       case this.options.tagName:

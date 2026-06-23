@@ -390,7 +390,10 @@ export class ZipArchive {
             }
             crcState = crc32Update(crcState, chunk);
             uncompressedSize += chunk.length;
-            await writer.write(chunk as unknown as BufferSource);
+            // `Uint8Array<ArrayBufferLike>` is a valid `BufferSource` at runtime;
+            // the cast only reconciles the lib's `ArrayBufferLike` backing-store
+            // generic with `BufferSource`'s `ArrayBuffer`.
+            await writer.write(chunk as BufferSource);
           }
           await writer.close();
           await readPromise;

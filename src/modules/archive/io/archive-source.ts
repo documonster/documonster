@@ -163,7 +163,7 @@ export async function collectUint8ArrayStream(
   options: { signal?: AbortSignal } = {}
 ): Promise<Uint8Array> {
   // Delegate to the general ArchiveSource collector so abort/cancellation semantics stay consistent.
-  return resolveArchiveSourceToBuffer(stream as unknown as ArchiveSource, options);
+  return resolveArchiveSourceToBuffer(stream, options);
 }
 
 export async function* toAsyncIterable(

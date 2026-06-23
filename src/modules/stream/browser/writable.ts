@@ -1516,7 +1516,7 @@ export function toWritable<T = Uint8Array>(
   }
 
   // Web WritableStream
-  if ((stream as unknown as Record<string, unknown>)?.getWriter) {
+  if ((stream as { getWriter?: unknown }).getWriter) {
     return new Writable<T>({ stream: stream as WritableStream<T> });
   }
 

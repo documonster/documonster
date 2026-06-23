@@ -111,6 +111,8 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
         this.parser = undefined;
 
         if (this.maxItems && this.model!.length > this.maxItems) {
+          // The concrete child may declare `tag` as a private member; probe it
+          // structurally for the diagnostic message.
           const childTag = (this.childXform as unknown as { tag?: string }).tag ?? "";
           throw new MaxItemsExceededError(childTag, this.maxItems);
         }

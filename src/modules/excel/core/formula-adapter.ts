@@ -43,13 +43,13 @@ function wrapCell(c: CellData): CellLike {
       return c.column.number;
     },
     get type() {
-      return cellType(c) as unknown as CellLike["type"];
+      return cellType(c);
     },
     get formula() {
       return cellFormula(c);
     },
     get model() {
-      return c._value.model as unknown as CellLike["model"];
+      return c._value.model as CellLike["model"];
     },
     get value() {
       return cellGetValue(c);
@@ -58,7 +58,7 @@ function wrapCell(c: CellData): CellLike {
       cellSetValue(c, v as never);
     },
     get result() {
-      return cellResult(c) as unknown as CellLike["result"];
+      return cellResult(c) as CellLike["result"];
     },
     set result(v: CellLike["result"]) {
       cellSetResult(c, v as never);
@@ -100,7 +100,7 @@ function wrapWorksheet(ws: WorksheetData): WorksheetLike {
       return wrapCell(getCell(ws, row, col));
     },
     getTables() {
-      return getTables(ws) as unknown as ReturnType<NonNullable<WorksheetLike["getTables"]>>;
+      return getTables(ws) as ReturnType<NonNullable<WorksheetLike["getTables"]>>;
     },
     get mergedRegions(): readonly { top: number; left: number; bottom: number; right: number }[] {
       return Object.values(ws._merges).map(m => ({

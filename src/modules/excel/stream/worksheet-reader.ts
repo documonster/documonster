@@ -380,7 +380,7 @@ class WorksheetReader extends EventEmitter {
         switch (tag.name) {
           case "cols":
             inCols = false;
-            this._columns = columnFromModel(cols!);
+            this._columns = columnFromModel(this as unknown as Worksheet, cols!);
             break;
           case "sheetData":
             inRows = false;

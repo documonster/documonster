@@ -531,20 +531,11 @@ export function columnSetHeader(c: ColumnData, value: ColumnHeaderValue | undefi
   }
 }
 
-export function columnFromModel(
-  worksheetOrCols: WorksheetData | ColumnModel[],
-  colsMaybe?: ColumnModel[]
-): ColumnData[] {
-  const worksheet = (
-    Array.isArray(worksheetOrCols) ? (worksheetOrCols as unknown as WorksheetData) : worksheetOrCols
-  ) as WorksheetData;
-  let cols: ColumnModel[] = Array.isArray(worksheetOrCols) ? worksheetOrCols : (colsMaybe ?? []);
-
-  cols = cols ?? [];
+export function columnFromModel(worksheet: WorksheetData, cols: ColumnModel[]): ColumnData[] {
   const columns: ColumnData[] = [];
   let count = 1;
   let index = 0;
-  cols = cols.sort((pre, next) => pre.min - next.min);
+  cols = (cols ?? []).sort((pre, next) => pre.min - next.min);
   while (index < cols.length) {
     const col = cols[index++];
     while (count < col.min) {

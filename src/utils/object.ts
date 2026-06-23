@@ -92,7 +92,7 @@ export function deepMerge<T = Record<string, unknown>>(...args: unknown[]): T {
     }
 
     if (Array.isArray(arg)) {
-      const tgt = target as unknown as unknown[];
+      const tgt = target as Record<number, unknown>;
       for (let j = 0, jLen = arg.length; j < jLen; j++) {
         const val = arg[j];
         if (val === undefined) {

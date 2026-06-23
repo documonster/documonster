@@ -38,7 +38,7 @@ export function read(
   data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).load(data, options) as unknown as Promise<WorkbookData>;
+  return getXlsxIo(wb).load(data, options);
 }
 
 /** Read a workbook from a parse stream (mutates and returns `wb`). */
@@ -47,7 +47,7 @@ export function readStream(
   stream: IParseStream,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).read(stream, options) as unknown as Promise<WorkbookData>;
+  return getXlsxIo(wb).read(stream, options);
 }
 
 /** Write a workbook to a writable stream. */

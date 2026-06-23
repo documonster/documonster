@@ -306,10 +306,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
   ): Readable<T> {
     // Node.js also supports creating from a Web ReadableStream.
     // Detect it explicitly (do not rely on Symbol.asyncIterator presence).
-    if (
-      iterable &&
-      typeof (iterable as unknown as Record<string, unknown>).getReader === "function"
-    ) {
+    if (iterable && typeof (iterable as { getReader?: unknown }).getReader === "function") {
       return Readable.fromWeb(iterable as ReadableStream<T>, options);
     }
 
@@ -333,9 +330,10 @@ export class Readable<T = Uint8Array> extends EventEmitter {
       throw err;
     }
     const hasIter =
-      typeof (iterable as unknown as Record<symbol, unknown>)[Symbol.iterator] === "function";
+      typeof (iterable as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function";
     const hasAsyncIter =
-      typeof (iterable as unknown as Record<symbol, unknown>)[Symbol.asyncIterator] === "function";
+      typeof (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] ===
+      "function";
     if (!hasIter && !hasAsyncIter && typeof iterable !== "string") {
       const name = (iterable as { constructor?: { name?: string } }).constructor?.name ?? "Object";
       const err = new TypeError(
@@ -2152,7 +2150,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
 
               if (
                 mapped &&
-                typeof (mapped as unknown as Record<symbol, unknown>)[Symbol.asyncIterator] ===
+                typeof (mapped as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] ===
                   "function"
               ) {
                 for await (const item of mapped as AsyncIterable<U>) {
@@ -2160,8 +2158,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
                 }
               } else if (
                 mapped &&
-                typeof (mapped as unknown as Record<symbol, unknown>)[Symbol.iterator] ===
-                  "function"
+                typeof (mapped as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function"
               ) {
                 for (const item of mapped as Iterable<U>) {
                   yield item;
@@ -2178,7 +2175,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
                 const collected: U[] = [];
                 if (
                   mapped &&
-                  typeof (mapped as unknown as Record<symbol, unknown>)[Symbol.asyncIterator] ===
+                  typeof (mapped as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] ===
                     "function"
                 ) {
                   for await (const item of mapped as AsyncIterable<U>) {
@@ -2186,8 +2183,7 @@ export class Readable<T = Uint8Array> extends EventEmitter {
                   }
                 } else if (
                   mapped &&
-                  typeof (mapped as unknown as Record<symbol, unknown>)[Symbol.iterator] ===
-                    "function"
+                  typeof (mapped as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function"
                 ) {
                   for (const item of mapped as Iterable<U>) {
                     collected.push(item);

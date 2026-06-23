@@ -55,6 +55,8 @@ interface StreamStateProbe {
   _finished?: boolean;
   _emitClose?: boolean;
   _autoDestroy?: boolean;
+  // Runtime streams produced by generator stages are async-iterable Readables.
+  [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
 }
 
 function asProbe(stream: unknown): StreamStateProbe {
@@ -240,7 +242,7 @@ export function pipeline(
       if (isGeneratorFunction(stage)) {
         // Generator consumes `current` internally → produces a new Readable.
         // This Readable replaces `current` as the source for subsequent stages.
-        current = asProbe(applyGeneratorStage(current as unknown as AsyncIterable<unknown>, stage));
+        current = asProbe(applyGeneratorStage(current as AsyncIterable<unknown>, stage));
         allStreams.push(current);
         // Replace the last entry in pipeStages (the consumed source) with
         // the generator-produced Readable, so the next real stream stage

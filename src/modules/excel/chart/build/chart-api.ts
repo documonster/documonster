@@ -405,10 +405,7 @@ function stageRowsIntoWorksheet<T extends Record<string, unknown>>(
   const startCol = start.col;
   if (includeHeaders) {
     keys.forEach((key, i) => {
-      cellSetValue(
-        getCell(worksheet, startRow, startCol + i),
-        key as unknown as CellValueInputType
-      );
+      cellSetValue(getCell(worksheet, startRow, startCol + i), key);
     });
   }
   const dataRowOffset = includeHeaders ? 1 : 0;

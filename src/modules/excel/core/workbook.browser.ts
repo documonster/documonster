@@ -354,8 +354,8 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
   // the copied entries use consistent ids.
   const chartMap = new Map<number, number>();
   const chartExMap = new Map<number, number>();
-  const sourceWorkbook = getSheetWorkbook(source) as unknown as Workbook;
-  const differentWorkbook = sourceWorkbook !== (wb as unknown as Workbook);
+  const sourceWorkbook = getSheetWorkbook(source);
+  const differentWorkbook = sourceWorkbook !== wb;
   const sourceCharts = sourceModel.charts ?? [];
   // `nextChartNumber()` / `nextChartExNumber()` compute `max(existing) + 1`
   // from the entry maps — they do NOT reserve a slot. Calling them in
@@ -423,13 +423,9 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
       if (exEntry) {
         addChartExStructuredEntry(wb, cloneChartExEntry(exEntry, dstNum));
       } else {
-        const rawBytes = (
-          sourceWorkbook as unknown as { _chartExEntries?: Record<number, Uint8Array> }
-        )._chartExEntries?.[srcNum];
+        const rawBytes = sourceWorkbook._chartExEntries?.[srcNum];
         if (rawBytes) {
-          (wb as unknown as { _chartExEntries: Record<number, Uint8Array> })._chartExEntries[
-            dstNum
-          ] = rawBytes.slice();
+          wb._chartExEntries[dstNum] = rawBytes.slice();
         }
       }
       if (differentWorkbook) {
@@ -478,7 +474,7 @@ export function addWorksheet(
     id,
     name,
     orderNo,
-    workbook: wb as unknown as Workbook
+    workbook: wb
   };
 
   const worksheet = createWorksheet(worksheetOptions);
@@ -1131,7 +1127,7 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
       name,
       orderNo: orderNo !== -1 ? orderNo : undefined,
       state,
-      workbook: wb as unknown as Workbook
+      workbook: wb
     }));
     setSheetModel(worksheet, worksheetModel);
   });

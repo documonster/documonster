@@ -1454,7 +1454,7 @@ function updateParagraphFields(
       });
       if (hlChanged) {
         childrenChanged = true;
-        newChildren.push({ ...(hl as object), children: newRuns } as unknown as ParagraphChild);
+        newChildren.push({ ...hl, children: newRuns } as ParagraphChild);
       } else {
         newChildren.push(child);
       }
@@ -1470,7 +1470,7 @@ function updateParagraphFields(
       const updated = updateRun(wrap.run);
       if (updated !== wrap.run) {
         childrenChanged = true;
-        newChildren.push({ ...(wrap as object), run: updated } as unknown as ParagraphChild);
+        newChildren.push({ ...wrap, run: updated } as ParagraphChild);
       } else {
         newChildren.push(child);
       }

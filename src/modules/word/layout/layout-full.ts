@@ -1105,7 +1105,7 @@ function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
 
   // Per (numId) counters, one slot per level. Counters reset at deeper
   // levels when a shallower level advances.
-  const counters = new Map<number, number[]>();
+  const counters = new Map<number, (number | undefined)[]>();
   // numIds whose list was interrupted by non-list content since their last
   // item; the next item with that numId restarts its numbering. This makes
   // two visually separate ordered lists (sharing a numId, separated by a
@@ -1190,14 +1190,14 @@ function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
     if (levelCounts[level] === undefined) {
       levelCounts[level] = start;
     } else {
-      levelCounts[level] += 1;
+      levelCounts[level]! += 1;
     }
     // Reset any deeper levels.
     for (let l = level + 1; l < levelCounts.length; l++) {
-      levelCounts[l] = undefined as unknown as number;
+      levelCounts[l] = undefined;
     }
 
-    const counter = levelCounts[level];
+    const counter = levelCounts[level]!;
     const numeral = formatListCounter(counter, levelDef.format);
     // Honour the level's `text` template (e.g. "%1.") when present; else
     // fall back to "<n>.".

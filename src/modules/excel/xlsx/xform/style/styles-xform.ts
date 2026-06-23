@@ -24,7 +24,7 @@ const NUMFMT_BASE = 164;
  */
 interface StylesModel {
   styles?: (string | StyleRef)[];
-  numFmts?: string[];
+  numFmts?: (string | { id: number; formatCode: string })[];
   fonts?: (string | Partial<Font>)[];
   borders?: (string | Partial<Borders>)[];
   fills?: (string | Fill)[];
@@ -56,7 +56,11 @@ type DxfStyle = Partial<Style> & { numFmtId?: number };
 
 interface StyleIndex {
   style?: { [key: string]: number };
-  numFmt?: { [key: string]: number };
+  // Dual-mode: in the write/manager role this maps formatCode→id
+  // (`{ [code: string]: number }`); in the parse/read role it is rebuilt as the
+  // inverse id→formatCode (`Record<string, string>`). The few mode-specific
+  // access points narrow with a single local cast.
+  numFmt?: { [key: string]: number } | Record<string, string>;
   numFmtNextId?: number;
   font?: { [key: string]: number };
   border?: { [key: string]: number };
@@ -178,8 +182,8 @@ class StylesXform extends BaseXform {
       // model has been built by style manager role (contains xml)
       if (renderModel.numFmts && renderModel.numFmts.length) {
         xmlStream.openNode("numFmts", { count: renderModel.numFmts.length });
-        renderModel.numFmts.forEach((numFmtXml: string) => {
-          xmlStream.writeRaw(numFmtXml);
+        renderModel.numFmts.forEach(numFmtXml => {
+          xmlStream.writeRaw(numFmtXml as string);
         });
         xmlStream.closeNode();
       }
@@ -304,12 +308,10 @@ class StylesXform extends BaseXform {
           numFmt: {}
         };
         if (this.model.numFmts) {
-          const numFmtIndex = this.index.numFmt as unknown as Record<number, string>;
-          (this.model.numFmts as unknown as { id: number; formatCode: string }[]).forEach(
-            numFmt => {
-              numFmtIndex[numFmt.id] = numFmt.formatCode;
-            }
-          );
+          const numFmtIndex = this.index.numFmt as Record<number, string>;
+          (this.model.numFmts as { id: number; formatCode: string }[]).forEach(numFmt => {
+            numFmtIndex[numFmt.id] = numFmt.formatCode;
+          });
         }
 
         return false;
@@ -429,7 +431,7 @@ class StylesXform extends BaseXform {
   getStyleModel(id: number): Style | null {
     // In the parse/read role the `styles` collection holds StyleRef objects
     // (not the rendered strings of the write role).
-    const style = this.model.styles![id] as unknown as StyleRef | undefined;
+    const style = this.model.styles![id] as StyleRef | undefined;
     if (!style) {
       return null;
     }
@@ -447,7 +449,7 @@ class StylesXform extends BaseXform {
     // number format
     if (style.numFmtId) {
       const numFmt =
-        (this.index!.numFmt as unknown as Record<string, string>)[style.numFmtId] ||
+        (this.index!.numFmt as Record<string, string>)[style.numFmtId] ||
         NumFmtXform.getDefaultFmtCode(style.numFmtId);
       if (numFmt) {
         model.numFmt = numFmt;

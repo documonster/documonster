@@ -87,12 +87,7 @@ export function resolvePendingChartImages(
   // `rId1` would be silently dropped by the writer on a round-tripped
   // chart whose original style sidecar already took `rId1`, leaving
   // the chart's `r:embed="rId1"` pointing at the wrong target.
-  const chartRelsBag = (
-    workbook as unknown as {
-      _chartRels?: Record<number, Array<{ Id?: string }>>;
-    }
-  )._chartRels;
-  const existingChartRels = chartRelsBag?.[chartNumber];
+  const existingChartRels = workbook._chartRels?.[chartNumber];
   if (Array.isArray(existingChartRels)) {
     for (const rel of existingChartRels) {
       if (rel?.Id) {

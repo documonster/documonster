@@ -34,7 +34,7 @@ export function read(
   data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).load(data, options) as unknown as Promise<WorkbookData>;
+  return getXlsxIo(wb).load(data, options);
 }
 
 /** Read a workbook from a parse stream (mutates and returns `wb`). */
@@ -43,7 +43,7 @@ export function readStream(
   stream: unknown,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).read(stream as never, options) as unknown as Promise<WorkbookData>;
+  return getXlsxIo(wb).read(stream as never, options);
 }
 
 /** Write a workbook to a writable stream. */
@@ -65,7 +65,7 @@ export function readFile(
   filename: string,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).readFile(filename, options) as unknown as Promise<WorkbookData>;
+  return getXlsxIo(wb).readFile(filename, options);
 }
 
 /** Node-only: write a workbook to an xlsx file path. */

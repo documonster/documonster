@@ -144,7 +144,7 @@ export function toWritable<T = Uint8Array>(
   // Web WritableStream: detect by getWriter() (avoid relying on global WritableStream).
   // Avoid `Writable.fromWeb()` — it is buggy on some runtimes (e.g. Bun).
   // Instead, wrap manually by piping through the WritableStream's writer.
-  if ((stream as unknown as Record<string, unknown>)?.getWriter) {
+  if ((stream as { getWriter?: unknown }).getWriter) {
     const ws = stream as WritableStream<T>;
     let writer: WritableStreamDefaultWriter<T> | undefined;
     const getWriter = () => (writer ??= ws.getWriter());
