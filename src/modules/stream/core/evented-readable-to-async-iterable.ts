@@ -9,26 +9,34 @@
  *   without implicitly destroying the underlying stream.
  */
 
+/**
+ * Listener accepted by {@link EventedReadableLike}. The events consumed here
+ * carry differing payloads (`data` → chunk, `end`/`close` → none, `error` →
+ * error), so the listener is the union of those concrete handler shapes rather
+ * than a single chunk signature.
+ */
+type EventedListener<T> = ((chunk: T) => void) | (() => void) | ((error: unknown) => void);
+
 export interface EventedReadableLike<T> {
-  on?(event: string, listener: (chunk: T) => void): any;
-  off?(event: string, listener: (chunk: T) => void): any;
-  removeListener?(event: string, listener: (chunk: T) => void): any;
-  pause?(): any;
-  resume?(): any;
+  on?(event: string, listener: EventedListener<T>): unknown;
+  off?(event: string, listener: EventedListener<T>): unknown;
+  removeListener?(event: string, listener: EventedListener<T>): unknown;
+  pause?(): unknown;
+  resume?(): unknown;
 }
 
 export function eventedReadableToAsyncIterableNoDestroy<T>(
   stream: EventedReadableLike<T>
 ): AsyncIterable<T> {
   return {
-    [Symbol.asyncIterator](): AsyncIterator<T> {
+    [Symbol.asyncIterator](): AsyncIterator<T, undefined> {
       const chunks: T[] = [];
       let head = 0;
       let done = false;
       let error: unknown = null;
       let cleanedUp = false;
       let pending: {
-        resolve: (r: IteratorResult<T>) => void;
+        resolve: (r: IteratorResult<T, undefined>) => void;
         reject: (e: unknown) => void;
       } | null = null;
 
@@ -48,27 +56,27 @@ export function eventedReadableToAsyncIterableNoDestroy<T>(
         }
         cleanedUp = true;
 
-        if (typeof (stream as any)?.off === "function") {
-          (stream as any).off("data", onData);
-          (stream as any).off("end", onEnd);
-          (stream as any).off("close", onClose);
-          (stream as any).off("error", onError);
-        } else if (typeof (stream as any)?.removeListener === "function") {
-          (stream as any).removeListener("data", onData);
-          (stream as any).removeListener("end", onEnd);
-          (stream as any).removeListener("close", onClose);
-          (stream as any).removeListener("error", onError);
+        if (typeof stream.off === "function") {
+          stream.off("data", onData);
+          stream.off("end", onEnd);
+          stream.off("close", onClose);
+          stream.off("error", onError);
+        } else if (typeof stream.removeListener === "function") {
+          stream.removeListener("data", onData);
+          stream.removeListener("end", onEnd);
+          stream.removeListener("close", onClose);
+          stream.removeListener("error", onError);
         }
 
-        if (typeof (stream as any)?.pause === "function") {
-          (stream as any).pause();
+        if (typeof stream.pause === "function") {
+          stream.pause();
         }
       };
 
       const onData = (chunk: T): void => {
         chunks.push(chunk);
-        if (typeof (stream as any)?.pause === "function") {
-          (stream as any).pause();
+        if (typeof stream.pause === "function") {
+          stream.pause();
         }
         if (pending) {
           const { resolve } = pending;
@@ -83,7 +91,7 @@ export function eventedReadableToAsyncIterableNoDestroy<T>(
         if (pending) {
           const { resolve } = pending;
           pending = null;
-          resolve({ value: undefined as any, done: true });
+          resolve({ value: undefined, done: true });
         }
       };
 
@@ -102,18 +110,18 @@ export function eventedReadableToAsyncIterableNoDestroy<T>(
         }
       };
 
-      if (typeof (stream as any)?.pause === "function") {
-        (stream as any).pause();
+      if (typeof stream.pause === "function") {
+        stream.pause();
       }
-      if (typeof (stream as any)?.on === "function") {
-        (stream as any).on("data", onData);
-        (stream as any).on("end", onEnd);
-        (stream as any).on("close", onClose);
-        (stream as any).on("error", onError);
+      if (typeof stream.on === "function") {
+        stream.on("data", onData);
+        stream.on("end", onEnd);
+        stream.on("close", onClose);
+        stream.on("error", onError);
       }
 
       return {
-        next(): Promise<IteratorResult<T>> {
+        next(): Promise<IteratorResult<T, undefined>> {
           if (error) {
             return Promise.reject(error);
           }
@@ -121,27 +129,27 @@ export function eventedReadableToAsyncIterableNoDestroy<T>(
             return Promise.resolve({ value: take(), done: false });
           }
           if (done) {
-            return Promise.resolve({ value: undefined as any, done: true });
+            return Promise.resolve({ value: undefined, done: true });
           }
 
           return new Promise((resolve, reject) => {
             pending = { resolve, reject };
-            if (typeof (stream as any)?.resume === "function") {
-              (stream as any).resume();
+            if (typeof stream.resume === "function") {
+              stream.resume();
             }
           });
         },
-        return(): Promise<IteratorResult<T>> {
+        return(): Promise<IteratorResult<T, undefined>> {
           done = true;
           cleanup();
           if (pending) {
             const { resolve } = pending;
             pending = null;
-            resolve({ value: undefined as any, done: true });
+            resolve({ value: undefined, done: true });
           }
-          return Promise.resolve({ value: undefined as any, done: true });
+          return Promise.resolve({ value: undefined, done: true });
         },
-        throw(e?: unknown): Promise<IteratorResult<T>> {
+        throw(e?: unknown): Promise<IteratorResult<T, undefined>> {
           done = true;
           cleanup();
           if (pending) {

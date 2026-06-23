@@ -20,12 +20,13 @@ export function isPipelineOptions(value: unknown): value is PipelineOptions {
   }
 
   // Avoid treating streams as options objects.
+  const candidate = value as Record<string, unknown>;
   if (
-    typeof (value as any).pipe === "function" ||
-    typeof (value as any).write === "function" ||
-    typeof (value as any).end === "function" ||
-    typeof (value as any).getReader === "function" ||
-    typeof (value as any).getWriter === "function"
+    typeof candidate.pipe === "function" ||
+    typeof candidate.write === "function" ||
+    typeof candidate.end === "function" ||
+    typeof candidate.getReader === "function" ||
+    typeof candidate.getWriter === "function"
   ) {
     return false;
   }

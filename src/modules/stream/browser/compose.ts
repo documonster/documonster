@@ -18,6 +18,37 @@ import { getDefaultHighWaterMark } from "@stream/core/utils";
 import type { ITransform } from "@stream/types";
 
 // =============================================================================
+// Internal chain-node shape
+// =============================================================================
+
+/**
+ * The subset of stream members `compose` reads/calls on the chained
+ * transforms beyond what `ITransform` declares. These mirror Node's
+ * `Writable`/`Readable` runtime surface (cork/uncork and the per-side
+ * objectMode / corked / needDrain accessors); they are optional because a
+ * chain node may omit some of them.
+ */
+interface ComposeChainNode extends ITransform<unknown, unknown> {
+  readonly writableObjectMode?: boolean;
+  readonly writableCorked?: number;
+  readonly writableNeedDrain?: boolean;
+  cork?(): void;
+  uncork?(): void;
+}
+
+/**
+ * Internal view of the composed `Transform` we monkey-patch: the private
+ * `_readable` whose `_read` hook is wrapped to resume `last` on demand, and
+ * the dynamically-added `cork`/`uncork` delegates. These members are not part
+ * of the public `Transform` surface, so they are described here locally.
+ */
+interface ComposedInternals {
+  _readable: { _read?: () => void };
+  cork?: () => void;
+  uncork?: () => void;
+}
+
+// =============================================================================
 // Compose
 // =============================================================================
 
@@ -25,26 +56,28 @@ import type { ITransform } from "@stream/types";
  * Compose multiple transform streams into one
  * Data flows through each transform in sequence
  */
-export function compose<T = any, R = any>(
-  ...transforms: Array<ITransform<any, any>>
+export function compose<T = unknown, R = unknown>(
+  ...transforms: Array<ITransform<unknown, unknown>>
 ): ITransform<T, R> {
   const len = transforms.length;
 
   if (len === 0) {
+    // Boundary: an empty composition is a pure pass-through, so each input
+    // chunk (type T) is re-emitted unchanged as the declared output type R.
     return new Transform<T, R>({
       objectMode: true,
-      transform: chunk => chunk as any as R
+      transform: chunk => chunk as unknown as R
     });
   }
 
   // Preserve identity: compose(single) returns the same transform.
   if (len === 1) {
-    return transforms[0] as any as Transform<T, R>;
+    return transforms[0] as ITransform<T, R>;
   }
 
   // Chain the transforms: first → second → ... → last
-  const first = transforms[0]!;
-  const last = transforms[len - 1]!;
+  const first: ComposeChainNode = transforms[0]!;
+  const last: ComposeChainNode = transforms[len - 1]!;
 
   // Pipe all transforms together
   for (let i = 0; i < len - 1; i++) {
@@ -59,8 +92,8 @@ export function compose<T = any, R = any>(
 
   // Use per-side objectMode matching Node.js compose behavior.
   // When the property is missing, default to false (same as Node.js Transform).
-  const readableObjMode = (last as any).readableObjectMode ?? false;
-  const writableObjMode = (first as any).writableObjectMode ?? false;
+  const readableObjMode = last.readableObjectMode ?? false;
+  const writableObjMode = first.writableObjectMode ?? false;
 
   const registry = createListenerRegistry();
 
@@ -76,7 +109,7 @@ export function compose<T = any, R = any>(
     // write serialization via _writeQueue, cork buffering, drain signals).
     write(chunk: T, encoding: string, callback: (error?: Error | null) => void) {
       try {
-        (first as any).write(chunk, encoding, callback);
+        first.write(chunk, encoding, callback);
       } catch (err) {
         callback(err as Error);
       }
@@ -93,7 +126,7 @@ export function compose<T = any, R = any>(
       // If `last` already ended independently (e.g. a "take N" transform that
       // pushed null on its own), complete immediately — the "end" event has
       // already fired and a new once("end") listener would never trigger.
-      if ((last as any).readableEnded) {
+      if (last.readableEnded) {
         callback();
         return;
       }
@@ -107,13 +140,13 @@ export function compose<T = any, R = any>(
         callback(err);
       };
       const cleanupFlush = (): void => {
-        (last as any).off?.("end", onEnd);
-        (last as any).off?.("error", onError);
+        last.off?.("end", onEnd);
+        last.off?.("error", onError);
       };
 
-      (last as any).once?.("end", onEnd);
-      (last as any).once?.("error", onError);
-      (first as any).end();
+      last.once?.("end", onEnd);
+      last.once?.("error", onError);
+      first.end();
     },
 
     // Destroy path: clean up all listeners and destroy all child transforms.
@@ -138,19 +171,19 @@ export function compose<T = any, R = any>(
   // (which releases _afterTransformCallback). Although _afterTransformCallback
   // is not used when the `write` option is provided, preserving it is a
   // defensive measure against future changes.
-  const composedReadable = (composed as any)._readable;
+  const composedReadable = (composed as unknown as ComposedInternals)._readable;
   const origRead = composedReadable._read;
   composedReadable._read = () => {
     origRead?.call(composedReadable);
     if (lastPaused) {
       lastPaused = false;
-      (last as any).resume?.();
+      last.resume?.();
     }
   };
 
   // Forward errors from all transforms — destroy composed on error (matches Node.js).
   for (const t of transforms) {
-    registry.add(t as any, "error", (err: Error) => composed.destroy(err));
+    registry.add(t, "error", (err: Error) => composed.destroy(err));
   }
 
   // Drain is handled by the internal Writable's own drain → Transform's
@@ -180,19 +213,19 @@ export function compose<T = any, R = any>(
   // Eagerly attach data/end forwarding from `last` to composed (matching Node.js).
   // Node.js compose immediately attaches last.on("data") so data flows into
   // composed's buffer right away, ensuring no data is missed.
-  registry.add(last as any, "data", (chunk: R) => {
-    if (!(composed as any).push(chunk)) {
+  registry.add(last, "data", (chunk: R) => {
+    if (!composed.push(chunk)) {
       lastPaused = true;
-      (last as any).pause?.();
+      last.pause?.();
     }
   });
 
-  registry.once(last as any, "end", () => {
+  registry.once(last, "end", () => {
     // When flushing, the final handler + Transform wrapper handles stream
     // termination (push(null)). Otherwise (e.g. last ended independently),
     // we must push(null) ourselves.
     if (!flushing) {
-      (composed as any).push(null);
+      composed.push(null);
     }
   });
 
@@ -203,11 +236,11 @@ export function compose<T = any, R = any>(
   });
 
   // Delegate cork/uncork to the head of the chain.
-  (composed as any).cork = (): void => {
-    (first as any).cork?.();
+  (composed as unknown as ComposedInternals).cork = (): void => {
+    first.cork?.();
   };
-  (composed as any).uncork = (): void => {
-    (first as any).uncork?.();
+  (composed as unknown as ComposedInternals).uncork = (): void => {
+    first.uncork?.();
   };
 
   // Safety net: ensure listener cleanup even if close fires through an
@@ -228,36 +261,36 @@ export function compose<T = any, R = any>(
   // writableFinished reflect the actual head-of-chain state, not the inner
   // Transform wrapper which is never written to directly.
   Object.defineProperty(composed, "writableEnded", {
-    get: () => (first as any).writableEnded ?? false
+    get: () => first.writableEnded ?? false
   });
   Object.defineProperty(composed, "writableFinished", {
-    get: () => (first as any).writableFinished ?? false
+    get: () => first.writableFinished ?? false
   });
   Object.defineProperty(composed, "writableLength", {
-    get: () => (first as any).writableLength ?? 0
+    get: () => first.writableLength ?? 0
   });
   Object.defineProperty(composed, "writableHighWaterMark", {
-    get: () => (first as any).writableHighWaterMark ?? getDefaultHighWaterMark(false)
+    get: () => first.writableHighWaterMark ?? getDefaultHighWaterMark(false)
   });
   Object.defineProperty(composed, "writableCorked", {
-    get: () => (first as any).writableCorked ?? 0
+    get: () => first.writableCorked ?? 0
   });
   Object.defineProperty(composed, "writableNeedDrain", {
-    get: () => (first as any).writableNeedDrain ?? false
+    get: () => first.writableNeedDrain ?? false
   });
 
   // Proxy readable-side state to `last`.
   Object.defineProperty(composed, "readableEnded", {
-    get: () => (last as any).readableEnded ?? false
+    get: () => last.readableEnded ?? false
   });
   Object.defineProperty(composed, "readableLength", {
-    get: () => (last as any).readableLength ?? 0
+    get: () => last.readableLength ?? 0
   });
   Object.defineProperty(composed, "readableHighWaterMark", {
-    get: () => (last as any).readableHighWaterMark ?? getDefaultHighWaterMark(false)
+    get: () => last.readableHighWaterMark ?? getDefaultHighWaterMark(false)
   });
   Object.defineProperty(composed, "readableFlowing", {
-    get: () => (last as any).readableFlowing ?? null
+    get: () => last.readableFlowing ?? null
   });
 
   return composed;

@@ -23,7 +23,9 @@ export { Readable, Duplex };
 // Late-binding injection: break circular Readable ↔ Duplex
 import { registerDuplexFrom } from "@stream/browser/_lazy";
 
-registerDuplexFrom(source => Duplex.from(source));
+// The registry is type-erased (`source: unknown`); re-project onto Duplex.from's
+// accepted source union at this single boundary.
+registerDuplexFrom(source => Duplex.from(source as Parameters<typeof Duplex.from>[0]));
 
 // Factory functions + re-exported helpers
 export {

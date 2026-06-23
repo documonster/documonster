@@ -6,7 +6,7 @@
  * browser uses `addEmitterListener`/`removeEmitterListener`).
  */
 
-import type { ReadableLike, WritableLike } from "@stream/types";
+import type { EventEmitterLike, ReadableLike, WritableLike } from "@stream/types";
 import { createAbortError } from "@utils/errors";
 
 // =============================================================================
@@ -14,8 +14,8 @@ import { createAbortError } from "@utils/errors";
 // =============================================================================
 
 export interface ListenerOps {
-  add(emitter: any, event: string, listener: (...args: any[]) => void): void;
-  remove(emitter: any, event: string, listener: (...args: any[]) => void): void;
+  add(emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void): void;
+  remove(emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void): void;
 }
 
 // =============================================================================
@@ -30,7 +30,7 @@ export function createAddAbortSignal(ops: ListenerOps) {
     T extends (ReadableLike | WritableLike) & { destroy(error?: Error): any }
   >(signal: AbortSignal, stream: T): T {
     if (signal.aborted) {
-      stream.destroy(createAbortError((signal as any).reason));
+      stream.destroy(createAbortError(signal.reason));
       return stream;
     }
 
@@ -44,7 +44,7 @@ export function createAddAbortSignal(ops: ListenerOps) {
 
     const onAbort = (): void => {
       cleanup();
-      stream.destroy(createAbortError((signal as any).reason));
+      stream.destroy(createAbortError(signal.reason));
     };
 
     const onDone = (): void => {

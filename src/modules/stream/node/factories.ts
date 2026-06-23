@@ -193,6 +193,9 @@ export function createDuplex<_TRead = Uint8Array, TWrite = Uint8Array>(
     writable?: unknown;
     allowHalfOpen?: boolean;
     objectMode?: boolean;
+    // The hook `this` types are intentionally `any`: the Node and browser
+    // `createDuplex` signatures must stay identical for the stream API parity
+    // typecheck, and each platform's hooks bind to a different Duplex class.
     read?: (this: any, size: number) => void;
     write?: (
       this: any,
@@ -209,22 +212,24 @@ export function createDuplex<_TRead = Uint8Array, TWrite = Uint8Array>(
   return new Duplex({
     highWaterMark: options?.highWaterMark ?? defaultHWM,
     objectMode: options?.objectMode,
-    allowHalfOpen: (options as any)?.allowHalfOpen,
+    allowHalfOpen: options?.allowHalfOpen,
     readableHighWaterMark: options?.readableHighWaterMark,
     writableHighWaterMark: options?.writableHighWaterMark,
     readableObjectMode: options?.readableObjectMode,
     writableObjectMode: options?.writableObjectMode,
     read: options?.read,
-    write: options?.write as any,
-    final: options?.final as any,
-    destroy: options?.destroy as any
+    write: options?.write,
+    final: options?.final,
+    destroy: options?.destroy
   });
 }
 
 /**
  * Create a passthrough stream
  */
-export function createPassThrough<_T = any>(options?: TransformStreamOptions): IPassThrough<_T> {
+export function createPassThrough<_T = unknown>(
+  options?: TransformStreamOptions
+): IPassThrough<_T> {
   return new PassThrough(withDefaultHWM(options));
 }
 
@@ -295,7 +300,7 @@ function nullWrite(
 /**
  * Create a writable stream that discards all data (like /dev/null)
  */
-export function createNullWritable<_T = any>(options?: WritableStreamOptions): IWritable<_T> {
+export function createNullWritable<_T = unknown>(options?: WritableStreamOptions): IWritable<_T> {
   return new Writable({
     ...withDefaultHWM(options),
     write: nullWrite

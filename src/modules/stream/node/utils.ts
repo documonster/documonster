@@ -48,7 +48,11 @@ export async function streamToBuffer(
 ): Promise<Uint8Array> {
   let iterable: AsyncIterable<Uint8Array>;
   if (isReadableStream(stream)) {
-    iterable = (Readable as any).fromWeb(stream as any) as AsyncIterable<Uint8Array>;
+    // Boundary: bridge a Web ReadableStream into a Node Readable. The DOM and
+    // node:stream/web ReadableStream types differ nominally, so reconcile here.
+    iterable = Readable.fromWeb(
+      stream as unknown as Parameters<typeof Readable.fromWeb>[0]
+    ) as AsyncIterable<Uint8Array>;
   } else if (isAsyncIterable(stream)) {
     iterable = stream;
   } else {
@@ -56,7 +60,7 @@ export async function streamToBuffer(
   }
   const chunks: Uint8Array[] = [];
   let totalLength = 0;
-  for await (const chunk of iterable as any) {
+  for await (const chunk of iterable) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
       throw new UnsupportedStreamTypeError("streamToBuffer", typeof chunk);
@@ -86,7 +90,10 @@ export async function streamToString(
 ): Promise<string> {
   let iterable: AsyncIterable<Uint8Array>;
   if (isReadableStream(stream)) {
-    iterable = (Readable as any).fromWeb(stream as any) as AsyncIterable<Uint8Array>;
+    // Boundary: bridge a Web ReadableStream into a Node Readable (see streamToBuffer).
+    iterable = Readable.fromWeb(
+      stream as unknown as Parameters<typeof Readable.fromWeb>[0]
+    ) as AsyncIterable<Uint8Array>;
   } else if (isAsyncIterable(stream)) {
     iterable = stream;
   } else {
@@ -96,7 +103,7 @@ export async function streamToString(
   const decoder = createTextDecoder(encoding);
   let text = "";
 
-  for await (const chunk of iterable as any) {
+  for await (const chunk of iterable) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
       throw new UnsupportedStreamTypeError("streamToString", typeof chunk);
@@ -116,7 +123,10 @@ export async function drainStream(
 ): Promise<void> {
   let iterable: AsyncIterable<unknown>;
   if (isReadableStream(stream)) {
-    iterable = (Readable as any).fromWeb(stream as any) as AsyncIterable<unknown>;
+    // Boundary: bridge a Web ReadableStream into a Node Readable (see streamToBuffer).
+    iterable = Readable.fromWeb(
+      stream as unknown as Parameters<typeof Readable.fromWeb>[0]
+    ) as AsyncIterable<unknown>;
   } else if (isAsyncIterable(stream)) {
     iterable = stream;
   } else {
@@ -135,10 +145,10 @@ export async function drainStream(
 /** Add abort signal handling to any stream */
 export const addAbortSignal = createAddAbortSignal({
   add(emitter, event, listener) {
-    (emitter as any).once?.(event, listener);
+    emitter.once?.(event, listener);
   },
   remove(emitter, event, listener) {
-    (emitter as any).off?.(event, listener);
+    emitter.off?.(event, listener);
   }
 });
 
@@ -154,7 +164,12 @@ export function isReadable(obj: unknown): obj is ReadableLike {
   if (obj == null) {
     return false;
   }
-  const s = obj as any;
+  const s = obj as {
+    destroyed?: boolean;
+    read?: unknown;
+    pipe?: unknown;
+    readableEnded?: boolean;
+  };
   if (s.destroyed) {
     return false;
   }
@@ -177,7 +192,12 @@ export function isWritable(obj: unknown): obj is WritableLike {
   if (obj == null) {
     return false;
   }
-  const s = obj as any;
+  const s = obj as {
+    destroyed?: boolean;
+    write?: unknown;
+    end?: unknown;
+    writableEnded?: boolean;
+  };
   if (s.destroyed) {
     return false;
   }
@@ -193,11 +213,11 @@ export function isWritable(obj: unknown): obj is WritableLike {
 }
 
 /** Check if an object is a transform stream */
-export const isTransform: (obj: unknown) => obj is ITransform<any, any> =
+export const isTransform: (obj: unknown) => obj is ITransform<unknown, unknown> =
   createIsTransform(Transform);
 
 /** Check if an object is a duplex stream */
-export const isDuplex: (obj: unknown) => obj is IDuplex<any, any> = createIsDuplex(
+export const isDuplex: (obj: unknown) => obj is IDuplex<unknown, unknown> = createIsDuplex(
   Duplex,
   Transform
 );
@@ -217,10 +237,14 @@ export const isStream: (obj: unknown) => obj is ReadableLike | WritableLike = cr
  * Matches Node.js native: readableDidRead || readableAborted.
  */
 export function isDisturbed(stream: unknown): boolean {
-  if ((stream as any)?.locked !== undefined) {
+  if ((stream as { locked?: boolean })?.locked !== undefined) {
     return !!(stream as ReadableStream).locked;
   }
-  const s = stream as any;
+  const s = stream as {
+    readableDidRead?: boolean;
+    _didRead?: boolean;
+    readableAborted?: boolean;
+  };
   return !!(s?.readableDidRead || s?._didRead || s?.readableAborted);
 }
 
@@ -232,7 +256,9 @@ export function isDisturbed(stream: unknown): boolean {
  * Create a pair of connected Duplex streams
  * Data written to one stream can be read from the other
  */
-export function duplexPair<T = any>(options?: DuplexStreamOptions): [IDuplex<T, T>, IDuplex<T, T>] {
+export function duplexPair<T = unknown>(
+  options?: DuplexStreamOptions
+): [IDuplex<T, T>, IDuplex<T, T>] {
   const objectMode =
     options?.readableObjectMode ?? options?.writableObjectMode ?? options?.objectMode ?? false;
   const highWaterMark =

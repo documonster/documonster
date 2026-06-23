@@ -110,11 +110,11 @@ export class Writable<T = Uint8Array> extends NodeWritable {
         decodeStrings: options?.decodeStrings,
         defaultEncoding: options?.defaultEncoding as BufferEncoding | undefined,
         signal: options?.signal,
-        write: options?.write as any,
-        writev: options?.writev as any,
-        final: options?.final as any,
-        destroy: options?.destroy as any,
-        construct: options?.construct as any
+        write: options?.write,
+        writev: options?.writev,
+        final: options?.final,
+        destroy: options?.destroy,
+        construct: options?.construct
       });
     }
   }
@@ -137,20 +137,20 @@ export function toWritable<T = Uint8Array>(
   }
 
   // Node.js Writable: already compatible, avoid extra wrapper allocation.
-  if (stream instanceof (NodeWritable as any)) {
-    return stream as unknown as WritableLike;
+  if (stream instanceof NodeWritable) {
+    return stream as WritableLike;
   }
 
   // Web WritableStream: detect by getWriter() (avoid relying on global WritableStream).
   // Avoid `Writable.fromWeb()` — it is buggy on some runtimes (e.g. Bun).
   // Instead, wrap manually by piping through the WritableStream's writer.
-  if ((stream as any)?.getWriter) {
-    const ws = stream as WritableStream<any>;
-    let writer: WritableStreamDefaultWriter<any> | undefined;
+  if ((stream as unknown as Record<string, unknown>)?.getWriter) {
+    const ws = stream as WritableStream<T>;
+    let writer: WritableStreamDefaultWriter<T> | undefined;
     const getWriter = () => (writer ??= ws.getWriter());
 
     return new Writable({
-      write(_chunk: any, _encoding: string, callback: (error?: Error | null) => void) {
+      write(_chunk: T, _encoding: string, callback: (error?: Error | null) => void) {
         getWriter()
           .write(_chunk)
           .then(() => callback(null), callback);

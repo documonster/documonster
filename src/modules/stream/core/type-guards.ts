@@ -11,7 +11,10 @@ import type { IDuplex, ITransform, ReadableLike, WritableLike } from "@stream/ty
 // Types
 // =============================================================================
 
-type Constructor = abstract new (...args: any[]) => any;
+// Boundary: matches any platform stream constructor passed to the guard
+// factories (Node native classes or browser polyfills); the constructor
+// signature is intentionally unconstrained.
+type Constructor = abstract new (...args: any[]) => unknown;
 
 // =============================================================================
 // Factories
@@ -22,8 +25,8 @@ type Constructor = abstract new (...args: any[]) => any;
  */
 export function createIsTransform(
   ...classes: Constructor[]
-): (obj: unknown) => obj is ITransform<any, any> {
-  return function isTransform(obj: unknown): obj is ITransform<any, any> {
+): (obj: unknown) => obj is ITransform<unknown, unknown> {
+  return function isTransform(obj: unknown): obj is ITransform<unknown, unknown> {
     if (obj == null) {
       return false;
     }
@@ -48,8 +51,8 @@ export function createIsTransform(
  */
 export function createIsDuplex(
   ...classes: Constructor[]
-): (obj: unknown) => obj is IDuplex<any, any> {
-  return function isDuplex(obj: unknown): obj is IDuplex<any, any> {
+): (obj: unknown) => obj is IDuplex<unknown, unknown> {
+  return function isDuplex(obj: unknown): obj is IDuplex<unknown, unknown> {
     if (obj == null) {
       return false;
     }
@@ -102,28 +105,35 @@ export function createIsStream(
  */
 
 export function isReadableStream(value: unknown): value is ReadableStream<unknown> {
-  return !!value && typeof value === "object" && typeof (value as any).getReader === "function";
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as Record<string, unknown>).getReader === "function"
+  );
 }
 
 export function isWritableStream(value: unknown): value is WritableStream<unknown> {
-  return !!value && typeof value === "object" && typeof (value as any).getWriter === "function";
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as Record<string, unknown>).getWriter === "function"
+  );
 }
 
 export function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return (
     !!value &&
     (typeof value === "object" || typeof value === "function") &&
-    typeof (value as any)[Symbol.asyncIterator] === "function"
+    typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] === "function"
   );
 }
 
 export function isTransformStream(value: unknown): value is TransformStream<unknown, unknown> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const o = value as Record<string, unknown>;
   return (
-    !!value &&
-    typeof value === "object" &&
-    !!(value as any).readable &&
-    !!(value as any).writable &&
-    isReadableStream((value as any).readable) &&
-    isWritableStream((value as any).writable)
+    !!o.readable && !!o.writable && isReadableStream(o.readable) && isWritableStream(o.writable)
   );
 }

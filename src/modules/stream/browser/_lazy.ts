@@ -12,7 +12,9 @@
  * @internal
  */
 
-type DuplexFromFn = (source: any) => any;
+import type { IDuplex } from "@stream/types";
+
+type DuplexFromFn = (source: unknown) => IDuplex<unknown, unknown>;
 
 let _duplexFrom: DuplexFromFn | null = null;
 

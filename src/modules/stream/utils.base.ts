@@ -116,6 +116,9 @@ export function createFilter(deps: UtilsDeps) {
 /**
  * Type guard for browser ReadableStream-like objects.
  * Re-exported from internal/type-guards for public API compatibility.
+ *
+ * Boundary: the reader's chunk type is erased here — callers of
+ * `readableStreamToAsyncIterable` re-assert the element type via its generic.
  */
 export const isReadableStreamLike = isReadableStream as (
   value: unknown
@@ -134,6 +137,8 @@ export const isReadableStreamLike = isReadableStream as (
  * ```
  */
 export async function* readableStreamToAsyncIterable<T = Uint8Array>(stream: {
+  // Boundary: the Web stream reader is duck-typed; its chunk type is supplied
+  // by the caller through the function's `T` generic (defaults to Uint8Array).
   getReader: () => any;
 }): AsyncGenerator<T, void, unknown> {
   const reader = stream.getReader();
