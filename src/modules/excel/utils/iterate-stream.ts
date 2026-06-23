@@ -1,5 +1,10 @@
 import { toError } from "@utils/errors";
 
+// Structural listener signature. The `any[]` is required for interop: Node's
+// built-in stream types (Readable/ReadStream, ZipEntry, ParseStream, …) declare
+// `removeListener(event, (...args: any[]) => void)`, and assigning those streams
+// to `IterableStreamLike` checks this parameter contravariantly — `unknown[]`
+// or `never[]` would reject `any[]` and break the interop. Keep as `any[]`.
 type Listener = (...args: any[]) => void;
 
 interface EventEmitterLike {

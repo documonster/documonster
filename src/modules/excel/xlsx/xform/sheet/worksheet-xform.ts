@@ -1,3 +1,4 @@
+import type { ImageModel } from "@excel/core/image";
 import type { ConditionalFormattingRule } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import {
@@ -458,15 +459,21 @@ class WorkSheetXform extends BaseXform {
       }
     }
 
-    // Process background and image media entries. The element type is the
-    // worksheet media model (a model substructure); `imageMedia` additionally
-    // flows into buildDrawingAnchorsAndRels (which expects its own internal
-    // ImageMedium shape). Kept `any[]` until the prepare() model is typed.
-    const backgroundMedia: any[] = [];
-    const imageMedia: any[] = [];
-    const watermarkMedia: any[] = [];
-    const headerImageMedia: any[] = [];
-    model.media.forEach(medium => {
+    // Split `model.media` (a discriminated union keyed by `type`) into the four
+    // concrete member types so each downstream branch is typed.
+    //
+    // NOTE: `imageMedia` is typed as the `ImageModel` `image` member here, but it
+    // flows into `buildDrawingAnchorsAndRels`, whose `ImageMedium.range` is the
+    // looser `DrawingRange` whose `ext` requires `{ width: number; height: number }`
+    // (or `{ cx; cy }`), while `ImageRangeModel.ext` is `{ width?; height? }`. The
+    // two are NOT assignable (optional vs required ext dims), so the call site below
+    // bridges via `unknown`. Unifying `ImageRangeModel`/`DrawingRange` is a separate
+    // drawing-subsystem refactor; until then the bridge cast is explicit and local.
+    const backgroundMedia: Extract<ImageModel, { type: "background" }>[] = [];
+    const imageMedia: Extract<ImageModel, { type: "image" }>[] = [];
+    const watermarkMedia: Extract<ImageModel, { type: "watermark" }>[] = [];
+    const headerImageMedia: Extract<ImageModel, { type: "headerImage" }>[] = [];
+    (model.media as ImageModel[]).forEach(medium => {
       if (medium.type === "background") {
         backgroundMedia.push(medium);
       } else if (medium.type === "image") {
@@ -515,10 +522,18 @@ class WorkSheetXform extends BaseXform {
         });
       }
 
-      const result = buildDrawingAnchorsAndRels(imageMedia, drawing.rels, {
-        getBookImage: id => options.media[id as number],
-        nextRId: currentRels => nextRid(currentRels)
-      });
+      // Bridge to the drawing subsystem's looser media shape — see the NOTE on
+      // `imageMedia` above. `ImageRangeModel.ext` (`{ width?; height? }`) is not
+      // assignable to `DrawingRange.ext` (`{ width; height }` | `{ cx; cy }`),
+      // so cross via `unknown`. The runtime shapes are compatible.
+      const result = buildDrawingAnchorsAndRels(
+        imageMedia as unknown as Parameters<typeof buildDrawingAnchorsAndRels>[0],
+        drawing.rels,
+        {
+          getBookImage: id => options.media[id as number],
+          nextRId: currentRels => nextRid(currentRels)
+        }
+      );
       drawing.anchors.push(...result.anchors);
       drawing.rels = result.rels;
     }

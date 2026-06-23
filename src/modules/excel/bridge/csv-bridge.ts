@@ -275,6 +275,10 @@ function* iterateWorksheetRows(
   }
 }
 
+// Structural shape of the CSV formatter's event API. The `any[]` is required
+// for interop: `CsvFormatterStream extends Transform`, whose `once`/`off` carry
+// Node's overloaded EventEmitter signatures; only `any[]` is assignable to that
+// overload set here. `unknown[]`/`never[]` would reject the formatter.
 function createDrainRacer(emitter: {
   once(event: string, listener: (...args: any[]) => void): void;
   off(event: string, listener: (...args: any[]) => void): void;

@@ -22,6 +22,10 @@ import { StringBuf } from "@utils/string-buf";
 // Encoding type - simplified from Node.js BufferEncoding (TextEncoder only supports UTF-8)
 type TextEncoding = "utf-8" | "utf8" | BufferEncoding;
 
+// Node-style write/end completion callback. Invoked with an optional error;
+// the return value is ignored.
+type WriteCallback = (error?: Error) => void;
+
 // Shared TextEncoder instance — avoid allocating a new one per StringChunk.toBuffer()
 const sharedTextEncoder = new TextEncoder();
 
@@ -287,8 +291,8 @@ class StreamBuf extends EventEmitter {
    */
   async write(
     data: Uint8Array | string | StringBuf | ArrayBuffer | ArrayBufferView,
-    encoding?: TextEncoding | ((...args: any[]) => any),
-    callback?: (...args: any[]) => any
+    encoding?: TextEncoding | WriteCallback,
+    callback?: WriteCallback
   ): Promise<boolean> {
     if (typeof encoding === "function") {
       callback = encoding;
@@ -402,7 +406,7 @@ class StreamBuf extends EventEmitter {
   end(
     chunk?: Uint8Array | string | StringBuf | ArrayBuffer | ArrayBufferView,
     encoding?: TextEncoding,
-    callback?: (...args: any[]) => any
+    callback?: WriteCallback
   ): void {
     const writeComplete = (error?: Error) => {
       if (error) {

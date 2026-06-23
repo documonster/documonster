@@ -475,7 +475,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
 
   // Transient parse state
   private chartModel!: ChartModel;
-  private chartData!: ChartData;
+  private chartData: ChartData | null = null;
   private plotArea!: PlotArea;
   // The following three are deliberately `any`: while parsing they are
   // incrementally populated mutable supersets that span every member of a
@@ -486,7 +486,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
   // single union member's type would admit. They are cast to the concrete union
   // member only when pushed onto the model. Do not narrow these.
   private currentChartTypeGroup: any = null; // -> ChartTypeGroup (union) on push
-  private currentSeries: any = null; // -> ChartSeries (union) on push
+  private currentSeries: any = null; // -> a series union member (BarSeries | LineSeries | …) on push
   private currentAxis: any = null; // -> ChartAxis (union) on push
   private currentTitle: ChartTitle | null = null;
   private currentLegend: ChartLegend | null = null;
@@ -1178,10 +1178,11 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         return false; // done
 
       case "c:chart":
-        this.chartModel.chart = this.chartData;
-        // Reset the transient (definite-assigned) parse field; `as any` because
-        // `chartData` is typed non-null for the body of a parse.
-        this.chartData = null as any;
+        if (this.chartData) {
+          this.chartModel.chart = this.chartData;
+        }
+        // Reset the transient parse field for the next chart.
+        this.chartData = null;
         break;
 
       case "c:view3D":
