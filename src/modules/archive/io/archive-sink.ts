@@ -7,10 +7,10 @@ export type ArchiveSink =
   | {
       write(chunk: Uint8Array): boolean | void | Promise<unknown>;
       end?(cb?: () => void): void;
-      // EventEmitter-style hooks (Node Writable). `...args: any[]` is the
+      // EventEmitter-style hooks (Node Writable). `...args: unknown[]` is the
       // standard emitter listener signature.
-      on?(event: string, listener: (...args: any[]) => void): unknown;
-      once?(event: string, listener: (...args: any[]) => void): unknown;
+      on?(event: string, listener: (...args: unknown[]) => void): unknown;
+      once?(event: string, listener: (...args: unknown[]) => void): unknown;
     };
 
 export async function pipeIterableToSink(

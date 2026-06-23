@@ -6,9 +6,9 @@ describe("streaming-compress (Node)", () => {
     const { inflateRawSync } = await import("zlib");
 
     const deflate = createDeflateStream({ level: 6 });
-    const chunks: Buffer[] = [];
+    const chunks: Uint8Array[] = [];
 
-    deflate.on("data", (chunk: Buffer) => chunks.push(chunk));
+    deflate.on("data", (chunk: Uint8Array) => chunks.push(chunk));
 
     const originalData = Buffer.from("Hello World! ".repeat(1000));
     deflate.write(originalData);

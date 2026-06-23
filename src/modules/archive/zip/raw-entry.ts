@@ -80,6 +80,6 @@ export function isZipRawEntry(entry: unknown): entry is ZipRawEntry {
     typeof entry === "object" &&
     entry !== null &&
     "compressedData" in entry &&
-    (entry as any).compressedData instanceof Uint8Array
+    (entry as { compressedData: unknown }).compressedData instanceof Uint8Array
   );
 }

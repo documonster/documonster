@@ -19,6 +19,7 @@ import {
   isSyncArchiveSource,
   isInMemoryArchiveSource
 } from "@archive/io/archive-source";
+import type { TarArchiveProgress } from "@archive/tar/tar-archive";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
@@ -496,7 +497,7 @@ export class ZipArchive {
       if (!hasBlobSource) {
         const entries = this._entries.map(entry => ({
           name: entry.name,
-          data: toUint8ArraySync(entry.source as any),
+          data: toUint8ArraySync(toSyncSource(entry.source)),
           level: entry.options?.level,
           modTime: entry.options?.modTime,
           comment: entry.options?.comment,
@@ -509,7 +510,7 @@ export class ZipArchive {
       const entries = await Promise.all(
         this._entries.map(async entry => ({
           name: entry.name,
-          data: await toUint8Array(entry.source as any),
+          data: await toUint8Array(toInMemorySource(entry.source)),
           level: entry.options?.level,
           modTime: entry.options?.modTime,
           comment: entry.options?.comment,
@@ -527,16 +528,12 @@ export class ZipArchive {
     this._sealed = true;
 
     const entries = this._entries.map(entry => {
-      if (
-        !(entry.source instanceof Uint8Array) &&
-        !(entry.source instanceof ArrayBuffer) &&
-        typeof entry.source !== "string"
-      ) {
+      if (!isSyncArchiveSource(entry.source)) {
         throw new ArchiveError("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
       }
       return {
         name: entry.name,
-        data: toUint8ArraySync(entry.source as any),
+        data: toUint8ArraySync(entry.source),
         modTime: entry.options?.modTime,
         comment: entry.options?.comment,
         encoding: entry.options?.encoding ?? this._options.encoding
@@ -551,9 +548,41 @@ export class ZipArchive {
   }
 }
 
+/**
+ * Narrow an {@link ArchiveSource} to a synchronously-resolvable source.
+ *
+ * Only called on code paths that have already verified all sources are sync
+ * (no Blob/stream), so a failure here indicates an internal invariant break.
+ */
+function toSyncSource(source: ArchiveSource): Uint8Array | ArrayBuffer | string {
+  if (isSyncArchiveSource(source)) {
+    return source;
+  }
+  throw new ArchiveError("Expected a synchronous archive source (Uint8Array/ArrayBuffer/string)");
+}
+
+/**
+ * Narrow an {@link ArchiveSource} to an in-memory source (sync types or Blob).
+ */
+function toInMemorySource(source: ArchiveSource): Uint8Array | ArrayBuffer | string | Blob {
+  if (isInMemoryArchiveSource(source)) {
+    return source;
+  }
+  throw new ArchiveError(
+    "Expected an in-memory archive source (Uint8Array/ArrayBuffer/string/Blob)"
+  );
+}
+
 /** ZIP options with format: "tar" */
-export interface ZipOptionsTar extends ZipOptions {
+export interface ZipOptionsTar extends Omit<ZipOptions, "onProgress"> {
   format: "tar";
+
+  /**
+   * Default progress callback used by streaming operations.
+   *
+   * TAR archives emit {@link TarArchiveProgress} rather than {@link ZipProgress}.
+   */
+  onProgress?: (p: TarArchiveProgress) => void;
 }
 
 /** ZIP options with format: "zip" (or default) */

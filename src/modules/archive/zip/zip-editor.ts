@@ -150,8 +150,8 @@ function isRandomAccessReader(value: unknown): value is RandomAccessReader {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as any).size === "number" &&
-    typeof (value as any).read === "function"
+    typeof (value as Partial<RandomAccessReader>).size === "number" &&
+    typeof (value as Partial<RandomAccessReader>).read === "function"
   );
 }
 

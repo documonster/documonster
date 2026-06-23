@@ -13,6 +13,7 @@ import type { ArchiveSink } from "@archive/io/archive-sink";
 import { pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { isInMemoryArchiveSource, toAsyncIterable, toUint8Array } from "@archive/io/archive-source";
+import type { TarReaderProgress } from "@archive/tar/tar-archive";
 import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "@archive/unzip/progress";
 import type { ParseOptions, ZipEntry as ParseZipEntry } from "@archive/unzip/stream";
 import { createParse } from "@archive/unzip/stream";
@@ -30,7 +31,7 @@ import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-re
 import { isWritableStream } from "@stream/core/type-guards";
 import { getTextDecoder } from "@utils/binary";
 
-function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
+function attachAbortToParseEntry(entry: ParseZipEntry, signal: AbortSignal): void {
   let cleanedUp = false;
 
   const cleanup = () => {
@@ -44,9 +45,9 @@ function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   const onAbort = () => {
     cleanup();
     try {
-      entry.destroy?.(createAbortError(signal.reason));
+      entry.destroy(createAbortError(signal.reason));
     } catch {
-      entry.autodrain?.();
+      entry.autodrain();
     }
   };
 
@@ -56,9 +57,9 @@ function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   }
 
   signal.addEventListener("abort", onAbort, { once: true });
-  entry.once?.("end", cleanup);
-  entry.once?.("close", cleanup);
-  entry.once?.("error", cleanup);
+  entry.once("end", cleanup);
+  entry.once("close", cleanup);
+  entry.once("error", cleanup);
 }
 
 /**
@@ -240,7 +241,7 @@ export class UnzipEntry {
     // If this entry is backed by a streaming parser entry, ensure it is
     // interrupted on abort so consumers don't hang waiting for more chunks.
     if (this._parseEntry && this._signal) {
-      attachAbortToParseEntry(this._parseEntry as any, this._signal);
+      attachAbortToParseEntry(this._parseEntry, this._signal);
     }
   }
 
@@ -362,12 +363,10 @@ export class UnzipEntry {
     }
 
     if (this._parseEntry) {
+      // ParseZipEntry is always a Node PassThrough, so it satisfies the evented
+      // readable contract; adapt it to an AsyncIterable without destroying it.
       const iterable: AsyncIterable<Uint8Array> =
-        typeof (this._parseEntry as any)?.on === "function" &&
-        typeof (this._parseEntry as any)?.pause === "function" &&
-        typeof (this._parseEntry as any)?.resume === "function"
-          ? eventedReadableToAsyncIterableNoDestroy<Uint8Array>(this._parseEntry)
-          : (this._parseEntry as any as AsyncIterable<Uint8Array>);
+        eventedReadableToAsyncIterableNoDestroy<Uint8Array>(this._parseEntry);
 
       // Encrypted entries carry raw ciphertext in streaming mode (inflate is
       // skipped by readFileRecord). Pipe through processEntryDataStream which
@@ -427,8 +426,8 @@ export class UnzipEntry {
   async pipeTo(sink: ArchiveSink, options?: PipeToOptions): Promise<void> {
     // Prefer native Web Streams piping semantics when a WHATWG WritableStream is provided.
     // This supports standard options like `signal` / `preventClose` / `preventAbort`.
-    if (isWritableStream(sink) && typeof (this.readableStream() as any).pipeTo === "function") {
-      await this.readableStream().pipeTo(sink, options as any);
+    if (isWritableStream(sink) && typeof this.readableStream().pipeTo === "function") {
+      await this.readableStream().pipeTo(sink, options);
       return;
     }
 
@@ -533,7 +532,7 @@ export class ZipReader {
 
         // Buffer mode
         if (isInMemoryArchiveSource(this._source)) {
-          const bytes = await toUint8Array(this._source as any);
+          const bytes = await toUint8Array(this._source);
           throwIfAborted(signal);
           progress.update({ bytesIn: bytes.length });
           const parser = new ZipParser(bytes, {
@@ -589,7 +588,7 @@ export class ZipReader {
             })) {
               throwIfAborted(signal);
               await new Promise<void>((resolve, reject) => {
-                (parse as any).write(chunk, (err?: Error | null) => {
+                parse.write(chunk, (err?: Error | null) => {
                   if (err) {
                     reject(err);
                   } else {
@@ -612,10 +611,9 @@ export class ZipReader {
         // Avoid unhandled rejection warnings when the operation is aborted.
         suppressUnhandledRejection(feedPromise);
 
-        const parseIter: AsyncIterator<ParseZipEntry> =
-          typeof (parse as any)?.[Symbol.asyncIterator] === "function"
-            ? (parse as any as AsyncIterable<ParseZipEntry>)[Symbol.asyncIterator]()
-            : (parse as any as AsyncIterator<ParseZipEntry>);
+        const parseIter: AsyncIterator<ParseZipEntry> = (parse as AsyncIterable<ParseZipEntry>)[
+          Symbol.asyncIterator
+        ]();
 
         try {
           while (true) {
@@ -695,7 +693,7 @@ export class ZipReader {
     }
 
     if (isInMemoryArchiveSource(this._source)) {
-      const bytes = await toUint8Array(this._source as any);
+      const bytes = await toUint8Array(this._source);
       this._bufferData = bytes;
       this._bufferParser = new ZipParser(bytes, {
         decodeStrings: this._options.decodeStrings,
@@ -730,8 +728,15 @@ export class ZipReader {
 }
 
 /** Unzip options with format: "tar" */
-export interface UnzipOptionsTar extends UnzipOptions {
+export interface UnzipOptionsTar extends Omit<UnzipOptions, "onProgress"> {
   format: "tar";
+
+  /**
+   * Default progress callback used by streaming operations.
+   *
+   * TAR archives emit {@link TarReaderProgress} rather than {@link UnzipProgress}.
+   */
+  onProgress?: (p: TarReaderProgress) => void;
 }
 
 /** Unzip options with format: "zip" (or default) */

@@ -70,6 +70,7 @@ import type { ArchiveSink } from "@archive/io/archive-sink";
 import { pipeIterableToSink } from "@archive/io/archive-sink";
 import { collectUint8ArrayStream, toAsyncIterable } from "@archive/io/archive-source";
 import { TarArchive, TarReader } from "@archive/tar/tar-archive";
+import { TAR_TYPE } from "@archive/tar/tar-constants";
 import { isDirectory as isTarDirectory } from "@archive/tar/tar-entry-info";
 import type { ZipEntryInfo as ParserEntryInfo } from "@archive/unzip/zip-parser";
 import { ZipParser } from "@archive/unzip/zip-parser";
@@ -326,7 +327,7 @@ function throwTarSyncNotSupported(methodName: string): never {
 const DEFAULT_IO_CONCURRENCY = 8;
 
 function isIgnorableFsError(err: unknown): boolean {
-  const code = (err as any)?.code;
+  const code = (err as { code?: unknown } | null | undefined)?.code;
   return code === "ENOENT" || code === "EACCES" || code === "EPERM";
 }
 
@@ -341,7 +342,7 @@ function emitExtractWarning(
   if (!onWarning) {
     return;
   }
-  const code = (err as any)?.code;
+  const code = (err as { code?: unknown } | null | undefined)?.code;
   const errMessage = err instanceof Error ? err.message : String(err);
   // For filesystem errors with a code, use a generic message; otherwise preserve the original
   const message =
@@ -403,7 +404,7 @@ async function processInOrderWithConcurrency<T>(
   let index = 0;
   let next = 0;
 
-  for await (const item of iterable as any) {
+  for await (const item of iterable) {
     const current = index++;
     inFlight.set(current, task(item));
 
@@ -688,7 +689,7 @@ function buildTarAddOptions(
  */
 function buildTarSymlinkOptions(target: string, mode?: number) {
   return {
-    type: "2" as any, // TAR symlink type (RFC 1062)
+    type: TAR_TYPE.SYMLINK, // TAR symlink type (RFC 1062)
     linkname: target,
     mode
   };
@@ -833,7 +834,7 @@ async function processZipPendingEntry(
       });
 
       await processInOrderWithConcurrency<FileEntry>(
-        traverseResult as any,
+        traverseResult,
         ctx.concurrency,
         async (entry: FileEntry) => {
           ctx.checkAbort?.();
@@ -904,7 +905,7 @@ async function processZipPendingEntry(
       });
 
       await processInOrderWithConcurrency<FileEntry>(
-        globResult as any,
+        globResult,
         ctx.concurrency,
         async (entry: FileEntry) => {
           ctx.checkAbort?.();
@@ -948,6 +949,25 @@ async function processZipPendingEntry(
 // =============================================================================
 
 /**
+ * Non-conditional view of the ZIP-mode mutable state fields of {@link ArchiveFile}.
+ *
+ * The class declares these fields conditionally on the format parameter `F`
+ * (`F extends "zip" ? T : null`). This interface mirrors the resolved `"zip"`
+ * branch so the internal `_setZipState` setter can type its `value` argument
+ * precisely without the format generic getting in the way.
+ */
+interface ArchiveZipState {
+  _zipData: Uint8Array | null;
+  _zipParser: ZipParser | null;
+  _zipPassword: string | Uint8Array | undefined;
+  _zipEditView: ZipEditView<ParserEntryInfo> | null;
+  _zipAbortController: AbortController | null;
+  _zipBytesWritten: number;
+  _zipPendingEntries: ZipPendingEntry[];
+  _zipSourcePath: string | null;
+}
+
+/**
  * Unified archive file class supporting both ZIP and TAR formats.
  *
  * This class provides file system integration for creating and reading archives.
@@ -974,7 +994,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   // TAR State
   // ===========================================================================
   private readonly _tarArchive: F extends "tar" ? TarArchive : null;
-  private readonly _tarReader: F extends "tar" ? TarReader | null : null;
+  private _tarReader: F extends "tar" ? TarReader | null : null;
   private readonly _tarPendingEntries: F extends "tar" ? TarPendingEntry[] : null;
   private readonly _tarOptions: F extends "tar" ? ArchiveFileOptionsTar : null;
 
@@ -1106,6 +1126,15 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
   }
 
   /** Set a ZIP state field */
+  /**
+   * Set a ZIP state field.
+   *
+   * The ZIP state fields are conditionally typed on the archive format `F`
+   * (`F extends "zip" ? T : null`). Within this generic class `F` is unresolved,
+   * so a precise per-key value type cannot be expressed. Callers only invoke this
+   * in the ZIP branch with the correct value type; the assignment is funneled
+   * through a single localized cast.
+   */
   private _setZipState<
     K extends
       | "_zipData"
@@ -1116,13 +1145,13 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
       | "_zipBytesWritten"
       | "_zipPendingEntries"
       | "_zipSourcePath"
-  >(key: K, value: any): void {
-    (this as any)[key] = value;
+  >(key: K, value: ArchiveZipState[K]): void {
+    (this as unknown as ArchiveZipState)[key] = value;
   }
 
   /** Set the TAR reader for read mode */
   private _setTarReader(reader: TarReader): void {
-    (this as any)._tarReader = reader;
+    this._tarReader = reader as F extends "tar" ? TarReader | null : null;
   }
 
   /** Find pending ZIP entry index by normalized path, or -1 if missing. */
@@ -3077,7 +3106,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
         });
 
         await processInOrderWithConcurrency<FileEntry>(
-          fileIterable as any,
+          fileIterable,
           tarConcurrency,
           async (file: FileEntry) => {
             // Apply transform function if provided
@@ -3132,7 +3161,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
         });
 
         await processInOrderWithConcurrency<FileEntry>(
-          fileIterable as any,
+          fileIterable,
           tarConcurrency,
           async (file: FileEntry) => {
             // Apply transform function if provided
@@ -3303,7 +3332,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
           // Use createReadStream for true streaming input
           const zipPath = pending.zipPath;
           const fileStream = createReadStream(pending.localPath);
-          zipArchive.add(zipPath, fileStream as any, {
+          zipArchive.add(zipPath, fileStream, {
             level: pending.options.level ?? globalOptions.level,
             modTime: pending.options.modTime,
             comment: pending.options.comment,
@@ -3323,7 +3352,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
         }
 
         case "stream": {
-          zipArchive.add(pending.zipPath, toAsyncIterable(pending.stream) as any, {
+          zipArchive.add(pending.zipPath, toAsyncIterable(pending.stream), {
             level: pending.options.level ?? globalOptions.level,
             modTime: pending.options.modTime,
             comment: pending.options.comment,
@@ -3359,7 +3388,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               });
             } else {
               const fileStream = createReadStream(entry.absolutePath);
-              zipArchive.add(zipPath, fileStream as any, {
+              zipArchive.add(zipPath, fileStream, {
                 level: pending.options.level ?? globalOptions.level,
                 modTime: entry.mtime,
                 encoding: pending.options.encoding ?? globalOptions.encoding
@@ -3387,7 +3416,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               });
             } else {
               const fileStream = createReadStream(entry.absolutePath);
-              zipArchive.add(zipPath, fileStream as any, {
+              zipArchive.add(zipPath, fileStream, {
                 level: pending.options.level ?? globalOptions.level,
                 modTime: entry.mtime,
                 encoding: pending.options.encoding ?? globalOptions.encoding
@@ -3425,11 +3454,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
         case "file": {
           // Use createReadStream for true streaming input
           const fileStream = createReadStream(pending.localPath);
-          tarArchive.add(
-            pending.tarPath,
-            fileStream as any,
-            buildTarAddOptions(pending.options, null)
-          );
+          tarArchive.add(pending.tarPath, fileStream, buildTarAddOptions(pending.options, null));
           break;
         }
 
@@ -3441,7 +3466,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
         case "stream": {
           tarArchive.add(
             pending.tarPath,
-            toAsyncIterable(pending.stream) as any,
+            toAsyncIterable(pending.stream),
             buildTarAddOptions(pending.options, null)
           );
           break;
@@ -3465,7 +3490,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               tarArchive.add(tarPath + "/", "", { mode: TAR_DIR_MODE });
             } else {
               const fileStream = createReadStream(file.absolutePath);
-              tarArchive.add(tarPath, fileStream as any, buildTarAddOptions(pending.options, file));
+              tarArchive.add(tarPath, fileStream, buildTarAddOptions(pending.options, file));
             }
           }
           break;
@@ -3488,7 +3513,7 @@ export class ArchiveFile<F extends ArchiveFormat = "zip"> {
               tarArchive.add(tarPath + "/", "", { mode: TAR_DIR_MODE });
             } else {
               const fileStream = createReadStream(file.absolutePath);
-              tarArchive.add(tarPath, fileStream as any, buildTarAddOptions(pending.options, file));
+              tarArchive.add(tarPath, fileStream, buildTarAddOptions(pending.options, file));
             }
           }
           break;

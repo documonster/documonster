@@ -113,7 +113,7 @@ function shouldUseWorker(data: Uint8Array, options: CompressOptions): boolean {
  */
 function rethrowIfAborted(err: unknown, signal?: AbortSignal): void {
   if (signal?.aborted || isAbortError(err)) {
-    throw createAbortError((signal as any)?.reason ?? err);
+    throw createAbortError(signal?.reason ?? err);
   }
 }
 

@@ -706,7 +706,7 @@ export type TarEntryInput = { name: string; source: ArchiveSource } | [string, A
 /** Helper to add entries to archive from Map or Iterable */
 export function addEntries(
   archive: TarArchive,
-  entries: Map<string, any> | Iterable<TarEntryInput>
+  entries: Map<string, ArchiveSource> | Iterable<TarEntryInput>
 ): void {
   if (entries instanceof Map) {
     for (const [name, source] of entries) {

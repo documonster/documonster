@@ -149,7 +149,7 @@ export function createZipOperation(
       await processFn({ zip, signal, progress });
     } catch (e) {
       const err = toError(e);
-      if ((err as any).name === "AbortError") {
+      if (err.name === "AbortError") {
         progress.update({ phase: "aborted" });
         try {
           zip.abort(err);

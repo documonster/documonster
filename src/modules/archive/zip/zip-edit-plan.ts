@@ -147,7 +147,7 @@ export class ZipEditPlan {
           break;
         default: {
           const _exhaustive: never = op;
-          throw new Error(`Unknown ZipEditOp: ${String((_exhaustive as any).type)}`);
+          throw new Error(`Unknown ZipEditOp: ${String((_exhaustive as { type: string }).type)}`);
         }
       }
     }

@@ -1,6 +1,6 @@
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { TarReader } from "@archive/tar/tar-archive";
-import type { UnzipOptions, UnzipOptionsTar, UnzipOptionsZip } from "@archive/unzip/zip-reader";
+import type { UnzipOptionsTar, UnzipOptionsZip } from "@archive/unzip/zip-reader";
 import { ZipReader } from "@archive/unzip/zip-reader";
 
 /**
@@ -27,11 +27,14 @@ import { ZipReader } from "@archive/unzip/zip-reader";
  */
 export function unzip(source: ArchiveSource, options: UnzipOptionsTar): TarReader;
 export function unzip(source: ArchiveSource, options?: UnzipOptionsZip): ZipReader;
-export function unzip(source: ArchiveSource, options: UnzipOptions = {}): ZipReader | TarReader {
+export function unzip(
+  source: ArchiveSource,
+  options: UnzipOptionsTar | UnzipOptionsZip = {}
+): ZipReader | TarReader {
   if (options.format === "tar") {
     return new TarReader(source, {
       signal: options.signal,
-      onProgress: options.onProgress as any,
+      onProgress: options.onProgress,
       progressIntervalMs: options.progressIntervalMs
     });
   }

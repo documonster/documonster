@@ -1161,9 +1161,9 @@ export class ZipDeflateFile {
     this._rejectComplete(err);
 
     try {
-      const anyDeflate = this._deflate as any;
-      if (anyDeflate && typeof anyDeflate.destroy === "function") {
-        anyDeflate.destroy(err);
+      const deflate = this._deflate;
+      if (deflate && typeof deflate.destroy === "function") {
+        deflate.destroy(err);
       }
     } catch {
       // ignore

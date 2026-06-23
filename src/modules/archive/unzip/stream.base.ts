@@ -122,7 +122,7 @@ export type PullFn = (length: number) => Promise<Uint8Array>;
 
 const STR_FUNCTION = "function";
 
-export class PullStream<TRead = any> extends Duplex {
+export class PullStream<TRead = unknown> extends Duplex {
   protected readonly _queue = new ByteQueue();
 
   // Writable-side backpressure (Node.js)
@@ -909,12 +909,11 @@ async function pumpKnownCompressedSizeToEntry(
   entry.once("error", onError);
 
   let skipping = false;
-  const anyInflater = inflater as any;
   let waitResolve: (() => void) | null = null;
 
   const cleanupWaitListeners = (): void => {
     try {
-      anyInflater?.removeListener?.("drain", onDrain);
+      inflater.removeListener("drain", onDrain);
     } catch {
       // ignore
     }
@@ -954,9 +953,7 @@ async function pumpKnownCompressedSizeToEntry(
     await new Promise<void>(resolve => {
       waitResolve = resolve;
 
-      if (typeof anyInflater?.once === "function") {
-        anyInflater.once("drain", onDrain);
-      }
+      inflater.once("drain", onDrain);
       entry.once("__autodrain", onAutodrain);
       entry.once("close", onClose);
 
@@ -964,7 +961,7 @@ async function pumpKnownCompressedSizeToEntry(
       // inflater.write() call and the listener registration above.
       // Without this check the pump can deadlock on Windows where
       // event-loop scheduling differs from macOS/Linux.
-      if (entry.__autodraining || (entry as any).destroyed) {
+      if (entry.__autodraining || entry.destroyed) {
         resolveWait();
       }
     });
@@ -978,17 +975,14 @@ async function pumpKnownCompressedSizeToEntry(
 
     // Stop forwarding decompressed output. We only need to advance the ZIP cursor.
     try {
-      const anyInflater = inflater as any;
-      if (typeof anyInflater.unpipe === "function") {
-        anyInflater.unpipe(entry as any);
-      }
+      inflater.unpipe(entry);
     } catch {
       // ignore
     }
 
     // End the entry as early as possible so downstream drain resolves quickly.
     try {
-      if (!(entry as any).writableEnded && !(entry as any).destroyed) {
+      if (!entry.writableEnded && !entry.destroyed) {
         entry.end();
       }
     } catch {
@@ -997,10 +991,7 @@ async function pumpKnownCompressedSizeToEntry(
 
     // Stop the inflater to avoid work/backpressure.
     try {
-      const anyInflater = inflater as any;
-      if (typeof anyInflater.destroy === "function") {
-        anyInflater.destroy();
-      }
+      inflater.destroy();
     } catch {
       // ignore
     }
@@ -1008,7 +999,7 @@ async function pumpKnownCompressedSizeToEntry(
 
   try {
     // Pipe decompressed output into the entry stream.
-    (inflater as any).pipe(entry as any);
+    inflater.pipe(entry);
 
     while (remaining > 0) {
       if (err) {
@@ -1017,7 +1008,7 @@ async function pumpKnownCompressedSizeToEntry(
 
       // If downstream decides to autodrain mid-entry (common when a consumer bails out
       // early due to a limit), stop inflating and just skip the remaining compressed bytes.
-      if (!skipping && (entry.__autodraining || (entry as any).destroyed)) {
+      if (!skipping && (entry.__autodraining || entry.destroyed)) {
         await switchToSkip();
       }
 
@@ -1030,7 +1021,7 @@ async function pumpKnownCompressedSizeToEntry(
       remaining -= chunk.length;
 
       if (!skipping) {
-        const ok = (inflater as any).write(chunk);
+        const ok = inflater.write(chunk);
         if (!ok) {
           await waitForDrainOrSkipSignal();
         }
@@ -1038,7 +1029,7 @@ async function pumpKnownCompressedSizeToEntry(
     }
 
     if (!skipping) {
-      (inflater as any).end();
+      inflater.end();
     }
 
     // Wait for all writes to complete (not for consumption).
@@ -1218,7 +1209,7 @@ async function readFileRecord(
   // writable side is force-destroyed and the entire parse operation is
   // being torn down (abort/error).
   try {
-    await pipeline(io.streamUntilDataDescriptor() as any, inflater as any, entry as any);
+    await pipeline(io.streamUntilDataDescriptor(), inflater, entry);
   } catch (pipelineErr) {
     if (!isPrematureCloseError(pipelineErr)) {
       throw pipelineErr;

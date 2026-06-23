@@ -206,9 +206,10 @@ export async function* toAsyncIterable(
   if (typeof Blob !== "undefined" && source instanceof Blob) {
     // Prefer streaming the Blob to avoid a full Blob->ArrayBuffer copy.
     // This reduces memory use and improves performance for both small and large inputs.
-    const maybeStream = (source as any).stream;
+    // `Blob.stream` may be missing on very old runtimes despite the type, so probe it.
+    const maybeStream: unknown = source.stream;
     if (typeof maybeStream === "function") {
-      const stream = (source as any).stream();
+      const stream = source.stream();
       yield* toAsyncIterable(stream, options);
       return;
     }
