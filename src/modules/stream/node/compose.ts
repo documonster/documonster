@@ -44,7 +44,7 @@ export function compose<T = unknown, R = unknown>(
     return new Transform({
       highWaterMark: getDefaultHighWaterMark(true),
       objectMode: true,
-      transform(chunk: any, _encoding: BufferEncoding, callback: NodeTransformCallback) {
+      transform(chunk: unknown, _encoding: BufferEncoding, callback: NodeTransformCallback) {
         callback(null, chunk);
       }
     });
@@ -78,7 +78,7 @@ export function compose<T = unknown, R = unknown>(
     writableHighWaterMark: getDefaultHighWaterMark(writableObjMode),
     readableObjectMode: readableObjMode,
     writableObjectMode: writableObjMode,
-    transform(chunk: any, encoding: BufferEncoding, callback: NodeTransformCallback) {
+    transform(chunk: unknown, encoding: BufferEncoding, callback: NodeTransformCallback) {
       try {
         // Forward writes into the head of the chain.
         first.write(chunk, encoding, callback);
@@ -139,7 +139,7 @@ export function compose<T = unknown, R = unknown>(
   });
 
   // Forward data from last directly to composed, with backpressure.
-  const onLastData = (chunk: any): void => {
+  const onLastData = (chunk: unknown): void => {
     if (!composed.push(chunk)) {
       lastPaused = true;
       last.pause?.();

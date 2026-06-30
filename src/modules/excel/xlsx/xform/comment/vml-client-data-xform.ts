@@ -12,7 +12,8 @@ interface Protection {
 }
 
 interface ClientDataModel {
-  anchor: any;
+  /** Raw VML anchor string (comma-separated cell/offset values) parsed from `<x:Anchor>`. */
+  anchor: string;
   protection: Protection;
   editAs: string;
   row?: number;
@@ -47,7 +48,7 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
       "x:SizeWithCells": new VmlPositionXform({ tag: "x:SizeWithCells" }),
       "x:MoveWithCells": new VmlPositionXform({ tag: "x:MoveWithCells" })
     };
-    this.model = { anchor: [], protection: {}, editAs: "" };
+    this.model = { anchor: "", protection: {}, editAs: "" };
   }
 
   get tag(): string {
@@ -73,7 +74,7 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
       case this.tag:
         this.reset();
         this.model = {
-          anchor: [],
+          anchor: "",
           protection: {},
           editAs: ""
         };
