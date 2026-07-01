@@ -1,0 +1,19 @@
+# These settings make GitHub show a "Sponsor" button at the top of the repo page.
+# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+# GitHub Sponsors username (requires enabling at https://github.com/sponsors first)
+github: [cjnoname]
+
+# Buy Me a Coffee username (from https://www.buymeacoffee.com)
+buy_me_a_coffee: cjnoname
+
+# Open Collective slug (from https://opencollective.com)
+# Once approved, fill in the slug and uncomment, e.g. open_collective: documonster
+# open_collective:
+
+# Other optional platforms (uncomment and set a value to enable):
+# ko_fi: your_kofi_username
+# liberapay: your_liberapay_username
+# patreon: your_patreon_username
+# polar: your_polar_username
+# custom: ["https://www.paypal.me/yourname"]
