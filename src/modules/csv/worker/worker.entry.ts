@@ -23,7 +23,7 @@ import type {
   AggregateConfig,
   PageConfig
 } from "@csv/worker/types";
-import { isForbiddenKey } from "@utils/object";
+import { isSafeDynamicKey } from "@utils/object";
 
 /** A CSV cell carries an unknown scalar (string in array mode, parsed value in typed mode). */
 type CsvCell = unknown;
@@ -108,7 +108,7 @@ function toObjectRows(
     const obj: CsvWorkerRow = Object.create(null) as CsvWorkerRow;
     for (let i = 0; i < resolvedHeaders.length; i++) {
       const key = resolvedHeaders[i];
-      if (!isForbiddenKey(key)) {
+      if (isSafeDynamicKey(key)) {
         obj[key] = row[i];
       }
     }
@@ -307,13 +307,13 @@ function groupByData(data: CsvWorkerRow[], config: GroupByConfig): CsvWorkerRow[
     const obj: CsvWorkerRow = Object.create(null) as CsvWorkerRow;
     columns.forEach((col, idx) => {
       const k = String(col);
-      if (!isForbiddenKey(k)) {
+      if (isSafeDynamicKey(k)) {
         obj[k] = group.keyValues[idx];
       }
     });
     for (const { column, fn, alias } of aggregates) {
       const key = alias || `${column}_${fn}`;
-      if (!isForbiddenKey(key)) {
+      if (isSafeDynamicKey(key)) {
         obj[key] = computeAggregate(group.rows, column, fn);
       }
     }
@@ -328,7 +328,7 @@ function aggregateData(data: CsvWorkerRow[], configs: AggregateConfig[]): Record
   for (const config of configs) {
     const { column, fn, alias } = config;
     const key = alias || `${column}_${fn}`;
-    if (!isForbiddenKey(key)) {
+    if (isSafeDynamicKey(key)) {
       result[key] = computeAggregate(data, column, fn);
     }
   }

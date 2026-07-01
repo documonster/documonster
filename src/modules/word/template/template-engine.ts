@@ -15,6 +15,7 @@
  * Handles cross-run placeholders (Word often splits {{name}} across runs).
  */
 
+import { isForbiddenKey } from "@utils/object";
 import { utf8Encoder } from "@word/core/internal-utils";
 import { isRun } from "@word/core/text-utils";
 import { TemplateError } from "@word/errors";
@@ -1161,7 +1162,7 @@ function buildLoopData(
   // and leak hidden fields into the rendered document.
   const result = Object.create(null) as Record<string, unknown>;
   for (const key of Object.keys(parentData)) {
-    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+    if (isForbiddenKey(key)) {
       // Skip dangerous keys at the parent level too.
       continue;
     }
@@ -1175,7 +1176,7 @@ function buildLoopData(
   if (item != null && typeof item === "object" && !Array.isArray(item)) {
     const obj = item as Record<string, unknown>;
     for (const key of Object.keys(obj)) {
-      if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      if (isForbiddenKey(key)) {
         continue;
       }
       // Object.hasOwn ensures we never copy something that came from the

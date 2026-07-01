@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-redundant-type-constituents -- Cell is intentionally `CellAddress & any` */
 import { colCache } from "@excel/utils/col-cache";
+import { isForbiddenKey } from "@utils/object";
 
 // Safe deep clone that filters out prototype pollution keys
 function safeDeepClone<T>(obj: T): T {
@@ -11,7 +12,7 @@ function safeDeepClone<T>(obj: T): T {
   }
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(obj)) {
-    if (key !== "__proto__" && key !== "constructor" && key !== "prototype") {
+    if (!isForbiddenKey(key)) {
       result[key] = safeDeepClone((obj as Record<string, unknown>)[key]);
     }
   }

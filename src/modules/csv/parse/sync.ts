@@ -29,6 +29,7 @@ import type {
 } from "@csv/types";
 import { applyDynamicTypingToArrayRow } from "@csv/utils/dynamic-typing";
 import { isEmptyRow } from "@csv/utils/row";
+import { isSafeDynamicKey } from "@utils/object";
 
 // =============================================================================
 // Helper Functions
@@ -584,9 +585,9 @@ export function parseCsv(
       const key = (rec as Record<string, unknown>)[objname];
       // Convert undefined/null to empty string, otherwise convert to string
       const keyStr = key === undefined || key === null ? "" : String(key);
-      // Skip __proto__ to prevent prototype pollution via JSON.
-      // Note: constructor/prototype are safe on Object.create(null) objects.
-      if (keyStr === "__proto__") {
+      // Skip unsafe keys to prevent prototype pollution and reject
+      // control-char / over-long keys derived from the objname column.
+      if (!isSafeDynamicKey(keyStr)) {
         continue;
       }
       objResult[keyStr] = item;

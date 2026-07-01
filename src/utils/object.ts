@@ -7,13 +7,70 @@
  */
 
 /**
+ * Property names that must never be assigned from untrusted input, to avoid
+ * prototype pollution. Covers the direct pollution vectors
+ * (`__proto__`/`constructor`/`prototype`) plus the legacy `Object.prototype`
+ * accessor-defining methods (`__defineGetter__` etc.), which are dangerous
+ * keys on prototyped objects and never legitimate data keys.
+ */
+const FORBIDDEN_KEYS: ReadonlySet<string> = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+  "__defineGetter__",
+  "__defineSetter__",
+  "__lookupGetter__",
+  "__lookupSetter__"
+]);
+
+/**
  * True for object keys that must never be assigned from untrusted input, to
- * avoid prototype pollution: `__proto__`, `constructor`, `prototype`. Use this
- * to guard every dynamic `obj[key] = value` where `key` derives from external
- * data (parsed files, worker messages, user config).
+ * avoid prototype pollution. Use this to guard every dynamic
+ * `obj[key] = value` where `key` derives from external data (parsed files,
+ * worker messages, user config) and the key is copied from an existing object.
+ *
+ * For keys built from raw external strings (CSV headers, worker configs),
+ * prefer {@link isSafeDynamicKey}, which additionally bounds length and
+ * rejects control characters.
  */
 export function isForbiddenKey(key: string): boolean {
-  return key === "__proto__" || key === "constructor" || key === "prototype";
+  return FORBIDDEN_KEYS.has(key);
+}
+
+/**
+ * Maximum accepted length for a dynamic object key derived from untrusted
+ * input. Real column names / aliases are short; anything longer is not a
+ * legitimate key and is rejected to bound memory and avoid abuse.
+ */
+export const MAX_DYNAMIC_KEY_LENGTH = 512;
+
+/**
+ * True when `key` is safe to use as a dynamic object property assigned from
+ * untrusted input (parsed files, worker messages, user config). Rejects:
+ *
+ * - forbidden prototype-pollution keys (see {@link isForbiddenKey}),
+ * - keys longer than {@link MAX_DYNAMIC_KEY_LENGTH},
+ * - keys containing control characters (U+0000–U+001F, U+007F), which are
+ *   never valid header/alias names and can corrupt downstream serialization.
+ *
+ * The empty string is allowed (empty CSV headers are legitimate and harmless
+ * as keys). Unicode letters, digits, spaces and ordinary punctuation are
+ * allowed, so column names like `"First Name"` or `"价格"` pass unchanged.
+ */
+export function isSafeDynamicKey(key: string): boolean {
+  if (isForbiddenKey(key)) {
+    return false;
+  }
+  if (key.length > MAX_DYNAMIC_KEY_LENGTH) {
+    return false;
+  }
+  for (let i = 0; i < key.length; i++) {
+    const code = key.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -122,7 +179,7 @@ export function deepMerge<T = Record<string, unknown>>(...args: unknown[]): T {
       const keys = Object.keys(obj);
       for (let j = 0, jLen = keys.length; j < jLen; j++) {
         const key = keys[j];
-        if (key === "__proto__" || key === "constructor" || key === "prototype") {
+        if (isForbiddenKey(key)) {
           continue;
         }
         const val = obj[key];

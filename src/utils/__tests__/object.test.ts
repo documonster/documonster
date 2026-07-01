@@ -1,6 +1,6 @@
 import util from "util";
 
-import { deepEqual } from "@utils/object";
+import { deepEqual, isForbiddenKey, isSafeDynamicKey, MAX_DYNAMIC_KEY_LENGTH } from "@utils/object";
 import { describe, it, expect } from "vitest";
 
 describe("@utils/object", () => {
@@ -105,6 +105,45 @@ describe("@utils/object", () => {
         expect(deepEqual(c.a, c.b), assertion).toBe(c.expected);
         expect(deepEqual(c.b, c.a), assertion + " (symmetric)").toBe(c.expected);
       }
+    });
+  });
+
+  describe("isForbiddenKey", () => {
+    it("flags prototype-pollution keys", () => {
+      expect(isForbiddenKey("__proto__")).toBe(true);
+      expect(isForbiddenKey("constructor")).toBe(true);
+      expect(isForbiddenKey("prototype")).toBe(true);
+    });
+
+    it("allows ordinary keys", () => {
+      expect(isForbiddenKey("total")).toBe(false);
+      expect(isForbiddenKey("")).toBe(false);
+    });
+  });
+
+  describe("isSafeDynamicKey", () => {
+    it("accepts legitimate column names / aliases", () => {
+      for (const key of ["count", "total", "First Name", "价格", "sum_x", "a.b-c", ""]) {
+        expect(isSafeDynamicKey(key), key).toBe(true);
+      }
+    });
+
+    it("rejects prototype-pollution keys", () => {
+      expect(isSafeDynamicKey("__proto__")).toBe(false);
+      expect(isSafeDynamicKey("constructor")).toBe(false);
+      expect(isSafeDynamicKey("prototype")).toBe(false);
+    });
+
+    it("rejects control characters", () => {
+      expect(isSafeDynamicKey("a\u0000b")).toBe(false);
+      expect(isSafeDynamicKey("a\tb")).toBe(false);
+      expect(isSafeDynamicKey("a\nb")).toBe(false);
+      expect(isSafeDynamicKey("a\u007fb")).toBe(false);
+    });
+
+    it("rejects over-length keys but accepts at-limit keys", () => {
+      expect(isSafeDynamicKey("x".repeat(MAX_DYNAMIC_KEY_LENGTH))).toBe(true);
+      expect(isSafeDynamicKey("x".repeat(MAX_DYNAMIC_KEY_LENGTH + 1))).toBe(false);
     });
   });
 });

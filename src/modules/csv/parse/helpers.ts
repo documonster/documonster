@@ -17,6 +17,7 @@ import { CsvError } from "@csv/errors";
 import type { CsvRecordError, OnSkipCallback } from "@csv/types";
 import type { HeaderArray } from "@csv/utils/row";
 import { deduplicateHeadersWithRenames } from "@csv/utils/row";
+import { isSafeDynamicKey } from "@utils/object";
 
 // =============================================================================
 // Types
@@ -243,7 +244,7 @@ function rowToObject(row: string[], headers: HeaderArray): Record<string, string
   const obj: Record<string, string> = Object.create(null) as Record<string, string>;
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
-    if (header !== null && header !== undefined && header !== "__proto__") {
+    if (header !== null && header !== undefined && isSafeDynamicKey(header)) {
       obj[header] = row[i] ?? "";
     }
   }
@@ -286,7 +287,7 @@ function rowToObjectGrouped(
   >;
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
-    if (header !== null && header !== undefined && header !== "__proto__") {
+    if (header !== null && header !== undefined && isSafeDynamicKey(header)) {
       const value = row[i] ?? "";
       if (header in obj) {
         // Column name already exists - convert to array or push to existing array

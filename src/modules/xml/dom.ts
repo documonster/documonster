@@ -10,6 +10,7 @@
  */
 
 import { toError } from "@utils/errors";
+import { isForbiddenKey } from "@utils/object";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
@@ -29,22 +30,11 @@ import type {
 // Security
 // =============================================================================
 
-/** Property names that must never be used as object keys from untrusted input. */
-const DANGEROUS_KEYS = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-  "__defineGetter__",
-  "__defineSetter__",
-  "__lookupGetter__",
-  "__lookupSetter__"
-]);
-
 /** Create a clean attribute map, filtering dangerous keys. */
 function safeAttributes(raw: Record<string, string>): Record<string, string> {
   const attrs: Record<string, string> = Object.create(null);
   for (const key in raw) {
-    if (Object.prototype.hasOwnProperty.call(raw, key) && !DANGEROUS_KEYS.has(key)) {
+    if (Object.prototype.hasOwnProperty.call(raw, key) && !isForbiddenKey(key)) {
       attrs[key] = raw[key];
     }
   }
