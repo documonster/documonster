@@ -195,14 +195,15 @@ Worksheet.addConditionalFormatting(worksheet, {
 ### Images
 
 ```typescript
+import { Image } from "documonster/excel";
 import { readFileSync } from "fs";
 
-const imageId = workbook.addImage({
+const imageId = Image.add(workbook, {
   buffer: readFileSync("logo.png"),
   extension: "png"
 });
 
-worksheet.addImage(imageId, {
+Image.place(worksheet, imageId, {
   tl: { col: 0, row: 0 },
   br: { col: 3, row: 5 }
 });
@@ -210,7 +211,7 @@ worksheet.addImage(imageId, {
 
 #### Embedded vs. external (linked) images
 
-`workbook.addImage` registers an image one of two ways:
+`Image.add` registers an image one of two ways:
 
 - **Embedded** — pass `buffer`, `base64`, or `filename`. The bytes are written
   into the `.xlsx` package (`xl/media/imageN.ext`). Self-contained, but the file
@@ -224,19 +225,19 @@ If both bytes and a `link` are provided, **embedding wins**.
 
 ```typescript
 // Linked picture from a URL — nothing is written to xl/media/.
-const urlId = workbook.addImage({ extension: "png", link: "https://example.com/logo.png" });
-worksheet.addImage(urlId, "B2:D6");
+const urlId = Image.add(workbook, { extension: "png", link: "https://example.com/logo.png" });
+Image.place(worksheet, urlId, "B2:D6");
 
 // Linked picture from a local file path (resolved by Excel on open).
-const fileId = workbook.addImage({ extension: "png", link: "file:///C:/images/logo.png" });
-worksheet.addImage(fileId, "F2:H6");
+const fileId = Image.add(workbook, { extension: "png", link: "file:///C:/images/logo.png" });
+Image.place(worksheet, fileId, "F2:H6");
 ```
 
 Linked images also work as overlay watermarks:
 
 ```typescript
-const wmId = workbook.addImage({ extension: "png", link: "https://example.com/draft.png" });
-worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
+const wmId = Image.add(workbook, { extension: "png", link: "https://example.com/draft.png" });
+Watermark.add(worksheet, { imageId: wmId, mode: "overlay", opacity: 0.15 });
 ```
 
 **Caveats** (inherent to Excel, not this library):
@@ -245,8 +246,8 @@ worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
   Excel shows a broken-image placeholder. Use embedding for self-contained files.
 - Modern Excel may refuse to auto-load remote URLs for security reasons.
 - Only **cell pictures** and **overlay watermarks** may be linked. Worksheet
-  **background** images (`addBackgroundImage`) and **header/footer (VML)**
-  watermarks (`addWatermark({ mode: "header" })`) **cannot** be linked — they
+  **background** images (`Image.setBackground`) and **header/footer (VML)**
+  watermarks (`Watermark.add(worksheet, { mode: "header" })`) **cannot** be linked — they
   throw an `ImageError` if given a linked image (Excel drops such backgrounds on
   open). Use an embedded image for those.
 
@@ -260,12 +261,12 @@ and the raster fallback (typically a PNG) you want embedded. Modern Excel shows
 the crisp SVG; older versions and non-SVG consumers show the raster fallback.
 
 ```typescript
-const id = workbook.addImage({
+const id = Image.add(workbook, {
   buffer: pngFallbackBytes, // raster fallback — required
   extension: "png",
   svg: { buffer: svgBytes } // vector data shown by Excel 2016+
 });
-worksheet.addImage(id, "B2:D6");
+Image.place(worksheet, id, "B2:D6");
 ```
 
 ### Shapes
@@ -275,7 +276,7 @@ anchored to a cell range. Shapes need no media file — geometry, fill, outline
 and an optional text label are written straight into the drawing part.
 
 ```typescript
-worksheet.addShape({
+Image.addShape(worksheet, {
   type: "rect", // rect | roundRect | ellipse | triangle | line | …
   range: "B2:D5", // a cell range or { tl, br } anchors
   fillColor: "FFD966", // hex RGB (omit for no fill)
@@ -284,8 +285,8 @@ worksheet.addShape({
   text: "Important"
 });
 
-worksheet.addShape({ type: "ellipse", range: "F2:H5", fillColor: "9DC3E6" });
-worksheet.addShape({
+Image.addShape(worksheet, { type: "ellipse", range: "F2:H5", fillColor: "9DC3E6" });
+Image.addShape(worksheet, {
   type: "line",
   range: { tl: "B7", br: "E7" },
   lineColor: "FF0000",
@@ -299,7 +300,7 @@ non-chart drawing content.
 ### Tables
 
 ```typescript
-worksheet.addTable({
+Table.add(worksheet, {
   name: "SalesTable",
   ref: "A1",
   headerRow: true,
@@ -318,9 +319,9 @@ worksheet.addTable({
 ### Merge Cells
 
 ```typescript
-worksheet.mergeCells("A1:D1");
-worksheet.getCell("A1").value = "Merged Header";
-worksheet.getCell("A1").alignment = { horizontal: "center" };
+Worksheet.merge(worksheet, "A1:D1");
+Cell.setValue(worksheet, "A1", "Merged Header");
+Cell.setAlignment(worksheet, "A1", { horizontal: "center" });
 ```
 
 ### Freeze Panes
@@ -358,7 +359,7 @@ worksheet.pageSetup.printTitlesRow = "1:2";
 ### Sheet Protection
 
 ```typescript
-await worksheet.protect("password123", {
+await Worksheet.protect(worksheet, "password123", {
   selectLockedCells: true,
   selectUnlockedCells: true,
   formatCells: false,
@@ -372,28 +373,24 @@ await worksheet.protect("password123", {
 ### Comments
 
 ```typescript
-worksheet.getCell("A1").note = "Simple comment";
+Cell.setNote(worksheet, "A1", "Simple comment");
 
-worksheet.getCell("B1").note = {
+Cell.setNote(worksheet, "B1", {
   texts: [{ text: "Author: ", font: { bold: true } }, { text: "This is a rich text comment" }]
-};
+});
 
 // Configure the comment box size (points). Defaults to 97.8 × 59.1pt.
-worksheet.getCell("C1").note = {
+Cell.setNote(worksheet, "C1", {
   texts: [{ text: "A roomier note" }],
   width: 200,
   height: 120
-};
+});
 ```
 
 ### Auto-Fit Column Width
 
 ```typescript
-worksheet.columns.forEach(column => {
-  column.width = column.values
-    ? Math.max(...column.values.map(v => String(v ?? "").length)) + 2
-    : 10;
-});
+Worksheet.autoFitColumns(worksheet);
 ```
 
 ## Charts
@@ -427,15 +424,16 @@ It is **not** a replacement for Excel / LibreOffice rendering when pixel-identic
 ### Classic Chart
 
 ```typescript
-const ws = workbook.addWorksheet("Sales");
-ws.addRows([
+const ws = Workbook.addWorksheet(workbook, "Sales");
+Worksheet.addRows(ws, [
   ["Month", "Revenue", "Profit"],
   ["Jan", 120, 32],
   ["Feb", 180, 49],
   ["Mar", 160, 41]
 ]);
 
-ws.addChart(
+Chart.add(
+  ws,
   {
     type: "bar",
     barDir: "col",
@@ -469,34 +467,35 @@ import {
 } from "documonster/chart";
 
 // 99 classic presets + 10 ChartEx presets (Excel UI aliases)
-ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
-ws.addPresetChartEx(
+Chart.addPreset(ws, "col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
+Chart.addPresetEx(
+  ws,
   "boxAndWhisker",
   { series: [{ values: "Samples!$A$2:$A$50" }] },
   "N1:V16"
 );
 
 // Per-type shortcut methods — the `type` field is implied.
-ws.addColumnChart({ series: [...] }, "E18:M32");
-ws.addBarChart({ series: [...] }, "E34:M48");
-ws.addLineChart({ series: [...] }, "E50:M64");
-ws.addAreaChart({ series: [...] }, "E66:M80");
-ws.addPieChart({ series: [...] }, "P1:X16");
-ws.addDoughnutChart({ series: [...] }, "P18:X32");
-ws.addScatterChart({ series: [...] }, "P34:X48");
-ws.addBubbleChart({ series: [...] }, "P50:X64");
-ws.addRadarChart({ series: [...] }, "P66:X80");
-ws.addStockChart({ series: [...] }, "AA1:AI16");
-ws.addSurfaceChart({ series: [...] }, "AA18:AI32");
+Chart.addColumn(ws, { series: [...] }, "E18:M32");
+Chart.addBar(ws, { series: [...] }, "E34:M48");
+Chart.addLine(ws, { series: [...] }, "E50:M64");
+Chart.addArea(ws, { series: [...] }, "E66:M80");
+Chart.addPie(ws, { series: [...] }, "P1:X16");
+Chart.addDoughnut(ws, { series: [...] }, "P18:X32");
+Chart.addScatter(ws, { series: [...] }, "P34:X48");
+Chart.addBubble(ws, { series: [...] }, "P50:X64");
+Chart.addRadar(ws, { series: [...] }, "P66:X80");
+Chart.addStock(ws, { series: [...] }, "AA1:AI16");
+Chart.addSurface(ws, { series: [...] }, "AA18:AI32");
 // ChartEx shortcuts
-ws.addHistogramChart({ series: [...] }, "AA34:AI48");
-ws.addParetoChart({ series: [...] }, "AA50:AI64");
-ws.addWaterfallChart({ series: [...] }, "AA66:AI80");
-ws.addFunnelChart({ series: [...] }, "AK1:AS16");
-ws.addTreemapChart({ series: [...] }, "AK18:AS32");
-ws.addSunburstChart({ series: [...] }, "AK34:AS48");
-ws.addBoxWhiskerChart({ series: [...] }, "AK50:AS64");
-ws.addRegionMapChart({ series: [...] }, "AK66:AS80");
+Chart.addHistogram(ws, { series: [...] }, "AA34:AI48");
+Chart.addPareto(ws, { series: [...] }, "AA50:AI64");
+Chart.addWaterfall(ws, { series: [...] }, "AA66:AI80");
+Chart.addFunnel(ws, { series: [...] }, "AK1:AS16");
+Chart.addTreemap(ws, { series: [...] }, "AK18:AS32");
+Chart.addSunburst(ws, { series: [...] }, "AK34:AS48");
+Chart.addBoxWhisker(ws, { series: [...] }, "AK50:AS64");
+Chart.addRegionMap(ws, { series: [...] }, "AK66:AS80");
 
 console.log(EXCEL_CHART_PRESETS.length, EXCEL_CHART_EX_PRESETS.length); // 99, 10
 ```
@@ -506,7 +505,8 @@ Build chart option bags from data-frame-style inputs:
 ```typescript
 // Object-array → chart: stages the rows into the worksheet and returns
 // the chart number.
-ws.addChartFromRows(
+Chart.addFromRows(
+  ws,
   [
     { day: "Mon", visits: 312 },
     { day: "Tue", visits: 400 },
@@ -517,20 +517,22 @@ ws.addChartFromRows(
 );
 
 // Column-shortcut — same as above with `type: "bar", barDir: "col"` implied.
-ws.addColumnChartFromRows(rows, { x: "quarter", y: "revenue", startCell: "A1" }, "C1:K16");
+Chart.addColumnFromRows(ws, rows, { x: "quarter", y: "revenue", startCell: "A1" }, "C1:K16");
 
 // Excel Table → chart. Series references are structured (`Table1[Col]`)
 // so the chart expands automatically when the table grows.
-const table = ws.addTable({ name: "Kpi", ref: "A1", headerRow: true, columns: [...], rows: [...] });
-ws.addChartFromTable(
+const table = Table.add(ws, { name: "Kpi", ref: "A1", headerRow: true, columns: [...], rows: [...] });
+Chart.addFromTable(
+  ws,
   table,
   { type: "bar", barDir: "col", categoryColumn: "Month", valueColumns: ["Revenue", "Profit"] },
   "F1:N18"
 );
 
 // ChartEx helpers have the same shape.
-ws.addChartExFromRows(rows, { type: "histogram", x: "bucket", y: "count" }, "AA1:AI18");
-ws.addChartExFromTable(
+Chart.addExFromRows(ws, rows, { type: "histogram", x: "bucket", y: "count" }, "AA1:AI18");
+Chart.addExFromTable(
+  ws,
   table,
   { type: "funnel", categoryColumn: "Stage", valueColumns: ["Users"] },
   "AA20:AI40"
@@ -538,18 +540,19 @@ ws.addChartExFromTable(
 
 // Low-level range helper — emits a series with absolute refs, matching
 // what the builders produce internally.
-const s = ws.seriesFromColumns({
+const s = Chart.seriesFromColumns(ws, {
   categories: "Sales!$A$2:$A$7",
   values: "Sales!$B$2:$B$7",
   name: "Revenue"
 });
-ws.addChart({ type: "line", series: [s] }, "A20:I35");
+Chart.add(ws, { type: "line", series: [s] }, "A20:I35");
 ```
 
 ### Combo, ChartEx, Pivot Chart, And Chartsheet
 
 ```typescript
-ws.addComboChart(
+Chart.addCombo(
+  ws,
   {
     groups: [
       {
@@ -572,11 +575,13 @@ ws.addComboChart(
 // ChartEx — Office 2016+ modern types (histogram/pareto/waterfall/funnel/
 // treemap/sunburst/boxWhisker/regionMap). Each type has a dedicated
 // shortcut; for full control pass `AddChartExOptions` to `addChartEx`.
-ws.addHistogramChart(
+Chart.addHistogram(
+  ws,
   { series: [{ name: "Distribution", values: "Sales!$B$2:$B$4" }], binning: { binType: "auto" } },
   "N18:V32"
 );
-ws.addWaterfallChart(
+Chart.addWaterfall(
+  ws,
   {
     title: "Revenue waterfall",
     categories: "Sales!$A$2:$A$7",
@@ -585,7 +590,8 @@ ws.addWaterfallChart(
   },
   "N34:V48"
 );
-ws.addTreemapChart(
+Chart.addTreemap(
+  ws,
   {
     categories: "Hier!$C$2:$C$10",
     series: [
@@ -603,8 +609,9 @@ ws.addTreemapChart(
 // Pivot chart — same options as a classic chart plus the link back to
 // the pivot table; `pivotChartOptions` controls drop-zone visibility,
 // refresh-on-open, and the Office 2014 expand/collapse field buttons.
-const pivot = ws.addPivotTable({ sourceTable: src, rows: ["Region"], values: ["Revenue"] });
-ws.addPivotChart(
+const pivot = Pivot.add(ws, { sourceTable: src, rows: ["Region"], values: ["Revenue"] });
+Chart.addPivot(
+  ws,
   pivot,
   {
     type: "bar",
@@ -621,17 +628,17 @@ ws.addPivotChart(
   },
   "F1:N20"
 );
-ws.addPivotComboChart(pivot, { groups: [...] }, "F22:N40");
+Chart.addPivotCombo(ws, pivot, { groups: [...] }, "F22:N40");
 
 // Chartsheet — a full-page chart on its own tab. Works with any of
 // `AddChartOptions`, `AddComboChartOptions`, or `AddChartExOptions`.
-workbook.addChartsheet("Revenue Chart", {
+Workbook.addChartsheet(workbook, "Revenue Chart", {
   tabSelected: true,
   zoomToFit: true,
   chart: { type: "bar", series: [...] }
 });
 
-workbook.addPivotChartsheet("Pivot Dashboard", pivot, {
+Workbook.addPivotChartsheet(workbook, "Pivot Dashboard", pivot, {
   chart: { type: "line", showMarker: true, series: [...] }
 });
 ```
@@ -640,21 +647,21 @@ workbook.addPivotChartsheet("Pivot Dashboard", pivot, {
 
 ```typescript
 // String A1 range (two-cell anchor, the most common form).
-ws.addChart({ type: "bar", series: [...] }, "A1:H15");
+Chart.add(ws, { type: "bar", series: [...] }, "A1:H15");
 
 // Two-cell anchor with row/col coordinates.
-ws.addChart(options, { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } });
+Chart.add(ws, options, { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } });
 
 // One-cell anchor — pinned to a cell with a fixed EMU extent (5×3 in).
 // 914400 EMU = 1 inch.
-ws.addChart(options, {
+Chart.add(ws, options, {
   tl: { col: 1, row: 19 },
   ext: { cx: 5 * 914400, cy: 3 * 914400 },
   editAs: "oneCell"
 });
 
 // Absolute anchor — fixed EMU position + size, ignores rows/columns.
-ws.addChart(options, {
+Chart.add(ws, options, {
   pos: { x: 914400, y: 36 * 914400 },
   ext: { cx: 5 * 914400, cy: 3 * 914400 },
   editAs: "absolute"
@@ -664,7 +671,8 @@ ws.addChart(options, {
 ### Advanced Series Formatting
 
 ```typescript
-ws.addChart(
+Chart.add(
+  ws,
   {
     type: "line",
     title: {
@@ -725,7 +733,8 @@ ws.addChart(
 // Picture-fill (bars filled with an image). Accepts raw Uint8Array,
 // a `data:` URL, a bare base64 string, a `{ workbookImageId }` handle,
 // or a structured `ChartPictureFillImageData`.
-ws.addChart(
+Chart.add(
+  ws,
   {
     type: "bar",
     barDir: "col",
@@ -746,12 +755,13 @@ ws.addChart(
 
 ```typescript
 // Legacy 2007/2010 built-in style (1..48). Emits `<c:style val="N"/>`.
-chart.setStyle(42);
-chart.setBuiltInStyle(42); // alias for the built-in style index
+Chart.setStyle(chart, 42);
+Chart.setBuiltInStyle(chart, 42); // alias for the built-in style index
 
 // Modern Office 2013+ sidecar — full styleN.xml + colorsN.xml. Applied
 // via `addChart` options or copied in later via the chart entry.
-ws.addChart(
+Chart.add(
+  ws,
   {
     type: "bar",
     series: [...],
@@ -812,12 +822,13 @@ Loaded chart XML is preserved byte-for-byte when not modified. For safe high-lev
 - ChartEx charts: chart data, title, legend, auto-title deletion, chart/plot shapes, plot-region layout, series visibility/name/axis bindings, series data references, layout properties (including `extLst` passthrough), data labels, data points, and axes
 - unsafe structural mutations fall back to structured re-rendering
 
-Use `chart.mutate(model => { ... }, { preferRawPatch: true })` when you want local XML patching after editing a loaded template chart.
+Use `Chart.mutate(chart, model => { ... }, { preferRawPatch: true })` when you want local XML patching after editing a loaded template chart.
 
 For strict template workflows, use `requireRawPatch: true` to fail instead of falling back to structured re-rendering when a mutation cannot be safely patched:
 
 ```typescript
-chart.mutate(
+Chart.mutate(
+  chart,
   model => {
     model.chart.plotArea.chartTypes[0].series[0].val = {
       numRef: { formula: "Sales!$B$2:$B$100", cache: { points: [] } }
@@ -832,9 +843,9 @@ This gives a hard guarantee of "preserve the raw template XML or throw" for supp
 You can also enforce that rule for every loaded chart/chartEx part during a write:
 
 ```typescript
-await workbook.xlsx.writeBuffer({ templateMode: "strict" });
+await Workbook.toBuffer(workbook, { templateMode: "strict" });
 // or
-await workbook.xlsx.writeBuffer({ strictTemplateMode: true });
+await Workbook.toBuffer(workbook, { strictTemplateMode: true });
 ```
 
 Strict template mode affects edited chart parts loaded from an existing workbook. Newly created charts still render structurally.
@@ -905,7 +916,7 @@ Excel and WPS can be wired into the same pattern by providing CI jobs that conve
 | Advanced chart features | combo charts, secondary axes, markers, data labels (`DataLabelPosition`, pie leader lines, bar/line collision avoidance), trendlines, error bars, manual plot layout (edge-mode), chartsheets, data table (`c:dTable` — rendered below plot area), user-shape overlays (`c:userShapes` byte-preserving + programmatic replacement; not rendered in SVG/PNG/PDF previews)                                                                                                                                                                                                                |
 | Pivot charts            | classic pivot chart source metadata, field buttons/filter metadata, pivot chartsheets (metadata-only — see pivot chart note below)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Presets                 | 99 classic presets + 10 ChartEx presets — cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut, histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (via `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`)                                                                                                                                                                                                                                                                                                                        |
-| ChartEx helpers         | `chartExOptionsFromTable` / `chartExOptionsFromRows` (+ `worksheet.addChartExFromTable/FromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ChartEx helpers         | `chartExOptionsFromTable` / `chartExOptionsFromRows` (+ `Chart.addExFromTable/addExFromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Template fidelity       | byte-preserving round-trip, raw-XML patching for narrow edits, `templateMode: "strict"` to refuse silent loss, `Chart.unknownElements` surfacing `c15:` / `cx14:` vendor tags                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Rendering scope         | **zero-dependency deterministic preview** — not an Excel-identical compositor. Classic charts use a `ChartScene` IR for SVG, PNG, PDF; ChartEx uses dedicated geometry collectors for SVG and vector PDF. For pixel-perfect output, round-trip the `.xlsx` through `soffice --convert-to pdf`                                                                                                                                                                                                                                                                                           |
 | Rendering features      | deterministic SVG, browser PNG, Node PNG fallback (honours text `rotate`), PDF drawing bridge (labels/markers/errorBars/trendlines/leader lines/data tables); text anchor+rotation+color+fontFamily (`bold`/`italic` from `txPr/a:latin`); radar/area/bubble true alpha via `PdfColor.a` → `/ExtGState`; bar3D true axonometric projection (`view3D.rotX` / `rotY` / `rAngAx`) with three shaded faces; text sized via `@excel/utils/text-metrics` (Calibri/Arial/Times/9 fonts + ~230 category factors). DrawingML effect filters emit as SVG `<filter>` but are not reproduced in PDF |
@@ -917,7 +928,7 @@ Rows are chart types. Columns mean:
 
 - **Create** — programmatic `addChart` / `addChartEx` (structured API, no template needed)
 - **Read** — parse an existing `chartN.xml` / `chartExN.xml` into a structured model
-- **Edit** — `chart.mutate(fn, { preferRawPatch })` works for this type (raw-patch for narrow edits, structured rebuild for the rest)
+- **Edit** — `Chart.mutate(chart, fn, { preferRawPatch })` works for this type (raw-patch for narrow edits, structured rebuild for the rest)
 - **Round-trip** — load → write → load yields an equivalent model + package audit passes
 - **Raw preserve** — loaded bytes are preserved verbatim when the chart is not edited (and via raw-patch for narrow edits)
 - **SVG** — content-asserting test (not just "does not throw"): text / path / colour / hash
@@ -978,7 +989,7 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 
 **regionMap note:** ChartEx `regionMap` previews ship a ~180-entry country centroid table and four real projection formulas (`mercator`, `miller`, `albers` Equal-Area Conic, `robinson`). This is a centroid-dot geographic preview by default; unmatched labels fall back to a deterministic hexagonal tile layout. For real country polygons, pass a TopoJSON topology via the render option `regionMap: { topology, objectName, match, projection }` — the renderer will decode features, match labels to `feature.id` or `feature.properties.<key>`, and draw choropleth paths. This keeps the library zero-data-bundle: the caller loads their own `world-atlas`/`natural-earth` file. The same three-mode pipeline (TopoJSON → centroid preview → hex-tile fallback) is implemented for **both** SVG and vector PDF — `chartToPdf` will pass the same `regionMap` option through to `drawChartExPdf`. See `src/modules/excel/chart/topojson.ts` and the exported `RegionMapDataOptions` / `TopologyLike` types.
 
-**Built-in chart styles:** `chart.setStyle(1..48)` (alias `chart.setBuiltInStyle(1..48)`) writes `<c:style val="N"/>` on a classic chart, selecting one of the built-in style indices. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `worksheet.addChart({ …, chartStyle: ChartStyleModel })`.
+**Built-in chart styles:** `Chart.setStyle(chart, 1..48)` (alias `Chart.setBuiltInStyle(chart, 1..48)`) writes `<c:style val="N"/>` on a classic chart, selecting one of the built-in style indices. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `Chart.add(ws, { …, chartStyle: ChartStyleModel })`.
 
 **3D rendering boundaries (non-goals):** Beyond the axonometric box used for `bar3D`, we intentionally do **not** render:
 
@@ -1252,43 +1263,34 @@ const url = URL.createObjectURL(blob);
 
 ## Utility Exports
 
+Documonster is published as subpath entry points — there is no bare
+`"documonster"` export. Import each symbol from the module that owns it.
+
 ```typescript
-import {
-  // Date conversion
-  dateToExcel,
-  excelToDate,
-  DateParser,
-  DateFormatter,
+// Excel domain errors — from documonster/excel
+import { ExcelError, isExcelError, ImageError, TableError } from "documonster/excel";
 
-  // Binary utilities
-  base64ToUint8Array,
-  uint8ArrayToBase64,
-  concatUint8Arrays,
-  toUint8Array,
-  stringToUint8Array,
-  uint8ArrayToString,
+// PDF export + PDF errors — from documonster/pdf
+import { Pdf, PdfError, isPdfError } from "documonster/pdf";
 
-  // XML utilities
-  xmlEncode,
-  xmlDecode,
-  xmlEncodeAttr,
-  validateXmlName,
+// XML helpers + XML errors — from documonster/xml
+import { Xml, XmlError, isXmlError } from "documonster/xml";
 
-  // PDF export
-  pdf,
-  excelToPdf,
-  PageSizes,
-  PdfError,
-  isPdfError,
+// Encode/decode text for safe XML embedding.
+const encoded = Xml.encode("a & b < c"); // "a &amp; b &lt; c"
+const decoded = Xml.decode(encoded); // "a & b < c"
 
-  // Errors
-  BaseError,
-  ExcelError,
-  toError,
-  errorToJSON,
-  getErrorChain,
-  getRootCause
-} from "documonster";
+// Export a workbook to PDF.
+const bytes = await Pdf.fromExcel(workbook);
+
+// Errors extend BaseError and support instanceof + type guards.
+try {
+  await Workbook.readFile(workbook, "broken.xlsx");
+} catch (err) {
+  if (isExcelError(err)) {
+    console.error("Excel error:", err.message);
+  }
+}
 ```
 
 ## Examples

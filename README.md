@@ -36,7 +36,7 @@ Read, write, and manipulate DOCX files with a full builder, reader, and converte
 
 ### Formula — Excel-Compatible Calculation Engine
 
-Standalone 433-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Ships as a separate subpath so it stays out of bundles that only need to read/write XLSX. **Works in two modes**: paired with `Workbook` via `installFormulaEngine()`, or standalone on any `WorkbookLike` host via `calculateFormulas()` — the engine itself has zero excel runtime dependencies.
+Standalone 433-function calculation engine with tokenizer, parser, dependency graph, dynamic-array spill, and `LAMBDA`/`LET`/`MAP`/`REDUCE` support. Ships as a separate subpath so it stays out of bundles that only need to read/write XLSX. A single pure function, `Formula.calculate()`, evaluates any `WorkbookLike` host in place (including a `Workbook` created by the excel module) — the engine itself has zero excel runtime dependencies.
 
 - [Documentation](src/modules/formula/README.md) | [中文](src/modules/formula/README_zh.md)
 - [Examples](src/modules/formula/examples/)
@@ -98,84 +98,80 @@ Each module is available as a standalone subpath export. All subpaths support `b
 ## Quick Start
 
 ```typescript
-import { Workbook } from "documonster";
+import { Workbook, Worksheet, Row } from "documonster/excel";
 
 // Create
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Sheet1");
-sheet.addRow(["Name", "Age"]);
-sheet.addRow(["Alice", 30]);
-await workbook.xlsx.writeFile("output.xlsx");
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Sheet1");
+Worksheet.addRow(sheet, ["Name", "Age"]);
+Worksheet.addRow(sheet, ["Alice", 30]);
+await Workbook.writeFile(workbook, "output.xlsx");
 
 // Read
-const wb = new Workbook();
-await wb.xlsx.readFile("output.xlsx");
-wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
+const wb = Workbook.create();
+await Workbook.readFile(wb, "output.xlsx");
+const readSheet = Workbook.getWorksheet(wb, 1);
+Worksheet.eachRow(readSheet, (_row, n) => console.log(n, Row.getValues(readSheet, n)));
 
 // PDF — generate from data, no Workbook needed
-import { pdf } from "documonster/pdf";
-const pdfBytes = await pdf([
+import { Pdf } from "documonster/pdf";
+const pdfBytes = await Pdf.create([
   ["Product", "Revenue"],
   ["Widget", 1000]
 ]);
 
 // PDF — read text, images, and metadata from any PDF
-import { readPdf } from "documonster/pdf";
-const result = await readPdf(pdfBytes);
+const result = await Pdf.read(pdfBytes);
 console.log(result.text); // extracted text
 console.log(result.metadata); // title, author, etc.
 
 // PDF — build free-form PDFs with text, shapes, SVG paths
-import { PdfDocumentBuilder } from "documonster/pdf";
-const doc = new PdfDocumentBuilder();
+const doc = new Pdf.Builder();
 const page = doc.addPage();
 page.drawText("Hello!", { x: 72, y: 770, fontSize: 24 });
 page.drawSvgPath("M10 10 L90 10 L50 80 Z", { fill: { r: 1, g: 0, b: 0 } });
 page.addAnnotation({ type: "Highlight", rect: [72, 765, 150, 785] });
 
 // PDF — edit existing PDFs (overlay, merge, fill forms)
-import { PdfEditor } from "documonster/pdf";
-const editor = PdfEditor.load(existingPdf);
+const editor = Pdf.Editor.load(existingPdf);
 editor.getPage(0).drawText("Stamp", { x: 200, y: 400, fontSize: 36 });
 editor.setFormField("name", "Jane");
 editor.copyPagesFrom(otherPdf);
 
 // CSV — parse and format
-import { parseCsv, formatCsv } from "documonster/csv";
-const rows = parseCsv("name,age\nAlice,30", { headers: true });
-const csv = formatCsv([{ name: "Bob", age: 25 }], { headers: true });
+import { Csv } from "documonster/csv";
+const rows = Csv.parse("name,age\nAlice,30", { headers: true });
+const csv = Csv.format([{ name: "Bob", age: 25 }], { headers: true });
 
 // XML — parse, query, write
-import { parseXml, queryAll, XmlWriter } from "documonster/xml";
-const titles = queryAll(parseXml(xmlString).root, "book/title");
+import { Xml } from "documonster/xml";
+const titles = Xml.queryAll(Xml.parse(xmlString).root, "book/title");
 
 // ZIP — create and extract
-import { zip, unzip } from "documonster/zip";
-const archive = await zip().add("hello.txt", "Hello!").bytes();
+import { Archive } from "documonster/archive";
+const archive = await Archive.zip().add("hello.txt", "Hello!").bytes();
 
 // Markdown — parse and format tables
-import { parseMarkdown, formatMarkdown } from "documonster/markdown";
-const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
+import { Markdown } from "documonster/markdown";
+const table = Markdown.parse("| A | B |\n|---|---|\n| 1 | 2 |");
 
 // Word — create, read, and convert DOCX
-import { Document, toBuffer, readDocx } from "documonster/word";
+import { Document, Io } from "documonster/word";
 const wdoc = Document.create();
 Document.addHeading(wdoc, "Report", 1);
 Document.addParagraph(wdoc, "Generated by Documonster.");
-const docxBytes = await toBuffer(Document.build(wdoc));
-const parsedDocx = await readDocx(docxBytes); // round-trip read
+const docxBytes = await Io.toBuffer(Document.build(wdoc));
+const parsedDocx = await Io.read(docxBytes); // round-trip read
 
 // Formula — opt-in calculation engine (kept out of the base bundle)
-//
-// Mode A: paired with Workbook — enables wb.calculateFormulas()
-import { installFormulaEngine } from "documonster/formula";
-installFormulaEngine(); // once at startup
-sheet.getCell("A4").value = { formula: "SUM(A1:A3)" };
-workbook.calculateFormulas(); // now populates cell.result
+// Pure function: populates cell results on any WorkbookLike object.
+import { Formula } from "documonster/formula";
+import { Cell } from "documonster/excel";
+Cell.setValue(sheet, "A4", { formula: "SUM(A1:A3)" });
+Formula.calculate(workbook); // now populates cell results
 
-// Mode B: standalone — pure function, zero excel runtime, any WorkbookLike
-import { calculateFormulas } from "documonster/formula";
-calculateFormulas(anyWorkbookLikeObject);
+// Also works standalone on any WorkbookLike object
+Formula.calculate(anyWorkbookLikeObject);
 ```
 
 ## Browser Support
@@ -184,8 +180,10 @@ Documonster has native browser support with **zero configuration** for modern bu
 
 ```typescript
 // Bundlers (Vite, Webpack, Rollup, esbuild) — just import
-import { Workbook } from "documonster";
-const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer();
+import { Workbook } from "documonster/excel";
+const wb = Workbook.create();
+Workbook.addWorksheet(wb, "S1");
+const buffer = await Workbook.toBuffer(wb);
 ```
 
 ```html
@@ -194,8 +192,7 @@ const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer
 ```
 
 > The IIFE bundle does not include the formula calculation engine. Use
-> ESM + `documonster/formula` if you need
-> `Workbook.calculateFormulas()`.
+> ESM + `documonster/formula` if you need `Formula.calculate()`.
 
 For older browsers without native `CompressionStream` API, Documonster automatically uses a built-in pure JavaScript DEFLATE implementation — no polyfills needed.
 

@@ -5,7 +5,8 @@
 高性能、RFC 4180 兼容的 CSV 解析器和格式化器，零依赖。
 
 ```typescript
-import { parseCsv, formatCsv, CsvParserStream } from "documonster/csv";
+import { Csv } from "documonster/csv";
+// Csv.parse, Csv.format, Csv.ParserStream, …
 ```
 
 ## 功能特性
@@ -14,7 +15,7 @@ import { parseCsv, formatCsv, CsvParserStream } from "documonster/csv";
 - **零依赖** — 纯 TypeScript，无外部包
 - **跨平台** — Node.js 和浏览器使用相同 API
 - **高性能** — 基于 indexOf 的扫描器、快速模式检测、批处理
-- **流式处理** — `CsvParserStream` / `CsvFormatterStream` 处理大文件
+- **流式处理** — `Csv.ParserStream` / `Csv.FormatterStream` 处理大文件
 - **类型安全** — 完整的 TypeScript 泛型和重载签名
 - **自动检测** — 分隔符、换行符和 BOM 检测
 - **动态类型** — 自动类型转换（数字、布尔值、日期）
@@ -27,19 +28,19 @@ import { parseCsv, formatCsv, CsvParserStream } from "documonster/csv";
 ### 解析
 
 ```typescript
-import { parseCsv } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 简单用法：返回 string[][]
-const rows = parseCsv("name,age\nAlice,30\nBob,25");
+const rows = Csv.parse("name,age\nAlice,30\nBob,25");
 // [["name","age"], ["Alice","30"], ["Bob","25"]]
 
 // 使用表头：返回 { rows, headers, meta, errors }
-const result = parseCsv("name,age\nAlice,30\nBob,25", { headers: true });
+const result = Csv.parse("name,age\nAlice,30\nBob,25", { headers: true });
 // result.rows = [{ name: "Alice", age: "30" }, { name: "Bob", age: "25" }]
 // result.headers = ["name", "age"]
 
 // 动态类型：自动转换数字、布尔值、日期
-const typed = parseCsv("name,age,active\nAlice,30,true", {
+const typed = Csv.parse("name,age,active\nAlice,30,true", {
   headers: true,
   dynamicTyping: true
 });
@@ -49,24 +50,24 @@ const typed = parseCsv("name,age,active\nAlice,30,true", {
 ### 格式化
 
 ```typescript
-import { formatCsv } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 从数组
-formatCsv([
+Csv.format([
   ["name", "age"],
   ["Alice", "30"]
 ]);
 // "name,age\nAlice,30"
 
 // 从对象（自动推导表头）
-formatCsv([
+Csv.format([
   { name: "Alice", age: 30 },
   { name: "Bob", age: 25 }
 ]);
 // "name,age\nAlice,30\nBob,25"
 
 // 使用选项
-formatCsv(data, {
+Csv.format(data, {
   delimiter: ";",
   bom: true,
   escapeFormulae: true,
@@ -78,22 +79,22 @@ formatCsv(data, {
 
 ## 解析 API
 
-### `parseCsv(input, options?)`
+### `Csv.parse(input, options?)`
 
 同步 CSV 解析器，支持类型安全的重载。
 
 ```typescript
 // 无选项 -> string[][]
-parseCsv(csvString): string[][];
+Csv.parse(csvString): string[][];
 
 // headers: true -> CsvParseResult<Record<string, unknown>>
-parseCsv(csvString, { headers: true }): CsvParseResult;
+Csv.parse(csvString, { headers: true }): CsvParseResult;
 
 // headers: true + dynamicTyping -> 自动类型转换的值
-parseCsv(csvString, { headers: true, dynamicTyping: true }): CsvParseResult;
+Csv.parse(csvString, { headers: true, dynamicTyping: true }): CsvParseResult;
 
 // info: true -> 行包含元数据（行号、原始输入等）
-parseCsv(csvString, { headers: true, info: true }): CsvParseResult<RecordWithInfo>;
+Csv.parse(csvString, { headers: true, info: true }): CsvParseResult<RecordWithInfo>;
 ```
 
 **解析选项（`CsvParseOptions`）：**
@@ -132,44 +133,44 @@ interface CsvParseResult<T> {
 }
 ```
 
-### `parseCsvAsync(input, options?)`
+### `Csv.parseAsync(input, options?)`
 
 异步解析器，支持字符串、`AsyncIterable<string | Uint8Array>` 和 `ReadableStream`。
 
 ```typescript
-import { parseCsvAsync } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 从字符串
-const result = await parseCsvAsync(csvString, { headers: true });
+const result = await Csv.parseAsync(csvString, { headers: true });
 
 // 从 ReadableStream（浏览器 fetch）
 const response = await fetch("/data.csv");
-const result = await parseCsvAsync(response.body, { headers: true });
+const result = await Csv.parseAsync(response.body, { headers: true });
 
 // 从异步可迭代对象
-const result = await parseCsvAsync(asyncChunks, { headers: true });
+const result = await Csv.parseAsync(asyncChunks, { headers: true });
 ```
 
-### `parseCsvRows(input, options?)`
+### `Csv.parseRows(input, options?)`
 
 真正的流式异步生成器 — 逐行产出。适合大文件的内存高效处理。
 
 ```typescript
-import { parseCsvRows } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
-for await (const row of parseCsvRows(hugeFile, { headers: true })) {
+for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
   console.log(row); // { name: "...", age: "..." }
 }
 ```
 
-### `parseCsvWithProgress(input, options?, onProgress?)`
+### `Csv.parseWithProgress(input, options?, onProgress?)`
 
 带进度回调的异步解析器，适合大文件。
 
 ```typescript
-import { parseCsvWithProgress } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
-const result = await parseCsvWithProgress(
+const result = await Csv.parseWithProgress(
   largeCsvString,
   { headers: true },
   ({ rowsProcessed, bytesProcessed }) => {
@@ -182,24 +183,24 @@ const result = await parseCsvWithProgress(
 
 ## 格式化 API
 
-### `formatCsv(data, options?)`
+### `Csv.format(data, options?)`
 
 批量 CSV 格式化器。接受数组的数组或对象的数组。
 
 ```typescript
-import { formatCsv } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 数组的数组
-formatCsv([
+Csv.format([
   ["a", "b"],
   [1, 2]
 ]);
 
 // 对象的数组
-formatCsv([{ name: "Alice", age: 30 }]);
+Csv.format([{ name: "Alice", age: 30 }]);
 
 // RowHashArray 格式
-formatCsv([
+Csv.format([
   [
     ["name", "Alice"],
     ["age", "30"]
@@ -226,19 +227,19 @@ formatCsv([
 
 ## 流式 API
 
-### `CsvParserStream`
+### `Csv.ParserStream`
 
 转换流，逐块解析 CSV 数据。跨平台（Node.js + 浏览器）。
 
 ```typescript
-import { CsvParserStream, createCsvParserStream } from "documonster/csv";
+import { Csv } from "documonster/csv";
 import { pipeline } from "documonster/stream";
 
 // 使用工厂函数
-const parser = createCsvParserStream({ headers: true, dynamicTyping: true });
+const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
 
 // 使用类构造函数
-const parser = new CsvParserStream({ headers: true });
+const parser = new Csv.ParserStream({ headers: true });
 
 // 使用转换和验证
 parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
@@ -253,14 +254,14 @@ parser.on("end", () => console.log("完成"));
 await pipeline(readableStream, parser, writable);
 ```
 
-### `CsvFormatterStream`
+### `Csv.FormatterStream`
 
 转换流，将行格式化为 CSV 文本。跨平台（Node.js + 浏览器）。
 
 ```typescript
-import { CsvFormatterStream, createCsvFormatterStream } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
-const formatter = createCsvFormatterStream({
+const formatter = Csv.createFormatterStream({
   headers: ["name", "age"],
   delimiter: ";",
   bom: true
@@ -279,19 +280,19 @@ formatter.pipe(writable);
 ## 检测工具
 
 ```typescript
-import { detectDelimiter, detectLinebreak, stripBom } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 从 CSV 内容自动检测分隔符
-detectDelimiter("a,b,c\n1,2,3"); // ","
-detectDelimiter("a;b;c\n1;2;3"); // ";"
-detectDelimiter("a\tb\tc\n1\t2\t3"); // "\t"
+Csv.detectDelimiter("a,b,c\n1,2,3"); // ","
+Csv.detectDelimiter("a;b;c\n1;2;3"); // ";"
+Csv.detectDelimiter("a\tb\tc\n1\t2\t3"); // "\t"
 
 // 检测行终止符（引号感知）
-detectLinebreak("a,b\r\nc,d"); // "\r\n"
-detectLinebreak("a,b\nc,d"); // "\n"
+Csv.detectLinebreak("a,b\r\nc,d"); // "\r\n"
+Csv.detectLinebreak("a,b\nc,d"); // "\n"
 
 // 去除 UTF-8 BOM
-stripBom("\ufeffname,age"); // "name,age"
+Csv.stripBom("\ufeffname,age"); // "name,age"
 ```
 
 ---
@@ -299,13 +300,13 @@ stripBom("\ufeffname,age"); // "name,age"
 ## 行工具
 
 ```typescript
-import { isRowHashArray, deduplicateHeaders, processColumns } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 检查行是否为 RowHashArray
-isRowHashArray([["key", "value"]]); // true
+Csv.isRowHashArray([["key", "value"]]); // true
 
 // 去重表头名称
-deduplicateHeaders(["id", "name", "name", "name"]);
+Csv.deduplicateHeaders(["id", "name", "name", "name"]);
 // ["id", "name", "name_1", "name_2"]
 ```
 
@@ -314,13 +315,13 @@ deduplicateHeaders(["id", "name", "name", "name"]);
 ## 动态类型
 
 ```typescript
-import { applyDynamicTyping } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 将字符串值自动转换为原生类型
-applyDynamicTyping("42"); // 42（number）
-applyDynamicTyping("3.14"); // 3.14（number）
-applyDynamicTyping("true"); // true（boolean）
-applyDynamicTyping("hello"); // "hello"（string，不变）
+Csv.applyDynamicTyping("42"); // 42（number）
+Csv.applyDynamicTyping("3.14"); // 3.14（number）
+Csv.applyDynamicTyping("true"); // true（boolean）
+Csv.applyDynamicTyping("hello"); // "hello"（string，不变）
 ```
 
 ---
@@ -328,14 +329,14 @@ applyDynamicTyping("hello"); // "hello"（string，不变）
 ## 数字工具
 
 ```typescript
-import { formatNumberForCsv, parseNumberFromCsv } from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 使用区域特定的小数分隔符格式化数字
-formatNumberForCsv(3.14, "."); // "3.14"
-formatNumberForCsv(3.14, ","); // "3,14"
+Csv.formatNumber(3.14, "."); // "3.14"
+Csv.formatNumber(3.14, ","); // "3,14"
 
 // 使用区域特定的小数分隔符解析数字
-parseNumberFromCsv("3,14", ","); // 3.14
+Csv.parseNumber("3,14", ","); // 3.14
 ```
 
 ---
@@ -345,23 +346,17 @@ parseNumberFromCsv("3,14", ","); // 3.14
 生成测试 CSV 数据，内置列类型和种子 PRNG 保证可复现性。
 
 ```typescript
-import {
-  csvGenerate,
-  csvGenerateRows,
-  csvGenerateAsync,
-  csvGenerateData,
-  createCsvGenerator
-} from "documonster/csv";
+import { Csv } from "documonster/csv";
 
 // 生成 CSV 字符串
-const { csv, headers, data } = csvGenerate({
+const { csv, headers, data } = Csv.generate({
   columns: ["name", "email", "int", "bool", "date"],
   rows: 100,
   seed: 42
 });
 
 // 使用自定义列类型生成
-const { csv } = csvGenerate({
+const { csv } = Csv.generate({
   columns: [
     { type: "int", min: 18, max: 65, name: "age" },
     { type: "float", min: 0, max: 100, name: "score" },
@@ -371,25 +366,25 @@ const { csv } = csvGenerate({
 });
 
 // 内存高效：逐行产出
-for (const row of csvGenerateRows({ columns: 5, rows: 1_000_000 })) {
+for (const row of Csv.generateRows({ columns: 5, rows: 1_000_000 })) {
   process.stdout.write(row + "\n");
 }
 
 // 按持续时间生成（无限行）
-for (const row of csvGenerateRows({ columns: 3, duration: 5000 })) {
+for (const row of Csv.generateRows({ columns: 3, duration: 5000 })) {
   // 生成 5 秒
 }
 
 // 异步生成器，行间有延迟
-for await (const row of csvGenerateAsync({ columns: 5, rows: 100, delay: 10 })) {
+for await (const row of Csv.generateAsync({ columns: 5, rows: 100, delay: 10 })) {
   console.log(row);
 }
 
 // 生成原始数据（非 CSV 字符串）
-const rawRows = csvGenerateData({ columns: ["name", "int"], rows: 10 });
+const rawRows = Csv.generateData({ columns: ["name", "int"], rows: 10 });
 // [[name, number], ...]
 
-const objects = csvGenerateData({
+const objects = Csv.generateData({
   columns: [{ type: "name", name: "fullName" }],
   rows: 10,
   objectMode: true
@@ -397,7 +392,7 @@ const objects = csvGenerateData({
 // [{ fullName: "..." }, ...]
 
 // 带预设配置的可复用生成器
-const gen = createCsvGenerator({ columns: ["name", "email"], seed: 42 });
+const gen = Csv.createGenerator({ columns: ["name", "email"], seed: 42 });
 const batch1 = gen.generate(100);
 const batch2 = gen.generate(100);
 ```
@@ -410,10 +405,11 @@ const batch2 = gen.generate(100);
 ## 错误类
 
 ```typescript
+import { Csv } from "documonster/csv";
 import { CsvError, CsvWorkerError } from "documonster/csv";
 
 try {
-  parseCsv(badInput, { headers: true });
+  Csv.parse(badInput, { headers: true });
 } catch (e) {
   if (e instanceof CsvError) {
     console.error(e.message);
@@ -428,41 +424,41 @@ try {
 
 ### 核心函数
 
-| 函数                                                 | 描述                                     |
-| ---------------------------------------------------- | ---------------------------------------- |
-| `parseCsv(input, options?)`                          | 同步 CSV 解析器                          |
-| `parseCsvAsync(input, options?)`                     | 异步解析器（字符串、流、异步可迭代对象） |
-| `parseCsvRows(input, options?)`                      | 异步生成器，逐行产出                     |
-| `parseCsvWithProgress(input, options?, onProgress?)` | 带进度报告的解析器                       |
-| `formatCsv(data, options?)`                          | 批量 CSV 格式化器                        |
+| 函数                                                  | 描述                                     |
+| ----------------------------------------------------- | ---------------------------------------- |
+| `Csv.parse(input, options?)`                          | 同步 CSV 解析器                          |
+| `Csv.parseAsync(input, options?)`                     | 异步解析器（字符串、流、异步可迭代对象） |
+| `Csv.parseRows(input, options?)`                      | 异步生成器，逐行产出                     |
+| `Csv.parseWithProgress(input, options?, onProgress?)` | 带进度报告的解析器                       |
+| `Csv.format(data, options?)`                          | 批量 CSV 格式化器                        |
 
 ### 流类
 
-| 类                                   | 描述                           |
-| ------------------------------------ | ------------------------------ |
-| `CsvParserStream`                    | 转换流：CSV 字节 -> 已解析的行 |
-| `CsvFormatterStream`                 | 转换流：行 -> CSV 文本         |
-| `createCsvParserStream(options?)`    | `CsvParserStream` 工厂函数     |
-| `createCsvFormatterStream(options?)` | `CsvFormatterStream` 工厂函数  |
+| 类                                    | 描述                           |
+| ------------------------------------- | ------------------------------ |
+| `Csv.ParserStream`                    | 转换流：CSV 字节 -> 已解析的行 |
+| `Csv.FormatterStream`                 | 转换流：行 -> CSV 文本         |
+| `Csv.createParserStream(options?)`    | `Csv.ParserStream` 工厂函数    |
+| `Csv.createFormatterStream(options?)` | `Csv.FormatterStream` 工厂函数 |
 
 ### 工具函数
 
-| 函数                             | 描述                   |
-| -------------------------------- | ---------------------- |
-| `detectDelimiter(input)`         | 自动检测 CSV 分隔符    |
-| `detectLinebreak(input)`         | 自动检测行终止符       |
-| `stripBom(input)`                | 去除 UTF-8 BOM         |
-| `applyDynamicTyping(value)`      | 将字符串转换为原生类型 |
-| `formatNumberForCsv(value, sep)` | 按区域格式化数字       |
-| `parseNumberFromCsv(value, sep)` | 解析区域格式化的数字   |
-| `deduplicateHeaders(headers)`    | 重命名重复表头         |
+| 函数                              | 描述                   |
+| --------------------------------- | ---------------------- |
+| `Csv.detectDelimiter(input)`      | 自动检测 CSV 分隔符    |
+| `Csv.detectLinebreak(input)`      | 自动检测行终止符       |
+| `Csv.stripBom(input)`             | 去除 UTF-8 BOM         |
+| `Csv.applyDynamicTyping(value)`   | 将字符串转换为原生类型 |
+| `Csv.formatNumber(value, sep)`    | 按区域格式化数字       |
+| `Csv.parseNumber(value, sep)`     | 解析区域格式化的数字   |
+| `Csv.deduplicateHeaders(headers)` | 重命名重复表头         |
 
 ### 生成器函数
 
-| 函数                           | 描述                          |
-| ------------------------------ | ----------------------------- |
-| `csvGenerate(options?)`        | 生成 CSV 字符串 + 数据        |
-| `csvGenerateRows(options?)`    | 同步生成器，逐行产出 CSV 行   |
-| `csvGenerateAsync(options?)`   | 异步生成器，支持延迟          |
-| `csvGenerateData(options?)`    | 生成原始数据（非 CSV 字符串） |
-| `createCsvGenerator(options?)` | 可复用的生成器工厂            |
+| 函数                            | 描述                          |
+| ------------------------------- | ----------------------------- |
+| `Csv.generate(options?)`        | 生成 CSV 字符串 + 数据        |
+| `Csv.generateRows(options?)`    | 同步生成器，逐行产出 CSV 行   |
+| `Csv.generateAsync(options?)`   | 异步生成器，支持延迟          |
+| `Csv.generateData(options?)`    | 生成原始数据（非 CSV 字符串） |
+| `Csv.createGenerator(options?)` | 可复用的生成器工厂            |

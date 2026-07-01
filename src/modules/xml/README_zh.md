@@ -5,15 +5,15 @@
 零依赖、跨平台的 XML 工具包，支持流式和缓冲两种模式的读写。
 
 ```typescript
-import { XmlWriter, SaxParser, parseXml, query } from "documonster/xml";
+import { Xml } from "documonster/xml";
 ```
 
 ## 功能特性
 
 - **零依赖** — 纯 TypeScript，无原生插件
 - **跨平台** — Node.js 和浏览器使用相同 API
-- **双模式写入** — 缓冲式（`XmlWriter`）和流式（`XmlStreamWriter`）
-- **双模式读取** — SAX 流式（`SaxParser`）和 DOM 树（`parseXml`）
+- **双模式写入** — 缓冲式（`Xml.Writer`）和流式（`Xml.StreamWriter`）
+- **双模式读取** — SAX 流式（`Xml.SaxParser`）和 DOM 树（`Xml.parse`）
 - **共享接口** — `XmlSink` 让渲染代码可以透明地同时适配两种写入模式
 - **XML 编码** — 快速实体编码/解码，支持特殊字符处理
 - **命名空间支持** — 完整的 XML 命名空间：前缀解析、保留命名空间强制、未绑定前缀检测
@@ -27,10 +27,10 @@ import { XmlWriter, SaxParser, parseXml, query } from "documonster/xml";
 ### 写入 XML（缓冲模式）
 
 ```typescript
-import { XmlWriter, StdDocAttributes } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const w = new XmlWriter();
-w.openXml(StdDocAttributes);
+const w = new Xml.Writer();
+w.openXml(Xml.StdDocAttributes);
 w.openNode("root", { version: "1.0" });
 w.leafNode("item", { id: "1" }, "hello");
 w.leafNode("item", { id: "2" }, "world");
@@ -44,11 +44,11 @@ console.log(w.xml);
 ### 写入 XML（流式模式）
 
 ```typescript
-import { XmlStreamWriter } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
 const chunks: string[] = [];
 const target = { write: (chunk: string) => chunks.push(chunk) };
-const sw = new XmlStreamWriter(target);
+const sw = new Xml.StreamWriter(target);
 
 sw.openXml();
 sw.openNode("root");
@@ -60,9 +60,9 @@ sw.closeNode();
 ### 读取 XML（SAX — 流式）
 
 ```typescript
-import { SaxParser } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const parser = new SaxParser();
+const parser = new Xml.SaxParser();
 parser.on("opentag", tag => console.log("open:", tag.name, tag.attributes));
 parser.on("text", text => console.log("text:", text));
 parser.on("closetag", tag => console.log("close:", tag.name));
@@ -73,12 +73,12 @@ parser.close();
 ### 读取 XML（DOM — 缓冲模式）
 
 ```typescript
-import { parseXml, findChild, textContent, attr } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const doc = parseXml('<root><item id="1">hello</item></root>');
-const item = findChild(doc.root, "item");
-console.log(attr(item!, "id")); // "1"
-console.log(textContent(item!)); // "hello"
+const doc = Xml.parse('<root><item id="1">hello</item></root>');
+const item = Xml.findChild(doc.root, "item");
+console.log(Xml.attr(item!, "id")); // "1"
+console.log(Xml.textContent(item!)); // "hello"
 ```
 
 ### XML 转换为普通对象
@@ -88,22 +88,22 @@ console.log(textContent(item!)); // "hello"
 两种入口适用于不同场景：
 
 ```typescript
-import { parseXml, toPlainObject, parseXmlToObject } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
 // 方式 1：已有 DOM 树
-const doc = parseXml('<root attr="1"><item>a</item><item>b</item></root>');
-const obj = toPlainObject(doc.root);
+const doc = Xml.parse('<root attr="1"><item>a</item><item>b</item></root>');
+const obj = Xml.toPlainObject(doc.root);
 // { root: { "@_attr": "1", item: ["a", "b"] } }
 
 // 方式 2：XML 字符串直接转换为普通对象（更快，单次 SAX 遍历）
-const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root>');
+const obj2 = Xml.parseToObject('<root attr="1"><item>a</item><item>b</item></root>');
 // 输出相同，中大型 XML 约快 1.6 倍
 ```
 
 **如何选择：**
 
-- `toPlainObject(element)` — 当你已经通过 `parseXml()` 获得了 `XmlElement`
-- `parseXmlToObject(xml)` — 当你只需要普通对象（跳过 DOM 分配）
+- `Xml.toPlainObject(element)` — 当你已经通过 `Xml.parse()` 获得了 `XmlElement`
+- `Xml.parseToObject(xml)` — 当你只需要普通对象（跳过 DOM 分配）
 
 **默认转换规则：**
 
@@ -113,28 +113,28 @@ const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root
 - 空元素变为 `""`
 - 仅含空白的缩进文本默认丢弃
 
-**局限性：** 普通对象转换是有损的 — 不保留元素顺序、注释或处理指令。如需精确的 XML 结构，请使用 `parseXml()` 并直接操作 DOM 树。
+**局限性：** 普通对象转换是有损的 — 不保留元素顺序、注释或处理指令。如需精确的 XML 结构，请使用 `Xml.parse()` 并直接操作 DOM 树。
 
 ### 查询引擎
 
 ```typescript
-import { parseXml, query, queryAll } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const doc = parseXml("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
-const first = query(doc.root, "a/b"); // 第一个 <b> 元素
-const all = queryAll(doc.root, "a/b"); // 所有 <b> 元素
-const indexed = queryAll(doc.root, "a/b[0]"); // 每个 <a> 下的第一个 <b>
-const filtered = query(doc.root, "a/b[@id='x']"); // id="x" 的 <b>
-const deep = queryAll(doc.root, "a//b"); // <a> 下任意深度的 <b>
+const doc = Xml.parse("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
+const first = Xml.query(doc.root, "a/b"); // 第一个 <b> 元素
+const all = Xml.queryAll(doc.root, "a/b"); // 所有 <b> 元素
+const indexed = Xml.queryAll(doc.root, "a/b[0]"); // 每个 <a> 下的第一个 <b>
+const filtered = Xml.query(doc.root, "a/b[@id='x']"); // id="x" 的 <b>
+const deep = Xml.queryAll(doc.root, "a//b"); // <a> 下任意深度的 <b>
 ```
 
 ### 编码/解码
 
 ```typescript
-import { xmlEncode, xmlDecode } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-xmlEncode('<tag attr="val">'); // "&lt;tag attr=&quot;val&quot;&gt;"
-xmlDecode("&lt;hello&gt;"); // "<hello>"
+Xml.encode('<tag attr="val">'); // "&lt;tag attr=&quot;val&quot;&gt;"
+Xml.decode("&lt;hello&gt;"); // "<hello>"
 ```
 
 ---
@@ -145,12 +145,12 @@ xmlDecode("&lt;hello&gt;"); // "<hello>"
 src/modules/xml/
 ├── types.ts              # 核心类型（XmlNode、XmlSink、SaxTag 等）
 ├── errors.ts             # XmlError、XmlParseError、XmlWriteError
-├── encode.ts             # xmlEncode、xmlDecode、validateXmlName、encodeCData 等
-├── writer.ts             # XmlWriter（缓冲式，支持回滚）
-├── stream-writer.ts      # XmlStreamWriter（流式，写入 WritableTarget）
-├── sax.ts                # SaxParser（事件驱动）+ parseSax（异步生成器）
-├── dom.ts                # parseXml + DOM 查询辅助函数 + toPlainObject
-├── to-object.ts          # parseXmlToObject（SAX 直接转换，单次遍历）
+├── encode.ts             # Xml.encode、Xml.decode、Xml.validateXmlName、Xml.encodeCData 等
+├── writer.ts             # Xml.Writer（缓冲式，支持回滚）
+├── stream-writer.ts      # Xml.StreamWriter（流式，写入 WritableTarget）
+├── sax.ts                # Xml.SaxParser（事件驱动）+ Xml.parseSax（异步生成器）
+├── dom.ts                # Xml.parse + DOM 查询辅助函数 + Xml.toPlainObject
+├── to-object.ts          # Xml.parseToObject（SAX 直接转换，单次遍历）
 ├── to-object-shared.ts   # 共享转换逻辑（内部使用）
 ├── query.ts              # 简化路径查询引擎
 ├── index.ts              # 公开 API barrel
@@ -161,11 +161,11 @@ src/modules/xml/
 
 ```
 XmlSink（接口）
-├── XmlWriter        — 在内存中构建 XML 字符串
+├── Xml.Writer        — 在内存中构建 XML 字符串
 │                      支持回滚/事务（save/commit/rollback）
 │                      适用于：中小型 XML、试探性写入
 │
-└── XmlStreamWriter  — 直接写入 WritableTarget
+└── Xml.StreamWriter  — 直接写入 WritableTarget
                        O(1) 内存 — 不持有完整文档
                        适用于：大型 XML（10万+ 行的工作表）
 ```
@@ -173,22 +173,22 @@ XmlSink（接口）
 ### 读取路径
 
 ```
-SaxParser            — 事件驱动的流式解析器
+Xml.SaxParser        — 事件驱动的流式解析器
 │                      通过 write() 输入数据块，事件同步触发
 │                      适用于：大型 XML、只需特定元素时
 │
-├── parseXml         — 构建 DOM 树（XmlDocument/XmlElement）
-│   │                  基于 SaxParser 构建 — 无重复解析逻辑
+├── Xml.parse        — 构建 DOM 树（XmlDocument/XmlElement）
+│   │                  基于 Xml.SaxParser 构建 — 无重复解析逻辑
 │   │                  适用于：中小型 XML、需要树遍历时
 │   │
-│   └── toPlainObject — 将 XmlElement DOM 转换为普通 JS 对象
+│   └── Xml.toPlainObject — 将 XmlElement DOM 转换为普通 JS 对象
 │                       适用于：已有 DOM 树时
 │
-├── parseXmlToObject — SAX 直接转换为普通 JS 对象（单次遍历，无 DOM）
-│                      比 parseXml + toPlainObject 快约 1.6 倍
+├── Xml.parseToObject — SAX 直接转换为普通 JS 对象（单次遍历，无 DOM）
+│                      比 Xml.parse + Xml.toPlainObject 快约 1.6 倍
 │                      适用于：XML 字符串 → 普通对象 → JSON.stringify
 │
-└── parseSax         — 包装 SaxParser 的异步生成器，用于流式迭代
+└── Xml.parseSax     — 包装 Xml.SaxParser 的异步生成器，用于流式迭代
                        适用于：异步管道（如从 zip 流中读取）
 ```
 
@@ -196,7 +196,7 @@ SaxParser            — 事件驱动的流式解析器
 
 ## API 参考
 
-### XmlWriter
+### Xml.Writer
 
 | 方法                            | 描述                      |
 | ------------------------------- | ------------------------- |
@@ -220,15 +220,15 @@ SaxParser            — 事件驱动的流式解析器
 | `currentElement`                | 最内层打开的元素名        |
 | `cursor`                        | 单调递增位置计数器        |
 
-### XmlStreamWriter
+### Xml.StreamWriter
 
-与 `XmlWriter` 方法相同（都实现 `XmlSink`），区别在于：
+与 `Xml.Writer` 方法相同（都实现 `XmlSink`），区别在于：
 
 - 无 `toString()` / `xml` — 内容已写入目标
 - 无 `save()` / `commit()` / `rollback()` — 流式写入不可逆
 - 无 `cursor` — 流式模式不适用
 
-### SaxParser
+### Xml.SaxParser
 
 | 方法 / 属性          | 描述                        |
 | -------------------- | --------------------------- |
@@ -253,19 +253,19 @@ SaxParser            — 事件驱动的流式解析器
 | `invalidCharHandling` | `"error"` | 如何处理无效 XML 字符（见下文）  |
 | `fileName`            | —         | 用于错误信息的文件名             |
 
-### parseSax（异步生成器）
+### Xml.parseSax（异步生成器）
 
 ```typescript
-async function* parseSax(
+Xml.parseSax(
   iterable: AsyncIterable<string | Uint8Array | ArrayBuffer>,
   options?: SaxOptions
 ): AsyncGenerator<SaxEventAny[]>
 ```
 
-### parseXml
+### Xml.parse
 
 ```typescript
-function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
+Xml.parse(xml: string, options?: XmlParseOptions): XmlDocument;
 ```
 
 **选项：**
@@ -292,18 +292,18 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
 
 ### DOM 辅助函数
 
-| 函数                     | 描述                   |
-| ------------------------ | ---------------------- |
-| `findChild(el, name)`    | 按名称查找第一个子元素 |
-| `findChildren(el, name)` | 按名称查找所有子元素   |
-| `textContent(node)`      | 递归获取文本内容       |
-| `attr(el, name)`         | 获取属性值             |
-| `walk(el, visitor)`      | 深度优先遍历           |
+| 函数                         | 描述                   |
+| ---------------------------- | ---------------------- |
+| `Xml.findChild(el, name)`    | 按名称查找第一个子元素 |
+| `Xml.findChildren(el, name)` | 按名称查找所有子元素   |
+| `Xml.textContent(node)`      | 递归获取文本内容       |
+| `Xml.attr(el, name)`         | 获取属性值             |
+| `Xml.walk(el, visitor)`      | 深度优先遍历           |
 
-### toPlainObject
+### Xml.toPlainObject
 
 ```typescript
-function toPlainObject(
+Xml.toPlainObject(
   element: XmlElement,
   options?: ToPlainObjectOptions
 ): Record<string, unknown>;
@@ -311,13 +311,13 @@ function toPlainObject(
 
 将 `XmlElement` DOM 树转换为普通 JavaScript 对象。
 
-### parseXmlToObject
+### Xml.parseToObject
 
 ```typescript
-function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
+Xml.parseToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
 ```
 
-将 XML 字符串在单次 SAX 遍历中直接转换为普通 JavaScript 对象。中大型 XML 比 `parseXml()` + `toPlainObject()` 快约 1.6 倍。
+将 XML 字符串在单次 SAX 遍历中直接转换为普通 JavaScript 对象。中大型 XML 比 `Xml.parse()` + `Xml.toPlainObject()` 快约 1.6 倍。
 
 **转换选项**（两个函数共用）：
 
@@ -331,7 +331,7 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
 | `preserveCData`        | `true`    | 在文本中包含 CDATA 值（与 `cdataAsNodes` 相关）      |
 | `ignoreWhitespaceText` | `true`    | 丢弃含有子元素的元素中仅含空白的文本                 |
 
-**解析器选项**（仅 `parseXmlToObject`）：
+**解析器选项**（仅 `Xml.parseToObject`）：
 
 | 选项                  | 默认值    | 描述                             |
 | --------------------- | --------- | -------------------------------- |
@@ -343,7 +343,7 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
 ### 查询引擎
 
 ```typescript
-import { query, queryAll } from "documonster/xml";
+import { Xml } from "documonster/xml";
 ```
 
 | 语法           | 描述                               |
@@ -354,21 +354,21 @@ import { query, queryAll } from "documonster/xml";
 | `a//c`         | 递归下降：`a` 下任意深度的 `c`     |
 | `a/b[0]`       | 索引：每个父级 `a` 下的第一个 `b`  |
 
-- `query(element, path)` — 第一个匹配项或 `undefined`
-- `queryAll(element, path)` — 所有匹配项（可能为空）
+- `Xml.query(element, path)` — 第一个匹配项或 `undefined`
+- `Xml.queryAll(element, path)` — 所有匹配项（可能为空）
 
 索引过滤器使用**逐父级语义**：`a/b[0]` 返回每个 `a` 下的第一个 `b`，而非全局第一个 `b`。
 
 ### 编码工具
 
-| 函数                        | 描述                                             |
-| --------------------------- | ------------------------------------------------ |
-| `xmlEncode(text)`           | 编码 XML 内容中的文本（`<`、`>`、`&`、`"`、`'`） |
-| `xmlDecode(text)`           | 将 XML 实体解码回文本                            |
-| `xmlEncodeAttr(value)`      | 编码属性值（与 `xmlEncode` 相同）                |
-| `validateXmlName(name)`     | 验证 XML 元素/属性名                             |
-| `validateCommentText(text)` | 验证 XML 注释内容文本                            |
-| `encodeCData(text)`         | 编码 CDATA 节的文本（拆分 `]]>`）                |
+| 函数                            | 描述                                             |
+| ------------------------------- | ------------------------------------------------ |
+| `Xml.encode(text)`              | 编码 XML 内容中的文本（`<`、`>`、`&`、`"`、`'`） |
+| `Xml.decode(text)`              | 将 XML 实体解码回文本                            |
+| `Xml.encodeAttr(value)`         | 编码属性值（与 `Xml.encode` 相同）               |
+| `Xml.validateXmlName(name)`     | 验证 XML 元素/属性名                             |
+| `Xml.validateCommentText(text)` | 验证 XML 注释内容文本                            |
+| `Xml.encodeCData(text)`         | 编码 CDATA 节的文本（拆分 `]]>`）                |
 
 ### 错误类型
 
@@ -403,11 +403,11 @@ import { query, queryAll } from "documonster/xml";
 - **实体扩展限制** — 防止 XML 炸弹攻击（可通过 `maxEntityExpansions` 配置）
 - **嵌套深度限制** — 防止深度嵌套 XML 导致的栈溢出（可通过 `maxDepth` 配置）
 - **重复属性拒绝** — XML 1.0 §3.1 WFC: Unique Att Spec（报告错误，以最后一个值恢复）
-- **名称注入防护** — 写入器通过 `validateXmlName()` 验证元素和属性名
-- **注释/CDATA 安全** — `validateCommentText()` 拒绝 `--`，`encodeCData()` 拆分 `]]>`
+- **名称注入防护** — 写入器通过 `Xml.validateXmlName()` 验证元素和属性名
+- **注释/CDATA 安全** — `Xml.validateCommentText()` 拒绝 `--`，`Xml.encodeCData()` 拆分 `]]>`
 - **BOM 处理** — 输入开头的 UTF-8 BOM 被静默去除
 - **原型污染防护** — DOM 属性映射使用空原型对象并过滤危险键
-- **无效字符处理** — 写入器通过 `xmlEncode()` 去除无效 XML 1.0 字符；解析器行为可通过 `invalidCharHandling` 配置
+- **无效字符处理** — 写入器通过 `Xml.encode()` 去除无效 XML 1.0 字符；解析器行为可通过 `invalidCharHandling` 配置
 
 ---
 
@@ -426,22 +426,22 @@ import { query, queryAll } from "documonster/xml";
 ### 示例
 
 ```typescript
-import { SaxParser, parseXml } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
 // 默认：严格模式 — 遇到 0x7F 时抛出异常
-parseXml("<root>hello\x7fworld</root>");
+Xml.parse("<root>hello\x7fworld</root>");
 // => XmlParseError: invalid XML character: 0x7f
 
 // skip 模式 — 无效字符被移除
-const doc = parseXml("<root>hello\x7fworld</root>", { invalidCharHandling: "skip" });
+const doc = Xml.parse("<root>hello\x7fworld</root>", { invalidCharHandling: "skip" });
 // doc.root 文本内容: "helloworld"
 
 // replace 模式 — 无效字符变为 U+FFFD
-const doc2 = parseXml("<root>hello\x7fworld</root>", { invalidCharHandling: "replace" });
+const doc2 = Xml.parse("<root>hello\x7fworld</root>", { invalidCharHandling: "replace" });
 // doc.root 文本内容: "hello\uFFFDworld"
 
 // SAX 解析器使用 skip 模式
-const parser = new SaxParser({ invalidCharHandling: "skip" });
+const parser = new Xml.SaxParser({ invalidCharHandling: "skip" });
 parser.on("text", text => console.log(text)); // "helloworld"
 parser.write("<root>hello\x7fworld</root>");
 parser.close();
@@ -453,4 +453,4 @@ parser.close();
 - **`"skip"`** — 用于读取不可信/脏数据 XML（如第三方 XLSX 文件），需要静默丢弃无效字符时。这是 Excel XLSX 读取器内部使用的模式。
 - **`"replace"`** — 用于需要保留无效字符*位置*的场景（如诊断或数据取证），同时不让解析器崩溃。
 
-> **注意：** XML _写入器_（`XmlWriter`、`XmlStreamWriter`）始终通过 `xmlEncode()` 去除无效字符 — 此选项仅影响*解析器*。
+> **注意：** XML _写入器_（`Xml.Writer`、`Xml.StreamWriter`）始终通过 `Xml.encode()` 去除无效字符 — 此选项仅影响*解析器*。

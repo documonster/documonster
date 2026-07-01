@@ -64,7 +64,10 @@ console.log(collector.chunks); // [2, 4, 6, 8, 10]
 浏览器兼容的 EventEmitter，提供类 Node.js API。
 
 ```typescript
-import { EventEmitter } from "documonster/stream";
+// 注意：documonster/stream 不导出 EventEmitter。流类
+// （Readable/Writable/Transform/Duplex）已提供 on/once/off/emit 等 API。
+// 如需独立的事件发射器，请从 Node.js 导入：
+import { EventEmitter } from "node:events";
 
 const emitter = new EventEmitter();
 
@@ -337,7 +340,7 @@ const text = binaryCollector.toString(); // Decode as UTF-8 string
 基于拉取的 Transform 流，支持模式匹配。适用于解析协议和文件格式。
 
 ```typescript
-import { createPullStream, stringToUint8Array, uint8ArrayToString } from "documonster/stream";
+import { createPullStream } from "documonster/stream";
 
 const pull = createPullStream();
 
@@ -796,24 +799,15 @@ isErrored(stream); // true if error occurred
 ## 二进制工具
 
 ```typescript
-import {
-  stringToUint8Array,
-  uint8ArrayToString,
-  uint8ArrayEquals,
-  uint8ArrayIndexOf,
-  concatUint8Arrays
-} from "documonster/stream";
+// 注意：这些二进制辅助函数并非由 documonster/stream 导出。
+// stringToUint8Array / uint8ArrayToString / concatUint8Arrays 可从
+// documonster/archive 获取；uint8ArrayEquals / uint8ArrayIndexOf 不属于
+// 任何公开子路径入口。
+import { stringToUint8Array, uint8ArrayToString, concatUint8Arrays } from "documonster/archive";
 
 // String <-> Uint8Array conversion (UTF-8)
 const bytes = stringToUint8Array("Hello, 世界!");
 const text = uint8ArrayToString(bytes);
-
-// Compare arrays for equality
-const isEqual = uint8ArrayEquals(arr1, arr2); // true/false
-
-// Find pattern in array (like indexOf)
-const index = uint8ArrayIndexOf(haystack, needle); // index or -1
-const indexFrom = uint8ArrayIndexOf(haystack, needle, startOffset);
 
 // Concatenate multiple arrays efficiently
 const combined = concatUint8Arrays([arr1, arr2, arr3]);
@@ -823,26 +817,21 @@ const combined = concatUint8Arrays([arr1, arr2, arr3]);
 
 ## Promise 工具
 
-### once
+### onceEvent
 
 等待来自 emitter 的单个事件。
 
 ```typescript
-import { once } from "documonster/stream";
+import { onceEvent } from "documonster/stream";
 
-// Wait for data event
-const [data] = await once(emitter, "data");
-console.log("Received:", data);
+// 等待单个事件（事件触发时 resolve 为 void）
+await onceEvent(emitter, "data");
+console.log("data event fired");
 
-// With timeout using AbortSignal
-const controller = new AbortController();
-setTimeout(() => controller.abort(), 5000);
-
-try {
-  const [data] = await once(emitter, "data", { signal: controller.signal });
-} catch (err) {
-  console.log("Timed out or aborted");
-}
+// 注意：onceEvent 仅接受 (emitter, event)，返回 Promise<void>。
+// 它不接受 AbortSignal，也不会以事件参数进行 resolve。
+// 若需要 Node 中可返回参数、支持 { signal } 的 `once`，请从 node:events 导入：
+//   import { once } from "node:events";
 ```
 
 ---
@@ -1136,7 +1125,6 @@ const data = collector.toUint8Array();
 
 | 类                            | 描述                   |
 | ----------------------------- | ---------------------- |
-| `EventEmitter`                | 浏览器兼容的事件发射器 |
 | `Readable`                    | 可读流类               |
 | `Writable`                    | 可写流类               |
 | `Transform`                   | 转换流类               |
@@ -1147,8 +1135,8 @@ const data = collector.toUint8Array();
 | `BufferedStream`              | 带内部缓冲的流         |
 | `ChunkedBuilder`              | 高效字符串构建器       |
 | `TransactionalChunkedBuilder` | 支持快照/回滚的构建器  |
-| `StringChunk`                 | 字符串数据块包装器     |
-| `BufferChunk`                 | 二进制数据块包装器     |
+| `createStringChunk()`         | 字符串数据块工厂函数   |
+| `createByteChunk()`           | 二进制数据块工厂函数   |
 
 ### 工厂函数
 
@@ -1172,28 +1160,28 @@ const data = collector.toUint8Array();
 
 ### 工具函数
 
-| 函数                   | 描述                 |
-| ---------------------- | -------------------- |
-| `pipeline()`           | 管道连接流并处理错误 |
-| `finished()`           | 等待流完成           |
-| `compose()`            | 组合多个转换流       |
-| `finishedAll()`        | 等待多个流完成       |
-| `addAbortSignal()`     | 为流添加中止信号     |
-| `once()`               | 等待单个事件         |
-| `promisify()`          | 将回调转换为 Promise |
-| `streamToUint8Array()` | 收集流为 Uint8Array  |
-| `streamToString()`     | 收集流为字符串       |
-| `drainStream()`        | 消费流但不收集数据   |
-| `copyStream()`         | 将源流复制到目标流   |
+| 函数                   | 描述                          |
+| ---------------------- | ----------------------------- |
+| `pipeline()`           | 管道连接流并处理错误          |
+| `finished()`           | 等待流完成                    |
+| `compose()`            | 组合多个转换流                |
+| `finishedAll()`        | 等待多个流完成                |
+| `addAbortSignal()`     | 为流添加中止信号              |
+| `onceEvent()`          | 等待单个事件；resolve 为 void |
+| `promisify()`          | 将回调转换为 Promise          |
+| `streamToUint8Array()` | 收集流为 Uint8Array           |
+| `streamToString()`     | 收集流为字符串                |
+| `drainStream()`        | 消费流但不收集数据            |
+| `copyStream()`         | 将源流复制到目标流            |
 
 ### 二进制工具
+
+以下辅助函数从 `documonster/archive` 重新导出（并非 `documonster/stream`）。
 
 | 函数                   | 描述                   |
 | ---------------------- | ---------------------- |
 | `stringToUint8Array()` | 将字符串转换为字节数组 |
 | `uint8ArrayToString()` | 将字节数组转换为字符串 |
-| `uint8ArrayEquals()`   | 比较两个数组是否相等   |
-| `uint8ArrayIndexOf()`  | 在数组中查找模式       |
 | `concatUint8Arrays()`  | 拼接多个数组           |
 
 ### 类型守卫

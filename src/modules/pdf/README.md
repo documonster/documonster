@@ -603,7 +603,7 @@ interface PdfMetadata {
 
 ### Page Sizes
 
-Built-in page sizes accessible via `PageSizes`:
+Built-in page sizes accessible via `Pdf.PageSizes`:
 
 | Name        | Dimensions (pt)  | Millimeters |
 | ----------- | ---------------- | ----------- |
@@ -945,7 +945,6 @@ page.drawSvgPath(d, { fill?, stroke?, lineWidth? });
 page.drawImage({ x, y, width, height, data, format });
 page.addAnnotation({ type, rect, ...options });
 page.addFormField({ type, name, rect, ...options });
-page.addLink({ rect, destPageIndex });
 
 doc.addBookmark(title, pageIndex, parent?);
 doc.generateTableOfContents({ title?, fontSize?, indent? });
@@ -964,7 +963,7 @@ const editor = Pdf.Editor.load(pdfBytes, { password? });
 
 // Page access
 const page = editor.getPage(index);    // Returns PdfEditorPage
-const count = editor.getPageCount();
+const count = editor.pageCount;         // getter, not a method
 
 // PdfEditorPage methods (same drawing API as PdfPageBuilder):
 page.drawText(text, options);

@@ -5,7 +5,7 @@
 零依赖、跨平台的归档工具包，用于创建、读取和编辑 ZIP 和 TAR 归档。
 
 ```typescript
-import { zip, unzip, ZipArchive, ZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 ```
 
 ## 功能特性
@@ -29,16 +29,16 @@ import { zip, unzip, ZipArchive, ZipReader } from "documonster/zip";
 ### 创建 ZIP
 
 ```typescript
-import { zip, ZipArchive } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // 便捷函数
-const archive = zip();
+const archive = Archive.zip();
 archive.add("hello.txt", "Hello, World!");
 archive.add("data.json", JSON.stringify({ key: "value" }));
 const bytes = await archive.bytes();
 
 // 使用选项
-const archive = zip({ level: 9, comment: "My archive" });
+const archive = Archive.zip({ level: 9, comment: "My archive" });
 archive.add("file.txt", content, { modTime: new Date() });
 archive.addDirectory("empty-dir/");
 archive.addSymlink("link.txt", "hello.txt");
@@ -48,9 +48,9 @@ const bytes = await archive.bytes();
 ### 读取 ZIP
 
 ```typescript
-import { unzip, ZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = unzip(zipBytes);
+const reader = Archive.unzip(zipBytes);
 for await (const entry of reader.entries()) {
   console.log(entry.path, entry.type);
   if (entry.type === "file") {
@@ -66,9 +66,9 @@ const data = await reader.bytes("hello.txt");
 ### 编辑 ZIP
 
 ```typescript
-import { editZip } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const editor = await editZip(existingZipBytes, { preserve: "best-effort" });
+const editor = await Archive.editZip(existingZipBytes, { preserve: "best-effort" });
 editor.delete("old.txt");
 editor.rename("a.txt", "renamed.txt");
 editor.set("new.txt", "new content");
@@ -84,10 +84,10 @@ const output = await editor.bytes();
 工厂函数，创建新的 `ZipArchive` 或 `TarArchive`。
 
 ```typescript
-import { zip } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const archive = zip(); // ZipArchive
-const tarArchive = zip({ format: "tar" }); // TarArchive
+const archive = Archive.zip(); // ZipArchive
+const tarArchive = Archive.zip({ format: "tar" }); // TarArchive
 ```
 
 ### `ZipArchive`
@@ -95,9 +95,9 @@ const tarArchive = zip({ format: "tar" }); // TarArchive
 流式 ZIP 归档构建器，支持链式调用。
 
 ```typescript
-import { ZipArchive } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const archive = new ZipArchive({ level: 6, reproducible: true });
+const archive = new Archive.ZipArchive({ level: 6, reproducible: true });
 
 // 添加条目（可链式调用）
 archive
@@ -150,11 +150,11 @@ for await (const chunk of op.iterable) { ... }
 打开归档进行读取。
 
 ```typescript
-import { unzip } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = unzip(zipBytes);
-const reader = unzip(zipBytes, { password: "secret" });
-const reader = unzip(tarBytes, { format: "tar" });
+const reader = Archive.unzip(zipBytes);
+const reader = Archive.unzip(zipBytes, { password: "secret" });
+const reader = Archive.unzip(tarBytes, { format: "tar" });
 ```
 
 ### `ZipReader`
@@ -162,9 +162,9 @@ const reader = unzip(tarBytes, { format: "tar" });
 流式 ZIP 读取器，支持随机访问。
 
 ```typescript
-import { ZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = new ZipReader(zipBytes);
+const reader = new Archive.ZipReader(zipBytes);
 
 // 流式迭代
 for await (const entry of reader.entries()) {
@@ -222,17 +222,17 @@ entry.discard();                  // 跳过不读取
 对现有 ZIP 归档进行文件系统式编辑。未变更的条目高效直通传递（保留原始压缩字节）。
 
 ```typescript
-import { editZip, editZipUrl, ZipEditor } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // 从字节
-const editor = await editZip(zipBytes, {
+const editor = await Archive.editZip(zipBytes, {
   reproducible: true,
   preserve: "best-effort",
   onWarning: w => console.warn(w.code, w.entry, w.message)
 });
 
 // 从 URL（HTTP Range 请求）
-const editor = await editZipUrl("https://example.com/archive.zip");
+const editor = await Archive.editZipUrl("https://example.com/archive.zip");
 
 // 操作
 editor.has("file.txt");               // 检查存在
@@ -243,9 +243,9 @@ editor.rename("a.txt", "b.txt");      // 重命名条目
 editor.setComment("Updated archive"); // 设置归档注释
 
 // 可复用的编辑计划
-import { ZipEditPlan } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const plan = new ZipEditPlan();
+const plan = new Archive.ZipEditPlan();
 plan.set("config.json", newConfig);
 plan.delete("temp/");
 editor.apply(plan);
@@ -263,9 +263,9 @@ for await (const chunk of editor.stream()) { ... }
 通过 HTTP Range 请求读取 ZIP 文件 — 只下载你需要的条目。
 
 ```typescript
-import { RemoteZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = await RemoteZipReader.open("https://example.com/large.zip");
+const reader = await Archive.RemoteZipReader.open("https://example.com/large.zip");
 
 // 元数据（尚未下载内容）
 const entries = reader.getEntries();
@@ -287,7 +287,7 @@ const results = await reader.extractMultiple(["a.txt", "b.txt"]);
 await reader.extractToStream("large-file.bin", writableStream);
 
 // 密码保护的归档
-const reader = await RemoteZipReader.open(url);
+const reader = await Archive.RemoteZipReader.open(url);
 const isValid = await reader.checkPassword("secret.txt", "mypassword");
 const data = await reader.extract("secret.txt", { password: "mypassword" });
 
@@ -323,7 +323,7 @@ import {
   decompressAuto,
   decompressAutoSync,
   detectCompressionFormat
-} from "documonster/zip";
+} from "documonster/archive";
 
 // DEFLATE-RAW（ZIP 文件使用）
 const compressed = await compress(data, { level: 9 });
@@ -354,7 +354,7 @@ import {
   createZlibStream,
   createUnzlibStream,
   hasDeflateRaw
-} from "documonster/zip";
+} from "documonster/archive";
 
 // DEFLATE-RAW 流式
 const deflater = createDeflateStream({ level: 6 });
@@ -375,7 +375,7 @@ hasDeflateRaw(); // Node.js 中为 true，浏览器取决于 CompressionStream
 ### CRC32
 
 ```typescript
-import { crc32, crc32Update, crc32Finalize } from "documonster/zip";
+import { crc32, crc32Update, crc32Finalize } from "documonster/archive";
 
 // 一次性
 const checksum = crc32(data);
@@ -396,16 +396,16 @@ const checksum = crc32Finalize(state);
 ### 创建 TAR 归档
 
 ```typescript
-import { tar, TarArchive } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // 便捷函数
-const tarBytes = await tar(
+const tarBytes = await Archive.tar(
   new Map([["file.txt", "content"], ["data.bin", uint8Array]]),
   { modTime: new Date() }
 );
 
 // 构建器 API（与 ZipArchive 相同）
-const archive = new TarArchive();
+const archive = new Archive.TarArchive();
 archive
   .add("file.txt", "content", { mode: 0o755 })
   .addDirectory("dir/")
@@ -418,13 +418,13 @@ for await (const chunk of archive.stream()) { ... }
 ### 读取 TAR 归档
 
 ```typescript
-import { unzip, TarReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // 通过统一 API
-const reader = unzip(tarBytes, { format: "tar" });
+const reader = Archive.unzip(tarBytes, { format: "tar" });
 
 // 直接使用
-const reader = new TarReader(tarBytes);
+const reader = new Archive.TarReader(tarBytes);
 for await (const entry of reader.entries()) {
   console.log(entry.path, entry.isDirectory);
   const data = await entry.bytes();
@@ -438,7 +438,7 @@ const paths = await reader.list();
 ### TAR + GZIP（仅 Node.js）
 
 ```typescript
-import { targz, TarGzArchive, parseTarGz, untargz } from "documonster/zip";
+import { targz, TarGzArchive, parseTarGz, untargz } from "documonster/archive";
 
 // 创建 .tar.gz
 const tgzBytes = await targz(
@@ -469,7 +469,7 @@ const files = await untargz(tgzBytes);
 高级 `ArchiveFile` 类，支持磁盘 I/O、glob 模式、目录遍历和提取。
 
 ```typescript
-import { ArchiveFile } from "documonster/zip";
+import { ArchiveFile } from "documonster/archive";
 
 // 从零创建
 const af = new ArchiveFile();
@@ -515,16 +515,16 @@ await tar.writeToFile("archive.tar");
 支持 ZIP 传统加密（旧版）和 AES-256 加密。
 
 ```typescript
-import { ZipArchive, unzip, RemoteZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // 加密条目（读取时自动处理）
-const reader = unzip(encryptedZip, { password: "secret" });
+const reader = Archive.unzip(encryptedZip, { password: "secret" });
 for await (const entry of reader.entries()) {
   const data = await entry.bytes(); // 自动解密
 }
 
 // 远程加密 ZIP
-const remote = await RemoteZipReader.open(url);
+const remote = await Archive.RemoteZipReader.open(url);
 const data = await remote.extract("secret.txt", { password: "mypassword" });
 
 // 无需完整提取即可验证密码
@@ -550,7 +550,7 @@ import {
   RangeNotSupportedError,
   HttpRangeError,
   AbortError
-} from "documonster/zip";
+} from "documonster/archive";
 ```
 
 ---
@@ -559,29 +559,29 @@ import {
 
 ### 高级函数
 
-| 函数                         | 描述                       |
-| ---------------------------- | -------------------------- |
-| `zip(options?)`              | 创建新归档（ZIP 或 TAR）   |
-| `unzip(source, options?)`    | 打开归档进行读取           |
-| `editZip(source, options?)`  | 打开 ZIP 进行编辑          |
-| `editZipUrl(url, options?)`  | 打开远程 ZIP 进行编辑      |
-| `tar(entries, options?)`     | 从条目创建 TAR（异步）     |
-| `tarSync(entries, options?)` | 从条目创建 TAR（同步）     |
-| `targz(entries, options?)`   | 创建 .tar.gz（仅 Node.js） |
+| 函数                                 | 描述                       |
+| ------------------------------------ | -------------------------- |
+| `Archive.zip(options?)`              | 创建新归档（ZIP 或 TAR）   |
+| `Archive.unzip(source, options?)`    | 打开归档进行读取           |
+| `Archive.editZip(source, options?)`  | 打开 ZIP 进行编辑          |
+| `Archive.editZipUrl(url, options?)`  | 打开远程 ZIP 进行编辑      |
+| `Archive.tar(entries, options?)`     | 从条目创建 TAR（异步）     |
+| `Archive.tarSync(entries, options?)` | 从条目创建 TAR（同步）     |
+| `targz(entries, options?)`           | 创建 .tar.gz（仅 Node.js） |
 
 ### 类
 
-| 类                | 描述                          |
-| ----------------- | ----------------------------- |
-| `ZipArchive`      | 流式 ZIP 构建器               |
-| `ZipReader`       | 流式 ZIP 读取器               |
-| `UnzipEntry`      | 单个归档条目                  |
-| `ZipEditor`       | 编辑现有 ZIP 归档             |
-| `TarArchive`      | 流式 TAR 构建器               |
-| `TarReader`       | 流式 TAR 读取器               |
-| `TarGzArchive`    | TAR + GZIP 构建器（Node.js）  |
-| `RemoteZipReader` | 基于 HTTP Range 的 ZIP 读取器 |
-| `ArchiveFile`     | 文件系统集成（Node.js）       |
+| 类                        | 描述                          |
+| ------------------------- | ----------------------------- |
+| `Archive.ZipArchive`      | 流式 ZIP 构建器               |
+| `Archive.ZipReader`       | 流式 ZIP 读取器               |
+| `Archive.UnzipEntry`      | 单个归档条目                  |
+| `Archive.ZipEditor`       | 编辑现有 ZIP 归档             |
+| `Archive.TarArchive`      | 流式 TAR 构建器               |
+| `Archive.TarReader`       | 流式 TAR 读取器               |
+| `TarGzArchive`            | TAR + GZIP 构建器（Node.js）  |
+| `Archive.RemoteZipReader` | 基于 HTTP Range 的 ZIP 读取器 |
+| `ArchiveFile`             | 文件系统集成（Node.js）       |
 
 ### 压缩
 

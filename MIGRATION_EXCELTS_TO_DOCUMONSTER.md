@@ -1,8 +1,8 @@
 # Migration Guide: `@cj-tech-master/excelts` → `documonster`
 
-This guide describes every breaking change introduced by the `documonster` v11
-release (previously published as `@cj-tech-master/excelts` v10). It is written
-to be followed mechanically: an AI or a developer can rewrite an existing
+This guide describes every breaking change introduced when the package
+`@cj-tech-master/excelts` was renamed and restructured into `documonster`. It is
+written to be followed mechanically: an AI or a developer can rewrite an existing
 `excelts` codebase to `documonster` by applying the rules below in order.
 
 > **TL;DR of the four biggest changes**
@@ -28,7 +28,6 @@ to be followed mechanically: an AI or a developer can rewrite an existing
 | Aspect             | Old (`excelts`)           | New (`documonster`)                     |
 | ------------------ | ------------------------- | --------------------------------------- |
 | Package name       | `@cj-tech-master/excelts` | `documonster`                           |
-| Version            | `10.x`                    | `11.0.0`                                |
 | License            | MIT                       | Apache-2.0                              |
 | Root `.` export    | present (Excel API)       | **removed**                             |
 | `./browser` export | present                   | **removed** (per-module browser builds) |
