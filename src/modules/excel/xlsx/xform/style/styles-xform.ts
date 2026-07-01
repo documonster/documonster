@@ -31,8 +31,19 @@ interface StylesModel {
   dxfs?: DxfStyle[];
 }
 
+/** xf-level boolean attributes (pivotButton + apply* flags). */
+interface XfFlags {
+  pivotButton?: boolean;
+  applyNumberFormat?: boolean;
+  applyFont?: boolean;
+  applyFill?: boolean;
+  applyBorder?: boolean;
+  applyAlignment?: boolean;
+  applyProtection?: boolean;
+}
+
 /** Internal xf reference: a cell style expressed as indices into the collections. */
-interface StyleRef {
+interface StyleRef extends XfFlags {
   numFmtId?: number;
   fontId?: number;
   fillId?: number;
@@ -42,14 +53,14 @@ interface StyleRef {
   protection?: Partial<Protection>;
   checkbox?: boolean;
   xfComplementIndex?: number;
-  pivotButton?: boolean;
-  applyNumberFormat?: boolean;
-  applyFont?: boolean;
-  applyFill?: boolean;
-  applyBorder?: boolean;
-  applyAlignment?: boolean;
-  applyProtection?: boolean;
 }
+
+/**
+ * A built style model: the public {@link Style} plus the xf-level flags that the
+ * read path preserves for round-tripping. `font`/`border`/`fill` are optional
+ * here because they are filled in incrementally while building from a StyleRef.
+ */
+type StyleModelEntry = Partial<Style> & XfFlags;
 
 /** A differential-formatting style: a cell style plus a registered numFmtId. */
 type DxfStyle = Partial<Style> & { numFmtId?: number };
@@ -65,7 +76,7 @@ interface StyleIndex {
   font?: { [key: string]: number };
   border?: { [key: string]: number };
   fill?: { [key: string]: number };
-  model?: Style[];
+  model?: StyleModelEntry[];
 }
 
 // =============================================================================
@@ -437,13 +448,13 @@ class StylesXform extends BaseXform {
     }
 
     // have we built this model before?
-    let model = this.index!.model![id];
-    if (model) {
-      return model;
+    const existing = this.index!.model![id];
+    if (existing) {
+      return existing as Style;
     }
 
     // build a new model
-    model = this.index!.model![id] = {} as Style;
+    const model: StyleModelEntry = (this.index!.model![id] = {});
 
     // -------------------------------------------------------
     // number format
@@ -456,18 +467,22 @@ class StylesXform extends BaseXform {
       }
     }
 
-    function addStyle(name: "font" | "border" | "fill", group: unknown[], styleId?: number): void {
+    function addStyle<K extends "font" | "border" | "fill">(
+      name: K,
+      group: NonNullable<Style[K]>[],
+      styleId?: number
+    ): void {
       if (styleId || styleId === 0) {
         const part = group[styleId];
         if (part) {
-          (model as unknown as Record<string, unknown>)[name] = part;
+          model[name] = part;
         }
       }
     }
 
-    addStyle("font", this.model.fonts!, style.fontId);
-    addStyle("border", this.model.borders!, style.borderId);
-    addStyle("fill", this.model.fills!, style.fillId);
+    addStyle("font", this.model.fonts as NonNullable<Style["font"]>[], style.fontId);
+    addStyle("border", this.model.borders as NonNullable<Style["border"]>[], style.borderId);
+    addStyle("fill", this.model.fills as NonNullable<Style["fill"]>[], style.fillId);
 
     // -------------------------------------------------------
     // alignment
@@ -483,7 +498,7 @@ class StylesXform extends BaseXform {
 
     // -------------------------------------------------------
     // xf-level attributes (pivotButton, apply* flags)
-    const xfFlags = [
+    const xfFlags: (keyof XfFlags)[] = [
       "pivotButton",
       "applyNumberFormat",
       "applyFont",
@@ -491,14 +506,14 @@ class StylesXform extends BaseXform {
       "applyBorder",
       "applyAlignment",
       "applyProtection"
-    ] as const;
+    ];
     for (const flag of xfFlags) {
       if (style[flag]) {
-        (model as unknown as Record<string, unknown>)[flag] = true;
+        model[flag] = true;
       }
     }
 
-    return model;
+    return model as Style;
   }
 
   addDxfStyle(style: DxfStyle): number {

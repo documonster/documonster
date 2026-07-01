@@ -1092,7 +1092,7 @@ describe("excelToPdf", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Cell.setValue(ws, "A1", "☐✓⧇");
-      Cell.setStyle(ws, "A1", { alignment: { textRotation: "vertical" as unknown as number } });
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: "vertical" } });
       Row.setHeight(ws, 1, 80);
       Column.setWidth(ws, "A", 20);
 

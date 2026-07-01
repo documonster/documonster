@@ -29,7 +29,7 @@ function createDoc(opts: {
     abstractNumberings: opts.abstractNumberings,
     numberingInstances: opts.numberingInstances,
     docDefaults: opts.docDefaults
-  } as unknown as DocxDocument;
+  };
 }
 
 describe("resolveRunStyle", () => {

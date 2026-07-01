@@ -49,8 +49,9 @@ class IconSetXform extends CompositeXform<IconSetModel> {
     };
   }
 
-  onParserClose(name: string, parser: BaseXform): void {
-    (this.model as unknown as Record<string, unknown[]>)[name].push(parser.model);
+  onParserClose(_name: string, _parser: BaseXform): void {
+    // The only child xform is `cfvo`; append its precisely-typed model.
+    this.model!.cfvo.push(this.cfvoXform.model!);
   }
 }
 

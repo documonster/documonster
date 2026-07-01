@@ -124,7 +124,7 @@ describe("buildWorkbookSnapshot: error value sanitization (R8)", () => {
   it("preserves known Excel error codes", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Cell.setValue(ws, "A1", { error: "#N/A" } as unknown as string);
+    Cell.setValue(ws, "A1", { error: "#N/A" });
     const snap = buildWorkbookSnapshot(toWorkbookLike(wb));
     const v = snap.worksheets[0].cells.get(snapshotCellKey(1, 1))?.value;
     expect(v).toEqual({ error: "#N/A" });

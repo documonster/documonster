@@ -11,6 +11,8 @@ interface ListChildXform<TChild> {
   prepare(model: TChild, options?: unknown): void;
   render(xmlStream: XmlSink, model: TChild, index?: number): void;
   parseOpen(node: ParseOpenTag): boolean | void;
+  parseText(text: string): void;
+  parseClose(name: string): boolean;
   reconcile(model: TChild, options?: unknown): void;
   reset(): void;
   model?: unknown;
@@ -39,7 +41,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
   declare public $?: XmlAttributes;
   declare protected childXform: ListChildXform<TChild>;
   declare protected maxItems?: number;
-  declare public parser?: BaseXform;
+  declare public parser?: ListChildXform<TChild>;
 
   constructor(options: ListXformOptions) {
     super();
@@ -92,7 +94,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
       return true;
     }
     if (this.childXform.parseOpen(node)) {
-      this.parser = this.childXform as unknown as BaseXform;
+      this.parser = this.childXform;
       return true;
     }
     return false;

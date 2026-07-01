@@ -9,6 +9,7 @@ import { applyPatchesToDocument } from "../patcher";
 import type {
   DocxDocument,
   DrawingShape,
+  Hyperlink,
   ImageDef,
   Paragraph,
   Run,
@@ -489,7 +490,7 @@ describe("applyPatchesToDocument: visible-run coverage", () => {
       { placeholder: "{{site}}", content: { type: "text", text: "Acme" } }
     ]);
     const p = result.body[0] as Paragraph;
-    const hl = p.children[0] as unknown as { children: Run[] };
+    const hl = p.children[0] as Hyperlink;
     const txt = (hl.children[0].content[0] as { type: "text"; text: string }).text;
     expect(txt).toBe("Visit Acme");
   });
@@ -549,7 +550,7 @@ describe("applyPatchesToDocument: visible-run coverage", () => {
     const p = result.body[0] as Paragraph;
     const t0 = ((p.children[0] as Run).content[0] as { type: "text"; text: string }).text;
     const t1 = (
-      (p.children[1] as unknown as { children: Run[] }).children[0].content[0] as {
+      (p.children[1] as Hyperlink).children[0].content[0] as {
         type: "text";
         text: string;
       }

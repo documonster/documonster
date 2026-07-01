@@ -1,15 +1,9 @@
+import type { Color } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface ColorModel {
-  argb?: string;
-  theme?: number;
-  tint?: number;
-  indexed?: number;
-}
-
 // Color encapsulates translation from color model to/from xlsx
-class ColorXform extends BaseXform {
+class ColorXform extends BaseXform<Partial<Color>> {
   declare private name: string;
 
   constructor(name?: string) {
@@ -23,7 +17,7 @@ class ColorXform extends BaseXform {
     return this.name;
   }
 
-  render(xmlStream: XmlSink, model?: ColorModel): boolean {
+  render(xmlStream: XmlSink, model?: Partial<Color>): boolean {
     if (model) {
       xmlStream.openNode(this.name);
       if (model.argb) {

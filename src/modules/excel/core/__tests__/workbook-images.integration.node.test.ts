@@ -969,7 +969,7 @@ describe("Workbook", () => {
       const ws = Workbook.addWorksheet(wb, "svg");
 
       const imageId = addWorkbookImage(wb, {
-        buffer: pngBytes as unknown as Buffer,
+        buffer: pngBytes,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
@@ -1004,7 +1004,7 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "svg");
       const imageId = addWorkbookImage(wb, {
-        buffer: pngBytes as unknown as Buffer,
+        buffer: pngBytes,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
@@ -1012,7 +1012,7 @@ describe("Workbook", () => {
 
       const buffer = await Workbook.toBuffer(wb);
       const { unzip } = await import("@archive/read-archive");
-      const reader = unzip(buffer as unknown as Uint8Array);
+      const reader = unzip(buffer);
       const entries: Record<string, string> = {};
       for await (const entry of reader.entries()) {
         const bytes = await entry.bytes();
@@ -1036,7 +1036,7 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "svg");
       const imageId = addWorkbookImage(wb, {
-        buffer: pngBytes as unknown as Buffer,
+        buffer: pngBytes,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
@@ -1045,7 +1045,7 @@ describe("Workbook", () => {
 
       const buffer = await Workbook.toBuffer(wb);
       const { unzip } = await import("@archive/read-archive");
-      const reader = unzip(buffer as unknown as Uint8Array);
+      const reader = unzip(buffer);
       const entries: Record<string, string> = {};
       for await (const entry of reader.entries()) {
         const bytes = await entry.bytes();
@@ -1065,7 +1065,7 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "svg");
       const imageId = addWorkbookImage(wb, {
-        buffer: pngBytes as unknown as Buffer,
+        buffer: pngBytes,
         extension: "png",
         svg: { buffer: SVG_BYTES }
       });
@@ -1074,12 +1074,12 @@ describe("Workbook", () => {
       // First round-trip.
       const buf1 = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await Workbook.read(wb2, buf1 as unknown as Uint8Array);
+      await Workbook.read(wb2, buf1);
 
       // Second round-trip from the re-read workbook.
       const buf2 = await Workbook.toBuffer(wb2);
       const { unzip } = await import("@archive/read-archive");
-      const reader = unzip(buf2 as unknown as Uint8Array);
+      const reader = unzip(buf2);
       const entries: Record<string, string> = {};
       for await (const entry of reader.entries()) {
         const bytes = await entry.bytes();
@@ -1089,7 +1089,7 @@ describe("Workbook", () => {
       expect(entries[drawingKey]).toContain("asvg:svgBlip");
 
       const wb3 = Workbook.create();
-      await Workbook.read(wb3, buf2 as unknown as Uint8Array);
+      await Workbook.read(wb3, buf2);
       const raster = getImage(wb3, getImages(Workbook.getWorksheet(wb3, "svg")!)[0].imageId!);
       expect(Buffer.compare(pngBytes, raster!.buffer as Uint8Array)).toBe(0);
       const svgMediaId = (raster as { svgMediaId?: number }).svgMediaId;

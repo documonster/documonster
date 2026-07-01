@@ -491,10 +491,16 @@ class WorksheetReader extends EventEmitter {
               if (hyperlinks) {
                 const hyperlink = hyperlinks[c.ref];
                 if (hyperlink) {
-                  // Streaming-specific: assign text and hyperlink for further processing
-                  (cell as unknown as { text: unknown }).text = cellGetValue(cell);
+                  // Streaming-specific: stash the cell's value as `text` and
+                  // attach the hyperlink so downstream processing can pick them
+                  // up. These fields are not part of the standard CellData.
+                  const streamingCell = cell as typeof cell & {
+                    text?: ReturnType<typeof cellGetValue>;
+                    hyperlink?: WorksheetHyperlink;
+                  };
+                  streamingCell.text = cellGetValue(cell);
                   cellSetValue(cell, undefined);
-                  (cell as unknown as { hyperlink: unknown }).hyperlink = hyperlink;
+                  streamingCell.hyperlink = hyperlink;
                 }
               }
               c = null;

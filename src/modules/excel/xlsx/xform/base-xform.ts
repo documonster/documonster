@@ -103,9 +103,10 @@ class BaseXform<TModel = any> {
     }
   }
 
-  mergeModel(obj: any): void {
+  mergeModel(obj: Partial<TModel>): void {
     // set obj's props to this.model
-    this.model = Object.assign(this.model || ({} as any), obj);
+    const base: object = (this.model as object | undefined) ?? {};
+    this.model = Object.assign(base, obj) as TModel;
   }
 
   async parse(saxParser: AsyncIterable<SaxEvent[]>): Promise<TModel | undefined> {

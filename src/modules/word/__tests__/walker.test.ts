@@ -18,7 +18,7 @@ function para(t: string, props?: Paragraph["properties"]): Paragraph {
 }
 
 function createDoc(body: BodyContent[]): DocxDocument {
-  return { body, contentTypes: [] } as unknown as DocxDocument;
+  return { body };
 }
 
 describe("walkDocument", () => {
@@ -462,7 +462,7 @@ describe("walker coverage of mixed body content", () => {
       type: "sdt",
       content: [textRun("inside-sdt")],
       properties: {}
-    } as unknown as BodyContent;
+    } satisfies BodyContent;
     const doc = createDoc([sdt]);
     const runs: string[] = [];
     walkDocument(doc, {
@@ -480,7 +480,7 @@ describe("walker coverage of mixed body content", () => {
     const toc = {
       type: "tableOfContents",
       cachedParagraphs: [para("toc-cached")]
-    } as unknown as BodyContent;
+    } satisfies BodyContent;
     const doc = createDoc([toc]);
     const seen: string[] = [];
     walkDocument(doc, {
@@ -514,7 +514,7 @@ describe("mapDocument coverage of textBox / TOC / DrawingShape", () => {
     const tb = {
       type: "textBox",
       content: [para("orig-tb")]
-    } as unknown as BodyContent;
+    } satisfies BodyContent;
     const doc = createDoc([tb]);
     const result = mapDocument(doc, {
       transformParagraph(p) {
@@ -522,7 +522,10 @@ describe("mapDocument coverage of textBox / TOC / DrawingShape", () => {
         return { ...p, children: [newRun] };
       }
     });
-    const newTb = result.body[0] as unknown as { content: Paragraph[] };
+    const newTb = result.body[0];
+    if (newTb.type !== "textBox") {
+      throw new Error("expected textBox");
+    }
     const txt = ((newTb.content[0].children[0] as Run).content[0] as { text: string }).text;
     expect(txt).toBe("MAPPED");
   });
@@ -531,7 +534,7 @@ describe("mapDocument coverage of textBox / TOC / DrawingShape", () => {
     const toc = {
       type: "tableOfContents",
       cachedParagraphs: [para("orig-toc")]
-    } as unknown as BodyContent;
+    } satisfies BodyContent;
     const doc = createDoc([toc]);
     const result = mapDocument(doc, {
       transformParagraph(p) {
@@ -539,8 +542,11 @@ describe("mapDocument coverage of textBox / TOC / DrawingShape", () => {
         return { ...p, children: [newRun] };
       }
     });
-    const newToc = result.body[0] as unknown as { cachedParagraphs: Paragraph[] };
-    const txt = ((newToc.cachedParagraphs[0].children[0] as Run).content[0] as { text: string })
+    const newToc = result.body[0];
+    if (newToc.type !== "tableOfContents") {
+      throw new Error("expected tableOfContents");
+    }
+    const txt = ((newToc.cachedParagraphs![0].children[0] as Run).content[0] as { text: string })
       .text;
     expect(txt).toBe("MAPPED");
   });
@@ -557,8 +563,11 @@ describe("mapDocument coverage of textBox / TOC / DrawingShape", () => {
         return { ...p, children: [newRun] };
       }
     });
-    const newShape = result.body[0] as unknown as { textContent: Paragraph[] };
-    const txt = ((newShape.textContent[0].children[0] as Run).content[0] as { text: string }).text;
+    const newShape = result.body[0];
+    if (newShape.type !== "drawingShape") {
+      throw new Error("expected drawingShape");
+    }
+    const txt = ((newShape.textContent![0].children[0] as Run).content[0] as { text: string }).text;
     expect(txt).toBe("MAPPED");
   });
 });

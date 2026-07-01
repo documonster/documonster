@@ -44,8 +44,10 @@ export function bytesToBase64(data: Uint8Array): string {
   const parts: string[] = [];
   for (let i = 0; i < data.length; i += CHUNK) {
     const slice = data.subarray(i, i + CHUNK);
-    // `apply` on Uint8Array works in all modern JS engines
-    parts.push(String.fromCharCode.apply(null, slice as unknown as number[]));
+    // Spread the chunk: Uint8Array is iterable as numbers, so this is type-safe
+    // and avoids the per-character O(n²) concat of a manual loop. CHUNK stays
+    // well within the engine argument-count limit.
+    parts.push(String.fromCharCode(...slice));
   }
   return btoa(parts.join(""));
 }

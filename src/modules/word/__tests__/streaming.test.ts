@@ -213,7 +213,7 @@ describe("StreamingDocxWriter", () => {
                   children: [{ content: [{ type: "text", text: "fn" }] }]
                 }
               ]
-            } as unknown as BodyContent as never
+            }
           ]
         }
       ] as never,
@@ -230,7 +230,7 @@ describe("StreamingDocxWriter", () => {
                   children: [{ content: [{ type: "text", text: "en" }] }]
                 }
               ]
-            } as unknown as BodyContent as never
+            }
           ]
         }
       ] as never,
@@ -248,7 +248,7 @@ describe("StreamingDocxWriter", () => {
                   children: [{ content: [{ type: "text", text: "cm" }] }]
                 }
               ]
-            } as unknown as BodyContent as never
+            }
           ]
         } as CommentDef
       ]

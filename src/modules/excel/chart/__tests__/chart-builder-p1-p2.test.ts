@@ -2003,7 +2003,7 @@ describe("P2: chart SVG/PDF renderer", () => {
           ]
         }
       }
-    } as unknown as ChartModel;
+    };
     const svg = renderChartSvg(model, { width: 400, height: 240 });
     // The blank at index 2 must split the polyline into two separate
     // `<polyline>` elements — one for indices 0-1, one for indices
@@ -2113,7 +2113,7 @@ describe("P2: chart SVG/PDF renderer", () => {
           ]
         }
       }
-    } as unknown as ChartModel;
+    };
     const scene = buildChartScene(model, { width: 400, height: 260 });
     const series = scene.series[0];
     if (series.type !== "bar" || !series.errorBars) {
@@ -2234,7 +2234,7 @@ describe("P2: chart SVG/PDF renderer", () => {
           ]
         }
       }
-    } as unknown as ChartModel;
+    };
     const scene = buildChartScene(model, { width: 300, height: 200 });
     // Left axis (`axPos=l`) is the Y axis in a column chart; its stroke
     // colour must come from the raw-XML `<a:srgbClr val="FF00AA"/>`.

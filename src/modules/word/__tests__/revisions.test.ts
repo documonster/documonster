@@ -19,9 +19,8 @@ import type {
 // Helper to create a minimal document
 function createDoc(paragraphs: Paragraph[]): DocxDocument {
   return {
-    body: paragraphs,
-    contentTypes: []
-  } as unknown as DocxDocument;
+    body: paragraphs
+  };
 }
 
 // Helper to create a run

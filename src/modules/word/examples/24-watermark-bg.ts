@@ -106,12 +106,6 @@ fs.mkdirSync(outDir, { recursive: true });
     0x00, 0x9e, 0x57, 0xb3, 0x16, 0xdc, 0x92, 0x57, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
     0x44, 0xae, 0x42, 0x60, 0x82
   ]);
-  // Store directly in the model so the watermark can reference it.
-  const handle = d as unknown as {
-    _state: {
-      images: Array<{ data: Uint8Array; mediaType: string; fileName: string; rId: string }>;
-    };
-  };
   // We use the public addImage path which assigns a stable rId then strip
   // the inserted body paragraph: only the image part survives in the package.
   const imgInfo = Document.addImage(d, logoPng, "png", Units.cmToTwips(5), Units.cmToTwips(2), {
@@ -120,7 +114,6 @@ fs.mkdirSync(outDir, { recursive: true });
   });
   // Pop the auto-inserted body paragraph (it will be replaced by the watermark)
   Document.removeContent(d, Document.getContentCount(d) - 1);
-  void handle;
 
   const wm: Watermark = {
     type: "image",

@@ -143,14 +143,11 @@ fs.mkdirSync(outDir, { recursive: true });
   });
   Document.addContent(
     doc,
-    Build.structuredDocumentTag(
-      [itemTemplate as unknown as Parameters<typeof Build.structuredDocumentTag>[0][0]],
-      {
-        tag: "items",
-        alias: "Items",
-        repeatingSection: { sectionTitle: "Item", allowInsertDelete: true }
-      }
-    )
+    Build.structuredDocumentTag([itemTemplate], {
+      tag: "items",
+      alias: "Items",
+      repeatingSection: { sectionTitle: "Item", allowInsertDelete: true }
+    })
   );
 
   // Group SDT — read-only wrapper around a paragraph

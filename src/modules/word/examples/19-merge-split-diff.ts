@@ -60,7 +60,7 @@ fs.writeFileSync(path.join(outDir, "01-single-merged.docx"), await Io.toBuffer(o
 
 // Edge: empty merge — invalid, requires at least one doc; we guard:
 try {
-  Io.merge([] as unknown as DocxDocument[]);
+  Io.merge([]);
 } catch (err) {
   console.log(`  empty merge correctly rejected: ${(err as Error).message}`);
 }

@@ -15,9 +15,8 @@ function createDoc(texts: string[], options?: Partial<DocxDocument>): DocxDocume
   }));
   return {
     body,
-    contentTypes: [],
     ...options
-  } as unknown as DocxDocument;
+  };
 }
 
 // Extract all paragraph text from body

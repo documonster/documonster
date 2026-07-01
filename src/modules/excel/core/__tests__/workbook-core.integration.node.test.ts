@@ -661,7 +661,7 @@ describe("Workbook", () => {
 
           const buffer = await Workbook.toBuffer(wb);
           const { unzip } = await import("@archive/read-archive");
-          const reader = unzip(buffer as unknown as Uint8Array);
+          const reader = unzip(buffer);
           let vml = "";
           for await (const entry of reader.entries()) {
             if (/drawings\/vmlDrawing\d+\.vml$/.test(entry.path)) {

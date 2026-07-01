@@ -70,7 +70,7 @@ describe("Worksheet.addShape", () => {
     });
 
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
 
     expect(xml).toContain("xdr:sp");
     expect(xml).toContain('prst="rect"');
@@ -97,7 +97,7 @@ describe("Worksheet.addShape", () => {
     });
 
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
 
     expect(xml).toContain('prst="rect"');
     expect(xml).toContain('prst="ellipse"');
@@ -114,7 +114,7 @@ describe("Worksheet.addShape", () => {
     addShape(ws, { type: "rect", range: "A1:B2", lineColor: "000000" });
 
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
 
     expect(xml).toContain("<a:noFill");
   });
@@ -126,7 +126,7 @@ describe("Worksheet.addShape", () => {
     addShape(ws, { type: "roundRect", range: "B2:D5", fillColor: "FFD966", text: "Note" });
 
     const buffer = await Workbook.toBuffer(wb);
-    await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shapes" });
+    await expectValidXlsx(buffer, { label: "shapes" });
   });
 
   it("renders a one-cell anchored shape (tl + ext)", async () => {
@@ -138,10 +138,10 @@ describe("Worksheet.addShape", () => {
       fillColor: "FF0000"
     });
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
     expect(xml).toContain("xdr:oneCellAnchor");
     expect(xml).toContain('prst="rect"');
-    await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shape-onecell" });
+    await expectValidXlsx(buffer, { label: "shape-onecell" });
   });
 
   it("renders an absolutely-positioned shape (pos + ext)", async () => {
@@ -153,10 +153,10 @@ describe("Worksheet.addShape", () => {
       fillColor: "00B050"
     });
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
     expect(xml).toContain("xdr:absoluteAnchor");
     expect(xml).toContain('prst="ellipse"');
-    await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shape-absolute" });
+    await expectValidXlsx(buffer, { label: "shape-absolute" });
   });
 
   it("normalizes colours by stripping a leading # and upper-casing", async () => {
@@ -164,7 +164,7 @@ describe("Worksheet.addShape", () => {
     const ws = Workbook.addWorksheet(wb, "shapes");
     addShape(ws, { type: "rect", range: "A1:B2", fillColor: "#ffd966", lineColor: "#00b050" });
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
     expect(xml).toContain('<a:srgbClr val="FFD966"');
     expect(xml).toContain('<a:srgbClr val="00B050"');
     expect(xml).not.toContain("#ffd966");
@@ -176,11 +176,11 @@ describe("Worksheet.addShape", () => {
     // documonster cell fills use 8-digit ARGB; addShape must coerce to valid 6-digit RGB.
     addShape(ws, { type: "rect", range: "A1:B2", fillColor: "FFFF0000", lineColor: "FF00B050" });
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
     expect(xml).toContain('<a:srgbClr val="FF0000"');
     expect(xml).toContain('<a:srgbClr val="00B050"');
     expect(xml).not.toContain('val="FFFF0000"');
-    await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shape-argb" });
+    await expectValidXlsx(buffer, { label: "shape-argb" });
   });
 
   it("rejects a range that does not cover an area with a clear error", () => {
@@ -213,14 +213,14 @@ describe("Worksheet.addShape", () => {
     // Round-trip so the chart becomes a preserved graphicFrame, then re-emit.
     const buf1 = await Workbook.toBuffer(wb);
     const wb2 = Workbook.create();
-    await Workbook.read(wb2, buf1 as unknown as Uint8Array);
+    await Workbook.read(wb2, buf1);
     addShape(Workbook.getWorksheet(wb2, "mix")!, {
       type: "ellipse",
       range: "C22:H30",
       fillColor: "9DC3E6"
     });
 
-    const xml = await readDrawingXml((await Workbook.toBuffer(wb2)) as unknown as Uint8Array);
+    const xml = await readDrawingXml(await Workbook.toBuffer(wb2));
     const ids = [...xml.matchAll(/<xdr:cNvPr id="(\d+)"/g)].map(m => m[1]);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -230,9 +230,9 @@ describe("Worksheet.addShape", () => {
     const ws = Workbook.addWorksheet(wb, "shapes");
     addShape(ws, { type: "rect", range: "A1:B2", text: "a < b & c > d" });
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
     expect(xml).toContain("a &lt; b &amp; c &gt; d");
-    await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shape-text-escape" });
+    await expectValidXlsx(buffer, { label: "shape-text-escape" });
   });
 
   it("coexists with images and charts without cNvPr id collisions", async () => {
@@ -248,11 +248,11 @@ describe("Worksheet.addShape", () => {
     addShape(ws, { type: "ellipse", range: "G1:H2", fillColor: "9DC3E6" });
 
     const buffer = await Workbook.toBuffer(wb);
-    const xml = await readDrawingXml(buffer as unknown as Uint8Array);
+    const xml = await readDrawingXml(buffer);
     const ids = [...xml.matchAll(/<xdr:cNvPr id="(\d+)"/g)].map(m => m[1]);
     // Every cNvPr id within a drawing must be unique.
     expect(new Set(ids).size).toBe(ids.length);
-    await expectValidXlsx(buffer as unknown as Uint8Array, { label: "shape-mixed" });
+    await expectValidXlsx(buffer, { label: "shape-mixed" });
   });
 
   it("reads a file containing shapes without crashing (shapes are write-only)", async () => {

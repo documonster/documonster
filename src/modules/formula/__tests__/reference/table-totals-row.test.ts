@@ -475,7 +475,7 @@ describe("AGGREGATE: option semantics", () => {
     // A1..A5 with an error in A3 and a hidden row at row 4.
     Cell.setValue(ws, "A1", 10);
     Cell.setValue(ws, "A2", 20);
-    Cell.setValue(ws, "A3", { error: "#DIV/0!" } as unknown as number);
+    Cell.setValue(ws, "A3", { error: "#DIV/0!" });
     Cell.setValue(ws, "A4", 40);
     Cell.setValue(ws, "A5", 50);
     Row.setHidden(ws, 4, true);

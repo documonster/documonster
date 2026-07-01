@@ -50,8 +50,8 @@ import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
 import { emuToPx } from "@utils/units";
 import { StdDocAttributes } from "@xml/writer";
 
-function mergeRule(rule: Record<string, unknown>, extRule: Record<string, unknown>): void {
-  Object.keys(extRule).forEach(key => {
+function mergeRule<T extends object>(rule: T, extRule: T): void {
+  (Object.keys(extRule) as (keyof T)[]).forEach(key => {
     const value = rule[key];
     const extValue = extRule[key];
     if (value === undefined && extValue !== undefined) {
@@ -96,10 +96,7 @@ function mergeConditionalFormattings(
       const rule = extRule.x14Id ? ruleMap[extRule.x14Id] : undefined;
       if (rule) {
         // merge with matching rule
-        mergeRule(
-          rule as unknown as Record<string, unknown>,
-          extRule as unknown as Record<string, unknown>
-        );
+        mergeRule(rule, extRule);
       } else if (cfMap[extCf.ref]) {
         // reuse existing cf ref
         cfMap[extCf.ref].rules.push(extRule);

@@ -180,6 +180,11 @@ export interface WorksheetData {
   _headerRowCount?: number;
   _drawing: unknown;
   _watermark: WatermarkOptions | null;
+  /**
+   * Optional streaming-writer hook. Present on streaming worksheet writers,
+   * absent on plain record worksheets; `_commitRow` dispatches to it when set.
+   */
+  _commitRow?: (row: RowData) => void;
 }
 
 // =============================================================================
@@ -250,9 +255,8 @@ export function _commitRow(ws: WorksheetData, row: RowData): void {
   // the writer's own commit logic so flat `rowCommit` works on writer rows too.
   // For plain record worksheets this is a no-op (allows the streaming reader to
   // fill a document).
-  const maybeWriter = ws as unknown as { _commitRow?: (r: RowData) => void };
-  if (typeof maybeWriter._commitRow === "function") {
-    maybeWriter._commitRow(row);
+  if (typeof ws._commitRow === "function") {
+    ws._commitRow(row);
   }
 }
 

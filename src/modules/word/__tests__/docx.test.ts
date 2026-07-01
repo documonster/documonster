@@ -2982,7 +2982,7 @@ describe("Template Engine", () => {
     const headers = new Map([
       ["default", { content: { children: [makePara("Header: {{title}}")] } }]
     ]);
-    const doc = { body: [makePara("Body")], headers } as unknown as DocxDocument;
+    const doc: DocxDocument = { body: [makePara("Body")], headers };
     const result = fillTemplate(doc, { title: "My Doc" });
     const headerContent = result.headers!.get("default")!.content.children;
     expect(getText(headerContent[0] as Paragraph)).toBe("Header: My Doc");

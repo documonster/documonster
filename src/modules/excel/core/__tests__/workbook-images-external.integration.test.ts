@@ -257,7 +257,7 @@ describe("Workbook external (linked) images", () => {
     const ws = Workbook.addWorksheet(wb, "mixed");
     const imageId = addWorkbookImage(wb, {
       extension: "png",
-      buffer: pngBytes as unknown as Buffer,
+      buffer: pngBytes,
       link: REMOTE_URL
     });
     addImage(ws, imageId, "A1:B2");
@@ -348,7 +348,7 @@ describe("Workbook external (linked) images", () => {
     const ws = Workbook.addWorksheet(wb, "hdr");
     const embedId = addWorkbookImage(wb, {
       extension: "png",
-      buffer: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) as unknown as Buffer
+      buffer: new Uint8Array([0x89, 0x50, 0x4e, 0x47])
     });
     addWatermark(ws, { imageId: embedId, mode: "overlay", opacity: 0.25 });
     const before = getWatermark(ws);
@@ -386,7 +386,7 @@ describe("Workbook external (linked) images", () => {
     const { wb, getBytes } = memoryStreamWriter();
     const embedId = wb.addImage({
       extension: "png",
-      buffer: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) as unknown as Buffer
+      buffer: new Uint8Array([0x89, 0x50, 0x4e, 0x47])
     });
     const ws = wb.addWorksheet("hdr");
     ws.addWatermark({ imageId: embedId, mode: "overlay", opacity: 0.25 });

@@ -21,7 +21,7 @@ function textRun(t: string): Run {
 }
 
 function createDoc(paragraphs: Paragraph[]): DocxDocument {
-  return { body: paragraphs } as unknown as DocxDocument;
+  return { body: paragraphs };
 }
 
 function extractText(doc: DocxDocument): string {

@@ -956,7 +956,7 @@ export function chart(options: {
 
 /** Create a structured document tag (content control). */
 export function structuredDocumentTag(
-  content: (Paragraph | Table)[],
+  content: readonly (Paragraph | Run | Table | StructuredDocumentTag)[],
   properties?: SdtProperties
 ): StructuredDocumentTag {
   return { type: "sdt", properties: properties ?? {}, content };

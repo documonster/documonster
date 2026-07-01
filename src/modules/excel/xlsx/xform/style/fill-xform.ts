@@ -283,7 +283,7 @@ class GradientFillXform extends BaseXform {
 // Fill encapsulates translation from fill model to/from xlsx
 class FillXform extends BaseXform {
   declare public map: { patternFill: PatternFillXform; gradientFill: GradientFillXform };
-  declare public parser?: BaseXform;
+  declare public parser?: PatternFillXform | GradientFillXform;
 
   constructor() {
     super();
@@ -342,7 +342,7 @@ class FillXform extends BaseXform {
         this.model = this.parser.model;
         // The active child fill xform exposes a `name` (pattern/gradient) used
         // as the model's fill type discriminator.
-        (this.model as { type?: string }).type = (this.parser as unknown as { name: string }).name;
+        (this.model as { type?: string }).type = this.parser.name;
         this.parser = undefined;
       }
       return true;

@@ -11,7 +11,7 @@ import {
   createCompositeDataSource,
   fillTemplateFromSource
 } from "../template/template-datasource";
-import type { DocxDocument } from "../types";
+import type { DocxDocument, Paragraph, Run } from "../types";
 
 // =============================================================================
 // Helpers
@@ -25,7 +25,7 @@ function makeMinimalDoc(bodyText: string): DocxDocument {
         children: [{ content: [{ type: "text", text: bodyText }] }]
       }
     ]
-  } as unknown as DocxDocument;
+  };
 }
 
 // =============================================================================
@@ -271,7 +271,7 @@ describe("getValue dot-path notation", () => {
   });
 
   it("returns undefined when traversing through null", () => {
-    const source = createJsonDataSource({ a: null } as unknown as Record<string, unknown>);
+    const source = createJsonDataSource({ a: null });
     expect(source.getValue("a.b")).toBeUndefined();
   });
 
@@ -355,15 +355,17 @@ describe("fillTemplateFromSource", () => {
     const doc = makeMinimalDoc("Hello {{name}}!");
     const source = createJsonDataSource({ name: "World" });
     const result = fillTemplateFromSource(doc, source);
-    const para = result.body[0] as unknown as { children: { content: { text: string }[] }[] };
-    expect(para.children[0].content[0].text).toBe("Hello World!");
+    const para = result.body[0] as Paragraph;
+    const run = para.children[0] as Run;
+    expect((run.content[0] as { type: "text"; text: string }).text).toBe("Hello World!");
   });
 
   it("returns document unchanged when no placeholders match", () => {
     const doc = makeMinimalDoc("No placeholders here");
     const source = createJsonDataSource({ name: "Test" });
     const result = fillTemplateFromSource(doc, source);
-    const para = result.body[0] as unknown as { children: { content: { text: string }[] }[] };
-    expect(para.children[0].content[0].text).toBe("No placeholders here");
+    const para = result.body[0] as Paragraph;
+    const run = para.children[0] as Run;
+    expect((run.content[0] as { type: "text"; text: string }).text).toBe("No placeholders here");
   });
 });

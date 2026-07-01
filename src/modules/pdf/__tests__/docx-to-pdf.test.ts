@@ -9,7 +9,7 @@
 
 import { buildWordChartExXml } from "@word/excel";
 import { Document, Build, Io, Layout } from "@word/index";
-import type { DocxDocument } from "@word/index";
+import type { DocxDocument, PageContent } from "@word/index";
 import { describe, it, expect } from "vitest";
 
 import { docxToPdf } from "../word-bridge";
@@ -377,21 +377,18 @@ describe("docxToPdf — flow layout fidelity", () => {
     const layout = Layout.documentFull(doc, opts);
     const runs: { text: string; x: number; y: number; bold?: boolean }[] = [];
     for (const page of layout.pages) {
-      for (const c of page.content as readonly { type: string }[]) {
+      for (const c of page.content) {
         if (c.type !== "paragraph") {
           continue;
         }
-        const para = c as unknown as {
-          lines: readonly { y: number; runs: readonly Record<string, unknown>[] }[];
-        };
-        for (const line of para.lines) {
+        for (const line of c.lines) {
           for (const r of line.runs) {
-            if (typeof r.text === "string") {
+            if (r.type !== "image") {
               runs.push({
                 text: r.text,
-                x: r.x as number,
+                x: r.x,
                 y: line.y,
-                bold: r.bold as boolean | undefined
+                bold: r.bold
               });
             }
           }
@@ -473,12 +470,11 @@ describe("docxToPdf — flow layout fidelity", () => {
     const layout = Layout.documentFull(Document.build(h));
     let cellsWithBorders = 0;
     for (const page of layout.pages) {
-      for (const c of page.content as readonly { type: string }[]) {
+      for (const c of page.content) {
         if (c.type !== "table") {
           continue;
         }
-        const tbl = c as unknown as { cells: readonly { borders?: unknown }[] };
-        for (const cell of tbl.cells) {
+        for (const cell of c.cells) {
           if (cell.borders) {
             cellsWithBorders++;
           }
@@ -522,31 +518,25 @@ describe("docxToPdf — flow layout fidelity", () => {
 
     const layout = Layout.documentFull(Document.build(h));
     let bulletInCell = false;
-    const visit = (items: readonly { type: string }[]): void => {
+    const visit = (items: readonly PageContent[]): void => {
       for (const c of items) {
         if (c.type === "paragraph") {
-          const para = c as unknown as {
-            lines: readonly { runs: readonly Record<string, unknown>[] }[];
-          };
-          const joined = para.lines
+          const joined = c.lines
             .flatMap(l => l.runs)
-            .map(r => (typeof r.text === "string" ? r.text : ""))
+            .map(r => (r.type !== "image" ? r.text : ""))
             .join("");
           if (joined.includes("InCell") && joined.includes("\u2022")) {
             bulletInCell = true;
           }
         } else if (c.type === "table") {
-          const tbl = c as unknown as {
-            cells: readonly { content: readonly { type: string }[] }[];
-          };
-          for (const cl of tbl.cells) {
+          for (const cl of c.cells) {
             visit(cl.content);
           }
         }
       }
     };
     for (const page of layout.pages) {
-      visit(page.content as readonly { type: string }[]);
+      visit(page.content);
     }
     expect(bulletInCell).toBe(true);
   });

@@ -47,8 +47,15 @@ class ColorScaleXform extends CompositeXform<ColorScaleModel> {
     };
   }
 
-  onParserClose(name: string, parser: BaseXform): void {
-    (this.model as unknown as Record<string, unknown[]>)[name].push(parser.model);
+  onParserClose(name: string, _parser: BaseXform): void {
+    // Append the just-closed child's model. `cfvoXform`/`colorXform` carry
+    // precise model types (Cvfo / Partial<Color>), so no cast is needed; the
+    // child always has a model by the time its close event fires.
+    if (name === "color") {
+      this.model!.color.push(this.colorXform.model!);
+    } else {
+      this.model!.cfvo.push(this.cfvoXform.model!);
+    }
   }
 }
 

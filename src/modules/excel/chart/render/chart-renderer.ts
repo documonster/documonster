@@ -5853,17 +5853,12 @@ function colorFromChartTextProperties(
  * In the raw case we lazily invoke `parseTxPr` so consumers don't need
  * to pre-process loaded chart parts themselves.
  */
-function textStyleFromTxPr(
-  textProperties:
-    | {
-        _rawXml?: string;
-        fontFamily?: string;
-        bold?: boolean;
-        italic?: boolean;
-        size?: number;
-      }
-    | undefined
-): { fontFamily?: string; bold?: boolean; italic?: boolean; fontSize?: number } {
+function textStyleFromTxPr(textProperties: ChartTextProperties | undefined): {
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
+  fontSize?: number;
+} {
   if (!textProperties) {
     return {};
   }
@@ -5872,7 +5867,7 @@ function textStyleFromTxPr(
   // `titleColor` already resolves colour from either form.
   const resolved =
     typeof textProperties._rawXml === "string" && textProperties.fontFamily === undefined
-      ? (parseTxPr(textProperties as unknown as ChartTextProperties) as typeof textProperties)
+      ? parseTxPr(textProperties)
       : textProperties;
   const out: { fontFamily?: string; bold?: boolean; italic?: boolean; fontSize?: number } = {};
   if (typeof resolved.fontFamily === "string" && resolved.fontFamily.length > 0) {

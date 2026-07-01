@@ -16,7 +16,7 @@ function para(t: string, props?: Paragraph["properties"]): Paragraph {
 }
 
 function createDoc(body: BodyContent[]): DocxDocument {
-  return { body } as unknown as DocxDocument;
+  return { body };
 }
 
 function paraText(p: Paragraph): string {

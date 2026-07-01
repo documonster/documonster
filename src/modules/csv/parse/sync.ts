@@ -419,6 +419,7 @@ export function parseCsv(
   | CsvParseResult<Record<string, unknown>>
   | CsvParseResult<RecordWithInfo<Record<string, unknown>>>
   | CsvParseResult<RecordWithInfo<string[]>>
+  | CsvParseResult<string[] | unknown[]>
   | CsvParseResultWithObjname<Record<string, unknown>> {
   // Resolve config and preprocess input
   const { config, processedInput } = resolveParseConfig(input, options);
@@ -507,7 +508,7 @@ export function parseCsv(
         invalidRows: optionalArray(invalidRows),
         errors: optionalArray(errors),
         meta
-      } as unknown as CsvParseResult<Record<string, unknown>>;
+      } as CsvParseResult<string[] | unknown[]>;
     }
 
     return processedRows as string[][];

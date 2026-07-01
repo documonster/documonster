@@ -12,8 +12,39 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
-import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
-import type { ChartEntry } from "@excel/chart/model/types";
+import type {
+  ChartExData,
+  ChartExEntry,
+  ChartExModel,
+  ChartExNumericDimension,
+  ChartExSeries,
+  ChartExStringDimension
+} from "@excel/chart/model/chart-ex-types";
+import type {
+  AxisBase,
+  Bevel,
+  ChartColor,
+  ChartEntry,
+  ChartFill,
+  ChartLayout,
+  ChartMarker,
+  ChartRichText,
+  ChartTextProperties,
+  DataLabelEntry,
+  DataPoint,
+  EffectList,
+  NumberCache,
+  NumberReference,
+  Scene3D,
+  SeriesBase,
+  Shadow,
+  ShapeProperties,
+  ShapeProperties3D,
+  StringCache,
+  StringReference,
+  Trendline,
+  TrendlineLabel
+} from "@excel/chart/model/types";
 import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 import {
   renderChartEx,
@@ -48,6 +79,7 @@ import {
   TableError,
   ChartOptionsError
 } from "@excel/errors";
+import type { ThreadedCommentPerson } from "@excel/types";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
@@ -888,7 +920,7 @@ function shouldPassthroughChartExEntry(
   return snapshotChartModel(entry.model) === entry.modelSnapshot;
 }
 
-function stripChartExRawXml(model: any): any {
+function stripChartExRawXml(model: ChartExModel): ChartExModel {
   return { ...model, rawXml: undefined };
 }
 
@@ -1191,7 +1223,7 @@ function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | unde
   } catch {
     return undefined;
   }
-  const current = entry.model as any;
+  const current = entry.model;
   if (!sameJson(stripPatchableChartExFields(previous), stripPatchableChartExFields(current))) {
     return undefined;
   }
@@ -1587,7 +1619,7 @@ function getChartRawPatchPlan(entry: ChartEntry): ChartRawPatchPlan | undefined 
   } catch {
     return undefined;
   }
-  const current = entry.model as any;
+  const current = entry.model;
   const prevChart = previous.chart;
   const curChart = current.chart;
   const plan: ChartRawPatchPlan = {
@@ -1860,7 +1892,9 @@ function buildRawChartExTitleXml(text: string): string {
   return `<cx:title><cx:tx><cx:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(text)}</a:t></a:r></a:p></cx:rich></cx:tx><cx:overlay val="0"/></cx:title>`;
 }
 
-function buildRawChartExLegendXml(legend: any): string {
+function buildRawChartExLegendXml(
+  legend: NonNullable<ChartExModel["chartSpace"]["chart"]["legend"]>
+): string {
   // Delegate to the structured ChartEx writer so the raw-patch path
   // produces a byte-identical serialisation. Previously this function
   // hand-rolled a self-closing `<cx:legend pos="…" overlay="…"/>`,
@@ -1877,7 +1911,7 @@ function buildRawChartExLegendXml(legend: any): string {
     .join("");
 }
 
-function buildRawChartExDataXml(chartData: any): string {
+function buildRawChartExDataXml(chartData: ChartExData | undefined): string {
   const parts = ["<cx:chartData>"];
   // `cx:externalData` is a child of `cx:chartSpace` per Chart2014's
   // `CT_ChartSpace`, NOT of `cx:chartData`. Emitted at the chartSpace
@@ -1896,7 +1930,7 @@ function buildRawChartExDataXml(chartData: any): string {
   return parts.join("");
 }
 
-function buildRawChartExStringDimensionXml(dim: any): string {
+function buildRawChartExStringDimensionXml(dim: ChartExStringDimension): string {
   const parts = [`<cx:strDim type="${escapeAttr(dim.type)}">`];
   if (dim.formula) {
     parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
@@ -1917,7 +1951,7 @@ function buildRawChartExStringDimensionXml(dim: any): string {
   return parts.join("");
 }
 
-function buildRawChartExNumericDimensionXml(dim: any): string {
+function buildRawChartExNumericDimensionXml(dim: ChartExNumericDimension): string {
   const parts = [`<cx:numDim type="${escapeAttr(dim.type)}">`];
   if (dim.formula) {
     parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
@@ -2426,7 +2460,7 @@ function patchRawPlotAreaLayout(raw: string, model: any): string | undefined {
   return raw.slice(0, range.start) + patched + raw.slice(range.end);
 }
 
-function buildRawLayoutXml(layout: any, namespace: "c" | "cx" = "c"): string {
+function buildRawLayoutXml(layout: ChartLayout | undefined, namespace: "c" | "cx" = "c"): string {
   if (!layout?.manualLayout) {
     return `<${namespace}:layout/>`;
   }
@@ -2595,7 +2629,10 @@ function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boole
   return parts.join("");
 }
 
-function buildRawDataLabelEntryXml(entry: any, opts?: { suppressDLblPos?: boolean }): string {
+function buildRawDataLabelEntryXml(
+  entry: DataLabelEntry,
+  opts?: { suppressDLblPos?: boolean }
+): string {
   // ECMA-376 `CT_DLbl` (§21.2.2.47) is a `choice(delete | …)` — the
   // two branches are mutually exclusive. Emitting `delete` alongside
   // any of the display-flag children (layout / tx / numFmt /
@@ -3014,7 +3051,7 @@ function patchAxisTypeSpecificLeaves(
   return patched;
 }
 
-function buildRawScalingXml(scaling: any): string {
+function buildRawScalingXml(scaling: NonNullable<AxisBase["scaling"]> | undefined): string {
   if (!scaling) {
     return "";
   }
@@ -3049,7 +3086,9 @@ function buildRawScalingXml(scaling: any): string {
   return parts.join("");
 }
 
-function buildRawNumFmtXml(numFmt: any): string {
+function buildRawNumFmtXml(
+  numFmt: { formatCode?: string; sourceLinked?: boolean } | undefined
+): string {
   if (!numFmt?.formatCode) {
     return "";
   }
@@ -3060,7 +3099,7 @@ function buildRawNumFmtXml(numFmt: any): string {
 function patchGridlines(
   block: string,
   tag: string,
-  spPr: any,
+  spPr: ShapeProperties | undefined,
   beforeTags: string[],
   parentTag: string
 ): string {
@@ -3090,14 +3129,14 @@ function patchBooleanLeaf(
   return patchGenericChild(block, tag, xml, beforeTags, parentTag);
 }
 
-function buildRawSeriesTxXml(tx: any): string {
+function buildRawSeriesTxXml(tx: NonNullable<SeriesBase["tx"]>): string {
   if (tx.strRef?.formula) {
     return `<c:tx>${buildRawStrRefXml(tx.strRef)}</c:tx>`;
   }
   return `<c:tx><c:v>${escapeXml(String(tx.value ?? ""))}</c:v></c:tx>`;
 }
 
-function buildRawMarkerXml(marker: any): string {
+function buildRawMarkerXml(marker: ChartMarker | undefined): string {
   if (!marker) {
     return "";
   }
@@ -3118,14 +3157,14 @@ function buildRawMarkerXml(marker: any): string {
   return parts.join("");
 }
 
-function buildRawDataPointsXml(dataPoints: any): string {
+function buildRawDataPointsXml(dataPoints: DataPoint[] | undefined): string {
   if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
     return "";
   }
   return dataPoints.map(buildRawDataPointXml).join("");
 }
 
-function buildRawDataPointXml(point: any): string {
+function buildRawDataPointXml(point: DataPoint): string {
   const parts = ["<c:dPt>", `<c:idx val="${point.index ?? 0}"/>`];
   if (point.invertIfNegative !== undefined) {
     parts.push(`<c:invertIfNegative val="${point.invertIfNegative ? "1" : "0"}"/>`);
@@ -3149,14 +3188,14 @@ function buildRawDataPointXml(point: any): string {
   return parts.join("");
 }
 
-function buildRawTrendlinesXml(trendlines: any): string {
+function buildRawTrendlinesXml(trendlines: Trendline[] | undefined): string {
   if (!Array.isArray(trendlines) || trendlines.length === 0) {
     return "";
   }
   return trendlines.map(buildRawTrendlineXml).join("");
 }
 
-function buildRawTrendlineXml(trendline: any): string {
+function buildRawTrendlineXml(trendline: Trendline): string {
   const parts = ["<c:trendline>"];
   if (trendline.name) {
     parts.push(`<c:name>${escapeXml(String(trendline.name))}</c:name>`);
@@ -3186,7 +3225,7 @@ function buildRawTrendlineXml(trendline: any): string {
   return parts.join("");
 }
 
-function buildRawTrendlineLabelXml(label: any): string {
+function buildRawTrendlineLabelXml(label: TrendlineLabel): string {
   const parts = ["<c:trendlineLbl>"];
   if (label.layout) {
     parts.push(buildRawLayoutXml(label.layout));
@@ -3260,15 +3299,15 @@ function buildRawDataSourceXml(tag: string, source: any): string | undefined {
   return undefined;
 }
 
-function buildRawNumRefXml(ref: any): string {
+function buildRawNumRefXml(ref: NumberReference): string {
   return `<c:numRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawNumCacheXml(ref.cache)}</c:numRef>`;
 }
 
-function buildRawStrRefXml(ref: any): string {
+function buildRawStrRefXml(ref: StringReference): string {
   return `<c:strRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawStrCacheXml(ref.cache)}</c:strRef>`;
 }
 
-function buildRawNumCacheXml(cache: any): string {
+function buildRawNumCacheXml(cache: NumberCache | undefined): string {
   if (!cache) {
     return "";
   }
@@ -3288,7 +3327,7 @@ function buildRawNumCacheXml(cache: any): string {
   return parts.join("");
 }
 
-function buildRawStrCacheXml(cache: any): string {
+function buildRawStrCacheXml(cache: StringCache | undefined): string {
   if (!cache) {
     return "";
   }
@@ -3303,7 +3342,10 @@ function buildRawStrCacheXml(cache: any): string {
   return parts.join("");
 }
 
-function buildRawShapePropertiesXml(spPr: any, namespace: "c" | "cx"): string | undefined {
+function buildRawShapePropertiesXml(
+  spPr: ShapeProperties | undefined,
+  namespace: "c" | "cx"
+): string | undefined {
   if (!spPr) {
     return "";
   }
@@ -3380,7 +3422,10 @@ function buildRawShapePropertiesXml(spPr: any, namespace: "c" | "cx"): string | 
   return writer.toString();
 }
 
-function buildRawTextPropertiesXml(txPr: any, namespace: "c" | "cx"): string | undefined {
+function buildRawTextPropertiesXml(
+  txPr: ChartTextProperties | string | undefined,
+  namespace: "c" | "cx"
+): string | undefined {
   if (!txPr) {
     return "";
   }
@@ -3413,7 +3458,7 @@ function normalizeRawNamespace(rawXml: string, localName: string, namespace: "c"
     .replace(new RegExp(`</(?:c|cx):${localName}>$`), `</${namespace}:${localName}>`);
 }
 
-function writeRawRunProperties(writer: XmlWriter, props: any, tag: string): void {
+function writeRawRunProperties(writer: XmlWriter, props: ChartTextProperties, tag: string): void {
   const attrs: Record<string, string> = {};
   if (props.size !== undefined) {
     attrs.sz = String(props.size);
@@ -3477,7 +3522,7 @@ function writeRawRunProperties(writer: XmlWriter, props: any, tag: string): void
   writer.closeNode();
 }
 
-function writeRawColor(writer: XmlWriter, color: any): void {
+function writeRawColor(writer: XmlWriter, color: ChartColor): void {
   const modifiers = buildRawColorModifiersXml(color);
   const writeColorNode = (tag: string, val: string) => {
     if (!modifiers) {
@@ -3519,7 +3564,10 @@ function writeRawColor(writer: XmlWriter, color: any): void {
   }
 }
 
-function writeRawGradientFill(writer: XmlWriter, gradient: any): void {
+function writeRawGradientFill(
+  writer: XmlWriter,
+  gradient: NonNullable<ChartFill["gradient"]>
+): void {
   if (!Array.isArray(gradient.stops) || gradient.stops.length < 2) {
     return;
   }
@@ -3579,7 +3627,7 @@ function writeRawGradientFill(writer: XmlWriter, gradient: any): void {
   writer.closeNode();
 }
 
-function writeRawEffectList(writer: XmlWriter, effects: any): void {
+function writeRawEffectList(writer: XmlWriter, effects: EffectList): void {
   writer.openNode("a:effectLst");
   if (effects.blur) {
     const attrs: Record<string, string> = {};
@@ -3648,7 +3696,7 @@ function writeRawEffectList(writer: XmlWriter, effects: any): void {
   writer.closeNode();
 }
 
-function writeRawShadow(writer: XmlWriter, tag: string, shadow: any): void {
+function writeRawShadow(writer: XmlWriter, tag: string, shadow: Shadow): void {
   const attrs: Record<string, string> = {};
   for (const [key, value] of [
     ["blurRad", shadow.blurRadius],
@@ -3670,7 +3718,7 @@ function writeRawShadow(writer: XmlWriter, tag: string, shadow: any): void {
   writer.closeNode();
 }
 
-function writeRawScene3D(writer: XmlWriter, scene: any): void {
+function writeRawScene3D(writer: XmlWriter, scene: Scene3D): void {
   writer.openNode("a:scene3d");
   if (scene.camera) {
     const camera = scene.camera;
@@ -3711,7 +3759,7 @@ function writeRawScene3D(writer: XmlWriter, scene: any): void {
   writer.closeNode();
 }
 
-function writeRawSp3D(writer: XmlWriter, sp3d: any): void {
+function writeRawSp3D(writer: XmlWriter, sp3d: ShapeProperties3D): void {
   const attrs: Record<string, string> = {};
   if (sp3d.z !== undefined) {
     attrs.z = String(sp3d.z);
@@ -3755,7 +3803,7 @@ function writeRawSp3D(writer: XmlWriter, sp3d: any): void {
   writer.closeNode();
 }
 
-function writeRawBevel(writer: XmlWriter, tag: string, bevel: any): void {
+function writeRawBevel(writer: XmlWriter, tag: string, bevel: Bevel): void {
   const attrs: Record<string, string> = {};
   if (bevel.width !== undefined) {
     attrs.w = String(bevel.width);
@@ -3769,7 +3817,7 @@ function writeRawBevel(writer: XmlWriter, tag: string, bevel: any): void {
   writer.leafNode(tag, attrs);
 }
 
-function buildRawColorModifiersXml(color: any): string {
+function buildRawColorModifiersXml(color: ChartColor): string {
   // Each modifier must serialise as `<a:* val="N"/>` where `N` is a
   // valid `xsd:int`. Previously the raw patcher interpolated model
   // values directly, so `NaN` / `Infinity` / unrounded floats leaked
@@ -3933,7 +3981,7 @@ function patchRawChartExSeriesBlock(
   return patched;
 }
 
-function buildRawChartExSeriesTxXml(tx: any): string {
+function buildRawChartExSeriesTxXml(tx: NonNullable<ChartExSeries["tx"]> | undefined): string {
   if (!tx) {
     return "";
   }
@@ -3995,7 +4043,7 @@ function buildRawChartExSeriesTxXml(tx: any): string {
  * `preferRawPatch` callers who need the full set should stay on
  * structural rebuilds.
  */
-function buildRawChartExRichTextXml(rich: any): string {
+function buildRawChartExRichTextXml(rich: ChartRichText | undefined): string {
   if (!rich || !Array.isArray(rich.paragraphs)) {
     return "";
   }
@@ -4018,7 +4066,7 @@ function buildRawChartExRichTextXml(rich: any): string {
   return parts.join("");
 }
 
-function buildRawChartExRunPropertiesXml(props: any): string {
+function buildRawChartExRunPropertiesXml(props: ChartTextProperties | undefined): string {
   if (!props || typeof props !== "object") {
     return "";
   }
@@ -4998,11 +5046,11 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
    * stay byte-identical.
    */
   async addPersons(zip: IZipWriter, model: any): Promise<void> {
-    const persons = model.persons as Array<unknown> | undefined;
+    const persons = model.persons as ThreadedCommentPerson[] | undefined;
     if (!persons || persons.length === 0) {
       return;
     }
-    zip.append(renderPersonList(persons as any), { name: "xl/persons/person.xml" });
+    zip.append(renderPersonList(persons), { name: "xl/persons/person.xml" });
   }
 
   // ===========================================================================
@@ -5195,7 +5243,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   protected async collectStreamData(stream: IParseStream): Promise<Uint8Array> {
     const chunks: Uint8Array[] = [];
     await new Promise<void>((resolve, reject) => {
-      stream.on("data", (chunk: any) => {
+      stream.on("data", (chunk: string | Uint8Array | ArrayBuffer) => {
         if (typeof chunk === "string") {
           chunks.push(new TextEncoder().encode(chunk));
         } else if (chunk instanceof Uint8Array) {
@@ -7570,7 +7618,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
 
     // Preserve default font from parsed styles if available
     const oldDefaultFont = model.defaultFont;
-    model.styles = model.useStyles ? new StylesXform(true) : new (StylesXform as any).Mock();
+    model.styles = model.useStyles ? new StylesXform(true) : new StylesXform.Mock();
     if (oldDefaultFont && model.styles.setDefaultFont) {
       model.styles.setDefaultFont(oldDefaultFont);
     }

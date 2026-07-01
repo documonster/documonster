@@ -10,9 +10,8 @@ import type { DocxDocument, Paragraph, Run } from "../types";
 // Helper to create a minimal document
 function createDoc(paragraphs: Paragraph[]): DocxDocument {
   return {
-    body: paragraphs,
-    contentTypes: []
-  } as unknown as DocxDocument;
+    body: paragraphs
+  };
 }
 
 // Helper to create a run with text
@@ -223,7 +222,7 @@ describe("replaceText", () => {
           textRun("plain "),
           { type: "insertedRun", run: insRun, revision: { id: 1, author: "x" } },
           { type: "movedToRun", run: movRun, revision: { id: 2, author: "y" } }
-        ] as unknown as Paragraph["children"]
+        ]
       }
     ]);
     const count = Query.replaceText(doc, /inserted|moved/g, "Z");

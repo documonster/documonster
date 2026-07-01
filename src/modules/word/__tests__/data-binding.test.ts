@@ -21,20 +21,20 @@ function createDocWithSdt(
 function makeBindingSdt(
   xpath: string,
   storeItemId: string,
-  content?: any[]
+  content?: StructuredDocumentTag["content"]
 ): StructuredDocumentTag {
   return {
     type: "sdt",
     properties: {
       dataBinding: { xpath, storeItemId }
-    } as any,
+    },
     content: content ?? [
       {
         type: "paragraph",
         children: [{ content: [{ type: "text", text: "PLACEHOLDER" }] } as Run]
       } as Paragraph
     ]
-  } as unknown as StructuredDocumentTag;
+  } satisfies StructuredDocumentTag;
 }
 
 describe("resolveDataBindings", () => {
@@ -133,7 +133,7 @@ describe("resolveDataBindings", () => {
           children: [{ content: [{ type: "text", text: "static" }] } as Run]
         } as Paragraph
       ]
-    } as unknown as StructuredDocumentTag;
+    };
     const doc = createDocWithSdt(sdt);
     const data = new Map<string, string>([["abc", "<root></root>"]]);
 

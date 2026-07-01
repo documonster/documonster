@@ -576,7 +576,7 @@ describe("Second-round chart bug fixes", () => {
     // — silently changing the DrawingML element type. The fix adds a
     // `schemeName` field that round-trips as `<a:schemeClr>`.
     const rawXml = `<a:spPr><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:spPr>`;
-    const parsed = parseSpPr({ _rawXml: rawXml } as unknown as Parameters<typeof parseSpPr>[0]);
+    const parsed = parseSpPr({ _rawXml: rawXml });
     const color = parsed.fill?.solid;
     expect(color).toBeDefined();
     expect(color?.schemeName).toBe("phClr");
@@ -590,7 +590,7 @@ describe("Second-round chart bug fixes", () => {
     // silently dropped the line width — Excel's default `9525` was
     // used instead, noticeably changing the stroke thickness.
     const rawXml = `<a:spPr><a:ln cap="flat" w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
-    const parsed = parseSpPr({ _rawXml: rawXml } as unknown as Parameters<typeof parseSpPr>[0]);
+    const parsed = parseSpPr({ _rawXml: rawXml });
     expect(parsed.line?.width).toBe(12700);
   });
 
@@ -601,11 +601,11 @@ describe("Second-round chart bug fixes", () => {
     // files.
     const boldTxPr = {
       _rawXml: `<a:txPr><a:rPr b="true" sz="1100"/></a:txPr>`
-    } as unknown as Parameters<typeof parseTxPr>[0];
+    };
     expect(parseTxPr(boldTxPr).bold).toBe(true);
     const italicTxPr = {
       _rawXml: `<a:txPr><a:rPr i="true" sz="1100"/></a:txPr>`
-    } as unknown as Parameters<typeof parseTxPr>[0];
+    };
     expect(parseTxPr(italicTxPr).italic).toBe(true);
   });
 
@@ -946,7 +946,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // other run-property attribute. This test exercises every field
     // the `ChartTextProperties` model declares.
     const raw = `<a:txPr><a:bodyPr rot="2700000"/><a:p><a:pPr><a:defRPr sz="1200" b="1" i="1" u="sng" strike="sngStrike" cap="small" baseline="30000" kern="1200" spc="-50" lang="ja-JP"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:latin typeface="Meiryo"/><a:ea typeface="MS Gothic"/><a:cs typeface="Arial"/></a:defRPr></a:pPr></a:p></a:txPr>`;
-    const parsed = parseTxPr({ _rawXml: raw } as unknown as Parameters<typeof parseTxPr>[0]);
+    const parsed = parseTxPr({ _rawXml: raw });
     expect(parsed.size).toBe(1200);
     expect(parsed.bold).toBe(true);
     expect(parsed.italic).toBe(true);
@@ -970,7 +970,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // truthy values were recognised; `b="0"` was dropped as if the
     // attribute were absent.
     const raw = `<a:txPr><a:p><a:pPr><a:defRPr b="0" i="0" sz="1000"/></a:pPr></a:p></a:txPr>`;
-    const parsed = parseTxPr({ _rawXml: raw } as unknown as Parameters<typeof parseTxPr>[0]);
+    const parsed = parseTxPr({ _rawXml: raw });
     expect(parsed.bold).toBe(false);
     expect(parsed.italic).toBe(false);
   });
@@ -1195,21 +1195,15 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // returned `scaled: undefined` and the writer always emitted
     // `scaled="1"`.
     const withScaledZero = `<a:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0" scaled="0"/></a:gradFill></a:spPr>`;
-    const parsed0 = parseSpPr({ _rawXml: withScaledZero } as unknown as Parameters<
-      typeof parseSpPr
-    >[0]);
+    const parsed0 = parseSpPr({ _rawXml: withScaledZero });
     expect(parsed0.fill?.gradient?.scaled).toBe(false);
 
     const withScaledOne = `<a:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0" scaled="1"/></a:gradFill></a:spPr>`;
-    const parsed1 = parseSpPr({ _rawXml: withScaledOne } as unknown as Parameters<
-      typeof parseSpPr
-    >[0]);
+    const parsed1 = parseSpPr({ _rawXml: withScaledOne });
     expect(parsed1.fill?.gradient?.scaled).toBe(true);
 
     const withoutScaled = `<a:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0"/></a:gradFill></a:spPr>`;
-    const parsedU = parseSpPr({ _rawXml: withoutScaled } as unknown as Parameters<
-      typeof parseSpPr
-    >[0]);
+    const parsedU = parseSpPr({ _rawXml: withoutScaled });
     expect(parsedU.fill?.gradient?.scaled).toBeUndefined();
   });
 
