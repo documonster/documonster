@@ -340,7 +340,7 @@
     "clean": "pnpm dlx --reporter=silent rimraf \"**/node_modules\" pnpm-lock.yaml \"**/dist\" -g && pnpm i",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
-    "type": "tsgo --noEmit",
+    "type": "tsc --noEmit",
     "format": "oxfmt",
     "benchmark": "rimraf dist && pnpm build && node --expose-gc scripts/benchmark.ts",
     "benchmark:compress": "rimraf dist && pnpm build && node --expose-gc scripts/benchmark-compress.ts",
@@ -353,26 +353,25 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@rspack/core": "^2.0.6",
-    "@types/node": "^25.9.2",
-    "@typescript/native-preview": "^7.0.0-dev.20260610.1",
-    "@vitest/browser": "^4.1.8",
-    "@vitest/browser-playwright": "^4.1.8",
-    "@vitest/ui": "^4.1.8",
+    "@rspack/core": "^2.1.2",
+    "@types/node": "^26.0.1",
+    "@vitest/browser": "^4.1.9",
+    "@vitest/browser-playwright": "^4.1.9",
+    "@vitest/ui": "^4.1.9",
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
-    "esbuild": "^0.28.0",
-    "fast-xml-parser": "^5.8.0",
+    "esbuild": "^0.28.1",
+    "fast-xml-parser": "^5.9.3",
     "husky": "^9.1.7",
-    "oxfmt": "^0.54.0",
-    "oxlint": "^1.69.0",
-    "oxlint-tsgolint": "latest",
-    "playwright": "^1.60.0",
+    "oxfmt": "^0.57.0",
+    "oxlint": "^1.72.0",
+    "oxlint-tsgolint": "^0.24.0",
+    "playwright": "^1.61.1",
     "rimraf": "^6.1.3",
-    "rolldown": "^1.1.0",
+    "rolldown": "^1.1.3",
     "rollup-plugin-visualizer": "^7.0.1",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "typescript": "7.0.1-rc",
+    "vitest": "^4.1.9"
   },
   "browserslist": [
     "chrome >= 89",
@@ -384,5 +383,5 @@
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@11.5.0"
+  "packageManager": "pnpm@11.9.0"
 }

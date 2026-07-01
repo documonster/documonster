@@ -41,7 +41,7 @@
     "tmp",
     "dist",
     "out",
-    "scripts/benchmark*.ts",
+    "scripts/**",
     "src/modules/csv/worker/worker-script.ts"
   ]
 }
