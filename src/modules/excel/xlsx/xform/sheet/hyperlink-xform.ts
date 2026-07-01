@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface HyperlinkModel {
   address: string;
@@ -12,7 +13,7 @@ class HyperlinkXform extends BaseXform {
     return "hyperlink";
   }
 
-  render(xmlStream: any, model: HyperlinkModel): void {
+  render(xmlStream: XmlSink, model: HyperlinkModel): void {
     if (model.target && isInternalLink(model.target)) {
       // Internal link: use location attribute only (no relationship)
       // Strip the leading "#" — OOXML location attribute is without "#"
@@ -31,7 +32,7 @@ class HyperlinkXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "hyperlink") {
       this.model = {
         address: node.attributes.ref,

@@ -3,6 +3,7 @@ import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { DatabarExtXform } from "@excel/xlsx/xform/sheet/cf-ext/databar-ext-xform";
 import { IconSetExtXform } from "@excel/xlsx/xform/sheet/cf-ext/icon-set-ext-xform";
 import { uuidV4 } from "@utils/uuid";
+import type { ParseOpenTag } from "@xml/types";
 
 const extIcons = {
   "3Triangles": true,
@@ -92,7 +93,7 @@ class CfRuleExtXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel({ attributes }) {
+  createNewModel({ attributes }: ParseOpenTag) {
     return {
       type: attributes.type,
       x14Id: attributes.id,

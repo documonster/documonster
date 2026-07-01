@@ -11,9 +11,9 @@
  */
 
 import { ExcelNotSupportedError, InvalidValueTypeError } from "@excel/errors";
-import { StringBuf } from "@excel/utils/string-buf";
 import { getTextDecoder, uint8ArrayToNodeBufferView } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
+import { StringBuf } from "@utils/string-buf";
 
 // =============================================================================
 // Data Chunks - encapsulating incoming data
@@ -21,6 +21,10 @@ import { EventEmitter } from "@utils/event-emitter";
 
 // Encoding type - simplified from Node.js BufferEncoding (TextEncoder only supports UTF-8)
 type TextEncoding = "utf-8" | "utf8" | BufferEncoding;
+
+// Node-style write/end completion callback. Invoked with an optional error;
+// the return value is ignored.
+type WriteCallback = (error?: Error) => void;
 
 // Shared TextEncoder instance — avoid allocating a new one per StringChunk.toBuffer()
 const sharedTextEncoder = new TextEncoder();
@@ -172,7 +176,7 @@ interface StreamBufOptions {
 // StreamBuf - Cross-Platform Implementation
 // =============================================================================
 
-const nop = () => {};
+function nop() {}
 
 /**
  * StreamBuf is a multi-purpose read-write stream that works in both
@@ -185,6 +189,16 @@ const nop = () => {};
  * - 'error': emitted on errors
  * - 'drain': emitted when buffer drains (after pipe)
  */
+/**
+ * A pipe destination: any writable-like sink with a Node-style `write`
+ * (and optional `end`). The `...args: any[]` is the standard Node stream
+ * callback signature, not a removable cast.
+ */
+interface PipeDestination {
+  write: (...args: any[]) => unknown;
+  end?: (...args: any[]) => unknown;
+}
+
 class StreamBuf extends EventEmitter {
   private bufSize: number;
   private buffers: ReadWriteBuf[];
@@ -192,7 +206,7 @@ class StreamBuf extends EventEmitter {
   private corked: boolean;
   private paused: boolean;
   private encoding: string | null;
-  private pipes: any[];
+  private pipes: PipeDestination[];
   private _ended: boolean;
   // Native WritableStream support
   private _writableStreamWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
@@ -255,7 +269,7 @@ class StreamBuf extends EventEmitter {
 
   private async _pipeChunk(chunk: Chunk): Promise<void> {
     const writePromises = this.pipes.map(
-      (pipe: any) =>
+      (pipe: PipeDestination) =>
         new Promise<void>(resolve => {
           pipe.write(chunk.toBuffer(), () => resolve());
         })
@@ -277,8 +291,8 @@ class StreamBuf extends EventEmitter {
    */
   async write(
     data: Uint8Array | string | StringBuf | ArrayBuffer | ArrayBufferView,
-    encoding?: TextEncoding | ((...args: any[]) => any),
-    callback?: (...args: any[]) => any
+    encoding?: TextEncoding | WriteCallback,
+    callback?: WriteCallback
   ): Promise<boolean> {
     if (typeof encoding === "function") {
       callback = encoding;
@@ -287,7 +301,10 @@ class StreamBuf extends EventEmitter {
 
     // Create chunk from data
     let chunk: Chunk;
-    if (data instanceof StringBuf || (data && (data as any).constructor?.name === "StringBuf")) {
+    if (
+      data instanceof StringBuf ||
+      (data && (data as { constructor?: { name?: string } }).constructor?.name === "StringBuf")
+    ) {
       chunk = new StringBufChunk(data as StringBuf);
     } else if (data instanceof Uint8Array) {
       chunk = new BufferChunk(data);
@@ -386,7 +403,11 @@ class StreamBuf extends EventEmitter {
   /**
    * End the stream
    */
-  end(chunk?: any, encoding?: TextEncoding, callback?: (...args: any[]) => any): void {
+  end(
+    chunk?: Uint8Array | string | StringBuf | ArrayBuffer | ArrayBufferView,
+    encoding?: TextEncoding,
+    callback?: WriteCallback
+  ): void {
     const writeComplete = (error?: Error) => {
       if (error) {
         callback?.(error);
@@ -395,7 +416,7 @@ class StreamBuf extends EventEmitter {
 
       this._ended = true;
       this._flush();
-      this.pipes.forEach((pipe: any) => {
+      this.pipes.forEach((pipe: PipeDestination) => {
         if (typeof pipe.end === "function") {
           pipe.end();
         }
@@ -513,8 +534,8 @@ class StreamBuf extends EventEmitter {
   /**
    * Remove a piped destination
    */
-  unpipe(destination: any): void {
-    this.pipes = this.pipes.filter((pipe: any) => pipe !== destination);
+  unpipe(destination: PipeDestination): void {
+    this.pipes = this.pipes.filter(pipe => pipe !== destination);
   }
 
   /**
@@ -534,7 +555,7 @@ class StreamBuf extends EventEmitter {
   /**
    * Push data to the stream (alias for write)
    */
-  push(chunk: any): boolean {
+  push(chunk: Uint8Array | string | StringBuf | ArrayBuffer | ArrayBufferView | null): boolean {
     if (chunk !== null) {
       this.write(chunk);
     }

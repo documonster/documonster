@@ -1,14 +1,9 @@
 import { toError } from "@utils/errors";
 import { SaxParser } from "@xml/sax";
-import type { XmlSink, SaxTag } from "@xml/types";
+import type { XmlSink, SaxTag, SaxEvent } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 /* 'virtual' methods used as a form of documentation */
-
-interface ParseEvent {
-  eventType: string;
-  value: any;
-}
 
 // HAN CELL namespace prefix normalization
 // HAN CELL uses non-standard namespace prefixes (ep:, cp:, dc:, etc.)
@@ -71,8 +66,11 @@ class BaseXform<TModel = any> {
     // convert model to xml
   }
 
-  parseOpen(_node: any): void {
-    // XML node opened
+  parseOpen(_node: any): boolean | void {
+    // XML node opened. Subclasses that participate in a composite parse return
+    // a boolean indicating whether they consumed the node; leaf/standalone
+    // xforms return nothing (void).
+    return false;
   }
 
   parseText(_text: string): void {
@@ -105,12 +103,13 @@ class BaseXform<TModel = any> {
     }
   }
 
-  mergeModel(obj: any): void {
+  mergeModel(obj: Partial<TModel>): void {
     // set obj's props to this.model
-    this.model = Object.assign(this.model || ({} as any), obj);
+    const base: object = (this.model as object | undefined) ?? {};
+    this.model = Object.assign(base, obj) as TModel;
   }
 
-  async parse(saxParser: AsyncIterable<ParseEvent[]>): Promise<TModel | undefined> {
+  async parse(saxParser: AsyncIterable<SaxEvent[]>): Promise<TModel | undefined> {
     // IMPORTANT:
     // Do not return early once parsing is "done".
     // In true streaming scenarios, `parseSax(stream)` is backed by a Node.js
@@ -127,8 +126,9 @@ class BaseXform<TModel = any> {
       if (done) {
         continue;
       }
-      for (const { eventType, value } of events) {
-        if (eventType === "opentag") {
+      for (const event of events) {
+        if (event.eventType === "opentag") {
+          const value = event.value;
           // Fast path for normal Excel files (majority case)
           if (nsMode === 1) {
             this.parseOpen(value);
@@ -156,9 +156,10 @@ class BaseXform<TModel = any> {
           } else {
             this.parseOpen(value);
           }
-        } else if (eventType === "text") {
-          this.parseText(value);
-        } else if (eventType === "closetag") {
+        } else if (event.eventType === "text") {
+          this.parseText(event.value);
+        } else if (event.eventType === "closetag") {
+          const value = event.value;
           // Fast path for normal files
           if (nsMode === 1) {
             if (!this.parseClose(value.name)) {

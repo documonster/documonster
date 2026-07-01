@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, toBuffer, readDocx, cmToEmu } from "../index";
+import { Document, Io, Units } from "../index";
 import { markdownToDocx, markdownToDocxBody, renderToMarkdown } from "../markdown";
 
 const outDir = path.resolve(
@@ -129,14 +129,14 @@ const importedDoc = await markdownToDocx(md, {
       return {
         data: tinyPng,
         mediaType: "png",
-        width: cmToEmu(2),
-        height: cmToEmu(2)
+        width: Units.cmToEmu(2),
+        height: Units.cmToEmu(2)
       };
     }
     return undefined;
   }
 });
-const buf = await toBuffer(importedDoc);
+const buf = await Io.toBuffer(importedDoc);
 fs.writeFileSync(path.join(outDir, "26-md-imported.docx"), buf);
 console.log(`  markdownToDocx → ${importedDoc.body.length} body items, ${buf.length} bytes`);
 console.log(
@@ -148,7 +148,7 @@ console.log(`  → 26-md-imported.docx`);
 // 2. DOCX → Markdown round-trip (re-read the just-written DOCX so the
 //    pipeline goes Markdown → DOCX → file → DOCX → Markdown)
 // ---------------------------------------------------------------------------
-const reread = await readDocx(buf);
+const reread = await Io.read(buf);
 const mdRoundtrip = renderToMarkdown(reread, {
   headingStyle: "atx",
   includeImages: true,
@@ -218,7 +218,7 @@ console.log(`  → 26-md-setext.md`);
     Document.addContent(host, item);
   }
   Document.addParagraph(host, "(End of imported fragment.)");
-  const buf3 = await toBuffer(Document.build(host));
+  const buf3 = await Io.toBuffer(Document.build(host));
   fs.writeFileSync(path.join(outDir, "26-md-fragment-spliced.docx"), buf3);
   console.log(`  markdownToDocxBody → ${fragment.body.length} body items spliced into host doc`);
   console.log(`  → 26-md-fragment-spliced.docx`);

@@ -12,12 +12,8 @@
 import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
-import {
-  resolveOptions,
-  resolveValue,
-  addChildValue,
-  type ResolvedOptions
-} from "@xml/to-object-shared";
+import type { ResolvedOptions } from "@xml/to-object-shared";
+import { resolveOptions, resolveValue, addChildValue } from "@xml/to-object-shared";
 import type { ParseXmlToObjectOptions } from "@xml/types";
 
 // =============================================================================

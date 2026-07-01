@@ -2,7 +2,8 @@
  * Engineering Functions — Native RuntimeValue implementation.
  */
 
-import type { RuntimeValue, ErrorValue, ScalarValue } from "../runtime/values";
+import { checkError } from "@formula/functions/_shared";
+import type { RuntimeValue, ErrorValue, ScalarValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -12,26 +13,31 @@ import {
   topLeft,
   rvNumber,
   rvString
-} from "../runtime/values";
-import { checkError } from "./_shared";
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Type alias for native function signature
 // ============================================================================
 
-type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
-
 // ============================================================================
 // Base Conversion Functions
 // ============================================================================
 
-export const fnBIN2DEC: NativeFn = args => baseToDec(args, 2, /^[01]{1,10}$/);
+export function fnBIN2DEC(args: RuntimeValue[]): RuntimeValue {
+  return baseToDec(args, 2, /^[01]{1,10}$/);
+}
 
-export const fnDEC2BIN: NativeFn = args => decToBase(args, 2, -512, 511);
+export function fnDEC2BIN(args: RuntimeValue[]): RuntimeValue {
+  return decToBase(args, 2, -512, 511);
+}
 
-export const fnDEC2HEX: NativeFn = args => decToBase(args, 16, -549_755_813_888, 549_755_813_887);
+export function fnDEC2HEX(args: RuntimeValue[]): RuntimeValue {
+  return decToBase(args, 16, -549_755_813_888, 549_755_813_887);
+}
 
-export const fnDEC2OCT: NativeFn = args => decToBase(args, 8, -536_870_912, 536_870_911);
+export function fnDEC2OCT(args: RuntimeValue[]): RuntimeValue {
+  return decToBase(args, 8, -536_870_912, 536_870_911);
+}
 
 /**
  * Shared implementation of `DEC2BIN`, `DEC2HEX`, `DEC2OCT`.
@@ -90,9 +96,13 @@ function decToBase(
   return rvString(places > 0 ? result.padStart(places, "0") : result);
 }
 
-export const fnHEX2DEC: NativeFn = args => baseToDec(args, 16, /^[0-9A-Fa-f]{1,10}$/);
+export function fnHEX2DEC(args: RuntimeValue[]): RuntimeValue {
+  return baseToDec(args, 16, /^[0-9A-Fa-f]{1,10}$/);
+}
 
-export const fnOCT2DEC: NativeFn = args => baseToDec(args, 8, /^[0-7]{1,10}$/);
+export function fnOCT2DEC(args: RuntimeValue[]): RuntimeValue {
+  return baseToDec(args, 8, /^[0-7]{1,10}$/);
+}
 
 /**
  * Shared implementation of `BIN2DEC`, `OCT2DEC`, `HEX2DEC`.
@@ -204,46 +214,52 @@ function formatToBase(
   return rvString(places > 0 ? result.padStart(places, "0") : result);
 }
 
-export const fnBIN2HEX: NativeFn = args =>
-  convertBase(args, parseBinInput, (n, places, hasPlaces) =>
+export function fnBIN2HEX(args: RuntimeValue[]): RuntimeValue {
+  return convertBase(args, parseBinInput, (n, places, hasPlaces) =>
     formatToBase(n, 16, 10, places, hasPlaces)
   );
+}
 
-export const fnBIN2OCT: NativeFn = args =>
-  convertBase(args, parseBinInput, (n, places, hasPlaces) =>
+export function fnBIN2OCT(args: RuntimeValue[]): RuntimeValue {
+  return convertBase(args, parseBinInput, (n, places, hasPlaces) =>
     formatToBase(n, 8, 10, places, hasPlaces)
   );
+}
 
-export const fnHEX2BIN: NativeFn = args =>
-  convertBase(args, parseHexInput, (n, places, hasPlaces) => {
+export function fnHEX2BIN(args: RuntimeValue[]): RuntimeValue {
+  return convertBase(args, parseHexInput, (n, places, hasPlaces) => {
     // BIN can only hold values in [-512, 511]; Excel rejects anything wider.
     if (n < -512 || n > 511) {
       return ERRORS.NUM;
     }
     return formatToBase(n, 2, 10, places, hasPlaces);
   });
+}
 
-export const fnHEX2OCT: NativeFn = args =>
-  convertBase(args, parseHexInput, (n, places, hasPlaces) => {
+export function fnHEX2OCT(args: RuntimeValue[]): RuntimeValue {
+  return convertBase(args, parseHexInput, (n, places, hasPlaces) => {
     // OCT holds values in [-2^29, 2^29 − 1].
     if (n < -536_870_912 || n > 536_870_911) {
       return ERRORS.NUM;
     }
     return formatToBase(n, 8, 10, places, hasPlaces);
   });
+}
 
-export const fnOCT2BIN: NativeFn = args =>
-  convertBase(args, parseOctInput, (n, places, hasPlaces) => {
+export function fnOCT2BIN(args: RuntimeValue[]): RuntimeValue {
+  return convertBase(args, parseOctInput, (n, places, hasPlaces) => {
     if (n < -512 || n > 511) {
       return ERRORS.NUM;
     }
     return formatToBase(n, 2, 10, places, hasPlaces);
   });
+}
 
-export const fnOCT2HEX: NativeFn = args =>
-  convertBase(args, parseOctInput, (n, places, hasPlaces) =>
+export function fnOCT2HEX(args: RuntimeValue[]): RuntimeValue {
+  return convertBase(args, parseOctInput, (n, places, hasPlaces) =>
     formatToBase(n, 16, 10, places, hasPlaces)
   );
+}
 
 // ============================================================================
 // Bessel functions
@@ -529,12 +545,20 @@ function bessel(
   return Number.isFinite(result) ? rvNumber(result) : ERRORS.NUM;
 }
 
-export const fnBESSELJ: NativeFn = args => bessel(args, besselJ, true);
-export const fnBESSELI: NativeFn = args => bessel(args, besselI, true);
-export const fnBESSELK: NativeFn = args => bessel(args, besselK, false);
-export const fnBESSELY: NativeFn = args => bessel(args, besselY, false);
+export function fnBESSELJ(args: RuntimeValue[]): RuntimeValue {
+  return bessel(args, besselJ, true);
+}
+export function fnBESSELI(args: RuntimeValue[]): RuntimeValue {
+  return bessel(args, besselI, true);
+}
+export function fnBESSELK(args: RuntimeValue[]): RuntimeValue {
+  return bessel(args, besselK, false);
+}
+export function fnBESSELY(args: RuntimeValue[]): RuntimeValue {
+  return bessel(args, besselY, false);
+}
 
-export const fnDELTA: NativeFn = args => {
+export function fnDELTA(args: RuntimeValue[]): RuntimeValue {
   const n1 = toNumberRV(topLeft(args[0]));
   if (isError(n1)) {
     return n1;
@@ -544,9 +568,9 @@ export const fnDELTA: NativeFn = args => {
     return n2;
   }
   return rvNumber(n1.value === n2.value ? 1 : 0);
-};
+}
 
-export const fnGESTEP: NativeFn = args => {
+export function fnGESTEP(args: RuntimeValue[]): RuntimeValue {
   const n = toNumberRV(topLeft(args[0]));
   if (isError(n)) {
     return n;
@@ -556,7 +580,7 @@ export const fnGESTEP: NativeFn = args => {
     return step;
   }
   return rvNumber(n.value >= step.value ? 1 : 0);
-};
+}
 
 // ============================================================================
 // Complex Numbers, Bit Operations
@@ -639,7 +663,7 @@ function formatComplex(re: number, im: number, suffix: string = "i"): string {
   return re + imStr;
 }
 
-export const fnCOMPLEX: NativeFn = args => {
+export function fnCOMPLEX(args: RuntimeValue[]): RuntimeValue {
   const re = toNumberRV(topLeft(args[0]));
   if (isError(re)) {
     return re;
@@ -662,27 +686,27 @@ export const fnCOMPLEX: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvString(formatComplex(re.value, im.value, suffix));
-};
+}
 
-export const fnIMREAL: NativeFn = args => {
+export function fnIMREAL(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   const c = parseComplex(toStringRV(topLeft(args[0])));
   return c ? rvNumber(c[0]) : ERRORS.NUM;
-};
+}
 
-export const fnIMAGINARY: NativeFn = args => {
+export function fnIMAGINARY(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
   }
   const c = parseComplex(toStringRV(topLeft(args[0])));
   return c ? rvNumber(c[1]) : ERRORS.NUM;
-};
+}
 
-export const fnIMABS: NativeFn = args => {
+export function fnIMABS(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -692,9 +716,9 @@ export const fnIMABS: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.sqrt(c[0] * c[0] + c[1] * c[1]));
-};
+}
 
-export const fnIMARGUMENT: NativeFn = args => {
+export function fnIMARGUMENT(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -707,9 +731,9 @@ export const fnIMARGUMENT: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.atan2(c[1], c[0]));
-};
+}
 
-export const fnIMCONJUGATE: NativeFn = args => {
+export function fnIMCONJUGATE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -719,7 +743,7 @@ export const fnIMCONJUGATE: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvString(formatComplex(c[0], -c[1]));
-};
+}
 
 /**
  * Iterate every scalar cell in a complex-number argument, invoking `step`
@@ -772,7 +796,7 @@ function forEachComplexCell(
   return visit(arg as ScalarValue);
 }
 
-export const fnIMSUM: NativeFn = args => {
+export function fnIMSUM(args: RuntimeValue[]): RuntimeValue {
   let re = 0;
   let im = 0;
   for (const a of args) {
@@ -789,9 +813,9 @@ export const fnIMSUM: NativeFn = args => {
     }
   }
   return rvString(formatComplex(re, im));
-};
+}
 
-export const fnIMSUB: NativeFn = args => {
+export function fnIMSUB(args: RuntimeValue[]): RuntimeValue {
   const e0 = checkError(args[0]);
   if (e0) {
     return e0;
@@ -806,9 +830,9 @@ export const fnIMSUB: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvString(formatComplex(c1[0] - c2[0], c1[1] - c2[1]));
-};
+}
 
-export const fnIMPRODUCT: NativeFn = args => {
+export function fnIMPRODUCT(args: RuntimeValue[]): RuntimeValue {
   let re = 1;
   let im = 0;
   for (const a of args) {
@@ -827,9 +851,9 @@ export const fnIMPRODUCT: NativeFn = args => {
     }
   }
   return rvString(formatComplex(re, im));
-};
+}
 
-export const fnIMDIV: NativeFn = args => {
+export function fnIMDIV(args: RuntimeValue[]): RuntimeValue {
   const e0 = checkError(args[0]);
   if (e0) {
     return e0;
@@ -855,9 +879,9 @@ export const fnIMDIV: NativeFn = args => {
   return rvString(
     formatComplex((c1[0] * c2[0] + c1[1] * c2[1]) / d, (c1[1] * c2[0] - c1[0] * c2[1]) / d)
   );
-};
+}
 
-export const fnIMPOWER: NativeFn = args => {
+export function fnIMPOWER(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -874,9 +898,9 @@ export const fnIMPOWER: NativeFn = args => {
   const theta = Math.atan2(c[1], c[0]);
   const rn = Math.pow(r, n.value);
   return rvString(formatComplex(rn * Math.cos(n.value * theta), rn * Math.sin(n.value * theta)));
-};
+}
 
-export const fnIMSQRT: NativeFn = args => {
+export function fnIMSQRT(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -889,9 +913,9 @@ export const fnIMSQRT: NativeFn = args => {
   const theta = Math.atan2(c[1], c[0]);
   const sr = Math.sqrt(r);
   return rvString(formatComplex(sr * Math.cos(theta / 2), sr * Math.sin(theta / 2)));
-};
+}
 
-export const fnIMLN: NativeFn = args => {
+export function fnIMLN(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -905,9 +929,9 @@ export const fnIMLN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvString(formatComplex(Math.log(r), Math.atan2(c[1], c[0])));
-};
+}
 
-export const fnIMLOG2: NativeFn = args => {
+export function fnIMLOG2(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -922,9 +946,9 @@ export const fnIMLOG2: NativeFn = args => {
   }
   const ln2 = Math.log(2);
   return rvString(formatComplex(Math.log(r) / ln2, Math.atan2(c[1], c[0]) / ln2));
-};
+}
 
-export const fnIMLOG10: NativeFn = args => {
+export function fnIMLOG10(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -939,9 +963,9 @@ export const fnIMLOG10: NativeFn = args => {
   }
   const ln10 = Math.log(10);
   return rvString(formatComplex(Math.log(r) / ln10, Math.atan2(c[1], c[0]) / ln10));
-};
+}
 
-export const fnIMEXP: NativeFn = args => {
+export function fnIMEXP(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -952,9 +976,9 @@ export const fnIMEXP: NativeFn = args => {
   }
   const er = Math.exp(c[0]);
   return rvString(formatComplex(er * Math.cos(c[1]), er * Math.sin(c[1])));
-};
+}
 
-export const fnIMSIN: NativeFn = args => {
+export function fnIMSIN(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -966,9 +990,9 @@ export const fnIMSIN: NativeFn = args => {
   return rvString(
     formatComplex(Math.sin(c[0]) * Math.cosh(c[1]), Math.cos(c[0]) * Math.sinh(c[1]))
   );
-};
+}
 
-export const fnIMCOS: NativeFn = args => {
+export function fnIMCOS(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -980,7 +1004,7 @@ export const fnIMCOS: NativeFn = args => {
   return rvString(
     formatComplex(Math.cos(c[0]) * Math.cosh(c[1]), -Math.sin(c[0]) * Math.sinh(c[1]))
   );
-};
+}
 
 /**
  * Shared helper: parse a single complex argument and either hand it to
@@ -1033,68 +1057,84 @@ function cdiv(a: [number, number], b: [number, number]): [number, number] | Erro
   return [(a[0] * b[0] + a[1] * b[1]) / denom, (a[1] * b[0] - a[0] * b[1]) / denom];
 }
 
-export const fnIMTAN: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMTAN(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     // tan(z) = sin(z) / cos(z)
     const sinZ: [number, number] = [Math.sin(re) * Math.cosh(im), Math.cos(re) * Math.sinh(im)];
     const cosZ: [number, number] = [Math.cos(re) * Math.cosh(im), -Math.sin(re) * Math.sinh(im)];
     return cdiv(sinZ, cosZ);
   });
+}
 
-export const fnIMCSC: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMCSC(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     // csc(z) = 1 / sin(z)
     const sinZ: [number, number] = [Math.sin(re) * Math.cosh(im), Math.cos(re) * Math.sinh(im)];
     return cdiv([1, 0], sinZ);
   });
+}
 
-export const fnIMSEC: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMSEC(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     // sec(z) = 1 / cos(z)
     const cosZ: [number, number] = [Math.cos(re) * Math.cosh(im), -Math.sin(re) * Math.sinh(im)];
     return cdiv([1, 0], cosZ);
   });
+}
 
-export const fnIMCOT: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMCOT(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     // cot(z) = cos(z) / sin(z)
     const sinZ: [number, number] = [Math.sin(re) * Math.cosh(im), Math.cos(re) * Math.sinh(im)];
     const cosZ: [number, number] = [Math.cos(re) * Math.cosh(im), -Math.sin(re) * Math.sinh(im)];
     return cdiv(cosZ, sinZ);
   });
+}
 
-export const fnIMSINH: NativeFn = args =>
-  unaryComplex(args, (re, im) => [Math.sinh(re) * Math.cos(im), Math.cosh(re) * Math.sin(im)]);
+export function fnIMSINH(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => [
+    Math.sinh(re) * Math.cos(im),
+    Math.cosh(re) * Math.sin(im)
+  ]);
+}
 
-export const fnIMCOSH: NativeFn = args =>
-  unaryComplex(args, (re, im) => [Math.cosh(re) * Math.cos(im), Math.sinh(re) * Math.sin(im)]);
+export function fnIMCOSH(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => [
+    Math.cosh(re) * Math.cos(im),
+    Math.sinh(re) * Math.sin(im)
+  ]);
+}
 
-export const fnIMTANH: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMTANH(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     // tanh(z) = sinh(z) / cosh(z)
     const sinhZ: [number, number] = [Math.sinh(re) * Math.cos(im), Math.cosh(re) * Math.sin(im)];
     const coshZ: [number, number] = [Math.cosh(re) * Math.cos(im), Math.sinh(re) * Math.sin(im)];
     return cdiv(sinhZ, coshZ);
   });
+}
 
-export const fnIMCSCH: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMCSCH(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     const sinhZ: [number, number] = [Math.sinh(re) * Math.cos(im), Math.cosh(re) * Math.sin(im)];
     return cdiv([1, 0], sinhZ);
   });
+}
 
-export const fnIMSECH: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMSECH(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     const coshZ: [number, number] = [Math.cosh(re) * Math.cos(im), Math.sinh(re) * Math.sin(im)];
     return cdiv([1, 0], coshZ);
   });
+}
 
-export const fnIMCOTH: NativeFn = args =>
-  unaryComplex(args, (re, im) => {
+export function fnIMCOTH(args: RuntimeValue[]): RuntimeValue {
+  return unaryComplex(args, (re, im) => {
     const sinhZ: [number, number] = [Math.sinh(re) * Math.cos(im), Math.cosh(re) * Math.sin(im)];
     const coshZ: [number, number] = [Math.cosh(re) * Math.cos(im), Math.sinh(re) * Math.sin(im)];
     return cdiv(coshZ, sinhZ);
   });
+}
 
 // Excel's bitwise family (BITAND/BITOR/BITXOR/BITLSHIFT/BITRSHIFT) operates
 // on integers in the range [0, 2^48 − 1]. JavaScript's `&`/`|`/`^` truncate
@@ -1132,7 +1172,7 @@ function validateBitOperand(v: number): number | ErrorValue {
   return v;
 }
 
-export const fnBITAND: NativeFn = args => {
+export function fnBITAND(args: RuntimeValue[]): RuntimeValue {
   const a = toNumberRV(topLeft(args[0]));
   if (isError(a)) {
     return a;
@@ -1150,9 +1190,9 @@ export const fnBITAND: NativeFn = args => {
     return bv;
   }
   return rvNumber(bitAnd48(av, bv));
-};
+}
 
-export const fnBITOR: NativeFn = args => {
+export function fnBITOR(args: RuntimeValue[]): RuntimeValue {
   const a = toNumberRV(topLeft(args[0]));
   if (isError(a)) {
     return a;
@@ -1170,9 +1210,9 @@ export const fnBITOR: NativeFn = args => {
     return bv;
   }
   return rvNumber(bitOr48(av, bv));
-};
+}
 
-export const fnBITXOR: NativeFn = args => {
+export function fnBITXOR(args: RuntimeValue[]): RuntimeValue {
   const a = toNumberRV(topLeft(args[0]));
   if (isError(a)) {
     return a;
@@ -1190,9 +1230,9 @@ export const fnBITXOR: NativeFn = args => {
     return bv;
   }
   return rvNumber(bitXor48(av, bv));
-};
+}
 
-export const fnBITLSHIFT: NativeFn = args => {
+export function fnBITLSHIFT(args: RuntimeValue[]): RuntimeValue {
   const num = toNumberRV(topLeft(args[0]));
   if (isError(num)) {
     return num;
@@ -1214,9 +1254,9 @@ export const fnBITLSHIFT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(result);
-};
+}
 
-export const fnBITRSHIFT: NativeFn = args => {
+export function fnBITRSHIFT(args: RuntimeValue[]): RuntimeValue {
   const num = toNumberRV(topLeft(args[0]));
   if (isError(num)) {
     return num;
@@ -1238,4 +1278,4 @@ export const fnBITRSHIFT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(result);
-};
+}

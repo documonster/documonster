@@ -2,6 +2,8 @@
  * WorkbookWriter/WorkbookReader Accuracy Tests - Node.js
  */
 
+import { rowValues } from "@excel/core/row";
+import { rowCommit } from "@excel/core/worksheet";
 import { PassThrough, Readable } from "@stream";
 import { createWorkbookRoundtripAccuracyTests } from "@stream/__tests__/streaming/workbook-roundtrip-accuracy-tests";
 import { beforeAll } from "vitest";
@@ -10,9 +12,8 @@ let WorkbookWriter: any;
 let WorkbookReader: any;
 
 beforeAll(async () => {
-  const excelModule = await import("../../../index");
-  WorkbookWriter = excelModule.WorkbookWriter;
-  WorkbookReader = excelModule.WorkbookReader;
+  WorkbookWriter = (await import("@excel/stream/workbook-writer")).WorkbookWriter;
+  WorkbookReader = (await import("@excel/stream/workbook-reader")).WorkbookReader;
 });
 
 function getNodeContext() {
@@ -39,7 +40,10 @@ function getNodeContext() {
         addWorksheet: (name: string) => {
           const worksheet = workbook.addWorksheet(name);
           return {
-            addRow: (data: (string | number)[]) => worksheet.addRow(data),
+            addRow: (data: (string | number)[]) => {
+              const row = worksheet.addRow(data);
+              return { commit: () => rowCommit(row) };
+            },
             commit: () => worksheet.commit()
           };
         },
@@ -56,7 +60,7 @@ function getNodeContext() {
 
       for await (const worksheet of reader) {
         for await (const row of worksheet) {
-          onRow(worksheet.name, row.number, row.values);
+          onRow(worksheet.name, row.number, rowValues(row));
         }
       }
     }

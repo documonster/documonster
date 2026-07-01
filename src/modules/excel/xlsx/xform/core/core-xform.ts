@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { DateXform } from "@excel/xlsx/xform/simple/date-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface CoreModel {
@@ -44,8 +45,8 @@ const PROPS = {
 } as const;
 
 class CoreXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -78,7 +79,7 @@ class CoreXform extends BaseXform {
     };
   }
 
-  render(xmlStream: any, model: CoreModel): void {
+  render(xmlStream: XmlSink, model: CoreModel): void {
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("cp:coreProperties", CoreXform.CORE_PROPERTY_ATTRIBUTES);
 
@@ -89,7 +90,7 @@ class CoreXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -129,9 +130,9 @@ class CoreXform extends BaseXform {
     return true;
   }
 
-  static DateFormat = function (dt: Date): string {
+  static DateFormat(dt: Date): string {
     return dt.toISOString().replace(/[.]\d{3}/, "");
-  };
+  }
 
   static DateAttrs = { "xsi:type": "dcterms:W3CDTF" };
 

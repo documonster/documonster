@@ -4,18 +4,12 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  parseStyleMap,
-  matchStyleMap,
-  mergeStyleMaps,
-  createStyleMap,
-  DEFAULT_STYLE_MAP
-} from "../index";
+import { Styles } from "../index";
 
 describe("Style mapping DSL", () => {
   describe("parseStyleMap", () => {
     it("parses basic rules", () => {
-      const map = parseStyleMap(
+      const map = Styles.parse(
         `
         p[style-name='Custom'] => div.custom
       `,
@@ -31,7 +25,7 @@ describe("Style mapping DSL", () => {
     });
 
     it("parses multiple rules", () => {
-      const map = parseStyleMap(
+      const map = Styles.parse(
         `
         p[style-name='H1'] => h1
         r[style-name='Bold'] => strong
@@ -43,7 +37,7 @@ describe("Style mapping DSL", () => {
     });
 
     it("skips comments and blank lines", () => {
-      const map = parseStyleMap(
+      const map = Styles.parse(
         `
         # This is a comment
         // Another comment
@@ -59,37 +53,37 @@ describe("Style mapping DSL", () => {
 
   describe("matchStyleMap", () => {
     it("matches source element with correct attributes", () => {
-      const map = parseStyleMap(`p[style-name='Quote'] => blockquote`, {
+      const map = Styles.parse(`p[style-name='Quote'] => blockquote`, {
         includeDefaults: false
       });
 
-      const target = matchStyleMap(map, "p", { "style-name": "Quote" });
+      const target = Styles.match(map, "p", { "style-name": "Quote" });
       expect(target).toBeDefined();
       expect(target!.tagName).toBe("blockquote");
     });
 
     it("returns undefined when no match", () => {
-      const map = parseStyleMap(`p[style-name='Quote'] => blockquote`, {
+      const map = Styles.parse(`p[style-name='Quote'] => blockquote`, {
         includeDefaults: false
       });
 
-      const target = matchStyleMap(map, "p", { "style-name": "Normal" });
+      const target = Styles.match(map, "p", { "style-name": "Normal" });
       expect(target).toBeUndefined();
     });
 
     it("does not match wrong source type", () => {
-      const map = parseStyleMap(`p[style-name='Code'] => pre`, {
+      const map = Styles.parse(`p[style-name='Code'] => pre`, {
         includeDefaults: false
       });
 
-      const target = matchStyleMap(map, "r", { "style-name": "Code" });
+      const target = Styles.match(map, "r", { "style-name": "Code" });
       expect(target).toBeUndefined();
     });
   });
 
   describe("nested targets (pre > code)", () => {
     it("parses nested target into child property", () => {
-      const map = parseStyleMap(`p[style-name='Code'] => pre > code`, {
+      const map = Styles.parse(`p[style-name='Code'] => pre > code`, {
         includeDefaults: false
       });
 
@@ -101,7 +95,7 @@ describe("Style mapping DSL", () => {
 
   describe("mergeStyleMaps", () => {
     it("merges two style maps with priority ordering", () => {
-      const map1 = createStyleMap([
+      const map1 = Styles.create([
         {
           source: "p",
           conditions: [{ attribute: "style-name", value: "A" }],
@@ -109,7 +103,7 @@ describe("Style mapping DSL", () => {
           priority: 1
         }
       ]);
-      const map2 = createStyleMap([
+      const map2 = Styles.create([
         {
           source: "p",
           conditions: [{ attribute: "style-name", value: "B" }],
@@ -118,7 +112,7 @@ describe("Style mapping DSL", () => {
         }
       ]);
 
-      const merged = mergeStyleMaps(map1, map2);
+      const merged = Styles.merge(map1, map2);
       expect(merged.rules.length).toBe(2);
       // map2 rules should have higher effective priority (later map = higher)
       expect(merged.rules[0]!.target.tagName).toBe("section");
@@ -127,16 +121,16 @@ describe("Style mapping DSL", () => {
 
   describe("DEFAULT_STYLE_MAP", () => {
     it("contains heading mappings", () => {
-      const h1 = matchStyleMap(DEFAULT_STYLE_MAP, "p", { "style-name": "Heading 1" });
+      const h1 = Styles.match(Styles.DEFAULT, "p", { "style-name": "Heading 1" });
       expect(h1).toBeDefined();
       expect(h1!.tagName).toBe("h1");
 
-      const h3 = matchStyleMap(DEFAULT_STYLE_MAP, "p", { "style-name": "Heading 3" });
+      const h3 = Styles.match(Styles.DEFAULT, "p", { "style-name": "Heading 3" });
       expect(h3!.tagName).toBe("h3");
     });
 
     it("contains run style mappings", () => {
-      const strong = matchStyleMap(DEFAULT_STYLE_MAP, "r", { "style-name": "Strong" });
+      const strong = Styles.match(Styles.DEFAULT, "r", { "style-name": "Strong" });
       expect(strong).toBeDefined();
       expect(strong!.tagName).toBe("strong");
     });
@@ -144,7 +138,7 @@ describe("Style mapping DSL", () => {
 
   describe("createStyleMap", () => {
     it("creates a sorted style map from rules", () => {
-      const map = createStyleMap([
+      const map = Styles.create([
         { source: "p", conditions: [], target: { tagName: "p" }, priority: 1 },
         {
           source: "p",

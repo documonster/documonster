@@ -2,24 +2,25 @@
 
 [English](README.md)
 
-GFM（GitHub 风格 Markdown）表格解析器和格式化器，零依赖。
+零依赖的 GFM(GitHub 风格 Markdown)表格解析器与格式化器。
 
 ```typescript
-import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
+// Markdown.parse, Markdown.parseAll, Markdown.format
 ```
 
-## 功能特性
+## 特性
 
-- **GFM 兼容** — 解析标准 GitHub 风格 Markdown 表格语法
-- **零依赖** — 纯 TypeScript，无外部包
-- **跨平台** — Node.js 和浏览器使用相同 API
-- **往返保持** — 解析和格式化一体，保留对齐方式
-- **列对齐** — 检测和生成左对齐、居中、右对齐、无对齐
-- **管道符转义** — 在解析和格式化方向上处理 `\|` 和 `\\`
-- **CJK/Emoji 宽度** — 内置显示宽度计算，正确对齐列
-- **多行单元格** — 通过 `<br>` 标签支持单元格内换行
-- **多表格提取** — 使用 `parseMarkdownAll` 从 Markdown 文档中提取所有表格
-- **工作簿集成** — `Workbook.readMarkdown()` / `writeMarkdown()` 实现 Excel↔Markdown 转换
+- **符合 GFM 规范** — 解析标准的 GitHub 风格 Markdown 表格语法
+- **零依赖** — 纯 TypeScript,无任何外部包
+- **跨平台** — 在 Node.js 与浏览器中使用相同的 API
+- **往返转换** — 解析与格式化集于一身,并保留对齐信息
+- **列对齐** — 检测并生成左对齐、居中、右对齐、无对齐
+- **管道符转义** — 在解析与格式化两个方向均处理 `\|` 与 `\\`
+- **CJK/Emoji 宽度** — 内置显示宽度计算,实现正确的列对齐
+- **多行单元格** — 支持 `<br>` 标签以在单元格内换行
+- **多表格** — 使用 `parseMarkdownAll` 从一篇 Markdown 文档中提取所有表格
+- **Workbook 集成** — 通过 `Workbook.readMarkdown()` / `writeMarkdown()` 实现 Excel↔Markdown
 
 ---
 
@@ -28,28 +29,28 @@ import { parseMarkdown, parseMarkdownAll, formatMarkdown } from "@cj-tech-master
 ### 解析
 
 ```typescript
-import { parseMarkdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
 
-const result = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const result = Markdown.parse("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
 // result.headers = ["Name", "Age"]
 // result.rows = [["Alice", "30"]]
 // result.alignments = ["none", "none"]
 
-// 对齐检测
-const aligned = parseMarkdown("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
+// 带对齐检测
+const aligned = Markdown.parse("| Left | Center | Right |\n|:---|:---:|---:|\n|a|b|c|");
 // aligned.alignments = ["left", "center", "right"]
 
-// 从较大的文档中提取（查找第一个表格）
-const doc = parseMarkdown("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
+// 从较大的文档中(查找第一个表格)
+const doc = Markdown.parse("# Title\n\nSome text.\n\n| A |\n| --- |\n| 1 |");
 // doc.headers = ["A"], doc.rows = [["1"]]
 ```
 
 ### 格式化
 
 ```typescript
-import { formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
 
-formatMarkdown(
+Markdown.format(
   ["Name", "Age"],
   [
     ["Alice", "30"],
@@ -61,8 +62,8 @@ formatMarkdown(
 // | Alice | 30  |
 // | Bob   | 25  |
 
-// 使用对齐
-formatMarkdown(["Left", "Center", "Right"], [["a", "b", "c"]], {
+// 带对齐
+Markdown.format(["Left", "Center", "Right"], [["a", "b", "c"]], {
   columns: [
     { header: "Left", alignment: "left" },
     { header: "Center", alignment: "center" },
@@ -70,73 +71,80 @@ formatMarkdown(["Left", "Center", "Right"], [["a", "b", "c"]], {
   ]
 });
 
-// 任意值类型 — 自动字符串化
-formatMarkdown(["Name", "Age", "Active"], [["Alice", 30, true]]);
+// 任意值类型 — 自动转为字符串
+Markdown.format(["Name", "Age", "Active"], [["Alice", 30, true]]);
 ```
 
-### 工作簿集成
+### Workbook 集成
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Cell } from "documonster/excel";
+import {
+  readMarkdown,
+  writeMarkdown,
+  readMarkdownAll,
+  readMarkdownFile,
+  writeMarkdownFile
+} from "documonster/excel/markdown";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // 读取 Markdown → 工作表
-const ws = workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-console.log(ws.getRow(2).getCell(1).value); // "Alice"
+const ws = readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+console.log(Cell.getValue(ws, "A2")); // "Alice"
 
 // 工作表 → Markdown
-const markdownText = workbook.writeMarkdown();
+const markdownText = writeMarkdown(workbook);
 
 // 从文档中读取所有表格
-const sheets = workbook.readMarkdownAll(markdownDoc, { sheetName: "Table" });
-// 创建 "Table"、"Table_2"、"Table_3"...
+const sheets = readMarkdownAll(workbook, markdownDoc, { sheetName: "Table" });
+// 创建 "Table"、"Table_2"、"Table_3"、……
 
-// 文件 I/O（仅 Node.js）
-await workbook.readMarkdownFile("data.md");
-await workbook.writeMarkdownFile("output.md");
+// 文件 I/O(仅限 Node.js)
+await readMarkdownFile(workbook, "data.md");
+await writeMarkdownFile(workbook, "output.md");
 ```
 
 ---
 
 ## 解析 API
 
-### `parseMarkdown(input, options?)`
+### `Markdown.parse(input, options?)`
 
 解析输入字符串中找到的第一个 Markdown 表格。
 
 ```typescript
-parseMarkdown(input: string, options?: MarkdownParseOptions): MarkdownParseResult
+Markdown.parse(input: string, options?: MarkdownParseOptions): MarkdownParseResult
 ```
 
-如果未找到有效表格，抛出 `MarkdownParseError`。
+若未找到有效表格,则抛出 `MarkdownParseError`。
 
-### `parseMarkdownAll(input, options?)`
+### `Markdown.parseAll(input, options?)`
 
 解析文档中的所有 Markdown 表格。
 
 ```typescript
-parseMarkdownAll(input: string, options?: MarkdownParseOptions): MarkdownParseResult[]
+Markdown.parseAll(input: string, options?: MarkdownParseOptions): MarkdownParseResult[]
 ```
 
-如果未找到表格，返回空数组。
+若未找到任何表格,则返回空数组。
 
-**解析选项（`MarkdownParseOptions`）：**
+**解析选项(`MarkdownParseOptions`):**
 
 | 选项            | 类型      | 默认值  | 描述                       |
-| --------------- | --------- | ------- | -------------------------- | ----------- |
-| `trim`          | `boolean` | `true`  | 去除单元格值的空白         |
-| `unescape`      | `boolean` | `true`  | 反转义 `\|` → `            | `和`\\`→`\` |
-| `skipEmptyRows` | `boolean` | `true`  | 跳过所有单元格为空的行     |
-| `maxRows`       | `number`  | —       | 最大数据行数（不含表头）   |
+| --------------- | --------- | ------- | -------------------------- | ------------- |
+| `trim`          | `boolean` | `true`  | 去除单元格值的首尾空白     |
+| `unescape`      | `boolean` | `true`  | 反转义 `\|` → `            | `以及`\\`→`\` |
+| `skipEmptyRows` | `boolean` | `true`  | 跳过所有单元格均为空的行   |
+| `maxRows`       | `number`  | —       | 最大解析数据行数(不含表头) |
 | `convertBr`     | `boolean` | `false` | 将 `<br>` 标签转换为换行符 |
 
-**结果（`MarkdownParseResult`）：**
+**结果(`MarkdownParseResult`):**
 
 ```typescript
 interface MarkdownParseResult {
-  headers: string[]; // 表头行的列名
-  rows: string[][]; // 数据行（每行 = 单元格值数组）
+  headers: string[]; // 表头行中的列名
+  rows: string[][]; // 数据行(每行 = 单元格值数组)
   alignments: MarkdownAlignment[]; // "left" | "center" | "right" | "none"
 }
 ```
@@ -145,32 +153,32 @@ interface MarkdownParseResult {
 
 ## 格式化 API
 
-### `formatMarkdown(headers, rows, options?)`
+### `Markdown.format(headers, rows, options?)`
 
 将数据格式化为 Markdown 表格字符串。
 
 ```typescript
-formatMarkdown(headers: string[], rows: unknown[][], options?: MarkdownFormatOptions): string
+Markdown.format(headers: string[], rows: unknown[][], options?: MarkdownFormatOptions): string
 ```
 
-**格式化选项（`MarkdownFormatOptions`）：**
+**格式化选项(`MarkdownFormatOptions`):**
 
-| 选项              | 类型                                 | 默认值   | 描述                     |
-| ----------------- | ------------------------------------ | -------- | ------------------------ | ------ |
-| `columns`         | `(string \| MarkdownColumnConfig)[]` | —        | 按列的表头和对齐配置     |
-| `alignment`       | `MarkdownAlignment`                  | `"left"` | 所有列的默认对齐方式     |
-| `padding`         | `boolean`                            | `true`   | 对齐列到等宽并填充       |
-| `trailingNewline` | `boolean`                            | `true`   | 输出中包含尾部换行符     |
-| `escapeContent`   | `boolean`                            | `true`   | 转义单元格内容中的 `     | `和`\` |
-| `stringify`       | `(value: unknown) => string`         | 内置     | 自定义值到字符串的转换器 |
+| 选项              | 类型                                 | 默认值   | 描述                       |
+| ----------------- | ------------------------------------ | -------- | -------------------------- | ------ |
+| `columns`         | `(string \| MarkdownColumnConfig)[]` | —        | 每列的表头与对齐配置       |
+| `alignment`       | `MarkdownAlignment`                  | `"left"` | 所有列的默认对齐方式       |
+| `padding`         | `boolean`                            | `true`   | 用填充将各列对齐到相等宽度 |
+| `trailingNewline` | `boolean`                            | `true`   | 在输出中包含末尾换行符     |
+| `escapeContent`   | `boolean`                            | `true`   | 转义单元格内容中的 `       | `与`\` |
+| `stringify`       | `(value: unknown) => string`         | 内置     | 自定义值到字符串的转换器   |
 
-**列配置（`MarkdownColumnConfig`）：**
+**列配置(`MarkdownColumnConfig`):**
 
 ```typescript
 interface MarkdownColumnConfig {
   header: string;
   alignment?: MarkdownAlignment; // "left" | "center" | "right" | "none"
-  minWidth?: number; // 最小列宽（默认：3）
+  minWidth?: number; // 最小列宽(默认:3)
 }
 ```
 
@@ -178,17 +186,17 @@ interface MarkdownColumnConfig {
 
 ## 多行单元格
 
-格式化时，单元格内容中的换行符会转换为 `<br>` 标签，解析时使用 `convertBr: true` 可以转换回来。
+单元格内容中的换行符在格式化时会转换为 `<br>` 标签,并可在解析时通过 `convertBr: true` 转换回换行符。
 
 ```typescript
-// 格式化：换行变为 <br>
-formatMarkdown(["Note"], [["Line 1\nLine 2"]]);
+// 格式化:换行符变为 <br>
+Markdown.format(["Note"], [["Line 1\nLine 2"]]);
 // | Note           |
 // | -------------- |
 // | Line 1<br>Line 2 |
 
-// 解析：<br> 转回换行
-parseMarkdown(table, { convertBr: true });
+// 解析:<br> 转回换行符
+Markdown.parse(table, { convertBr: true });
 // rows[0] = ["Line 1\nLine 2"]
 ```
 
@@ -196,10 +204,10 @@ parseMarkdown(table, { convertBr: true });
 
 ## CJK / Unicode 宽度
 
-格式化器在计算列宽时自动考虑 CJK 字符、全角形式和 emoji。无需外部依赖。
+在计算列宽时,格式化器会自动考虑 CJK 字符、全角字符以及 emoji,无需任何外部依赖。
 
 ```typescript
-formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
+Markdown.format(["Name", "名前"], [["Alice", "太郎"]]);
 // | Name  | 名前 |
 // | ----- | ---- |
 // | Alice | 太郎 |
@@ -210,10 +218,11 @@ formatMarkdown(["Name", "名前"], [["Alice", "太郎"]]);
 ## 错误
 
 ```typescript
-import { MarkdownParseError } from "@cj-tech-master/excelts/markdown";
+import { Markdown } from "documonster/markdown";
+import { MarkdownParseError } from "documonster/markdown";
 
 try {
-  parseMarkdown("no table here");
+  Markdown.parse("no table here");
 } catch (e) {
   if (e instanceof MarkdownParseError) {
     console.log(e.message); // "Line 1: No valid Markdown table found in input"
@@ -224,25 +233,25 @@ try {
 
 ---
 
-## 工作簿方法
+## Workbook 方法
 
 | 方法                                  | 平台    | 描述                        |
 | ------------------------------------- | ------- | --------------------------- |
-| `readMarkdown(input, options?)`       | 全平台  | 解析 Markdown 表格 → 工作表 |
-| `readMarkdownAll(input, options?)`    | 全平台  | 解析所有表格 → 工作表[]     |
-| `writeMarkdown(options?)`             | 全平台  | 工作表 → Markdown 字符串    |
-| `writeMarkdownBuffer(options?)`       | 全平台  | 工作表 → Uint8Array (UTF-8) |
+| `readMarkdown(input, options?)`       | 全部    | 解析 Markdown 表格 → 工作表 |
+| `readMarkdownAll(input, options?)`    | 全部    | 解析所有表格 → Worksheet[]  |
+| `writeMarkdown(options?)`             | 全部    | 工作表 → Markdown 字符串    |
+| `writeMarkdownBuffer(options?)`       | 全部    | 工作表 → Uint8Array(UTF-8)  |
 | `readMarkdownFile(path, options?)`    | Node.js | 从文件读取                  |
 | `readMarkdownAllFile(path, options?)` | Node.js | 从文件读取所有表格          |
-| `writeMarkdownFile(path, options?)`   | Node.js | 写入到文件                  |
+| `writeMarkdownFile(path, options?)`   | Node.js | 写入文件                    |
 
-**工作簿选项（`MarkdownOptions`）** 继承 `MarkdownParseOptions` 和 `MarkdownFormatOptions`，另加：
+**Workbook 选项(`MarkdownOptions`)** 同时继承 `MarkdownParseOptions` 与 `MarkdownFormatOptions`,并额外包含:
 
-| 选项               | 类型                         | 描述                                       |
-| ------------------ | ---------------------------- | ------------------------------------------ |
-| `sheetName`        | `string`                     | 工作表名称（`readMarkdownAll` 时用作前缀） |
-| `sheetId`          | `number`                     | 要写入的工作表 ID                          |
-| `map`              | `(value, column) => unknown` | 解析时的自定义值映射器                     |
-| `dateFormat`       | `string`                     | 写入时的日期格式                           |
-| `dateUTC`          | `boolean`                    | 日期使用 UTC                               |
-| `includeEmptyRows` | `boolean`                    | 输出中包含空行                             |
+| 选项               | 类型                         | 描述                                      |
+| ------------------ | ---------------------------- | ----------------------------------------- |
+| `sheetName`        | `string`                     | 工作表名称(对 `readMarkdownAll`:用作前缀) |
+| `sheetId`          | `number`                     | 要写入的工作表 ID                         |
+| `map`              | `(value, column) => unknown` | 解析时的自定义值映射器                    |
+| `dateFormat`       | `string`                     | 写入时的日期格式                          |
+| `dateUTC`          | `boolean`                    | 日期使用 UTC                              |
+| `includeEmptyRows` | `boolean`                    | 在输出中包含空行                          |

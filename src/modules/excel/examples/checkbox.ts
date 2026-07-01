@@ -8,19 +8,29 @@
  *   node src/modules/excel/examples/checkbox.ts [outputPath]
  */
 
-import { Workbook } from "@excel/workbook";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { Cell, Column, Row, Workbook } from "@excel/index";
+import type { Fill, Alignment } from "@excel/types";
 
 async function main(): Promise<void> {
-  const outputPath = process.argv[2] || "src/modules/excel/examples/data/checkbox.xlsx";
+  const outDir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../tmp/excel-examples"
+  );
+  fs.mkdirSync(outDir, { recursive: true });
+  const outputPath = process.argv[2] || path.join(outDir, "checkbox.xlsx");
 
-  const wb = new Workbook();
-  wb.creator = "excelts";
+  const wb = Workbook.create();
+  wb.creator = "documonster";
 
-  const ws = wb.addWorksheet("Checkbox");
+  const ws = Workbook.addWorksheet(wb, "Checkbox");
 
-  ws.getCell("A1").value = "Task";
-  ws.getCell("B1").value = "Done";
-  ws.getRow(1).font = { bold: true };
+  Cell.setValue(ws, "A1", "Task");
+  Cell.setValue(ws, "B1", "Done");
+  Row.setFont(ws, 1, { bold: true });
 
   const rows: Array<{ task: string; done: boolean; priority: "P0" | "P1" | "P2" }> = [
     { task: "Implement checkbox (Office Online)", done: true, priority: "P0" },
@@ -31,18 +41,18 @@ async function main(): Promise<void> {
 
   rows.forEach((r, i) => {
     const rowNo = i + 2;
-    ws.getCell(`A${rowNo}`).value = r.task;
-    ws.getCell(`B${rowNo}`).value = { checkbox: r.done };
-    ws.getCell(`C${rowNo}`).value = r.priority;
+    Cell.setValue(ws, `A${rowNo}`, r.task);
+    Cell.setValue(ws, `B${rowNo}`, { checkbox: r.done });
+    Cell.setValue(ws, `C${rowNo}`, r.priority);
   });
 
-  ws.getColumn(1).width = 46;
-  ws.getColumn(2).width = 12;
-  ws.getColumn(3).width = 10;
+  Column.setWidth(ws, 1, 46);
+  Column.setWidth(ws, 2, 12);
+  Column.setWidth(ws, 3, 10);
 
   // Add some styling to prove checkbox + user style merge works
-  ws.getCell("B2").style.font = { bold: true };
-  ws.getCell("B3").style.fill = {
+  Cell.getStyle(ws, "B2").font = { bold: true };
+  Cell.getStyle(ws, "B3").fill = {
     type: "gradient",
     gradient: "path",
     center: { left: 0.5, top: 0.5 },
@@ -50,13 +60,14 @@ async function main(): Promise<void> {
       { position: 0, color: { argb: "FFB3E5FC" } },
       { position: 1, color: { argb: "FFFFFFFF" } }
     ]
-  } as any;
+  } satisfies Fill;
 
-  ws.getCell("A1").style.alignment = { vertical: "middle", horizontal: "center" } as any;
-  ws.getCell("B1").style.alignment = { vertical: "middle", horizontal: "center" } as any;
-  ws.getCell("C1").value = "Priority";
+  const centered: Partial<Alignment> = { vertical: "middle", horizontal: "center" };
+  Cell.getStyle(ws, "A1").alignment = centered;
+  Cell.getStyle(ws, "B1").alignment = centered;
+  Cell.setValue(ws, "C1", "Priority");
 
-  await wb.xlsx.writeFile(outputPath);
+  await Workbook.writeFile(wb, outputPath);
 
   console.log(`Wrote: ${outputPath}`);
 }

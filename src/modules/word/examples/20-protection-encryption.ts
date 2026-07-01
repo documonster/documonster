@@ -16,16 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  protectDocument,
-  unprotectDocument,
-  isDocumentProtected,
-  getProtectionState,
-  verifyProtectionPassword,
-  encryptDocx,
-  toBuffer
-} from "../index";
+import { Document, Io, Security } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -55,62 +46,62 @@ function makeDoc(): ReturnType<typeof Document.build> {
 //    (`swordfish`). (Some Word builds also surface a "Restrict Editing"
 //    task pane automatically.)
 // ---------------------------------------------------------------------------
-const readOnlyProtected = await protectDocument(makeDoc(), {
+const readOnlyProtected = await Security.protect(makeDoc(), {
   edit: "readOnly",
   password: "swordfish",
   hashAlgorithm: "SHA-256",
   spinCount: 100_000
 });
-console.log("  isDocumentProtected:", isDocumentProtected(readOnlyProtected));
-console.log("  protection state:", getProtectionState(readOnlyProtected));
+console.log("  isDocumentProtected:", Security.isProtected(readOnlyProtected));
+console.log("  protection state:", Security.getState(readOnlyProtected));
 console.log(
   "  verifyProtectionPassword('swordfish'):",
-  await verifyProtectionPassword(readOnlyProtected, "swordfish")
+  await Security.verifyPassword(readOnlyProtected, "swordfish")
 );
 console.log(
   "  verifyProtectionPassword('wrong'):",
-  await verifyProtectionPassword(readOnlyProtected, "wrong")
+  await Security.verifyPassword(readOnlyProtected, "wrong")
 );
-fs.writeFileSync(path.join(outDir, "01-readonly.docx"), await toBuffer(readOnlyProtected));
+fs.writeFileSync(path.join(outDir, "01-readonly.docx"), await Io.toBuffer(readOnlyProtected));
 
 // ---------------------------------------------------------------------------
 // 2. Comments-only restriction (no password — anyone can disable in Word)
 // ---------------------------------------------------------------------------
-const commentsOnly = await protectDocument(makeDoc(), { edit: "comments" });
-fs.writeFileSync(path.join(outDir, "02-comments-only.docx"), await toBuffer(commentsOnly));
+const commentsOnly = await Security.protect(makeDoc(), { edit: "comments" });
+fs.writeFileSync(path.join(outDir, "02-comments-only.docx"), await Io.toBuffer(commentsOnly));
 
 // ---------------------------------------------------------------------------
 // 3. Tracked-changes-only with SHA-512
 // ---------------------------------------------------------------------------
-const tracked = await protectDocument(makeDoc(), {
+const tracked = await Security.protect(makeDoc(), {
   edit: "trackedChanges",
   password: "p@ssw0rd",
   hashAlgorithm: "SHA-512",
   spinCount: 50_000,
   formatting: true
 });
-fs.writeFileSync(path.join(outDir, "03-tracked-changes.docx"), await toBuffer(tracked));
+fs.writeFileSync(path.join(outDir, "03-tracked-changes.docx"), await Io.toBuffer(tracked));
 
 // ---------------------------------------------------------------------------
 // 4. Forms only — typical for "fillable form" DOCX
 // ---------------------------------------------------------------------------
-const formsOnly = await protectDocument(makeDoc(), { edit: "forms", password: "fill" });
-fs.writeFileSync(path.join(outDir, "04-forms-only.docx"), await toBuffer(formsOnly));
+const formsOnly = await Security.protect(makeDoc(), { edit: "forms", password: "fill" });
+fs.writeFileSync(path.join(outDir, "04-forms-only.docx"), await Io.toBuffer(formsOnly));
 
 // ---------------------------------------------------------------------------
 // 5. Unprotect
 // ---------------------------------------------------------------------------
-const noLongerProtected = unprotectDocument(readOnlyProtected);
-console.log("  after unprotect, isProtected =", isDocumentProtected(noLongerProtected));
-fs.writeFileSync(path.join(outDir, "05-unprotected.docx"), await toBuffer(noLongerProtected));
+const noLongerProtected = Security.unprotect(readOnlyProtected);
+console.log("  after unprotect, isProtected =", Security.isProtected(noLongerProtected));
+fs.writeFileSync(path.join(outDir, "05-unprotected.docx"), await Io.toBuffer(noLongerProtected));
 
 // ---------------------------------------------------------------------------
 // 6. Agile encryption — the whole DOCX is encrypted, not just settings.
 //    The output is an OLE2 (CFB) container that Word opens with the password.
 // ---------------------------------------------------------------------------
-const plainBuf = await toBuffer(makeDoc());
+const plainBuf = await Io.toBuffer(makeDoc());
 fs.writeFileSync(path.join(outDir, "06-plain.docx"), plainBuf);
-const encrypted = await encryptDocx(plainBuf, "topsecret", {
+const encrypted = await Security.encrypt(plainBuf, "topsecret", {
   keyBits: 256,
   hashAlgorithm: "SHA512",
   spinCount: 100_000

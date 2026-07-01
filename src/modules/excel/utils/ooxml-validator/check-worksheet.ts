@@ -22,19 +22,18 @@
  * generic `sheet-child-out-of-order` kind.
  */
 
-import type { XmlElement } from "@xml/types";
-
-import { decodeCol, decodeRow } from "../address";
-import type { ValidationContext } from "./context";
-import { posixBasename } from "./path-utils";
-import type { OoxmlProblemKind } from "./types";
+import { decodeCol, decodeRow } from "@excel/utils/address";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import { posixBasename } from "@excel/utils/ooxml-validator/path-utils";
+import type { OoxmlProblemKind } from "@excel/utils/ooxml-validator/types";
 import {
   attrByLocalName,
   collectDescendantsLocal,
   findChildLocal,
   findChildrenLocal,
   matchesLocal
-} from "./xml-utils";
+} from "@excel/utils/ooxml-validator/xml-utils";
+import type { XmlElement } from "@xml/types";
 
 // -----------------------------------------------------------------------------
 // ECMA-376 worksheet child order.

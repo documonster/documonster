@@ -8,17 +8,16 @@
  * - word/fontTable.xml (FontDef[] — embedded font references)
  */
 
-import { findChild, parseXml, textContent } from "@xml/dom";
-
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import { attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
 import type {
   AppProperties,
   CoreProperties,
   CustomProperty,
   CustomPropertyValue,
   FontDef
-} from "../types";
-import { attrVal, findChildNs, findChildrenNs } from "./parse-utils";
+} from "@word/types";
+import { findChild, parseXml, textContent } from "@xml/dom";
 
 // =============================================================================
 // Core Properties Parser

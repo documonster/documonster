@@ -23,12 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  zip,
-  unzip,
-  ZipArchive,
-  ZipEditor,
-  ZipEditPlan,
-  TarArchive,
+  Archive,
   TarGzArchive,
   ArchiveFile,
   compress,
@@ -62,7 +57,7 @@ const decoder = new TextDecoder();
 // 1. Create a ZIP — simplest way
 // =============================================================================
 
-const archive1 = zip();
+const archive1 = Archive.zip();
 archive1.add("hello.txt", "Hello, World!");
 archive1.add("data.json", JSON.stringify({ name: "test", value: 42 }));
 archive1.add("binary.bin", new Uint8Array([0x00, 0x01, 0x02, 0xff]));
@@ -77,9 +72,9 @@ console.log("1. basic.zip — 3 entries,", zipBytes1.length, "bytes");
 
 const largeText = "The quick brown fox jumps over the lazy dog. ".repeat(1000);
 
-const zipLevel0 = await zip({ level: 0 }).add("text.txt", largeText).bytes();
-const zipLevel1 = await zip({ level: 1 }).add("text.txt", largeText).bytes();
-const zipLevel9 = await zip({ level: 9 }).add("text.txt", largeText).bytes();
+const zipLevel0 = await Archive.zip({ level: 0 }).add("text.txt", largeText).bytes();
+const zipLevel1 = await Archive.zip({ level: 1 }).add("text.txt", largeText).bytes();
+const zipLevel9 = await Archive.zip({ level: 9 }).add("text.txt", largeText).bytes();
 
 console.log("2. Compression levels:");
 console.log("  Level 0 (store):", zipLevel0.length, "bytes");
@@ -90,7 +85,7 @@ console.log("  Level 9 (best):", zipLevel9.length, "bytes");
 // 3. ZipArchive with directories and symlinks
 // =============================================================================
 
-const archive3 = new ZipArchive({ level: 6, timestamps: "dos" });
+const archive3 = new Archive.ZipArchive({ level: 6, timestamps: "dos" });
 archive3.add("src/main.ts", 'console.log("hello");');
 archive3.add("src/utils/helper.ts", "export const PI = 3.14;");
 archive3.addDirectory("src/empty/");
@@ -104,7 +99,7 @@ console.log("3. with-dirs.zip — directories + symlink");
 // 4. Synchronous ZIP creation
 // =============================================================================
 
-const archive4 = new ZipArchive();
+const archive4 = new Archive.ZipArchive();
 archive4.add("sync.txt", "Created synchronously");
 archive4.add("data.csv", "name,age\nAlice,30\nBob,25");
 
@@ -116,7 +111,7 @@ console.log("4. sync.zip —", zipSync4.length, "bytes (sync)");
 // 5. Streaming ZIP output
 // =============================================================================
 
-const archive5 = new ZipArchive();
+const archive5 = new Archive.ZipArchive();
 archive5.add("stream1.txt", "First file");
 archive5.add("stream2.txt", "Second file");
 
@@ -130,7 +125,7 @@ console.log("5. Streaming output: total", streamSize, "bytes");
 // 6. Progress tracking
 // =============================================================================
 
-const archive6 = new ZipArchive();
+const archive6 = new Archive.ZipArchive();
 for (let i = 0; i < 10; i++) {
   archive6.add(`file-${i}.txt`, `Content of file ${i}`);
 }
@@ -152,7 +147,7 @@ for await (const chunk of op6.iterable) {
 // 7. Read/extract ZIP
 // =============================================================================
 
-const reader7 = unzip(zipBytes1);
+const reader7 = Archive.unzip(zipBytes1);
 console.log("\n7. Reading basic.zip:");
 for await (const entry of reader7.entries()) {
   const bytes = await entry.bytes();
@@ -170,7 +165,7 @@ if (helloEntry) {
 // 8. ZipEditor — modify existing archives
 // =============================================================================
 
-const editor8 = await ZipEditor.open(zipBytes1);
+const editor8 = await Archive.ZipEditor.open(zipBytes1);
 editor8.set("new-file.txt", "Added by editor");
 editor8.delete("binary.bin");
 editor8.rename("hello.txt", "greeting.txt");
@@ -180,7 +175,7 @@ fs.writeFileSync(path.join(outDir, "edited.zip"), editedZip);
 console.log("\n8. edited.zip — added, deleted, renamed entries");
 
 // Verify
-const reader8 = unzip(editedZip);
+const reader8 = Archive.unzip(editedZip);
 console.log("  Entries after edit:");
 for await (const entry of reader8.entries()) {
   console.log(`    ${entry.path}`);
@@ -190,11 +185,11 @@ for await (const entry of reader8.entries()) {
 // 9. ZipEditPlan — serializable edit operations
 // =============================================================================
 
-const plan = new ZipEditPlan();
+const plan = new Archive.ZipEditPlan();
 plan.set("readme.md", "# Updated README");
 plan.delete("data.json");
 
-const editor9 = await ZipEditor.open(zipBytes1);
+const editor9 = await Archive.ZipEditor.open(zipBytes1);
 editor9.apply(plan);
 
 const planned = await editor9.bytes();
@@ -204,7 +199,7 @@ console.log("\n9. ZipEditPlan applied:", planned.length, "bytes");
 // 10. TAR archives
 // =============================================================================
 
-const tar10 = new TarArchive();
+const tar10 = new Archive.TarArchive();
 tar10.add("file1.txt", "TAR content 1");
 tar10.add("file2.txt", "TAR content 2");
 tar10.add("dir/file3.txt", "Nested file");
@@ -214,7 +209,7 @@ fs.writeFileSync(path.join(outDir, "archive.tar"), tarBytes);
 console.log("\n10. archive.tar —", tarBytes.length, "bytes");
 
 // Read TAR
-const tarReader = unzip(tarBytes, { format: "tar" });
+const tarReader = Archive.unzip(tarBytes, { format: "tar" });
 console.log("  TAR entries:");
 for await (const entry of tarReader.entries()) {
   console.log(`    ${entry.path} (${entry.isDirectory ? "dir" : "file"})`);
@@ -406,9 +401,9 @@ console.log("  Re-archived:", zipBytes20.length, "bytes");
 // 21. Reproducible ZIP output
 // =============================================================================
 
-const repro1 = await new ZipArchive({ reproducible: true }).add("a.txt", "hello").bytes();
+const repro1 = await new Archive.ZipArchive({ reproducible: true }).add("a.txt", "hello").bytes();
 
-const repro2 = await new ZipArchive({ reproducible: true }).add("a.txt", "hello").bytes();
+const repro2 = await new Archive.ZipArchive({ reproducible: true }).add("a.txt", "hello").bytes();
 
 console.log("\n21. Reproducible output:");
 console.log(
@@ -425,7 +420,7 @@ for (let i = 0; i < randomData.length; i++) {
   randomData[i] = Math.floor(Math.random() * 256);
 }
 
-const smartZip = await new ZipArchive({ smartStore: true })
+const smartZip = await new Archive.ZipArchive({ smartStore: true })
   .add("random.bin", randomData)
   .add("text.txt", "Compressible ".repeat(100))
   .bytes();

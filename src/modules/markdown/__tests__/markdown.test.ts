@@ -8,7 +8,17 @@
  * - parseMarkdownAll: multi-table document parsing
  */
 
-import { Workbook } from "@excel/workbook";
+import {
+  readMarkdown,
+  readMarkdownAll,
+  writeMarkdown,
+  writeMarkdownBuffer
+} from "@excel/bridge/markdown-bridge";
+import { readMarkdownFile } from "@excel/bridge/markdown-bridge.node";
+import { cellGetValue, cellSetValue } from "@excel/core/cell";
+import type { WorkbookData } from "@excel/core/workbook-core";
+import { getSheetName, rowGetCell } from "@excel/core/worksheet";
+import { Workbook, Worksheet } from "@excel/index";
 import { MarkdownParseError } from "@markdown/errors";
 import { formatMarkdown } from "@markdown/format/index";
 import { parseMarkdown, parseMarkdownAll } from "@markdown/parse/index";
@@ -843,57 +853,57 @@ describe("formatMarkdown", () => {
 // =============================================================================
 
 describe("Workbook Markdown integration", () => {
-  let workbook: InstanceType<typeof Workbook>;
+  let workbook: WorkbookData;
 
   beforeEach(() => {
-    workbook = new Workbook();
+    workbook = Workbook.create();
   });
 
   describe("readMarkdown", () => {
     it("should create a worksheet from Markdown table", () => {
       const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |";
-      const ws = workbook.readMarkdown(markdown);
+      const ws = readMarkdown(workbook, markdown);
 
       expect(ws).toBeDefined();
-      expect(ws.name).toBeDefined();
-      expect(ws.rowCount).toBe(3); // 1 header + 2 data
+      expect(getSheetName(ws)).toBeDefined();
+      expect(Worksheet.rowCount(ws)).toBe(3); // 1 header + 2 data
     });
 
     it("should set header row correctly", () => {
       const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const ws = workbook.readMarkdown(markdown);
+      const ws = readMarkdown(workbook, markdown);
 
-      const headerRow = ws.getRow(1);
-      expect(headerRow.getCell(1).value).toBe("Name");
-      expect(headerRow.getCell(2).value).toBe("Age");
+      const headerRow = Worksheet.getRow(ws, 1);
+      expect(cellGetValue(rowGetCell(headerRow, 1))).toBe("Name");
+      expect(cellGetValue(rowGetCell(headerRow, 2))).toBe("Age");
     });
 
     it("should set data rows correctly", () => {
       const markdown = "| Name | Age |\n| --- | --- |\n| Alice | 30 |";
-      const ws = workbook.readMarkdown(markdown);
+      const ws = readMarkdown(workbook, markdown);
 
-      const dataRow = ws.getRow(2);
-      expect(dataRow.getCell(1).value).toBe("Alice");
-      expect(dataRow.getCell(2).value).toBe("30");
+      const dataRow = Worksheet.getRow(ws, 2);
+      expect(cellGetValue(rowGetCell(dataRow, 1))).toBe("Alice");
+      expect(cellGetValue(rowGetCell(dataRow, 2))).toBe("30");
     });
 
     it("should use custom sheet name", () => {
       const markdown = "| A |\n| --- |\n| 1 |";
-      const ws = workbook.readMarkdown(markdown, { sheetName: "MyData" });
-      expect(ws.name).toBe("MyData");
+      const ws = readMarkdown(workbook, markdown, { sheetName: "MyData" });
+      expect(getSheetName(ws)).toBe("MyData");
     });
 
     it("should apply custom value mapper", () => {
       const markdown = "| Value |\n| --- |\n| 42 |\n| hello |";
-      const ws = workbook.readMarkdown(markdown, {
+      const ws = readMarkdown(workbook, markdown, {
         map: (v, _col) => {
           const num = Number(v);
           return Number.isNaN(num) ? v : num;
         }
       });
 
-      expect(ws.getRow(2).getCell(1).value).toBe(42);
-      expect(ws.getRow(3).getCell(1).value).toBe("hello");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(ws, 2), 1))).toBe(42);
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(ws, 3), 1))).toBe("hello");
     });
   });
 
@@ -913,45 +923,45 @@ describe("Workbook Markdown integration", () => {
         "| 3 | 4 |"
       ].join("\n");
 
-      const sheets = workbook.readMarkdownAll(markdown);
+      const sheets = readMarkdownAll(workbook, markdown);
 
       expect(sheets).toHaveLength(2);
-      expect(sheets[0].getRow(1).getCell(1).value).toBe("A");
-      expect(sheets[0].getRow(2).getCell(1).value).toBe("1");
-      expect(sheets[1].getRow(1).getCell(1).value).toBe("C");
-      expect(sheets[1].getRow(2).getCell(1).value).toBe("3");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[0], 1), 1))).toBe("A");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[0], 2), 1))).toBe("1");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[1], 1), 1))).toBe("C");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[1], 2), 1))).toBe("3");
     });
 
     it("should return empty array for document with no tables", () => {
-      const sheets = workbook.readMarkdownAll("just some text\nno tables here");
+      const sheets = readMarkdownAll(workbook, "just some text\nno tables here");
       expect(sheets).toEqual([]);
     });
 
     it("should use sheetName as prefix for worksheet names", () => {
       const markdown = "| A |\n| --- |\n| 1 |\n\n| B |\n| --- |\n| 2 |";
-      const sheets = workbook.readMarkdownAll(markdown, { sheetName: "Data" });
+      const sheets = readMarkdownAll(workbook, markdown, { sheetName: "Data" });
 
       expect(sheets).toHaveLength(2);
-      expect(sheets[0].name).toBe("Data");
-      expect(sheets[1].name).toBe("Data_2");
+      expect(getSheetName(sheets[0])).toBe("Data");
+      expect(getSheetName(sheets[1])).toBe("Data_2");
     });
 
     it("should apply value mapper to all tables", () => {
       const markdown = "| V |\n| --- |\n| 10 |\n\n| V |\n| --- |\n| 20 |";
-      const sheets = workbook.readMarkdownAll(markdown, {
+      const sheets = readMarkdownAll(workbook, markdown, {
         map: v => {
           const n = Number(v);
           return Number.isNaN(n) ? v : n;
         }
       });
 
-      expect(sheets[0].getRow(2).getCell(1).value).toBe(10);
-      expect(sheets[1].getRow(2).getCell(1).value).toBe(20);
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[0], 2), 1))).toBe(10);
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[1], 2), 1))).toBe(20);
     });
 
     it("should preserve alignments on each worksheet", () => {
       const markdown = "| L |\n| :--- |\n| a |\n\n| R |\n| ---: |\n| b |";
-      const sheets = workbook.readMarkdownAll(markdown);
+      const sheets = readMarkdownAll(workbook, markdown);
 
       expect((sheets[0] as any)._markdownAlignments).toEqual(["left"]);
       expect((sheets[1] as any)._markdownAlignments).toEqual(["right"]);
@@ -959,60 +969,60 @@ describe("Workbook Markdown integration", () => {
 
     it("should apply convertBr across all tables", () => {
       const markdown = "| N |\n| --- |\n| A<br>B |\n\n| N |\n| --- |\n| C<br>D |";
-      const sheets = workbook.readMarkdownAll(markdown, { convertBr: true });
+      const sheets = readMarkdownAll(workbook, markdown, { convertBr: true });
 
-      expect(sheets[0].getRow(2).getCell(1).value).toBe("A\nB");
-      expect(sheets[1].getRow(2).getCell(1).value).toBe("C\nD");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[0], 2), 1))).toBe("A\nB");
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(sheets[1], 2), 1))).toBe("C\nD");
     });
   });
 
   describe("writeMarkdown", () => {
     it("should write empty string for empty workbook", () => {
-      const result = workbook.writeMarkdown();
+      const result = writeMarkdown(workbook);
       expect(result).toBe("");
     });
 
     it("should write a valid Markdown table", () => {
-      const ws = workbook.addWorksheet("Test");
-      ws.addRow(["Name", "Age"]);
-      ws.addRow(["Alice", 30]);
-      ws.addRow(["Bob", 25]);
+      const ws = Workbook.addWorksheet(workbook, "Test");
+      Worksheet.addRow(ws, ["Name", "Age"]);
+      Worksheet.addRow(ws, ["Alice", 30]);
+      Worksheet.addRow(ws, ["Bob", 25]);
 
-      const result = workbook.writeMarkdown();
+      const result = writeMarkdown(workbook);
       expect(result).toContain("| Name");
       expect(result).toContain("---");
       expect(result).toContain("Alice");
     });
 
     it("should write specific worksheet by name", () => {
-      workbook.addWorksheet("Sheet1");
-      const ws2 = workbook.addWorksheet("Sheet2");
-      ws2.addRow(["Specific"]);
-      ws2.addRow(["Data"]);
+      Workbook.addWorksheet(workbook, "Sheet1");
+      const ws2 = Workbook.addWorksheet(workbook, "Sheet2");
+      Worksheet.addRow(ws2, ["Specific"]);
+      Worksheet.addRow(ws2, ["Data"]);
 
-      const result = workbook.writeMarkdown({ sheetName: "Sheet2" });
+      const result = writeMarkdown(workbook, { sheetName: "Sheet2" });
       expect(result).toContain("Specific");
     });
 
     it("should handle null/undefined cell values", () => {
-      const ws = workbook.addWorksheet("Test");
-      ws.addRow(["A", "B"]);
-      ws.addRow([null, undefined]);
+      const ws = Workbook.addWorksheet(workbook, "Test");
+      Worksheet.addRow(ws, ["A", "B"]);
+      Worksheet.addRow(ws, [null, undefined]);
 
-      const result = workbook.writeMarkdown();
+      const result = writeMarkdown(workbook);
       expect(result).toBeDefined();
       // Should not throw
     });
 
     it("should handle sparse rows (non-contiguous columns)", () => {
-      const ws = workbook.addWorksheet("Sparse");
-      ws.addRow(["A", "B", "C"]);
+      const ws = Workbook.addWorksheet(workbook, "Sparse");
+      Worksheet.addRow(ws, ["A", "B", "C"]);
       // Create a sparse row: only set columns 1 and 3
-      const row = ws.addRow([]);
-      row.getCell(1).value = "x";
-      row.getCell(3).value = "z";
+      const row = Worksheet.addRow(ws, []);
+      cellSetValue(rowGetCell(row, 1), "x");
+      cellSetValue(rowGetCell(row, 3), "z");
 
-      const result = workbook.writeMarkdown({ sheetName: "Sparse" });
+      const result = writeMarkdown(workbook, { sheetName: "Sparse" });
       expect(result).toBeDefined();
       const parsed = parseMarkdown(result);
       expect(parsed.headers).toEqual(["A", "B", "C"]);
@@ -1024,21 +1034,21 @@ describe("Workbook Markdown integration", () => {
 
   describe("writeMarkdownBuffer", () => {
     it("should return a Uint8Array", () => {
-      const ws = workbook.addWorksheet("Test");
-      ws.addRow(["Name"]);
-      ws.addRow(["Alice"]);
+      const ws = Workbook.addWorksheet(workbook, "Test");
+      Worksheet.addRow(ws, ["Name"]);
+      Worksheet.addRow(ws, ["Alice"]);
 
-      const buffer = workbook.writeMarkdownBuffer();
+      const buffer = writeMarkdownBuffer(workbook);
       expect(buffer).toBeInstanceOf(Uint8Array);
       expect(buffer.length).toBeGreaterThan(0);
     });
 
     it("should encode as UTF-8", () => {
-      const ws = workbook.addWorksheet("Test");
-      ws.addRow(["\u540d\u524d"]);
-      ws.addRow(["\u592a\u90ce"]);
+      const ws = Workbook.addWorksheet(workbook, "Test");
+      Worksheet.addRow(ws, ["\u540d\u524d"]);
+      Worksheet.addRow(ws, ["\u592a\u90ce"]);
 
-      const buffer = workbook.writeMarkdownBuffer();
+      const buffer = writeMarkdownBuffer(workbook);
       const text = new TextDecoder().decode(buffer);
       expect(text).toContain("\u540d\u524d");
       expect(text).toContain("\u592a\u90ce");
@@ -1050,8 +1060,8 @@ describe("Workbook Markdown integration", () => {
       const original =
         "| Name | Age | City |\n| --- | --- | --- |\n| Alice | 30 | NYC |\n| Bob | 25 | LA |";
 
-      const _ws = workbook.readMarkdown(original);
-      const output = workbook.writeMarkdown();
+      const _ws = readMarkdown(workbook, original);
+      const output = writeMarkdown(workbook);
 
       // Parse the output to verify content
       const reparsed = parseMarkdown(output);
@@ -1065,8 +1075,8 @@ describe("Workbook Markdown integration", () => {
     it("should preserve alignment through round-trip", () => {
       const original = "| Left | Center | Right |\n| :--- | :---: | ---: |\n| a | b | c |";
 
-      workbook.readMarkdown(original);
-      const output = workbook.writeMarkdown();
+      readMarkdown(workbook, original);
+      const output = writeMarkdown(workbook);
 
       const reparsed = parseMarkdown(output);
       expect(reparsed.alignments).toEqual(["left", "center", "right"]);
@@ -1075,8 +1085,8 @@ describe("Workbook Markdown integration", () => {
     it("should handle escaped content through round-trip", () => {
       const original = "| Formula |\n| --- |\n| a \\| b |";
 
-      workbook.readMarkdown(original);
-      const output = workbook.writeMarkdown();
+      readMarkdown(workbook, original);
+      const output = writeMarkdown(workbook);
 
       const reparsed = parseMarkdown(output);
       expect(reparsed.rows[0][0]).toBe("a | b");
@@ -1084,18 +1094,18 @@ describe("Workbook Markdown integration", () => {
 
     it("should preserve multiline cell content through Workbook round-trip", () => {
       // Simulate multiline content: write a cell with newline, read it back
-      const ws = workbook.addWorksheet("Multi");
-      ws.addRow(["Note"]);
-      ws.addRow(["Line1\nLine2"]);
+      const ws = Workbook.addWorksheet(workbook, "Multi");
+      Worksheet.addRow(ws, ["Note"]);
+      Worksheet.addRow(ws, ["Line1\nLine2"]);
 
-      const markdown = workbook.writeMarkdown({ sheetName: "Multi" });
+      const markdown = writeMarkdown(workbook, { sheetName: "Multi" });
       // The formatter should convert \n to <br>
       expect(markdown).toContain("<br>");
 
       // Parse back with convertBr to restore the newline
-      const wb2 = new Workbook();
-      const ws2 = wb2.readMarkdown(markdown, { convertBr: true });
-      expect(ws2.getRow(2).getCell(1).value).toBe("Line1\nLine2");
+      const wb2 = Workbook.create();
+      const ws2 = readMarkdown(wb2, markdown, { convertBr: true });
+      expect(cellGetValue(rowGetCell(Worksheet.getRow(ws2, 2), 1))).toBe("Line1\nLine2");
     });
   });
 
@@ -1104,7 +1114,7 @@ describe("Workbook Markdown integration", () => {
       // The base class (browser) throws ExcelNotSupportedError.
       // In Node.js test environment, the Node override will actually try to read the file.
       // We test that readMarkdownFile with non-existent file throws.
-      await expect(workbook.readMarkdownFile("/nonexistent/path.md")).rejects.toThrow();
+      await expect(readMarkdownFile(workbook, "/nonexistent/path.md")).rejects.toThrow();
     });
   });
 });

@@ -4,14 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  protectDocument,
-  unprotectDocument,
-  isDocumentProtected,
-  getProtectionState,
-  verifyProtectionPassword,
-  Document
-} from "../index";
+import { Document, Security } from "../index";
 import type { DocxDocument } from "../types";
 
 function minimalDoc(): DocxDocument {
@@ -22,7 +15,7 @@ describe("Document protection", () => {
   describe("protectDocument with password", () => {
     it("applies protection settings to the document", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "readOnly",
         password: "secret",
         spinCount: 1000
@@ -56,7 +49,7 @@ describe("Document protection", () => {
       const spin = 1000;
 
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "readOnly",
         password,
         hashAlgorithm: algo,
@@ -85,15 +78,15 @@ describe("Document protection", () => {
       expect(dp.hashValue).toBe(bytesToBase64(h));
 
       // And the verifier accepts the correct password / rejects a wrong one.
-      expect(await verifyProtectionPassword(protected_, "swordfish")).toBe(true);
-      expect(await verifyProtectionPassword(protected_, "wrong")).toBe(false);
+      expect(await Security.verifyPassword(protected_, "swordfish")).toBe(true);
+      expect(await Security.verifyPassword(protected_, "wrong")).toBe(false);
     });
   });
 
   describe("protectDocument without password", () => {
     it("applies protection without hash", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "comments",
         formatting: true
       });
@@ -109,19 +102,19 @@ describe("Document protection", () => {
   describe("unprotectDocument", () => {
     it("removes protection", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "readOnly",
         password: "pass",
         spinCount: 1000
       });
-      const unprotected = unprotectDocument(protected_);
+      const unprotected = Security.unprotect(protected_);
 
       expect(unprotected.settings?.documentProtection).toBeUndefined();
     });
 
     it("is a no-op for unprotected documents", () => {
       const doc = minimalDoc();
-      const result = unprotectDocument(doc);
+      const result = Security.unprotect(doc);
       expect(result.settings?.documentProtection).toBeUndefined();
     });
   });
@@ -129,29 +122,29 @@ describe("Document protection", () => {
   describe("isDocumentProtected", () => {
     it("returns true for protected document", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "forms",
         spinCount: 1000
       });
-      expect(isDocumentProtected(protected_)).toBe(true);
+      expect(Security.isProtected(protected_)).toBe(true);
     });
 
     it("returns false for unprotected document", () => {
       const doc = minimalDoc();
-      expect(isDocumentProtected(doc)).toBe(false);
+      expect(Security.isProtected(doc)).toBe(false);
     });
   });
 
   describe("getProtectionState", () => {
     it("returns protection state for protected doc", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "trackedChanges",
         password: "pw",
         spinCount: 1000
       });
 
-      const state = getProtectionState(protected_);
+      const state = Security.getState(protected_);
       expect(state).toBeDefined();
       expect(state!.edit).toBe("trackedChanges");
       expect(state!.enforcement).toBe(true);
@@ -160,32 +153,32 @@ describe("Document protection", () => {
 
     it("returns undefined for unprotected doc", () => {
       const doc = minimalDoc();
-      expect(getProtectionState(doc)).toBeUndefined();
+      expect(Security.getState(doc)).toBeUndefined();
     });
   });
 
   describe("verifyProtectionPassword", () => {
     it("returns true for correct password", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "readOnly",
         password: "correct-horse",
         spinCount: 1000
       });
 
-      const result = await verifyProtectionPassword(protected_, "correct-horse");
+      const result = await Security.verifyPassword(protected_, "correct-horse");
       expect(result).toBe(true);
     });
 
     it("returns false for wrong password", async () => {
       const doc = minimalDoc();
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "readOnly",
         password: "correct",
         spinCount: 1000
       });
 
-      const result = await verifyProtectionPassword(protected_, "wrong");
+      const result = await Security.verifyPassword(protected_, "wrong");
       expect(result).toBe(false);
     });
   });
@@ -193,22 +186,22 @@ describe("Document protection", () => {
   describe("round-trip through DOCX", () => {
     it("preserves protection settings through protect → build → verify", async () => {
       const doc = Document.build(Document.create());
-      const protected_ = await protectDocument(doc, {
+      const protected_ = await Security.protect(doc, {
         edit: "forms",
         password: "roundtrip",
         spinCount: 1000
       });
 
       // Verify the protection is intact in the document model
-      expect(isDocumentProtected(protected_)).toBe(true);
-      const state = getProtectionState(protected_);
+      expect(Security.isProtected(protected_)).toBe(true);
+      const state = Security.getState(protected_);
       expect(state).toBeDefined();
       expect(state!.edit).toBe("forms");
       expect(state!.enforcement).toBe(true);
       expect(state!.hashValue).toBeDefined();
 
       // Verify password works on the protected model
-      const valid = await verifyProtectionPassword(protected_, "roundtrip");
+      const valid = await Security.verifyPassword(protected_, "roundtrip");
       expect(valid).toBe(true);
     });
   });

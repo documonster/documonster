@@ -1,5 +1,7 @@
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { PageBreaksXform } from "@excel/xlsx/xform/sheet/page-breaks-xform";
+import type { PageBreakModel } from "@excel/xlsx/xform/sheet/page-breaks-xform";
+import type { XmlSink } from "@xml/types";
 
 /**
  * Xform for column page breaks (colBreaks element in worksheet XML)
@@ -11,7 +13,7 @@ import { PageBreaksXform } from "@excel/xlsx/xform/sheet/page-breaks-xform";
  *   <brk id="6" max="1048575" man="1"/>
  * </colBreaks>
  */
-class ColBreaksXform extends ListXform {
+class ColBreaksXform extends ListXform<PageBreakModel> {
   constructor() {
     super({
       tag: "colBreaks",
@@ -21,7 +23,7 @@ class ColBreaksXform extends ListXform {
   }
 
   // Override to add manualBreakCount attribute required by Excel
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model?: PageBreakModel[]): void {
     if (model && model.length) {
       xmlStream.openNode(this.tag, this.$);
       xmlStream.addAttribute(this.$count, model.length);

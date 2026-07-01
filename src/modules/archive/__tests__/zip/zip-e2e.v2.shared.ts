@@ -5,8 +5,10 @@
  * in both Node.js and Browser environments.
  */
 
-import type { ArchiveSource, UnzipOptions, ZipArchive, ZipOptions, ZipReader } from "@archive";
+import type { ArchiveSource, UnzipOptions, ZipOptions } from "@archive";
 import { hasSignature } from "@archive/__tests__/zip/zip-test-utils";
+import type { ZipReader } from "@archive/unzip";
+import type { ZipArchive } from "@archive/zip";
 import { LOCAL_FILE_HEADER_SIG, END_OF_CENTRAL_DIR_SIG } from "@archive/zip-spec/zip-records";
 import { describe, it, expect } from "vitest";
 

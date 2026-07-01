@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean, value: string): string | undefined {
   return model ? value : undefined;
@@ -36,9 +37,9 @@ class SheetProtectionXform extends BaseXform {
     return "sheetProtection";
   }
 
-  render(xmlStream: any, model?: SheetProtectionModel): void {
+  render(xmlStream: XmlSink, model?: SheetProtectionModel): void {
     if (model) {
-      const attributes: any = {
+      const attributes: XmlAttributes = {
         sheet: booleanToXml(model.sheet!, "1"),
         selectLockedCells: model.selectLockedCells === false ? "1" : undefined,
         selectUnlockedCells: model.selectUnlockedCells === false ? "1" : undefined,
@@ -62,13 +63,13 @@ class SheetProtectionXform extends BaseXform {
         attributes.objects = booleanToXml(model.objects === false, "1");
         attributes.scenarios = booleanToXml(model.scenarios === false, "1");
       }
-      if (Object.values(attributes).some((value: any) => value !== undefined)) {
+      if (Object.values(attributes).some((value: unknown) => value !== undefined)) {
         xmlStream.leafNode(this.tag, attributes);
       }
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.model = {

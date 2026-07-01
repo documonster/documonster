@@ -2,9 +2,9 @@
  * Shared utility functions for PDF reader modules.
  */
 
-import type { PdfDocument } from "./pdf-document";
-import type { PdfDictValue } from "./pdf-parser";
-import { decodePdfStringBytes } from "./pdf-parser";
+import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue } from "@pdf/reader/pdf-parser";
+import { decodePdfStringBytes } from "@pdf/reader/pdf-parser";
 
 /**
  * Safely extract a string value from a PDF dictionary entry.

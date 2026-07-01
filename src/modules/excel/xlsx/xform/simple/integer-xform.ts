@@ -1,16 +1,17 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface IntegerXformOptions {
   tag: string;
   attr?: string;
-  attrs?: any;
+  attrs?: XmlAttributes;
   zero?: boolean;
 }
 
 class IntegerXform extends BaseXform {
   declare private tag: string;
   declare private attr?: string;
-  declare private attrs?: any;
+  declare private attrs?: XmlAttributes;
   declare private zero?: boolean;
   declare private text: string[];
 
@@ -26,23 +27,26 @@ class IntegerXform extends BaseXform {
     this.text = [];
   }
 
-  render(xmlStream: any, model?: number): void {
+  render(xmlStream: XmlSink, model?: number): void {
     // int is different to float in that zero is not rendered
     if (model || this.zero) {
+      // When rendering the zero case (`this.zero` set and model falsy/absent),
+      // emit a concrete 0 rather than letting `undefined` through.
+      const value = model ?? 0;
       xmlStream.openNode(this.tag);
       if (this.attrs) {
         xmlStream.addAttributes(this.attrs);
       }
       if (this.attr) {
-        xmlStream.addAttribute(this.attr, model);
+        xmlStream.addAttribute(this.attr, value);
       } else {
-        xmlStream.writeText(model);
+        xmlStream.writeText(value);
       }
       xmlStream.closeNode();
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       if (this.attr) {
         this.model = parseInt(node.attributes[this.attr], 10);

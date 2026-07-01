@@ -1,16 +1,18 @@
+import type { Color } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BooleanXform } from "@excel/xlsx/xform/simple/boolean-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
 import { UnderlineXform } from "@excel/xlsx/xform/style/underline-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface FontModel {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean | string;
   charset?: number;
-  color?: any;
+  color?: Partial<Color>;
   condense?: boolean;
   extend?: boolean;
   family?: number;
@@ -31,7 +33,7 @@ interface FontOptions {
 // Font encapsulates translation from font model to xlsx
 class FontXform extends BaseXform {
   declare private options: FontOptions;
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private renderOrder: string[];
 
   constructor(options?: FontOptions) {
@@ -81,7 +83,7 @@ class FontXform extends BaseXform {
     return this.options.tagName;
   }
 
-  render(xmlStream: any, model: FontModel): void {
+  render(xmlStream: XmlSink, model: FontModel): void {
     const { map, renderOrder } = this;
 
     xmlStream.openNode(this.options.tagName);
@@ -91,14 +93,16 @@ class FontXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
     }
     if (this.map![node.name]) {
-      this.parser = this.map![node.name].xform;
-      return this.parser!.parseOpen(node);
+      const parser = this.map![node.name].xform;
+      this.parser = parser;
+      // The child xform reports whether it consumed the node (void → false).
+      return parser.parseOpen(node) ?? false;
     }
     switch (node.name) {
       case this.options.tagName:

@@ -18,7 +18,7 @@
  */
 
 // Shared type + platform-independent exports
-export * from "./index.base";
+export * from "@stream/index.base";
 
 // Core stream classes (native Node.js)
 import { Readable, Transform, Duplex, PassThrough } from "stream";
@@ -35,8 +35,8 @@ export { Collector, createCollector } from "@stream/node/collector";
 export {
   PullStream,
   BufferedStream,
-  StringChunk,
-  ByteChunk,
+  createStringChunk,
+  createByteChunk,
   createReadable,
   createReadableFromAsyncIterable,
   createReadableFromArray,

@@ -5,16 +5,16 @@
  * Works identically in both Node.js and Browser environments.
  */
 
-import { Transform } from "@stream";
-
+import type { FormatConfig, FormatRowOptions } from "@csv/format";
+import { createFormatConfig, formatRowWithLookup } from "@csv/format";
+import type { CsvFormatOptions, Row } from "@csv/types";
 import {
-  createFormatConfig,
-  formatRowWithLookup,
-  type FormatConfig,
-  type FormatRowOptions
-} from "../format";
-import type { CsvFormatOptions, Row } from "../types";
-import { extractRowValues, detectRowKeys, processColumns, deduplicateHeaders } from "../utils/row";
+  extractRowValues,
+  detectRowKeys,
+  processColumns,
+  deduplicateHeaders
+} from "@csv/utils/row";
+import { Transform } from "@stream";
 
 /**
  * Transform stream that formats rows to CSV

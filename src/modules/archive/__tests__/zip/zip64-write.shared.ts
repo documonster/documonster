@@ -6,7 +6,8 @@ import {
   ZIP64_END_OF_CENTRAL_DIR_SIG,
   END_OF_CENTRAL_DIR_SIG
 } from "@archive/zip-spec/zip-records";
-import { createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZipSync } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
 export function runZip64WriteTests(): void {

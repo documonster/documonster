@@ -14,11 +14,11 @@
 
 import { describe, it, expect } from "vitest";
 
+import type { DependencyGraph } from "../dependency-analysis";
 import {
   buildDependencyGraphFromDeps,
   mergeDynamicDeps,
-  topologicalSort,
-  type DependencyGraph
+  topologicalSort
 } from "../dependency-analysis";
 
 // ---------------------------------------------------------------------------

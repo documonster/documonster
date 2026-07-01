@@ -5,7 +5,7 @@
  * This file contains all interfaces, types, and type utilities.
  */
 
-import type { FormattedValue as FormattedValueImpl } from "./format/formatted-value";
+import type { FormattedValue as FormattedValueImpl } from "@csv/format/formatted-value";
 
 // =============================================================================
 // Row Types
@@ -99,7 +99,7 @@ export interface TypeTransformMap {
   date?: (value: Date, ctx: TransformContext) => TransformResult;
   number?: (value: number, ctx: TransformContext) => TransformResult;
   bigint?: (value: bigint, ctx: TransformContext) => TransformResult;
-  object?: (value: Record<string, any>, ctx: TransformContext) => TransformResult;
+  object?: (value: Record<string, unknown>, ctx: TransformContext) => TransformResult;
   string?: (value: string, ctx: TransformContext) => TransformResult;
   /** Row-level transform (runs first, return null to skip) */
   row?: (row: Row, sourceIndex: number) => Row | null;
@@ -453,7 +453,7 @@ export interface CsvParseObjectOptions extends CsvParseOptions {
 // =============================================================================
 
 // Re-export from formatted-value for compatibility
-export { isFormattedValue, quoted, unquoted } from "./format/formatted-value";
+export { isFormattedValue, quoted, unquoted } from "@csv/format/formatted-value";
 
 /**
  * Check if transform function is synchronous.

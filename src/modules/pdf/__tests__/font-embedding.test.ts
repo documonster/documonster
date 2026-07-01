@@ -1,3 +1,5 @@
+import { createWorkbook, addWorksheet } from "@excel/core/workbook";
+import { Cell } from "@excel/index";
 import { PdfFontError } from "@pdf/errors";
 import { FontManager } from "@pdf/font/font-manager";
 import { parseTtf } from "@pdf/font/ttf-parser";
@@ -112,14 +114,13 @@ describe("Font Embedding Utilities", () => {
 
 describe("Font Integration with excelToPdf", () => {
   it("should export PDF with embedded font", async () => {
-    const { Workbook } = await import("@excel/workbook");
     const { excelToPdf } = await import("@pdf/excel-bridge");
 
     const ttfData = buildMinimalTtf();
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Test");
-    ws.getCell("A1").value = "AB";
+    const wb = createWorkbook();
+    const ws = addWorksheet(wb, "Test");
+    Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, { font: ttfData });
 
@@ -143,14 +144,13 @@ describe("Font Integration with excelToPdf", () => {
     // remapped subset GIDs. The font maps A→GID 5 and B→GID 8. After subsetting
     // to [.notdef, A, B], the new GIDs should be [0, 1, 2].
     // Content stream must contain <00010002>, NOT <00050008>.
-    const { Workbook } = await import("@excel/workbook");
     const { excelToPdf } = await import("@pdf/excel-bridge");
 
     const ttfData = buildSparseGidTtf();
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Test");
-    ws.getCell("A1").value = "AB";
+    const wb = createWorkbook();
+    const ws = addWorksheet(wb, "Test");
+    Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, { font: ttfData });
     const text = new TextDecoder().decode(pdf);

@@ -1,14 +1,19 @@
-import { Workbook } from "../../../index";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const filename = process.argv[2];
+import { Workbook, Worksheet } from "@excel/index";
 
-const workbook = new Workbook();
-workbook.xlsx
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+
+const filename = process.argv[2] ?? path.join(exampleDir, "data/table.xlsx");
+
+const workbook = Workbook.create();
+Workbook.getXlsxIo(workbook)
   .readFile(filename)
   .then(() => {
-    workbook.eachSheet(worksheet => {
+    Workbook.eachSheet(workbook, worksheet => {
       console.log(
-        `Sheet ${worksheet.id} - ${worksheet.name}, Dims=${JSON.stringify(worksheet.dimensions)}`
+        `Sheet ${worksheet.id} - ${Worksheet.getName(worksheet)}, Dims=${JSON.stringify(Worksheet.dimensions(worksheet))}`
       );
     });
   })

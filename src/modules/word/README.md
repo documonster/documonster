@@ -34,12 +34,12 @@ Works in Node.js 22+ and modern browsers.
 - **Streaming writer** — `createDocxStream()` for large documents
 - **Validation** — structural checks with severity-tagged issues
 - **OOXML Strict** — transparent normalization to Transitional on read
-- **Browser support** — the same `@cj-tech-master/excelts/word` import works in Node.js and browsers
+- **Browser support** — the same `documonster/word` import works in Node.js and browsers
 
 ## Quick Start
 
 ```typescript
-import { Document, toBuffer, readDocx } from "@cj-tech-master/excelts/word";
+import { Document, Io } from "documonster/word";
 
 // Create a document
 const doc = Document.create();
@@ -50,11 +50,11 @@ Document.addTable(doc, [
   ["1", "2"]
 ]);
 
-const buffer = await toBuffer(Document.build(doc));
+const buffer = await Io.toBuffer(Document.build(doc));
 // Write to file, send as response, etc.
 
 // Read a document
-const parsed = await readDocx(buffer);
+const parsed = await Io.read(buffer);
 console.log(parsed.body.length, "elements");
 ```
 
@@ -63,13 +63,16 @@ console.log(parsed.body.length, "elements");
 ### Document Builder
 
 ```typescript
-import { Document, paragraph, text, bold, italic, heading } from "@cj-tech-master/excelts/word";
+import { Document, Build, Io } from "documonster/word";
 
 const doc = Document.create();
 
 // Text
 Document.addParagraph(doc, "Simple text");
-Document.addParagraphElement(doc, paragraph([text("Normal "), bold("bold "), italic("italic")]));
+Document.addParagraphElement(
+  doc,
+  Build.paragraph([Build.text("Normal "), Build.bold("bold "), Build.italic("italic")])
+);
 Document.addHeading(doc, "Title", 1);
 
 // Tables
@@ -97,35 +100,35 @@ Document.setSectionProperties(doc, {
 });
 
 // Headers/Footers
-Document.setHeader(doc, "default", { children: [textParagraph("Page Header")] });
+Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
 
 // Build & export
 const model = Document.build(doc);
-const bytes = await toBuffer(model);
+const bytes = await Io.toBuffer(model);
 ```
 
 ### Reading Documents
 
 ```typescript
-import { readDocx, extractText, searchText } from "@cj-tech-master/excelts/word";
+import { Io, Query } from "documonster/word";
 
-const doc = await readDocx(fileBuffer);
+const doc = await Io.read(fileBuffer);
 
 // Extract text content
-const text = extractText(doc);
+const text = Query.extractText(doc);
 
 // Search
-const results = searchText(doc, /pattern/g);
+const results = Query.searchText(doc, /pattern/g);
 ```
 
 ### Modifying Documents
 
 ```typescript
-import { readDocx, replaceText, toBuffer } from "@cj-tech-master/excelts/word";
+import { Io, Query } from "documonster/word";
 
-const doc = await readDocx(buffer);
-const modified = replaceText(doc, "OLD_TEXT", "NEW_TEXT");
-const output = await toBuffer(modified);
+const doc = await Io.read(buffer);
+const modified = Query.replaceText(doc, "OLD_TEXT", "NEW_TEXT");
+const output = await Io.toBuffer(modified);
 ```
 
 ## Advanced Features
@@ -133,9 +136,9 @@ const output = await toBuffer(modified);
 ### Template Engine
 
 ```typescript
-import { fillTemplate } from "@cj-tech-master/excelts/word";
+import { Template } from "documonster/word";
 
-const filled = fillTemplate(doc, {
+const filled = Template.fillTemplate(doc, {
   name: "John",
   showDetails: true,
   items: ["A", "B", "C"]
@@ -146,19 +149,16 @@ const filled = fillTemplate(doc, {
 ### Form Fields
 
 ```typescript
-import {
-  extractFormFields,
-  fillFormFields,
-  formTextField,
-  formCheckboxField
-} from "@cj-tech-master/excelts/word";
+import { Query, Build } from "documonster/word";
+
+// `Build.formTextField` / `Build.formCheckboxField` build form-field runs.
 
 // Extract form data
-const fields = extractFormFields(doc);
+const fields = Query.extractFormFields(doc);
 // → [{ name: "FullName", type: "text", value: "..." }, ...]
 
 // Fill form data
-const filled = fillFormFields(
+const filled = Query.fillFormFields(
   doc,
   new Map([
     ["FullName", "Jane Doe"],
@@ -171,13 +171,13 @@ const filled = fillFormFields(
 ### Data Binding (OpenDoPE)
 
 ```typescript
-import { resolveDataBindings } from "@cj-tech-master/excelts/word";
+import { Query } from "documonster/word";
 
 // Resolve SDT data bindings against CustomXML parts
-const resolved = resolveDataBindings(doc);
+const resolved = Query.resolveDataBindings(doc);
 
 // Or with override data
-const resolved2 = resolveDataBindings(
+const resolved2 = Query.resolveDataBindings(
   doc,
   new Map([["{GUID}", "<root><field>value</field></root>"]])
 );
@@ -186,9 +186,9 @@ const resolved2 = resolveDataBindings(
 ### Drawing Shapes with Effects
 
 ```typescript
-import { createShape, createRect, createEllipse } from "@cj-tech-master/excelts/word";
+import { Build } from "documonster/word";
 
-const shape = createShape({
+const shape = Build.createShape({
   shapeType: "roundRect",
   width: 3000000, // EMU
   height: 2000000,
@@ -221,10 +221,10 @@ const shape = createShape({
 ### Font Embedding with Subsetting
 
 ```typescript
-import { embedFont, addEmbeddedFonts, subsetFont } from "@cj-tech-master/excelts/word";
+import { Font } from "documonster/word";
 
 // Embed with automatic subsetting (only glyphs used in document)
-const result = embedFont({
+const result = Font.embed({
   name: "CustomFont",
   data: fontFileBytes,
   style: "regular",
@@ -232,44 +232,44 @@ const result = embedFont({
 });
 
 // Add to document
-const docWithFonts = addEmbeddedFonts(doc, [result]);
+const docWithFonts = Font.addEmbedded(doc, [result]);
 ```
 
 ### Track Changes
 
 ```typescript
-import { acceptAllRevisions, rejectAllRevisions } from "@cj-tech-master/excelts/word";
+import { Query } from "documonster/word";
 
-const accepted = acceptAllRevisions(doc);
-const rejected = rejectAllRevisions(doc);
+const accepted = Query.acceptAllRevisions(doc);
+const rejected = Query.rejectAllRevisions(doc);
 ```
 
 ### Document Diff
 
 ```typescript
-import { diffDocuments } from "@cj-tech-master/excelts/word";
+import { Diff } from "documonster/word";
 
-const diff = diffDocuments(docA, docB);
+const diff = Diff.documents(docA, docB);
 // → { changes: [{ type: "added"|"removed"|"modified", ... }] }
 ```
 
 ### Document Merge
 
 ```typescript
-import { mergeDocuments } from "@cj-tech-master/excelts/word";
+import { Io } from "documonster/word";
 
-const merged = mergeDocuments([doc1, doc2, doc3], { sectionBreak: "nextPage" });
+const merged = Io.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```
 
 ### Streaming Writer
 
 ```typescript
-import { createDocxStream } from "@cj-tech-master/excelts/word";
+import { Streaming } from "documonster/word";
 
-const stream = createDocxStream();
-stream.addParagraph("Title", { style: "Heading1" });
+const stream = Streaming.createDocxStream();
+stream.addText("Title", { style: "Heading1" });
 for (const item of largeDataset) {
-  stream.addParagraph(item.text);
+  stream.addText(item.text);
 }
 const buffer = await stream.finalize();
 ```
@@ -277,23 +277,19 @@ const buffer = await stream.finalize();
 ### Document Protection
 
 ```typescript
-import {
-  protectDocument,
-  isDocumentProtected,
-  verifyProtectionPassword
-} from "@cj-tech-master/excelts/word";
+import { Security } from "documonster/word";
 
-const protected = protectDocument(doc, { type: "readOnly", password: "secret" });
-const isProtected = isDocumentProtected(protected); // true
-const valid = verifyProtectionPassword(protected, "secret"); // true
+const protectedDoc = Security.protect(doc, { type: "readOnly", password: "secret" });
+const isProtected = Security.isProtected(protectedDoc); // true
+const valid = Security.verifyPassword(protectedDoc, "secret"); // true
 ```
 
 ### Validation
 
 ```typescript
-import { validateDocument } from "@cj-tech-master/excelts/word";
+import { Validation } from "documonster/word";
 
-const result = validateDocument(doc);
+const result = Validation.document(doc);
 if (!result.valid) {
   console.log(result.issues); // [{ severity, message, path }]
 }
@@ -305,37 +301,37 @@ if (!result.valid) {
 // DOCX → Markdown (GFM: headings, bold/italic/strike, inline code,
 // code blocks, blockquotes, ordered/unordered lists, tables with
 // alignment, links, images, footnotes)
-import { renderToMarkdown } from "@cj-tech-master/excelts/word/markdown";
+import { renderToMarkdown } from "documonster/word/markdown";
 const md = renderToMarkdown(doc);
 const mdSetext = renderToMarkdown(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX (full document or body fragment)
-import { markdownToDocx, markdownToDocxBody } from "@cj-tech-master/excelts/word/markdown";
+import { markdownToDocx, markdownToDocxBody } from "documonster/word/markdown";
 const doc = markdownToDocx("# Title\n\nHello **world**");
 const bodyItems = markdownToDocxBody("- a\n- b");
 
 // DOCX → HTML
-import { renderToHtml } from "@cj-tech-master/excelts/word/html";
+import { renderToHtml } from "documonster/word/html";
 const html = renderToHtml(doc);
 
 // HTML → DOCX body content
-import { htmlToDocxBody } from "@cj-tech-master/excelts/word/html";
+import { htmlToDocxBody } from "documonster/word/html";
 const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
 ```
 
 ### Flat OPC Format
 
 ```typescript
-import { parseFlatOpc, toFlatOpc, isFlatOpc } from "@cj-tech-master/excelts/word";
+import { Convert } from "documonster/word";
 
 // Single-XML representation of a DOCX
-const flatXml = toFlatOpc(doc);
-const doc = parseFlatOpc(flatXmlString);
+const flatXml = Convert.toFlatOpc(doc);
+const doc = Convert.parseFlatOpc(flatXmlString);
 ```
 
 ### Encryption & Signatures
 
-Low-level cryptography helpers live on the `@cj-tech-master/excelts/word/crypto`
+Low-level cryptography helpers live on the `documonster/word/crypto`
 subpath so they stay out of bundles that only read/write plain DOCX.
 
 ```typescript
@@ -345,7 +341,7 @@ import {
   encryptDocx,
   extractSignatures,
   hasDigitalSignatures
-} from "@cj-tech-master/excelts/word/crypto";
+} from "documonster/word/crypto";
 
 // Decrypt a password-protected DOCX (Agile Encryption)
 if (isEncryptedDocx(bytes)) {
@@ -367,12 +363,12 @@ borders), column widths, rich-text runs, and an optional title page.
 Hidden sheets are skipped; rows/columns can be capped.
 
 ```typescript
-import { excelToDocx, extractTablesToExcel } from "@cj-tech-master/excelts/word/excel";
-import { packageDocx } from "@cj-tech-master/excelts/word";
+import { excelToDocx, extractTablesToExcel } from "documonster/word/excel";
+import { Io } from "documonster/word";
 
 // Workbook → DocxDocument (all visible sheets, formatting preserved)
 const doc = excelToDocx(workbook);
-const docxBytes = await packageDocx(doc);
+const docxBytes = await Io.package(doc);
 
 // With options: a title page, only some sheets, capped dimensions
 const doc2 = excelToDocx(workbook, {
@@ -388,7 +384,7 @@ const extracted = extractTablesToExcel(doc);
 ```
 
 Charts embedded in a Word document also bridge to the Excel chart engine
-(27 chart families, classic and modern ChartEx). See `createWordChartPdfRenderer`
+(27 chart families, classic and modern ChartEx). See `Pdf.wordChartRenderer`
 for the PDF rendering side.
 
 ### Word → PDF
@@ -399,15 +395,15 @@ inline images, headers/footers, and floats all render identically to the
 SVG path.
 
 ```typescript
-import { readDocx } from "@cj-tech-master/excelts/word";
-import { docxToPdf } from "@cj-tech-master/excelts/pdf";
+import { Io } from "documonster/word";
+import { Pdf } from "documonster/pdf";
 
-const doc = await readDocx(docxBytes);
-const pdfBytes = await docxToPdf(doc);
+const doc = await Io.read(docxBytes);
+const pdfBytes = await Pdf.fromDocx(doc);
 
 // Override page geometry (points). Any field omitted falls back to the
 // document's section properties, then engine defaults (US Letter, 1").
-const pdf2 = await docxToPdf(doc, {
+const pdf2 = await Pdf.fromDocx(doc, {
   pageWidth: 595, // A4 width
   pageHeight: 842, // A4 height
   marginTop: 72,
@@ -421,20 +417,18 @@ const pdf2 = await docxToPdf(doc, {
 });
 ```
 
-**Charts.** When `installChartSupport()` has been called, both classic
-(`<c:chart>`) and modern ChartEx (`<cx:chartSpace>` — sunburst, treemap,
+**Charts.** When a chart renderer is supplied via `Pdf.wordChartRenderer()`,
+both classic (`<c:chart>`) and modern ChartEx (`<cx:chartSpace>` — sunburst, treemap,
 waterfall, funnel, boxWhisker, histogram, pareto, regionMap) charts render
-as full vector PDF automatically. Without chart support installed, charts
+as full vector PDF automatically. Without a chart renderer, charts
 degrade to a titled placeholder box (no throw, no blank page). To supply
 your own classic-chart renderer:
 
 ```typescript
-import { installChartSupport } from "@cj-tech-master/excelts/chart";
-import { docxToPdf, createWordChartPdfRenderer } from "@cj-tech-master/excelts/pdf";
+import { Pdf } from "documonster/pdf";
 
-installChartSupport();
-const pdf = await docxToPdf(doc, {
-  chartRenderer: createWordChartPdfRenderer()
+const pdf = await Pdf.fromDocx(doc, {
+  chartRenderer: await Pdf.wordChartRenderer()
 });
 ```
 
@@ -461,28 +455,5 @@ transparently normalized to their Transitional equivalents — no user action re
 | ISO 29500 Strict       | ✅ Auto-normalized                                             |
 | Encrypted .docx        | ✅ Decrypt with password (Agile Encryption)                    |
 | Digital Signatures     | 🔍 Detection & metadata extraction (no signing/verification)   |
-| Browser                | ✅ (same `@cj-tech-master/excelts/word` import)                |
+| Browser                | ✅ (same `documonster/word` import)                            |
 | Node.js 22+            | ✅                                                             |
-
-## Migration from `docx` (npm)
-
-| docx (npm)                          | excelts/word                                             |
-| ----------------------------------- | -------------------------------------------------------- |
-| `new Document()`                    | `Document.create()`                                      |
-| `new Paragraph({ text })`           | `textParagraph(text)`                                    |
-| `new TextRun({ bold: true, text })` | `bold(text)`                                             |
-| `new Table({ rows })`               | `table(rows)`                                            |
-| `Packer.toBuffer(doc)`              | `toBuffer(doc)`                                          |
-| ❌ No reader                        | `readDocx(buffer)`                                       |
-| ❌ No modify                        | `replaceText(doc, old, new)`                             |
-| ❌ No template                      | `fillTemplate(doc, data)`                                |
-| ❌ No forms                         | `extractFormFields(doc)` / `fillFormFields(doc, values)` |
-
-## Migration from `mammoth.js`
-
-| mammoth.js                         | excelts/word                                         |
-| ---------------------------------- | ---------------------------------------------------- |
-| `mammoth.convertToHtml(input)`     | `readDocx(buf)` → `renderToHtml(doc)`                |
-| `mammoth.convertToMarkdown(input)` | `readDocx(buf)` → `renderToMarkdown(doc)`            |
-| Style maps                         | `parseStyleMap(rules)` / `matchStyleMap(style, map)` |
-| ❌ No writing                      | Full read/write/modify                               |

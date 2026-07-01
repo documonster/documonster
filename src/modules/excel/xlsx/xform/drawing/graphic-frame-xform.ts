@@ -23,6 +23,7 @@
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { uuidV4 } from "@utils/uuid";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const CHART_EX_URI = "http://schemas.microsoft.com/office/drawing/2014/chartex";
@@ -49,7 +50,7 @@ export interface GraphicFrameModel {
 
 class GraphicFrameXform extends BaseXform {
   declare public model: GraphicFrameModel;
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   // SAX parse state
   private _inNvPr = false;
@@ -67,7 +68,7 @@ class GraphicFrameXform extends BaseXform {
     }
   }
 
-  render(xmlStream: any, model: GraphicFrameModel): void {
+  render(xmlStream: XmlSink, model: GraphicFrameModel): void {
     xmlStream.openNode(this.tag, { macro: "" });
 
     // Non-visual properties
@@ -151,7 +152,7 @@ class GraphicFrameXform extends BaseXform {
     xmlStream.closeNode(); // xdr:graphicFrame
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Raw XML capture mode for extLst
     if (this._extLstCapture) {
       const attrs = Object.entries(node.attributes || {})

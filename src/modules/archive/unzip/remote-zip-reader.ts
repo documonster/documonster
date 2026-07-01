@@ -15,6 +15,9 @@
  */
 
 import { crc32 } from "@archive/compression/crc32";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import type { ZipStringEncoding } from "@archive/core/text";
+import { resolveZipStringCodec } from "@archive/core/text";
 import {
   zipCryptoVerifyPassword,
   aesVerifyPassword,
@@ -25,8 +28,6 @@ import {
 import { pipeIterableToSink } from "@archive/io/archive-sink";
 import type { RandomAccessReader, HttpRangeReaderOptions } from "@archive/io/random-access";
 import { HttpRangeReader } from "@archive/io/random-access";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { resolveZipStringCodec, type ZipStringEncoding } from "@archive/shared/text";
 import {
   processEntryData,
   processEntryDataStream,
@@ -34,6 +35,7 @@ import {
 } from "@archive/unzip/zip-extract-core";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
+import type { EOCDInfo, ZIP64EOCDInfo } from "@archive/zip-spec/zip-parser-core";
 import {
   EOCD_MAX_SEARCH_SIZE,
   ZIP64_EOCD_LOCATOR_SIZE,
@@ -42,9 +44,7 @@ import {
   parseZIP64EOCDLocator,
   parseZIP64EOCD,
   applyZIP64ToEOCD,
-  parseCentralDirectory,
-  type EOCDInfo,
-  type ZIP64EOCDInfo
+  parseCentralDirectory
 } from "@archive/zip-spec/zip-parser-core";
 import { LOCAL_FILE_HEADER_SIG } from "@archive/zip-spec/zip-records";
 
@@ -140,8 +140,13 @@ export interface RemoteZipStats {
 /**
  * Error thrown when CRC32 validation fails
  */
-export { Crc32MismatchError } from "@archive/shared/errors";
-import { Crc32MismatchError, throwIfAborted } from "@archive/shared/errors";
+export { Crc32MismatchError } from "@archive/core/errors";
+import {
+  ArchiveError,
+  Crc32MismatchError,
+  EocdNotFoundError,
+  throwIfAborted
+} from "@archive/core/errors";
 
 /**
  * Remote ZIP Reader
@@ -258,7 +263,7 @@ export class RemoteZipReader {
     // Search backwards for EOCD signature with validation
     const eocdLocalOffset = findEOCDSignature(tailData, true);
     if (eocdLocalOffset === -1) {
-      throw new Error("Invalid ZIP file: End of Central Directory not found");
+      throw new EocdNotFoundError();
     }
 
     // Parse EOCD using shared function
@@ -963,7 +968,7 @@ export class RemoteZipReader {
     const headerReader = new BinaryReader(localHeaderData, 0);
     const sig = headerReader.readUint32();
     if (sig !== LOCAL_FILE_HEADER_SIG) {
-      throw new Error(`Invalid local file header signature for "${entry.path}"`);
+      throw new ArchiveError(`Invalid local file header signature for "${entry.path}"`);
     }
 
     headerReader.skip(22); // skip to filename length

@@ -1,11 +1,11 @@
 /**
- * PDF module for excelts.
+ * PDF module for documonster.
  *
  * A full-featured, zero-dependency PDF engine for both writing and reading.
  *
  * @example Standalone PDF generation:
  * ```typescript
- * import { pdf } from "excelts/pdf";
+ * import { pdf } from "documonster/pdf";
  *
  * const bytes = await pdf([
  *   ["Product", "Revenue"],
@@ -16,18 +16,18 @@
  *
  * @example From Excel Workbook:
  * ```typescript
- * import { Workbook } from "excelts";
- * import { excelToPdf } from "excelts/pdf";
+ * import { Workbook, Worksheet } from "documonster/excel";
+ * import { Pdf } from "documonster/pdf";
  *
- * const workbook = new Workbook();
- * const sheet = workbook.addWorksheet("Sales");
- * sheet.addRow(["Product", "Revenue"]);
- * const bytes = await excelToPdf(workbook);
+ * const workbook = Workbook.create();
+ * const sheet = Workbook.addWorksheet(workbook, "Sales");
+ * Worksheet.addRow(sheet, ["Product", "Revenue"]);
+ * const bytes = await Pdf.fromExcel(workbook);
  * ```
  *
  * @example Read PDF — extract text, images, and metadata:
  * ```typescript
- * import { readPdf } from "excelts/pdf";
+ * import { readPdf } from "documonster/pdf";
  *
  * const result = await readPdf(pdfBytes);
  * console.log(result.text);               // All text
@@ -42,54 +42,20 @@
  */
 
 // =============================================================================
-// Public API — Writing
+// Public API — the `Pdf` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-/** Standalone PDF generation — accepts plain arrays, sheet objects, or workbooks. */
-export { pdf } from "./pdf";
+export * as Pdf from "@pdf/surface/pdf";
 
-/** Excel-to-PDF conversion — accepts an Excel Workbook instance. */
-export {
-  excelToPdf,
-  chartToPdf,
-  createWordChartPdfRenderer,
-  type ChartToPdfOptions
-} from "./excel-bridge";
-
-/** Word-to-PDF conversion — accepts a DocxDocument. */
-export { docxToPdf } from "./word-bridge";
-export type { DocxToPdfOptions } from "./word-bridge";
-
-// =============================================================================
-// Public API — Reading
-// =============================================================================
-
-/** Read a PDF file and extract text, images, and metadata. */
-export { readPdf } from "./reader/pdf-reader";
-
-// =============================================================================
-// Public API — Building (free-form content)
-// =============================================================================
-
-/** Build PDFs with free text positioning, vector drawing, and images. */
-export { PdfDocumentBuilder, PdfPageBuilder, parseSvgPath } from "./builder/document-builder";
-
-/** Edit existing PDFs: overlay content, fill forms, copy/merge pages. */
-export { PdfEditor, PdfEditorPage } from "./builder/pdf-editor";
-
-/** Digital signatures — verify and sign PDF documents. */
-export {
-  verifyPdfSignature,
-  signPdf,
-  buildSignatureDictPlaceholder,
-  asn1Parse
-} from "./core/digital-signature";
+// Conversion option types (the converter functions live on `Pdf.*`).
+export type { ChartToPdfOptions } from "@pdf/excel-bridge";
+export type { DocxToPdfOptions } from "@pdf/word-bridge";
 
 // =============================================================================
 // Types — Writing
 // =============================================================================
 
-export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook, PdfImage } from "./pdf";
+export type { PdfCell, PdfRow, PdfColumn, PdfSheet, PdfBook, PdfImage } from "@pdf/pdf";
 
 export type {
   PdfExportOptions,
@@ -102,22 +68,20 @@ export type {
   PdfTextWatermark,
   PdfImageWatermark,
   PdfWatermarkFilter
-} from "./types";
-
-export { PageSizes } from "./types";
+} from "@pdf/types";
 
 // =============================================================================
 // Types — Reading
 // =============================================================================
 
-export type { ReadPdfOptions, ReadPdfResult, ReadPdfPage } from "./reader/pdf-reader";
-export type { PdfMetadata } from "./reader/metadata-reader";
-export type { ExtractedImage } from "./reader/image-extractor";
-export type { TextLine } from "./reader/text-reconstruction";
-export type { PdfAnnotation, PdfRect } from "./reader/annotation-extractor";
-export type { PdfFormField, PdfFormFieldType } from "./reader/form-extractor";
-export type { PdfBookmark } from "./reader/bookmark-extractor";
-export type { PdfTable, PdfTableRow, PdfTableCell } from "./reader/table-extractor";
+export type { ReadPdfOptions, ReadPdfResult, ReadPdfPage } from "@pdf/reader/pdf-reader";
+export type { PdfMetadata } from "@pdf/reader/metadata-reader";
+export type { ExtractedImage } from "@pdf/reader/image-extractor";
+export type { TextLine } from "@pdf/reader/text-reconstruction";
+export type { PdfAnnotation, PdfRect } from "@pdf/reader/annotation-extractor";
+export type { PdfFormField, PdfFormFieldType } from "@pdf/reader/form-extractor";
+export type { PdfBookmark } from "@pdf/reader/bookmark-extractor";
+export type { PdfTable, PdfTableRow, PdfTableCell } from "@pdf/reader/table-extractor";
 
 // =============================================================================
 // Types — Building
@@ -148,8 +112,8 @@ export type {
   DropdownOptions,
   RadioGroupOptions,
   PdfSignatureOptions
-} from "./builder/document-builder";
-export type { LoadOptions } from "./builder/pdf-editor";
+} from "@pdf/builder/document-builder";
+export type { LoadOptions } from "@pdf/builder/pdf-editor";
 
 // =============================================================================
 // Types — Digital Signatures
@@ -160,10 +124,10 @@ export type {
   CmsSignedData,
   SignOptions,
   Asn1Node
-} from "./core/digital-signature";
+} from "@pdf/core/digital-signature";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "./errors";
+export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/errors";

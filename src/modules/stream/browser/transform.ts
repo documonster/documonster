@@ -2,16 +2,37 @@
  * Browser Stream - Transform
  */
 
-import { parseEndArgs } from "@stream/common/end-args";
+import { Duplex } from "@stream/browser/duplex";
+import { createListenerRegistry } from "@stream/browser/helpers";
+import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
+import type { PipeSource } from "@stream/browser/pipe-manager";
+import { Readable } from "@stream/browser/readable";
+import { Writable } from "@stream/browser/writable";
+import { parseEndArgs } from "@stream/core/end-args";
 import type { DuplexStreamOptions, IDuplex, WritableLike } from "@stream/types";
 import { createAbortError, toError } from "@utils/errors";
 import { EventEmitter } from "@utils/event-emitter";
 
-import { Duplex } from "./duplex";
-import { createListenerRegistry } from "./helpers";
-import { deferTask, inDeferredContext } from "./microtask-context";
-import { Readable } from "./readable";
-import { Writable } from "./writable";
+// =============================================================================
+// Transform Stream Wrapper
+// =============================================================================
+
+/**
+ * Internal view of the private `Readable` members the Transform pokes when
+ * wiring up its readable side: the pull-implementation flags/hook
+ * (`_hasReadImpl`/`_read`), the `_pipes` manager (used to re-point the pipe
+ * origin and to inspect active destinations), and `_emitEndOnce` (invoked to
+ * synchronously flush the end sequence).
+ */
+interface ReadableSideInternals {
+  _hasReadImpl: boolean;
+  _read?: () => void;
+  _pipes?: {
+    setSource(source: PipeSource): void;
+    _destinations: WritableLike[];
+  };
+  _emitEndOnce(): void;
+}
 
 // =============================================================================
 // Transform Stream Wrapper
@@ -26,7 +47,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
    * Makes `transform instanceof Transform` return true, and also
    * `transform instanceof Duplex` via Duplex's own Symbol.hasInstance.
    */
-  static [Symbol.hasInstance](instance: any): boolean {
+  static [Symbol.hasInstance](instance: unknown): boolean {
     if (instance == null || typeof instance !== "object") {
       return false;
     }
@@ -35,23 +56,24 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
       return true;
     }
     // Duck-type: must have Duplex characteristics + _transform method
+    const o = instance as Record<string, unknown>;
     return (
-      instance.__excelts_stream === true &&
-      typeof instance.read === "function" &&
-      typeof instance.pipe === "function" &&
-      typeof instance.write === "function" &&
-      typeof instance.end === "function" &&
-      typeof instance.on === "function" &&
-      typeof instance._transform === "function" &&
+      o.__documonster_stream === true &&
+      typeof o.read === "function" &&
+      typeof o.pipe === "function" &&
+      typeof o.write === "function" &&
+      typeof o.end === "function" &&
+      typeof o.on === "function" &&
+      typeof o._transform === "function" &&
       "readableFlowing" in instance &&
       "writableFinished" in instance
     );
   }
 
   /** @internal */
-  private readonly _readable: Readable<TOutput>;
+  private _readable: Readable<TOutput>;
   /** @internal */
-  private readonly _writable: Writable<TInput>;
+  private _writable: Writable<TInput>;
   allowHalfOpen: boolean;
 
   private _destroyed: boolean = false;
@@ -74,6 +96,27 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
   private _sideForwardingCleanup: (() => void) | null = null;
   // User-provided construct function (Node.js compatibility)
   private _constructFunc?: (callback: (error?: Error | null) => void) => void;
+
+  /**
+   * Optional lifecycle hooks a subclass may define (Node.js convention). The
+   * base class does not implement them; they only exist when a subclass (or a
+   * constructor option) provides them, which the guards before each call site
+   * verify.
+   * @internal
+   */
+  _flush?(callback: (error?: Error | null, data?: TOutput) => void): void;
+  /** @internal */
+  _construct?(callback: (error?: Error | null) => void): void;
+  /**
+   * Node.js sets `Transform.prototype._writev = null` (copied from Writable).
+   * @internal
+   */
+  _writev?:
+    | ((
+        chunks: Array<{ chunk: TInput; encoding: string }>,
+        callback: (error?: Error | null) => void
+      ) => void)
+    | null;
 
   /** Cached result of _hasSubclassTransform (called per-chunk, so worth caching) */
   private _isSubclassTransform: boolean | undefined;
@@ -157,7 +200,6 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     }
   ) {
     super();
-    (this as any).__excelts_stream = true;
 
     // ObjectMode: per-side overrides general (matching Node)
     const objectMode = options?.objectMode ?? false;
@@ -209,8 +251,9 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     // Node.js Transform uses _read() as the backpressure release mechanism:
     // when the consumer pulls data (read() or flowing-mode drain), the Readable
     // internals call _read(), which fires the deferred write callback.
-    (this._readable as any)._hasReadImpl = true;
-    (this._readable as any)._read = () => {
+    const readableInternals = this._readable as unknown as ReadableSideInternals;
+    readableInternals._hasReadImpl = true;
+    readableInternals._read = () => {
       if (this._afterTransformCallback) {
         const cb = this._afterTransformCallback;
         this._afterTransformCallback = null;
@@ -220,7 +263,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
 
     // Override pipe source identity so destinations see the outer Transform
     // (not the internal Readable) in "pipe"/"unpipe" events.
-    (this._readable as any)._pipes.setSource(this);
+    readableInternals._pipes!.setSource(this);
 
     // Determine write/final handlers.
     // If a `write` option is provided, it replaces the transform-based write (matching Node).
@@ -291,11 +334,10 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
           // Check if a subclass overrides _final on the prototype chain.
           // This handles all inheritance depths: A extends Transform, B extends A, etc.
           const hasFinalOverride =
-            typeof (this as any)._final === "function" &&
-            (this as any)._final !== Transform.prototype._final;
+            typeof this._final === "function" && this._final !== Transform.prototype._final;
 
           if (hasFinalOverride) {
-            (this as any)._final.call(this, (err?: Error | null) => {
+            this._final.call(this, (err?: Error | null) => {
               if (err) {
                 callback(err);
                 return;
@@ -319,7 +361,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
             this._readable.push(null);
             // push(null) schedules _emitEndOnce via deferTask. Call it
             // synchronously so 'end' fires before 'finish' (Node.js order).
-            (this._readable as any)._emitEndOnce();
+            (this._readable as unknown as ReadableSideInternals)._emitEndOnce();
             callback(null);
           } else {
             // No flush, no _final override, but the readable side has pipe
@@ -369,7 +411,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     // R7-3: _construct hook — if provided, delay reads/writes until constructed
     if (hasConstruct) {
       deferTask(() => {
-        const fn = this._constructFunc ?? (this as any)._construct.bind(this);
+        const fn = this._constructFunc ?? this._construct!.bind(this);
         fn((err?: Error | null) => {
           if (err) {
             readableConstructCb?.(err);
@@ -387,12 +429,12 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
 
   private _setupAbortSignal(signal: AbortSignal): void {
     if (signal.aborted) {
-      this.destroy(createAbortError((signal as any).reason));
+      this.destroy(createAbortError(signal.reason));
       return;
     }
 
     const onAbort = (): void => {
-      this.destroy(createAbortError((signal as any).reason));
+      this.destroy(createAbortError(signal.reason));
     };
 
     const cleanup = (): void => {
@@ -411,7 +453,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
 
     // Ensure the pipe source identity is always the outer Transform,
     // including after fromWeb() replaces the internal _readable.
-    (this._readable as any)._pipes?.setSource(this);
+    (this._readable as unknown as ReadableSideInternals)._pipes?.setSource(this);
 
     const registry = createListenerRegistry();
 
@@ -494,11 +536,8 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
         this._endCalledFromSync &&
         !this._hasSubclassFlush() &&
         !this._flushImpl &&
-        !(
-          typeof (this as any)._final === "function" &&
-          (this as any)._final !== Transform.prototype._final
-        ) &&
-        (this._readable as any)._pipes._destinations.length === 0
+        !(typeof this._final === "function" && this._final !== Transform.prototype._final) &&
+        (this._readable as unknown as ReadableSideInternals)._pipes!._destinations.length === 0
       ) {
         this._syncFinal = true;
         this._writable._syncFinish = true;
@@ -511,7 +550,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     });
   }
 
-  private _emitErrorOnce(err: any): void {
+  private _emitErrorOnce(err: unknown): void {
     if (this._errored) {
       return;
     }
@@ -585,7 +624,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
       let callbackFired = false;
 
       let resolveAsync: (() => void) | null = null;
-      let rejectAsync: ((err: any) => void) | null = null;
+      let rejectAsync: ((err: unknown) => void) | null = null;
 
       this._transform(chunk, encoding, (err?: Error | null, data?: TOutput) => {
         if (callbackFired) {
@@ -645,7 +684,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
       let syncData: TOutput | undefined;
 
       let resolveAsync: (() => void) | null = null;
-      let rejectAsync: ((err: any) => void) | null = null;
+      let rejectAsync: ((err: unknown) => void) | null = null;
 
       this._transform(chunk, encoding, (err?: Error | null, data?: TOutput) => {
         if (sync) {
@@ -692,7 +731,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
     let callbackFired = false;
 
     let resolveAsync: (() => void) | null = null;
-    let rejectAsync: ((err: any) => void) | null = null;
+    let rejectAsync: ((err: unknown) => void) | null = null;
     const promise = new Promise<void>((resolve, reject) => {
       resolveAsync = resolve;
       rejectAsync = reject;
@@ -704,7 +743,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
         chunk: TInput,
         encoding: string,
         callback: (error?: Error | null, data?: TOutput) => void
-      ) => any
+      ) => unknown
     ).call(this, chunk, encoding, (err?: Error | null, data?: TOutput) => {
       if (callbackFired) {
         // Node.js throws ERR_MULTIPLE_CALLBACK on double invocation.
@@ -759,7 +798,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
 
     if (this._hasSubclassFlush()) {
       await new Promise<void>((resolve, reject) => {
-        (this as any)._flush((err?: Error | null, data?: TOutput) => {
+        this._flush!((err?: Error | null, data?: TOutput) => {
           if (err) {
             reject(err);
             return;
@@ -786,7 +825,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
         userFlush as (
           this: Transform<TInput, TOutput>,
           callback: (error?: Error | null, data?: TOutput) => void
-        ) => any
+        ) => unknown
       ).call(this, (err?: Error | null, data?: TOutput) => {
         if (err) {
           reject(err);
@@ -873,10 +912,15 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
         cb: endCb
       } = parseEndArgs<TInput>(chunkOrCallback, encodingOrCallback, callback);
 
+      // Node invokes the end() callback with an error in some paths (write-after-
+      // end / already-finished). `parseEndArgs` types it `() => void`, so view it
+      // through an error-accepting signature for those Node-parity invocations.
+      const errCb = endCb as ((error?: Error | null) => void) | undefined;
+
       // If a chunk was provided, this is a write-after-end error (Node.js behavior).
       if (chunk !== undefined) {
         this.write(chunk, encoding, err => {
-          (endCb as any)?.(err ?? null);
+          errCb?.(err ?? null);
         });
         return this;
       }
@@ -888,10 +932,10 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
           code: string;
         };
         err.code = "ERR_STREAM_ALREADY_FINISHED";
-        deferTask(() => (endCb as any)(err));
+        deferTask(() => errCb!(err));
       } else if (endCb) {
         // Redundant end() is a no-op; callback called with no error.
-        deferTask(() => (endCb as any)(null));
+        deferTask(() => errCb!(null));
       }
       return this;
     }
@@ -927,7 +971,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
       if (encoding !== undefined) {
         this._writable.write(chunk, encoding, onWriteError);
       } else {
-        this._writable.write(chunk, onWriteError as any);
+        this._writable.write(chunk, onWriteError);
       }
     }
 
@@ -960,7 +1004,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
   /**
    * Unpipe from destination
    */
-  unpipe(destination?: any): this {
+  unpipe(destination?: WritableLike): this {
     this._readable.unpipe(destination);
     return this;
   }
@@ -1246,7 +1290,7 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
   }
 
   get readableFlowing(): boolean | null {
-    return (this as any)._readable.readableFlowing;
+    return this._readable.readableFlowing;
   }
 
   get destroyed(): boolean {
@@ -1463,11 +1507,14 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
    * Check if a stream has been disturbed (data read or piped).
    * Delegates to Readable.isDisturbed, checking internal _readable for Duplex/Transform.
    */
-  static isDisturbed(stream: any): boolean {
-    if (stream && stream._readable instanceof Readable) {
-      return Readable.isDisturbed(stream._readable);
+  static isDisturbed(stream: unknown): boolean {
+    if (stream && typeof stream === "object") {
+      const inner = (stream as { _readable?: unknown })._readable;
+      if (inner instanceof Readable) {
+        return Readable.isDisturbed(inner);
+      }
     }
-    return Readable.isDisturbed(stream);
+    return Readable.isDisturbed(stream as Readable<unknown>);
   }
 
   /**
@@ -1505,8 +1552,8 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
       transform._sideForwardingCleanup = null;
     }
 
-    (transform as any)._readable = newReadable;
-    (transform as any)._writable = newWritable;
+    transform._readable = newReadable;
+    transform._writable = newWritable;
 
     // Re-connect event forwarding (data forwarding remains lazy via Transform.on)
     transform._setupSideForwarding();
@@ -1550,8 +1597,8 @@ export class Transform<TInput = Uint8Array, TOutput = Uint8Array> extends EventE
    * exists primarily for API surface parity and subclass override detection.
    */
   _final(callback: (error?: Error | null) => void): void {
-    if (typeof (this as any)._flush === "function" && !this.destroyed) {
-      (this as any)._flush((err?: Error | null, data?: TOutput) => {
+    if (typeof this._flush === "function" && !this.destroyed) {
+      this._flush((err?: Error | null, data?: TOutput) => {
         if (err) {
           callback(err);
           return;
@@ -1575,4 +1622,4 @@ Transform.prototype.addListener = Transform.prototype.on;
 
 // Node.js: Transform.prototype._writev === null (inherited from Duplex/Writable chain).
 // Browser Transform doesn't extend Duplex, so we set it explicitly.
-(Transform.prototype as any)._writev = null;
+Transform.prototype._writev = null;

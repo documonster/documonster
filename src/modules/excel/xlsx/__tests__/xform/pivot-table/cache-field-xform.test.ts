@@ -1,4 +1,5 @@
-import { PivotErrorValue } from "@excel/pivot-table";
+import type { PivotError } from "@excel/core/pivot-table";
+import { isPivotError } from "@excel/core/pivot-table";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";
 import { describe, it, expect } from "vitest";
@@ -127,8 +128,8 @@ describe("CacheFieldXform", () => {
       });
 
       expect(model.sharedItems).toHaveLength(1);
-      expect(model.sharedItems![0]).toBeInstanceOf(PivotErrorValue);
-      expect((model.sharedItems![0] as PivotErrorValue).code).toBe("REF!");
+      expect(isPivotError(model.sharedItems![0])).toBe(true);
+      expect((model.sharedItems![0] as PivotError).code).toBe("REF!");
     });
 
     it("should parse missing value items (<m>)", () => {
@@ -195,8 +196,8 @@ describe("CacheFieldXform", () => {
       });
 
       expect(model.sharedItems).toHaveLength(1);
-      expect(model.sharedItems![0]).toBeInstanceOf(PivotErrorValue);
-      expect((model.sharedItems![0] as PivotErrorValue).code).toBe("");
+      expect(isPivotError(model.sharedItems![0])).toBe(true);
+      expect((model.sharedItems![0] as PivotError).code).toBe("");
     });
 
     it("should parse empty sharedItems (count=0) as empty array", () => {

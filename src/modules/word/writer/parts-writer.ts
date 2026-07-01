@@ -5,8 +5,7 @@
  * Renders various auxiliary parts of the DOCX package.
  */
 
-import type { XmlSink } from "@xml/types";
-
+import { DEFAULT_OFFICE_THEME } from "@utils/theme-colors";
 import {
   NS_W,
   NS_R,
@@ -23,8 +22,8 @@ import {
   NS_XSI,
   NS_CUSTOM,
   STD_DOC_ATTRIBUTES
-} from "../constants";
-import { DocxRawXmlPolicyError } from "../errors";
+} from "@word/constants";
+import { DocxRawXmlPolicyError } from "@word/errors";
 import type {
   DocumentSettings,
   CoreProperties,
@@ -38,7 +37,8 @@ import type {
   ThemeFont,
   WebSettings,
   PersonInfo
-} from "../types";
+} from "@word/types";
+import type { XmlSink } from "@xml/types";
 
 /** Render footnote/endnote properties in settings. */
 function renderSettingsNoteProperties(
@@ -512,7 +512,7 @@ export function renderAppProperties(xml: XmlSink, props?: AppProperties): void {
     "xmlns:vt": NS_VT
   });
 
-  xml.leafNode("Application", undefined, props?.application ?? "excelts");
+  xml.leafNode("Application", undefined, props?.application ?? "documonster");
   xml.leafNode("AppVersion", undefined, props?.appVersion ?? "1.0.0");
 
   if (props?.pages !== undefined) {
@@ -631,20 +631,7 @@ export function renderTheme(
   // Color scheme
   const colorScheme = theme?.colorScheme;
   xml.openNode("a:clrScheme", { name: colorScheme?.name ?? "Office" });
-  const defaultColors: Record<string, string> = {
-    dk1: "000000",
-    lt1: "FFFFFF",
-    dk2: "44546A",
-    lt2: "E7E6E6",
-    accent1: "4472C4",
-    accent2: "ED7D31",
-    accent3: "A5A5A5",
-    accent4: "FFC000",
-    accent5: "5B9BD5",
-    accent6: "70AD47",
-    hlink: "0563C1",
-    folHlink: "954F72"
-  };
+  const defaultColors: Record<string, string> = DEFAULT_OFFICE_THEME;
   const colorOrder = [
     "dk1",
     "lt1",

@@ -1,5 +1,5 @@
 /**
- * XML Performance Benchmark: excelts vs fast-xml-parser
+ * XML Performance Benchmark: documonster vs fast-xml-parser
  *
  * Compares:
  * 1. DOM parse (non-streaming): parseXml() vs XMLParser.parse()
@@ -91,10 +91,10 @@ function printResult(
   theirs: { avg: number; min: number }
 ) {
   const ratio = theirs.min / ours.min;
-  const winner = ratio > 1 ? "excelts" : "fxp";
+  const winner = ratio > 1 ? "documonster" : "fxp";
   const factor = ratio > 1 ? ratio : 1 / ratio;
   console.log(`  ${label}`);
-  console.log(`    excelts:  avg ${formatMs(ours.avg)}, min ${formatMs(ours.min)}`);
+  console.log(`    documonster:  avg ${formatMs(ours.avg)}, min ${formatMs(ours.min)}`);
   console.log(`    fxp:      avg ${formatMs(theirs.avg)}, min ${formatMs(theirs.min)}`);
   console.log(`    → ${winner} is ${factor.toFixed(2)}x faster (by min)`);
   console.log();
@@ -102,7 +102,7 @@ function printResult(
 
 function printSoloResult(label: string, result: { avg: number; min: number }) {
   console.log(`  ${label}`);
-  console.log(`    excelts:  avg ${formatMs(result.avg)}, min ${formatMs(result.min)}`);
+  console.log(`    documonster:  avg ${formatMs(result.avg)}, min ${formatMs(result.min)}`);
   console.log(`    fxp:      N/A (no SAX/streaming mode)`);
   console.log();
 }
@@ -112,7 +112,7 @@ function printSoloResult(label: string, result: { avg: number; min: number }) {
 // =============================================================================
 
 console.log("=".repeat(70));
-console.log("XML Performance Benchmark: excelts vs fast-xml-parser");
+console.log("XML Performance Benchmark: documonster vs fast-xml-parser");
 console.log("=".repeat(70));
 console.log();
 
@@ -140,7 +140,7 @@ for (const size of sizes) {
   });
 
   const domOurs = bench(
-    "excelts parseXml",
+    "documonster parseXml",
     () => {
       parseXml(xml);
     },
@@ -162,7 +162,7 @@ for (const size of sizes) {
   // -------------------------------------------------------------------------
 
   const saxOurs = bench(
-    "excelts SaxParser",
+    "documonster SaxParser",
     () => {
       let tagCount = 0;
       const parser = new SaxParser({ position: false });
@@ -188,7 +188,7 @@ for (const size of sizes) {
   const rowData = generateRowData(size.rows, size.cols);
 
   const writeOurs = bench(
-    "excelts XmlWriter",
+    "documonster XmlWriter",
     () => {
       const w = new XmlWriter();
       w.openXml();
@@ -251,7 +251,7 @@ for (const size of sizes) {
 console.log("=".repeat(70));
 console.log("Notes:");
 console.log("  - fast-xml-parser has no SAX/streaming parse mode");
-console.log("  - excelts SaxParser shown solo for reference");
+console.log("  - documonster SaxParser shown solo for reference");
 console.log("  - 'min' is the best single run (least noise)");
 console.log("  - DOM parse comparison is parseXml() vs XMLParser.parse()");
 console.log("  - Write comparison is XmlWriter vs XMLBuilder");

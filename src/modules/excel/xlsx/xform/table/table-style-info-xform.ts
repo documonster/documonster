@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface TableStyleModel {
   theme?: string | null;
@@ -24,7 +25,7 @@ class TableStyleInfoXform extends BaseXform<TableStyleModel> {
     return "tableStyleInfo";
   }
 
-  render(xmlStream: any, model: TableStyleModel): void {
+  render(xmlStream: XmlSink, model: TableStyleModel): void {
     xmlStream.leafNode(this.tag, {
       name: model.theme ? model.theme : undefined,
       showFirstColumn: model.showFirstColumn ? "1" : "0",
@@ -34,7 +35,7 @@ class TableStyleInfoXform extends BaseXform<TableStyleModel> {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       const { attributes } = node;
       this.model = {

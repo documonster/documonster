@@ -1,9 +1,10 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface DateXformOptions {
   tag: string;
   attr?: string;
-  attrs?: any;
+  attrs?: XmlAttributes;
   format?: (dt: Date) => string;
   parse?: (str: string) => Date;
 }
@@ -11,7 +12,7 @@ interface DateXformOptions {
 class DateXform extends BaseXform {
   declare private tag: string;
   declare private attr?: string;
-  declare private attrs?: any;
+  declare private attrs?: XmlAttributes;
   declare private text: string[];
   declare private _format: (dt: Date) => string;
   declare private _parse: (str: string) => Date;
@@ -42,7 +43,7 @@ class DateXform extends BaseXform {
       };
   }
 
-  render(xmlStream: any, model?: Date): void {
+  render(xmlStream: XmlSink, model?: Date): void {
     if (model) {
       xmlStream.openNode(this.tag);
       if (this.attrs) {
@@ -57,7 +58,7 @@ class DateXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === this.tag) {
       if (this.attr) {
         this.model = this._parse(node.attributes[this.attr]);

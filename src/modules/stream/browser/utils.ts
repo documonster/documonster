@@ -2,13 +2,24 @@
  * Browser Stream - Utilities
  */
 
-import { createAddAbortSignal } from "@stream/common/add-abort-signal";
-import { toStreamBytes } from "@stream/common/binary-chunk";
-import { createConsumers } from "@stream/common/consumers";
-import { createIsTransform, createIsDuplex, createIsStream } from "@stream/common/type-guards";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { Duplex } from "@stream/browser/duplex";
+import { removeEmitterListener, addEmitterListener } from "@stream/browser/helpers";
+import { pipeline, finished } from "@stream/browser/pipeline";
+import { Readable } from "@stream/browser/readable";
+import { Transform } from "@stream/browser/transform";
+import { Writable } from "@stream/browser/writable";
+import { createAddAbortSignal } from "@stream/core/add-abort-signal";
+import { toStreamBytes } from "@stream/core/binary-chunk";
+import { createConsumers } from "@stream/core/consumers";
+import {
+  createIsTransform,
+  createIsDuplex,
+  createIsStream,
+  isAsyncIterable,
+  isReadableStream
+} from "@stream/core/type-guards";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { UnsupportedStreamTypeError } from "@stream/errors";
-import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
 import type {
   IDuplex,
   ITransform,
@@ -17,13 +28,6 @@ import type {
   DuplexStreamOptions
 } from "@stream/types";
 import { concatUint8Arrays, createTextDecoder } from "@utils/binary";
-
-import { Duplex } from "./duplex";
-import { removeEmitterListener, addEmitterListener } from "./helpers";
-import { pipeline, finished } from "./pipeline";
-import { Readable } from "./readable";
-import { Transform } from "./transform";
-import { Writable } from "./writable";
 
 // =============================================================================
 // Utility Functions
@@ -66,7 +70,7 @@ export async function streamToString(
   const decoder = createTextDecoder(encoding);
   let text = "";
 
-  for await (const chunk of iterable as any) {
+  for await (const chunk of iterable) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
       throw new UnsupportedStreamTypeError("streamToString", typeof chunk);
@@ -96,11 +100,11 @@ export async function drainStream(
 // =============================================================================
 
 /** Check if an object is a transform stream */
-export const isTransform: (obj: unknown) => obj is ITransform<any, any> =
+export const isTransform: (obj: unknown) => obj is ITransform<unknown, unknown> =
   createIsTransform(Transform);
 
 /** Check if an object is a duplex stream */
-export const isDuplex: (obj: unknown) => obj is IDuplex<any, any> = createIsDuplex(
+export const isDuplex: (obj: unknown) => obj is IDuplex<unknown, unknown> = createIsDuplex(
   Duplex,
   Transform
 );
@@ -137,16 +141,20 @@ export function isDisturbed(stream: unknown): boolean {
     return Readable.isDisturbed(stream);
   }
   if (stream instanceof Duplex) {
-    return Readable.isDisturbed((stream as any)._readable);
+    return Readable.isDisturbed((stream as unknown as { _readable: Readable<unknown> })._readable);
   }
 
   // Web ReadableStream: `locked` is the closest indicator of disturbance
   // (a reader has been acquired). Matches the Node.js isDisturbed check.
-  if ((stream as any)?.locked !== undefined) {
+  if ((stream as { locked?: boolean })?.locked !== undefined) {
     return !!(stream as ReadableStream).locked;
   }
 
-  const s = stream as any;
+  const s = stream as {
+    readableDidRead?: boolean;
+    _didRead?: boolean;
+    readableAborted?: boolean;
+  };
   return !!(s?.readableDidRead || s?._didRead || s?.readableAborted);
 }
 
@@ -158,7 +166,12 @@ export function isReadable(stream: unknown): stream is ReadableLike {
   if (stream == null) {
     return false;
   }
-  const s = stream as any;
+  const s = stream as {
+    destroyed?: boolean;
+    read?: unknown;
+    pipe?: unknown;
+    readableEnded?: boolean;
+  };
   // Check if destroyed
   if (s.destroyed) {
     return false;
@@ -184,7 +197,12 @@ export function isWritable(stream: unknown): stream is WritableLike {
   if (stream == null) {
     return false;
   }
-  const s = stream as any;
+  const s = stream as {
+    destroyed?: boolean;
+    write?: unknown;
+    end?: unknown;
+    writableEnded?: boolean;
+  };
   // Check if destroyed
   if (s.destroyed) {
     return false;
@@ -210,7 +228,9 @@ export function isWritable(stream: unknown): stream is WritableLike {
  * Create a pair of connected Duplex streams
  * Data written to one stream can be read from the other
  */
-export function duplexPair<T = any>(options?: DuplexStreamOptions): [IDuplex<T, T>, IDuplex<T, T>] {
+export function duplexPair<T = unknown>(
+  options?: DuplexStreamOptions
+): [IDuplex<T, T>, IDuplex<T, T>] {
   const objectMode =
     options?.readableObjectMode ?? options?.writableObjectMode ?? options?.objectMode ?? false;
   const highWaterMark =
@@ -290,7 +310,7 @@ async function collectStreamChunks(
     "collectStreamChunks"
   ) as AsyncIterable<Uint8Array>;
 
-  for await (const chunk of iterable as any) {
+  for await (const chunk of iterable) {
     const bytes = toStreamBytes(chunk);
     if (!bytes) {
       throw new UnsupportedStreamTypeError("streamToBuffer", typeof chunk);
@@ -306,7 +326,9 @@ function toReadableAsyncIterable<T>(
   name: string
 ): AsyncIterable<T> {
   if (isReadableStream(stream)) {
-    return Readable.fromWeb(stream as any) as unknown as AsyncIterable<T>;
+    // Boundary: `isReadableStream` erases the Web stream's element type; the
+    // caller-supplied T is reasserted for the wrapped Readable.
+    return Readable.fromWeb(stream as ReadableStream<T>);
   }
   if (isAsyncIterable(stream)) {
     return stream;

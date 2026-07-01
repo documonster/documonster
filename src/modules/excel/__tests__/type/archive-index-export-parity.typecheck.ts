@@ -170,12 +170,15 @@ type _NonClass_hasDeflateRaw = Assert<
 >;
 
 type _NonClass_zip = Assert<
-  IsEqualStrict<NodeRuntimeNonClass["zip"], BrowserRuntimeNonClass["zip"]>
+  IsEqualStrict<NodeRuntime["Archive"]["zip"], BrowserRuntime["Archive"]["zip"]>
 >;
 
 type _NonClass_unzip = Assert<
-  IsEqualStrict<NodeRuntimeNonClass["unzip"], BrowserRuntimeNonClass["unzip"]>
+  IsEqualStrict<NodeRuntime["Archive"]["unzip"], BrowserRuntime["Archive"]["unzip"]>
 >;
+
+// `Archive` domain namespace parity (the high-level API now lives here)
+type _Namespace_Archive = Assert<IsEqual<NodeRuntime["Archive"], BrowserRuntime["Archive"]>>;
 
 // Exported type parity
 

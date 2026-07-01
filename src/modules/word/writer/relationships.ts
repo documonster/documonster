@@ -8,10 +8,9 @@
  * backward-compatible free functions (addRelationship, renderRelationships, etc.).
  */
 
+import { NS_PKG_RELS, STD_DOC_ATTRIBUTES } from "@word/constants";
+import { DocxWriteError } from "@word/errors";
 import type { XmlSink } from "@xml/types";
-
-import { NS_PKG_RELS, STD_DOC_ATTRIBUTES } from "../constants";
-import { DocxWriteError } from "../errors";
 
 /** A single OPC relationship. */
 export interface Relationship {

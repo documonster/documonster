@@ -1,9 +1,18 @@
-import { Workbook } from "../../../index";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const [, , filename] = process.argv;
+import { Workbook, Worksheet } from "@excel/index";
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("test sheet");
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "print-area.xlsx");
+
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "test sheet");
 
 for (let row = 1; row <= 10; row++) {
   const values: string[] = [];
@@ -21,7 +30,7 @@ for (let row = 1; row <= 10; row++) {
       }
     }
   }
-  ws.addRow(values);
+  Worksheet.addRow(ws, values);
 }
 
 ws.pageSetup.printTitlesColumn = "A:A";
@@ -29,7 +38,7 @@ ws.pageSetup.printTitlesRow = "1:1";
 ws.pageSetup.printArea = "A1:B10";
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   console.log("Done.");
 } catch (error) {
   console.log(error.message);

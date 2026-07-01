@@ -6,7 +6,7 @@
  *
  * @example Simplest — pass a 2D array:
  * ```typescript
- * import { pdf } from "@cj-tech-master/excelts/pdf";
+ * import { pdf } from "documonster/pdf";
  *
  * const bytes = await pdf([
  *   ["Product", "Revenue"],
@@ -47,18 +47,18 @@
  * ```
  */
 
-import { exportPdf } from "./render/pdf-exporter";
-import {
-  PdfCellType,
-  type PdfWorkbook,
-  type PdfSheetData,
-  type PdfRowData,
-  type PdfCellData,
-  type PdfColumnData,
-  type PdfCellStyle,
-  type PdfSheetImage,
-  type PdfExportOptions
-} from "./types";
+import { exportPdf } from "@pdf/render/pdf-exporter";
+import type {
+  PdfWorkbook,
+  PdfSheetData,
+  PdfRowData,
+  PdfCellData,
+  PdfColumnData,
+  PdfCellStyle,
+  PdfSheetImage,
+  PdfExportOptions
+} from "@pdf/types";
+import { PdfCellType } from "@pdf/types";
 
 // =============================================================================
 // Input Types

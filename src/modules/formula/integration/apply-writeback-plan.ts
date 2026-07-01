@@ -16,9 +16,14 @@
  * 7. Update persistent spill maps and ghost snapshot maps.
  */
 
-import { getGhostSnapshots, getPersistentSpillMap } from "../materialize/spill-engine";
-import type { CellErrorValueLike, FormulaResultLike, WorkbookLike } from "../materialize/types";
-import { CellValueTypeLike } from "../materialize/types";
+import type { SnapshotCellValue, SnapshotErrorValue } from "@formula/integration/workbook-snapshot";
+import { getGhostSnapshots, getPersistentSpillMap } from "@formula/materialize/spill-engine";
+import type {
+  CellErrorValueLike,
+  FormulaResultLike,
+  WorkbookLike
+} from "@formula/materialize/types";
+import { CellValueTypeLike } from "@formula/materialize/types";
 import type {
   WritebackPlan,
   WriteOperation,
@@ -27,8 +32,7 @@ import type {
   SpillWrite,
   SpillErrorWrite,
   CleanupWrite
-} from "../materialize/writeback-plan";
-import type { SnapshotCellValue, SnapshotErrorValue } from "./workbook-snapshot";
+} from "@formula/materialize/writeback-plan";
 
 // ============================================================================
 // Apply Writeback Plan

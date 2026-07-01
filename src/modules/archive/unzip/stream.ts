@@ -1,20 +1,18 @@
 import zlib from "zlib";
 
-import {
-  DATA_DESCRIPTOR_SIGNATURE_BYTES,
-  type CrxHeader,
-  type ParseDriverState,
-  type ParseOptions
-} from "@archive/unzip/parser-core";
+import type { CrxHeader, ParseDriverState, ParseOptions } from "@archive/unzip/parser-core";
+import { DATA_DESCRIPTOR_SIGNATURE_BYTES } from "@archive/unzip/parser-core";
+import type {
+  PullStreamPublicApi,
+  InflateFactory,
+  ParseEmitter,
+  ParseIO,
+  ZipEntry
+} from "@archive/unzip/stream.base";
 import {
   PullStream,
-  type PullStreamPublicApi,
   runParseLoop,
-  streamUntilValidatedDataDescriptor,
-  type InflateFactory,
-  type ParseEmitter,
-  type ParseIO,
-  type ZipEntry
+  streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";
 import type { Duplex, PassThrough, Transform } from "@stream";
 
@@ -30,6 +28,23 @@ export type { CrxHeader, EntryProps, EntryVars, ParseOptions } from "@archive/un
 export type { ZipEntry } from "@archive/unzip/stream.base";
 
 const dataDescriptorSignature = DATA_DESCRIPTOR_SIGNATURE_BYTES;
+
+/**
+ * Minimal view of Node's internal `_readableState` covering the pipe-tracking
+ * fields we need. Not part of the public stream type surface.
+ */
+interface ReadableStatePipes {
+  pipesCount?: number;
+  pipes?: { length: number } | null;
+}
+
+/**
+ * Async iterator returned by the custom entry-queue iterator. Mirrors the shape
+ * Node's `Duplex[Symbol.asyncIterator]` expects, including `[Symbol.asyncDispose]`.
+ */
+interface DisposableEntryIterator extends AsyncIterator<ZipEntry, undefined>, AsyncDisposable {
+  [Symbol.asyncIterator](): DisposableEntryIterator;
+}
 
 export type ParseStream = Duplex & {
   promise(): Promise<void>;
@@ -65,7 +80,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     // ---------------------------------------------------------------
     private _entryQueue: ZipEntry[] = [];
     private _entryWaiter: {
-      resolve: (result: IteratorResult<ZipEntry>) => void;
+      resolve: (result: IteratorResult<ZipEntry, undefined>) => void;
       reject: (err: unknown) => void;
     } | null = null;
     /** True once the parser has finished producing entries. */
@@ -108,15 +123,17 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           this._enqueueEntry(entry);
         },
         pushEntryIfPiped: (entry: ZipEntry) => {
-          const state = (this as any)._readableState;
-          if (state.pipesCount || (state.pipes && state.pipes.length)) {
+          // Node's internal readable state exposes active pipe targets; it is not
+          // part of the public type surface, so probe it through a minimal shape.
+          const state = (this as unknown as { _readableState?: ReadableStatePipes })._readableState;
+          if (state && (state.pipesCount || (state.pipes && state.pipes.length))) {
             this.push(entry);
           }
           // Always feed the entry queue regardless of pipe state.
           this._enqueueEntry(entry);
         },
         emitCrxHeader: header => {
-          (this as any).crxHeader = header;
+          this.crxHeader = header;
           this.emit("crx-header", header);
         },
         emitError: err => {
@@ -184,7 +201,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         if (err) {
           waiter.reject(err);
         } else {
-          waiter.resolve({ value: undefined as any, done: true });
+          waiter.resolve({ value: undefined, done: true });
         }
       }
     }
@@ -198,12 +215,12 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     // based iterator. This avoids Node.js's Readable default iterator which uses
     // finished() internally and races with the close event.
     //
-    // We cast through `any` because ES2024+ AsyncIterator requires
-    // [Symbol.asyncDispose] which AsyncIterableIterator doesn't include,
-    // and we don't need disposal semantics here.
-    override [Symbol.asyncIterator](): any {
-      const iterator = {
-        next: (): Promise<IteratorResult<ZipEntry>> => {
+    // The return type mirrors Node's `Duplex[Symbol.asyncIterator]`, which (with
+    // the disposable lib types enabled) requires `[Symbol.asyncDispose]`. We
+    // provide a dispose that simply terminates the iterator.
+    override [Symbol.asyncIterator](): DisposableEntryIterator {
+      const iterator: DisposableEntryIterator = {
+        next: (): Promise<IteratorResult<ZipEntry, undefined>> => {
           if (this._entryQueue.length > 0) {
             return Promise.resolve({ value: this._entryQueue.shift()!, done: false });
           }
@@ -212,19 +229,23 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
             if (this._parserError) {
               return Promise.reject(this._parserError);
             }
-            return Promise.resolve({ value: undefined as any, done: true });
+            return Promise.resolve({ value: undefined, done: true });
           }
 
-          return new Promise<IteratorResult<ZipEntry>>((resolve, reject) => {
+          return new Promise<IteratorResult<ZipEntry, undefined>>((resolve, reject) => {
             this._entryWaiter = { resolve, reject };
           });
         },
 
-        return: (): Promise<IteratorResult<ZipEntry>> => {
+        return: (): Promise<IteratorResult<ZipEntry, undefined>> => {
           this._entriesDone = true;
           this._entryQueue.length = 0;
           this._entryWaiter = null;
-          return Promise.resolve({ value: undefined as any, done: true });
+          return Promise.resolve({ value: undefined, done: true });
+        },
+
+        async [Symbol.asyncDispose](): Promise<void> {
+          await iterator.return?.();
         },
 
         [Symbol.asyncIterator]() {

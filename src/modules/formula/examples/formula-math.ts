@@ -1,3 +1,8 @@
+import { cellFormula, cellResult } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getCell } from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+
 /**
  * Example: Math & Trigonometry Formulas
  *
@@ -9,54 +14,48 @@
  * - Matrix math (MMULT, MDETERM, MINVERSE, TRANSPOSE)
  * - Modular arithmetic (MOD, QUOTIENT)
  */
-import { Workbook } from "../../../index";
-import { installFormulaEngine } from "../index";
-
-// One-time install so `workbook.calculateFormulas()` wires to the engine.
-installFormulaEngine();
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("Math");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Math");
 
 // Inputs
-ws.getCell("A1").value = 10;
-ws.getCell("A2").value = 20;
-ws.getCell("A3").value = 30;
-ws.getCell("B1").value = -5.678;
+Cell.setValue(ws, "A1", 10);
+Cell.setValue(ws, "A2", 20);
+Cell.setValue(ws, "A3", 30);
+Cell.setValue(ws, "B1", -5.678);
 
 // Aggregates and basic arithmetic
-ws.getCell("C1").value = { formula: "SUM(A1:A3)" }; // 60
-ws.getCell("C2").value = { formula: "PRODUCT(A1:A3)" }; // 6000
-ws.getCell("C3").value = { formula: "ABS(B1)" }; // 5.678
+Cell.setValue(ws, "C1", { formula: "SUM(A1:A3)" }); // 60
+Cell.setValue(ws, "C2", { formula: "PRODUCT(A1:A3)" }); // 6000
+Cell.setValue(ws, "C3", { formula: "ABS(B1)" }); // 5.678
 
 // Rounding family
-ws.getCell("D1").value = { formula: "ROUND(B1, 2)" }; // -5.68
-ws.getCell("D2").value = { formula: "ROUNDUP(B1, 0)" }; // -6
-ws.getCell("D3").value = { formula: "INT(B1)" }; // -6
-ws.getCell("D4").value = { formula: "CEILING(4.3, 1)" }; // 5
+Cell.setValue(ws, "D1", { formula: "ROUND(B1, 2)" }); // -5.68
+Cell.setValue(ws, "D2", { formula: "ROUNDUP(B1, 0)" }); // -6
+Cell.setValue(ws, "D3", { formula: "INT(B1)" }); // -6
+Cell.setValue(ws, "D4", { formula: "CEILING(4.3, 1)" }); // 5
 
 // Trigonometry — 30° in radians, then back
-ws.getCell("E1").value = { formula: "RADIANS(30)" };
-ws.getCell("E2").value = { formula: "SIN(E1)" }; // 0.5
-ws.getCell("E3").value = { formula: "DEGREES(ATAN2(1, 1))" }; // 45
+Cell.setValue(ws, "E1", { formula: "RADIANS(30)" });
+Cell.setValue(ws, "E2", { formula: "SIN(E1)" }); // 0.5
+Cell.setValue(ws, "E3", { formula: "DEGREES(ATAN2(1, 1))" }); // 45
 
 // Power & log
-ws.getCell("F1").value = { formula: "POWER(2, 10)" }; // 1024
-ws.getCell("F2").value = { formula: "SQRT(144)" }; // 12
-ws.getCell("F3").value = { formula: "LOG(1000, 10)" }; // 3
+Cell.setValue(ws, "F1", { formula: "POWER(2, 10)" }); // 1024
+Cell.setValue(ws, "F2", { formula: "SQRT(144)" }); // 12
+Cell.setValue(ws, "F3", { formula: "LOG(1000, 10)" }); // 3
 
 // Modular
-ws.getCell("G1").value = { formula: "MOD(17, 5)" }; // 2
-ws.getCell("G2").value = { formula: "QUOTIENT(17, 5)" }; // 3
+Cell.setValue(ws, "G1", { formula: "MOD(17, 5)" }); // 2
+Cell.setValue(ws, "G2", { formula: "QUOTIENT(17, 5)" }); // 3
 
 // Matrix — populate a 2x2 and compute determinant / inverse via MMULT
-ws.getCell("H1").value = 1;
-ws.getCell("I1").value = 2;
-ws.getCell("H2").value = 3;
-ws.getCell("I2").value = 4;
-ws.getCell("J1").value = { formula: "MDETERM(H1:I2)" }; // -2
+Cell.setValue(ws, "H1", 1);
+Cell.setValue(ws, "I1", 2);
+Cell.setValue(ws, "H2", 3);
+Cell.setValue(ws, "I2", 4);
+Cell.setValue(ws, "J1", { formula: "MDETERM(H1:I2)" }); // -2
 
-wb.calculateFormulas();
+calculateFormulas(wb);
 
 // Report — single pass, tabulated so you can eyeball the results.
 const cells = [
@@ -78,6 +77,6 @@ const cells = [
   "J1"
 ];
 for (const addr of cells) {
-  const cell = ws.getCell(addr);
-  console.log(`${addr}  ${String(cell.formula).padEnd(28)}  = ${cell.result}`);
+  const cell = getCell(ws, addr);
+  console.log(`${addr}  ${String(cellFormula(cell)).padEnd(28)}  = ${cellResult(cell)}`);
 }

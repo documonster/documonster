@@ -15,15 +15,6 @@
  *    shared formula translation, etc.
  */
 
-import { dateToExcel } from "@utils/utils.base";
-
-import type {
-  CellLike,
-  TableDefinitionLike,
-  WorkbookLike,
-  WorksheetLike
-} from "../materialize/types";
-import { CellValueTypeLike } from "../materialize/types";
 import type {
   CalcPropertiesSnapshot,
   CellSnapshot,
@@ -37,8 +28,16 @@ import type {
   WorkbookPropertiesSnapshot,
   WorkbookSnapshot,
   WorksheetSnapshot
-} from "./workbook-snapshot";
-import { snapshotCellKey, scopedNameKey } from "./workbook-snapshot";
+} from "@formula/integration/workbook-snapshot";
+import { snapshotCellKey, scopedNameKey } from "@formula/integration/workbook-snapshot";
+import type {
+  CellLike,
+  TableDefinitionLike,
+  WorkbookLike,
+  WorksheetLike
+} from "@formula/materialize/types";
+import { CellValueTypeLike } from "@formula/materialize/types";
+import { dateToExcel } from "@utils/utils.base";
 
 // ============================================================================
 // Build Workbook Snapshot
@@ -117,7 +116,11 @@ function buildWorksheetSnapshot(ws: WorksheetLike, date1904: boolean): Worksheet
     if (row.hidden) {
       hiddenRows.add(rowNumber);
     }
-    row.eachCell((cell, colNumber) => {
+    row.cells.forEach((cell, index) => {
+      if (!cell) {
+        return;
+      }
+      const colNumber = index + 1;
       const cellSnapshot = buildCellSnapshot(cell, rowNumber, colNumber, date1904);
       if (cellSnapshot) {
         cells.set(snapshotCellKey(rowNumber, colNumber), cellSnapshot);
@@ -174,7 +177,7 @@ function buildCellSnapshot(
   // Skip merge slaves — Excel treats them as blank for formula
   // purposes, but the host's `MergeValue` proxy would forward
   // `cell.value` from the master, so letting them into `cells` would
-  // double-count master values in range aggregates. See issue #162
+  // double-count master values in range aggregates. See
   // and the `Merge` case in `CellValueTypeLike`.
   if (cellType === CellValueTypeLike.Merge) {
     return null;

@@ -5,7 +5,7 @@
  * Uses generics and base types to reduce repetition.
  */
 
-import type { CsvParseOptions, CsvFormatOptions, CsvParseResult } from "@csv/types";
+import type { CsvParseOptions, CsvFormatOptions, CsvParseResult, Row } from "@csv/types";
 
 // =============================================================================
 // Base Result Type (for reuse)
@@ -51,7 +51,8 @@ export type FilterOperator =
 export interface FilterCondition {
   column: string | number;
   operator: FilterOperator;
-  value?: any;
+  /** Compare value: a scalar for most operators, or an array for `in`/`notIn`. */
+  value?: unknown;
   ignoreCase?: boolean;
 }
 
@@ -142,8 +143,15 @@ interface BaseRequest<T extends CsvWorkerTaskType> {
 /** Worker request messages (main thread -> worker) */
 export type CsvWorkerRequestMessage =
   | (BaseRequest<"parse"> & { data: string; options?: CsvParseOptions })
-  | (BaseRequest<"format"> & { data: any[][]; options?: CsvFormatOptions })
-  | (BaseRequest<"load"> & { sessionId: string; data: any[] | any[][]; headers?: string[] })
+  | (BaseRequest<"format"> & {
+      data: Row[] | Record<string, unknown>[];
+      options?: CsvFormatOptions;
+    })
+  | (BaseRequest<"load"> & {
+      sessionId: string;
+      data: Record<string, unknown>[] | unknown[][];
+      headers?: string[];
+    })
   | (BaseRequest<"getData"> & { sessionId: string })
   | (BaseRequest<"clear"> & { sessionId?: string })
   | (BaseRequest<"sort"> & { sessionId: string; config: SortConfig | SortConfig[] })
@@ -158,7 +166,7 @@ export type CsvWorkerRequestMessage =
 /** Unified worker response - single format for all results */
 export type CsvWorkerResponseMessage =
   | { type: "ready" }
-  | { type: "result"; taskId: number; data: any; duration: number }
+  | { type: "result"; taskId: number; data: unknown; duration: number }
   | { type: "error"; taskId: number; error: string; duration: number };
 
 // =============================================================================
@@ -202,14 +210,14 @@ export interface CsvWorkerPoolStats {
 // =============================================================================
 
 /** Filter/Search result */
-export interface FilterResult<T = Record<string, any>> extends BaseResult {
+export interface FilterResult<T = Record<string, unknown>> extends BaseResult {
   data: T[];
   matchCount: number;
   totalCount: number;
 }
 
 /** Pagination result */
-export interface PageResult<T = Record<string, any>> extends BaseResult {
+export interface PageResult<T = Record<string, unknown>> extends BaseResult {
   data: T[];
   page: number;
   pageSize: number;
@@ -218,18 +226,18 @@ export interface PageResult<T = Record<string, any>> extends BaseResult {
 }
 
 /** Group by result */
-export interface GroupResult<T = Record<string, any>> extends BaseResult {
+export interface GroupResult<T = Record<string, unknown>> extends BaseResult {
   data: T[];
   groupCount: number;
 }
 
 /** Aggregation result */
 export interface AggregateResult extends BaseResult {
-  data: Record<string, any>;
+  data: Record<string, unknown>;
 }
 
 /** Batch query result - adapts based on operations */
-export interface QueryResult<T = Record<string, any>> extends BaseResult {
+export interface QueryResult<T = Record<string, unknown>> extends BaseResult {
   data: T[];
   page?: number;
   pageSize?: number;
@@ -237,7 +245,7 @@ export interface QueryResult<T = Record<string, any>> extends BaseResult {
   totalPages?: number;
   matchCount?: number;
   groupCount?: number;
-  aggregates?: Record<string, any>;
+  aggregates?: Record<string, unknown>;
 }
 
 // Re-export core CSV types for convenience - allows worker module consumers

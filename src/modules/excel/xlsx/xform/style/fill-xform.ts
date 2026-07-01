@@ -1,16 +1,18 @@
+import type { Color } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface StopModel {
   position: number;
-  color: any;
+  color: Partial<Color>;
 }
 
 interface PatternFillModel {
   type: "pattern";
   pattern: string;
-  fgColor?: any;
-  bgColor?: any;
+  fgColor?: Partial<Color>;
+  bgColor?: Partial<Color>;
 }
 
 interface GradientFillModel {
@@ -30,7 +32,7 @@ type FillModel = PatternFillModel | GradientFillModel;
 
 class StopXform extends BaseXform {
   declare public map: { color: ColorXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -44,14 +46,14 @@ class StopXform extends BaseXform {
     return "stop";
   }
 
-  render(xmlStream: any, model: StopModel): void {
+  render(xmlStream: XmlSink, model: StopModel): void {
     xmlStream.openNode("stop");
     xmlStream.addAttribute("position", model.position);
     this.map.color.render(xmlStream, model.color);
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -87,7 +89,7 @@ class StopXform extends BaseXform {
 
 class PatternFillXform extends BaseXform {
   declare public map: { fgColor: ColorXform; bgColor: ColorXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -106,7 +108,7 @@ class PatternFillXform extends BaseXform {
     return "patternFill";
   }
 
-  render(xmlStream: any, model: PatternFillModel): void {
+  render(xmlStream: XmlSink, model: PatternFillModel): void {
     xmlStream.openNode("patternFill");
     xmlStream.addAttribute("patternType", model.pattern);
     if (model.fgColor) {
@@ -118,7 +120,7 @@ class PatternFillXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -162,7 +164,7 @@ class PatternFillXform extends BaseXform {
 
 class GradientFillXform extends BaseXform {
   declare public map: { stop: StopXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -180,11 +182,11 @@ class GradientFillXform extends BaseXform {
     return "gradientFill";
   }
 
-  render(xmlStream: any, model: GradientFillModel): void {
+  render(xmlStream: XmlSink, model: GradientFillModel): void {
     xmlStream.openNode("gradientFill");
     switch (model.gradient) {
       case "angle":
-        xmlStream.addAttribute("degree", model.degree);
+        xmlStream.addAttribute("degree", model.degree ?? 0);
         break;
       case "path":
         xmlStream.addAttribute("type", "path");
@@ -220,15 +222,16 @@ class GradientFillXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
     }
     switch (node.name) {
       case "gradientFill": {
-        const model: any = (this.model = {
-          stops: []
+        // Built incrementally from attributes; starts with just `stops`.
+        const model = (this.model = { stops: [] } as Partial<GradientFillModel> & {
+          stops: StopModel[];
         });
         if (node.attributes.degree) {
           model.gradient = "angle";
@@ -280,7 +283,7 @@ class GradientFillXform extends BaseXform {
 // Fill encapsulates translation from fill model to/from xlsx
 class FillXform extends BaseXform {
   declare public map: { patternFill: PatternFillXform; gradientFill: GradientFillXform };
-  declare public parser: any;
+  declare public parser?: PatternFillXform | GradientFillXform;
 
   constructor() {
     super();
@@ -295,7 +298,7 @@ class FillXform extends BaseXform {
     return "fill";
   }
 
-  render(xmlStream: any, model: FillModel): void {
+  render(xmlStream: XmlSink, model: FillModel): void {
     if (model.type !== "pattern" && model.type !== "gradient") {
       return;
     }
@@ -308,7 +311,7 @@ class FillXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -337,7 +340,9 @@ class FillXform extends BaseXform {
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
         this.model = this.parser.model;
-        this.model.type = this.parser.name;
+        // The active child fill xform exposes a `name` (pattern/gradient) used
+        // as the model's fill type discriminator.
+        (this.model as { type?: string }).type = this.parser.name;
         this.parser = undefined;
       }
       return true;

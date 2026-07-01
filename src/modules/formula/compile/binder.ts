@@ -11,13 +11,8 @@
  * The binder operates on snapshot data only — no live workbook objects.
  */
 
-import type { DefinedNameSnapshot, WorkbookSnapshot } from "../integration/workbook-snapshot";
-import { resolveDefinedName as resolveDefinedNameFromSnapshot } from "../integration/workbook-snapshot";
-import type { AstNode, CellRefNode, RangeRefNode } from "../syntax/ast";
-import { NodeType } from "../syntax/ast";
-import { stripFunctionPrefix } from "../syntax/token-types";
-import { colLetterToNumber, parseDefinedNameRange } from "./address-utils";
-import type { BoundExpr, SpecialFormName } from "./bound-ast";
+import { colLetterToNumber, parseDefinedNameRange } from "@formula/compile/address-utils";
+import type { BoundExpr, SpecialFormName } from "@formula/compile/bound-ast";
 import {
   BoundExprKind,
   boundAreaRef,
@@ -27,12 +22,18 @@ import {
   boundLiteral,
   boundNameExpr,
   boundSpecialCall
-} from "./bound-ast";
+} from "@formula/compile/bound-ast";
 import {
   resolveStructuredRefRows,
   buildTableGeometry,
   resolveStructuredRefColumns
-} from "./structured-ref-utils";
+} from "@formula/compile/structured-ref-utils";
+import { FormulaError } from "@formula/errors";
+import type { DefinedNameSnapshot, WorkbookSnapshot } from "@formula/integration/workbook-snapshot";
+import { resolveDefinedName as resolveDefinedNameFromSnapshot } from "@formula/integration/workbook-snapshot";
+import type { AstNode, CellRefNode, RangeRefNode } from "@formula/syntax/ast";
+import { NodeType } from "@formula/syntax/ast";
+import { stripFunctionPrefix } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Binding Context
@@ -181,7 +182,7 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
  * discriminated-union variant. At runtime, this path is unreachable.
  */
 function assertNever(x: never): never {
-  throw new Error(`unexpected AST node: ${JSON.stringify(x)}`);
+  throw new FormulaError(`unexpected AST node: ${JSON.stringify(x)}`);
 }
 
 // ============================================================================

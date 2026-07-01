@@ -1,16 +1,18 @@
+import { cellGetValue, cellSetValue } from "@excel/core/cell";
+import { getCell, rowGetCell } from "@excel/core/worksheet";
 import { describe, it, expect } from "vitest";
-
 describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
   it("should read a workbook from ReadableStream<Uint8Array>", async () => {
-    const excelModule = await import("../../../../index.browser");
-    const { Workbook, WorkbookReader } = excelModule as any;
+    const { createWorkbook, addWorksheet } = await import("@excel/core/workbook.browser");
+    const { toBuffer } = await import("@excel/core/xlsx-io.browser");
+    const { WorkbookReader } = await import("@excel/stream/workbook-reader.browser");
 
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "hello";
-    ws.getCell("A2").value = 42;
+    const wb = createWorkbook();
+    const ws = addWorksheet(wb, "Sheet1");
+    cellSetValue(getCell(ws, "A1"), "hello");
+    cellSetValue(getCell(ws, "A2"), 42);
 
-    const data: Uint8Array = await wb.xlsx.writeBuffer();
+    const data: Uint8Array = await toBuffer(wb);
 
     const webStream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -33,10 +35,10 @@ describe("WorkbookReader (Browser) accepts ReadableStream input", () => {
       for await (const row of worksheet) {
         rowCount++;
         if (row.number === 1) {
-          expect(row.getCell(1).value).toBe("hello");
+          expect(cellGetValue(rowGetCell(row, 1))).toBe("hello");
         }
         if (row.number === 2) {
-          expect(row.getCell(1).value).toBe(42);
+          expect(cellGetValue(rowGetCell(row, 1))).toBe(42);
         }
       }
 

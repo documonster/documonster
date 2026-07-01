@@ -19,11 +19,10 @@
  */
 
 import { zlibSync } from "@archive/compression/compress";
+import { PdfDict, pdfName, pdfNumber, pdfRef, pdfArray } from "@pdf/core/pdf-object";
+import type { PdfWriter } from "@pdf/core/pdf-writer";
+import type { TtfFont } from "@pdf/font/ttf-parser";
 import { concatUint8Arrays } from "@utils/binary";
-
-import { PdfDict, pdfName, pdfNumber, pdfRef, pdfArray } from "../core/pdf-object";
-import type { PdfWriter } from "../core/pdf-writer";
-import type { TtfFont } from "./ttf-parser";
 
 // =============================================================================
 // Types

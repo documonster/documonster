@@ -6,7 +6,9 @@ describe("TwoCellAnchorXform", () => {
     it("handles null picture gracefully", () => {
       const twoCell = new TwoCellAnchorXform();
       const model: any = { picture: null };
-      expect(() => twoCell.reconcile(model, {})).not.toThrow();
+      expect(() =>
+        twoCell.reconcile(model, {} as Parameters<typeof twoCell.reconcile>[1])
+      ).not.toThrow();
       // Model should remain intact with null picture
       expect(model.picture).toBeNull();
     });
@@ -14,7 +16,9 @@ describe("TwoCellAnchorXform", () => {
     it("handles missing tl anchor gracefully", () => {
       const twoCell = new TwoCellAnchorXform();
       const model: any = { br: { col: 1, row: 1 } };
-      expect(() => twoCell.reconcile(model, {})).not.toThrow();
+      expect(() =>
+        twoCell.reconcile(model, {} as Parameters<typeof twoCell.reconcile>[1])
+      ).not.toThrow();
       // br should be preserved, tl should remain absent
       expect(model.br).toEqual({ col: 1, row: 1 });
       expect(model.tl).toBeUndefined();
@@ -23,7 +27,9 @@ describe("TwoCellAnchorXform", () => {
     it("handles missing br anchor gracefully", () => {
       const twoCell = new TwoCellAnchorXform();
       const model: any = { tl: { col: 1, row: 1 } };
-      expect(() => twoCell.reconcile(model, {})).not.toThrow();
+      expect(() =>
+        twoCell.reconcile(model, {} as Parameters<typeof twoCell.reconcile>[1])
+      ).not.toThrow();
       // tl should be preserved, br should remain absent
       expect(model.tl).toEqual({ col: 1, row: 1 });
       expect(model.br).toBeUndefined();

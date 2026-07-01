@@ -19,14 +19,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+
 import { PdfStructureError } from "../errors";
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/pdf-reader-examples"
+  "../../../../tmp/pdf-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -280,7 +282,7 @@ const metaPdf = await pdf([["Data", 123]], {
   title: "Quarterly Report",
   author: "Finance Team",
   subject: "Q4 2025 Financials",
-  creator: "excelts PDF module"
+  creator: "documonster PDF module"
 });
 
 const meta = await readPdf(metaPdf);
@@ -503,29 +505,29 @@ save("07-text-positioning.txt", posOutput);
 
 console.log("\n--- 8. Excel-to-PDF Roundtrip ---\n");
 
-const wb = new Workbook();
-const ws = wb.addWorksheet("Inventory");
-ws.columns = [
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Inventory");
+Worksheet.setColumns(ws, [
   { header: "Item", key: "item", width: 20 },
   { header: "SKU", key: "sku", width: 15 },
   { header: "Qty", key: "qty", width: 10 },
   { header: "Price", key: "price", width: 12 },
   { header: "In Stock", key: "inStock", width: 10 }
-];
-ws.addRows([
+]);
+Worksheet.addRows(ws, [
   { item: "Laptop Pro", sku: "LP-001", qty: 42, price: 1299.99, inStock: true },
   { item: "Wireless Mouse", sku: "WM-055", qty: 350, price: 29.99, inStock: true },
   { item: "USB-C Hub", sku: "UH-112", qty: 0, price: 49.99, inStock: false },
   { item: 'Monitor 27"', sku: "MN-270", qty: 18, price: 399.99, inStock: true }
 ]);
 
-const ws2 = wb.addWorksheet("Summary");
-ws2.getCell("A1").value = "Total Items";
-ws2.getCell("B1").value = 4;
-ws2.getCell("A2").value = "Total Value";
-ws2.getCell("B2").value = 76827.16;
+const ws2 = Workbook.addWorksheet(wb, "Summary");
+Cell.setValue(ws2, "A1", "Total Items");
+Cell.setValue(ws2, "B1", 4);
+Cell.setValue(ws2, "A2", "Total Value");
+Cell.setValue(ws2, "B2", 76827.16);
 
-const excelPdfBytes = await excelToPdf(wb, {
+const excelPdfBytes = await Pdf.fromExcel(wb, {
   title: "Inventory Report",
   author: "Warehouse System",
   orientation: "landscape"

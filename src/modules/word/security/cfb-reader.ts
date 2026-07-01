@@ -9,7 +9,7 @@
  *   - https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb
  */
 
-import { DocxParseError } from "../errors";
+import { DocxParseError } from "@word/errors";
 
 /** A stream entry extracted from/written to a CFB file. */
 export interface CfbEntry {
@@ -109,7 +109,7 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
     const off = sectorOffset(fatSec);
     for (let i = 0; i < sectorSize / 4; i++) {
       if (fat.length >= MAX_FAT_ENTRIES) {
-        throw new Error(
+        throw new DocxParseError(
           `CFB FAT exceeds maximum entry count (${MAX_FAT_ENTRIES}). ` +
             `Aborting to avoid runaway memory consumption.`
         );
@@ -140,7 +140,7 @@ export function readCfb(buffer: Uint8Array): CfbEntry[] {
         sectors.push(buffer.slice(off, off + sectorSize));
         totalBytes += sectorSize;
         if (totalBytes > MAX_CHAIN_BYTES) {
-          throw new Error(
+          throw new DocxParseError(
             `CFB sector chain exceeds maximum size (${MAX_CHAIN_BYTES} bytes). ` +
               `Aborting to avoid runaway memory consumption.`
           );

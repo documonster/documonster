@@ -90,7 +90,7 @@ class XmlStreamWriter implements XmlSink {
     const merged = attributes ? { ...StdDocAttributes, ...attributes } : StdDocAttributes;
     let s = "<?xml";
     for (const key in merged) {
-      const value = (merged as any)[key];
+      const value = merged[key];
       if (value !== undefined) {
         validateXmlName(key);
         s += ` ${key}="${xmlEncodeAttr(String(value))}"`;

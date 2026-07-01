@@ -17,19 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  gridBorders,
-  cell,
-  row,
-  table,
-  ptToHalfPoint,
-  cmToTwips,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 import type { StyleDef, AbstractNumbering, NumberingInstance } from "../index";
 
 const outDir = path.resolve(
@@ -47,7 +35,7 @@ Document.useDefaultStyles(doc);
 Document.setDocDefaults(doc, {
   runProperties: {
     font: { ascii: "Calibri", hAnsi: "Calibri", eastAsia: "Microsoft YaHei", cs: "Arial" },
-    size: ptToHalfPoint(11),
+    size: Units.ptToHalfPoint(11),
     color: "262626"
   },
   paragraphProperties: {
@@ -67,7 +55,7 @@ const quoteStyle: StyleDef = {
   qFormat: true,
   uiPriority: 30,
   paragraphProperties: {
-    indent: { left: cmToTwips(1), right: cmToTwips(1) },
+    indent: { left: Units.cmToTwips(1), right: Units.cmToTwips(1) },
     spacing: { before: 240, after: 240 },
     borders: {
       left: { style: "single", size: 16, color: "1F4E79", space: 8 }
@@ -76,7 +64,7 @@ const quoteStyle: StyleDef = {
   runProperties: {
     italic: true,
     color: "1F4E79",
-    size: ptToHalfPoint(11)
+    size: Units.ptToHalfPoint(11)
   }
 };
 Document.addStyle(doc, quoteStyle);
@@ -108,7 +96,7 @@ const tableStyle: StyleDef = {
   basedOn: "TableNormal",
   uiPriority: 39,
   tableProperties: {
-    borders: gridBorders(4, "BFBFBF"),
+    borders: Build.gridBorders(4, "BFBFBF"),
     // One row per banding stripe so band1Horz/band2Horz alternate every row.
     rowBandSize: 1,
     cellMargins: {
@@ -150,7 +138,7 @@ Document.addStyle(doc, {
   link: "LeadChar",
   qFormat: true,
   paragraphProperties: { spacing: { before: 0, after: 240 }, alignment: "both" },
-  runProperties: { size: ptToHalfPoint(13), color: "595959" }
+  runProperties: { size: Units.ptToHalfPoint(13), color: "595959" }
 });
 Document.addStyle(doc, {
   type: "character",
@@ -158,7 +146,7 @@ Document.addStyle(doc, {
   name: "Lead Char",
   link: "Lead",
   basedOn: "Normal",
-  runProperties: { size: ptToHalfPoint(13), color: "595959" }
+  runProperties: { size: Units.ptToHalfPoint(13), color: "595959" }
 });
 
 // ---------------------------------------------------------------------------
@@ -168,11 +156,11 @@ Document.addHeading(doc, "Word — Custom Styles & Numbering", 1);
 
 Document.addParagraphElement(
   doc,
-  paragraph(
+  Build.paragraph(
     [
-      text("This first paragraph uses the "),
-      text("Lead", { style: "LeadChar" }),
-      text(" paragraph style.")
+      Build.text("This first paragraph uses the "),
+      Build.text("Lead", { style: "LeadChar" }),
+      Build.text(" paragraph style.")
     ],
     { style: "Lead" }
   )
@@ -181,9 +169,9 @@ Document.addParagraphElement(
 // MyQuote
 Document.addParagraphElement(
   doc,
-  paragraph(
+  Build.paragraph(
     [
-      text(
+      Build.text(
         "“The only way to learn a new programming language is by writing programs in it.” — Brian Kernighan"
       )
     ],
@@ -194,10 +182,10 @@ Document.addParagraphElement(
 // Inline character style
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Run formatting via "),
-    text("MyEmphasis", { style: "MyEmphasis" }),
-    text(" character style; this is independent of any paragraph style.")
+  Build.paragraph([
+    Build.text("Run formatting via "),
+    Build.text("MyEmphasis", { style: "MyEmphasis" }),
+    Build.text(" character style; this is independent of any paragraph style.")
   ])
 );
 
@@ -205,13 +193,13 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Custom table style with banding", 2);
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row([cell("Quarter"), cell("Revenue"), cell("Profit")]),
-      row([cell("Q1"), cell("$1.2M"), cell("$200K")]),
-      row([cell("Q2"), cell("$1.5M"), cell("$280K")]),
-      row([cell("Q3"), cell("$1.8M"), cell("$340K")]),
-      row([cell("Q4"), cell("$2.1M"), cell("$410K")])
+      Build.row([Build.cell("Quarter"), Build.cell("Revenue"), Build.cell("Profit")]),
+      Build.row([Build.cell("Q1"), Build.cell("$1.2M"), Build.cell("$200K")]),
+      Build.row([Build.cell("Q2"), Build.cell("$1.5M"), Build.cell("$280K")]),
+      Build.row([Build.cell("Q3"), Build.cell("$1.8M"), Build.cell("$340K")]),
+      Build.row([Build.cell("Q4"), Build.cell("$2.1M"), Build.cell("$410K")])
     ],
     {
       style: "MyGrid",
@@ -264,18 +252,18 @@ const final = {
   numberingInstances: [...(built.numberingInstances ?? []), asianInstance, fancyInstance],
   body: [
     ...built.body,
-    textParagraph("Asian-numeral list:", { style: "Heading2" }),
-    textParagraph("第一项内容", { numbering: { numId: 500, level: 0 } }),
-    textParagraph("第二项内容", { numbering: { numId: 500, level: 0 } }),
-    textParagraph("第三项内容", { numbering: { numId: 500, level: 0 } }),
+    Build.textParagraph("Asian-numeral list:", { style: "Heading2" }),
+    Build.textParagraph("第一项内容", { numbering: { numId: 500, level: 0 } }),
+    Build.textParagraph("第二项内容", { numbering: { numId: 500, level: 0 } }),
+    Build.textParagraph("第三项内容", { numbering: { numId: 500, level: 0 } }),
 
-    textParagraph("Fancy chevron bullets:", { style: "Heading2" }),
-    textParagraph("Foo", { numbering: { numId: 501, level: 0 } }),
-    textParagraph("Bar", { numbering: { numId: 501, level: 0 } }),
-    textParagraph("Baz", { numbering: { numId: 501, level: 0 } })
+    Build.textParagraph("Fancy chevron bullets:", { style: "Heading2" }),
+    Build.textParagraph("Foo", { numbering: { numId: 501, level: 0 } }),
+    Build.textParagraph("Bar", { numbering: { numId: 501, level: 0 } }),
+    Build.textParagraph("Baz", { numbering: { numId: 501, level: 0 } })
   ]
 };
 
-const buf = await toBuffer(final);
+const buf = await Io.toBuffer(final);
 fs.writeFileSync(path.join(outDir, "09-styles-numbering.docx"), buf);
 console.log(`  → 09-styles-numbering.docx (${buf.length} bytes)`);

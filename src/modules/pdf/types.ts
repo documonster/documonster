@@ -411,6 +411,16 @@ export type PdfOrientation = "portrait" | "landscape";
  */
 export interface PdfExportOptions {
   /**
+   * Optional formula recalculator, injected to avoid a static dependency on
+   * the ~200 KB formula engine. Pass `calculateFormulas` from
+   * `documonster/formula` to recompute formula results before
+   * export; omit it to use the workbook's existing cached results. Explicit
+   * replacement for the old formula host-registry — only opt-in callers pull
+   * the engine into their bundle.
+   */
+  recalculate?: (workbook: never) => void;
+
+  /**
    * Page size. Can be a predefined name or custom dimensions.
    * @default "A4"
    */
@@ -516,7 +526,7 @@ export interface PdfExportOptions {
 
   /**
    * PDF document creator metadata.
-   * @default "excelts"
+   * @default "documonster"
    */
   creator?: string;
 
@@ -529,7 +539,7 @@ export interface PdfExportOptions {
    * ```typescript
    * import { readFileSync } from "fs";
    * const font = readFileSync("NotoSansSC-Regular.ttf");
-   * excelToPdf(workbook, { font });
+   * Pdf.fromExcel(workbook, { font });
    * ```
    */
   font?: Uint8Array;
@@ -539,7 +549,7 @@ export interface PdfExportOptions {
    *
    * @example
    * ```typescript
-   * excelToPdf(workbook, {
+   * Pdf.fromExcel(workbook, {
    *   encryption: {
    *     ownerPassword: "secret",
    *     userPassword: "open",

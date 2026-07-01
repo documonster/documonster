@@ -1,12 +1,20 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
+import type { Fill } from "@excel/types";
 
-import { Workbook } from "../../../index";
-import type { Fill } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "workbook-styles.xlsx");
 
-const [, , filename] = process.argv;
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("blort");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "blort");
 
 const fonts = {
   arialBlackUI14: {
@@ -184,7 +192,7 @@ const fills = {
   }
 } satisfies Record<string, Fill>;
 
-ws.columns = [
+Worksheet.setColumns(ws, [
   { header: "Col 1", key: "key", width: 25 },
   { header: "Col 2", key: "name", width: 32 },
   { header: "Col 3", key: "age", width: 21 },
@@ -198,157 +206,153 @@ ws.columns = [
     style: { font: fonts.comicSansUdB16, alignment: alignments[1].alignment }
   },
   { header: "Col 9", width: 8, hidden: true }
-];
+]);
 
-ws.getCell("A2").value = 7;
-ws.getCell("B2").value = "Hello, World!";
-ws.getCell("B2").font = fonts.comicSansUdB16;
-ws.getCell("B2").border = borders.thin;
+Cell.setValue(ws, "A2", 7);
+Cell.setValue(ws, "B2", "Hello, World!");
+Cell.setStyle(ws, "B2", { font: fonts.comicSansUdB16 });
+Cell.setStyle(ws, "B2", { border: borders.thin });
 
-ws.getCell("C2").value = -5.55;
-ws.getCell("C2").numFmt = "'£'#,##0.00;[Red]-'£'#,##0.00";
-ws.getCell("C2").font = fonts.arialBlackUI14;
+Cell.setValue(ws, "C2", -5.55);
+Cell.setStyle(ws, "C2", { numFmt: "'£'#,##0.00;[Red]-'£'#,##0.00" });
+Cell.setStyle(ws, "C2", { font: fonts.arialBlackUI14 });
 
-ws.getCell("D2").value = 3.14;
-ws.getCell("D2").value = new Date();
-ws.getCell("D2").numFmt = "d-mmm-yyyy";
-ws.getCell("D2").font = fonts.comicSansUdB16;
-ws.getCell("D2").border = borders.doubleRed;
+Cell.setValue(ws, "D2", 3.14);
+Cell.setValue(ws, "D2", new Date());
+Cell.setStyle(ws, "D2", { numFmt: "d-mmm-yyyy" });
+Cell.setStyle(ws, "D2", { font: fonts.comicSansUdB16 });
+Cell.setStyle(ws, "D2", { border: borders.doubleRed });
 
-ws.getCell("E2").value = ["Hello", "World"].join(", ") + "!";
+Cell.setValue(ws, "E2", ["Hello", "World"].join(", ") + "!");
 
-ws.getCell("F2").value = true;
-ws.getCell("G2").value = { error: "#N/A" };
-ws.getCell("H2").value = { error: "#VALUE!" };
+Cell.setValue(ws, "F2", true);
+Cell.setValue(ws, "G2", { error: "#N/A" });
+Cell.setValue(ws, "H2", { error: "#VALUE!" });
 
-ws.getCell("A3").value = {
+Cell.setValue(ws, "A3", {
   text: "www.google.com",
   hyperlink: "http://www.google.com",
   tooltip: "Google!"
-};
-ws.getCell("A4").value = "Boo!";
-ws.getCell("C4").value = "Hoo!";
-ws.mergeCells("A4", "C4");
+});
+Cell.setValue(ws, "A4", "Boo!");
+Cell.setValue(ws, "C4", "Hoo!");
+Worksheet.merge(ws, "A4", "C4");
 
-ws.getCell("A5").value = 1;
-ws.getCell("B5").value = 2;
-ws.getCell("C5").value = { formula: "A5+B5", result: 3 };
+Cell.setValue(ws, "A5", 1);
+Cell.setValue(ws, "B5", 2);
+Cell.setValue(ws, "C5", { formula: "A5+B5", result: 3 });
 
-ws.getCell("A6").value = "Hello";
-ws.getCell("B6").value = "World";
-ws.getCell("C6").value = {
+Cell.setValue(ws, "A6", "Hello");
+Cell.setValue(ws, "B6", "World");
+Cell.setValue(ws, "C6", {
   formula: "CONCATENATE(A6,', ',B6,'!')",
   result: "Hello, World!"
-};
-ws.getCell("C6").border = borders.thickRainbow;
+});
+Cell.setStyle(ws, "C6", { border: borders.thickRainbow });
 
-ws.getCell("A7").value = 1;
-ws.getCell("B7").value = 2;
-ws.getCell("C7").value = { formula: "A7+B7" };
+Cell.setValue(ws, "A7", 1);
+Cell.setValue(ws, "B7", 2);
+Cell.setValue(ws, "C7", { formula: "A7+B7" });
 
 const now = new Date();
-ws.getCell("A8").value = now;
-ws.getCell("B8").value = 0;
-ws.getCell("C8").value = { formula: "A8+B8", result: now };
+Cell.setValue(ws, "A8", now);
+Cell.setValue(ws, "B8", 0);
+Cell.setValue(ws, "C8", { formula: "A8+B8", result: now });
 
-ws.getCell("A9").value = 1.6;
-ws.getCell("A9").numFmt = "# ?/?";
-ws.getCell("B9").value = 1.6;
-ws.getCell("B9").numFmt = "h:mm:ss";
-ws.getCell("C9").value = 0.016;
-ws.getCell("C9").numFmt = "0.00%";
-ws.getCell("D9").value = 1.6;
-ws.getCell("D9").numFmt = "[Green]#,##0 ;[Red](#,##0)";
-ws.getCell("E9").value = 1.6;
-ws.getCell("E9").numFmt = "#0.000";
-ws.getCell("F9").value = 0.016;
-ws.getCell("F9").numFmt = "# ?/?%";
+Cell.setValue(ws, "A9", 1.6);
+Cell.setStyle(ws, "A9", { numFmt: "# ?/?" });
+Cell.setValue(ws, "B9", 1.6);
+Cell.setStyle(ws, "B9", { numFmt: "h:mm:ss" });
+Cell.setValue(ws, "C9", 0.016);
+Cell.setStyle(ws, "C9", { numFmt: "0.00%" });
+Cell.setValue(ws, "D9", 1.6);
+Cell.setStyle(ws, "D9", { numFmt: "[Green]#,##0 ;[Red](#,##0)" });
+Cell.setValue(ws, "E9", 1.6);
+Cell.setStyle(ws, "E9", { numFmt: "#0.000" });
+Cell.setValue(ws, "F9", 0.016);
+Cell.setStyle(ws, "F9", { numFmt: "# ?/?%" });
 
-ws.getCell("A10").value = "<";
-ws.getCell("B10").value = ">";
-ws.getCell("C10").value = "<a>";
-ws.getCell("D10").value = "><";
+Cell.setValue(ws, "A10", "<");
+Cell.setValue(ws, "B10", ">");
+Cell.setValue(ws, "C10", "<a>");
+Cell.setValue(ws, "D10", "><");
 
-ws.getRow(11).height = 40;
+Row.setHeight(ws, 11, 40);
 alignments.forEach((alignment, index) => {
   const rowNumber = 11;
   const colNumber = index + 1;
-  const cell = ws.getCell(rowNumber, colNumber);
-  cell.value = alignment.text;
-  cell.alignment = alignment.alignment;
+  Cell.setValue(ws, rowNumber, colNumber, alignment.text);
+  Cell.setStyle(ws, rowNumber, colNumber, { alignment: alignment.alignment });
 });
 
-const row12 = ws.getRow(12);
-row12.height = 40;
-row12.getCell(1).value = "Blue White Horizontal Gradient";
-row12.getCell(1).fill = fills.blueWhiteHGrad;
-row12.getCell(2).value = "Red Dark Vertical";
-row12.getCell(2).fill = fills.redDarkVertical;
-row12.getCell(3).value = "Red Green Dark Trellis";
-row12.getCell(3).fill = fills.redGreenDarkTrellis;
-row12.getCell(4).value = "RGB Path Gradient";
-row12.getCell(4).fill = fills.rgbPathGrad;
-row12.getCell(5).value = "Solid Green";
-row12.getCell(5).fill = fills.solidGreen;
+Row.setHeight(ws, 12, 40);
+Cell.setValue(ws, "A12", "Blue White Horizontal Gradient");
+Cell.setFill(ws, "A12", fills.blueWhiteHGrad);
+Cell.setValue(ws, "B12", "Red Dark Vertical");
+Cell.setFill(ws, "B12", fills.redDarkVertical);
+Cell.setValue(ws, "C12", "Red Green Dark Trellis");
+Cell.setFill(ws, "C12", fills.redGreenDarkTrellis);
+Cell.setValue(ws, "D12", "RGB Path Gradient");
+Cell.setFill(ws, "D12", fills.rgbPathGrad);
+Cell.setValue(ws, "E12", "Solid Green");
+Cell.setFill(ws, "E12", fills.solidGreen);
 
 // testing background and color trickery
-ws.getCell("F5").value = "white";
-ws.getCell("F5").fill = fills.solidGreen;
-ws.getCell("F5").border = borders.thinWhite;
-ws.getCell("F5").font = fonts.whiteText;
-ws.getCell("E4").fill = fills.solidGreen;
-ws.getCell("E5").fill = fills.solidGreen;
-ws.getCell("E6").fill = fills.solidGreen;
-ws.getCell("F4").fill = fills.solidGreen;
-ws.getCell("F6").fill = fills.solidGreen;
-ws.getCell("G4").fill = fills.solidGreen;
-ws.getCell("G5").fill = fills.solidGreen;
-ws.getCell("G6").fill = fills.solidGreen;
+Cell.setValue(ws, "F5", "white");
+Cell.setStyle(ws, "F5", { fill: fills.solidGreen });
+Cell.setStyle(ws, "F5", { border: borders.thinWhite });
+Cell.setStyle(ws, "F5", { font: fonts.whiteText });
+Cell.setStyle(ws, "E4", { fill: fills.solidGreen });
+Cell.setStyle(ws, "E5", { fill: fills.solidGreen });
+Cell.setStyle(ws, "E6", { fill: fills.solidGreen });
+Cell.setStyle(ws, "F4", { fill: fills.solidGreen });
+Cell.setStyle(ws, "F6", { fill: fills.solidGreen });
+Cell.setStyle(ws, "G4", { fill: fills.solidGreen });
+Cell.setStyle(ws, "G5", { fill: fills.solidGreen });
+Cell.setStyle(ws, "G6", { fill: fills.solidGreen });
 
 // row and column styles
-ws.getRow(13).font = fonts.arialBlackUI14;
-ws.getCell("H12").value = "Foo";
-ws.getCell("G13").value = "Foo";
-ws.getCell("H13").value = "Bar";
-ws.getCell("I13").value = "Baz";
-ws.getCell("H14").value = "Baz";
+Row.setFont(ws, 13, fonts.arialBlackUI14);
+Cell.setValue(ws, "H12", "Foo");
+Cell.setValue(ws, "G13", "Foo");
+Cell.setValue(ws, "H13", "Bar");
+Cell.setValue(ws, "I13", "Baz");
+Cell.setValue(ws, "H14", "Baz");
 
 // hidden stuff
-ws.getRow(16).hidden = true;
-ws.getCell("I15").value = "You Can't See Me!";
-ws.getCell("A16").value = "You Can't See Me!";
+Row.setHidden(ws, 16, true);
+Cell.setValue(ws, "I15", "You Can't See Me!");
+Cell.setValue(ws, "A16", "You Can't See Me!");
 
-const A18 = ws.getCell("A18");
-A18.value = "Wrap Text - Wrapping Wrapping Wrappity Wrap Wrap Wrap";
-A18.alignment = { wrapText: true };
+Cell.setValue(ws, "A18", "Wrap Text - Wrapping Wrapping Wrappity Wrap Wrap Wrap");
+Cell.setAlignment(ws, "A18", { wrapText: true });
 
-const A20 = ws.getCell("A20");
-A20.value = "Wrap Text - Wrapping Wrappity Wrap";
-A20.alignment = { shrinkToFit: true };
+Cell.setValue(ws, "A20", "Wrap Text - Wrapping Wrappity Wrap");
+Cell.setAlignment(ws, "A20", { shrinkToFit: true });
 
-ws.getCell("A2").name = "Passe";
-ws.getCell("B2").name = "Passe";
+Cell.setName(ws, "A2", "Passe");
+Cell.setName(ws, "B2", "Passe");
 
-ws.getCell("E2").name = "Greet";
-ws.getCell("A22").value = { formula: "E2" };
+Cell.setName(ws, "E2", "Greet");
+Cell.setValue(ws, "A22", { formula: "E2" });
 
-ws.getCell("A24").value = "Choose";
-ws.getCell("D24").value = "Hewie";
-ws.getCell("D24").name = "Nephews";
-ws.getCell("E24").value = "Dewie";
-ws.getCell("E24").name = "Nephews";
-ws.getCell("F24").value = "Louie";
-ws.getCell("F24").name = "Nephews";
-ws.getCell("B24").dataValidation = {
+Cell.setValue(ws, "A24", "Choose");
+Cell.setValue(ws, "D24", "Hewie");
+Cell.setName(ws, "D24", "Nephews");
+Cell.setValue(ws, "E24", "Dewie");
+Cell.setName(ws, "E24", "Nephews");
+Cell.setValue(ws, "F24", "Louie");
+Cell.setName(ws, "F24", "Nephews");
+Cell.setValidation(ws, "B24", {
   type: "list",
   allowBlank: true,
   formulae: ["Nephews"]
-};
+});
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

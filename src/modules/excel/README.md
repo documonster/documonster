@@ -29,7 +29,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Streaming** — `WorkbookReader` and `WorkbookWriter` for large files
 - **CSV import/export** — `readCsv`, `writeCsv`, `readCsvFile`, `writeCsvFile`
 - **Markdown import/export** — `readMarkdown`, `writeMarkdown`, `readMarkdownFile`, `writeMarkdownFile`
-- **PDF export** — `excelToPdf()` with full styling, pagination, fonts, encryption
+- **PDF export** — `Pdf.fromExcel()` with full styling, pagination, fonts, encryption
 - **Browser support** — `xlsx.load()`, `xlsx.writeBuffer()`, no polyfills needed
 
 ## Quick Start
@@ -37,21 +37,21 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 ### Creating a Workbook
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet } from "documonster/excel";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("My Sheet");
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "My Sheet");
 
 // Add data
-sheet.addRow(["Name", "Age", "Email"]);
-sheet.addRow(["John Doe", 30, "john@example.com"]);
-sheet.addRow(["Jane Smith", 25, "jane@example.com"]);
+Worksheet.addRow(sheet, ["Name", "Age", "Email"]);
+Worksheet.addRow(sheet, ["John Doe", 30, "john@example.com"]);
+Worksheet.addRow(sheet, ["Jane Smith", 25, "jane@example.com"]);
 
 // Node.js: write to file
-await workbook.xlsx.writeFile("output.xlsx");
+await Workbook.writeFile(workbook, "output.xlsx");
 
 // Browser: write to buffer
-const buffer = await workbook.xlsx.writeBuffer();
+const buffer = await Workbook.toBuffer(workbook);
 ```
 
 #### Adding rows by object (with nested keys)
@@ -60,122 +60,125 @@ When columns have keys, rows can be added from objects. Keys may use dotted
 paths to pull values from nested objects:
 
 ```typescript
-sheet.columns = [
+Worksheet.setColumns(sheet, [
   { header: "Name", key: "name", width: 20 },
   { header: "City", key: "address.city", width: 20 }
-];
-sheet.addRow({ name: "Alice", address: { city: "Sydney" } });
+]);
+Worksheet.addRow(sheet, { name: "Alice", address: { city: "Sydney" } });
 ```
 
 ### Reading a Workbook
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet, Row } from "documonster/excel";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Node.js: read from file
-await workbook.xlsx.readFile("input.xlsx");
+await Workbook.readFile(workbook, "input.xlsx");
 
 // Browser: read from ArrayBuffer
-await workbook.xlsx.load(arrayBuffer);
+await Workbook.read(workbook, arrayBuffer);
 
-const worksheet = workbook.getWorksheet(1);
-worksheet.eachRow((row, rowNumber) => {
-  console.log("Row " + rowNumber + " = " + JSON.stringify(row.values));
+const worksheet = Workbook.getWorksheet(workbook, 1);
+Worksheet.eachRow(worksheet, (row, rowNumber) => {
+  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.values(worksheet, rowNumber)));
 });
 ```
 
 ### Styling Cells
 
 ```typescript
-const cell = worksheet.getCell("A1");
-cell.value = "Hello";
-cell.font = {
+import { Cell } from "documonster/excel";
+
+Cell.setValue(worksheet, "A1", "Hello");
+Cell.setFont(worksheet, "A1", {
   name: "Arial",
   size: 16,
   bold: true,
   color: { argb: "FFFF0000" }
-};
-cell.fill = {
+});
+Cell.setFill(worksheet, "A1", {
   type: "pattern",
   pattern: "solid",
   fgColor: { argb: "FFFFFF00" }
-};
-cell.border = {
+});
+Cell.setBorder(worksheet, "A1", {
   top: { style: "thin" },
   left: { style: "thin" },
   bottom: { style: "thin" },
   right: { style: "thin" }
-};
-cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-cell.numFmt = "$#,##0.00";
+});
+Cell.setAlignment(worksheet, "A1", { vertical: "middle", horizontal: "center", wrapText: true });
+Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 ```
 
 ### Number Formats
 
 ```typescript
+import { Cell } from "documonster/excel";
+
 // Currency
-cell.numFmt = "$#,##0.00";
+Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 
 // Percentage
-cell.numFmt = "0.00%";
+Cell.setNumFmt(worksheet, "A1", "0.00%");
 
 // Date
-cell.numFmt = "yyyy-mm-dd";
+Cell.setNumFmt(worksheet, "A1", "yyyy-mm-dd");
 
 // Custom
-cell.numFmt = '#,##0.00 "units"';
+Cell.setNumFmt(worksheet, "A1", '#,##0.00 "units"');
 ```
 
 ### Rich Text
 
 ```typescript
-cell.value = {
+Cell.setValue(worksheet, "A1", {
   richText: [
     { text: "Bold ", font: { bold: true } },
     { text: "and ", font: {} },
     { text: "Red", font: { color: { argb: "FFFF0000" } } }
   ]
-};
+});
 ```
 
 ### Formulas
 
 ```typescript
-cell.value = { formula: "SUM(A1:A10)" };
-cell.value = { formula: "A1+B1", result: 42 }; // with cached result
+Cell.setValue(worksheet, "A1", { formula: "SUM(A1:A10)" });
+Cell.setValue(worksheet, "A1", { formula: "A1+B1", result: 42 }); // with cached result
 
 // Shared formulas
-sheet.getCell("A1").value = { formula: "B1*2", shareType: "shared", ref: "A1:A10" };
+Cell.setValue(sheet, "A1", { formula: "B1*2", shareType: "shared", ref: "A1:A10" });
 
 // Defined names
-workbook.definedNames.add("MyRange", "Sheet1!$A$1:$B$10");
+DefinedNames.add(Workbook.getDefinedNames(workbook), "Sheet1!$A$1:$B$10", "MyRange");
 ```
 
 ### Data Validation
 
 ```typescript
-worksheet.getCell("A1").dataValidation = {
+Cell.setValidation(worksheet, "A1", {
   type: "list",
   allowBlank: true,
   formulae: ['"Option1,Option2,Option3"']
-};
+});
 
-worksheet.getCell("B1").dataValidation = {
+Cell.setValidation(worksheet, "B1", {
   type: "whole",
   operator: "between",
   formulae: [1, 100],
   showErrorMessage: true,
   errorTitle: "Invalid",
   error: "Enter a number between 1 and 100"
-};
+});
 ```
 
 ### Conditional Formatting
 
 ```typescript
-worksheet.addConditionalFormatting({
+Worksheet.addConditionalFormatting(worksheet, {
   ref: "A1:A100",
   rules: [
     {
@@ -395,16 +398,12 @@ worksheet.columns.forEach(column => {
 
 ## Charts
 
-ExcelTS includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
+Documonster includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
 
-> **Setup:** Chart support is opt-in to keep bundle size minimal. Call `installChartSupport()` once at startup before using any chart API (`addChart`, `addLineChart`, chart load/write, etc.):
->
-> ```typescript
-> import { installChartSupport } from "@cj-tech-master/excelts/chart";
-> installChartSupport(); // once, at startup
-> ```
->
-> Without this call, `worksheet.addChart()` and chart serialisation during `writeFile()` will throw.
+> **Setup:** No install or registration step is required. The chart APIs
+> (`Chart.add`, the per-type shortcuts, chart load/write, etc.) pull the chart
+> implementation directly and statically. A consumer that never references any
+> chart API gets the entire chart implementation tree-shaken out of the bundle.
 
 > A runnable end-to-end example is at [`src/modules/excel/examples/charts.ts`](examples/charts.ts) — it creates 70+ charts covering every classic + ChartEx type, all preset families, combo / pivot / chartsheet layouts, and exports SVG / PNG / PDF previews. Run with `pnpm exec tsx src/modules/excel/examples/charts.ts`.
 
@@ -467,7 +466,7 @@ import {
   EXCEL_CHART_EX_PRESETS,
   applyChartPreset,
   applyChartExPreset
-} from "@cj-tech-master/excelts/chart";
+} from "documonster/chart";
 
 // 99 classic presets + 10 ChartEx presets (Excel UI aliases)
 ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
@@ -748,7 +747,7 @@ ws.addChart(
 ```typescript
 // Legacy 2007/2010 built-in style (1..48). Emits `<c:style val="N"/>`.
 chart.setStyle(42);
-chart.setBuiltInStyle(42); // alias matching xlsxwriter terminology
+chart.setBuiltInStyle(42); // alias for the built-in style index
 
 // Modern Office 2013+ sidecar — full styleN.xml + colorsN.xml. Applied
 // via `addChart` options or copied in later via the chart entry.
@@ -776,18 +775,19 @@ ws.addChart(
 ### Preview Export
 
 ```typescript
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { Chart } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
-const chart = ws.getCharts()[0];
+const chart = Chart.get(ws)[0];
 
 // SVG / PNG previews — Promise for PNG because the Node rasteriser is async.
-const svg = chart.toSVG({ width: 800, height: 450, backgroundColor: "transparent" });
-const png = await chart.toPNG({ width: 800, height: 450, scale: 2, dpi: 192 });
+const svg = Chart.toSVG(chart, { width: 800, height: 450, backgroundColor: "transparent" });
+const png = await Chart.toPNG(chart, { width: 800, height: 450, scale: 2, dpi: 192 });
 
 // Standalone one-page PDF — classic charts render as vector content
 // (selectable text, resolution-independent shapes); ChartEx types render
 // as vector too when supported, or raster via `forceRaster: true`.
-const pdf = await chartToPdf(chart, {
+const pdf = await Pdf.fromChart(chart, {
   title: "Revenue",
   width: 640,
   height: 400,
@@ -795,17 +795,18 @@ const pdf = await chartToPdf(chart, {
 });
 
 // Inspect the vector-vs-raster decision explicitly:
-import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts/chart";
-if (chart.chartExModel) {
-  console.log(canRenderChartExAsVectorPdf(chart.chartExModel));
+import { canRenderChartExAsVectorPdf } from "documonster/chart";
+const chartExModel = Chart.chartExModel(chart);
+if (chartExModel) {
+  console.log(canRenderChartExAsVectorPdf(chartExModel));
 }
 ```
 
-Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel/Aspose pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
+Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel-pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
 
 ### Template Preservation
 
-Loaded chart XML is preserved byte-for-byte when not modified. For safe high-level mutations, ExcelTS patches only known XML blocks and keeps unsupported extensions intact:
+Loaded chart XML is preserved byte-for-byte when not modified. For safe high-level mutations, Documonster patches only known XML blocks and keeps unsupported extensions intact:
 
 - classic charts: title, legend, series references, series formatting, markers, data points, data labels, trendlines, error bars, axes, plot layout
 - ChartEx charts: chart data, title, legend, auto-title deletion, chart/plot shapes, plot-region layout, series visibility/name/axis bindings, series data references, layout properties (including `extLst` passthrough), data labels, data points, and axes
@@ -846,26 +847,26 @@ Every generated workbook in these harnesses also runs an OOXML package audit bef
 
 ```bash
 # LibreOffice visual/PDF export oracle
-EXCELTS_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
+DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # LibreOffice open/convert validation for generated workbooks
-EXCELTS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
-# Proprietary Office/Aspose-style CLI validation hook. The command must accept
-# {input} and {outDir} placeholders via EXCELTS_OFFICE_OPEN_ARGS.
-EXCELTS_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
-EXCELTS_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
+# Proprietary Office CLI validation hook. The command must accept
+# {input} and {outDir} placeholders via DOCUMONSTER_OFFICE_OPEN_ARGS.
+DOCUMONSTER_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
+DOCUMONSTER_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # Enterprise corpus round-trip harness
-EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+DOCUMONSTER_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
 # Enterprise corpus plus LibreOffice open validation
-EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
-EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+DOCUMONSTER_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 ```
 
@@ -891,9 +892,9 @@ An optional `manifest.json` in the corpus directory can mark expected structures
 }
 ```
 
-Excel, WPS, and Aspose can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. ExcelTS itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
+Excel and WPS can be wired into the same pattern by providing CI jobs that convert each generated workbook to PDF/images and compare against approved artifacts. Documonster itself stays zero-dependency and does not bundle proprietary renderers. The built-in audit is a structural gate, not a replacement for real Office visual/open-repair validation.
 
-### Compatibility Matrix
+### Capability Matrix
 
 #### High-level capability map
 
@@ -966,7 +967,7 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 
 - **Classic PNG content assertions** are generic: every type hits the PNG pipeline, but only `bar` has a hash golden because binary-level stability across chart types would over-couple tests to renderer internals.
 - **Classic PDF content assertions** exist only where the PDF path diverges meaningfully from SVG (alpha via `/ExtGState`, pie leader lines, marker geometry). Other types re-use the same call graph, so one SVG assertion and the generic `drawChartPdf` smoke are considered sufficient.
-- **LibreOffice visual oracle** is gated on `EXCELTS_LIBREOFFICE_VISUAL_ORACLE` and CI does not install LibreOffice by default to keep matrix jobs fast; direct per-type open-validation is provided for `bar` (solo) and the combo/chartsheet/ChartEx-treemap/funnel fixture, with the full catalogue reachable via the `EXCELTS_ENTERPRISE_CORPUS_DIR` opt-in (see `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`).
+- **LibreOffice visual oracle** is gated on `DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE` and CI does not install LibreOffice by default to keep matrix jobs fast; direct per-type open-validation is provided for `bar` (solo) and the combo/chartsheet/ChartEx-treemap/funnel fixture, with the full catalogue reachable via the `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` opt-in (see `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`).
 - **ChartEx PDF vector path** (`drawChartExPdf`) covers every ChartEx layout the builder currently emits; see the dedicated note.
 
 **3D note:** `bar3D` renders as a **true extruded box** whose axonometric projection is driven by `view3D.rotX` / `view3D.rotY` / `view3D.rAngAx` — three shaded faces (top + front + right) per bar, with depth scaled to bar width so the 3D effect stays readable across chart sizes. The default fallback (`rotX=15°, rotY=20°, rAngAx=true`) matches Excel's new-chart defaults. `line3D`, `pie3D`, `area3D`, `surface3D` and the richer `view3D` / `Scene3D` / `ShapeProperties3D` metadata are **preserved in XML** so clean round-trips and Excel re-opens survive intact, but the preview still renders those types as their 2D equivalents — there is no projection matrix, no light rig, no depth sort for non-bar 3D. This is a preview-grade renderer, not a 3D engine; use Excel or LibreOffice for commercial-grade 3D output.
@@ -977,7 +978,7 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 
 **regionMap note:** ChartEx `regionMap` previews ship a ~180-entry country centroid table and four real projection formulas (`mercator`, `miller`, `albers` Equal-Area Conic, `robinson`). This is a centroid-dot geographic preview by default; unmatched labels fall back to a deterministic hexagonal tile layout. For real country polygons, pass a TopoJSON topology via the render option `regionMap: { topology, objectName, match, projection }` — the renderer will decode features, match labels to `feature.id` or `feature.properties.<key>`, and draw choropleth paths. This keeps the library zero-data-bundle: the caller loads their own `world-atlas`/`natural-earth` file. The same three-mode pipeline (TopoJSON → centroid preview → hex-tile fallback) is implemented for **both** SVG and vector PDF — `chartToPdf` will pass the same `regionMap` option through to `drawChartExPdf`. See `src/modules/excel/chart/topojson.ts` and the exported `RegionMapDataOptions` / `TopologyLike` types.
 
-**Built-in chart styles:** `chart.setStyle(1..48)` (alias `chart.setBuiltInStyle(1..48)`) writes `<c:style val="N"/>` on a classic chart, matching the semantics of xlsxwriter's `chart.set_style(N)`. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `worksheet.addChart({ …, chartStyle: ChartStyleModel })`.
+**Built-in chart styles:** `chart.setStyle(1..48)` (alias `chart.setBuiltInStyle(1..48)`) writes `<c:style val="N"/>` on a classic chart, selecting one of the built-in style indices. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `worksheet.addChart({ …, chartStyle: ChartStyleModel })`.
 
 **3D rendering boundaries (non-goals):** Beyond the axonometric box used for `bar3D`, we intentionally do **not** render:
 
@@ -991,49 +992,38 @@ These features would require multi-week investments with a low payoff for a prev
 - **Vector path (default)** — `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`, `pareto`, `boxWhisker`, `regionMap` all go through `drawChartExPdf`, which shares its geometry collectors with the SVG renderer so the two backends stay pixel-equivalent modulo rasterisation. Sunburst arcs are emitted as cubic-Bézier approximations (≤ 0.03 % max error); everything else is straight `drawRect` / `drawLine` / `drawPath` primitives that PDF understands natively. `regionMap` reuses the same TopoJSON decoder + projection math + centroid table as the SVG renderer; the only intentional visual divergence is that the rounded-corner frame (`rx="14"`) becomes a sharp-corner frame in PDF (`drawRect` does not expose a corner radius).
 - **Raster opt-in** — any ChartEx type can be rasterised on demand with `chartToPdf(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text or vector scalability.
 
-Use `chartToPdf(chart, options)` from `@cj-tech-master/excelts/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
+Use `chartToPdf(chart, options)` from `documonster/pdf` — it picks the path automatically, honours `forceRaster: true` when you need the raster route on purpose, and exposes `canRenderChartExAsVectorPdf(model)` if you want to inspect the decision from outside the helper.
 
-**Pivot chart note:** ExcelTS supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
+**Pivot chart note:** Documonster supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
 
 **Strict template mode:** Writers accept `{ templateMode: "strict" }` (or `{ strictTemplateMode: true }`) to refuse any chart/ChartEx edit that would force a structural rebuild. When a rebuild is unavoidable the error message now lists any unstructured XML elements the parser observed (available as `ChartExModel.unknownElements`) so vendor extensions can never disappear silently from a loaded template.
 
 **Testing scope boundaries (what this library does _not_ test):**
 
 - **No pixel-level visual diff.** Preview output is tested through SVG-structure assertions and PNG header/signature hashes — a true RMS/SSIM pixel diff would require bundling a PNG decoder and a diff algorithm, and the preview is explicitly not pixel-perfect anyway (see the rendering notes above). If your workflow needs pixel parity with Excel, run `chartToPdf(chart)` through LibreOffice's headless PDF export and compare there.
-- **No in-tree Excel/WPS/Aspose-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by ExcelTS itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `EXCELTS_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape and `scripts/compatibility-report.ts` (`pnpm compatibility:report`) for the report generator.
-- **No automated Excel / WPS runtime.** CI gates open-validation on LibreOffice only. Excel and WPS binaries are not shipped in any CI runner, and GUI-driven validation of those apps is out of scope. The `EXCELTS_OFFICE_OPEN_VALIDATION` + `EXCELTS_OFFICE_OPEN_ARGS` hook lets a self-hosted runner with Office installed participate in the same check pattern.
+- **No in-tree Office-generated fixtures.** Every real-file fixture in this repo (`src/modules/excel/__tests__/data/`) was either generated by Documonster itself or minimally hand-authored for regression testing. For host-application compatibility coverage, use the opt-in `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` mechanism: point it at a directory of files the three vendors produced, and `chart-oracle.integration.test.ts` will audit each one. See `docs/enterprise-corpus-manifest.example.json` for the manifest shape.
+- **No automated Excel / WPS runtime.** CI gates open-validation on LibreOffice only. Excel and WPS binaries are not shipped in any CI runner, and GUI-driven validation of those apps is out of scope. The `DOCUMONSTER_OFFICE_OPEN_VALIDATION` + `DOCUMONSTER_OFFICE_OPEN_ARGS` hook lets a self-hosted runner with Office installed participate in the same check pattern.
 
-Compared with ExcelJS, ExcelTS has native chart creation and editing. Compared with xlsx-populate, ExcelTS adds structured chart APIs while still preserving template XML where safe. Compared with XlsxWriter/openpyxl/excelize, ExcelTS adds TypeScript/browser support, ChartEx, pivot chart metadata, chartsheets, and preview renderers.
-
-### Migrating from another library
-
-Full API mapping tables are in dedicated docs, one per library:
-
-- **[`docs/FROM_EXCELJS.md`](../../../docs/FROM_EXCELJS.md)** — ExcelJS had no native chart creation API; this guide shows how to convert "export template unchanged" and "hand-edited chart XML" flows into structured `addChart` / `mutate` calls, plus the preview-render helpers ExcelJS lacks. Now covers chartsheet, pivot chart, user shapes, ChartEx, `unknownElements`, data table, and a migration checklist.
-- **[`docs/FROM_XLSXWRITER.md`](../../../docs/FROM_XLSXWRITER.md)** — XlsxWriter (Python) is the reference for ergonomic chart options; ExcelTS models its option shapes after XlsxWriter's with additions for reading, editing, ChartEx, and preview rendering. 6 end-to-end translation examples.
-- **[`docs/FROM_OPENPYXL.md`](../../../docs/FROM_OPENPYXL.md)** — openpyxl (Python) uses class-based chart construction (`BarChart()`, `Reference()`); this guide translates 6 example workflows into ExcelTS' options-object style and covers loaded-chart editing, which openpyxl does unreliably.
-- **[`docs/FROM_EXCELIZE.md`](../../../docs/FROM_EXCELIZE.md)** — excelize (Go) has a JSON-ish chart API close in spirit to ExcelTS; this guide covers the `Chart{...}` → `addChart({...})` translation, per-point colours, combo charts, and the modern ChartEx types excelize cannot author.
-- **[`docs/FROM_POI.md`](../../../docs/FROM_POI.md)** — Apache POI (Java) is the deepest open-source chart library before ExcelTS; this guide maps `XSSFChart` / `XDDFChartData` / `CTPlotArea` / `XDDFDataSourcesFactory` onto ExcelTS' options objects, with ChartEx authoring as the main capability expansion.
-- **Compatibility matrix:** [`docs/COMPATIBILITY.md`](../../../docs/COMPATIBILITY.md) — per-type support grid + cross-cutting features + side-by-side comparison against ExcelJS / SheetJS / xlsxwriter / openpyxl / excelize / POI / EPPlus / ClosedXML / Aspose.Cells.
-- Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json).
+Enterprise corpus validation manifest example: [`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json).
 
 ## PDF Export
 
 Export any workbook to PDF with zero external dependencies:
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Report");
-sheet.columns = [
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Report");
+Worksheet.setColumns(sheet, [
   { header: "Product", key: "product", width: 20 },
   { header: "Revenue", key: "revenue", width: 15 }
-];
-sheet.addRow({ product: "Widget", revenue: 1000 });
-sheet.getColumn("revenue").numFmt = "$#,##0.00";
+]);
+Worksheet.addRow(sheet, { product: "Widget", revenue: 1000 });
+Column.setStyle(sheet, "revenue", { numFmt: "$#,##0.00" });
 
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   showGridLines: true,
   showPageNumbers: true,
   title: "Sales Report"
@@ -1051,15 +1041,15 @@ window.open(URL.createObjectURL(blob));
 ### XLSX to PDF Conversion
 
 ```typescript
-const workbook = new Workbook();
-await workbook.xlsx.readFile("input.xlsx");
-const pdf = await excelToPdf(workbook);
+const workbook = Workbook.create();
+await Workbook.readFile(workbook, "input.xlsx");
+const pdf = await Pdf.fromExcel(workbook);
 ```
 
 ### PDF Encryption
 
 ```typescript
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader",
@@ -1072,7 +1062,7 @@ const pdf = await excelToPdf(workbook, {
 
 ```typescript
 import { readFileSync } from "fs";
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```
@@ -1080,45 +1070,59 @@ const pdf = await excelToPdf(workbook, {
 ## CSV Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster/excel";
+import {
+  readCsv,
+  writeCsv,
+  writeCsvBuffer,
+  readCsvFile,
+  writeCsvFile
+} from "documonster/excel/csv";
 import fs from "fs";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Node.js: read/write CSV files
-await workbook.readCsvFile("data.csv");
-await workbook.writeCsvFile("output.csv");
+await readCsvFile(workbook, "data.csv");
+await writeCsvFile(workbook, "output.csv");
 
 // Read CSV from stream
-await workbook.readCsv(fs.createReadStream("data.csv"), { sheetName: "Imported" });
+await readCsv(workbook, fs.createReadStream("data.csv"), { sheetName: "Imported" });
 
 // Write CSV to stream
-await workbook.writeCsv(fs.createWriteStream("output.csv"));
+await writeCsv(workbook, fs.createWriteStream("output.csv"));
 
 // Write CSV to string / bytes
-const csvText = workbook.writeCsv();
-const bytes = await workbook.writeCsvBuffer();
+const csvText = writeCsv(workbook);
+const bytes = await writeCsvBuffer(workbook);
 
 // Browser: read from string/ArrayBuffer/File
-await workbook.readCsv(csvString);
-await workbook.readCsv(arrayBuffer);
+await readCsv(workbook, csvString);
+await readCsv(workbook, arrayBuffer);
 ```
 
 ## Markdown Import/Export
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster/excel";
+import {
+  readMarkdown,
+  writeMarkdown,
+  writeMarkdownBuffer,
+  readMarkdownFile,
+  writeMarkdownFile
+} from "documonster/excel/markdown";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Read Markdown table
-workbook.readMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-await workbook.readMarkdownFile("table.md");
+readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+await readMarkdownFile(workbook, "table.md");
 
 // Write Markdown
-const mdText = workbook.writeMarkdown();
-await workbook.writeMarkdownFile("output.md");
-const bytes = workbook.writeMarkdownBuffer();
+const mdText = writeMarkdown(workbook);
+await writeMarkdownFile(workbook, "output.md");
+const bytes = writeMarkdownBuffer(workbook);
 ```
 
 ## Streaming API
@@ -1128,9 +1132,9 @@ const bytes = workbook.writeMarkdownBuffer();
 Read large XLSX files with minimal memory usage:
 
 ```typescript
-import { WorkbookReader } from "@cj-tech-master/excelts";
+import { Stream } from "documonster/excel";
 
-const reader = new WorkbookReader("large-file.xlsx", {
+const reader = new Stream.WorkbookReader("large-file.xlsx", {
   worksheets: "emit",
   sharedStrings: "cache",
   hyperlinks: "ignore",
@@ -1150,9 +1154,9 @@ for await (const worksheet of reader) {
 Write large XLSX files row by row:
 
 ```typescript
-import { WorkbookWriter } from "@cj-tech-master/excelts";
+import { Stream } from "documonster/excel";
 
-const workbook = new WorkbookWriter({
+const workbook = new Stream.WorkbookWriter({
   filename: "output.xlsx",
   useSharedStrings: true,
   useStyles: true
@@ -1170,7 +1174,7 @@ await workbook.commit();
 ### Web Streams (Node.js 22+ and Browsers)
 
 ```typescript
-import { WorkbookWriter, WorkbookReader } from "@cj-tech-master/excelts";
+import { Stream } from "documonster/excel";
 
 // Write to Web WritableStream
 const chunks: Uint8Array[] = [];
@@ -1180,7 +1184,7 @@ const writable = new WritableStream({
   }
 });
 
-const writer = new WorkbookWriter({ stream: writable });
+const writer = new Stream.WorkbookWriter({ stream: writable });
 const sheet = writer.addWorksheet("Sheet1");
 sheet.addRow(["Name", "Score"]).commit();
 sheet.addRow(["Alice", 98]).commit();
@@ -1202,7 +1206,7 @@ const readable = new ReadableStream({
   }
 });
 
-const reader = new WorkbookReader(readable, { worksheets: "emit" });
+const reader = new Stream.WorkbookReader(readable, { worksheets: "emit" });
 for await (const ws of reader) {
   for await (const row of ws) {
     console.log(row.values);
@@ -1215,13 +1219,13 @@ for await (const ws of reader) {
 ### Using with Bundlers (Vite, Webpack, Rollup, esbuild)
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Cell } from "documonster/excel";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Sheet1");
-sheet.getCell("A1").value = "Hello, Browser!";
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Sheet1");
+Cell.setValue(sheet, "A1", "Hello, Browser!");
 
-const buffer = await workbook.xlsx.writeBuffer();
+const buffer = await Workbook.toBuffer(workbook);
 const blob = new Blob([buffer], {
   type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 });
@@ -1231,17 +1235,17 @@ const url = URL.createObjectURL(blob);
 ### Using with Script Tags
 
 ```html
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+<script src="https://unpkg.com/documonster/dist/iife/documonster.iife.min.js"></script>
 <script>
-  const { Workbook } = ExcelTS;
-  const wb = new Workbook();
+  const { Workbook } = Documonster;
+  const wb = Workbook.create();
 </script>
 ```
 
 ### Browser Notes
 
-- Use `xlsx.load(arrayBuffer)` instead of `xlsx.readFile()`
-- Use `xlsx.writeBuffer()` instead of `xlsx.writeFile()`
+- Use `Workbook.read(workbook, arrayBuffer)` instead of `Workbook.readFile(...)`
+- Use `Workbook.toBuffer(workbook)` instead of `Workbook.writeFile(...)`
 - PDF export is fully supported
 - CSV and Markdown operations are supported
 - Sheet protection with passwords uses pure JS SHA-512
@@ -1284,7 +1288,7 @@ import {
   errorToJSON,
   getErrorChain,
   getRootCause
-} from "@cj-tech-master/excelts";
+} from "documonster";
 ```
 
 ## Examples

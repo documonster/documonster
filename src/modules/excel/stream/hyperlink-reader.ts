@@ -4,7 +4,7 @@
  * Cross-platform implementation.
  */
 
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
 import { RelType } from "@excel/xlsx/rel-type";
 import { EventEmitter } from "@utils/event-emitter";

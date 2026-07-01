@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface SheetFormatPropertiesModel {
   defaultRowHeight: number;
@@ -14,9 +15,9 @@ class SheetFormatPropertiesXform extends BaseXform {
     return "sheetFormatPr";
   }
 
-  render(xmlStream: any, model?: SheetFormatPropertiesModel): void {
+  render(xmlStream: XmlSink, model?: SheetFormatPropertiesModel): void {
     if (model) {
-      const attributes: any = {
+      const attributes: XmlAttributes = {
         defaultRowHeight: model.defaultRowHeight,
         // Only output outlineLevelRow/Col when non-zero (matches Excel behavior)
         outlineLevelRow: model.outlineLevelRow || undefined,
@@ -35,13 +36,13 @@ class SheetFormatPropertiesXform extends BaseXform {
         attributes.customHeight = "1";
       }
 
-      if (Object.values(attributes).some((value: any) => value !== undefined)) {
+      if (Object.values(attributes).some((value: unknown) => value !== undefined)) {
         xmlStream.leafNode("sheetFormatPr", attributes);
       }
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "sheetFormatPr") {
       this.model = {
         defaultRowHeight: parseFloat(node.attributes.defaultRowHeight ?? "0"),

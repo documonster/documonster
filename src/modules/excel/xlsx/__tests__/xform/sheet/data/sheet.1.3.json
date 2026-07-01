@@ -110,14 +110,14 @@
   ],
   "hyperlinks": [{ "address": "B6", "rId": "rId1" }],
   "headerFooter": {
-    "oddHeader": "&C&KCCCCCC&\"Aril\"2 excelts",
-    "oddFooter": "&Lexcelts&C&F&RPage &P",
-    "firstHeader": "Hello Excelts",
+    "oddHeader": "&C&KCCCCCC&\"Aril\"2 documonster",
+    "oddFooter": "&Ldocumonster&C&F&RPage &P",
+    "firstHeader": "Hello Documonster",
     "firstFooter": "Hello World",
     "differentFirst": true,
     "differentOddEven": true,
-    "evenHeader": "&C&KCCCCCC&\"Aril\"3 excelts evenHeader",
-    "evenFooter": "&Lexcelts&C&F&RPage &P evenHeader"
+    "evenHeader": "&C&KCCCCCC&\"Aril\"3 documonster evenHeader",
+    "evenFooter": "&Ldocumonster&C&F&RPage &P evenHeader"
   },
   "conditionalFormattings": [],
   "rowBreaks": [],

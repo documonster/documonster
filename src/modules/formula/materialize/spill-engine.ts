@@ -5,7 +5,7 @@
  * `calculateFormulas()` invocations.
  */
 
-import type { SpillRegion, WorkbookLike } from "./types";
+import type { SpillRegion, WorkbookLike } from "@formula/materialize/types";
 
 // ============================================================================
 // Persistent State (WeakMap keyed by workbook — survives across invocations)

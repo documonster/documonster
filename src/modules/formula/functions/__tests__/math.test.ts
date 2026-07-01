@@ -12,9 +12,11 @@
  * implementation under test.
  */
 
-import { Workbook } from "@excel/workbook";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
+import type { ArrayValue, NumberValue, RuntimeValue, StringValue } from "../../runtime/values";
 import {
   BLANK,
   ERRORS,
@@ -23,11 +25,7 @@ import {
   rvBoolean,
   rvError,
   rvNumber,
-  rvString,
-  type ArrayValue,
-  type NumberValue,
-  type RuntimeValue,
-  type StringValue
+  rvString
 } from "../../runtime/values";
 import {
   fnROUND,
@@ -1840,11 +1838,11 @@ describe("SUMX2MY2 / SUMX2PY2 / SUMXMY2 extra", () => {
 // ============================================================================
 
 function runFormula(formula: string): unknown {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
-  ws.getCell("A1").value = { formula, result: 0 };
-  wb.calculateFormulas();
-  return ws.getCell("A1").result;
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Sheet1");
+  Cell.setValue(ws, "A1", { formula, result: 0 });
+  calculateFormulas(wb);
+  return Cell.getResult(ws, "A1");
 }
 
 describe("CEILING.MATH / CEILING.PRECISE / ISO.CEILING aliases", () => {

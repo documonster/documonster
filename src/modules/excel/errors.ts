@@ -4,7 +4,8 @@
  * All Excel-related errors extend ExcelError.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import type { BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 /**
  * Base class for all Excel-related errors.
@@ -113,10 +114,10 @@ export class InvalidValueTypeError extends ExcelError {
 }
 
 /**
- * Error thrown when XML parsing encounters unexpected content.
+ * Error thrown when xlsx (OOXML) parsing encounters unexpected content.
  */
-export class XmlParseError extends ExcelError {
-  override name = "XmlParseError";
+export class XlsxParseError extends ExcelError {
+  override name = "XlsxParseError";
 
   constructor(
     public readonly context: string,

@@ -6,10 +6,8 @@
  * Platform-agnostic — imported by both Node.js and browser test runners.
  */
 
-import {
-  eventedReadableToAsyncIterableNoDestroy,
-  type EventedReadableLike
-} from "@stream/internal/evented-readable-to-async-iterable";
+import type { EventedReadableLike } from "@stream/core/evented-readable-to-async-iterable";
+import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
 import { describe, it, expect } from "vitest";
 
 /**

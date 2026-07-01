@@ -1,25 +1,28 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Cell, Workbook } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "default-row-height.xlsx");
 
-const [, , filename] = process.argv;
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "blort");
 
-if (!filename) {
-  console.error("Must specify a filename");
-  process.exit(1);
-}
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("blort");
-
-ws.getCell("B2").value = "Hello";
+Cell.setValue(ws, "B2", "Hello");
 ws.properties.defaultRowHeight = 50;
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

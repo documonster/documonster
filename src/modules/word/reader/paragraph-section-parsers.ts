@@ -6,9 +6,21 @@
  * embed section properties); they're co-located here.
  */
 
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import {
+  attrInt,
+  attrVal,
+  boolToggle,
+  findChildNs,
+  findChildrenNs,
+  parseNoteProperties
+} from "@word/reader/parse-utils";
+import {
+  parseBorder,
+  parseRevisionInfo,
+  parseRunProperties,
+  parseShading
+} from "@word/reader/properties-parsers";
 import type {
   Border,
   HeaderFooterRef,
@@ -22,21 +34,8 @@ import type {
   SectionProperties,
   SectionPropertyChange,
   TabStop
-} from "../types";
-import {
-  attrInt,
-  attrVal,
-  boolToggle,
-  findChildNs,
-  findChildrenNs,
-  parseNoteProperties
-} from "./parse-utils";
-import {
-  parseBorder,
-  parseRevisionInfo,
-  parseRunProperties,
-  parseShading
-} from "./properties-parsers";
+} from "@word/types";
+import type { XmlElement } from "@xml/types";
 
 // =============================================================================
 // Paragraph Properties

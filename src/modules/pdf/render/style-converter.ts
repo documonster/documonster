@@ -18,7 +18,8 @@ import type {
   PdfBorderSideData,
   PdfBordersData,
   PdfAlignmentData
-} from "../types";
+} from "@pdf/types";
+import { CELL_THEME_PALETTE, hexToRgb01, applyTintRgb01 } from "@utils/theme-colors";
 
 // =============================================================================
 // Color Conversion
@@ -33,37 +34,7 @@ export function argbToPdfColor(argb: string | undefined): PdfColor | null {
   if (!argb || argb.length < 6) {
     return null;
   }
-
-  let a: number;
-  let r: number;
-  let g: number;
-  let b: number;
-
-  if (argb.length >= 8) {
-    // AARRGGBB format
-    a = parseInt(argb.substring(0, 2), 16);
-    r = parseInt(argb.substring(2, 4), 16);
-    g = parseInt(argb.substring(4, 6), 16);
-    b = parseInt(argb.substring(6, 8), 16);
-  } else {
-    // RRGGBB format
-    a = 255;
-    r = parseInt(argb.substring(0, 2), 16);
-    g = parseInt(argb.substring(2, 4), 16);
-    b = parseInt(argb.substring(4, 6), 16);
-  }
-
-  if (isNaN(r) || isNaN(g) || isNaN(b)) {
-    return null;
-  }
-
-  const alpha = a / 255;
-  return {
-    r: r / 255,
-    g: g / 255,
-    b: b / 255,
-    ...(alpha < 1 ? { a: alpha } : {})
-  };
+  return hexToRgb01(argb);
 }
 
 /**
@@ -102,26 +73,12 @@ export function excelColorToPdf(color: Partial<PdfColorData> | undefined): PdfCo
 }
 
 /**
- * Map theme color indices to PDF colors.
- * These are the default Office theme colors.
+ * Map a cell-colour theme index to a PDF colour using the default Office
+ * palette in SpreadsheetML cell order (0=lt1, 1=dk1, 2=lt2, 3=dk2, …).
  */
 function themeColorToPdf(themeIndex: number): PdfColor | null {
-  // Default Office 2019+ theme color palette (hex values verified)
-  const themeColors: PdfColor[] = [
-    { r: 1, g: 1, b: 1 }, // 0: lt1 — #FFFFFF (white / window background)
-    { r: 0, g: 0, b: 0 }, // 1: dk1 — #000000 (black / window text)
-    { r: 0.906, g: 0.902, b: 0.902 }, // 2: lt2 — #E7E6E6
-    { r: 0.267, g: 0.329, b: 0.416 }, // 3: dk2 — #44546A
-    { r: 0.267, g: 0.447, b: 0.769 }, // 4: accent1 — #4472C4 (blue)
-    { r: 0.929, g: 0.49, b: 0.192 }, // 5: accent2 — #ED7D31 (orange)
-    { r: 0.647, g: 0.647, b: 0.647 }, // 6: accent3 — #A5A5A5 (gray)
-    { r: 1, g: 0.753, b: 0 }, // 7: accent4 — #FFC000 (gold)
-    { r: 0.357, g: 0.608, b: 0.835 }, // 8: accent5 — #5B9BD5 (light blue)
-    { r: 0.439, g: 0.678, b: 0.278 } // 9: accent6 — #70AD47 (green)
-  ];
-
-  if (themeIndex >= 0 && themeIndex < themeColors.length) {
-    return themeColors[themeIndex];
+  if (themeIndex >= 0 && themeIndex < CELL_THEME_PALETTE.length) {
+    return hexToRgb01(CELL_THEME_PALETTE[themeIndex]);
   }
   return null;
 }
@@ -229,17 +186,7 @@ function indexedColorToPdf(index: number): PdfColor | null {
  * @see OOXML §18.8.19 - tint formula
  */
 export function applyTint(color: PdfColor, tint: number): PdfColor {
-  const apply = (c: number) => {
-    if (tint < 0) {
-      return c * (1 + tint);
-    }
-    return c + (1 - c) * tint;
-  };
-  return {
-    r: Math.max(0, Math.min(1, apply(color.r))),
-    g: Math.max(0, Math.min(1, apply(color.g))),
-    b: Math.max(0, Math.min(1, apply(color.b)))
-  };
+  return applyTintRgb01(color, tint);
 }
 
 /**
@@ -327,10 +274,10 @@ export function excelFillToPdfColor(fill: PdfFillData | undefined): PdfColor | n
  * Map border styles to PDF line widths (in points).
  *
  * Values match Excel's actual border weights as used historically by this
- * library (pre-#154). PR #154 doubled every width (0.25 → 0.5, 0.5 → 1,
+ * library. An earlier change doubled every width (0.25 → 0.5, 0.5 → 1,
  * 1 → 2) to make `thin` and `medium` more visually distinct in PDF
- * viewers, but that change made all borders heavier than Excel itself
- * (issue #164). The 2× ratio between thin/medium and the 4× ratio between
+ * viewers, but that change made all borders heavier than Excel itself.
+ * The 2× ratio between thin/medium and the 4× ratio between
  * thin/thick are preserved with the lighter values, so styles remain
  * distinguishable while matching Excel.
  *

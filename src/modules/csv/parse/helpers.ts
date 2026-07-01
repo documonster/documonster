@@ -13,9 +13,10 @@
  * the batch parser (parse.ts) and the streaming parser (csv-stream.ts).
  */
 
-import { CsvError } from "../errors";
-import type { CsvRecordError, OnSkipCallback } from "../types";
-import { deduplicateHeadersWithRenames, type HeaderArray } from "../utils/row";
+import { CsvError } from "@csv/errors";
+import type { CsvRecordError, OnSkipCallback } from "@csv/types";
+import type { HeaderArray } from "@csv/utils/row";
+import { deduplicateHeadersWithRenames } from "@csv/utils/row";
 
 // =============================================================================
 // Types

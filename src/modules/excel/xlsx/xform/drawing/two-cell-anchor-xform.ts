@@ -1,23 +1,29 @@
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
+import type { PositionModel } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
+import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import type { PicModel } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
+import type { ShapeRenderModel } from "@excel/xlsx/xform/drawing/shape-xform";
 import { SpXform } from "@excel/xlsx/xform/drawing/sp-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface TwoCellModel {
   range: {
     editAs?: string;
-    tl: any;
-    br: any;
+    tl: PositionModel;
+    br: PositionModel;
   };
-  picture?: any;
-  shape?: any;
+  picture?: PicModel;
+  shape?: ShapeRenderModel;
   /** Graphic frame model (for charts and other embedded objects) */
-  graphicFrame?: any;
+  graphicFrame?: GraphicFrameModel;
   /** Wrap the anchor in mc:AlternateContent for modern drawing clients */
   alternateContent?: { requires: string };
+  medium?: unknown;
 }
 
 class TwoCellAnchorXform extends BaseCellAnchorXform {
@@ -60,7 +66,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: any, model: TwoCellModel): void {
+  render(xmlStream: XmlSink, model: TwoCellModel): void {
     // ChartEx anchors (sunburst, treemap, funnel, waterfall, boxplot,
     // histogram, region map, …) MUST be wrapped in
     // `<mc:AlternateContent>`. ChartEx is a Microsoft extension that
@@ -186,7 +192,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
    * sizing from the outer `<xdr:from>`/`<xdr:to>` cell range — they
    * do NOT each re-declare the anchor; there is only one anchor.
    */
-  private renderChartExAlternateContent(xmlStream: any, model: TwoCellModel): void {
+  private renderChartExAlternateContent(xmlStream: XmlSink, model: TwoCellModel): void {
     xmlStream.openNode("mc:AlternateContent", {
       "xmlns:mc": "http://schemas.openxmlformats.org/markup-compatibility/2006"
     });
@@ -223,7 +229,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
    * "drawing shape" validation failure even though the outer
    * twoCellAnchor provides sizing.
    */
-  private renderChartExFallbackShape(xmlStream: any, model: TwoCellModel): void {
+  private renderChartExFallbackShape(xmlStream: XmlSink, model: TwoCellModel): void {
     xmlStream.openNode("xdr:sp", { macro: "", textlink: "" });
 
     xmlStream.openNode("xdr:nvSpPr");
@@ -282,7 +288,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     xmlStream.closeNode(); // xdr:sp
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Swallow everything inside `<mc:Fallback>` — it is a legacy
     // placeholder shape the writer regenerates verbatim.
     if (this._inFallback) {
@@ -400,7 +406,10 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  reconcile(model: any, options: any): void {
+  reconcile(
+    model: TwoCellModel,
+    options: Parameters<BaseCellAnchorXform["reconcilePicture"]>[1]
+  ): void {
     if (model.picture) {
       model.medium = this.reconcilePicture(model.picture, options);
     }

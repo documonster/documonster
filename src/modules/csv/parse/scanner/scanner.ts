@@ -11,7 +11,7 @@
  *
  * @example Basic usage
  * ```ts
- * import { createScanner, scanAllRows } from './scanner';
+ * import { createScanner, scanAllRows } from '@csv/parse/scanner/scanner';
  *
  * // One-shot parsing
  * const rows = scanAllRows('a,b,c\n1,2,3\n');
@@ -23,7 +23,7 @@
  *
  * @example Streaming usage
  * ```ts
- * import { scanRowsAsync } from './scanner';
+ * import { scanRowsAsync } from '@csv/parse/scanner/scanner';
  *
  * async function* readChunks() {
  *   yield 'a,b,c\n';
@@ -36,15 +36,20 @@
  * ```
  */
 
-import type { ScannerConfig, FieldScanResult, RowScanResult, Scanner } from "./types";
-import { DEFAULT_SCANNER_CONFIG, createScannerState } from "./types";
+import type {
+  ScannerConfig,
+  FieldScanResult,
+  RowScanResult,
+  Scanner
+} from "@csv/parse/scanner/types";
+import { DEFAULT_SCANNER_CONFIG, createScannerState } from "@csv/parse/scanner/types";
 
 // =============================================================================
 // Re-exports from types
 // =============================================================================
 
-export type { ScannerConfig, RowScanResult, Scanner } from "./types";
-export { DEFAULT_SCANNER_CONFIG } from "./types";
+export type { ScannerConfig, RowScanResult, Scanner } from "@csv/parse/scanner/types";
+export { DEFAULT_SCANNER_CONFIG } from "@csv/parse/scanner/types";
 
 // =============================================================================
 // Helper Functions

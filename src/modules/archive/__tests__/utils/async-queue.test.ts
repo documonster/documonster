@@ -1,4 +1,4 @@
-import { createAsyncQueue } from "@archive/shared/async-queue";
+import { createAsyncQueue } from "@archive/core/async-queue";
 import { describe, expect, it } from "vitest";
 
 describe("async-queue", () => {

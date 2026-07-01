@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface CustomFilterModel {
   val: string;
@@ -15,14 +16,14 @@ class CustomFilterXform extends BaseXform<CustomFilterModel> {
     return "customFilter";
   }
 
-  render(xmlStream: any, model: CustomFilterModel): void {
+  render(xmlStream: XmlSink, model: CustomFilterModel): void {
     xmlStream.leafNode(this.tag, {
       val: model.val,
       operator: model.operator
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
         val: node.attributes.val,

@@ -1,15 +1,15 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ExtLstXform } from "@excel/xlsx/xform/drawing/ext-lst-xform";
 import { HLinkClickXform } from "@excel/xlsx/xform/drawing/hlink-click-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface CNvPrModel {
   index: number;
 }
 
-class CNvPrXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
-  declare public model: any;
+class CNvPrXform extends BaseXform<CNvPrModel> {
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -24,7 +24,7 @@ class CNvPrXform extends BaseXform {
     return "xdr:cNvPr";
   }
 
-  render(xmlStream: any, model: CNvPrModel): void {
+  render(xmlStream: XmlSink, model: CNvPrModel): void {
     xmlStream.openNode(this.tag, {
       id: model.index,
       name: `Picture ${model.index}`
@@ -34,7 +34,7 @@ class CNvPrXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

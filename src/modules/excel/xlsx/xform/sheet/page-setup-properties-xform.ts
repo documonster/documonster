@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface PageSetupPropertiesModel {
   fitToPage: boolean;
@@ -9,7 +10,7 @@ class PageSetupPropertiesXform extends BaseXform {
     return "pageSetUpPr";
   }
 
-  render(xmlStream: any, model?: PageSetupPropertiesModel): boolean {
+  render(xmlStream: XmlSink, model?: PageSetupPropertiesModel): boolean {
     if (model && model.fitToPage) {
       xmlStream.leafNode(this.tag, {
         fitToPage: model.fitToPage ? "1" : undefined
@@ -19,7 +20,7 @@ class PageSetupPropertiesXform extends BaseXform {
     return false;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
         fitToPage: node.attributes.fitToPage === "1"

@@ -14,11 +14,16 @@
  * not full OLE compound document manipulation.
  */
 
+import { ContentType } from "@word/constants";
+import { getFileName } from "@word/core/opc-paths";
+import type {
+  BodyContent,
+  DocxDocument,
+  OleObjectPart,
+  OpaqueDrawing,
+  OpaquePart
+} from "@word/types";
 import { xmlEncodeAttr } from "@xml/encode";
-
-import { ContentType } from "../constants";
-import { getFileName } from "../core/opc-paths";
-import type { BodyContent, DocxDocument, OleObjectPart, OpaqueDrawing, OpaquePart } from "../types";
 
 // =============================================================================
 // Types

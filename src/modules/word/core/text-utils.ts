@@ -14,7 +14,7 @@ import type {
   Hyperlink,
   InsertedRun,
   MovedToRun
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Type Guards — Paragraph Children

@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface WorkbookProtectionModel {
   lockStructure?: boolean;
@@ -17,7 +18,7 @@ class WorkbookProtectionXform extends BaseXform {
     return "workbookProtection";
   }
 
-  render(xmlStream: any, model?: WorkbookProtectionModel): void {
+  render(xmlStream: XmlSink, model?: WorkbookProtectionModel): void {
     if (!model) {
       return;
     }
@@ -51,7 +52,7 @@ class WorkbookProtectionXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag: {
         const a = node.attributes;

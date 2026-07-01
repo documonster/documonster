@@ -20,18 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  bold,
-  italic,
-  hyperlink,
-  toBuffer,
-  cmToEmu,
-  createConversionContext,
-  docxToSemantic
-} from "../index";
+import { Document, Build, Convert, Io, Units } from "../index";
 import type { SemanticBlock, SemanticInline } from "../index";
 
 const outDir = path.resolve(
@@ -58,14 +47,14 @@ Document.addHeading(d, "IR demo", 1);
 Document.addHeading(d, "Section A", 2);
 Document.addParagraphElement(
   d,
-  paragraph([
-    text("A paragraph with "),
-    bold("bold"),
-    text(", "),
-    italic("italic"),
-    text(", and "),
-    hyperlink("a link", { url: "https://example.com" }),
-    text(".")
+  Build.paragraph([
+    Build.text("A paragraph with "),
+    Build.bold("bold"),
+    Build.text(", "),
+    Build.italic("italic"),
+    Build.text(", and "),
+    Build.hyperlink("a link", { url: "https://example.com" }),
+    Build.text(".")
   ])
 );
 Document.addBulletList(d, ["First", "Second", "Third"]);
@@ -79,12 +68,12 @@ Document.addTable(
   ],
   { headerRow: true, borders: true }
 );
-Document.addImage(d, tinyPng, "png", cmToEmu(2), cmToEmu(2), { altText: "tiny dot" });
+Document.addImage(d, tinyPng, "png", Units.cmToEmu(2), Units.cmToEmu(2), { altText: "tiny dot" });
 Document.addFootnote(d, "Footnote at the end of section A.");
 Document.addParagraph(d, "End of section A.");
 
 const docModel = Document.build(d);
-fs.writeFileSync(path.join(outDir, "00-source.docx"), await toBuffer(docModel));
+fs.writeFileSync(path.join(outDir, "00-source.docx"), await Io.toBuffer(docModel));
 
 // ---------------------------------------------------------------------------
 // 1. createConversionContext + docxToSemantic
@@ -92,11 +81,11 @@ fs.writeFileSync(path.join(outDir, "00-source.docx"), await toBuffer(docModel));
 //    { document, context }. createConversionContext is the building block
 //    used by custom converters that drive the IR pipeline manually.
 // ---------------------------------------------------------------------------
-const standalone = createConversionContext();
+const standalone = Convert.createConversionContext();
 standalone.addWarning("info", "demo", "createConversionContext usable on its own", "/example");
 console.log(`  standalone context: ${standalone.warnings.length} warning(s) collected`);
 
-const result = docxToSemantic(docModel);
+const result = Convert.docxToSemantic(docModel);
 const ir = result.document;
 console.log(
   `  IR: ${ir.blocks.length} blocks, ${ir.assets.length} asset(s), ${ir.footnotes.length} footnote(s)`
@@ -212,5 +201,5 @@ console.log(`  block-type counts: ${JSON.stringify(summary)}`);
 // ---------------------------------------------------------------------------
 // 4. Edge: empty doc still produces a SemanticDocument
 // ---------------------------------------------------------------------------
-const empty = docxToSemantic(Document.build(Document.create()));
+const empty = Convert.docxToSemantic(Document.build(Document.create()));
 console.log(`  empty doc → ${empty.document.blocks.length} block(s)`);

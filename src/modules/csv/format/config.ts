@@ -5,10 +5,10 @@
  * Creates regex patterns, quote lookup functions, and format settings.
  */
 
-import { CsvError } from "../errors";
-import type { CsvFormatOptions, TypeTransformMap } from "../types";
-import { escapeRegex, normalizeQuoteOption, normalizeEscapeOption } from "../utils/detect";
-import type { DecimalSeparator } from "../utils/number";
+import { CsvError } from "@csv/errors";
+import type { CsvFormatOptions, TypeTransformMap } from "@csv/types";
+import { escapeRegex, normalizeQuoteOption, normalizeEscapeOption } from "@csv/utils/detect";
+import type { DecimalSeparator } from "@csv/utils/number";
 
 /**
  * Escape a string for use inside a regex character class [...].

@@ -1,3 +1,8 @@
+import { cellFormula, cellResult } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getCell } from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+
 /**
  * Example: Database Formulas
  *
@@ -14,20 +19,15 @@
  * - field: column header (string) or 1-based column index
  * - criteria: range including headers and one or more condition rows
  */
-import { Workbook } from "../../../index";
-import { installFormulaEngine } from "../index";
-
-installFormulaEngine();
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("DB");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "DB");
 
 // Database: A1:D7  (header row + 6 data rows)
 // Region  Product  Sales  Units
-ws.getCell("A1").value = "Region";
-ws.getCell("B1").value = "Product";
-ws.getCell("C1").value = "Sales";
-ws.getCell("D1").value = "Units";
+Cell.setValue(ws, "A1", "Region");
+Cell.setValue(ws, "B1", "Product");
+Cell.setValue(ws, "C1", "Sales");
+Cell.setValue(ws, "D1", "Units");
 const data: [string, string, number, number][] = [
   ["East", "Widget", 120, 10],
   ["West", "Gadget", 95, 8],
@@ -37,38 +37,38 @@ const data: [string, string, number, number][] = [
   ["East", "Gadget", 75, 6]
 ];
 data.forEach((row, i) => {
-  ws.getCell(i + 2, 1).value = row[0];
-  ws.getCell(i + 2, 2).value = row[1];
-  ws.getCell(i + 2, 3).value = row[2];
-  ws.getCell(i + 2, 4).value = row[3];
+  Cell.setValue(ws, i + 2, 1, row[0]);
+  Cell.setValue(ws, i + 2, 2, row[1]);
+  Cell.setValue(ws, i + 2, 3, row[2]);
+  Cell.setValue(ws, i + 2, 4, row[3]);
 });
 
 // Criteria — East + Gadget
-ws.getCell("F1").value = "Region";
-ws.getCell("G1").value = "Product";
-ws.getCell("F2").value = "East";
-ws.getCell("G2").value = "Gadget";
+Cell.setValue(ws, "F1", "Region");
+Cell.setValue(ws, "G1", "Product");
+Cell.setValue(ws, "F2", "East");
+Cell.setValue(ws, "G2", "Gadget");
 
 // DSUM — total sales of East-region Gadgets
-ws.getCell("I1").value = { formula: 'DSUM(A1:D7, "Sales", F1:G2)' }; // 215
+Cell.setValue(ws, "I1", { formula: 'DSUM(A1:D7, "Sales", F1:G2)' }); // 215
 // DCOUNT — matching rows
-ws.getCell("I2").value = { formula: 'DCOUNT(A1:D7, "Sales", F1:G2)' }; // 2
+Cell.setValue(ws, "I2", { formula: 'DCOUNT(A1:D7, "Sales", F1:G2)' }); // 2
 // DAVERAGE
-ws.getCell("I3").value = { formula: 'DAVERAGE(A1:D7, "Sales", F1:G2)' }; // 107.5
+Cell.setValue(ws, "I3", { formula: 'DAVERAGE(A1:D7, "Sales", F1:G2)' }); // 107.5
 // DMAX / DMIN
-ws.getCell("I4").value = { formula: 'DMAX(A1:D7, "Sales", F1:G2)' }; // 140
-ws.getCell("I5").value = { formula: 'DMIN(A1:D7, "Sales", F1:G2)' }; // 75
+Cell.setValue(ws, "I4", { formula: 'DMAX(A1:D7, "Sales", F1:G2)' }); // 140
+Cell.setValue(ws, "I5", { formula: 'DMIN(A1:D7, "Sales", F1:G2)' }); // 75
 
 // OR-style criteria — East OR West
-ws.getCell("F5").value = "Region";
-ws.getCell("F6").value = "East";
-ws.getCell("F7").value = "West";
-ws.getCell("I7").value = { formula: 'DSUM(A1:D7, "Sales", F5:F7)' };
-ws.getCell("I8").value = { formula: 'DCOUNTA(A1:D7, "Product", F5:F7)' };
+Cell.setValue(ws, "F5", "Region");
+Cell.setValue(ws, "F6", "East");
+Cell.setValue(ws, "F7", "West");
+Cell.setValue(ws, "I7", { formula: 'DSUM(A1:D7, "Sales", F5:F7)' });
+Cell.setValue(ws, "I8", { formula: 'DCOUNTA(A1:D7, "Product", F5:F7)' });
 
-wb.calculateFormulas();
+calculateFormulas(wb);
 
 for (const addr of ["I1", "I2", "I3", "I4", "I5", "I7", "I8"]) {
-  const c = ws.getCell(addr);
-  console.log(`${addr}  ${String(c.formula).padEnd(40)}  = ${JSON.stringify(c.result)}`);
+  const c = getCell(ws, addr);
+  console.log(`${addr}  ${String(cellFormula(c)).padEnd(40)}  = ${JSON.stringify(cellResult(c))}`);
 }

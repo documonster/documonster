@@ -1,3 +1,4 @@
+import { ArchiveError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
 
 export const EXTENDED_TIMESTAMP_ID = 0x5455;
@@ -32,7 +33,7 @@ function unixSecondsFromDate(date: Date): number {
 
 function fileTimeFromDate(date: Date): bigint {
   if (typeof BigInt !== "function") {
-    throw new Error("NTFS timestamps require BigInt support");
+    throw new ArchiveError("NTFS timestamps require BigInt support");
   }
   // Windows FILETIME: 100-nanosecond intervals since 1601-01-01 UTC.
   // JS Date is milliseconds since 1970-01-01 UTC.
@@ -109,7 +110,7 @@ function buildExtendedTimestampExtraField(modTime: Date, extra?: ZipExtraTimesta
 
 function buildNtfsTimestampExtraField(modTime: Date, extra?: ZipExtraTimestamps): Uint8Array {
   if (typeof BigInt !== "function") {
-    throw new Error("NTFS timestamps require BigInt support");
+    throw new ArchiveError("NTFS timestamps require BigInt support");
   }
   // NTFS extra field (0x000a)
   // Data:

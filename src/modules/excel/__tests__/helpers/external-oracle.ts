@@ -76,7 +76,7 @@ export async function runExternalOracle(
       outputs: []
     };
   }
-  const dir = await mkdtemp(join(tmpdir(), "excelts-oracle-"));
+  const dir = await mkdtemp(join(tmpdir(), "documonster-oracle-"));
   const outDir = join(dir, "out");
   try {
     await mkdir(outDir);
@@ -192,7 +192,7 @@ export async function runLibreOfficeOpenValidationAuto(
   inputName: string
 ): Promise<ExternalOracleResult> {
   return runOfficeOpenValidation({
-    envFlag: "EXCELTS_LIBREOFFICE_OPEN_VALIDATION",
+    envFlag: "DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION",
     executableEnv: "LIBREOFFICE_BIN",
     candidates: [
       "soffice",

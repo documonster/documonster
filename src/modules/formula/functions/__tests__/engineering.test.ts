@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import type { NumberValue, RuntimeValue, StringValue } from "../../runtime/values";
 import {
   BLANK,
   ERRORS,
@@ -20,10 +21,7 @@ import {
   rvArray,
   rvBoolean,
   rvNumber,
-  rvString,
-  type NumberValue,
-  type RuntimeValue,
-  type StringValue
+  rvString
 } from "../../runtime/values";
 import {
   fnBIN2DEC,

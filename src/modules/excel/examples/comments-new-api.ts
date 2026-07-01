@@ -1,13 +1,21 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Cell, Workbook } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "comments-new-api.xlsx");
 
-const [, , filename] = process.argv;
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
-ws.getCell("B2").value = 5;
-ws.getCell("B2").note = {
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
+Cell.setValue(ws, "B2", 5);
+Cell.setNote(ws, "B2", {
   texts: [
     {
       font: {
@@ -89,16 +97,16 @@ ws.getCell("B2").note = {
       text: "format"
     }
   ]
-};
+});
 
-ws.getCell("D2").value = "Zoo";
-ws.getCell("D2").note = "Plain Text Comment";
+Cell.setValue(ws, "D2", "Zoo");
+Cell.setNote(ws, "D2", "Plain Text Comment");
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

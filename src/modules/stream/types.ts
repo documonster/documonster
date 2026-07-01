@@ -148,7 +148,7 @@ export type PipelineStreamLike =
 /**
  * Common readable stream interface
  */
-export interface IReadable<T = any> extends ReadableLike, AsyncIterable<T> {
+export interface IReadable<T = unknown> extends ReadableLike, AsyncIterable<T> {
   read(size?: number): T | null;
   destroy(error?: Error): any;
   pipe(destination: any): any;
@@ -168,7 +168,7 @@ export interface IReadable<T = any> extends ReadableLike, AsyncIterable<T> {
 /**
  * Common writable stream interface
  */
-export interface IWritable<T = any> extends WritableLike {
+export interface IWritable<T = unknown> extends WritableLike {
   write(chunk: T, callback?: WriteCallback): boolean;
   write(chunk: T, encoding?: string, callback?: WriteCallback): boolean;
   end(callback?: () => void): this;
@@ -186,7 +186,7 @@ export interface IWritable<T = any> extends WritableLike {
 /**
  * Common transform stream interface
  */
-export interface ITransform<TInput = any, TOutput = any>
+export interface ITransform<TInput = unknown, TOutput = unknown>
   extends IReadable<TOutput>, IWritable<TInput> {
   _transform(chunk: TInput, encoding: string, callback: TransformCallback<TOutput>): void;
   _flush?(callback: FlushCallback<TOutput>): void;
@@ -195,7 +195,8 @@ export interface ITransform<TInput = any, TOutput = any>
 /**
  * Common duplex stream interface
  */
-export interface IDuplex<TRead = any, TWrite = any> extends IReadable<TRead>, IWritable<TWrite> {}
+export interface IDuplex<TRead = unknown, TWrite = unknown>
+  extends IReadable<TRead>, IWritable<TWrite> {}
 
 // =============================================================================
 // Pull Stream Interface
@@ -280,7 +281,7 @@ export type IPassThrough<T = Uint8Array> = ITransform<T, T>;
 /**
  * Collector interface - collects all chunks
  */
-export interface ICollector<T = any> extends IWritable<T> {
+export interface ICollector<T = unknown> extends IWritable<T> {
   readonly chunks: T[];
   readonly isFinished?: boolean;
 }

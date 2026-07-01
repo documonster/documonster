@@ -1,3 +1,5 @@
+import { ArchiveError } from "@archive/core/errors";
+
 export type ZipPathMode = "legacy" | "posix" | "safe";
 
 export interface ZipPathOptions {
@@ -74,7 +76,7 @@ export function normalizeZipPath(pathName: string, options: ZipPathOptions = {})
 
   const stripDrive = options.stripDrive ?? true;
   if (mode === "safe" && hadWindowsDrive && !stripDrive) {
-    throw new Error(`Unsafe ZIP path (drive): ${pathName}`);
+    throw new ArchiveError(`Unsafe ZIP path (drive): ${pathName}`);
   }
   if (stripDrive) {
     p = stripWindowsDrive(p);
@@ -86,10 +88,10 @@ export function normalizeZipPath(pathName: string, options: ZipPathOptions = {})
 
   if (mode === "safe") {
     if (hadLeadingSlash) {
-      throw new Error(`Unsafe ZIP path (absolute): ${pathName}`);
+      throw new ArchiveError(`Unsafe ZIP path (absolute): ${pathName}`);
     }
     if (p === ".." || p.startsWith("../")) {
-      throw new Error(`Unsafe ZIP path (traversal): ${pathName}`);
+      throw new ArchiveError(`Unsafe ZIP path (traversal): ${pathName}`);
     }
   }
 

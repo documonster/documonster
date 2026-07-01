@@ -4,7 +4,8 @@
  * All DOCX-related errors extend DocxError.
  */
 
-import { BaseError, type BaseErrorOptions } from "@utils/errors";
+import type { BaseErrorOptions } from "@utils/errors";
+import { BaseError } from "@utils/errors";
 
 /**
  * Base class for all DOCX-related errors.
@@ -69,7 +70,7 @@ export class DocxUnsupportedFeatureError extends DocxError {
 /**
  * Error thrown when a DOCX file is encrypted (CFB format) and no password
  * was provided. Pass `{ password }` in the second argument of `readDocx()`
- * to decrypt automatically, or call `decryptDocx()` from "excelts/word/crypto"
+ * to decrypt automatically, or call `decryptDocx()` from "documonster/word/crypto"
  * directly if you need lower-level access to the decrypted ZIP bytes.
  */
 export class DocxEncryptedError extends DocxError {
@@ -78,7 +79,7 @@ export class DocxEncryptedError extends DocxError {
   constructor() {
     super(
       "The document is encrypted (password-protected). " +
-        'Pass { password } to readDocx(), or use decryptDocx() from "excelts/word/crypto" ' +
+        'Pass { password } to readDocx(), or use decryptDocx() from "documonster/word/crypto" ' +
         "for lower-level decryption."
     );
   }
@@ -140,5 +141,38 @@ export class DocxRawXmlPolicyError extends DocxWriteError {
         "WordSecurityPolicy.rawXmlPolicy to 'preserve' or 'strip'."
     );
     this.site = site;
+  }
+}
+
+/** Error thrown when template processing fails. */
+export class TemplateError extends DocxError {
+  override readonly name = "TemplateError";
+  /** The placeholder that caused the error. */
+  readonly placeholder: string;
+  /** Location hint (e.g. "body paragraph 3", "header"). */
+  readonly location: string;
+  /** The tag name/expression that caused the error. */
+  readonly tagName?: string;
+  /** The paragraph index within the current block where the error occurred. */
+  readonly paragraphIndex?: number;
+  /** The section path (e.g. "body", "header:default", "footer:first"). */
+  readonly sectionPath?: string;
+
+  constructor(
+    message: string,
+    placeholder: string,
+    location: string,
+    options?: BaseErrorOptions & {
+      tagName?: string;
+      paragraphIndex?: number;
+      sectionPath?: string;
+    }
+  ) {
+    super(message, options);
+    this.placeholder = placeholder;
+    this.location = location;
+    this.tagName = options?.tagName;
+    this.paragraphIndex = options?.paragraphIndex;
+    this.sectionPath = options?.sectionPath;
   }
 }

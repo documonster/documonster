@@ -7,16 +7,16 @@
  *
  * @example
  * ```ts
- * import { diffDocuments } from "excelts/word";
+ * import { diffDocuments } from "documonster/word";
  *
  * const changes = diffDocuments(oldDoc, newDoc);
  * console.log(changes.filter(c => c.type === "modified"));
  * ```
  */
 
-import { extractParagraphText } from "../core/text-utils";
-import { walkBlocks } from "../core/walker";
-import type { DocxDocument, BodyContent } from "../types";
+import { extractParagraphText } from "@word/core/text-utils";
+import { walkBlocks } from "@word/core/walker";
+import type { DocxDocument, BodyContent } from "@word/types";
 
 /** Type of change detected between two documents. */
 export type DiffChangeType = "added" | "deleted" | "modified" | "unchanged";

@@ -6,7 +6,7 @@
  *
  * @example Basic usage:
  * ```typescript
- * import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+ * import { PdfDocumentBuilder } from "documonster/pdf";
  *
  * const doc = new PdfDocumentBuilder();
  * const page = doc.addPage({ width: 595, height: 842 }); // A4
@@ -19,17 +19,18 @@
  * ```
  */
 
-import { initEncryption } from "../core/encryption";
-import { PdfDict, pdfRef, pdfString, pdfNumber } from "../core/pdf-object";
-import { PdfContentStream } from "../core/pdf-stream";
-import { PdfWriter } from "../core/pdf-writer";
-import { writePdfAMetadata, writePdfAOutputIntent } from "../core/pdfa";
-import { FontManager } from "../font/font-manager";
-import { iterateSystemFontCandidates } from "../font/system-fonts";
-import { parseTtf } from "../font/ttf-parser";
-import { emitTextBlock, alphaGsName } from "../render/page-renderer";
-import type { PdfColor, PdfExportOptions } from "../types";
-import { writeImageXObject } from "./image-utils";
+import { writeImageXObject } from "@pdf/builder/image-utils";
+import { initEncryption } from "@pdf/core/encryption";
+import { PdfDict, pdfRef, pdfString, pdfNumber } from "@pdf/core/pdf-object";
+import { PdfContentStream } from "@pdf/core/pdf-stream";
+import { PdfWriter } from "@pdf/core/pdf-writer";
+import { writePdfAMetadata, writePdfAOutputIntent } from "@pdf/core/pdfa";
+import { FontManager } from "@pdf/font/font-manager";
+import { iterateSystemFontCandidates } from "@pdf/font/system-fonts";
+import { parseTtf } from "@pdf/font/ttf-parser";
+import { emitTextBlock, alphaGsName } from "@pdf/render/page-renderer";
+import type { PdfColor, PdfExportOptions } from "@pdf/types";
+import { hexToRgb01 } from "@utils/theme-colors";
 
 // =============================================================================
 // Types
@@ -843,7 +844,7 @@ export class PdfPageBuilder {
   /**
    * Draw a simple SVG document onto this page.
    *
-   * Supports the SVG primitives emitted by ExcelTS chart rendering:
+   * Supports the SVG primitives emitted by Documonster chart rendering:
    * `rect`, `line`, `circle`, `polyline`, `polygon`, `path`, and `text`.
    */
   drawSvg(options: DrawSvgOptions): this {
@@ -1400,7 +1401,7 @@ export class PdfDocumentBuilder {
     }
 
     // Write font resources
-    const fontObjectMap = this._fontManager.writeFontResources(writer);
+    const fontObjectMap = await this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
 
     // Build each page
@@ -1642,7 +1643,8 @@ export class PdfDocumentBuilder {
     // 2. Build the PDF bytes
     // 3. Call signPdf() to fill in the real signature
     if (this._signatureOptions) {
-      const { buildSignatureDictPlaceholder, signPdf } = await import("../core/digital-signature");
+      const { buildSignatureDictPlaceholder, signPdf } =
+        await import("@pdf/core/digital-signature");
 
       const { dictString } = buildSignatureDictPlaceholder({
         name: this._signatureOptions.name,
@@ -2481,21 +2483,7 @@ function svgColorToPdf(value: string): PdfColor | undefined {
     return color;
   }
   const hex = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
-  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
-    return {
-      r: parseInt(hex[0] + hex[0], 16) / 255,
-      g: parseInt(hex[1] + hex[1], 16) / 255,
-      b: parseInt(hex[2] + hex[2], 16) / 255
-    };
-  }
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return undefined;
-  }
-  return {
-    r: parseInt(hex.slice(0, 2), 16) / 255,
-    g: parseInt(hex.slice(2, 4), 16) / 255,
-    b: parseInt(hex.slice(4, 6), 16) / 255
-  };
+  return hexToRgb01(hex) ?? undefined;
 }
 
 /**

@@ -3,8 +3,9 @@ import { BlipFillXform } from "@excel/xlsx/xform/drawing/blip-fill-xform";
 import { NvPicPrXform } from "@excel/xlsx/xform/drawing/nv-pic-pr-xform";
 import { spPrJSON } from "@excel/xlsx/xform/drawing/sp-pr";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface PicModel {
+export interface PicModel {
   index?: number;
   rId?: string;
   /** Alpha modulation for transparency (OOXML percentage, e.g. 15000 = 15%). */
@@ -13,13 +14,12 @@ interface PicModel {
   external?: boolean;
   /** Relationship id of an SVG companion (asvg:svgBlip extension). */
   svgRId?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
-class PicXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
-  declare public model: any;
+class PicXform extends BaseXform<PicModel> {
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -39,7 +39,7 @@ class PicXform extends BaseXform {
     model.index = options.index + 1;
   }
 
-  render(xmlStream: any, model: PicModel): void {
+  render(xmlStream: XmlSink, model: PicModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:nvPicPr"].render(xmlStream, model);
@@ -55,7 +55,7 @@ class PicXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

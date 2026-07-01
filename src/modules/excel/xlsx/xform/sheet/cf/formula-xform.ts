@@ -1,12 +1,13 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 
-class FormulaXform extends BaseXform {
+class FormulaXform extends BaseXform<string> {
   get tag(): string {
     return "formula";
   }
 
-  render(xmlStream: any, model: any): void {
-    xmlStream.leafNode(this.tag, null, model);
+  render(xmlStream: XmlSink, model?: string): void {
+    xmlStream.leafNode(this.tag, undefined, model);
   }
 
   parseOpen(): void {

@@ -6,7 +6,7 @@
  */
 
 // Re-export error helper for browser use
-export { toError } from "@archive/shared/errors";
+export { toError } from "@archive/core/errors";
 
 export interface StreamCompressOptions {
   level?: number;
@@ -50,20 +50,23 @@ export type StreamCallback = (err?: Error | null) => void;
  * support this subset.
  */
 export interface StreamingCodec {
+  // Lifecycle/flow-control events. Listeners for these are all nullary; the
+  // typed overloads below cover every event the codec contract exposes, so no
+  // permissive catch-all (`any[]`) fallback is needed.
   on(event: "data", listener: (chunk: Uint8Array) => void): this;
   on(event: "end", listener: () => void): this;
   on(event: "error", listener: (err: Error) => void): this;
-  on(event: string, listener: (...args: any[]) => void): this;
+  on(event: "drain" | "finish" | "close", listener: () => void): this;
 
   once(event: "data", listener: (chunk: Uint8Array) => void): this;
   once(event: "end", listener: () => void): this;
   once(event: "error", listener: (err: Error) => void): this;
-  once(event: string, listener: (...args: any[]) => void): this;
+  once(event: "drain" | "finish" | "close", listener: () => void): this;
 
   off(event: "data", listener: (chunk: Uint8Array) => void): this;
   off(event: "end", listener: () => void): this;
   off(event: "error", listener: (err: Error) => void): this;
-  off(event: string, listener: (...args: any[]) => void): this;
+  off(event: "drain" | "finish" | "close", listener: () => void): this;
 
   write(chunk: Uint8Array, callback?: StreamCallback): boolean;
   end(callback?: StreamCallback): unknown;

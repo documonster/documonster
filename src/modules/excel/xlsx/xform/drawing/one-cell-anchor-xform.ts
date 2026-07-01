@@ -1,21 +1,28 @@
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
+import type { PositionModel } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
+import type { ExtModel } from "@excel/xlsx/xform/drawing/ext-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
+import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import type { PicModel } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
+import type { ShapeRenderModel } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { XmlSink } from "@xml/types";
 
 interface OneCellModel {
   range: {
     editAs?: string;
-    tl: any;
-    ext: any;
+    tl: PositionModel;
+    ext: ExtModel;
   };
-  picture?: any;
-  shape?: any;
+  picture?: PicModel;
+  shape?: ShapeRenderModel;
   /** Graphic frame model (for charts and other embedded objects) */
-  graphicFrame?: any;
+  graphicFrame?: GraphicFrameModel;
+  medium?: unknown;
 }
 
 class OneCellAnchorXform extends BaseCellAnchorXform {
@@ -44,7 +51,7 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: any, model: OneCellModel): void {
+  render(xmlStream: XmlSink, model: OneCellModel): void {
     xmlStream.openNode(this.tag, { editAs: model.range.editAs ?? "oneCell" });
 
     this.map["xdr:from"].render(xmlStream, model.range.tl);
@@ -81,7 +88,10 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  reconcile(model: any, options: any): void {
+  reconcile(
+    model: OneCellModel,
+    options: Parameters<BaseCellAnchorXform["reconcilePicture"]>[1]
+  ): void {
     if (model.picture) {
       model.medium = this.reconcilePicture(model.picture, options);
     }

@@ -1,8 +1,11 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class HLinkClickXform extends BaseXform {
-  declare public model: any;
+interface HLinkClickModel {
+  hyperlinks?: { rId?: string; tooltip?: string };
+}
 
+class HLinkClickXform extends BaseXform<HLinkClickModel> {
   constructor() {
     super();
     this.model = {};
@@ -12,8 +15,8 @@ class HLinkClickXform extends BaseXform {
     return "a:hlinkClick";
   }
 
-  render(xmlStream: any, model: any): void {
-    if (!(model.hyperlinks && model.hyperlinks.rId)) {
+  render(xmlStream: XmlSink, model?: HLinkClickModel): void {
+    if (!(model?.hyperlinks && model.hyperlinks.rId)) {
       return;
     }
     xmlStream.leafNode(this.tag, {
@@ -23,7 +26,7 @@ class HLinkClickXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.model = {

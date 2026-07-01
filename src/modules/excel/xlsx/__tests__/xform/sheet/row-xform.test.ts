@@ -1,4 +1,4 @@
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { RowXform } from "@excel/xlsx/xform/sheet/row-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";

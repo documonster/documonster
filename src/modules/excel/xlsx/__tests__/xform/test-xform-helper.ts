@@ -1,8 +1,43 @@
-import { cloneDeep } from "@excel/utils/under-dash";
 import { CompyXform } from "@excel/xlsx/__tests__/xform/compy-xform";
 import { BooleanXform } from "@excel/xlsx/xform/simple/boolean-xform";
 import { PassThrough } from "@stream";
 import { parseSax } from "@xml/sax";
+
+/**
+ * Local test helper: deep clone (replaces the retired under-dash `cloneDeep`).
+ * `preserveUndefined=false` drops `undefined` props/holes — used to normalise
+ * models before structural comparison.
+ */
+function cloneDeep(obj: unknown, preserveUndefined = true): unknown {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+  if (obj instanceof Date) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    const clone: unknown[] = new Array(obj.length);
+    for (let i = 0; i < obj.length; i++) {
+      const value = obj[i];
+      if (value !== undefined) {
+        clone[i] = cloneDeep(value, preserveUndefined);
+      } else if (preserveUndefined) {
+        clone[i] = undefined;
+      }
+    }
+    return clone;
+  }
+  const clone: Record<string, unknown> = {};
+  for (const key of Object.keys(obj)) {
+    const value = (obj as Record<string, unknown>)[key];
+    if (value !== undefined) {
+      clone[key] = cloneDeep(value, preserveUndefined);
+    } else if (preserveUndefined) {
+      clone[key] = undefined;
+    }
+  }
+  return clone;
+}
 import { XmlWriter } from "@xml/writer";
 import { expect } from "vitest";
 

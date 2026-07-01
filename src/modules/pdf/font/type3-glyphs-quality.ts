@@ -14,7 +14,7 @@
  * earlier, lower-quality definitions for the same code point.
  */
 
-import type { GlyphDef, GlyphPen } from "./type3-glyphs";
+import type { GlyphDef, GlyphPen } from "@pdf/font/type3-glyphs";
 
 const W = 600;
 
@@ -766,7 +766,7 @@ export const REFINED_SYMBOLS: Record<number, GlyphDef> = {
       p.stroke();
     }
   },
-  // ⧇ SQUARED SMALL CIRCLE — refined (the key character from issue #150!)
+  // ⧇ SQUARED SMALL CIRCLE — refined
   [0x29c7]: {
     width: W,
     draw: (p: GlyphPen) => {

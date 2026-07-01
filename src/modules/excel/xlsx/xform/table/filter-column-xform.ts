@@ -1,18 +1,21 @@
-import { XmlParseError } from "@excel/errors";
+import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { CustomFilterXform } from "@excel/xlsx/xform/table/custom-filter-xform";
 import { FilterXform } from "@excel/xlsx/xform/table/filter-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface FilterColumnModel {
+export interface FilterColumnModel {
   colId?: string;
-  filterButton: boolean;
-  customFilters?: any[];
+  filterButton?: boolean;
+  customFilters?: unknown[];
+  filters?: unknown;
+  dynamicFilter?: unknown;
 }
 
 class FilterColumnXform extends BaseXform<FilterColumnModel> {
   declare public map: { [key: string]: ListXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -42,7 +45,7 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
     model.colId = options.index.toString();
   }
 
-  render(xmlStream: any, model: FilterColumnModel): void {
+  render(xmlStream: XmlSink, model: FilterColumnModel): void {
     if (model.customFilters) {
       xmlStream.openNode(this.tag, {
         colId: model.colId,
@@ -60,7 +63,7 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -81,7 +84,7 @@ class FilterColumnXform extends BaseXform<FilterColumnModel> {
           this.parseOpen(node);
           return true;
         }
-        throw new XmlParseError(
+        throw new XlsxParseError(
           "filterColumn",
           `Unexpected xml node in parseOpen: ${JSON.stringify(node)}`
         );

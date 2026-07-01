@@ -5,10 +5,9 @@
  * Used by the run content parser when encountering form-field-bearing fields.
  */
 
+import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
+import type { FormField } from "@word/types";
 import type { XmlElement } from "@xml/types";
-
-import type { FormField } from "../types";
-import { attrInt, attrVal, findChildNs, findChildrenNs } from "./parse-utils";
 
 /**
  * Parse a `w:ffData` element into a `FormField`.

@@ -18,28 +18,37 @@
  * parseCsvAsync buffers the entire input; parseCsvRows streams progressively.
  */
 
-import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/utils.base";
-import { toError } from "@utils/errors";
-
-import { getUtf8ByteLength } from "../constants";
-import { CsvError } from "../errors";
-import { CsvParserStream } from "../stream/parser";
+import { getUtf8ByteLength } from "@csv/constants";
+import { CsvError } from "@csv/errors";
+import { parseCsv } from "@csv/parse/sync";
+import { CsvParserStream } from "@csv/stream/parser";
 import type {
   CsvParseOptions,
   CsvParseArrayOptions,
   CsvParseObjectOptions,
   CsvParseResult,
   RecordWithInfo
-} from "../types";
-import { parseCsv } from "./sync";
+} from "@csv/types";
+import { isReadableStreamLike, readableStreamToAsyncIterable } from "@stream/utils.base";
+import { toError } from "@utils/errors";
 
 type ReadableStreamLike = { getReader: () => any };
 type AsyncInput = AsyncIterable<string | Uint8Array>;
 type AnyAsyncInput = AsyncInput | ReadableStreamLike;
 type CsvAsyncInput = string | AnyAsyncInput;
 
+/** A single row produced by the streaming parser (array, object, or with-info variants). */
+type ParsedRow =
+  | Record<string, unknown>
+  | string[]
+  | RecordWithInfo<Record<string, unknown>>
+  | RecordWithInfo<string[]>;
+
 function isAsyncIterable(value: unknown): value is AsyncInput {
-  return Boolean(value && typeof (value as any)[Symbol.asyncIterator] === "function");
+  return Boolean(
+    value &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
+  );
 }
 
 function normalizeAsyncInput(input: unknown): AsyncInput {
@@ -221,14 +230,7 @@ export async function parseCsvAsync(
 export async function* parseCsvRows(
   input: string | AnyAsyncInput,
   options: CsvParseOptions = {}
-): AsyncGenerator<
-  | Record<string, unknown>
-  | string[]
-  | RecordWithInfo<Record<string, unknown>>
-  | RecordWithInfo<string[]>,
-  void,
-  unknown
-> {
+): AsyncGenerator<ParsedRow, void, unknown> {
   // objname produces a map output in the sync parser, which cannot be produced
   // in a true streaming fashion. Fall back to buffered parsing.
   if (options.objname) {
@@ -256,7 +258,7 @@ export async function* parseCsvRows(
       return;
     }
 
-    const rowsValue = (result as CsvParseResult<any>).rows;
+    const rowsValue = (result as CsvParseResult<Record<string, unknown>>).rows;
     if (Array.isArray(rowsValue)) {
       for (const row of rowsValue) {
         yield row;
@@ -266,7 +268,7 @@ export async function* parseCsvRows(
 
     if (rowsValue && typeof rowsValue === "object") {
       for (const row of Object.values(rowsValue)) {
-        yield row as any;
+        yield row as ParsedRow;
       }
     }
     return;
@@ -275,7 +277,7 @@ export async function* parseCsvRows(
   const parser = new CsvParserStream(options);
 
   type StreamEvent =
-    | { type: "data"; value: any }
+    | { type: "data"; value: ParsedRow }
     | { type: "end" }
     | { type: "error"; error: unknown };
 
@@ -295,7 +297,7 @@ export async function* parseCsvRows(
     queue.push(ev);
   };
 
-  const onData = (value: any): void => {
+  const onData = (value: ParsedRow): void => {
     pushEvent({ type: "data", value });
   };
   const onEnd = (): void => {
@@ -324,7 +326,7 @@ export async function* parseCsvRows(
         if (aborted) {
           break;
         }
-        const canContinue = parser.write(chunk as any);
+        const canContinue = typeof chunk === "string" ? parser.write(chunk) : parser.write(chunk);
         if (!canContinue) {
           await new Promise<void>(resolve => parser.once("drain", resolve));
         }

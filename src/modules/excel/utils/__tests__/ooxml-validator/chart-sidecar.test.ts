@@ -7,9 +7,8 @@
  * chart stubs are lenient and must NOT be flagged.
  */
 
-import { installChartSupport } from "@excel/chart/install";
 import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { baseParts, buildPackage, contentTypesWith, relsWith } from "./fixtures";
 
@@ -101,10 +100,6 @@ const POPULATED_COLORS = `<?xml version="1.0" encoding="UTF-8"?>
   <a:schemeClr val="accent1"/><a:schemeClr val="accent2"/><a:schemeClr val="accent3"/>
   <a:schemeClr val="accent4"/><a:schemeClr val="accent5"/><a:schemeClr val="accent6"/>
 </cs:colorStyle>`;
-
-beforeAll(() => {
-  installChartSupport();
-});
 
 describe("ooxml-validator / chartEx sidecar stub detection", () => {
   it("flags stub <cs:chartStyle id='395'/> when referenced from a chartEx", async () => {

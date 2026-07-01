@@ -1,6 +1,8 @@
+import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <rPh sb="0" eb="1">
 //   <t>(its pronounciation in KATAKANA)</t>
@@ -10,12 +12,12 @@ interface PhoneticTextModel {
   sb: number;
   eb: number;
   text?: string;
-  richText?: any[];
+  richText?: RichText[];
 }
 
 class PhoneticTextXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -30,7 +32,7 @@ class PhoneticTextXform extends BaseXform {
     return "rPh";
   }
 
-  render(xmlStream: any, model: PhoneticTextModel): void {
+  render(xmlStream: XmlSink, model: PhoneticTextModel): void {
     xmlStream.openNode(this.tag, {
       sb: model.sb ?? 0,
       eb: model.eb ?? 0
@@ -46,7 +48,7 @@ class PhoneticTextXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name } = node;
     if (this.parser) {
       this.parser.parseOpen(node);

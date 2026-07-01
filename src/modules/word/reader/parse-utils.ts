@@ -6,11 +6,10 @@
  * orchestration of the higher-level parsers.
  */
 
+import type { ParsedRelationship } from "@word/reader/reader-context";
 import { findChild, findChildren } from "@xml/dom";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import type { XmlElement } from "@xml/types";
-
-import type { ParsedRelationship } from "./reader-context";
 
 // =============================================================================
 // Attribute Readers
@@ -168,7 +167,7 @@ export function collectRIds(el: XmlElement, out: Set<string>): void {
 // Path / Relationship Helpers
 // =============================================================================
 
-export { getPartRelsPath, getFileName, getFileExt } from "../core/opc-paths";
+export { getPartRelsPath, getFileName, getFileExt } from "@word/core/opc-paths";
 
 /**
  * Resolve an OPC relationship target against its source part.

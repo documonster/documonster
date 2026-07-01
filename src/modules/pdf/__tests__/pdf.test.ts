@@ -1,4 +1,4 @@
-import { Workbook } from "@excel/workbook";
+import { Cell, Workbook } from "@excel/index";
 import { PdfError, PdfStructureError } from "@pdf/errors";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { pdf } from "@pdf/pdf";
@@ -137,12 +137,12 @@ describe("pdf", () => {
 
 describe("excelToPdf", () => {
   it("should produce a valid PDF", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sales");
-    ws.getCell("A1").value = "Product";
-    ws.getCell("B1").value = "Revenue";
-    ws.getCell("A2").value = "Widget";
-    ws.getCell("B2").value = 1000;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sales");
+    Cell.setValue(ws, "A1", "Product");
+    Cell.setValue(ws, "B1", "Revenue");
+    Cell.setValue(ws, "A2", "Widget");
+    Cell.setValue(ws, "B2", 1000);
 
     const asyncBytes = await excelToPdf(wb);
 
@@ -155,11 +155,11 @@ describe("excelToPdf", () => {
   });
 
   it("should export multiple worksheets", async () => {
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("Sheet1");
-    ws1.getCell("A1").value = "Hello";
-    const ws2 = wb.addWorksheet("Sheet2");
-    ws2.getCell("A1").value = "World";
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws1, "A1", "Hello");
+    const ws2 = Workbook.addWorksheet(wb, "Sheet2");
+    Cell.setValue(ws2, "A1", "World");
 
     const result = await excelToPdf(wb);
     expectValidPdf(result);
@@ -169,14 +169,14 @@ describe("excelToPdf", () => {
   });
 
   it("should throw for workbook with no sheets", async () => {
-    const wb = new Workbook();
+    const wb = Workbook.create();
     await expect(excelToPdf(wb)).rejects.toThrow(PdfError);
   });
 
   it("should support PDF export options", async () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = "Test";
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", "Test");
 
     const result = await excelToPdf(wb, {
       title: "Async Export",

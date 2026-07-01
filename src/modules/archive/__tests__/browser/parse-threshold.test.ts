@@ -1,5 +1,6 @@
-import { unzip, zip } from "@archive";
 import { DEFAULT_COMPRESS_THRESHOLD_BYTES } from "@archive/compression/compress.base";
+import { zip } from "@archive/create-archive";
+import { unzip } from "@archive/read-archive";
 import { Readable } from "@stream";
 import { describe, it, expect } from "vitest";
 

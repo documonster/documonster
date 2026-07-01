@@ -21,14 +21,23 @@
  */
 
 import type {
+  CsvFormatRegex,
+  FormatFieldContext,
+  FormatRowOptions,
+  FormatConfig
+} from "@csv/format/config";
+import { createFormatConfig } from "@csv/format/config";
+import { isFormattedValue } from "@csv/format/formatted-value";
+import type {
   CsvFormatOptions,
   Row,
   TypeTransformMap,
   TransformContext,
   TransformResult
-} from "../types";
-import { startsWithFormulaChar } from "../utils/detect";
-import { formatNumberForCsv, type DecimalSeparator } from "../utils/number";
+} from "@csv/types";
+import { startsWithFormulaChar } from "@csv/utils/detect";
+import type { DecimalSeparator } from "@csv/utils/number";
+import { formatNumberForCsv } from "@csv/utils/number";
 import {
   deduplicateHeaders,
   isRowHashArray,
@@ -36,10 +45,7 @@ import {
   rowHashArrayToValues,
   rowHashArrayMapByHeaders,
   processColumns
-} from "../utils/row";
-import type { CsvFormatRegex, FormatFieldContext, FormatRowOptions, FormatConfig } from "./config";
-import { createFormatConfig } from "./config";
-import { isFormattedValue } from "./formatted-value";
+} from "@csv/utils/row";
 
 // =============================================================================
 // Type Transform Functions
@@ -50,7 +56,7 @@ import { isFormattedValue } from "./formatted-value";
  * Returns the transformed result, or undefined if no transform applies.
  */
 export function applyTypeTransform(
-  value: any,
+  value: unknown,
   transform: TypeTransformMap,
   ctx: TransformContext
 ): TransformResult {
@@ -58,27 +64,25 @@ export function applyTypeTransform(
     return undefined;
   }
 
-  const type = typeof value;
-
-  if (type === "boolean" && transform.boolean) {
+  if (typeof value === "boolean" && transform.boolean) {
     return transform.boolean(value, ctx);
   }
   if (value instanceof Date && transform.date) {
     return transform.date(value, ctx);
   }
-  if (type === "number" && transform.number) {
+  if (typeof value === "number" && transform.number) {
     return transform.number(value, ctx);
   }
-  if (type === "bigint" && transform.bigint) {
+  if (typeof value === "bigint" && transform.bigint) {
     return transform.bigint(value, ctx);
   }
-  if (type === "string" && transform.string) {
+  if (typeof value === "string" && transform.string) {
     return transform.string(value, ctx);
   }
   // Handle plain objects (not Date, not Array, not null)
-  if (type === "object" && !Array.isArray(value) && !(value instanceof Date)) {
+  if (typeof value === "object" && !Array.isArray(value) && !(value instanceof Date)) {
     if (transform.object) {
-      return transform.object(value, ctx);
+      return transform.object(value as Record<string, unknown>, ctx);
     }
   }
 
@@ -88,7 +92,7 @@ export function applyTypeTransform(
 /**
  * Default type conversion to string.
  */
-export function defaultToString(value: any, decimalSeparator: DecimalSeparator): string {
+export function defaultToString(value: unknown, decimalSeparator: DecimalSeparator): string {
   if (value === null || value === undefined) {
     return "";
   }

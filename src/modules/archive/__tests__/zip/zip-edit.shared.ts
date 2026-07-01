@@ -1,6 +1,10 @@
-import { zip, editZip, editZipUrl, BufferReader, ZipEditPlan, type ZipEditWarning } from "@archive";
+import { zip } from "@archive/create-archive";
+import { createBufferReader } from "@archive/io/random-access";
 import { ZipParser } from "@archive/unzip/zip-parser";
-import { createZip, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEditWarning } from "@archive/zip";
+import { editZip, editZipUrl, ZipEditPlan } from "@archive/zip";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, it, expect, vi } from "vitest";
 
@@ -197,7 +201,10 @@ export function runZipEditTests(): void {
         const originalRaw = originalParser.getRawCompressedData("big.txt");
         expect(originalRaw).not.toBeNull();
 
-        const editor = await editZip(new BufferReader(original), { level: 6, reproducible: true });
+        const editor = await editZip(createBufferReader(original), {
+          level: 6,
+          reproducible: true
+        });
         editor.rename("big.txt", "moved.txt");
         const out = await editor.bytes();
 

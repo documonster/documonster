@@ -5,12 +5,12 @@
  */
 
 import { ImageError } from "@excel/errors";
-import {
-  WorkbookWriterBase,
-  type WorkbookWriterOptions as BaseOptions,
-  type WorkbookZipOptions,
-  type ZlibOptions
+import type {
+  WorkbookWriterOptions as BaseOptions,
+  WorkbookZipOptions,
+  ZlibOptions
 } from "@excel/stream/workbook-writer.browser";
+import { WorkbookWriterBase } from "@excel/stream/workbook-writer.browser";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import { isExternalImage } from "@excel/utils/drawing-utils";
 import { mediaPath } from "@excel/utils/ooxml-paths";

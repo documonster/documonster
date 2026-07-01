@@ -24,7 +24,7 @@ export {
   zipCryptoDecryptByte,
   zipCryptoCheckPassword as zipCryptoVerifyPassword,
   type ZipCryptoState
-} from "./zip-crypto";
+} from "@archive/crypto/zip-crypto";
 
 // AES (WinZip AE-1 / AE-2)
 export {
@@ -45,7 +45,7 @@ export {
   buildAesExtraField,
   type AesKeyStrength,
   type AesExtraFieldInfo
-} from "./aes";
+} from "@archive/crypto/aes";
 
 // Random bytes — from shared @utils/crypto
 export { randomBytes } from "@utils/crypto";
@@ -60,4 +60,4 @@ export {
   isAesEncryption,
   getAesKeyStrength,
   encryptionMethodFromAesKeyStrength
-} from "./types";
+} from "@archive/crypto/types";

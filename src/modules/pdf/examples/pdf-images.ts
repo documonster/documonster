@@ -2,7 +2,7 @@
  * Example: PDF Export with Images
  *
  * Demonstrates embedding JPEG and PNG images via:
- * 1. excelToPdf() — Excel workbook with images → PDF
+ * 1. Pdf.fromExcel() — Excel workbook with images → PDF
  * 2. pdf() — Standalone PDF with images (no Excel)
  *
  * Run: npx tsx src/modules/pdf/examples/pdf-images.ts
@@ -12,7 +12,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addImage } from "@excel/core/worksheet";
+import { Cell, Workbook, Worksheet } from "@excel/index";
+
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 
 const outDir = path.resolve(
@@ -39,26 +43,26 @@ console.log("--- Part A: excelToPdf (Excel workbook with images) ---\n");
 // =============================================================================
 
 if (hasJpeg) {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("JPEG Example");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "JPEG Example");
 
-  ws.columns = [
+  Worksheet.setColumns(ws, [
     { header: "Product", key: "product", width: 25 },
     { header: "Status", key: "status", width: 15 },
     { header: "Notes", key: "notes", width: 30 }
-  ];
-  ws.addRows([
+  ]);
+  Worksheet.addRows(ws, [
     { product: "Widget A", status: "Active", notes: "Best seller" },
     { product: "Widget B", status: "Pending", notes: "New launch" },
     { product: "Widget C", status: "Active", notes: "Updated design" }
   ]);
 
-  const jpegId = wb.addImage({ buffer: fs.readFileSync(jpegPath), extension: "jpeg" });
-  ws.addImage(jpegId, { tl: { col: 0, row: 4 }, ext: { width: 300, height: 200 } });
+  const jpegId = addWorkbookImage(wb, { buffer: fs.readFileSync(jpegPath), extension: "jpeg" });
+  addImage(ws, jpegId, { tl: { col: 0, row: 4 }, ext: { width: 300, height: 200 } });
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-jpeg.pdf"),
-    await excelToPdf(wb, { showGridLines: true })
+    await Pdf.fromExcel(wb, { showGridLines: true })
   );
   console.log("A1. excel-images-jpeg.pdf — table with embedded JPEG");
 } else {
@@ -70,23 +74,23 @@ if (hasJpeg) {
 // =============================================================================
 
 if (hasPng) {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("PNG Alpha");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "PNG Alpha");
 
-  ws.getCell("A1").value = "PNG with transparency";
-  ws.getCell("A1").font = { bold: true, size: 14 };
+  Cell.setValue(ws, "A1", "PNG with transparency");
+  Cell.setStyle(ws, "A1", { font: { bold: true, size: 14 } });
   for (let r = 2; r <= 12; r++) {
-    ws.getCell(`A${r}`).value = `Row ${r}`;
-    ws.getCell(`B${r}`).value = r * 100;
-    ws.getCell(`C${r}`).value = "filler";
+    Cell.setValue(ws, `A${r}`, `Row ${r}`);
+    Cell.setValue(ws, `B${r}`, r * 100);
+    Cell.setValue(ws, `C${r}`, "filler");
   }
 
-  const pngId = wb.addImage({ buffer: fs.readFileSync(pngPath), extension: "png" });
-  ws.addImage(pngId, { tl: { col: 1, row: 2 }, ext: { width: 150, height: 150 } });
+  const pngId = addWorkbookImage(wb, { buffer: fs.readFileSync(pngPath), extension: "png" });
+  addImage(ws, pngId, { tl: { col: 1, row: 2 }, ext: { width: 150, height: 150 } });
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-png.pdf"),
-    await excelToPdf(wb, { showGridLines: true })
+    await Pdf.fromExcel(wb, { showGridLines: true })
   );
   console.log("A2. excel-images-png.pdf — PNG with alpha transparency");
 } else {
@@ -98,29 +102,29 @@ if (hasPng) {
 // =============================================================================
 
 if (hasJpeg && hasPng) {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Multi-Image");
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "Multi-Image");
 
-  ws.getCell("A1").value = "Multiple Images";
-  ws.getCell("A1").font = { bold: true, size: 14 };
+  Cell.setValue(ws, "A1", "Multiple Images");
+  Cell.setStyle(ws, "A1", { font: { bold: true, size: 14 } });
   for (let r = 2; r <= 20; r++) {
-    ws.getCell(`A${r}`).value = `Data ${r}`;
-    ws.getCell(`B${r}`).value = r;
-    ws.getCell(`C${r}`).value = `Item ${r}`;
-    ws.getCell(`D${r}`).value = r * 1.5;
-    ws.getCell(`E${r}`).value = " ";
-    ws.getCell(`F${r}`).value = " ";
-    ws.getCell(`G${r}`).value = " ";
+    Cell.setValue(ws, `A${r}`, `Data ${r}`);
+    Cell.setValue(ws, `B${r}`, r);
+    Cell.setValue(ws, `C${r}`, `Item ${r}`);
+    Cell.setValue(ws, `D${r}`, r * 1.5);
+    Cell.setValue(ws, `E${r}`, " ");
+    Cell.setValue(ws, `F${r}`, " ");
+    Cell.setValue(ws, `G${r}`, " ");
   }
 
-  const img1 = wb.addImage({ buffer: fs.readFileSync(jpegPath), extension: "jpeg" });
-  const img2 = wb.addImage({ buffer: fs.readFileSync(pngPath), extension: "png" });
-  ws.addImage(img1, { tl: { col: 4, row: 1 }, ext: { width: 200, height: 150 } });
-  ws.addImage(img2, { tl: { col: 4, row: 10 }, ext: { width: 150, height: 150 } });
+  const img1 = addWorkbookImage(wb, { buffer: fs.readFileSync(jpegPath), extension: "jpeg" });
+  const img2 = addWorkbookImage(wb, { buffer: fs.readFileSync(pngPath), extension: "png" });
+  addImage(ws, img1, { tl: { col: 4, row: 1 }, ext: { width: 200, height: 150 } });
+  addImage(ws, img2, { tl: { col: 4, row: 10 }, ext: { width: 150, height: 150 } });
 
   fs.writeFileSync(
     path.join(outDir, "excel-images-multi.pdf"),
-    await excelToPdf(wb, {
+    await Pdf.fromExcel(wb, {
       showGridLines: true,
       showPageNumbers: true,
       title: "Multi-Image Report"

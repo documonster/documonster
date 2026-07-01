@@ -65,85 +65,31 @@ export type {
   ColumnMismatchConfig,
   ColumnMismatchLess,
   ColumnMismatchMore
-} from "./types";
-
-// Type guards and helpers from types.ts
-export { isFormattedValue, quoted, unquoted } from "./types";
+} from "@csv/types";
 
 // =============================================================================
-// Core Functions
+// Core API — the `Csv` domain namespace (tree-shaken via `export * as`)
 // =============================================================================
 
-// Synchronous parser (direct import to avoid barrel pulling in async -> stream)
-export { parseCsv } from "./parse/sync";
+export * as Csv from "@csv/surface/csv";
 
-// Async parser
-export { parseCsvAsync, parseCsvRows, parseCsvWithProgress } from "./parse/async";
-
-// Formatter
-export { formatCsv } from "./format/index";
-
-// =============================================================================
-// Stream Classes
-// =============================================================================
-
-export {
-  CsvParserStream,
-  CsvFormatterStream,
-  createCsvParserStream,
-  createCsvFormatterStream
-} from "./stream/index";
-
-// =============================================================================
-// Detection Utilities (commonly needed by users)
-// =============================================================================
-
-export { detectDelimiter, detectLinebreak, stripBom } from "./utils/detect";
-
-// =============================================================================
-// Row Utilities (commonly needed by users)
-// =============================================================================
-
-export {
-  isRowHashArray,
-  rowHashArrayToValues,
-  rowHashArrayToHeaders,
-  rowHashArrayMapByHeaders,
-  processColumns,
-  deduplicateHeaders,
-  deduplicateHeadersWithRenames
-} from "./utils/row";
-
-// =============================================================================
-// Extras (opt-in utilities - inline for tree-shaking)
-// =============================================================================
-
-// Dynamic Typing utilities
-export { applyDynamicTyping, applyDynamicTypingToRow } from "./utils/dynamic-typing";
-
-// CSV Generator utilities
-export {
-  csvGenerate,
-  csvGenerateRows,
-  csvGenerateAsync,
-  csvGenerateData,
-  createCsvGenerator,
-  type CsvGenerateOptions,
-  type CsvGenerateResult,
-  type ColumnDef,
-  type GeneratorColumnConfig,
-  type BuiltinColumnType,
-  type GeneratorFn,
-  type GeneratorContext,
-  type StopCondition,
-  type StopContext
-} from "./utils/generate";
-
-// Number formatting utilities
-export { formatNumberForCsv, parseNumberFromCsv, type DecimalSeparator } from "./utils/number";
+// Type-only re-exports for the generator + number utilities (the value
+// functions live on the `Csv` namespace; these are the option/result types).
+export type {
+  CsvGenerateOptions,
+  CsvGenerateResult,
+  ColumnDef,
+  GeneratorColumnConfig,
+  BuiltinColumnType,
+  GeneratorFn,
+  GeneratorContext,
+  StopCondition,
+  StopContext
+} from "@csv/utils/generate";
+export type { DecimalSeparator } from "@csv/utils/number";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { CsvError, CsvWorkerError } from "./errors";
+export { CsvError, CsvWorkerError, isCsvError } from "@csv/errors";

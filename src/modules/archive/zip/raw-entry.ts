@@ -1,4 +1,4 @@
-import type { ZipStringEncoding } from "@archive/shared/text";
+import type { ZipStringEncoding } from "@archive/core/text";
 
 /**
  * Shared types for raw ZIP entries.
@@ -80,6 +80,6 @@ export function isZipRawEntry(entry: unknown): entry is ZipRawEntry {
     typeof entry === "object" &&
     entry !== null &&
     "compressedData" in entry &&
-    (entry as any).compressedData instanceof Uint8Array
+    (entry as { compressedData: unknown }).compressedData instanceof Uint8Array
   );
 }

@@ -1,17 +1,17 @@
-import { PivotTableError } from "@excel/errors";
+import type { PivotTableSource } from "@excel/core/pivot-table";
 import type {
-  PivotTableSource,
   RecordValue,
   ParsedCacheRecords,
   CacheField,
   SharedItemValue
-} from "@excel/pivot-table";
-import { PivotErrorValue } from "@excel/pivot-table";
+} from "@excel/core/pivot-table-types";
+import { isPivotError } from "@excel/core/pivot-table-types";
+import { PivotTableError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { formatDateForExcel } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { parseOoxmlDate } from "@utils/utils";
 import { xmlEncode } from "@xml/encode";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /** Attribute keys on <pivotCacheRecords> that are individually parsed (not collected into extraRootAttrs). */
@@ -142,7 +142,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
         return `<e v="${xmlEncode(value.value)}" />`;
       default: {
         const _exhaustive: never = value;
-        throw new Error(`Unhandled record value type: ${(_exhaustive as any).type}`);
+        throw new Error(`Unhandled record value type: ${(_exhaustive as { type?: string }).type}`);
       }
     }
   }
@@ -188,7 +188,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
 
     // no shared items — render inline by type
     if (sharedItems === null) {
-      if (value instanceof PivotErrorValue) {
+      if (isPivotError(value)) {
         return `<e v="${xmlEncode(value.code)}" />`;
       }
       if (typeof value === "boolean") {
@@ -213,7 +213,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
     return `<x v="${sharedItemsIndex}" />`;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
     switch (name) {
@@ -377,10 +377,10 @@ function findSharedItemIndex(sharedItems: SharedItemValue[], value: unknown): nu
     }
     return -1;
   }
-  if (value instanceof PivotErrorValue) {
+  if (isPivotError(value)) {
     for (let i = 0; i < sharedItems.length; i++) {
       const item = sharedItems[i];
-      if (item instanceof PivotErrorValue && item.code === value.code) {
+      if (isPivotError(item) && item.code === value.code) {
         return i;
       }
     }

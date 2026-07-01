@@ -13,15 +13,17 @@ export type {
   TaskOptions,
   TaskResult,
   WorkerTaskType
-} from "./types";
+} from "@archive/compression/worker-pool/types";
 
-export { hasWorkerSupport, createAbortError } from "./pool.base";
+export { hasWorkerSupport, createAbortError } from "@archive/compression/worker-pool/pool.base";
+
+import { ArchiveError } from "@archive/core/errors";
 
 /** Shared error for Node.js stub methods */
 const NODEJS_STUB_ERROR = "WorkerPool is not available in Node.js";
 
 function throwStubError(): never {
-  throw new Error(NODEJS_STUB_ERROR);
+  throw new ArchiveError(NODEJS_STUB_ERROR);
 }
 
 /**
@@ -29,7 +31,7 @@ function throwStubError(): never {
  */
 export class WorkerPool {
   constructor() {
-    throw new Error(
+    throw new ArchiveError(
       "WorkerPool is only available in browser environments. " +
         "Node.js uses the native zlib thread pool automatically."
     );

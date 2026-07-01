@@ -6,10 +6,8 @@
  */
 
 import { createDeflateStream } from "@archive";
-import {
-  runStreamingZipTests,
-  type StreamingZipModuleImports
-} from "@archive/__tests__/zip/streaming-zip.shared";
+import type { StreamingZipModuleImports } from "@archive/__tests__/zip/streaming-zip.shared";
+import { runStreamingZipTests } from "@archive/__tests__/zip/streaming-zip.shared";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { Zip, ZipDeflate } from "@archive/zip/stream";
 import { describe, it, expect } from "vitest";

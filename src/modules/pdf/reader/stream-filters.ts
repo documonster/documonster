@@ -16,9 +16,8 @@
 
 import { unzlibSync } from "@archive/compression/compress";
 import { inflateRaw } from "@archive/compression/deflate-fallback";
-
-import type { PdfDictValue } from "./pdf-parser";
-import { dictGetNumber, isPdfDict, isPdfArray } from "./pdf-parser";
+import type { PdfDictValue } from "@pdf/reader/pdf-parser";
+import { dictGetNumber, isPdfDict, isPdfArray } from "@pdf/reader/pdf-parser";
 
 // =============================================================================
 // Public API

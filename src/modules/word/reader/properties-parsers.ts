@@ -13,9 +13,8 @@
  * - `parseRevisionInfo` (w:ins/w:del/w:rPrChange/etc. revision metadata)
  */
 
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import { attrInt, attrVal, boolToggle, findChildNs, safeParseInt } from "@word/reader/parse-utils";
 import type {
   Border,
   ColorSpec,
@@ -28,8 +27,8 @@ import type {
   Shading,
   TableWidth,
   UnderlineStyle
-} from "../types";
-import { attrInt, attrVal, boolToggle, findChildNs, safeParseInt } from "./parse-utils";
+} from "@word/types";
+import type { XmlElement } from "@xml/types";
 
 // =============================================================================
 // Run Properties

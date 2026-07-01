@@ -7,11 +7,10 @@
  * - `parseTocInstruction` — TOC field instruction string parser
  */
 
+import type { Mutable } from "@word/core/internal-utils";
+import type { CheckBox, TableOfContents } from "@word/types";
 import { findChild } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
-import type { CheckBox, TableOfContents } from "../types";
 
 /**
  * Parse a w14:checkbox SDT element.

@@ -14,7 +14,8 @@
  * non-context-dependent stubs.
  */
 
-import { Workbook } from "@excel/workbook";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 import { lookupFunction } from "../../runtime/function-registry";
@@ -528,35 +529,35 @@ describe("NA()", () => {
   });
 
   it("can be wrapped by ISNA in the evaluator", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "ISNA(NA())", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "ISNA(NA())", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(true);
   });
 
   it("used as an explicit error value in arithmetic propagates", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "NA()+1", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "NA()+1", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#N/A" });
   });
 
   it("used with IFERROR returns the fallback", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: 'IFERROR(NA(),"fallback")', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe("fallback");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: 'IFERROR(NA(),"fallback")', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe("fallback");
   });
 
   it("is classified by ERROR.TYPE as 7", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "ERROR.TYPE(NA())", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(7);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "ERROR.TYPE(NA())", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(7);
   });
 });
 
@@ -566,24 +567,24 @@ describe("NA()", () => {
 
 describe("SHEET / SHEETS (stubs and context-aware path)", () => {
   it("SHEET() with no args returns current sheet number via evaluator", () => {
-    const wb = new Workbook();
-    wb.addWorksheet("One");
-    wb.addWorksheet("Two");
-    const ws = wb.getWorksheet("Two")!;
-    ws.getCell("A1").value = { formula: "SHEET()", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(2);
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "One");
+    Workbook.addWorksheet(wb, "Two");
+    const ws = Workbook.getWorksheet(wb, "Two")!;
+    Cell.setValue(ws, "A1", { formula: "SHEET()", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(2);
   });
 
   it("SHEETS() with no args returns total sheet count", () => {
-    const wb = new Workbook();
-    wb.addWorksheet("One");
-    wb.addWorksheet("Two");
-    wb.addWorksheet("Three");
-    const ws = wb.getWorksheet("One")!;
-    ws.getCell("A1").value = { formula: "SHEETS()", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(3);
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "One");
+    Workbook.addWorksheet(wb, "Two");
+    Workbook.addWorksheet(wb, "Three");
+    const ws = Workbook.getWorksheet(wb, "One")!;
+    Cell.setValue(ws, "A1", { formula: "SHEETS()", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(3);
   });
 
   it("SHEET registry stub returns 1 when no argument is provided", () => {
@@ -684,11 +685,11 @@ describe("HYPERLINK", () => {
 
 describe("CELL (via evaluator)", () => {
   it('"address" returns absolute reference to the cell', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B2").value = { formula: 'CELL("address",C5)', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B2").result).toBe("$C$5");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B2", { formula: 'CELL("address",C5)', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B2")).toBe("$C$5");
   });
 
   it('"address" qualifies cross-sheet targets with the sheet name (Excel)', () => {
@@ -696,72 +697,72 @@ describe("CELL (via evaluator)", () => {
     // `INDIRECT(CELL("address", Sheet2!A1))` misread the same cell on
     // the formula's own sheet. Excel always qualifies when the target
     // sheet differs from the formula cell's sheet.
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("Sheet1");
-    wb.addWorksheet("Sheet2");
-    ws1.getCell("B2").value = { formula: 'CELL("address", Sheet2!C5)', result: "" };
-    wb.calculateFormulas();
-    expect(ws1.getCell("B2").result).toBe("Sheet2!$C$5");
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+    Workbook.addWorksheet(wb, "Sheet2");
+    Cell.setValue(ws1, "B2", { formula: 'CELL("address", Sheet2!C5)', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws1, "B2")).toBe("Sheet2!$C$5");
   });
 
   it('"address" quotes sheet names that need quoting', () => {
     // Sheet name with a space requires `'...'` around it.
-    const wb = new Workbook();
-    const ws1 = wb.addWorksheet("Sheet1");
-    wb.addWorksheet("My Sheet");
-    ws1.getCell("B2").value = { formula: "CELL(\"address\", 'My Sheet'!A1)", result: "" };
-    wb.calculateFormulas();
-    expect(ws1.getCell("B2").result).toBe("'My Sheet'!$A$1");
+    const wb = Workbook.create();
+    const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+    Workbook.addWorksheet(wb, "My Sheet");
+    Cell.setValue(ws1, "B2", { formula: "CELL(\"address\", 'My Sheet'!A1)", result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws1, "B2")).toBe("'My Sheet'!$A$1");
   });
 
   it('"row" and "col" return 1-based coordinates', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: 'CELL("row",C5)', result: 0 };
-    ws.getCell("A2").value = { formula: 'CELL("col",C5)', result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(5);
-    expect(ws.getCell("A2").result).toBe(3);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: 'CELL("row",C5)', result: 0 });
+    Cell.setValue(ws, "A2", { formula: 'CELL("col",C5)', result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(5);
+    expect(Cell.getResult(ws, "A2")).toBe(3);
   });
 
   it('"contents" returns the value of the target cell', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("C5").value = 99;
-    ws.getCell("A1").value = { formula: 'CELL("contents",C5)', result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(99);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "C5", 99);
+    Cell.setValue(ws, "A1", { formula: 'CELL("contents",C5)', result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(99);
   });
 
   it('"type" classifies blank / label / value', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A5").value = "hello";
-    ws.getCell("A6").value = 42;
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A5", "hello");
+    Cell.setValue(ws, "A6", 42);
     // A7 blank
-    ws.getCell("B1").value = { formula: 'CELL("type",A5)', result: "" };
-    ws.getCell("B2").value = { formula: 'CELL("type",A6)', result: "" };
-    ws.getCell("B3").value = { formula: 'CELL("type",A7)', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe("l");
-    expect(ws.getCell("B2").result).toBe("v");
-    expect(ws.getCell("B3").result).toBe("b");
+    Cell.setValue(ws, "B1", { formula: 'CELL("type",A5)', result: "" });
+    Cell.setValue(ws, "B2", { formula: 'CELL("type",A6)', result: "" });
+    Cell.setValue(ws, "B3", { formula: 'CELL("type",A7)', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe("l");
+    expect(Cell.getResult(ws, "B2")).toBe("v");
+    expect(Cell.getResult(ws, "B3")).toBe("b");
   });
 
   it("unknown info type returns #N/A", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: 'CELL("nosuchinfo",A2)', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: 'CELL("nosuchinfo",A2)', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#N/A" });
   });
 
   it('"width" returns the default column width (8)', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: 'CELL("width",B2)', result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(8);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: 'CELL("width",B2)', result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(8);
   });
 });
 
@@ -929,51 +930,51 @@ describe("XOR", () => {
 
 describe("TRUE / FALSE literals", () => {
   it("TRUE bareword returns boolean true", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "TRUE", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "TRUE", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(true);
   });
 
   it("FALSE bareword returns boolean false", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "FALSE", result: true };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "FALSE", result: true });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(false);
   });
 
   it("TRUE and FALSE participate in AND", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "AND(TRUE,FALSE)", result: true };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "AND(TRUE,FALSE)", result: true });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(false);
   });
 
   it("TRUE+1 coerces to 2", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "TRUE+1", result: 0 };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(2);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "TRUE+1", result: 0 });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(2);
   });
 
   it("NOT(TRUE) is FALSE", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "NOT(TRUE)", result: true };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "NOT(TRUE)", result: true });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(false);
   });
 
   it("TRUE<>FALSE is TRUE", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "TRUE<>FALSE", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "TRUE<>FALSE", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toBe(true);
   });
 });
 
@@ -983,111 +984,111 @@ describe("TRUE / FALSE literals", () => {
 
 describe("ISFORMULA / FORMULATEXT (reference path via evaluator)", () => {
   it("ISFORMULA(ref) is TRUE when target cell holds a formula", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "1+1", result: 0 };
-    ws.getCell("B1").value = { formula: "ISFORMULA(A1)", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "1+1", result: 0 });
+    Cell.setValue(ws, "B1", { formula: "ISFORMULA(A1)", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(true);
   });
 
   it("ISFORMULA(ref) is FALSE for a literal cell", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 42;
-    ws.getCell("B1").value = { formula: "ISFORMULA(A1)", result: true };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 42);
+    Cell.setValue(ws, "B1", { formula: "ISFORMULA(A1)", result: true });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(false);
   });
 
   it("FORMULATEXT(ref) returns =<formula> for a formula cell", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "1+1", result: 0 };
-    ws.getCell("B1").value = { formula: "FORMULATEXT(A1)", result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe("=1+1");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "1+1", result: 0 });
+    Cell.setValue(ws, "B1", { formula: "FORMULATEXT(A1)", result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe("=1+1");
   });
 
   it("FORMULATEXT on a literal cell returns #N/A", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 10;
-    ws.getCell("B1").value = { formula: "FORMULATEXT(A1)", result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 10);
+    Cell.setValue(ws, "B1", { formula: "FORMULATEXT(A1)", result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toEqual({ error: "#N/A" });
   });
 
   it("ISFORMULA on a value expression (non-ref) returns #N/A", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "ISFORMULA(1+1)", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "ISFORMULA(1+1)", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#N/A" });
   });
 
   it('ISFORMULA(INDIRECT("A1")) resolves through a runtime reference', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "1+1", result: 0 };
-    ws.getCell("B1").value = { formula: 'ISFORMULA(INDIRECT("A1"))', result: false };
-    ws.getCell("B2").value = 5;
-    ws.getCell("C2").value = { formula: 'ISFORMULA(INDIRECT("B2"))', result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(true);
-    expect(ws.getCell("C2").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "1+1", result: 0 });
+    Cell.setValue(ws, "B1", { formula: 'ISFORMULA(INDIRECT("A1"))', result: false });
+    Cell.setValue(ws, "B2", 5);
+    Cell.setValue(ws, "C2", { formula: 'ISFORMULA(INDIRECT("B2"))', result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(true);
+    expect(Cell.getResult(ws, "C2")).toBe(false);
   });
 
   it('ISFORMULA(INDIRECT("xx")) returns #N/A — invalid ref collapses to N/A', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: 'ISFORMULA(INDIRECT("xx"))', result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: 'ISFORMULA(INDIRECT("xx"))', result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#N/A" });
   });
 
   it("ISFORMULA on an area reference inspects the top-left cell", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "1+1", result: 0 };
-    ws.getCell("B2").value = 5;
-    ws.getCell("C1").value = { formula: "ISFORMULA(A1:B2)", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("C1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "1+1", result: 0 });
+    Cell.setValue(ws, "B2", 5);
+    Cell.setValue(ws, "C1", { formula: "ISFORMULA(A1:B2)", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "C1")).toBe(true);
   });
 
   it('FORMULATEXT(INDIRECT("A1")) returns the formula text', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "SUM(1,2)", result: 0 };
-    ws.getCell("B1").value = { formula: 'FORMULATEXT(INDIRECT("A1"))', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe("=SUM(1,2)");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "SUM(1,2)", result: 0 });
+    Cell.setValue(ws, "B1", { formula: 'FORMULATEXT(INDIRECT("A1"))', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe("=SUM(1,2)");
   });
 
   it("FORMULATEXT on an area reference inspects the top-left cell", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: "1*2", result: 0 };
-    ws.getCell("B1").value = { formula: "FORMULATEXT(A1:B2)", result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe("=1*2");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: "1*2", result: 0 });
+    Cell.setValue(ws, "B1", { formula: "FORMULATEXT(A1:B2)", result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe("=1*2");
   });
 
   it("FORMULATEXT on a missing cell returns #N/A", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B1").value = { formula: "FORMULATEXT(Z99)", result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B1", { formula: "FORMULATEXT(Z99)", result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toEqual({ error: "#N/A" });
   });
 
   it('FORMULATEXT(INDIRECT("xx")) returns #N/A', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = { formula: 'FORMULATEXT(INDIRECT("xx"))', result: "" };
-    wb.calculateFormulas();
-    expect(ws.getCell("A1").result).toEqual({ error: "#N/A" });
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", { formula: 'FORMULATEXT(INDIRECT("xx"))', result: "" });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "A1")).toEqual({ error: "#N/A" });
   });
 });
 
@@ -1097,44 +1098,44 @@ describe("ISFORMULA / FORMULATEXT (reference path via evaluator)", () => {
 
 describe("ISREF (reference path via evaluator)", () => {
   it("returns TRUE for a direct cell reference", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("A1").value = 1;
-    ws.getCell("B1").value = { formula: "ISREF(A1)", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "A1", 1);
+    Cell.setValue(ws, "B1", { formula: "ISREF(A1)", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(true);
   });
 
   it("returns TRUE for an area reference", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B1").value = { formula: "ISREF(A1:A5)", result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(true);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B1", { formula: "ISREF(A1:A5)", result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(true);
   });
 
   it("returns FALSE for an arithmetic expression", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B1").value = { formula: "ISREF(1+1)", result: true };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B1", { formula: "ISREF(1+1)", result: true });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(false);
   });
 
   it("returns FALSE for a string literal", () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B1").value = { formula: 'ISREF("A1")', result: true };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B1", { formula: 'ISREF("A1")', result: true });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(false);
   });
 
   it('returns FALSE for INDIRECT("xx") (invalid target → FALSE per Excel)', () => {
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("Sheet1");
-    ws.getCell("B1").value = { formula: 'ISREF(INDIRECT("xx"))', result: false };
-    wb.calculateFormulas();
-    expect(ws.getCell("B1").result).toBe(false);
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sheet1");
+    Cell.setValue(ws, "B1", { formula: 'ISREF(INDIRECT("xx"))', result: false });
+    calculateFormulas(wb);
+    expect(Cell.getResult(ws, "B1")).toBe(false);
   });
 });
 

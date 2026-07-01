@@ -40,8 +40,8 @@ export {
   getDefaultHighWaterMark,
   setDefaultHighWaterMark,
   promisify
-} from "@stream/common/utils";
-export type { PipelineOptions, FinishedOptions } from "@stream/common/options";
+} from "@stream/core/utils";
+export type { PipelineOptions, FinishedOptions } from "@stream/core/options";
 
 export { ChunkedBuilder, TransactionalChunkedBuilder } from "@stream/chunked-builder";
 export type { ChunkedBuilderOptions, BuilderSnapshot } from "@stream/chunked-builder";
@@ -60,7 +60,13 @@ export {
   readableStreamToAsyncIterable
 } from "@stream/utils";
 
-export { StreamStateError, StreamTypeError, UnsupportedStreamTypeError } from "@stream/errors";
+export {
+  StreamError,
+  StreamStateError,
+  StreamTypeError,
+  UnsupportedStreamTypeError,
+  isStreamError
+} from "@stream/errors";
 
 // Internal utilities exposed for cross-module use (e.g. archive, word/excel writers)
 export {
@@ -68,12 +74,12 @@ export {
   isWritableStream,
   isAsyncIterable,
   isTransformStream
-} from "@stream/internal/type-guards";
-export { onceEvent } from "@stream/internal/event-utils";
+} from "@stream/core/type-guards";
+export { onceEvent } from "@stream/core/event-utils";
 export {
   eventedReadableToAsyncIterableNoDestroy,
   type EventedReadableLike
-} from "@stream/internal/evented-readable-to-async-iterable";
-export { SinkAdapter } from "@stream/internal/sink-adapter";
-export type { AnySink, NodeWritableLike, DuckSinkLike } from "@stream/internal/sink-adapter";
+} from "@stream/core/evented-readable-to-async-iterable";
+export { SinkAdapter } from "@stream/core/sink-adapter";
+export type { AnySink, NodeWritableLike, DuckSinkLike } from "@stream/core/sink-adapter";
 export type { EventEmitterLike } from "@stream/types";

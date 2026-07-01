@@ -2,46 +2,24 @@
  * Example: XML Module — Complete Guide
  *
  * Covers:
- * - XmlWriter: building XML documents in memory
- * - XmlStreamWriter: streaming XML to a writable target
+ * - Xml.Writer: building XML documents in memory
+ * - Xml.StreamWriter: streaming XML to a writable target
  * - XML declaration, namespaces, attributes
  * - Text content, CDATA sections, comments
  * - Save/commit/rollback (transactional writes)
- * - DOM parsing with parseXml
- * - DOM navigation: findChild, findChildren, attr, textContent, walk
- * - Query engine: query, queryAll (XPath-like syntax)
- * - SAX streaming parser: SaxParser, parseSax
- * - parseXmlToObject: convert XML to plain JS objects
- * - Encoding utilities: xmlEncode, xmlDecode, xmlEncodeAttr
+ * - DOM parsing with Xml.parse
+ * - DOM navigation: Xml.findChild, Xml.findChildren, Xml.attr, Xml.textContent, Xml.walk
+ * - Query engine: Xml.query, Xml.queryAll (XPath-like syntax)
+ * - SAX streaming parser: Xml.SaxParser, Xml.parseSax
+ * - Xml.parseToObject: convert XML to plain JS objects
+ * - Encoding utilities: Xml.encode, Xml.decode, Xml.encodeAttr
  * - Error handling: XmlError, XmlParseError, XmlWriteError
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  XmlWriter,
-  XmlStreamWriter,
-  StdDocAttributes,
-  parseXml,
-  parseXmlToObject,
-  SaxParser,
-  findChild,
-  findChildren,
-  attr,
-  textContent,
-  walk,
-  toPlainObject,
-  query,
-  queryAll,
-  xmlEncode,
-  xmlDecode,
-  xmlEncodeAttr,
-  validateXmlName,
-  encodeCData,
-  isXmlError,
-  isXmlParseError
-} from "../index";
+import { Xml, isXmlError, isXmlParseError } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -50,11 +28,11 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 // =============================================================================
-// 1. XmlWriter — basic document
+// 1. Xml.Writer — basic document
 // =============================================================================
 
-const w1 = new XmlWriter();
-w1.openXml(StdDocAttributes);
+const w1 = new Xml.Writer();
+w1.openXml(Xml.StdDocAttributes);
 w1.openNode("catalog");
 w1.leafNode("book", { id: "1", lang: "en" }, "The Great Gatsby");
 w1.leafNode("book", { id: "2", lang: "fr" }, "Le Petit Prince");
@@ -62,15 +40,15 @@ w1.closeNode();
 
 const xml1 = w1.xml;
 fs.writeFileSync(path.join(outDir, "basic.xml"), xml1);
-console.log("=== 1. Basic XmlWriter ===");
+console.log("=== 1. Basic Xml.Writer ===");
 console.log(xml1);
 
 // =============================================================================
 // 2. Nested elements with attributes
 // =============================================================================
 
-const w2 = new XmlWriter();
-w2.openXml(StdDocAttributes);
+const w2 = new Xml.Writer();
+w2.openXml(Xml.StdDocAttributes);
 w2.openNode("employees");
 
 w2.openNode("employee", { id: "101", department: "Engineering" });
@@ -95,8 +73,8 @@ console.log(w2.xml.substring(0, 200) + "...");
 // 3. CDATA, comments, raw XML
 // =============================================================================
 
-const w3 = new XmlWriter();
-w3.openXml(StdDocAttributes);
+const w3 = new Xml.Writer();
+w3.openXml(Xml.StdDocAttributes);
 w3.openNode("page");
 
 w3.writeComment("This is a comment");
@@ -119,8 +97,8 @@ console.log(w3.xml);
 // 4. Save/commit/rollback (transactional writes)
 // =============================================================================
 
-const w4 = new XmlWriter();
-w4.openXml(StdDocAttributes);
+const w4 = new Xml.Writer();
+w4.openXml(Xml.StdDocAttributes);
 w4.openNode("root");
 w4.leafNode("kept", undefined, "This stays");
 
@@ -138,10 +116,10 @@ console.log("\n=== 4. Save/Commit/Rollback ===");
 console.log(w4.xml);
 
 // =============================================================================
-// 5. XmlWriter cursor and depth
+// 5. Xml.Writer cursor and depth
 // =============================================================================
 
-const w5 = new XmlWriter();
+const w5 = new Xml.Writer();
 w5.openXml();
 w5.openNode("a");
 w5.openNode("b");
@@ -155,7 +133,7 @@ w5.closeAll();
 console.log("After closeAll depth:", w5.depth); // 0
 
 // =============================================================================
-// 6. XmlStreamWriter — streaming to file
+// 6. Xml.StreamWriter — streaming to file
 // =============================================================================
 
 const filePath6 = path.join(outDir, "streamed.xml");
@@ -168,8 +146,8 @@ const writeTarget = {
   }
 };
 
-const sw6 = new XmlStreamWriter(writeTarget);
-sw6.openXml(StdDocAttributes);
+const sw6 = new Xml.StreamWriter(writeTarget);
+sw6.openXml(Xml.StdDocAttributes);
 sw6.openNode("data");
 for (let i = 0; i < 5; i++) {
   sw6.leafNode("item", { index: i }, `Value ${i}`);
@@ -177,12 +155,12 @@ for (let i = 0; i < 5; i++) {
 sw6.closeAll();
 fs.closeSync(fileHandle);
 
-console.log("\n=== 6. XmlStreamWriter ===");
+console.log("\n=== 6. Xml.StreamWriter ===");
 console.log("Written to:", filePath6);
 console.log(chunks6.join(""));
 
 // =============================================================================
-// 7. DOM parsing — parseXml
+// 7. DOM parsing — Xml.parse
 // =============================================================================
 
 const xmlDoc = `<?xml version="1.0" encoding="UTF-8"?>
@@ -204,36 +182,36 @@ const xmlDoc = `<?xml version="1.0" encoding="UTF-8"?>
   </book>
 </library>`;
 
-const doc = parseXml(xmlDoc);
+const doc = Xml.parse(xmlDoc);
 console.log("\n=== 7. DOM Parsing ===");
 console.log("Root element:", doc.root.name);
 console.log("Children:", doc.root.children.length);
 
 // =============================================================================
-// 8. DOM navigation — findChild, findChildren, attr, textContent
+// 8. DOM navigation — Xml.findChild, Xml.findChildren, Xml.attr, Xml.textContent
 // =============================================================================
 
 console.log("\n=== 8. DOM Navigation ===");
 
 // Find first book
-const firstBook = findChild(doc.root, "book");
+const firstBook = Xml.findChild(doc.root, "book");
 if (firstBook) {
-  console.log("First book id:", attr(firstBook, "id"));
-  console.log("First book genre:", attr(firstBook, "genre"));
+  console.log("First book id:", Xml.attr(firstBook, "id"));
+  console.log("First book genre:", Xml.attr(firstBook, "genre"));
 
-  const titleEl = findChild(firstBook, "title");
+  const titleEl = Xml.findChild(firstBook, "title");
   if (titleEl) {
-    console.log("Title:", textContent(titleEl));
+    console.log("Title:", Xml.textContent(titleEl));
   }
 }
 
 // Find all books
-const allBooks = findChildren(doc.root, "book");
+const allBooks = Xml.findChildren(doc.root, "book");
 console.log("Total books:", allBooks.length);
 for (const book of allBooks) {
-  const title = findChild(book, "title");
-  const author = findChild(book, "author");
-  console.log(`  "${textContent(title!)}" by ${textContent(author!)}`);
+  const title = Xml.findChild(book, "title");
+  const author = Xml.findChild(book, "author");
+  console.log(`  "${Xml.textContent(title!)}" by ${Xml.textContent(author!)}`);
 }
 
 // =============================================================================
@@ -243,7 +221,7 @@ for (const book of allBooks) {
 console.log("\n=== 9. Walk ===");
 
 const elementNames: string[] = [];
-walk(doc.root, el => {
+Xml.walk(doc.root, el => {
   elementNames.push(el.name);
 });
 console.log("All elements:", elementNames);
@@ -255,49 +233,49 @@ console.log("All elements:", elementNames);
 console.log("\n=== 10. Query Engine ===");
 
 // Direct path
-const firstTitle = query(doc.root, "book/title");
-console.log("First title:", firstTitle ? textContent(firstTitle) : "not found");
+const firstTitle = Xml.query(doc.root, "book/title");
+console.log("First title:", firstTitle ? Xml.textContent(firstTitle) : "not found");
 
 // All titles
-const allTitles = queryAll(doc.root, "book/title");
+const allTitles = Xml.queryAll(doc.root, "book/title");
 console.log(
   "All titles:",
-  allTitles.map(t => textContent(t))
+  allTitles.map(t => Xml.textContent(t))
 );
 
 // Attribute filter
-const fictionBooks = queryAll(doc.root, "book[@genre='fiction']");
+const fictionBooks = Xml.queryAll(doc.root, "book[@genre='fiction']");
 console.log(
   "Fiction books:",
-  fictionBooks.map(b => textContent(findChild(b, "title")!))
+  fictionBooks.map(b => Xml.textContent(Xml.findChild(b, "title")!))
 );
 
 // Indexed access
-const secondBook = query(doc.root, "book[1]");
+const secondBook = Xml.query(doc.root, "book[1]");
 if (secondBook) {
-  console.log("Second book:", textContent(findChild(secondBook, "title")!));
+  console.log("Second book:", Xml.textContent(Xml.findChild(secondBook, "title")!));
 }
 
 // Wildcard
-const allChildren = queryAll(doc.root, "book/*");
+const allChildren = Xml.queryAll(doc.root, "book/*");
 console.log("All book children:", allChildren.length, "elements");
 
 // =============================================================================
-// 11. toPlainObject — convert DOM to JS objects
+// 11. Xml.toPlainObject — convert DOM to JS objects
 // =============================================================================
 
-console.log("\n=== 11. toPlainObject ===");
+console.log("\n=== 11. Xml.toPlainObject ===");
 
 if (firstBook) {
-  const obj = toPlainObject(firstBook);
+  const obj = Xml.toPlainObject(firstBook);
   console.log("Book as object:", JSON.stringify(obj, null, 2));
 }
 
 // =============================================================================
-// 12. parseXmlToObject — direct XML to JS object
+// 12. Xml.parseToObject — direct XML to JS object
 // =============================================================================
 
-console.log("\n=== 12. parseXmlToObject ===");
+console.log("\n=== 12. Xml.parseToObject ===");
 
 const simpleXml = `<config>
   <host>localhost</host>
@@ -305,7 +283,7 @@ const simpleXml = `<config>
   <debug>true</debug>
 </config>`;
 
-const configObj = parseXmlToObject(simpleXml);
+const configObj = Xml.parseToObject(simpleXml);
 console.log("Config:", JSON.stringify(configObj, null, 2));
 
 // =============================================================================
@@ -314,7 +292,7 @@ console.log("Config:", JSON.stringify(configObj, null, 2));
 
 console.log("\n=== 13. SAX Parser ===");
 
-const sax = new SaxParser();
+const sax = new Xml.SaxParser();
 const saxEvents: string[] = [];
 
 sax.on("opentag", tag => {
@@ -344,7 +322,7 @@ console.log(`  ... (${saxEvents.length} total events)`);
 
 console.log("\n=== 14. SAX Error Handling ===");
 
-const saxErr = new SaxParser();
+const saxErr = new Xml.SaxParser();
 let parseError: Error | null = null;
 saxErr.on("error", err => {
   parseError = err;
@@ -363,22 +341,22 @@ if (parseError) {
 
 console.log("\n=== 15. Encoding Utilities ===");
 
-// xmlEncode: escape special chars in text content
-const encoded = xmlEncode('Hello <world> & "quotes"');
+// Xml.encode: escape special chars in text content
+const encoded = Xml.encode('Hello <world> & "quotes"');
 console.log("Encoded:", encoded);
 // "Hello &lt;world&gt; &amp; &quot;quotes&quot;"
 
-// xmlDecode: unescape back
-const decoded = xmlDecode("Hello &lt;world&gt; &amp; &quot;quotes&quot;");
+// Xml.decode: unescape back
+const decoded = Xml.decode("Hello &lt;world&gt; &amp; &quot;quotes&quot;");
 console.log("Decoded:", decoded);
 // "Hello <world> & "quotes""
 
-// xmlEncodeAttr: for attribute values
-const attrEncoded = xmlEncodeAttr('value with "quotes" & <tags>');
+// Xml.encodeAttr: for attribute values
+const attrEncoded = Xml.encodeAttr('value with "quotes" & <tags>');
 console.log("Attr encoded:", attrEncoded);
 
-// encodeCData: handle ]]> in CDATA
-const cdataEncoded = encodeCData("Data with ]]> inside");
+// Xml.encodeCData: handle ]]> in CDATA
+const cdataEncoded = Xml.encodeCData("Data with ]]> inside");
 console.log("CDATA encoded:", cdataEncoded);
 
 // =============================================================================
@@ -388,14 +366,14 @@ console.log("CDATA encoded:", cdataEncoded);
 console.log("\n=== 16. Name Validation ===");
 
 try {
-  validateXmlName("valid-name");
+  Xml.validateXmlName("valid-name");
   console.log("'valid-name' is valid");
 } catch {
   // won't reach here
 }
 
 try {
-  validateXmlName("123invalid");
+  Xml.validateXmlName("123invalid");
   console.log("'123invalid' is valid");
 } catch (err) {
   if (isXmlError(err)) {
@@ -407,8 +385,8 @@ try {
 // 17. Namespace support
 // =============================================================================
 
-const w17 = new XmlWriter();
-w17.openXml(StdDocAttributes);
+const w17 = new Xml.Writer();
+w17.openXml(Xml.StdDocAttributes);
 w17.openNode("worksheet", {
   xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
   "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -429,7 +407,7 @@ console.log("\n=== 18. Parse Options ===");
 
 // Strict parsing (default)
 try {
-  const strictDoc = parseXml("<root><child>text</child></root>");
+  const strictDoc = Xml.parse("<root><child>text</child></root>");
   console.log("Strict parse OK, root:", strictDoc.root.name);
 } catch (err) {
   if (isXmlParseError(err)) {
@@ -440,8 +418,8 @@ try {
 // With invalid char handling
 const xmlWithBadChars = "<root>text with \x01 control char</root>";
 try {
-  const tolerantDoc = parseXml(xmlWithBadChars, { invalidCharHandling: "replace" });
-  console.log("Tolerant parse OK:", textContent(tolerantDoc.root).length, "chars");
+  const tolerantDoc = Xml.parse(xmlWithBadChars, { invalidCharHandling: "replace" });
+  console.log("Tolerant parse OK:", Xml.textContent(tolerantDoc.root).length, "chars");
 } catch (err) {
   console.log("Even tolerant mode failed:", (err as Error).message);
 }
@@ -450,8 +428,8 @@ try {
 // 19. Building complex XML — OOXML-like structure
 // =============================================================================
 
-const w19 = new XmlWriter();
-w19.openXml(StdDocAttributes);
+const w19 = new Xml.Writer();
+w19.openXml(Xml.StdDocAttributes);
 w19.openNode("workbook", {
   xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 });
@@ -473,21 +451,21 @@ console.log("\n=== 19. OOXML-like Structure ===");
 console.log(w19.xml.substring(0, 300) + "...");
 
 // =============================================================================
-// 20. Round-trip: write → parse → query → extract
+// 20. Round-trip: write → parse → Xml.query → extract
 // =============================================================================
 
 console.log("\n=== 20. Round-Trip ===");
 
-const roundTrip = parseXml(w19.xml);
-const sheets = queryAll(roundTrip.root, "sheets/sheet");
+const roundTrip = Xml.parse(w19.xml);
+const sheets = Xml.queryAll(roundTrip.root, "sheets/sheet");
 console.log("Sheets found:", sheets.length);
 for (const sheet of sheets) {
-  console.log(`  Sheet: name="${attr(sheet, "name")}" id=${attr(sheet, "sheetId")}`);
+  console.log(`  Sheet: name="${Xml.attr(sheet, "name")}" id=${Xml.attr(sheet, "sheetId")}`);
 }
 
-const printArea = query(roundTrip.root, "definedNames/definedName[@name='_xlnm.Print_Area']");
+const printArea = Xml.query(roundTrip.root, "definedNames/definedName[@name='_xlnm.Print_Area']");
 if (printArea) {
-  console.log("Print area:", textContent(printArea));
+  console.log("Print area:", Xml.textContent(printArea));
 }
 
 console.log("\n=== XML Examples Complete ===");

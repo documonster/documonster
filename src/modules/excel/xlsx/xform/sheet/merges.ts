@@ -1,5 +1,6 @@
-import { Enums } from "@excel/enums";
-import { Range } from "@excel/range";
+import { Enums } from "@excel/core/enums";
+import type { RangeData } from "@excel/core/range";
+import { rangeCreate, rangeExpandToAddress, rangeRange, rangeTl } from "@excel/core/range";
 import { colCache } from "@excel/utils/col-cache";
 
 interface MergeData {
@@ -8,8 +9,8 @@ interface MergeData {
 }
 
 class Merges {
-  declare private merges: { [key: string]: Range };
-  declare private hash?: { [key: string]: Range };
+  declare private merges: { [key: string]: RangeData };
+  declare private hash?: { [key: string]: RangeData };
 
   constructor() {
     // optional mergeCells is array of ranges (like the xml)
@@ -19,21 +20,30 @@ class Merges {
   add(merge: MergeData): void {
     // merge is {address, master}
     if (this.merges[merge.master]) {
-      this.merges[merge.master].expandToAddress(merge.address);
+      rangeExpandToAddress(this.merges[merge.master], merge.address);
     } else {
       const range = `${merge.master}:${merge.address}`;
-      this.merges[merge.master] = new Range(range);
+      this.merges[merge.master] = rangeCreate(range);
     }
   }
 
   get mergeCells(): string[] {
-    return Object.values(this.merges).map((merge: Range) => merge.range);
+    return Object.values(this.merges).map((merge: RangeData) => rangeRange(merge));
   }
 
-  reconcile(mergeCells: string[], rows: any[]): void {
+  reconcile(
+    mergeCells: string[],
+    rows: { cells: ({ type: number; master?: string; address?: string } | undefined)[] }[]
+  ): void {
     // reconcile merge list with merge cells
     mergeCells.forEach((merge: string) => {
-      const dimensions: any = colCache.decode(merge);
+      const dimensions = colCache.decode(merge) as {
+        top: number;
+        bottom: number;
+        left: number;
+        right: number;
+        tl: string;
+      };
       for (let i = dimensions.top; i <= dimensions.bottom; i++) {
         const row = rows[i - 1];
         for (let j = dimensions.left; j <= dimensions.right; j++) {
@@ -55,7 +65,7 @@ class Merges {
   getMasterAddress(address: string): string | undefined {
     // if address has been merged, return its master's address. Assumes reconcile has been called
     const range = this.hash![address];
-    return range && range.tl;
+    return range && rangeTl(range);
   }
 }
 

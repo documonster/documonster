@@ -5,8 +5,6 @@
  * including floating tables, table look, cell spacing, and revisions.
  */
 
-import type { XmlSink } from "@xml/types";
-
 import type {
   Table,
   TableRow,
@@ -19,10 +17,11 @@ import type {
   TableCellMargins,
   TableLook,
   TableFloat
-} from "../types";
-import { renderBorder, renderParagraph } from "./paragraph-writer";
-import type { RenderHelpers } from "./render-context";
-import { renderShading } from "./run-writer";
+} from "@word/types";
+import { renderBorder, renderParagraph } from "@word/writer/paragraph-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
+import { renderShading } from "@word/writer/run-writer";
+import type { XmlSink } from "@xml/types";
 
 /** Render a table width element. */
 function renderTableWidth(xml: XmlSink, tagName: string, tw: TableWidth): void {

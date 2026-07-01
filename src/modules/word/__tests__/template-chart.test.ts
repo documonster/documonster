@@ -40,7 +40,7 @@ function makeParagraph(text: string): BodyContent {
 }
 
 function makeDoc(body: BodyContent[]): DocxDocument {
-  return { body } as unknown as DocxDocument;
+  return { body };
 }
 
 // =============================================================================

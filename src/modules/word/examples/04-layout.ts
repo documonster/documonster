@@ -18,17 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  pageBreak,
-  columnBreak,
-  pageNumberField,
-  cmToTwips,
-  inchesToTwips,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 import type { SectionProperties } from "../index";
 
 const outDir = path.resolve(
@@ -41,14 +31,14 @@ fs.mkdirSync(outDir, { recursive: true });
 // Helpers — common page sizes (twips). Word stores landscape by swapping
 // width/height AND setting orientation="landscape".
 // ---------------------------------------------------------------------------
-const A4_PORTRAIT = { width: cmToTwips(21), height: cmToTwips(29.7) };
+const A4_PORTRAIT = { width: Units.cmToTwips(21), height: Units.cmToTwips(29.7) };
 const A4_LANDSCAPE = {
-  width: cmToTwips(29.7),
-  height: cmToTwips(21),
+  width: Units.cmToTwips(29.7),
+  height: Units.cmToTwips(21),
   orientation: "landscape" as const
 };
-const LETTER = { width: inchesToTwips(8.5), height: inchesToTwips(11) };
-const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
+const LETTER = { width: Units.inchesToTwips(8.5), height: Units.inchesToTwips(11) };
+const A3 = { width: Units.cmToTwips(29.7), height: Units.cmToTwips(42) };
 
 // ---------------------------------------------------------------------------
 // Document 1: A4 portrait, mirror margins, gutter
@@ -67,17 +57,17 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
   const sect: SectionProperties = {
     pageSize: A4_PORTRAIT,
     margins: {
-      top: cmToTwips(2.5),
-      bottom: cmToTwips(2.5),
-      left: cmToTwips(3.0),
-      right: cmToTwips(2.0),
-      gutter: cmToTwips(1.0),
-      header: cmToTwips(1.25),
-      footer: cmToTwips(1.25)
+      top: Units.cmToTwips(2.5),
+      bottom: Units.cmToTwips(2.5),
+      left: Units.cmToTwips(3.0),
+      right: Units.cmToTwips(2.0),
+      gutter: Units.cmToTwips(1.0),
+      header: Units.cmToTwips(1.25),
+      footer: Units.cmToTwips(1.25)
     }
   };
   Document.setSectionProperties(doc, sect);
-  const buf = await toBuffer(Document.build(doc));
+  const buf = await Io.toBuffer(Document.build(doc));
   fs.writeFileSync(path.join(outDir, "04-layout-a4.docx"), buf);
   console.log(`  → 04-layout-a4.docx (${buf.length} bytes)`);
 }
@@ -100,10 +90,10 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
   Document.addSectionBreak(doc, {
     pageSize: LETTER,
     margins: {
-      top: inchesToTwips(1),
-      bottom: inchesToTwips(1),
-      left: inchesToTwips(1),
-      right: inchesToTwips(1)
+      top: Units.inchesToTwips(1),
+      bottom: Units.inchesToTwips(1),
+      left: Units.inchesToTwips(1),
+      right: Units.inchesToTwips(1)
     },
     breakType: "nextPage"
   });
@@ -118,7 +108,7 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
     );
   }
   // Force a break to the second column
-  Document.addParagraphElement(doc, paragraph([columnBreak()]));
+  Document.addParagraphElement(doc, Build.paragraph([Build.columnBreak()]));
   for (let i = 0; i < 3; i++) {
     Document.addParagraph(
       doc,
@@ -129,15 +119,15 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
   Document.addSectionBreak(doc, {
     pageSize: {
       ...LETTER,
-      width: inchesToTwips(11),
-      height: inchesToTwips(8.5),
+      width: Units.inchesToTwips(11),
+      height: Units.inchesToTwips(8.5),
       orientation: "landscape"
     },
     margins: {
-      top: inchesToTwips(1),
-      bottom: inchesToTwips(1),
-      left: inchesToTwips(1),
-      right: inchesToTwips(1)
+      top: Units.inchesToTwips(1),
+      bottom: Units.inchesToTwips(1),
+      left: Units.inchesToTwips(1),
+      right: Units.inchesToTwips(1)
     },
     breakType: "nextPage",
     columns: { count: 2, space: 720, equalWidth: true, separator: true }
@@ -155,24 +145,24 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
   Document.setSectionProperties(doc, {
     pageSize: A3,
     margins: {
-      top: cmToTwips(2),
-      bottom: cmToTwips(2),
-      left: cmToTwips(2),
-      right: cmToTwips(2)
+      top: Units.cmToTwips(2),
+      bottom: Units.cmToTwips(2),
+      left: Units.cmToTwips(2),
+      right: Units.cmToTwips(2)
     },
     columns: {
       equalWidth: false,
       space: 360,
       columns: [
-        { width: cmToTwips(8), space: 360 },
-        { width: cmToTwips(8), space: 360 },
-        { width: cmToTwips(8.7) }
+        { width: Units.cmToTwips(8), space: 360 },
+        { width: Units.cmToTwips(8), space: 360 },
+        { width: Units.cmToTwips(8.7) }
       ],
       separator: false
     }
   });
 
-  const buf = await toBuffer(Document.build(doc));
+  const buf = await Io.toBuffer(Document.build(doc));
   fs.writeFileSync(path.join(outDir, "04-layout-multi-section.docx"), buf);
   console.log(`  → 04-layout-multi-section.docx (${buf.length} bytes)`);
 }
@@ -189,7 +179,7 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
     doc,
     "This page has artistic borders, vertical-centered text, and Roman page numbers."
   );
-  Document.addParagraphElement(doc, paragraph([pageBreak()]));
+  Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
   Document.addParagraph(doc, "Second page — line numbers should appear on the left margin.");
   for (let i = 0; i < 30; i++) {
     Document.addParagraph(doc, `Numbered line ${i + 1}.`);
@@ -199,16 +189,16 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
   // a footer — it does NOT auto-emit the number. Without an explicit footer
   // containing a PAGE field, no page numbers appear in the document at all.
   Document.setFooter(doc, "default", {
-    children: [paragraph([pageNumberField()], { alignment: "center", style: "Footer" })]
+    children: [Build.paragraph([Build.pageNumberField()], { alignment: "center", style: "Footer" })]
   });
 
   Document.setSectionProperties(doc, {
     pageSize: A4_PORTRAIT,
     margins: {
-      top: cmToTwips(3),
-      bottom: cmToTwips(3),
-      left: cmToTwips(3),
-      right: cmToTwips(3)
+      top: Units.cmToTwips(3),
+      bottom: Units.cmToTwips(3),
+      left: Units.cmToTwips(3),
+      right: Units.cmToTwips(3)
     },
     pageBorders: {
       display: "allPages",
@@ -220,10 +210,10 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
     },
     verticalAlign: "top",
     pageNumbering: { start: 1, format: "lowerRoman" },
-    lineNumbers: { countBy: 1, start: 1, restart: "newPage", distance: cmToTwips(0.5) }
+    lineNumbers: { countBy: 1, start: 1, restart: "newPage", distance: Units.cmToTwips(0.5) }
   });
 
-  const buf = await toBuffer(Document.build(doc));
+  const buf = await Io.toBuffer(Document.build(doc));
   fs.writeFileSync(path.join(outDir, "04-layout-decorative.docx"), buf);
   console.log(`  → 04-layout-decorative.docx (${buf.length} bytes)`);
 }
@@ -243,7 +233,12 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
 
   Document.addSectionBreak(doc, {
     pageSize: A4_LANDSCAPE,
-    margins: { top: cmToTwips(2), bottom: cmToTwips(2), left: cmToTwips(2), right: cmToTwips(2) },
+    margins: {
+      top: Units.cmToTwips(2),
+      bottom: Units.cmToTwips(2),
+      left: Units.cmToTwips(2),
+      right: Units.cmToTwips(2)
+    },
     breakType: "nextPage",
     docGrid: { type: "linesAndChars", linePitch: 312, charSpace: 0 }
   });
@@ -255,21 +250,31 @@ const A3 = { width: cmToTwips(29.7), height: cmToTwips(42) };
   // the heading.
   Document.addParagraphElement(
     doc,
-    paragraph([text("Right-to-left section")], { style: "Heading1", bidi: true })
+    Build.paragraph([Build.text("Right-to-left section")], { style: "Heading1", bidi: true })
   );
   Document.addParagraphElement(
     doc,
-    paragraph([text("هذه فقرة في قسم RTL.  Latin words وكلمات عربية mixed.")], { bidi: true })
+    Build.paragraph([Build.text("هذه فقرة في قسم RTL.  Latin words وكلمات عربية mixed.")], {
+      bidi: true
+    })
   );
-  Document.addParagraphElement(doc, paragraph([text("النص الثاني في هذا القسم.")], { bidi: true }));
+  Document.addParagraphElement(
+    doc,
+    Build.paragraph([Build.text("النص الثاني في هذا القسم.")], { bidi: true })
+  );
 
   Document.setSectionProperties(doc, {
     pageSize: A4_PORTRAIT,
-    margins: { top: cmToTwips(2), bottom: cmToTwips(2), left: cmToTwips(2), right: cmToTwips(2) },
+    margins: {
+      top: Units.cmToTwips(2),
+      bottom: Units.cmToTwips(2),
+      left: Units.cmToTwips(2),
+      right: Units.cmToTwips(2)
+    },
     bidi: true
   });
 
-  const buf = await toBuffer(Document.build(doc));
+  const buf = await Io.toBuffer(Document.build(doc));
   fs.writeFileSync(path.join(outDir, "04-layout-landscape-grid-rtl.docx"), buf);
   console.log(`  → 04-layout-landscape-grid-rtl.docx (${buf.length} bytes)`);
 }

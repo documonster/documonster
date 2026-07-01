@@ -5,11 +5,11 @@
  * are safe. Previously this state lived in a module-level `_session` object.
  */
 
+import { STRICT_TO_TRANSITIONAL_REL } from "@word/constants";
+import type { WordSecurityPolicy } from "@word/security/policy";
+import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
+import type { FormField, RunProperties } from "@word/types";
 import { parseXml } from "@xml/dom";
-
-import { STRICT_TO_TRANSITIONAL_REL } from "../constants";
-import { DEFAULT_SECURITY_POLICY, type WordSecurityPolicy } from "../security/policy";
-import type { FormField, RunProperties } from "../types";
 
 /**
  * A parsed OPC relationship entry (from a .rels part).

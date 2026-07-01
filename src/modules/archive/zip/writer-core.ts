@@ -1,4 +1,5 @@
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ArchiveError } from "@archive/core/errors";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildEndOfCentralDirectory,
@@ -20,8 +21,7 @@ import {
   VERSION_NEEDED,
   VERSION_ZIP64
 } from "@archive/zip-spec/zip-records";
-
-import type { ZipCentralDirEntry } from "./writable-file";
+import type { ZipCentralDirEntry } from "@archive/zip/writable-file";
 
 /**
  * Input type for building Central Directory entries.
@@ -112,12 +112,100 @@ function zip64ExtraLength(
 }
 
 function getEntryShape(entries: AnyCentralDirectoryEntry[]): "input" | "central" | "processed" {
-  const first = entries[0] as any;
+  const first = entries[0] as
+    | Partial<ZipCentralDirectoryEntryInput & ZipCentralDirectoryProcessedEntry>
+    | undefined;
   return first?.fileName !== undefined
     ? "input"
     : first?.compressedData !== undefined
       ? "processed"
       : "central";
+}
+
+/**
+ * Fields a central-directory entry exposes after being normalized across the
+ * three possible input shapes (`input`, `central`, `processed`).
+ */
+interface NormalizedCentralDirEntry {
+  fileName: Uint8Array;
+  extraField: Uint8Array;
+  comment?: Uint8Array;
+  flags: number;
+  crc32: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  compressionMethod: number;
+  dosTime: number;
+  dosDate: number;
+  localHeaderOffset: number;
+  zip64: boolean | undefined;
+  externalAttributes: number;
+  versionMadeBy?: number;
+}
+
+/**
+ * Collapse the three structurally-distinct entry shapes into a single uniform
+ * view so callers don't need shape-specific field access.
+ */
+function normalizeCentralDirEntry(
+  entry: AnyCentralDirectoryEntry,
+  shape: "input" | "central" | "processed"
+): NormalizedCentralDirEntry {
+  if (shape === "processed") {
+    const e = entry as ZipCentralDirectoryProcessedEntry;
+    return {
+      fileName: e.name,
+      extraField: e.extraField,
+      comment: e.comment,
+      flags: e.flags,
+      crc32: e.crc,
+      compressedSize: e.compressedData.length,
+      uncompressedSize: e.uncompressedSize,
+      compressionMethod: e.compressionMethod,
+      dosTime: e.modTime,
+      dosDate: e.modDate,
+      localHeaderOffset: e.offset,
+      zip64: undefined,
+      externalAttributes: e.externalAttributes,
+      versionMadeBy: e.versionMadeBy
+    };
+  }
+  if (shape === "input") {
+    const e = entry as ZipCentralDirectoryEntryInput;
+    return {
+      fileName: e.fileName,
+      extraField: e.extraField,
+      comment: e.comment,
+      flags: e.flags,
+      crc32: e.crc32,
+      compressedSize: e.compressedSize,
+      uncompressedSize: e.uncompressedSize,
+      compressionMethod: e.compressionMethod,
+      dosTime: e.dosTime,
+      dosDate: e.dosDate,
+      localHeaderOffset: e.localHeaderOffset,
+      zip64: e.zip64,
+      externalAttributes: e.externalAttributes,
+      versionMadeBy: e.versionMadeBy
+    };
+  }
+  const e = entry as ZipCentralDirEntry;
+  return {
+    fileName: e.name,
+    extraField: e.extraField,
+    comment: e.comment,
+    flags: e.flags,
+    crc32: e.crc,
+    compressedSize: e.compressedSize,
+    uncompressedSize: e.uncompressedSize,
+    compressionMethod: e.compressionMethod,
+    dosTime: e.dosTime,
+    dosDate: e.dosDate,
+    localHeaderOffset: e.offset,
+    zip64: e.zip64,
+    externalAttributes: e.externalAttributes,
+    versionMadeBy: e.versionMadeBy
+  };
 }
 
 export function measureCentralDirectoryAndEocd(
@@ -134,15 +222,14 @@ export function measureCentralDirectoryAndEocd(
 
   let centralDirSize = 0;
   for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i] as any;
-    const fileName: Uint8Array = shape === "input" ? entry.fileName : entry.name;
-    const extraFieldBase: Uint8Array = entry.extraField;
-    const comment: Uint8Array = entry.comment;
-    const compressedSize: number =
-      shape === "processed" ? entry.compressedData.length : entry.compressedSize;
-    const uncompressedSize: number = entry.uncompressedSize;
-    const localHeaderOffset: number = shape === "input" ? entry.localHeaderOffset : entry.offset;
-    const zip64: boolean | undefined = shape === "processed" ? undefined : entry.zip64;
+    const entry = normalizeCentralDirEntry(entries[i]!, shape);
+    const fileName = entry.fileName;
+    const extraFieldBase = entry.extraField;
+    const comment = entry.comment;
+    const compressedSize = entry.compressedSize;
+    const uncompressedSize = entry.uncompressedSize;
+    const localHeaderOffset = entry.localHeaderOffset;
+    const zip64 = entry.zip64;
 
     const needsZip64Entry =
       forceZip64 ||
@@ -170,7 +257,7 @@ export function measureCentralDirectoryAndEocd(
   const usedZip64 = forceZip64 || needsZip64EOCDFromArchive || centralDirSize > UINT32_MAX;
 
   if (forbidZip64 && usedZip64) {
-    throw new Error("ZIP64 is required but zip64=false");
+    throw new ArchiveError("ZIP64 is required but zip64=false");
   }
 
   const trailerSize = usedZip64
@@ -340,7 +427,7 @@ export function buildCentralDirectoryAndEocd(
 
   const usedZip64 = forceZip64 || needsZip64EOCDFromArchive || centralDirSize > UINT32_MAX;
   if (forbidZip64 && usedZip64) {
-    throw new Error("ZIP64 is required but zip64=false");
+    throw new ArchiveError("ZIP64 is required but zip64=false");
   }
 
   if (usedZip64) {
@@ -407,23 +494,22 @@ export function writeCentralDirectoryAndEocdInto(
   const view = new DataView(options.out.buffer, options.out.byteOffset, options.out.byteLength);
 
   for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i] as any;
+    const entry = normalizeCentralDirEntry(entries[i]!, shape);
 
-    const fileName: Uint8Array = shape === "input" ? entry.fileName : entry.name;
-    const extraFieldBase: Uint8Array = entry.extraField;
-    const comment: Uint8Array = entry.comment;
-    const flags: number = entry.flags;
-    const crc32: number = shape === "input" ? entry.crc32 : entry.crc;
-    const compressedSize: number =
-      shape === "processed" ? entry.compressedData.length : entry.compressedSize;
-    const uncompressedSize: number = entry.uncompressedSize;
-    const compressionMethod: number = entry.compressionMethod;
-    const dosTime: number = shape === "processed" ? entry.modTime : entry.dosTime;
-    const dosDate: number = shape === "processed" ? entry.modDate : entry.dosDate;
-    const localHeaderOffset: number = shape === "input" ? entry.localHeaderOffset : entry.offset;
-    const zip64: boolean | undefined = shape === "processed" ? undefined : entry.zip64;
-    const externalAttributes: number = entry.externalAttributes;
-    const versionMadeBy: number | undefined = entry.versionMadeBy;
+    const fileName = entry.fileName;
+    const extraFieldBase = entry.extraField;
+    const comment = entry.comment;
+    const flags = entry.flags;
+    const crc32 = entry.crc32;
+    const compressedSize = entry.compressedSize;
+    const uncompressedSize = entry.uncompressedSize;
+    const compressionMethod = entry.compressionMethod;
+    const dosTime = entry.dosTime;
+    const dosDate = entry.dosDate;
+    const localHeaderOffset = entry.localHeaderOffset;
+    const zip64 = entry.zip64;
+    const externalAttributes = entry.externalAttributes;
+    const versionMadeBy = entry.versionMadeBy;
 
     const needsZip64Entry =
       forceZip64 ||

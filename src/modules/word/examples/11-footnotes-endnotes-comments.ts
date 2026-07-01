@@ -17,18 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  italic,
-  commentRangeStart,
-  commentRangeEnd,
-  commentReference,
-  toBuffer
-} from "../index";
+import { Document, Build, Io } from "../index";
 import type { Run } from "../index";
 
 const outDir = path.resolve(
@@ -52,30 +41,35 @@ const fn1 = Document.addFootnote(doc, "First footnote — citation goes here.");
 
 // Rich footnote (multiple paragraphs)
 const fn2 = Document.addFootnote(doc, [
-  paragraph([italic("First paragraph "), text("of a richly formatted footnote.")]),
-  paragraph([
-    text("Second paragraph (with "),
-    bold("bold"),
-    text(" and an URL: "),
-    text("https://example.com", { color: "0563C1", underline: "single" }),
-    text(").")
+  Build.paragraph([
+    Build.italic("First paragraph "),
+    Build.text("of a richly formatted footnote.")
+  ]),
+  Build.paragraph([
+    Build.text("Second paragraph (with "),
+    Build.bold("bold"),
+    Build.text(" and an URL: "),
+    Build.text("https://example.com", { color: "0563C1", underline: "single" }),
+    Build.text(").")
   ])
 ]);
 
 // Reference the footnotes inline
-const footnoteRef = (id: number): Run => ({
-  properties: { vertAlign: "superscript" },
-  content: [{ type: "footnoteRef", id }]
-});
+function footnoteRef(id: number): Run {
+  return {
+    properties: { vertAlign: "superscript" },
+    content: [{ type: "footnoteRef", id }]
+  };
+}
 
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("This sentence has a footnote"),
+  Build.paragraph([
+    Build.text("This sentence has a footnote"),
     footnoteRef(fn1),
-    text(" attached, and another"),
+    Build.text(" attached, and another"),
     footnoteRef(fn2),
-    text(" with rich content.")
+    Build.text(" with rich content.")
   ])
 );
 
@@ -86,22 +80,27 @@ Document.addHeading(doc, "2. Endnotes", 2);
 
 const en1 = Document.addEndnote(doc, "First endnote — appears at the end of the document.");
 const en2 = Document.addEndnote(doc, [
-  paragraph([text("A multi-paragraph endnote. "), text("Endnotes typically collect citations.")])
+  Build.paragraph([
+    Build.text("A multi-paragraph endnote. "),
+    Build.text("Endnotes typically collect citations.")
+  ])
 ]);
 
-const endnoteRef = (id: number): Run => ({
-  properties: { vertAlign: "superscript" },
-  content: [{ type: "endnoteRef", id }]
-});
+function endnoteRef(id: number): Run {
+  return {
+    properties: { vertAlign: "superscript" },
+    content: [{ type: "endnoteRef", id }]
+  };
+}
 
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("This sentence references endnote one"),
+  Build.paragraph([
+    Build.text("This sentence references endnote one"),
     endnoteRef(en1),
-    text(", and another endnote"),
+    Build.text(", and another endnote"),
     endnoteRef(en2),
-    text(" follows here.")
+    Build.text(" follows here.")
   ])
 );
 
@@ -127,20 +126,20 @@ const c3 = Document.addComment(doc, "Alice", "Done.", {
 // Body content with overlapping comment ranges
 Document.addParagraphElement(
   doc,
-  paragraph([
-    commentRangeStart(c1),
-    text("This entire sentence is the target of comment 1."),
-    commentRangeEnd(c1),
-    commentReference(c1),
-    text(" Following normal text. "),
-    commentRangeStart(c2),
-    commentRangeStart(c3),
-    text("Both c2 and c3 cover this fragment."),
-    commentRangeEnd(c2),
-    commentRangeEnd(c3),
-    commentReference(c2),
-    commentReference(c3),
-    text(" End of paragraph.")
+  Build.paragraph([
+    Build.commentRangeStart(c1),
+    Build.text("This entire sentence is the target of comment 1."),
+    Build.commentRangeEnd(c1),
+    Build.commentReference(c1),
+    Build.text(" Following normal text. "),
+    Build.commentRangeStart(c2),
+    Build.commentRangeStart(c3),
+    Build.text("Both c2 and c3 cover this fragment."),
+    Build.commentRangeEnd(c2),
+    Build.commentRangeEnd(c3),
+    Build.commentReference(c2),
+    Build.commentReference(c3),
+    Build.text(" End of paragraph.")
   ])
 );
 
@@ -152,10 +151,10 @@ const pointComment = Document.addComment(
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Point-style comment placed mid-sentence "),
-    commentReference(pointComment),
-    text(" — the sticky note has no underlined range.")
+  Build.paragraph([
+    Build.text("Point-style comment placed mid-sentence "),
+    Build.commentReference(pointComment),
+    Build.text(" — the sticky note has no underlined range.")
   ])
 );
 
@@ -163,11 +162,11 @@ Document.addParagraphElement(
 const emptyComment = Document.addComment(doc, "Carol", "");
 Document.addParagraphElement(
   doc,
-  paragraph([
-    commentRangeStart(emptyComment),
-    text("Even empty-bodied comments produce a valid review marker."),
-    commentRangeEnd(emptyComment),
-    commentReference(emptyComment)
+  Build.paragraph([
+    Build.commentRangeStart(emptyComment),
+    Build.text("Even empty-bodied comments produce a valid review marker."),
+    Build.commentRangeEnd(emptyComment),
+    Build.commentReference(emptyComment)
   ])
 );
 
@@ -185,15 +184,15 @@ Document.addTableElement(doc, {
   rows: [
     {
       cells: [
-        { content: [textParagraph("Source")] },
+        { content: [Build.textParagraph("Source")] },
         {
           content: [
-            paragraph([
-              text("Cited multiple times: "),
+            Build.paragraph([
+              Build.text("Cited multiple times: "),
               footnoteRef(fnA),
-              text(", "),
+              Build.text(", "),
               footnoteRef(fnB),
-              text(", "),
+              Build.text(", "),
               footnoteRef(fnC)
             ])
           ]
@@ -213,15 +212,17 @@ for (let i = 1; i <= 100; i++) {
 }
 Document.addParagraphElement(
   doc,
-  paragraph([text(`There are ${stressIds.length} footnotes attached to this paragraph.`)])
+  Build.paragraph([
+    Build.text(`There are ${stressIds.length} footnotes attached to this paragraph.`)
+  ])
 );
 // Reference every 10th one inline so the file actually links them
 const sampledRefs = stressIds.filter((_, idx) => idx % 10 === 0).map(footnoteRef);
 Document.addParagraphElement(
   doc,
-  paragraph([text("Sampled refs:"), ...sampledRefs.flatMap(r => [text(" "), r])])
+  Build.paragraph([Build.text("Sampled refs:"), ...sampledRefs.flatMap(r => [Build.text(" "), r])])
 );
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "11-footnotes-endnotes-comments.docx"), buf);
 console.log(`  → 11-footnotes-endnotes-comments.docx (${buf.length} bytes)`);

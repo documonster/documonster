@@ -19,26 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  bold,
-  insertedRun,
-  deletedRun,
-  movedFromRun,
-  movedToRun,
-  moveFromRangeStart,
-  moveFromRangeEnd,
-  moveToRangeStart,
-  moveToRangeEnd,
-  acceptAllRevisions,
-  rejectAllRevisions,
-  listRevisions,
-  acceptRevision,
-  rejectRevision,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Query } from "../index";
 import type { RevisionInfo } from "../index";
 
 const outDir = path.resolve(
@@ -48,7 +29,9 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 const baseDate = "2026-05-01T09:00:00Z";
-const rev = (id: number, author = "Alice"): RevisionInfo => ({ id, author, date: baseDate });
+function rev(id: number, author = "Alice"): RevisionInfo {
+  return { id, author, date: baseDate };
+}
 
 const doc = Document.create();
 Document.useDefaultStyles(doc);
@@ -60,11 +43,11 @@ Document.addHeading(doc, "Track Changes Demo", 1);
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("The quick "),
-    deletedRun(text("brown "), rev(1, "Alice")),
-    insertedRun(text("red "), rev(2, "Bob")),
-    text("fox jumps over the lazy dog.")
+  Build.paragraph([
+    Build.text("The quick "),
+    Build.deletedRun(Build.text("brown "), rev(1, "Alice")),
+    Build.insertedRun(Build.text("red "), rev(2, "Bob")),
+    Build.text("fox jumps over the lazy dog.")
   ])
 );
 
@@ -73,10 +56,10 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Original sentence kept. "),
-    insertedRun(text("Brand-new sentence inserted by Bob. "), rev(3, "Bob")),
-    text("Second original sentence kept.")
+  Build.paragraph([
+    Build.text("Original sentence kept. "),
+    Build.insertedRun(Build.text("Brand-new sentence inserted by Bob. "), rev(3, "Bob")),
+    Build.text("Second original sentence kept.")
   ])
 );
 
@@ -85,20 +68,23 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    moveFromRangeStart(10, "Carol", { date: baseDate, name: "swap-paragraphs" }),
-    movedFromRun(text("This sentence has been moved away from here. "), rev(10, "Carol")),
-    moveFromRangeEnd(10),
-    text("(remaining text stays put.)")
+  Build.paragraph([
+    Build.moveFromRangeStart(10, "Carol", { date: baseDate, name: "swap-paragraphs" }),
+    Build.movedFromRun(
+      Build.text("This sentence has been moved away from here. "),
+      rev(10, "Carol")
+    ),
+    Build.moveFromRangeEnd(10),
+    Build.text("(remaining text stays put.)")
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    moveToRangeStart(10, "Carol", { date: baseDate, name: "swap-paragraphs" }),
-    movedToRun(text("This sentence has been moved away from here. "), rev(10, "Carol")),
-    moveToRangeEnd(10),
-    text("It now belongs with the second paragraph.")
+  Build.paragraph([
+    Build.moveToRangeStart(10, "Carol", { date: baseDate, name: "swap-paragraphs" }),
+    Build.movedToRun(Build.text("This sentence has been moved away from here. "), rev(10, "Carol")),
+    Build.moveToRangeEnd(10),
+    Build.text("It now belongs with the second paragraph.")
   ])
 );
 
@@ -110,31 +96,31 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Edge case: "),
-    insertedRun(text("inserted then "), rev(20, "Dave")),
-    deletedRun(text("deleted "), rev(21, "Dave")),
-    bold("(both marks visible in pending file)")
+  Build.paragraph([
+    Build.text("Edge case: "),
+    Build.insertedRun(Build.text("inserted then "), rev(20, "Dave")),
+    Build.deletedRun(Build.text("deleted "), rev(21, "Dave")),
+    Build.bold("(both marks visible in pending file)")
   ])
 );
 
 const built = Document.build(doc);
 
 // Pending — write as-is
-const pending = await toBuffer(built);
+const pending = await Io.toBuffer(built);
 fs.writeFileSync(path.join(outDir, "15-revisions-pending.docx"), pending);
 console.log(`  → 15-revisions-pending.docx (${pending.length} bytes)`);
 
 // List the revisions (proves the API can introspect them)
-const revisions = listRevisions(built);
+const revisions = Query.listRevisions(built);
 console.log(`  detected ${revisions.length} revisions`);
 
 // Selectively accept & reject specific IDs
 {
   const cloned = JSON.parse(JSON.stringify(built));
-  acceptRevision(cloned, 2); // accept the "red" insertion
-  rejectRevision(cloned, 1); // keep the original "brown"
-  const buf = await toBuffer(cloned);
+  Query.acceptRevision(cloned, 2); // accept the "red" insertion
+  Query.rejectRevision(cloned, 1); // keep the original "brown"
+  const buf = await Io.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-partial.docx"), buf);
   console.log(`  → 15-revisions-partial.docx (${buf.length} bytes)`);
 }
@@ -142,8 +128,8 @@ console.log(`  detected ${revisions.length} revisions`);
 // Accept all
 {
   const cloned = JSON.parse(JSON.stringify(built));
-  acceptAllRevisions(cloned);
-  const buf = await toBuffer(cloned);
+  Query.acceptAllRevisions(cloned);
+  const buf = await Io.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-accepted.docx"), buf);
   console.log(`  → 15-revisions-accepted.docx (${buf.length} bytes)`);
 }
@@ -151,8 +137,8 @@ console.log(`  detected ${revisions.length} revisions`);
 // Reject all
 {
   const cloned = JSON.parse(JSON.stringify(built));
-  rejectAllRevisions(cloned);
-  const buf = await toBuffer(cloned);
+  Query.rejectAllRevisions(cloned);
+  const buf = await Io.toBuffer(cloned);
   fs.writeFileSync(path.join(outDir, "15-revisions-rejected.docx"), buf);
   console.log(`  → 15-revisions-rejected.docx (${buf.length} bytes)`);
 }

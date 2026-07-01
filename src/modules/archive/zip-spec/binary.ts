@@ -3,7 +3,7 @@
  * Shared by ZIP parsers.
  */
 
-import { decodeCp437 } from "@archive/shared/text";
+import { decodeCp437 } from "@archive/core/text";
 import { uint8ArrayToString as decodeUtf8 } from "@utils/binary";
 
 export function writeUint32LE(value: number): Uint8Array {

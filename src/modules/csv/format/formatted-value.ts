@@ -30,7 +30,9 @@ export interface FormattedValue {
  */
 export function isFormattedValue(value: unknown): value is FormattedValue {
   return (
-    value !== null && typeof value === "object" && (value as any)[FORMATTED_VALUE_SYMBOL] === true
+    value !== null &&
+    typeof value === "object" &&
+    (value as Record<typeof FORMATTED_VALUE_SYMBOL, unknown>)[FORMATTED_VALUE_SYMBOL] === true
   );
 }
 
@@ -45,7 +47,7 @@ export function isFormattedValue(value: unknown): value is FormattedValue {
  *
  * @example
  * ```ts
- * import { quoted } from '@cj-tech-master/excelts';
+ * import { quoted } from 'documonster';
  *
  * formatCsv(data, {
  *   transform: {
@@ -77,7 +79,7 @@ export function quoted(value: string): FormattedValue {
  *
  * @example
  * ```ts
- * import { unquoted } from '@cj-tech-master/excelts';
+ * import { unquoted } from 'documonster';
  *
  * formatCsv(data, {
  *   transform: {

@@ -1,15 +1,17 @@
-import { XmlParseError } from "@excel/errors";
+import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { FilterColumnXform } from "@excel/xlsx/xform/table/filter-column-xform";
+import type { FilterColumnModel } from "@excel/xlsx/xform/table/filter-column-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface AutoFilterModel {
   autoFilterRef: string;
-  columns: any[];
+  columns: FilterColumnModel[];
 }
 
 class AutoFilterXform extends BaseXform<AutoFilterModel> {
   declare public map: { [key: string]: FilterColumnXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -24,13 +26,13 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     return "autoFilter";
   }
 
-  prepare(model: any): void {
-    model.columns.forEach((column: any, index: number) => {
+  prepare(model: AutoFilterModel): void {
+    model.columns.forEach((column, index) => {
       this.map.filterColumn.prepare(column, { index });
     });
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: AutoFilterModel): void {
     xmlStream.openNode(this.tag, {
       ref: model.autoFilterRef
     });
@@ -45,7 +47,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     // emitting an empty `<filterColumn hiddenButton="1"/>` for
     // every such column makes Excel reject the table with
     // "Removed Records: Table from /xl/tables/tableN.xml".
-    model.columns.forEach((column: any) => {
+    model.columns.forEach(column => {
       if (
         column?.customFilters !== undefined ||
         column?.filters !== undefined ||
@@ -59,7 +61,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -78,7 +80,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
           this.parseOpen(node);
           return true;
         }
-        throw new XmlParseError(
+        throw new XlsxParseError(
           "autoFilter",
           `Unexpected xml node in parseOpen: ${JSON.stringify(node)}`
         );
@@ -103,7 +105,7 @@ class AutoFilterXform extends BaseXform<AutoFilterModel> {
       case this.tag:
         return false;
       default:
-        throw new XmlParseError("autoFilter", `Unexpected xml node in parseClose: ${name}`);
+        throw new XlsxParseError("autoFilter", `Unexpected xml node in parseClose: ${name}`);
     }
   }
 }

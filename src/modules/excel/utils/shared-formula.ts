@@ -5,8 +5,9 @@ const replacementCandidateRx = /(([a-z_\-0-9]*)!)?([a-z0-9_$]{2,})([(])?/gi;
 const CRrx = /^([$])?([a-z]+)([$])?([1-9][0-9]*)$/i;
 
 function slideFormula(formula: string, fromCell: string, toCell: string): string {
-  const offset = colCache.decode(fromCell);
-  const to = colCache.decode(toCell);
+  // Single-cell refs decode to an address carrying col/row.
+  const offset = colCache.decode(fromCell) as { col: number; row: number };
+  const to = colCache.decode(toCell) as { col: number; row: number };
   return formula.replace(
     replacementCandidateRx,
     (
@@ -32,10 +33,10 @@ function slideFormula(formula: string, fromCell: string, toCell: string): string
         let col = colCache.l2n(colStr);
         let row = parseInt(rowStr, 10);
         if (!colDollar) {
-          col += (to as any).col - (offset as any).col;
+          col += to.col - offset.col;
         }
         if (!rowDollar) {
-          row += (to as any).row - (offset as any).row;
+          row += to.row - offset.row;
         }
         const res = (sheet ?? "") + (colDollar ?? "") + colCache.n2l(col) + (rowDollar ?? "") + row;
         return res;

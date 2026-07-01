@@ -21,21 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  cell,
-  row,
-  table,
-  simpleTable,
-  border,
-  gridBorders,
-  cmToTwips,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 import type { TableCell, TableRow } from "../index";
 
 const outDir = path.resolve(
@@ -67,13 +53,14 @@ Document.addTable(
 // 2. Custom column widths in twips, header shading, striped body
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "2. Striped table with custom widths", 2);
-const headerCell = (label: string): TableCell =>
-  cell([textParagraph(label, { run: { bold: true, color: "FFFFFF" } })], {
+function headerCell(label: string): TableCell {
+  return Build.cell([Build.textParagraph(label, { run: { bold: true, color: "FFFFFF" } })], {
     shading: { fill: "1F4E79", pattern: "clear" },
     verticalAlign: "center"
   });
+}
 const stripedRows: TableRow[] = [
-  row(
+  Build.row(
     [headerCell("Region"), headerCell("Q1"), headerCell("Q2"), headerCell("Q3"), headerCell("Q4")],
     {
       tableHeader: true
@@ -88,9 +75,9 @@ for (const [i, r] of [
   ["West", "75", "82", "95", "110"]
 ].entries()) {
   stripedRows.push(
-    row(
+    Build.row(
       r.map(v =>
-        cell(v, {
+        Build.cell(v, {
           shading: { fill: stripeFills[i % 2], pattern: "clear" },
           verticalAlign: "center"
         })
@@ -100,11 +87,11 @@ for (const [i, r] of [
 }
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     stripedRows,
     {
       width: { value: 5000, type: "pct" },
-      borders: gridBorders(4, "BFBFBF"),
+      borders: Build.gridBorders(4, "BFBFBF"),
       cellMargins: {
         top: { value: 80, type: "dxa" },
         bottom: { value: 80, type: "dxa" },
@@ -112,7 +99,13 @@ Document.addTableElement(
         right: { value: 100, type: "dxa" }
       }
     },
-    [cmToTwips(4), cmToTwips(2.5), cmToTwips(2.5), cmToTwips(2.5), cmToTwips(2.5)]
+    [
+      Units.cmToTwips(4),
+      Units.cmToTwips(2.5),
+      Units.cmToTwips(2.5),
+      Units.cmToTwips(2.5),
+      Units.cmToTwips(2.5)
+    ]
   )
 );
 
@@ -122,28 +115,41 @@ Document.addTableElement(
 Document.addHeading(doc, "3. Mixed borders / borderless", 2);
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row([
-        cell("thick top", {
-          borders: { top: border("single", 24, "C00000"), bottom: border("single", 4, "auto") }
+      Build.row([
+        Build.cell("thick top", {
+          borders: {
+            top: Build.border("single", 24, "C00000"),
+            bottom: Build.border("single", 4, "auto")
+          }
         }),
-        cell("dashed", {
-          borders: { top: border("dashed", 8, "0070C0"), bottom: border("dashed", 8, "0070C0") }
+        Build.cell("dashed", {
+          borders: {
+            top: Build.border("dashed", 8, "0070C0"),
+            bottom: Build.border("dashed", 8, "0070C0")
+          }
         }),
-        cell("double", {
-          borders: { top: border("double", 6, "70AD47"), bottom: border("double", 6, "70AD47") }
+        Build.cell("double", {
+          borders: {
+            top: Build.border("double", 6, "70AD47"),
+            bottom: Build.border("double", 6, "70AD47")
+          }
         })
       ]),
-      row([cell("none", { borders: { top: border("nil") } }), cell("none"), cell("none")])
+      Build.row([
+        Build.cell("none", { borders: { top: Build.border("nil") } }),
+        Build.cell("none"),
+        Build.cell("none")
+      ])
     ],
     {
       width: { value: 5000, type: "pct" },
       borders: {
-        top: border("nil"),
-        bottom: border("nil"),
-        left: border("nil"),
-        right: border("nil")
+        top: Build.border("nil"),
+        bottom: Build.border("nil"),
+        left: Build.border("nil"),
+        right: Build.border("nil")
       }
     }
   )
@@ -155,13 +161,13 @@ Document.addTableElement(
 Document.addHeading(doc, "4. Horizontal merge (gridSpan)", 2);
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row([cell("Header spanning all 3 columns", { gridSpan: 3 })]),
-      row([cell("A1"), cell("B1"), cell("C1")]),
-      row([cell("A2 + B2 merged", { gridSpan: 2 }), cell("C2")])
+      Build.row([Build.cell("Header spanning all 3 columns", { gridSpan: 3 })]),
+      Build.row([Build.cell("A1"), Build.cell("B1"), Build.cell("C1")]),
+      Build.row([Build.cell("A2 + B2 merged", { gridSpan: 2 }), Build.cell("C2")])
     ],
-    { width: { value: 5000, type: "pct" }, borders: gridBorders() }
+    { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() }
   )
 );
 
@@ -171,23 +177,35 @@ Document.addTableElement(
 Document.addHeading(doc, "5. Vertical merge (vMerge)", 2);
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row([
-        cell("Group A", { verticalMerge: "restart", verticalAlign: "center" }),
-        cell("Item A1"),
-        cell("100")
+      Build.row([
+        Build.cell("Group A", { verticalMerge: "restart", verticalAlign: "center" }),
+        Build.cell("Item A1"),
+        Build.cell("100")
       ]),
-      row([cell("", { verticalMerge: "continue" }), cell("Item A2"), cell("120")]),
-      row([cell("", { verticalMerge: "continue" }), cell("Item A3"), cell("140")]),
-      row([
-        cell("Group B", { verticalMerge: "restart", verticalAlign: "center" }),
-        cell("Item B1"),
-        cell("50")
+      Build.row([
+        Build.cell("", { verticalMerge: "continue" }),
+        Build.cell("Item A2"),
+        Build.cell("120")
       ]),
-      row([cell("", { verticalMerge: "continue" }), cell("Item B2"), cell("60")])
+      Build.row([
+        Build.cell("", { verticalMerge: "continue" }),
+        Build.cell("Item A3"),
+        Build.cell("140")
+      ]),
+      Build.row([
+        Build.cell("Group B", { verticalMerge: "restart", verticalAlign: "center" }),
+        Build.cell("Item B1"),
+        Build.cell("50")
+      ]),
+      Build.row([
+        Build.cell("", { verticalMerge: "continue" }),
+        Build.cell("Item B2"),
+        Build.cell("60")
+      ])
     ],
-    { width: { value: 5000, type: "pct" }, borders: gridBorders() }
+    { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() }
   )
 );
 
@@ -195,25 +213,31 @@ Document.addTableElement(
 // 6. Nested table inside a cell (and a cell with multiple paragraphs)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "6. Nested table & multi-paragraph cell", 2);
-const nested = table(
-  [row([cell("inner-1A"), cell("inner-1B")]), row([cell("inner-2A"), cell("inner-2B")])],
-  { width: { value: 5000, type: "pct" }, borders: gridBorders(2, "808080") }
+const nested = Build.table(
+  [
+    Build.row([Build.cell("inner-1A"), Build.cell("inner-1B")]),
+    Build.row([Build.cell("inner-2A"), Build.cell("inner-2B")])
+  ],
+  { width: { value: 5000, type: "pct" }, borders: Build.gridBorders(2, "808080") }
 );
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row([
-        cell("outer-1"),
-        cell([
-          textParagraph("Cell with multiple paragraphs:"),
-          paragraph([bold("First "), text("then second.")]),
-          textParagraph("…and a third one.")
+      Build.row([
+        Build.cell("outer-1"),
+        Build.cell([
+          Build.textParagraph("Cell with multiple paragraphs:"),
+          Build.paragraph([Build.bold("First "), Build.text("then second.")]),
+          Build.textParagraph("…and a third one.")
         ])
       ]),
-      row([cell("outer-2"), cell([textParagraph("Nested below ↓"), nested])])
+      Build.row([
+        Build.cell("outer-2"),
+        Build.cell([Build.textParagraph("Nested below ↓"), nested])
+      ])
     ],
-    { width: { value: 5000, type: "pct" }, borders: gridBorders() }
+    { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() }
   )
 );
 
@@ -223,20 +247,20 @@ Document.addTableElement(
 Document.addHeading(doc, "7. Vertical alignment & text direction", 2);
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row(
+      Build.row(
         [
-          cell("top", { verticalAlign: "top" }),
-          cell("center", { verticalAlign: "center" }),
-          cell("bottom", { verticalAlign: "bottom" }),
-          cell("rotated\nleft→top", { textDirection: "btLr", verticalAlign: "center" }),
-          cell("rotated\ntop→right", { textDirection: "tbRl", verticalAlign: "center" })
+          Build.cell("top", { verticalAlign: "top" }),
+          Build.cell("center", { verticalAlign: "center" }),
+          Build.cell("bottom", { verticalAlign: "bottom" }),
+          Build.cell("rotated\nleft→top", { textDirection: "btLr", verticalAlign: "center" }),
+          Build.cell("rotated\ntop→right", { textDirection: "tbRl", verticalAlign: "center" })
         ],
-        { height: { value: cmToTwips(3), rule: "atLeast" } }
+        { height: { value: Units.cmToTwips(3), rule: "atLeast" } }
       )
     ],
-    { width: { value: 5000, type: "pct" }, borders: gridBorders() }
+    { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() }
   )
 );
 
@@ -244,18 +268,20 @@ Document.addTableElement(
 // 8. Header repeats / cantSplit / explicit row height
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "8. Header repeat + cantSplit", 2);
-const repeatRows: TableRow[] = [row([headerCell("#"), headerCell("Value")], { tableHeader: true })];
+const repeatRows: TableRow[] = [
+  Build.row([headerCell("#"), headerCell("Value")], { tableHeader: true })
+];
 for (let i = 1; i <= 30; i++) {
   repeatRows.push(
-    row([cell(`${i}`), cell(`row ${i} content`)], {
+    Build.row([Build.cell(`${i}`), Build.cell(`row ${i} content`)], {
       cantSplit: true,
-      height: { value: cmToTwips(0.6), rule: "atLeast" }
+      height: { value: Units.cmToTwips(0.6), rule: "atLeast" }
     })
   );
 }
 Document.addTableElement(
   doc,
-  table(repeatRows, { width: { value: 5000, type: "pct" }, borders: gridBorders() })
+  Build.table(repeatRows, { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() })
 );
 
 // ---------------------------------------------------------------------------
@@ -270,20 +296,26 @@ Document.addParagraph(
 );
 Document.addTableElement(
   doc,
-  table([row([cell("Float-1"), cell("Float-2")]), row([cell("Float-3"), cell("Float-4")])], {
-    width: { value: cmToTwips(6), type: "dxa" },
-    borders: gridBorders(),
-    float: {
-      horizontalAnchor: "page",
-      verticalAnchor: "text",
-      leftFromText: 180,
-      rightFromText: 180,
-      topFromText: 0,
-      bottomFromText: 0,
-      absoluteHorizontalPosition: cmToTwips(13),
-      absoluteVerticalPosition: 0
+  Build.table(
+    [
+      Build.row([Build.cell("Float-1"), Build.cell("Float-2")]),
+      Build.row([Build.cell("Float-3"), Build.cell("Float-4")])
+    ],
+    {
+      width: { value: Units.cmToTwips(6), type: "dxa" },
+      borders: Build.gridBorders(),
+      float: {
+        horizontalAnchor: "page",
+        verticalAnchor: "text",
+        leftFromText: 180,
+        rightFromText: 180,
+        topFromText: 0,
+        bottomFromText: 0,
+        absoluteHorizontalPosition: Units.cmToTwips(13),
+        absoluteVerticalPosition: 0
+      }
     }
-  })
+  )
 );
 
 // ---------------------------------------------------------------------------
@@ -294,18 +326,18 @@ Document.addHeading(doc, "Edge cases", 2);
 // Empty cell — must still contain at least one (empty) paragraph
 Document.addTableElement(
   doc,
-  table([row([cell("non-empty"), cell([textParagraph("")])])], {
+  Build.table([Build.row([Build.cell("non-empty"), Build.cell([Build.textParagraph("")])])], {
     width: { value: 2000, type: "dxa" },
-    borders: gridBorders()
+    borders: Build.gridBorders()
   })
 );
 
 // Single-cell single-row table
 Document.addTableElement(
   doc,
-  table([row([cell("only cell")])], {
+  Build.table([Build.row([Build.cell("only cell")])], {
     width: { value: 5000, type: "pct" },
-    borders: gridBorders()
+    borders: Build.gridBorders()
   })
 );
 
@@ -327,30 +359,36 @@ Document.addTable(
 // cells entirely.
 Document.addTableElement(
   doc,
-  table(
+  Build.table(
     [
-      row([cell("a"), cell("b"), cell("c")]),
+      Build.row([Build.cell("a"), Build.cell("b"), Build.cell("c")]),
       // Row 2 visually has one cell, padded by leaving 2 trailing grid units empty.
-      row([cell("only-one")], { gridAfter: 2, widthAfter: { value: 2666, type: "dxa" } }),
+      Build.row([Build.cell("only-one")], {
+        gridAfter: 2,
+        widthAfter: { value: 2666, type: "dxa" }
+      }),
       // Row 3 visually has two cells with the third grid unit blank.
-      row([cell("x"), cell("y")], { gridAfter: 1, widthAfter: { value: 1333, type: "dxa" } })
+      Build.row([Build.cell("x"), Build.cell("y")], {
+        gridAfter: 1,
+        widthAfter: { value: 1333, type: "dxa" }
+      })
     ],
-    { width: { value: 4000, type: "dxa" }, borders: gridBorders() }
+    { width: { value: 4000, type: "dxa" }, borders: Build.gridBorders() }
   )
 );
 
 // simpleTable() — the standalone builder Document.addTable wraps internally.
 // Useful when you need the Table value without immediately attaching it to
 // a doc (e.g. to nest it).
-const standaloneTable = simpleTable(
+const standaloneTable = Build.simpleTable(
   [
     ["A", "B"],
     ["1", "2"]
   ],
-  { headerRow: true, borders: true, columnWidths: [cmToTwips(3), cmToTwips(3)] }
+  { headerRow: true, borders: true, columnWidths: [Units.cmToTwips(3), Units.cmToTwips(3)] }
 );
 Document.addTableElement(doc, standaloneTable);
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "03-tables.docx"), buf);
 console.log(`  → 03-tables.docx (${buf.length} bytes)`);

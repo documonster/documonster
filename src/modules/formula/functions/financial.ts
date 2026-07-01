@@ -2,9 +2,9 @@
  * Financial Functions — Native RuntimeValue implementation.
  */
 
-import { excelToDate } from "@utils/utils.base";
-
-import type { RuntimeValue, NumberValue, ErrorValue } from "../runtime/values";
+import { isDate1904 } from "@formula/functions/_date-context";
+import { flattenNumbers, firstError } from "@formula/functions/_shared";
+import type { RuntimeValue, NumberValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -15,9 +15,8 @@ import {
   topLeft,
   rvNumber,
   rvBoolean
-} from "../runtime/values";
-import { isDate1904 } from "./_date-context";
-import { flattenNumbers, firstError } from "./_shared";
+} from "@formula/runtime/values";
+import { excelToDate } from "@utils/utils.base";
 
 /**
  * Convert an Excel serial to a UTC `Date`, honouring the active date1904 mode.
@@ -35,13 +34,11 @@ function toDate(serial: number): Date {
 // Type alias for native function signature
 // ============================================================================
 
-type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
-
 // ============================================================================
 // Financial Functions
 // ============================================================================
 
-export const fnPMT: NativeFn = args => {
+export function fnPMT(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -84,9 +81,9 @@ export const fnPMT: NativeFn = args => {
   return rvNumber(
     -(rate.value * (pv.value * pvif + fv.value)) / (pvif - 1) / (1 + rate.value * typeBit)
   );
-};
+}
 
-export const fnFV: NativeFn = args => {
+export function fnFV(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -122,9 +119,9 @@ export const fnFV: NativeFn = args => {
   return rvNumber(
     -(pv.value * pvif + pmt.value * (1 + rate.value * typeBit) * ((pvif - 1) / rate.value))
   );
-};
+}
 
-export const fnPV: NativeFn = args => {
+export function fnPV(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -159,9 +156,9 @@ export const fnPV: NativeFn = args => {
   return rvNumber(
     -(fv.value + pmt.value * (1 + rate.value * typeBit) * ((pvif - 1) / rate.value)) / pvif
   );
-};
+}
 
-export const fnNPV: NativeFn = args => {
+export function fnNPV(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -209,9 +206,9 @@ export const fnNPV: NativeFn = args => {
     npv += values[i] / Math.pow(1 + rate.value, i + 1);
   }
   return isFinite(npv) ? rvNumber(npv) : ERRORS.NUM;
-};
+}
 
-export const fnIRR: NativeFn = args => {
+export function fnIRR(args: RuntimeValue[]): RuntimeValue {
   if (!isArray(args[0])) {
     return ERRORS.VALUE;
   }
@@ -324,9 +321,9 @@ export const fnIRR: NativeFn = args => {
     prevV = currV;
   }
   return ERRORS.NUM;
-};
+}
 
-export const fnNPER: NativeFn = args => {
+export function fnNPER(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -371,9 +368,9 @@ export const fnNPER: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(result);
-};
+}
 
-export const fnRATE: NativeFn = args => {
+export function fnRATE(args: RuntimeValue[]): RuntimeValue {
   const nper = toNumberRV(topLeft(args[0]));
   if (isError(nper)) {
     return nper;
@@ -460,9 +457,9 @@ export const fnRATE: NativeFn = args => {
   }
   // Did not converge after 100 iterations
   return ERRORS.NUM;
-};
+}
 
-export const fnSLN: NativeFn = args => {
+export function fnSLN(args: RuntimeValue[]): RuntimeValue {
   const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
@@ -479,7 +476,7 @@ export const fnSLN: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber((cost.value - salvage.value) / life.value);
-};
+}
 
 /**
  * SYD — Sum-of-years'-digits depreciation.
@@ -490,7 +487,7 @@ export const fnSLN: NativeFn = args => {
  * method: `(cost - salvage) * (life - per + 1) * 2 / (life * (life + 1))`.
  * Excel rejects `life = 0` and period outside [1, life] with #NUM!.
  */
-export const fnSYD: NativeFn = args => {
+export function fnSYD(args: RuntimeValue[]): RuntimeValue {
   const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
@@ -514,7 +511,7 @@ export const fnSYD: NativeFn = args => {
     ((cost.value - salvage.value) * (life.value - per.value + 1) * 2) /
       (life.value * (life.value + 1))
   );
-};
+}
 
 /**
  * VDB — Variable Declining Balance depreciation.
@@ -528,7 +525,7 @@ export const fnSYD: NativeFn = args => {
  * behaviour. `no_switch = TRUE` forces declining-balance for all
  * periods.
  */
-export const fnVDB: NativeFn = args => {
+export function fnVDB(args: RuntimeValue[]): RuntimeValue {
   const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
@@ -616,9 +613,9 @@ export const fnVDB: NativeFn = args => {
     }
   }
   return rvNumber(total);
-};
+}
 
-export const fnDB: NativeFn = args => {
+export function fnDB(args: RuntimeValue[]): RuntimeValue {
   const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
@@ -682,9 +679,9 @@ export const fnDB: NativeFn = args => {
     totalDepreciation += depn;
   }
   return rvNumber(depn);
-};
+}
 
-export const fnDDB: NativeFn = args => {
+export function fnDDB(args: RuntimeValue[]): RuntimeValue {
   const cost = toNumberRV(topLeft(args[0]));
   if (isError(cost)) {
     return cost;
@@ -730,7 +727,7 @@ export const fnDDB: NativeFn = args => {
     bookValue -= depn;
   }
   return rvNumber(depn);
-};
+}
 
 /** Internal PMT computation that returns a raw number (for IPMT/PPMT/CUMPRINC/CUMIPMT). */
 function pmtRaw(rate: number, nper: number, pv: number, fv: number, type: number): number {
@@ -773,7 +770,7 @@ function ipmtRaw(
   return type === 1 ? ipmt / (1 + rate) : ipmt;
 }
 
-export const fnIPMT: NativeFn = args => {
+export function fnIPMT(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -799,9 +796,9 @@ export const fnIPMT: NativeFn = args => {
     return type;
   }
   return rvNumber(ipmtRaw(rate.value, per.value, nper.value, pv.value, fv.value, type.value));
-};
+}
 
-export const fnPPMT: NativeFn = args => {
+export function fnPPMT(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -829,7 +826,7 @@ export const fnPPMT: NativeFn = args => {
   const pmtVal = pmtRaw(rate.value, nper.value, pv.value, fv.value, type.value);
   const ipmtVal = ipmtRaw(rate.value, per.value, nper.value, pv.value, fv.value, type.value);
   return rvNumber(pmtVal - ipmtVal);
-};
+}
 
 /**
  * FVSCHEDULE — future value with a schedule of varying rates.
@@ -842,7 +839,7 @@ export const fnPPMT: NativeFn = args => {
  * Excel treats blanks in the schedule as zero (no-op compounding) and
  * propagates any error it encounters. Text values produce #VALUE!.
  */
-export const fnFVSCHEDULE: NativeFn = args => {
+export function fnFVSCHEDULE(args: RuntimeValue[]): RuntimeValue {
   const principal = toNumberRV(topLeft(args[0]));
   if (isError(principal)) {
     return principal;
@@ -883,7 +880,7 @@ export const fnFVSCHEDULE: NativeFn = args => {
     }
   }
   return rvNumber(fv);
-};
+}
 
 /**
  * PDURATION — number of periods required for an investment to reach a
@@ -893,7 +890,7 @@ export const fnFVSCHEDULE: NativeFn = args => {
  *
  * Excel requires `rate > 0` and `pv, fv > 0`.
  */
-export const fnPDURATION: NativeFn = args => {
+export function fnPDURATION(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -910,7 +907,7 @@ export const fnPDURATION: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((Math.log(fv.value) - Math.log(pv.value)) / Math.log(1 + rate.value));
-};
+}
 
 /**
  * RRI — equivalent interest rate for the growth of an investment.
@@ -919,7 +916,7 @@ export const fnPDURATION: NativeFn = args => {
  *
  * Excel requires `nper > 0`, `pv > 0`, `fv >= 0`.
  */
-export const fnRRI: NativeFn = args => {
+export function fnRRI(args: RuntimeValue[]): RuntimeValue {
   const nper = toNumberRV(topLeft(args[0]));
   if (isError(nper)) {
     return nper;
@@ -936,9 +933,9 @@ export const fnRRI: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.pow(fv.value / pv.value, 1 / nper.value) - 1);
-};
+}
 
-export const fnEFFECT: NativeFn = args => {
+export function fnEFFECT(args: RuntimeValue[]): RuntimeValue {
   const nomRate = toNumberRV(topLeft(args[0]));
   if (isError(nomRate)) {
     return nomRate;
@@ -953,9 +950,9 @@ export const fnEFFECT: NativeFn = args => {
   return rvNumber(
     Math.pow(1 + nomRate.value / Math.floor(npery.value), Math.floor(npery.value)) - 1
   );
-};
+}
 
-export const fnNOMINAL: NativeFn = args => {
+export function fnNOMINAL(args: RuntimeValue[]): RuntimeValue {
   const effRate = toNumberRV(topLeft(args[0]));
   if (isError(effRate)) {
     return effRate;
@@ -969,9 +966,9 @@ export const fnNOMINAL: NativeFn = args => {
   }
   const np = Math.floor(npery.value);
   return rvNumber(np * (Math.pow(effRate.value + 1, 1 / np) - 1));
-};
+}
 
-export const fnXNPV: NativeFn = args => {
+export function fnXNPV(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -1006,9 +1003,9 @@ export const fnXNPV: NativeFn = args => {
     npv += values[i] / Math.pow(1 + rate.value, (dates[i] - d0) / 365);
   }
   return isFinite(npv) ? rvNumber(npv) : ERRORS.NUM;
-};
+}
 
-export const fnXIRR: NativeFn = args => {
+export function fnXIRR(args: RuntimeValue[]): RuntimeValue {
   if (!isArray(args[0]) || !isArray(args[1])) {
     return ERRORS.VALUE;
   }
@@ -1119,9 +1116,9 @@ export const fnXIRR: NativeFn = args => {
     xPrevV = currV;
   }
   return ERRORS.NUM;
-};
+}
 
-export const fnMIRR: NativeFn = args => {
+export function fnMIRR(args: RuntimeValue[]): RuntimeValue {
   if (!isArray(args[0])) {
     return ERRORS.VALUE;
   }
@@ -1161,9 +1158,9 @@ export const fnMIRR: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.pow(-npvPos / npvNeg, 1 / (n - 1)) - 1);
-};
+}
 
-export const fnISPMT: NativeFn = args => {
+export function fnISPMT(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -1186,9 +1183,9 @@ export const fnISPMT: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(pv.value * rate.value * (per.value / nper.value - 1));
-};
+}
 
-export const fnCUMPRINC: NativeFn = args => {
+export function fnCUMPRINC(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -1235,9 +1232,9 @@ export const fnCUMPRINC: NativeFn = args => {
     cumPrinc += pmtVal - ipmtVal;
   }
   return rvNumber(cumPrinc);
-};
+}
 
-export const fnCUMIPMT: NativeFn = args => {
+export function fnCUMIPMT(args: RuntimeValue[]): RuntimeValue {
   const rate = toNumberRV(topLeft(args[0]));
   if (isError(rate)) {
     return rate;
@@ -1279,9 +1276,9 @@ export const fnCUMIPMT: NativeFn = args => {
     cumIpmt += ipmtRaw(rate.value, p, nper.value, pv.value, 0, type.value);
   }
   return rvNumber(cumIpmt);
-};
+}
 
-export const fnDOLLARDE: NativeFn = args => {
+export function fnDOLLARDE(args: RuntimeValue[]): RuntimeValue {
   const fractionalDollar = toNumberRV(topLeft(args[0]));
   if (isError(fractionalDollar)) {
     return fractionalDollar;
@@ -1307,9 +1304,9 @@ export const fnDOLLARDE: NativeFn = args => {
   const numerator = fracPart * scale;
   const sign = fractionalDollar.value < 0 ? -1 : 1;
   return rvNumber(sign * (Math.abs(intPart) + numerator / f));
-};
+}
 
-export const fnDOLLARFR: NativeFn = args => {
+export function fnDOLLARFR(args: RuntimeValue[]): RuntimeValue {
   const decimalDollar = toNumberRV(topLeft(args[0]));
   if (isError(decimalDollar)) {
     return decimalDollar;
@@ -1335,7 +1332,7 @@ export const fnDOLLARFR: NativeFn = args => {
   const numerator = fracPart * f;
   const sign = decimalDollar.value < 0 ? -1 : 1;
   return rvNumber(sign * (Math.abs(intPart) + numerator / scale));
-};
+}
 
 /**
  * Common sanity check for the `basis` argument shared across the
@@ -1351,7 +1348,7 @@ function validateBasis(basis: number): ErrorValue | null {
   return null;
 }
 
-export const fnDISC: NativeFn = args => {
+export function fnDISC(args: RuntimeValue[]): RuntimeValue {
   const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
@@ -1387,9 +1384,9 @@ export const fnDISC: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((redemption.value - pr.value) / redemption.value / dcf);
-};
+}
 
-export const fnPRICEDISC: NativeFn = args => {
+export function fnPRICEDISC(args: RuntimeValue[]): RuntimeValue {
   const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
@@ -1419,9 +1416,9 @@ export const fnPRICEDISC: NativeFn = args => {
   }
   const dcf = dayCountFraction(settlement.value, maturity.value, Math.floor(basis.value));
   return rvNumber(redemption.value - disc.value * redemption.value * dcf);
-};
+}
 
-export const fnYIELDDISC: NativeFn = args => {
+export function fnYIELDDISC(args: RuntimeValue[]): RuntimeValue {
   const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
@@ -1454,9 +1451,9 @@ export const fnYIELDDISC: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((redemption.value - pr.value) / pr.value / dcf);
-};
+}
 
-export const fnRECEIVED: NativeFn = args => {
+export function fnRECEIVED(args: RuntimeValue[]): RuntimeValue {
   const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
@@ -1490,9 +1487,9 @@ export const fnRECEIVED: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(investment.value / denom);
-};
+}
 
-export const fnINTRATE: NativeFn = args => {
+export function fnINTRATE(args: RuntimeValue[]): RuntimeValue {
   const settlement = toNumberRV(topLeft(args[0]));
   if (isError(settlement)) {
     return settlement;
@@ -1525,7 +1522,7 @@ export const fnINTRATE: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((redemption.value - investment.value) / investment.value / dcf);
-};
+}
 
 // ============================================================================
 // Bond Math — day-count conventions and coupon helpers
@@ -1734,7 +1731,7 @@ function validateBondBasis(frequency: number, basis: number): ErrorValue | null 
  *   E   = days in coupon period containing settlement
  *   A   = days from beginning of coupon period to settlement
  */
-export const fnPRICE: NativeFn = args => {
+export function fnPRICE(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -1805,7 +1802,7 @@ export const fnPRICE: NativeFn = args => {
   }
   price -= couponAmt * (a / e);
   return rvNumber(price);
-};
+}
 
 /**
  * YIELD(settlement, maturity, rate, pr, redemption, frequency, [basis])
@@ -1814,7 +1811,7 @@ export const fnPRICE: NativeFn = args => {
  * Uses bracketed bisection in [0, 1] (100% yield upper bound covers all
  * realistic bond scenarios) followed by a light Newton polish.
  */
-export const fnYIELD: NativeFn = args => {
+export function fnYIELD(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -1896,7 +1893,7 @@ export const fnYIELD: NativeFn = args => {
     }
   }
   return rvNumber((lo + hi) / 2);
-};
+}
 
 /**
  * DURATION(settlement, maturity, coupon, yield, frequency, [basis])
@@ -1904,7 +1901,7 @@ export const fnYIELD: NativeFn = args => {
  * Macaulay duration of a bond: the weighted average time to cash flows,
  * weighted by present value. Expressed in years.
  */
-export const fnDURATION: NativeFn = args => {
+export function fnDURATION(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -1967,12 +1964,12 @@ export const fnDURATION: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(weighted / pv);
-};
+}
 
 /**
  * MDURATION — modified duration = DURATION / (1 + yield/frequency).
  */
-export const fnMDURATION: NativeFn = args => {
+export function fnMDURATION(args: RuntimeValue[]): RuntimeValue {
   const dur = fnDURATION(args);
   if (dur.kind !== RVKind.Number) {
     return dur;
@@ -1986,7 +1983,7 @@ export const fnMDURATION: NativeFn = args => {
     return frequencyRV;
   }
   return rvNumber(dur.value / (1 + yieldRV.value / frequencyRV.value));
-};
+}
 
 /**
  * ACCRINT(issue, first_interest, settlement, rate, par, frequency, [basis], [calc_method])
@@ -1995,7 +1992,7 @@ export const fnMDURATION: NativeFn = args => {
  * The simplified implementation (calc_method TRUE, the default) treats
  * accrued interest from issue to settlement as par * rate * dcf(issue, settlement, basis).
  */
-export const fnACCRINT: NativeFn = args => {
+export function fnACCRINT(args: RuntimeValue[]): RuntimeValue {
   const issueRV = toNumberRV(topLeft(args[0]));
   if (isError(issueRV)) {
     return issueRV;
@@ -2039,14 +2036,14 @@ export const fnACCRINT: NativeFn = args => {
 
   const dcf = dayCountFraction(issue, settlement, basis);
   return rvNumber(parRV.value * rateRV.value * dcf);
-};
+}
 
 /**
  * ACCRINTM(issue, settlement, rate, par, [basis]) — accrued interest
  * for a security that pays interest at maturity.
  *   result = par × rate × dayCountFraction(issue, settlement, basis)
  */
-export const fnACCRINTM: NativeFn = args => {
+export function fnACCRINTM(args: RuntimeValue[]): RuntimeValue {
   const issueRV = toNumberRV(topLeft(args[0]));
   if (isError(issueRV)) {
     return issueRV;
@@ -2080,14 +2077,14 @@ export const fnACCRINTM: NativeFn = args => {
 
   const dcf = dayCountFraction(issue, settlement, basis);
   return rvNumber(parRV.value * rateRV.value * dcf);
-};
+}
 
 /**
  * TBILLPRICE(settlement, maturity, discount) — price per $100 face value.
  *   price = 100 × (1 - discount × DSM / 360)
  * where DSM is days from settlement to maturity.
  */
-export const fnTBILLPRICE: NativeFn = args => {
+export function fnTBILLPRICE(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -2118,13 +2115,13 @@ export const fnTBILLPRICE: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(price);
-};
+}
 
 /**
  * TBILLYIELD(settlement, maturity, pr) — bond-equivalent yield.
  *   yield = (100 - pr) / pr × (360 / DSM)
  */
-export const fnTBILLYIELD: NativeFn = args => {
+export function fnTBILLYIELD(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -2150,13 +2147,13 @@ export const fnTBILLYIELD: NativeFn = args => {
   }
 
   return rvNumber(((100 - pr) / pr) * (360 / dsm));
-};
+}
 
 /**
  * TBILLEQ(settlement, maturity, discount) — bond equivalent yield.
  *   TBILLEQ = (365 × discount) / (360 - discount × DSM)
  */
-export const fnTBILLEQ: NativeFn = args => {
+export function fnTBILLEQ(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -2186,7 +2183,7 @@ export const fnTBILLEQ: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((365 * discount) / denom);
-};
+}
 
 /**
  * PRICEMAT(settlement, maturity, issue, rate, yld, [basis]) —
@@ -2197,7 +2194,7 @@ export const fnTBILLEQ: NativeFn = args => {
  *   DIM = DCF(issue, maturity, basis)
  *   price = (100 + DIM × rate × 100) / (1 + DSM × yld) - A × rate × 100
  */
-export const fnPRICEMAT: NativeFn = args => {
+export function fnPRICEMAT(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -2245,7 +2242,7 @@ export const fnPRICEMAT: NativeFn = args => {
   const numerator = 100 + dim * rate * 100;
   const denominator = 1 + dsm * yld;
   return rvNumber(numerator / denominator - a * rate * 100);
-};
+}
 
 /**
  * YIELDMAT(settlement, maturity, issue, rate, pr, [basis]) —
@@ -2256,7 +2253,7 @@ export const fnPRICEMAT: NativeFn = args => {
  *   DIM = DCF(issue, maturity, basis)
  *   yield = ((1 + DIM × rate) / (pr/100 + A × rate) - 1) / DSM
  */
-export const fnYIELDMAT: NativeFn = args => {
+export function fnYIELDMAT(args: RuntimeValue[]): RuntimeValue {
   const settlementRV = toNumberRV(topLeft(args[0]));
   if (isError(settlementRV)) {
     return settlementRV;
@@ -2310,7 +2307,7 @@ export const fnYIELDMAT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber((numer / denom - 1) / dsm);
-};
+}
 
 // ============================================================================
 // COUP family — coupon-period queries
@@ -2360,43 +2357,43 @@ function parseCoupArgs(
  * COUPNCD(settlement, maturity, frequency, [basis]) — next coupon date
  * after settlement, as an Excel serial.
  */
-export const fnCOUPNCD: NativeFn = args => {
+export function fnCOUPNCD(args: RuntimeValue[]): RuntimeValue {
   const p = parseCoupArgs(args);
   if ("kind" in p) {
     return p;
   }
   return rvNumber(nextCouponAfter(p.settlement, p.maturity, p.frequency));
-};
+}
 
 /**
  * COUPPCD(settlement, maturity, frequency, [basis]) — previous coupon
  * date on or before settlement, as an Excel serial.
  */
-export const fnCOUPPCD: NativeFn = args => {
+export function fnCOUPPCD(args: RuntimeValue[]): RuntimeValue {
   const p = parseCoupArgs(args);
   if ("kind" in p) {
     return p;
   }
   return rvNumber(prevCouponOnOrBefore(p.settlement, p.maturity, p.frequency));
-};
+}
 
 /**
  * COUPNUM(settlement, maturity, frequency, [basis]) — number of
  * coupons payable between settlement and maturity, rounded up.
  */
-export const fnCOUPNUM: NativeFn = args => {
+export function fnCOUPNUM(args: RuntimeValue[]): RuntimeValue {
   const p = parseCoupArgs(args);
   if ("kind" in p) {
     return p;
   }
   return rvNumber(couponsBetween(p.settlement, p.maturity, p.frequency));
-};
+}
 
 /**
  * COUPDAYSNC(settlement, maturity, frequency, [basis]) — days from
  * settlement to the next coupon date.
  */
-export const fnCOUPDAYSNC: NativeFn = args => {
+export function fnCOUPDAYSNC(args: RuntimeValue[]): RuntimeValue {
   const p = parseCoupArgs(args);
   if ("kind" in p) {
     return p;
@@ -2410,13 +2407,13 @@ export const fnCOUPDAYSNC: NativeFn = args => {
   }
   // Actual day count: plain serial difference works for basis 1/2/3.
   return rvNumber(next - p.settlement);
-};
+}
 
 /**
  * COUPDAYBS(settlement, maturity, frequency, [basis]) — days from the
  * beginning of the coupon period to settlement.
  */
-export const fnCOUPDAYBS: NativeFn = args => {
+export function fnCOUPDAYBS(args: RuntimeValue[]): RuntimeValue {
   const p = parseCoupArgs(args);
   if ("kind" in p) {
     return p;
@@ -2426,13 +2423,13 @@ export const fnCOUPDAYBS: NativeFn = args => {
     return rvNumber(dayCountFraction(prev, p.settlement, p.basis) * 360);
   }
   return rvNumber(p.settlement - prev);
-};
+}
 
 /**
  * COUPDAYS(settlement, maturity, frequency, [basis]) — days in the
  * coupon period that contains settlement.
  */
-export const fnCOUPDAYS: NativeFn = args => {
+export function fnCOUPDAYS(args: RuntimeValue[]): RuntimeValue {
   const p = parseCoupArgs(args);
   if ("kind" in p) {
     return p;
@@ -2451,4 +2448,4 @@ export const fnCOUPDAYS: NativeFn = args => {
   }
   // 30/360 NASD or 30/360 European: 360/freq conventional.
   return rvNumber(360 / p.frequency);
-};
+}

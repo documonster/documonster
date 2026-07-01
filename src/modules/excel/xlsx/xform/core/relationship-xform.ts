@@ -1,6 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
-interface RelationshipModel {
+export interface RelationshipModel {
   Id?: string;
   Type?: string;
   Target?: string;
@@ -8,11 +9,13 @@ interface RelationshipModel {
 }
 
 class RelationshipXform extends BaseXform {
-  render(xmlStream: any, model: RelationshipModel): void {
-    xmlStream.leafNode("Relationship", model);
+  render(xmlStream: XmlSink, model: RelationshipModel): void {
+    // RelationshipModel is a plain attribute bag (all string|undefined); it
+    // matches XmlAttributes structurally but lacks an index signature.
+    xmlStream.leafNode("Relationship", model as XmlAttributes);
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "Relationship":
         this.model = node.attributes;

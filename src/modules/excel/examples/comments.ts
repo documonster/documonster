@@ -1,20 +1,23 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook } from "../../../index";
+import { Cell, Workbook } from "@excel/index";
 
 const inputFile = fileURLToPath(new URL("./data/comments.xlsx", import.meta.url));
-const outputFile = path.join(path.dirname(inputFile), "comments-out.xlsx");
+const outDir = path.resolve(path.dirname(inputFile), "../../../../../tmp/excel-examples");
+fs.mkdirSync(outDir, { recursive: true });
+const outputFile = path.join(outDir, "comments-out.xlsx");
 
-const wb = new Workbook();
+const wb = Workbook.create();
 
-wb.xlsx
+Workbook.getXlsxIo(wb)
   .readFile(inputFile)
   .then(() => {
-    wb.worksheets.forEach(sheet => {
-      console.info(sheet.getCell("A1").model);
-      sheet.getCell("B2").value = "Zeb";
-      sheet.getCell("B2").comment = {
+    Workbook.getWorksheets(wb).forEach(sheet => {
+      console.info(Cell.getModel(sheet, "A1"));
+      Cell.setValue(sheet, "B2", "Zeb");
+      Cell.setComment(sheet, "B2", {
         texts: [
           {
             font: {
@@ -96,10 +99,10 @@ wb.xlsx
             text: "format"
           }
         ]
-      };
+      });
     });
 
-    return wb.xlsx.writeFile(outputFile);
+    return Workbook.writeFile(wb, outputFile);
   })
   .then(() => {
     console.log("Wrote", outputFile);

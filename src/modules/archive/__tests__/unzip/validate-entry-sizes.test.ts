@@ -1,9 +1,10 @@
-import { EntrySizeMismatchError } from "@archive/shared/errors";
+import { EntrySizeMismatchError } from "@archive/core/errors";
 import { processEntryDataStream, readLocalHeaderDataOffset } from "@archive/unzip/zip-extract-core";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import { createZipSync, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZipSync } from "@archive/zip/zip-bytes";
 /**
  * Tests for validateEntrySizes option - ZIP bomb protection
  */

@@ -17,8 +17,21 @@
  * - Math content (text fallback)
  */
 
-import { ommlToMathML } from "../advanced/math-convert";
-import { extractMathText, isRun } from "../core/text-utils";
+import { ommlToMathML } from "@word/advanced/math-convert";
+import type {
+  ConversionContext,
+  ResolvedFormatting,
+  SemanticBlock,
+  SemanticDocument,
+  SemanticInline,
+  SemanticListItem,
+  SemanticNote,
+  SemanticParagraphStyle,
+  SemanticTableCell,
+  SemanticTableRow
+} from "@word/convert/conversion-ir";
+import { createConversionContext } from "@word/convert/conversion-ir";
+import { extractMathText, isRun } from "@word/core/text-utils";
 import type {
   AltChunk,
   BodyContent,
@@ -38,21 +51,8 @@ import type {
   RunContent,
   RunProperties,
   Table
-} from "../types";
-import { EMU_PER_INCH } from "../units";
-import type {
-  ConversionContext,
-  ResolvedFormatting,
-  SemanticBlock,
-  SemanticDocument,
-  SemanticInline,
-  SemanticListItem,
-  SemanticNote,
-  SemanticParagraphStyle,
-  SemanticTableCell,
-  SemanticTableRow
-} from "./conversion-ir";
-import { createConversionContext } from "./conversion-ir";
+} from "@word/types";
+import { EMU_PER_INCH } from "@word/units";
 
 // =============================================================================
 // Public API

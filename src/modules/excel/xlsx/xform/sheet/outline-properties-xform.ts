@@ -1,6 +1,9 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-const isDefined = (attr: any): boolean => typeof attr !== "undefined";
+function isDefined(attr: unknown): boolean {
+  return typeof attr !== "undefined";
+}
 
 interface OutlinePropertiesModel {
   summaryBelow?: boolean;
@@ -12,7 +15,7 @@ class OutlinePropertiesXform extends BaseXform {
     return "outlinePr";
   }
 
-  render(xmlStream: any, model?: OutlinePropertiesModel): boolean {
+  render(xmlStream: XmlSink, model?: OutlinePropertiesModel): boolean {
     if (model && (isDefined(model.summaryBelow) || isDefined(model.summaryRight))) {
       xmlStream.leafNode(this.tag, {
         summaryBelow: isDefined(model.summaryBelow) ? Number(model.summaryBelow) : undefined,
@@ -23,7 +26,7 @@ class OutlinePropertiesXform extends BaseXform {
     return false;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
         summaryBelow: isDefined(node.attributes.summaryBelow)

@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Document, chart, packageDocx, readDocx, toBuffer } from "../index";
+import { Document, Build, Io } from "../index";
 import type { ChartContent, DocxDocument, Paragraph, Run } from "../types";
 
 // =============================================================================
@@ -23,7 +23,7 @@ describe("Chart data editing round-trip", () => {
     Document.addParagraph(h, "Chart test");
     Document.addContent(
       h,
-      chart({
+      Build.chart({
         type: "bar",
         title: "Sales",
         series: [
@@ -34,8 +34,8 @@ describe("Chart data editing round-trip", () => {
     const doc1 = Document.build(h);
 
     // Step 2: Package and read back
-    const buffer1 = await toBuffer(doc1);
-    const parsed1 = await readDocx(buffer1);
+    const buffer1 = await Io.toBuffer(doc1);
+    const parsed1 = await Io.read(buffer1);
 
     // Verify initial chart data
     const chartItems1 = parsed1.body.filter(b => b.type === "chart");
@@ -65,10 +65,10 @@ describe("Chart data editing round-trip", () => {
     };
 
     // Step 4: Re-package
-    const buffer2 = await packageDocx(modifiedDoc);
+    const buffer2 = await Io.package(modifiedDoc);
 
     // Step 5: Read back and verify updated data
-    const parsed2 = await readDocx(buffer2);
+    const parsed2 = await Io.read(buffer2);
     const chartItems2 = parsed2.body.filter(b => b.type === "chart");
     expect(chartItems2.length).toBe(1);
     const chartContent2 = chartItems2[0] as ChartContent;
@@ -82,7 +82,7 @@ describe("Chart data editing round-trip", () => {
     const h = Document.create();
     Document.addContent(
       h,
-      chart({
+      Build.chart({
         type: "line",
         title: "Multi-Series",
         series: [
@@ -92,8 +92,8 @@ describe("Chart data editing round-trip", () => {
       })
     );
     const doc = Document.build(h);
-    const buffer1 = await toBuffer(doc);
-    const parsed1 = await readDocx(buffer1);
+    const buffer1 = await Io.toBuffer(doc);
+    const parsed1 = await Io.read(buffer1);
 
     // Modify values
     const modifiedDoc: DocxDocument = {
@@ -116,8 +116,8 @@ describe("Chart data editing round-trip", () => {
       })
     };
 
-    const buffer2 = await packageDocx(modifiedDoc);
-    const parsed2 = await readDocx(buffer2);
+    const buffer2 = await Io.package(modifiedDoc);
+    const parsed2 = await Io.read(buffer2);
     const chartItems = parsed2.body.filter(b => b.type === "chart");
     expect(chartItems.length).toBe(1);
     const cc = chartItems[0] as ChartContent;
@@ -130,14 +130,14 @@ describe("Chart data editing round-trip", () => {
     const h = Document.create();
     Document.addContent(
       h,
-      chart({
+      Build.chart({
         type: "column",
         series: [{ name: "Data", categories: ["A", "B"], values: [10, 20] }]
       })
     );
     const doc = Document.build(h);
-    const buffer1 = await toBuffer(doc);
-    const parsed1 = await readDocx(buffer1);
+    const buffer1 = await Io.toBuffer(doc);
+    const parsed1 = await Io.read(buffer1);
 
     // Add more data points
     const modifiedDoc: DocxDocument = {
@@ -163,8 +163,8 @@ describe("Chart data editing round-trip", () => {
       })
     };
 
-    const buffer2 = await packageDocx(modifiedDoc);
-    const parsed2 = await readDocx(buffer2);
+    const buffer2 = await Io.package(modifiedDoc);
+    const parsed2 = await Io.read(buffer2);
     const chartItems = parsed2.body.filter(b => b.type === "chart");
     const cc = chartItems[0] as ChartContent;
     expect(cc.chart.series[0]!.categories).toEqual(["A", "B", "C", "D"]);
@@ -187,8 +187,8 @@ describe("RTL/BiDi support round-trip", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.bidi).toBe(true);
   });
@@ -207,8 +207,8 @@ describe("RTL/BiDi support round-trip", () => {
         }
       ]
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as Run;
     expect(run.properties?.rightToLeft).toBe(true);
@@ -226,8 +226,8 @@ describe("RTL/BiDi support round-trip", () => {
         textDirection: "tbRl"
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.textDirection).toBe("tbRl");
   });
 
@@ -245,8 +245,8 @@ describe("RTL/BiDi support round-trip", () => {
         textDirection: "tbRl"
       }
     };
-    const buffer = await packageDocx(doc);
-    const parsed = await readDocx(buffer);
+    const buffer = await Io.package(doc);
+    const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.bidi).toBe(true);
     expect(parsed.sectionProperties?.textDirection).toBe("tbRl");
     const para = parsed.body[0] as Paragraph;
@@ -278,7 +278,7 @@ describe("Large file performance", () => {
 
     // Time the packaging
     const startPackage = performance.now();
-    const buffer = await packageDocx(doc);
+    const buffer = await Io.package(doc);
     const packageTime = performance.now() - startPackage;
 
     // Should complete within 5 seconds
@@ -290,7 +290,7 @@ describe("Large file performance", () => {
 
     // Read back and verify paragraph count
     const startRead = performance.now();
-    const parsed = await readDocx(buffer);
+    const parsed = await Io.read(buffer);
     const readTime = performance.now() - startRead;
 
     // Reading should also be within reasonable time

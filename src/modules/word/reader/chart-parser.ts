@@ -6,10 +6,12 @@
  * opaque chart drawings with parsed Chart instances.
  */
 
-import { parseXml, textContent } from "@xml/dom";
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import {
+  findChildLocal as findChartChild,
+  findChildrenLocal as findAllChartChildren,
+  localName
+} from "@word/reader/parse-utils";
 import type {
   BodyContent,
   Chart,
@@ -30,12 +32,9 @@ import type {
   ChartType,
   Emu,
   OpaqueDrawing
-} from "../types";
-import {
-  findChildLocal as findChartChild,
-  findChildrenLocal as findAllChartChildren,
-  localName
-} from "./parse-utils";
+} from "@word/types";
+import { parseXml, textContent } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
 
 // =============================================================================
 // Chart Reader

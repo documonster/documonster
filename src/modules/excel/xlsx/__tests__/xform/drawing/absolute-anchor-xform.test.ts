@@ -51,7 +51,10 @@ describe("AbsoluteAnchorXform", () => {
     // Should have one anchor
     expect(model!.anchors).toHaveLength(1);
 
-    const anchor = model!.anchors[0];
+    const anchor = model!.anchors[0] as unknown as {
+      range: { pos: { x: number; y: number }; ext: { width: number; height: number } };
+      picture: { rId: string };
+    };
 
     // Should have pos and ext (not tl/br)
     expect(anchor.range.pos).toBeDefined();

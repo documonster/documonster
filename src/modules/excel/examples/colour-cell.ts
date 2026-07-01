@@ -1,11 +1,19 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "colour-cell.xlsx");
 
-const filename = process.argv[2];
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("blort");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "blort");
 
 const fills = {
   redDarkVertical: {
@@ -40,17 +48,17 @@ const fills = {
   }
 } as const;
 
-ws.addRow([1, 2, 3, 4]);
-ws.addRow(["one", "two", "three", "four"]);
-ws.addRow(["une", "deux", "trois", "quatre"]);
-ws.addRow(["uno", "due", "tre", "quatro"]);
+Worksheet.addRow(ws, [1, 2, 3, 4]);
+Worksheet.addRow(ws, ["one", "two", "three", "four"]);
+Worksheet.addRow(ws, ["une", "deux", "trois", "quatre"]);
+Worksheet.addRow(ws, ["uno", "due", "tre", "quatro"]);
 
-ws.getCell("B2").fill = fills.redDarkVertical;
+Cell.setStyle(ws, "B2", { fill: fills.redDarkVertical });
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

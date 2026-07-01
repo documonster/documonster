@@ -1,13 +1,21 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Stream } from "@excel/index";
 
-import { WorkbookWriter } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "comments-streaming-writer.xlsx");
 
-const [, , filename] = process.argv;
-
-const wb = new WorkbookWriter({ filename });
+const wb = new Stream.WorkbookWriter({ filename });
 const ws = wb.addWorksheet("Foo");
-ws.getCell("B2").value = 5;
-ws.getCell("B2").note = {
+Stream.setCellValue(ws.getCell("B2"), 5);
+Stream.setCellNote(ws.getCell("B2"), {
   texts: [
     {
       font: {
@@ -89,10 +97,10 @@ ws.getCell("B2").note = {
       text: "format"
     }
   ]
-};
+});
 
-ws.getCell("D2").value = "Zoo";
-ws.getCell("D2").note = "Plain Text Comment";
+Stream.setCellValue(ws.getCell("D2"), "Zoo");
+Stream.setCellNote(ws.getCell("D2"), "Plain Text Comment");
 
 const stopwatch = new HrStopwatch();
 stopwatch.start();

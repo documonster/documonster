@@ -11,8 +11,7 @@
 
 import { createReadableFromArray, createTransform } from "@stream/node/factories";
 import { consumers } from "@stream/node/utils";
-
-import type { UtilsDeps } from "./utils.base";
+import type { UtilsDeps } from "@stream/utils.base";
 import {
   collect,
   createText,
@@ -25,7 +24,7 @@ import {
   createFilter,
   isReadableStreamLike,
   readableStreamToAsyncIterable
-} from "./utils.base";
+} from "@stream/utils.base";
 
 let _deps: UtilsDeps | null = null;
 function getDeps(): UtilsDeps {

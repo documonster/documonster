@@ -9,8 +9,8 @@
  *
  * @example
  * ```ts
- * import { htmlToDocxBody } from "excelts/word/html";
- * import { Document, toBuffer } from "excelts/word";
+ * import { htmlToDocxBody } from "documonster/word/html";
+ * import { Document, toBuffer } from "documonster/word";
  *
  * const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
  * const h = Document.create();
@@ -22,8 +22,7 @@
  */
 
 import { base64ToUint8Array } from "@utils/utils";
-
-import { sanitizeUrl } from "../../core/internal-utils";
+import { sanitizeUrl } from "@word/core/internal-utils";
 import type {
   BodyContent,
   Hyperlink,
@@ -42,8 +41,8 @@ import type {
   TableProperties,
   TableRow,
   TableWidth
-} from "../../types";
-import { EMU_PER_PX } from "../../units";
+} from "@word/types";
+import { EMU_PER_PX } from "@word/units";
 
 /** Options for HTML to DOCX conversion. */
 export interface HtmlImportOptions {

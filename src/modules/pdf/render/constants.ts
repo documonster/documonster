@@ -26,10 +26,10 @@ export const INDENT_WIDTH = 10;
 
 /**
  * Excel column widths are measured in characters of the default font's digit width.
- * For Calibri 11pt (the default), maxDigitWidth ≈ 7 pixels at 96 DPI.
- * Excel adds 5 pixels of padding per column (4px text margin + 1px gridline).
- * To convert to PDF points: (charWidth × 7 + 5) × (72/96).
+ * For Calibri 11pt (the default), maxDigitWidth ≈ 7 pixels at 96 DPI. The
+ * per-column pixel padding (4px text margin + 1px gridline) is derived inside
+ * `charWidthToPixel` (`@utils/units`); see that helper for the exact formula.
+ * To convert the resulting pixels to PDF points multiply by `PX_TO_PT` (72/96).
  */
 export const MAX_DIGIT_WIDTH_PX = 7;
-export const EXCEL_COLUMN_PADDING_PX = 5;
 export const PX_TO_PT = 72 / 96; // 0.75

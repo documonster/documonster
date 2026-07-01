@@ -6,7 +6,8 @@
  */
 
 import type { DynamicTypingConfig, CastDateConfig } from "@csv/types";
-import { DateParser } from "@utils/datetime";
+import type { DateParser } from "@utils/datetime";
+import { createIsoDateParser } from "@utils/datetime";
 
 // =============================================================================
 // Pre-compiled Regex Constants
@@ -27,7 +28,7 @@ let isoDateParser: DateParser | null = null;
  */
 function getIsoDateParser(): DateParser {
   if (!isoDateParser) {
-    isoDateParser = DateParser.iso();
+    isoDateParser = createIsoDateParser();
   }
   return isoDateParser;
 }

@@ -95,8 +95,8 @@ export interface HttpRangeReaderStats {
 /**
  * Error thrown when the server doesn't support Range requests.
  */
-export { RangeNotSupportedError, HttpRangeError } from "@archive/shared/errors";
-import { RangeNotSupportedError, HttpRangeError } from "@archive/shared/errors";
+export { RangeNotSupportedError, HttpRangeError } from "@archive/core/errors";
+import { RangeNotSupportedError, HttpRangeError, ArchiveError } from "@archive/core/errors";
 
 /**
  * Parse total file size from Content-Range header.
@@ -314,7 +314,7 @@ export class HttpRangeReader implements RandomAccessReader {
           return instance;
         }
       } else {
-        throw new Error(
+        throw new ArchiveError(
           contentLength
             ? `Invalid Content-Length "${contentLength}" for: ${url}`
             : `Server did not provide Content-Length for: ${url}`
@@ -412,27 +412,20 @@ export class HttpRangeReader implements RandomAccessReader {
  * Wraps a Uint8Array to provide the RandomAccessReader interface.
  * Useful for testing and as a fallback.
  */
-export class BufferReader implements RandomAccessReader {
-  private readonly data: Uint8Array;
-
-  constructor(data: Uint8Array | ArrayBuffer) {
-    this.data = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-  }
-
-  get size(): number {
-    return this.data.length;
-  }
-
-  async read(start: number, end: number): Promise<Uint8Array> {
-    if (start < 0 || end > this.data.length || start >= end) {
-      throw new RangeError(
-        `Invalid range [${start}, ${end}) for buffer of size ${this.data.length}`
-      );
+export function createBufferReader(data: Uint8Array | ArrayBuffer): RandomAccessReader {
+  const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+  return {
+    get size(): number {
+      return bytes.length;
+    },
+    async read(start: number, end: number): Promise<Uint8Array> {
+      if (start < 0 || end > bytes.length || start >= end) {
+        throw new RangeError(`Invalid range [${start}, ${end}) for buffer of size ${bytes.length}`);
+      }
+      return bytes.subarray(start, end);
+    },
+    async close(): Promise<void> {
+      // Nothing to close
     }
-    return this.data.subarray(start, end);
-  }
-
-  async close(): Promise<void> {
-    // Nothing to close
-  }
+  };
 }

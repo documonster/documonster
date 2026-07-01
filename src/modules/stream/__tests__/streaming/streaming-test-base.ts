@@ -87,13 +87,13 @@ export function printAnalysis(
   totalBytes: number
 ): void {
   const shouldLog = (() => {
-    const g = globalThis as unknown as { __EXCELTS_TEST_LOGS__?: boolean };
-    if (g.__EXCELTS_TEST_LOGS__) {
+    const g = globalThis as unknown as { __DOCUMONSTER_TEST_LOGS__?: boolean };
+    if (g.__DOCUMONSTER_TEST_LOGS__) {
       return true;
     }
     if (typeof process !== "undefined") {
       const env = (process as unknown as { env?: Record<string, string | undefined> }).env;
-      return env?.EXCELTS_TEST_LOGS === "1" || env?.VITEST_VERBOSE === "1";
+      return env?.DOCUMONSTER_TEST_LOGS === "1" || env?.VITEST_VERBOSE === "1";
     }
     return false;
   })();

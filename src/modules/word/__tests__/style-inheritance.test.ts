@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { resolveRunStyle, resolveNumberingLevel, resolveTableStyle, resolveStyle } from "../index";
+import { Query } from "../index";
 import type {
   AbstractNumbering,
   DocxDocument,
@@ -29,7 +29,7 @@ function createDoc(opts: {
     abstractNumberings: opts.abstractNumberings,
     numberingInstances: opts.numberingInstances,
     docDefaults: opts.docDefaults
-  } as unknown as DocxDocument;
+  };
 }
 
 describe("resolveRunStyle", () => {
@@ -39,7 +39,7 @@ describe("resolveRunStyle", () => {
       properties: { bold: true },
       content: []
     };
-    const resolved = resolveRunStyle(doc, run);
+    const resolved = Query.resolveRunStyle(doc, run);
     expect(resolved.runProperties.bold).toBe(true);
     expect(resolved.chain).toEqual([]);
   });
@@ -65,7 +65,7 @@ describe("resolveRunStyle", () => {
       properties: { style: "Strong" },
       content: []
     };
-    const resolved = resolveRunStyle(doc, run);
+    const resolved = Query.resolveRunStyle(doc, run);
     expect(resolved.chain).toEqual(["Strong", "Default"]);
     expect(resolved.runProperties.bold).toBe(true);
     expect(resolved.runProperties.font).toBe("Arial");
@@ -86,7 +86,7 @@ describe("resolveRunStyle", () => {
       content: []
     };
 
-    const resolved = resolveRunStyle(doc, run, { font: "Calibri", size: 22 });
+    const resolved = Query.resolveRunStyle(doc, run, { font: "Calibri", size: 22 });
     // Inherited from paragraph
     expect(resolved.runProperties.font).toBe("Calibri");
     expect(resolved.runProperties.size).toBe(22);
@@ -108,7 +108,7 @@ describe("resolveRunStyle", () => {
       properties: { style: "Red", color: "00FF00" },
       content: []
     };
-    const resolved = resolveRunStyle(doc, run);
+    const resolved = Query.resolveRunStyle(doc, run);
     // Run's own color overrides style
     expect(resolved.runProperties.color).toBe("00FF00");
   });
@@ -120,7 +120,7 @@ describe("resolveRunStyle", () => {
       }
     });
     const run: Run = { content: [] };
-    const resolved = resolveRunStyle(doc, run);
+    const resolved = Query.resolveRunStyle(doc, run);
     expect(resolved.runProperties.font).toBe("Times");
   });
 
@@ -144,7 +144,7 @@ describe("resolveRunStyle", () => {
     const doc = createDoc({ styles });
     const run: Run = { properties: { style: "A" }, content: [] };
     // Should not infinite loop
-    const resolved = resolveRunStyle(doc, run);
+    const resolved = Query.resolveRunStyle(doc, run);
     expect(resolved.chain.length).toBe(2);
   });
 });
@@ -153,7 +153,7 @@ describe("resolveNumberingLevel", () => {
   it("returns undefined for paragraph without numbering", () => {
     const doc = createDoc({});
     const para: Paragraph = { type: "paragraph", children: [] };
-    expect(resolveNumberingLevel(doc, para)).toBeUndefined();
+    expect(Query.resolveNumberingLevel(doc, para)).toBeUndefined();
   });
 
   it("resolves a simple numbering level", () => {
@@ -179,7 +179,7 @@ describe("resolveNumberingLevel", () => {
       children: []
     };
 
-    const resolved = resolveNumberingLevel(doc, para);
+    const resolved = Query.resolveNumberingLevel(doc, para);
     expect(resolved).toBeDefined();
     expect(resolved!.format).toBe("decimal");
     expect(resolved!.text).toBe("%1.");
@@ -193,7 +193,7 @@ describe("resolveNumberingLevel", () => {
       properties: { numbering: { level: 0, numId: 999 } },
       children: []
     };
-    expect(resolveNumberingLevel(doc, para)).toBeUndefined();
+    expect(Query.resolveNumberingLevel(doc, para)).toBeUndefined();
   });
 
   it("applies level override", () => {
@@ -227,7 +227,7 @@ describe("resolveNumberingLevel", () => {
       children: []
     };
 
-    const resolved = resolveNumberingLevel(doc, para);
+    const resolved = Query.resolveNumberingLevel(doc, para);
     expect(resolved!.format).toBe("bullet");
     expect(resolved!.text).toBe("•");
   });
@@ -251,7 +251,7 @@ describe("resolveTableStyle", () => {
       }
     ];
     const doc = createDoc({ styles });
-    const resolved = resolveTableStyle(doc, "MyTable");
+    const resolved = Query.resolveTableStyle(doc, "MyTable");
 
     expect(resolved.chain).toEqual(["MyTable", "BaseTable"]);
     expect(resolved.runProperties.bold).toBe(true);
@@ -260,7 +260,7 @@ describe("resolveTableStyle", () => {
 
   it("returns minimal result for unknown style", () => {
     const doc = createDoc({});
-    const resolved = resolveTableStyle(doc, "Unknown");
+    const resolved = Query.resolveTableStyle(doc, "Unknown");
     expect(resolved.chain).toEqual(["Unknown"]);
   });
 
@@ -278,7 +278,7 @@ describe("resolveTableStyle", () => {
         }
       ]
     });
-    const resolved = resolveTableStyle(doc, "T");
+    const resolved = Query.resolveTableStyle(doc, "T");
     expect(resolved.runProperties.font).toBe("Calibri");
     expect(resolved.runProperties.bold).toBe(true);
   });
@@ -318,12 +318,12 @@ describe("combined style resolution", () => {
     };
 
     // Step 1: resolve paragraph style
-    const paraStyle = resolveStyle(doc, para);
+    const paraStyle = Query.resolveStyle(doc, para);
     expect(paraStyle.runProperties.font).toBe("Calibri");
     expect(paraStyle.runProperties.size).toBe(22);
 
     // Step 2: resolve run with paragraph context
-    const runStyle = resolveRunStyle(doc, run, paraStyle.runProperties);
+    const runStyle = Query.resolveRunStyle(doc, run, paraStyle.runProperties);
 
     // Inherited from paragraph
     expect(runStyle.runProperties.font).toBe("Calibri");

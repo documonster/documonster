@@ -1,7 +1,8 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { IntegerXform } from "@excel/xlsx/xform/simple/integer-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-interface PositionModel {
+export interface PositionModel {
   nativeCol: number;
   nativeColOff: number;
   nativeRow: number;
@@ -11,7 +12,7 @@ interface PositionModel {
 class CellPositionXform extends BaseXform<PositionModel> {
   declare private tag: string;
   declare public map: { [key: string]: IntegerXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(options: { tag: string }) {
     super();
@@ -26,7 +27,7 @@ class CellPositionXform extends BaseXform<PositionModel> {
     this.model = { nativeCol: 0, nativeColOff: 0, nativeRow: 0, nativeRowOff: 0 };
   }
 
-  render(xmlStream: any, model: PositionModel): void {
+  render(xmlStream: XmlSink, model: PositionModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:col"].render(xmlStream, model.nativeCol);
@@ -38,7 +39,7 @@ class CellPositionXform extends BaseXform<PositionModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

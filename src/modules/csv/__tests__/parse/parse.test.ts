@@ -13,7 +13,7 @@
  * 6. Spaces are part of the field and should not be trimmed
  */
 
-import { parseCsv, parseCsvRows } from "@csv/index";
+import { Csv } from "@csv/index";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
@@ -22,7 +22,7 @@ import { describe, it, expect } from "vitest";
 describe("Basic Parsing", () => {
   it("should parse simple CSV with commas", () => {
     const input = "a,b,c\n1,2,3";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -31,7 +31,7 @@ describe("Basic Parsing", () => {
 
   it("should handle CRLF line endings (RFC 4180 standard)", () => {
     const input = "a,b,c\r\n1,2,3\r\n4,5,6";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"],
@@ -41,7 +41,7 @@ describe("Basic Parsing", () => {
 
   it("should handle CR only line endings", () => {
     const input = "a,b,c\r1,2,3";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -50,7 +50,7 @@ describe("Basic Parsing", () => {
 
   it("should handle LF only line endings", () => {
     const input = "a,b,c\n1,2,3";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -58,23 +58,23 @@ describe("Basic Parsing", () => {
   });
 
   it("should handle empty input", () => {
-    const result = parseCsv("");
+    const result = Csv.parse("");
     expect(result).toEqual([]);
   });
 
   it("should handle single field", () => {
-    const result = parseCsv("hello");
+    const result = Csv.parse("hello");
     expect(result).toEqual([["hello"]]);
   });
 
   it("should handle single row with multiple fields", () => {
-    const result = parseCsv("a,b,c,d,e");
+    const result = Csv.parse("a,b,c,d,e");
     expect(result).toEqual([["a", "b", "c", "d", "e"]]);
   });
 
   it("should handle trailing newline", () => {
     const input = "a,b,c\n1,2,3\n";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -88,62 +88,62 @@ describe("Basic Parsing", () => {
 describe("Quoted Fields", () => {
   it("should parse quoted fields containing commas", () => {
     const input = '"hello, world",test';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["hello, world", "test"]]);
   });
 
   it("should parse quoted fields containing newlines", () => {
     const input = '"line1\nline2",test';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["line1\nline2", "test"]]);
   });
 
   it("should parse quoted fields containing CRLF", () => {
     const input = '"line1\r\nline2",test';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     // After normalization, \r\n becomes \n
     expect(result).toEqual([["line1\nline2", "test"]]);
   });
 
   it("should parse escaped double-quotes (RFC 4180 Section 2.7)", () => {
     const input = '"He said ""Hello""",test';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([['He said "Hello"', "test"]]);
   });
 
   it("should handle multiple escaped quotes", () => {
     const input = '"""quoted""",""""';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([['"quoted"', '"']]);
   });
 
   it("should handle empty quoted field", () => {
     const input = '"",test,""';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["", "test", ""]]);
   });
 
   it("should handle quoted field at end of row", () => {
     const input = 'a,b,"c,d"';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a", "b", "c,d"]]);
   });
 
   it("should handle quoted field at start of row", () => {
     const input = '"a,b",c,d';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a,b", "c", "d"]]);
   });
 
   it("should handle all quoted fields", () => {
     const input = '"a","b","c"';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a", "b", "c"]]);
   });
 
   it("should handle quoted fields with only quotes inside", () => {
     const input = '""""';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([['"']]);
   });
 });
@@ -154,43 +154,43 @@ describe("Quoted Fields", () => {
 describe("Empty Fields and Rows", () => {
   it("should handle empty fields", () => {
     const input = "a,,c";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a", "", "c"]]);
   });
 
   it("should handle multiple consecutive empty fields", () => {
     const input = "a,,,d";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a", "", "", "d"]]);
   });
 
   it("should handle empty field at start", () => {
     const input = ",b,c";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["", "b", "c"]]);
   });
 
   it("should handle empty field at end", () => {
     const input = "a,b,";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a", "b", ""]]);
   });
 
   it("should handle row with only empty fields", () => {
     const input = ",,";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["", "", ""]]);
   });
 
   it("should handle empty rows when skipEmptyLines is false", () => {
     const input = "a,b\n\nc,d";
-    const result = parseCsv(input, { skipEmptyLines: false });
+    const result = Csv.parse(input, { skipEmptyLines: false });
     expect(result).toEqual([["a", "b"], [""], ["c", "d"]]);
   });
 
   it("should skip empty rows when skipEmptyLines is true", () => {
     const input = "a,b\n\nc,d";
-    const result = parseCsv(input, { skipEmptyLines: true });
+    const result = Csv.parse(input, { skipEmptyLines: true });
     expect(result).toEqual([
       ["a", "b"],
       ["c", "d"]
@@ -204,25 +204,25 @@ describe("Empty Fields and Rows", () => {
 describe("Whitespace Handling", () => {
   it("should preserve leading/trailing spaces by default (RFC 4180)", () => {
     const input = " a , b , c ";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([[" a ", " b ", " c "]]);
   });
 
   it("should trim whitespace when trim option is true", () => {
     const input = " a , b , c ";
-    const result = parseCsv(input, { trim: true });
+    const result = Csv.parse(input, { trim: true });
     expect(result).toEqual([["a", "b", "c"]]);
   });
 
   it("should preserve spaces inside quoted fields", () => {
     const input = '" a "," b "';
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([[" a ", " b "]]);
   });
 
   it("should preserve tabs as part of field", () => {
     const input = "a\tb,c";
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect(result).toEqual([["a\tb", "c"]]);
   });
 });
@@ -233,7 +233,7 @@ describe("Whitespace Handling", () => {
 describe("Custom Delimiters", () => {
   it("should support tab delimiter (TSV)", () => {
     const input = "a\tb\tc\n1\t2\t3";
-    const result = parseCsv(input, { delimiter: "\t" });
+    const result = Csv.parse(input, { delimiter: "\t" });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -242,7 +242,7 @@ describe("Custom Delimiters", () => {
 
   it("should support semicolon delimiter", () => {
     const input = "a;b;c\n1;2;3";
-    const result = parseCsv(input, { delimiter: ";" });
+    const result = Csv.parse(input, { delimiter: ";" });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -251,7 +251,7 @@ describe("Custom Delimiters", () => {
 
   it("should support pipe delimiter", () => {
     const input = "a|b|c\n1|2|3";
-    const result = parseCsv(input, { delimiter: "|" });
+    const result = Csv.parse(input, { delimiter: "|" });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -260,7 +260,7 @@ describe("Custom Delimiters", () => {
 
   it("should handle quoted fields with custom delimiter", () => {
     const input = '"a;b";c;d';
-    const result = parseCsv(input, { delimiter: ";" });
+    const result = Csv.parse(input, { delimiter: ";" });
     expect(result).toEqual([["a;b", "c", "d"]]);
   });
 });
@@ -271,26 +271,26 @@ describe("Custom Delimiters", () => {
 describe("Custom Quote Character", () => {
   it("should support single quote as quote character", () => {
     const input = "'hello, world',test";
-    const result = parseCsv(input, { quote: "'" });
+    const result = Csv.parse(input, { quote: "'" });
     expect(result).toEqual([["hello, world", "test"]]);
   });
 
   it("should handle escaped single quotes", () => {
     const input = "'It''s a test',value";
-    const result = parseCsv(input, { quote: "'", escape: "'" });
+    const result = Csv.parse(input, { quote: "'", escape: "'" });
     expect(result).toEqual([["It's a test", "value"]]);
   });
 
   it("should disable quoting when quote is null", () => {
     const input = '"hello",world';
-    const result = parseCsv(input, { quote: null });
+    const result = Csv.parse(input, { quote: null });
     // Without quoting, the quotes are literal characters
     expect(result).toEqual([['"hello"', "world"]]);
   });
 
   it("should disable quoting when quote is false", () => {
     const input = '"hello",world';
-    const result = parseCsv(input, { quote: false });
+    const result = Csv.parse(input, { quote: false });
     expect(result).toEqual([['"hello"', "world"]]);
   });
 });
@@ -301,7 +301,7 @@ describe("Custom Quote Character", () => {
 describe("Headers", () => {
   it("should return objects when headers option is true", () => {
     const input = "name,age,city\nAlice,30,NYC\nBob,25,LA";
-    const result = parseCsv(input, { headers: true }) as any;
+    const result = Csv.parse(input, { headers: true }) as any;
     expect(result.headers).toEqual(["name", "age", "city"]);
     expect(result.rows).toEqual([
       { name: "Alice", age: "30", city: "NYC" },
@@ -311,7 +311,7 @@ describe("Headers", () => {
 
   it("should handle missing fields in data rows with pad option", () => {
     const input = "a,b,c\n1,2";
-    const result = parseCsv(input, {
+    const result = Csv.parse(input, {
       headers: true,
       columnMismatch: { less: "pad", more: "error" }
     }) as any;
@@ -320,7 +320,7 @@ describe("Headers", () => {
 
   it("should handle extra fields in data rows with truncate option", () => {
     const input = "a,b\n1,2,3";
-    const result = parseCsv(input, {
+    const result = Csv.parse(input, {
       headers: true,
       columnMismatch: { less: "error", more: "truncate" }
     }) as any;
@@ -334,7 +334,7 @@ describe("Headers", () => {
 describe("Skip Lines and Comments", () => {
   it("should skip lines at beginning", () => {
     const input = "header line\ncomment line\na,b,c\n1,2,3";
-    const result = parseCsv(input, { skipLines: 2 });
+    const result = Csv.parse(input, { skipLines: 2 });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -343,7 +343,7 @@ describe("Skip Lines and Comments", () => {
 
   it("should skip comment lines", () => {
     const input = "a,b,c\n# this is a comment\n1,2,3";
-    const result = parseCsv(input, { comment: "#" });
+    const result = Csv.parse(input, { comment: "#" });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -352,7 +352,7 @@ describe("Skip Lines and Comments", () => {
 
   it("should handle multiple comment lines", () => {
     const input = "# comment 1\n# comment 2\na,b,c";
-    const result = parseCsv(input, { comment: "#" });
+    const result = Csv.parse(input, { comment: "#" });
     expect(result).toEqual([["a", "b", "c"]]);
   });
 });
@@ -363,7 +363,7 @@ describe("Skip Lines and Comments", () => {
 describe("Max Rows", () => {
   it("should limit number of rows parsed", () => {
     const input = "a,b\n1,2\n3,4\n5,6\n7,8";
-    const result = parseCsv(input, { maxRows: 2 });
+    const result = Csv.parse(input, { maxRows: 2 });
     expect(result).toEqual([
       ["a", "b"],
       ["1", "2"]
@@ -372,7 +372,7 @@ describe("Max Rows", () => {
 
   it("should handle maxRows with headers", () => {
     const input = "name,age\nAlice,30\nBob,25\nCharlie,35";
-    const result = parseCsv(input, { headers: true, maxRows: 2 }) as any;
+    const result = Csv.parse(input, { headers: true, maxRows: 2 }) as any;
     expect(result.headers).toEqual(["name", "age"]);
     expect(result.rows).toHaveLength(2);
   });
@@ -384,14 +384,14 @@ describe("Max Rows", () => {
 describe("Max Row Bytes", () => {
   it("should throw error when row exceeds maxRowBytes in standard mode", () => {
     const input = "a,b,c\n123456789,data,more";
-    expect(() => parseCsv(input, { maxRowBytes: 10 })).toThrow(
+    expect(() => Csv.parse(input, { maxRowBytes: 10 })).toThrow(
       "Row exceeds the maximum size of 10 bytes"
     );
   });
 
   it("should allow rows under maxRowBytes limit", () => {
     const input = "a,b,c\n1,2,3";
-    const result = parseCsv(input, { maxRowBytes: 100 });
+    const result = Csv.parse(input, { maxRowBytes: 100 });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -400,20 +400,20 @@ describe("Max Row Bytes", () => {
 
   it("should throw error for unclosed quotes that exceed limit", () => {
     const input = 'a,b\n"very long content that never closes';
-    expect(() => parseCsv(input, { maxRowBytes: 20 })).toThrow(
+    expect(() => Csv.parse(input, { maxRowBytes: 20 })).toThrow(
       "Row exceeds the maximum size of 20 bytes"
     );
   });
 
   it("should reset byte counter for each row", () => {
     const input = "12345\nabcde\nfghij";
-    const result = parseCsv(input, { maxRowBytes: 10 });
+    const result = Csv.parse(input, { maxRowBytes: 10 });
     expect(result).toEqual([["12345"], ["abcde"], ["fghij"]]);
   });
 
   it("should not apply limit when maxRowBytes is undefined", () => {
     const input = "a".repeat(10000);
-    const result = parseCsv(input);
+    const result = Csv.parse(input);
     expect((result as string[][])[0][0]).toHaveLength(10000);
   });
 });
@@ -424,7 +424,7 @@ describe("Max Row Bytes", () => {
 describe("fastMode", () => {
   it("should parse simple CSV in fastMode", () => {
     const input = "a,b,c\n1,2,3";
-    const result = parseCsv(input, { fastMode: true });
+    const result = Csv.parse(input, { fastMode: true });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -433,7 +433,7 @@ describe("fastMode", () => {
 
   it("should handle custom delimiter in fastMode", () => {
     const input = "a;b;c\n1;2;3";
-    const result = parseCsv(input, { fastMode: true, delimiter: ";" });
+    const result = Csv.parse(input, { fastMode: true, delimiter: ";" });
     expect(result).toEqual([
       ["a", "b", "c"],
       ["1", "2", "3"]
@@ -442,28 +442,28 @@ describe("fastMode", () => {
 
   it("should handle empty string in fastMode", () => {
     // Empty string with fastMode - no rows
-    const result = parseCsv("", { fastMode: true });
+    const result = Csv.parse("", { fastMode: true });
     expect(result).toEqual([]);
 
     // With skipEmptyLines: true, same behavior
-    const result2 = parseCsv("", { fastMode: true, skipEmptyLines: true });
+    const result2 = Csv.parse("", { fastMode: true, skipEmptyLines: true });
     expect(result2).toEqual([]);
   });
 
   it("should handle single field in fastMode", () => {
-    const result = parseCsv("value", { fastMode: true }) as string[][];
+    const result = Csv.parse("value", { fastMode: true }) as string[][];
     expect(result).toEqual([["value"]]);
   });
 });
 
 // =============================================================================
-// parseCsvRows (Async Generator)
+// Csv.parseRows (Async Generator)
 // =============================================================================
 describe("parseCsvRows", () => {
   it("should parse CSV with async generator", async () => {
     const input = "a,b,c\n1,2,3\n4,5,6";
     const rows: any[] = [];
-    for await (const row of parseCsvRows(input)) {
+    for await (const row of Csv.parseRows(input)) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -476,7 +476,7 @@ describe("parseCsvRows", () => {
   it("should support headers in async generator", async () => {
     const input = "name,age\nAlice,30\nBob,25";
     const rows: any[] = [];
-    for await (const row of parseCsvRows(input, { headers: true })) {
+    for await (const row of Csv.parseRows(input, { headers: true })) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -492,7 +492,7 @@ describe("parseCsvRows", () => {
       yield "4,5,6";
     }
     const rows: any[] = [];
-    for await (const row of parseCsvRows(generateChunks())) {
+    for await (const row of Csv.parseRows(generateChunks())) {
       rows.push(row);
     }
     expect(rows).toEqual([
@@ -509,7 +509,7 @@ describe("parseCsvRows", () => {
 describe("Roundtrip", () => {
   it("parses and re-parses consistently", () => {
     const original = "a,b,c\n1,2,3\n4,5,6";
-    const parsed = parseCsv(original) as string[][];
+    const parsed = Csv.parse(original) as string[][];
     // Re-parse should give same result
     expect(parsed).toEqual([
       ["a", "b", "c"],
@@ -520,7 +520,7 @@ describe("Roundtrip", () => {
 
   it("handles quoted fields in roundtrip", () => {
     const input = '"hello, world",test\n"line1\nline2",value';
-    const parsed = parseCsv(input) as string[][];
+    const parsed = Csv.parse(input) as string[][];
     expect(parsed[0][0]).toBe("hello, world");
     expect(parsed[1][0]).toBe("line1\nline2");
   });

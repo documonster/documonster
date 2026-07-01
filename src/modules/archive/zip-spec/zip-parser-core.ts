@@ -5,20 +5,14 @@
  * Used by both `ZipParser` (in-memory) and `RemoteZipReader` (random-access).
  */
 
+import { ArchiveError, EocdNotFoundError } from "@archive/core/errors";
+import type { ZipStringEncoding, ZipStringCodec } from "@archive/core/text";
+import { decodeZipPath, decodeZipComment, resolveZipStringCodec } from "@archive/core/text";
 import type { AesKeyStrength } from "@archive/crypto/aes";
-import {
-  decodeZipPath,
-  decodeZipComment,
-  resolveZipStringCodec,
-  type ZipStringEncoding,
-  type ZipStringCodec
-} from "@archive/shared/text";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import { resolveZipLastModifiedDateFromUnixSeconds } from "@archive/zip-spec/timestamps";
+import type { ZipEntryInfo, ZipEntryEncryptionMethod } from "@archive/zip-spec/zip-entry-info";
 import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import { uint8ArrayToString as decodeUtf8 } from "@utils/binary";
-
-import type { ZipEntryInfo, ZipEntryEncryptionMethod } from "./zip-entry-info";
 import {
   CENTRAL_DIR_HEADER_SIG,
   COMPRESSION_AES,
@@ -30,7 +24,8 @@ import {
   getUnixModeFromExternalAttributes,
   isSymlinkMode,
   isDirectoryMode
-} from "./zip-records";
+} from "@archive/zip-spec/zip-records";
+import { uint8ArrayToString as decodeUtf8 } from "@utils/binary";
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
@@ -43,7 +38,7 @@ const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
  */
 function safeBigIntToNumber(value: bigint, fieldName: string): number {
   if (value > MAX_SAFE) {
-    throw new Error(
+    throw new ArchiveError(
       `ZIP64 ${fieldName} value ${value} exceeds Number.MAX_SAFE_INTEGER. ` +
         "The archive may be corrupted or malicious."
     );
@@ -467,7 +462,7 @@ export function parseCentralDirectoryAt(
   for (let i = 0; i < totalEntries; i++) {
     const sig = reader.readUint32();
     if (sig !== CENTRAL_DIR_HEADER_SIG) {
-      throw new Error(`Invalid Central Directory header signature at entry ${i}`);
+      throw new ArchiveError(`Invalid Central Directory header signature at entry ${i}`);
     }
 
     entries[i] = parseCentralDirectoryEntry(reader, decodeStrings, decoder);
@@ -499,7 +494,7 @@ export function parseZipArchiveFromBuffer(
   // Find EOCD
   const eocdOffset = findEOCDSignature(data);
   if (eocdOffset === -1) {
-    throw new Error("Invalid ZIP file: End of Central Directory not found");
+    throw new EocdNotFoundError();
   }
 
   // Parse EOCD

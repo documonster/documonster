@@ -33,14 +33,14 @@ export async function smokeRoundTripWithLibreOffice(
   input: Uint8Array,
   filename = "workbook.xlsx"
 ): Promise<LibreOfficeSmokeResult> {
-  if (process.env.EXCELTS_LIBREOFFICE_SMOKE !== "1") {
-    return { available: false, skipped: "Set EXCELTS_LIBREOFFICE_SMOKE=1 to enable." };
+  if (process.env.DOCUMONSTER_LIBREOFFICE_SMOKE !== "1") {
+    return { available: false, skipped: "Set DOCUMONSTER_LIBREOFFICE_SMOKE=1 to enable." };
   }
   const binary = await libreOfficeAvailable();
   if (!binary) {
     return { available: false, skipped: "LibreOffice executable not found." };
   }
-  const dir = await mkdtemp(join(tmpdir(), "excelts-lo-smoke-"));
+  const dir = await mkdtemp(join(tmpdir(), "documonster-lo-smoke-"));
   const outDir = join(dir, "out");
   try {
     await mkdir(outDir);

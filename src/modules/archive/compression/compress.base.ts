@@ -9,7 +9,8 @@
  * see deflate-fallback.ts for pure JS implementation
  */
 
-import { ByteQueue } from "@archive/shared/byte-queue";
+import { ByteQueue } from "@archive/core/byte-queue";
+import { ArchiveError } from "@archive/core/errors";
 
 /**
  * Compression options
@@ -505,23 +506,23 @@ export function buildZlibTrailer(adlerValue: number): Uint8Array {
  */
 export function parseZlibHeader(data: Uint8Array): number {
   if (data.length < ZLIB_MIN_SIZE) {
-    throw new Error("Invalid zlib data (too small)");
+    throw new ArchiveError("Invalid zlib data (too small)");
   }
 
   const cmf = data[0];
   const flg = data[1];
 
   if ((cmf & 0x0f) !== ZLIB_CM_DEFLATE) {
-    throw new Error("Invalid zlib compression method");
+    throw new ArchiveError("Invalid zlib compression method");
   }
   if (cmf >> 4 > ZLIB_CINFO_MAX) {
-    throw new Error("Invalid zlib CINFO value");
+    throw new ArchiveError("Invalid zlib CINFO value");
   }
   if (((cmf << 8) | flg) % 31 !== 0) {
-    throw new Error("Invalid zlib header checksum");
+    throw new ArchiveError("Invalid zlib header checksum");
   }
   if (flg & 0x20) {
-    throw new Error("Zlib preset dictionary not supported");
+    throw new ArchiveError("Zlib preset dictionary not supported");
   }
 
   return 2; // header size without FDICT
@@ -543,6 +544,6 @@ export function readZlibTrailer(data: Uint8Array): number {
 export function verifyAdler32(data: Uint8Array, expected: number): void {
   const actual = adler32(data) >>> 0;
   if (actual !== expected >>> 0) {
-    throw new Error("Invalid zlib data (Adler-32 mismatch)");
+    throw new ArchiveError("Invalid zlib data (Adler-32 mismatch)");
   }
 }

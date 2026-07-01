@@ -7,4 +7,4 @@ export {
   type UnzipOperation,
   type UnzipProgress,
   type UnzipStreamOptions
-} from "./zip-reader";
+} from "@archive/unzip/zip-reader";

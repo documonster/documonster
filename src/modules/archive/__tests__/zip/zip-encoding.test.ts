@@ -1,4 +1,4 @@
-import type { ZipStringCodec } from "@archive/shared/text";
+import type { ZipStringCodec } from "@archive/core/text";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
 import { createZip } from "@archive/zip/zip-bytes";

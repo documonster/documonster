@@ -1,27 +1,24 @@
-import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
+import {
+  DEFAULT_ZIP_LEVEL,
+  DEFAULT_ZIP_TIMESTAMPS,
+  REPRODUCIBLE_ZIP_MOD_TIME
+} from "@archive/core/defaults";
+import { throwIfAborted, toError, ArchiveError } from "@archive/core/errors";
+import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
+import { encodeZipStringWithCodec, resolveZipStringCodec } from "@archive/core/text";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveSource } from "@archive/io/archive-source";
 import {
   toAsyncIterable,
   collectUint8ArrayStream,
   toUint8ArraySync,
   isSyncArchiveSource,
   isInMemoryArchiveSource,
-  resolveArchiveSourceToBuffer,
-  type ArchiveSource
+  resolveArchiveSourceToBuffer
 } from "@archive/io/archive-source";
 import type { RandomAccessReader, HttpRangeReaderOptions } from "@archive/io/random-access";
-import { BufferReader, HttpRangeReader } from "@archive/io/random-access";
-import {
-  DEFAULT_ZIP_LEVEL,
-  DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
-} from "@archive/shared/defaults";
-import { throwIfAborted, toError } from "@archive/shared/errors";
-import {
-  encodeZipStringWithCodec,
-  resolveZipStringCodec,
-  type ZipStringCodec,
-  type ZipStringEncoding
-} from "@archive/shared/text";
+import { createBufferReader, HttpRangeReader } from "@archive/io/random-access";
 import { RemoteZipReader } from "@archive/unzip/remote-zip-reader";
 import type { ZipEntryOptions } from "@archive/zip";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
@@ -32,12 +29,13 @@ import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import { FLAG_ENCRYPTED } from "@archive/zip-spec/zip-records";
 import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 import { ZipDeflateFile, ZipRawFile } from "@archive/zip/stream";
-import { createZip, createZipSync, type ZipRawEntry, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipRawEntry, ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip, createZipSync } from "@archive/zip/zip-bytes";
+import type { ZipEditPlan } from "@archive/zip/zip-edit-plan";
+import type { SetViewEntry } from "@archive/zip/zip-edit-view";
+import { ZipEditView } from "@archive/zip/zip-edit-view";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
-
-import type { ZipEditPlan } from "./zip-edit-plan";
-import { ZipEditView, type SetViewEntry } from "./zip-edit-view";
-import { createZipOperation } from "./zip-output-pipeline";
+import { createZipOperation } from "@archive/zip/zip-output-pipeline";
 
 // -----------------------------------------------------------------------------
 // Types
@@ -152,8 +150,8 @@ function isRandomAccessReader(value: unknown): value is RandomAccessReader {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as any).size === "number" &&
-    typeof (value as any).read === "function"
+    typeof (value as Partial<RandomAccessReader>).size === "number" &&
+    typeof (value as Partial<RandomAccessReader>).read === "function"
   );
 }
 
@@ -321,7 +319,7 @@ export class ZipEditor {
     // (via BufferReader) for a single unified read path.
     const bytes = await resolveArchiveSourceToBuffer(source, { signal: options.signal });
 
-    return ZipEditor.openReader(new BufferReader(bytes), options);
+    return ZipEditor.openReader(createBufferReader(bytes), options);
   }
 
   static async openReader(
@@ -615,7 +613,7 @@ export class ZipEditor {
           );
 
           if (this._options.preserve === "strict") {
-            throw new Error(
+            throw new ArchiveError(
               `Cannot preserve entry "${p.info.path}" because its raw compressed payload is unavailable.`
             );
           }
@@ -827,7 +825,7 @@ export class ZipEditor {
       );
 
       if (this._options.preserve === "strict") {
-        throw new Error(
+        throw new ArchiveError(
           `Cannot preserve entry "${p.info.path}" because its raw compressed payload is unavailable.`
         );
       }

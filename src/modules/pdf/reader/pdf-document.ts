@@ -11,7 +11,7 @@
  * @see PDF Reference 1.7, §3.4 - File Structure
  */
 
-import { PdfStructureError } from "../errors";
+import { PdfStructureError } from "@pdf/errors";
 import {
   parseObject,
   isPdfDict,
@@ -23,10 +23,10 @@ import {
   dictGetArray,
   dictGetName,
   decodePdfStringBytes
-} from "./pdf-parser";
-import type { PdfObject, PdfDictValue, PdfRef, PdfStream } from "./pdf-parser";
-import { PdfTokenizer, TokenType } from "./pdf-tokenizer";
-import { decodeStreamFilters } from "./stream-filters";
+} from "@pdf/reader/pdf-parser";
+import type { PdfObject, PdfDictValue, PdfRef, PdfStream } from "@pdf/reader/pdf-parser";
+import { PdfTokenizer, TokenType } from "@pdf/reader/pdf-tokenizer";
+import { decodeStreamFilters } from "@pdf/reader/stream-filters";
 
 // =============================================================================
 // Module-level cached TextEncoder
@@ -73,6 +73,9 @@ export class PdfDocument {
   private tokenizer: PdfTokenizer;
   private xref: Map<number, XrefEntry> = new Map();
   private cache: Map<string, PdfObject> = new Map();
+  // Parsed object streams (keyed by the object-stream's object number). Kept
+  // separate from `cache` because the value is a Map, not a `PdfObject`.
+  private objStmCache: Map<number, Map<number, PdfObject>> = new Map();
   declare readonly trailer: PdfDictValue;
 
   /** Encryption handler (set externally after decryption is initialized) */
@@ -803,15 +806,14 @@ export class PdfDocument {
    */
   private parseCompressedObject(objStmNum: number, index: number): PdfObject | null {
     // Resolve the object stream itself (must be type 1 — not recursive)
-    const stmCacheKey = `objstm:${objStmNum}`;
     let stmObjects: Map<number, PdfObject> | undefined;
 
-    if (this.cache.has(stmCacheKey)) {
-      stmObjects = this.cache.get(stmCacheKey) as unknown as Map<number, PdfObject>;
+    if (this.objStmCache.has(objStmNum)) {
+      stmObjects = this.objStmCache.get(objStmNum);
     } else {
       stmObjects = this.parseObjectStream(objStmNum) ?? undefined;
       if (stmObjects) {
-        this.cache.set(stmCacheKey, stmObjects as unknown as PdfObject);
+        this.objStmCache.set(objStmNum, stmObjects);
       }
     }
 

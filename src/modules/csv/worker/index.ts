@@ -12,7 +12,7 @@ export {
   terminateDefaultWorkerPool,
   parseWithPool,
   formatWithPool
-} from "./pool";
+} from "@csv/worker/pool";
 
 export type {
   // Pool options
@@ -39,4 +39,4 @@ export type {
   GroupResult,
   AggregateResult,
   QueryResult
-} from "./types";
+} from "@csv/worker/types";

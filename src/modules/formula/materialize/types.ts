@@ -42,7 +42,7 @@ export type FormulaResultLike = number | string | boolean | Date | CellErrorValu
  * host's in-memory model may proxy `cell.value` from slaves to the
  * master (see `MergeValue` in `@excel/cell`), so the snapshot builder
  * must filter merge slaves out — otherwise range aggregates count the
- * master's value once per slave. See issue #162.
+ * master's value once per slave.
  *
  * Kept as inline numeric literals (not an enum) so this file stays free
  * of runtime dependencies. The `const` object and `type` alias share a
@@ -100,13 +100,12 @@ export interface CellLike {
 export interface RowLike {
   readonly hidden?: boolean;
   /**
-   * Excel's `eachCell` accepts either a bare callback or options + callback.
+   * Sparse array of cells (0-based index = colNumber-1). Host rows are plain
+   * data records carrying their cells directly; the engine iterates this
+   * array rather than calling a method, so the contract has no behavioural
+   * dependency on the host's row representation.
    */
-  eachCell(callback: (cell: CellLike, colNumber: number) => void): void;
-  eachCell(
-    opts: { includeEmpty?: boolean },
-    callback: (cell: CellLike, colNumber: number) => void
-  ): void;
+  readonly cells: readonly (CellLike | undefined)[];
 }
 
 export interface DimensionsLike {

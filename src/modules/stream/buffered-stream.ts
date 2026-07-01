@@ -13,59 +13,48 @@ import { EventEmitter } from "@utils/event-emitter";
 export type { BufferedStreamOptions, DataChunk } from "@stream/types";
 
 /**
- * String chunk implementation
+ * Create a string-backed data chunk.
  */
-export class StringChunk implements DataChunk {
-  private readonly _data: string;
-  private _buffer?: Uint8Array;
-
-  constructor(data: string) {
-    this._data = data;
-  }
-
-  get length(): number {
-    // Cache the buffer on first access
-    return this.toUint8Array().length;
-  }
-
-  copy(target: Uint8Array, targetOffset: number, offset: number, length: number): number {
-    const source = this.toUint8Array();
-    const copyLength = Math.min(length, source.length - offset);
-    target.set(source.subarray(offset, offset + copyLength), targetOffset);
-    return copyLength;
-  }
-
-  toUint8Array(): Uint8Array {
-    if (!this._buffer) {
-      this._buffer = textEncoder.encode(this._data);
+export function createStringChunk(data: string): DataChunk {
+  let buffer: Uint8Array | undefined;
+  function toUint8Array(): Uint8Array {
+    if (!buffer) {
+      buffer = textEncoder.encode(data);
     }
-    return this._buffer;
+    return buffer;
   }
+  return {
+    get length(): number {
+      // Cache the buffer on first access
+      return toUint8Array().length;
+    },
+    copy(target: Uint8Array, targetOffset: number, offset: number, length: number): number {
+      const source = toUint8Array();
+      const copyLength = Math.min(length, source.length - offset);
+      target.set(source.subarray(offset, offset + copyLength), targetOffset);
+      return copyLength;
+    },
+    toUint8Array
+  };
 }
 
 /**
- * Uint8Array chunk implementation
+ * Create a Uint8Array-backed data chunk.
  */
-export class ByteChunk implements DataChunk {
-  private readonly _data: Uint8Array;
-
-  constructor(data: Uint8Array) {
-    this._data = data;
-  }
-
-  get length(): number {
-    return this._data.length;
-  }
-
-  copy(target: Uint8Array, targetOffset: number, offset: number, length: number): number {
-    const copyLength = Math.min(length, this._data.length - offset);
-    target.set(this._data.subarray(offset, offset + copyLength), targetOffset);
-    return copyLength;
-  }
-
-  toUint8Array(): Uint8Array {
-    return this._data;
-  }
+export function createByteChunk(data: Uint8Array): DataChunk {
+  return {
+    get length(): number {
+      return data.length;
+    },
+    copy(target: Uint8Array, targetOffset: number, offset: number, length: number): number {
+      const copyLength = Math.min(length, data.length - offset);
+      target.set(data.subarray(offset, offset + copyLength), targetOffset);
+      return copyLength;
+    },
+    toUint8Array(): Uint8Array {
+      return data;
+    }
+  };
 }
 
 /**
@@ -159,7 +148,7 @@ export class BufferedStream extends EventEmitter {
       return false;
     }
 
-    const dataChunk = typeof chunk === "string" ? new StringChunk(chunk) : new ByteChunk(chunk);
+    const dataChunk = typeof chunk === "string" ? createStringChunk(chunk) : createByteChunk(chunk);
     this._chunks.push(dataChunk);
     this._totalLength += dataChunk.length;
     return true;

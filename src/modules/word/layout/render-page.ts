@@ -9,30 +9,14 @@
  */
 
 import { measureTextWidth, mapToStandardFont } from "@utils/font-metrics";
-import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
-
-import { isHyperlink, isRun } from "../core/text-utils";
-import { resolveStyle } from "../query/style-resolve";
-import type {
-  BodyContent,
-  DocxDocument,
-  FontSpec,
-  Paragraph,
-  ParagraphProperties,
-  Run,
-  RunProperties,
-  SectionProperties,
-  Table,
-  TableRow
-} from "../types";
-import { EMU_PER_POINT } from "../units";
-import { layoutDocument } from "./layout";
-import type { LayoutResult } from "./layout";
+import { isHyperlink, isRun } from "@word/core/text-utils";
+import { layoutDocument } from "@word/layout/layout";
+import type { LayoutResult } from "@word/layout/layout";
 import {
   DEFAULT_PAGE_HEIGHT_TWIPS,
   DEFAULT_PAGE_MARGIN_TWIPS,
   DEFAULT_PAGE_WIDTH_TWIPS
-} from "./layout-constants";
+} from "@word/layout/layout-constants";
 import type {
   LayoutChart,
   LayoutCheckBox,
@@ -49,7 +33,22 @@ import type {
   LayoutTextBox,
   PageContent,
   PageGeometry
-} from "./layout-model";
+} from "@word/layout/layout-model";
+import { resolveStyle } from "@word/query/style-resolve";
+import type {
+  BodyContent,
+  DocxDocument,
+  FontSpec,
+  Paragraph,
+  ParagraphProperties,
+  Run,
+  RunProperties,
+  SectionProperties,
+  Table,
+  TableRow
+} from "@word/types";
+import { EMU_PER_POINT } from "@word/units";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 
 // =============================================================================
 // Public API Types

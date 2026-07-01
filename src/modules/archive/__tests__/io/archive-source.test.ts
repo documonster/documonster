@@ -1,4 +1,4 @@
-import { isAbortError } from "@archive";
+import { isAbortError } from "@archive/core/errors";
 import { toAsyncIterable } from "@archive/io/archive-source";
 import { describe, expect, it } from "vitest";
 

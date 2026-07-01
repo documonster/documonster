@@ -27,17 +27,16 @@ import {
   hash as hashSyncMaybe,
   hashAsync
 } from "@utils/crypto";
-
 import {
   base64ToBytes,
   bytesToBase64,
   randomBytes,
   utf8Decoder,
   utf8Encoder
-} from "../core/internal-utils";
-import { DocxDecryptionError } from "../errors";
-import { readCfb, writeCfb } from "./cfb-reader";
-import type { CfbEntry } from "./cfb-reader";
+} from "@word/core/internal-utils";
+import { DocxDecryptionError } from "@word/errors";
+import { readCfb, writeCfb } from "@word/security/cfb-reader";
+import type { CfbEntry } from "@word/security/cfb-reader";
 
 /** Agile encryption parameters. */
 export interface AgileEncryptionInfo {
@@ -169,7 +168,7 @@ export async function deriveEncryptionKey(
   // error.
   const keyBytes = info.keyBits / 8;
   if (h.length < keyBytes) {
-    throw new Error(
+    throw new DocxDecryptionError(
       `deriveEncryptionKey: hash output of ${h.length} bytes is too ` +
         `short for keyBits=${info.keyBits} (need ${keyBytes}). ` +
         `Use a hash algorithm with a larger digest size (e.g. SHA-512 ` +

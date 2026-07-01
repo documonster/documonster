@@ -2,179 +2,182 @@
 
 [English](README.md)
 
-现代 TypeScript Excel 工作簿管理器 — 读取、操作和写入 XLSX 与 JSON 格式的电子表格，零运行时依赖。
+现代化的 TypeScript Excel 工作簿管理器 —— 零运行时依赖，读取、操作并写入 XLSX 与 JSON 电子表格。
 
-## 功能特性
+## 特性
 
-- **创建、读取和修改 XLSX 文件** — 完整 Open XML 支持
-- **多工作表支持** — 添加、删除、重排序、复制
-- **单元格样式** — 字体、颜色、边框、填充、对齐、数字格式
-- **单元格合并和格式化** — 合并区域、富文本、超链接
-- **行列属性** — 宽度、高度、隐藏、大纲级别、自动适应；按对象添加行时支持嵌套列 key 路径（`"address.city"`）
-- **冻结窗格和拆分视图** — 冻结行/列、在指定位置拆分
-- **富文本支持** — 单个单元格内多种字体/样式
-- **公式和计算值** — 共享公式、定义名称
-- **数据验证** — 列表、整数、小数、日期、文本长度、自定义
-- **条件格式** — 单元格值、色阶、数据条、图标集
-- **图片** — JPEG、PNG、GIF，支持单单元格和双单元格锚点；可嵌入或通过 URL/文件路径外链；SVG 带光栅 fallback
-- **形状** — 矩形、椭圆、线条、文本框，支持填充/轮廓/文本
-- **超链接** — 内部链接、外部链接、邮件链接
-- **数据透视表** — 读取和保留数据透视表定义
-- **图表** — 创建/读取/编辑 classic chart、ChartEx 现代图表、组合图、数据透视图、图表工作表，并提供 SVG/PNG/PDF 预览
-- **表格** — 自动筛选、汇总行、结构化引用
-- **批注和备注** — 线程批注、旧版备注
-- **复选框** — 表单控件和单元格级复选框
-- **页面设置** — 打印区域、打印标题、页眉/页脚、分页符
-- **数据保护** — 带密码的工作表保护（SHA-512）
-- **流式处理** — `WorkbookReader` 和 `WorkbookWriter` 处理大文件
-- **CSV 导入/导出** — `readCsv`、`writeCsv`、`readCsvFile`、`writeCsvFile`
-- **Markdown 导入/导出** — `readMarkdown`、`writeMarkdown`、`readMarkdownFile`、`writeMarkdownFile`
-- **PDF 导出** — `excelToPdf()`，完整支持样式、分页、字体、加密
-- **浏览器支持** — `xlsx.load()`、`xlsx.writeBuffer()`，无需 polyfill
+- **创建、读取并修改 XLSX 文件** —— 完整的 Open XML 支持
+- **多工作表支持** —— 添加、删除、重排、复制
+- **单元格样式** —— 字体、颜色、边框、填充、对齐、数字格式
+- **单元格合并与格式化** —— 合并区域、富文本、超链接
+- **行与列属性** —— 宽度、高度、隐藏、分级显示级别、自动适应；按对象添加行时支持嵌套列键路径（`"address.city"`）
+- **冻结窗格与拆分视图** —— 冻结行/列、按位置拆分
+- **富文本支持** —— 单个单元格内可包含多种字体/样式
+- **公式与计算值** —— 共享公式、定义名称
+- **数据验证** —— 列表、整数、小数、日期、文本长度、自定义
+- **条件格式** —— 单元格值、色阶、数据条、图标集
+- **图片** —— JPEG、PNG、GIF，支持单格与双格锚定；可嵌入或通过 URL/文件路径外部（链接）引用；SVG 带栅格回退
+- **形状** —— 矩形、椭圆、直线、文本框，支持填充/轮廓/文字
+- **超链接** —— 内部、外部、电子邮件
+- **数据透视表** —— 读取并保留数据透视表定义
+- **图表** —— 创建/读取/编辑经典图表、ChartEx 现代图表、组合图、透视图、图表工作表，以及零依赖的 SVG/PNG/PDF 预览（确定性输出，并非 Excel 像素级精确 —— 参见[渲染范围](#渲染范围)）
+- **表格** —— 自动筛选、汇总行、结构化引用
+- **批注与备注** —— 线程化批注、传统备注
+- **复选框** —— 表单控件与单元格级复选框
+- **页面设置** —— 打印区域、打印标题、页眉/页脚、分页符
+- **数据保护** —— 带密码（SHA-512）的工作表保护
+- **流式处理** —— 用于大文件的 `WorkbookReader` 与 `WorkbookWriter`
+- **CSV 导入/导出** —— `readCsv`、`writeCsv`、`readCsvFile`、`writeCsvFile`
+- **Markdown 导入/导出** —— `readMarkdown`、`writeMarkdown`、`readMarkdownFile`、`writeMarkdownFile`
+- **PDF 导出** —— `Pdf.fromExcel()`，支持完整样式、分页、字体、加密
+- **浏览器支持** —— `xlsx.load()`、`xlsx.writeBuffer()`，无需任何 polyfill
 
 ## 快速开始
 
 ### 创建工作簿
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet } from "documonster/excel";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("My Sheet");
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "My Sheet");
 
 // 添加数据
-sheet.addRow(["姓名", "年龄", "邮箱"]);
-sheet.addRow(["张三", 30, "zhang@example.com"]);
-sheet.addRow(["李四", 25, "li@example.com"]);
+Worksheet.addRow(sheet, ["Name", "Age", "Email"]);
+Worksheet.addRow(sheet, ["John Doe", 30, "john@example.com"]);
+Worksheet.addRow(sheet, ["Jane Smith", 25, "jane@example.com"]);
 
 // Node.js：写入文件
-await workbook.xlsx.writeFile("output.xlsx");
+await Workbook.writeFile(workbook, "output.xlsx");
 
 // 浏览器：写入缓冲区
-const buffer = await workbook.xlsx.writeBuffer();
+const buffer = await Workbook.toBuffer(workbook);
 ```
 
-#### 按对象添加行（支持嵌套 key）
+#### 按对象添加行（带嵌套键）
 
-当列设置了 key 时，可以从对象添加行。key 支持点号路径，从嵌套对象取值：
+当列设置了键时，行可以从对象添加。键可以使用点分路径从嵌套对象中提取值：
 
 ```typescript
-sheet.columns = [
+Worksheet.setColumns(sheet, [
   { header: "Name", key: "name", width: 20 },
   { header: "City", key: "address.city", width: 20 }
-];
-sheet.addRow({ name: "Alice", address: { city: "Sydney" } });
+]);
+Worksheet.addRow(sheet, { name: "Alice", address: { city: "Sydney" } });
 ```
 
 ### 读取工作簿
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet, Row } from "documonster/excel";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // Node.js：从文件读取
-await workbook.xlsx.readFile("input.xlsx");
+await Workbook.readFile(workbook, "input.xlsx");
 
 // 浏览器：从 ArrayBuffer 读取
-await workbook.xlsx.load(arrayBuffer);
+await Workbook.read(workbook, arrayBuffer);
 
-const worksheet = workbook.getWorksheet(1);
-worksheet.eachRow((row, rowNumber) => {
-  console.log("行 " + rowNumber + " = " + JSON.stringify(row.values));
+const worksheet = Workbook.getWorksheet(workbook, 1);
+Worksheet.eachRow(worksheet, (row, rowNumber) => {
+  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.values(worksheet, rowNumber)));
 });
 ```
 
 ### 设置单元格样式
 
 ```typescript
-const cell = worksheet.getCell("A1");
-cell.value = "你好";
-cell.font = {
+import { Cell } from "documonster/excel";
+
+Cell.setValue(worksheet, "A1", "Hello");
+Cell.setFont(worksheet, "A1", {
   name: "Arial",
   size: 16,
   bold: true,
   color: { argb: "FFFF0000" }
-};
-cell.fill = {
+});
+Cell.setFill(worksheet, "A1", {
   type: "pattern",
   pattern: "solid",
   fgColor: { argb: "FFFFFF00" }
-};
-cell.border = {
+});
+Cell.setBorder(worksheet, "A1", {
   top: { style: "thin" },
   left: { style: "thin" },
   bottom: { style: "thin" },
   right: { style: "thin" }
-};
-cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-cell.numFmt = "$#,##0.00";
+});
+Cell.setAlignment(worksheet, "A1", { vertical: "middle", horizontal: "center", wrapText: true });
+Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 ```
 
 ### 数字格式
 
 ```typescript
+import { Cell } from "documonster/excel";
+
 // 货币
-cell.numFmt = "$#,##0.00";
+Cell.setNumFmt(worksheet, "A1", "$#,##0.00");
 
 // 百分比
-cell.numFmt = "0.00%";
+Cell.setNumFmt(worksheet, "A1", "0.00%");
 
 // 日期
-cell.numFmt = "yyyy-mm-dd";
+Cell.setNumFmt(worksheet, "A1", "yyyy-mm-dd");
 
 // 自定义
-cell.numFmt = '#,##0.00 "单位"';
+Cell.setNumFmt(worksheet, "A1", '#,##0.00 "units"');
 ```
 
 ### 富文本
 
 ```typescript
-cell.value = {
+Cell.setValue(worksheet, "A1", {
   richText: [
-    { text: "粗体 ", font: { bold: true } },
-    { text: "和 ", font: {} },
-    { text: "红色", font: { color: { argb: "FFFF0000" } } }
+    { text: "Bold ", font: { bold: true } },
+    { text: "and ", font: {} },
+    { text: "Red", font: { color: { argb: "FFFF0000" } } }
   ]
-};
+});
 ```
 
 ### 公式
 
 ```typescript
-cell.value = { formula: "SUM(A1:A10)" };
-cell.value = { formula: "A1+B1", result: 42 }; // 带缓存结果
+Cell.setValue(worksheet, "A1", { formula: "SUM(A1:A10)" });
+Cell.setValue(worksheet, "A1", { formula: "A1+B1", result: 42 }); // 带缓存结果
 
 // 共享公式
-sheet.getCell("A1").value = { formula: "B1*2", shareType: "shared", ref: "A1:A10" };
+Cell.setValue(sheet, "A1", { formula: "B1*2", shareType: "shared", ref: "A1:A10" });
 
 // 定义名称
-workbook.definedNames.add("MyRange", "Sheet1!$A$1:$B$10");
+DefinedNames.add(Workbook.getDefinedNames(workbook), "Sheet1!$A$1:$B$10", "MyRange");
 ```
 
 ### 数据验证
 
 ```typescript
-worksheet.getCell("A1").dataValidation = {
+Cell.setValidation(worksheet, "A1", {
   type: "list",
   allowBlank: true,
-  formulae: ['"选项1,选项2,选项3"']
-};
+  formulae: ['"Option1,Option2,Option3"']
+});
 
-worksheet.getCell("B1").dataValidation = {
+Cell.setValidation(worksheet, "B1", {
   type: "whole",
   operator: "between",
   formulae: [1, 100],
   showErrorMessage: true,
-  errorTitle: "无效",
-  error: "请输入 1 到 100 之间的数字"
-};
+  errorTitle: "Invalid",
+  error: "Enter a number between 1 and 100"
+});
 ```
 
 ### 条件格式
 
 ```typescript
-worksheet.addConditionalFormatting({
+Worksheet.addConditionalFormatting(worksheet, {
   ref: "A1:A100",
   rules: [
     {
@@ -204,54 +207,56 @@ worksheet.addImage(imageId, {
 });
 ```
 
-#### 嵌入式 vs. 外链式（linked）图片
+#### 嵌入式与外部（链接）图片
 
-`workbook.addImage` 有两种注册方式：
+`workbook.addImage` 以两种方式之一注册图片：
 
-- **嵌入式** —— 传 `buffer`、`base64` 或 `filename`。图片字节会写入 `.xlsx`
-  包内（`xl/media/imageN.ext`）。文件自包含，但每张图片都会增大文件体积。
-- **外链式（external）** —— 只传 `link`（URL 或本地文件路径）。不存储任何字节，
-  包内只保留一个 `TargetMode="External"` 的关系，图片通过 `<a:blip r:link>` 引用。
-  文件体积保持很小，图片在 Excel 打开工作簿时解析。
+- **嵌入式** —— 传入 `buffer`、`base64` 或 `filename`。字节会写入 `.xlsx`
+  包（`xl/media/imageN.ext`）。自包含，但文件会随每张图片增大。
+- **链接式（外部）** —— 仅传入 `link`（URL 或本地文件路径）。不存储任何字节；
+  包会保留一个 `TargetMode="External"` 的关系，图片通过 `<a:blip r:link>`
+  渲染。文件保持较小，图片在工作簿打开时由 Excel 解析。
 
-若同时提供字节和 `link`，**嵌入式优先**。
+如果同时提供了字节和 `link`，则**嵌入式优先**。
 
 ```typescript
-// 来自 URL 的外链图片 —— 不会写入 xl/media/。
+// 来自 URL 的链接图片——不会向 xl/media/ 写入任何内容。
 const urlId = workbook.addImage({ extension: "png", link: "https://example.com/logo.png" });
 worksheet.addImage(urlId, "B2:D6");
 
-// 来自本地文件路径的外链图片（Excel 打开时解析）。
+// 来自本地文件路径的链接图片（由 Excel 在打开时解析）。
 const fileId = workbook.addImage({ extension: "png", link: "file:///C:/images/logo.png" });
 worksheet.addImage(fileId, "F2:H6");
 ```
 
-外链图片同样支持叠加（overlay）水印：
+链接图片也可用作覆盖式水印：
 
 ```typescript
 const wmId = workbook.addImage({ extension: "png", link: "https://example.com/draft.png" });
 worksheet.addWatermark({ imageId: wmId, mode: "overlay", opacity: 0.15 });
 ```
 
-**注意事项**（这是 Excel 本身的限制，并非本库限制）：
+**注意事项**（这是 Excel 固有的限制，而非本库的限制）：
 
-- 外链图片是易失的 —— 一旦目标移动或工作簿被转发，Excel 会显示破图占位符。
-  需要自包含文件时请使用嵌入式。
-- 现代 Excel 出于安全考虑，可能拒绝自动加载远程 URL 图片。
-- 只有**单元格图片**和**叠加（overlay）水印**可以外链。工作表**背景图**
-  （`addBackgroundImage`）和**页眉/页脚（VML）水印**（`addWatermark({ mode: "header" })`）
-  **不能**外链 —— 传入外链图片会抛 `ImageError`（Excel 打开时会丢弃这种背景图）。
-  这两种请使用嵌入式图片。
+- 链接图片是易失的——如果目标移动或工作簿被共享，Excel 会显示损坏图片占位符。
+  对于自包含文件，请使用嵌入式。
+- 出于安全原因，现代 Excel 可能拒绝自动加载远程 URL。
+- 只有**单元格图片**和**覆盖式水印**可以链接。工作表**背景**图片
+  （`addBackgroundImage`）和**页眉/页脚（VML）**水印
+  （`addWatermark({ mode: "header" })`）**不能**被链接——若给定链接图片，
+  它们会抛出 `ImageError`（Excel 在打开时会丢弃此类背景）。这些情况请使用嵌入式图片。
 
-可运行示例见 [`images-external.ts`](examples/images-external.ts)。
+参见可运行的 [`images-external.ts`](examples/images-external.ts) 示例。
 
-#### SVG 图片（带光栅 fallback）
+#### SVG 图片（带栅格回退）
 
-Excel 通过一个光栅 `a:blip` 加 `asvg:svgBlip` 扩展来渲染 SVG 图片。本库**不做光栅化** —— 你需要同时提供 SVG 字节和想嵌入的光栅 fallback（通常是 PNG）。现代 Excel 显示清晰的 SVG，旧版本和不支持 SVG 的消费端显示光栅 fallback。
+Excel 通过栅格 `a:blip` 加上 `asvg:svgBlip` 扩展来渲染 SVG 图片。本库**不**进行
+栅格化——你需要同时提供 SVG 字节和你想嵌入的栅格回退（通常是 PNG）。现代 Excel
+显示清晰的 SVG；旧版本和非 SVG 消费者则显示栅格回退。
 
 ```typescript
 const id = workbook.addImage({
-  buffer: pngFallbackBytes, // 光栅 fallback —— 必填
+  buffer: pngFallbackBytes, // 栅格回退——必需
   extension: "png",
   svg: { buffer: svgBytes } // Excel 2016+ 显示的矢量数据
 });
@@ -260,7 +265,8 @@ worksheet.addImage(id, "B2:D6");
 
 ### 形状
 
-添加锚定到单元格区域的自由绘图形状（矩形、椭圆、线条、文本框……）。形状无需媒体文件 —— 几何、填充、轮廓和可选文本标签会直接写入 drawing 部件。
+添加锚定到单元格区域的自由绘制形状（矩形、椭圆、直线、文本框……）。形状不需要
+媒体文件——几何、填充、轮廓和可选的文本标签会直接写入绘图部件。
 
 ```typescript
 worksheet.addShape({
@@ -268,7 +274,7 @@ worksheet.addShape({
   range: "B2:D5", // 单元格区域或 { tl, br } 锚点
   fillColor: "FFD966", // 十六进制 RGB（省略则无填充）
   lineColor: "000000",
-  lineWidth: 1, // 单位：磅
+  lineWidth: 1, // 磅
   text: "Important"
 });
 
@@ -281,7 +287,7 @@ worksheet.addShape({
 });
 ```
 
-形状是只写的（读取时不解析回来），与其它非图表 drawing 内容一致。
+形状是只写的（读取时不会解析回来），这与其他非图表绘图内容保持一致。
 
 ### 表格
 
@@ -292,12 +298,12 @@ worksheet.addTable({
   headerRow: true,
   totalsRow: true,
   columns: [
-    { name: "产品", totalsRowLabel: "合计", filterButton: true },
-    { name: "收入", totalsRowFunction: "sum", filterButton: true }
+    { name: "Product", totalsRowLabel: "Total", filterButton: true },
+    { name: "Revenue", totalsRowFunction: "sum", filterButton: true }
   ],
   rows: [
-    ["小工具", 1000],
-    ["大工具", 2500]
+    ["Widget", 1000],
+    ["Gadget", 2500]
   ]
 });
 ```
@@ -306,7 +312,7 @@ worksheet.addTable({
 
 ```typescript
 worksheet.mergeCells("A1:D1");
-worksheet.getCell("A1").value = "合并标题";
+worksheet.getCell("A1").value = "Merged Header";
 worksheet.getCell("A1").alignment = { horizontal: "center" };
 ```
 
@@ -359,15 +365,15 @@ await worksheet.protect("password123", {
 ### 批注
 
 ```typescript
-worksheet.getCell("A1").note = "简单批注";
+worksheet.getCell("A1").note = "Simple comment";
 
 worksheet.getCell("B1").note = {
-  texts: [{ text: "作者：", font: { bold: true } }, { text: "这是一个富文本批注" }]
+  texts: [{ text: "Author: ", font: { bold: true } }, { text: "This is a rich text comment" }]
 };
 
-// 配置批注框尺寸（单位：磅）。默认 97.8 × 59.1pt。
+// 配置批注框尺寸（磅）。默认为 97.8 × 59.1pt。
 worksheet.getCell("C1").note = {
-  texts: [{ text: "更宽敞的批注" }],
+  texts: [{ text: "A roomier note" }],
   width: 200,
   height: 120
 };
@@ -385,20 +391,32 @@ worksheet.columns.forEach(column => {
 
 ## 图表
 
-ExcelTS 提供结构化图表 API、模板 raw XML 保留，以及确定性的预览渲染器。目标不是只保留图表 XML，而是能直接创建、修改、导出图表预览。
+Documonster 包含结构化的图表 API、用于模板的原始 XML 保留，以及确定性预览渲染器。它旨在填补那些只保留图表 XML 或只写入工作表数据的库所留下的开源空白。
 
-> **启用方式：** 图表功能是 opt-in 的，不会增大不使用图表的 bundle。在使用任何图表 API（`addChart`、`addLineChart`、图表加载/写入等）前，需在启动时调用一次 `installChartSupport()`：
->
-> ```typescript
-> import { installChartSupport } from "@cj-tech-master/excelts/chart";
-> installChartSupport(); // 启动时调用一次
-> ```
->
-> 不调用此函数时，`worksheet.addChart()` 和 `writeFile()` 中的图表序列化会抛错。
+> **设置：** 无需安装或注册步骤。图表 API
+> （`Chart.add`、各类型快捷方法、图表加载/写入等）直接静态地引入图表实现。
+> 从不引用任何图表 API 的消费者，其整个图表实现树会被从打包产物中 tree-shaken 掉。
 
-> 完整可运行示例位于 [`src/modules/excel/examples/charts.ts`](examples/charts.ts)，涵盖 70+ 张图表——包含所有 classic 与 ChartEx 类型、各种 preset、combo/pivot/chartsheet 布局，并导出 SVG/PNG/PDF 预览。运行：`pnpm exec tsx src/modules/excel/examples/charts.ts`。
+> 一个可运行的端到端示例位于 [`src/modules/excel/examples/charts.ts`](examples/charts.ts) —— 它创建了 70 多个图表，涵盖每一种经典 + ChartEx 类型、所有预设系列、组合/透视/图表工作表布局，并导出 SVG / PNG / PDF 预览。运行命令：`pnpm exec tsx src/modules/excel/examples/charts.ts`。
 
-### Classic 图表
+### 渲染范围
+
+内置的 `chart.toSVG()` / `chart.toPNG()` / `chartToPdf(chart)` 辅助方法生成的是**零依赖的确定性预览** —— 并非 Excel 像素级精确的合成器。经典图表由一个在 SVG、PNG 和 PDF 之间共享的 `ChartScene` 中间表示驱动；ChartEx 图表使用专门的几何收集器，从构造上保证 SVG 与矢量 PDF 路径等价。该预览非常适合：
+
+- 服务端缩略图、电子邮件附件和 README 图片
+- CI 健全性检查（"该图表能否在不崩溃的情况下渲染"）
+- 用户打开 Excel 前的快速仪表盘预览
+
+当像素级一致的输出至关重要时，它**不能**替代 Excel / LibreOffice 渲染。具体范围边界：
+
+- Excel 内部的文本布局启发式、字体微调（hinting）和字偶距（kerning）是近似的，而非复现的
+- 3D 渲染仅限于 `bar3D` 轴测投影；其他 3D 变体回退到 2D（参见下方的 3D 说明）
+- DrawingML 效果滤镜（阴影/发光/柔化边缘/模糊/反射）会以 SVG `<filter>` 形式输出，但被 Node PNG 栅格化器静默丢弃
+- 透视图字段按钮和拖放区 UI 仅为元数据 —— 仍由宿主应用程序绘制它们
+
+**对于生产级渲染**，请通过无头 LibreOffice（`soffice --convert-to pdf`）对 `.xlsx` 进行往返转换。本库的字节保留往返 + `templateMode: "strict"` 保证使得这一交接是安全的。
+
+### 经典图表
 
 ```typescript
 const ws = workbook.addWorksheet("Sales");
@@ -432,7 +450,7 @@ ws.addChart(
 );
 ```
 
-### 预设和快捷 API
+### 预设与便捷 API
 
 ```typescript
 import {
@@ -440,9 +458,9 @@ import {
   EXCEL_CHART_EX_PRESETS,
   applyChartPreset,
   applyChartExPreset
-} from "@cj-tech-master/excelts/chart";
+} from "documonster/chart";
 
-// 99 个 classic preset + 10 个 ChartEx preset（对齐 Excel UI 别名）
+// 99 个经典预设 + 10 个 ChartEx 预设（Excel UI 别名）
 ws.addPresetChart("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
 ws.addPresetChartEx(
   "boxAndWhisker",
@@ -450,7 +468,7 @@ ws.addPresetChartEx(
   "N1:V16"
 );
 
-// 按类型的快捷方法 —— `type` 字段自动带入
+// 各类型快捷方法——`type` 字段已隐含。
 ws.addColumnChart({ series: [...] }, "E18:M32");
 ws.addBarChart({ series: [...] }, "E34:M48");
 ws.addLineChart({ series: [...] }, "E50:M64");
@@ -475,10 +493,10 @@ ws.addRegionMapChart({ series: [...] }, "AK66:AS80");
 console.log(EXCEL_CHART_PRESETS.length, EXCEL_CHART_EX_PRESETS.length); // 99, 10
 ```
 
-支持从 JS 数组或 Excel Table 构造 series：
+从数据帧风格的输入构建图表选项包：
 
 ```typescript
-// 对象数组 → 图表：自动把行写入 worksheet，再按绝对引用生成 series
+// 对象数组 → 图表：将行暂存到工作表并返回图表编号。
 ws.addChartFromRows(
   [
     { day: "Mon", visits: 312 },
@@ -489,11 +507,11 @@ ws.addChartFromRows(
   "C1:K16"
 );
 
-// 柱状图快捷 —— 等价于上面的 `type: "bar", barDir: "col"`
+// 列快捷方法——同上，隐含 `type: "bar", barDir: "col"`。
 ws.addColumnChartFromRows(rows, { x: "quarter", y: "revenue", startCell: "A1" }, "C1:K16");
 
-// Excel Table → 图表：默认用 structured reference (`Table1[Col]`)，
-// 表格扩行时图表自动跟进
+// Excel 表格 → 图表。系列引用是结构化的（`Table1[Col]`），
+// 因此当表格增长时图表会自动扩展。
 const table = ws.addTable({ name: "Kpi", ref: "A1", headerRow: true, columns: [...], rows: [...] });
 ws.addChartFromTable(
   table,
@@ -501,7 +519,7 @@ ws.addChartFromTable(
   "F1:N18"
 );
 
-// ChartEx 对应的 helper
+// ChartEx 辅助方法具有相同的形态。
 ws.addChartExFromRows(rows, { type: "histogram", x: "bucket", y: "count" }, "AA1:AI18");
 ws.addChartExFromTable(
   table,
@@ -509,7 +527,8 @@ ws.addChartExFromTable(
   "AA20:AI40"
 );
 
-// 更底层的 range helper —— 生成带绝对引用的 series 对象
+// 低级区域辅助方法——发出带绝对引用的系列，与
+// 构建器内部产出的内容一致。
 const s = ws.seriesFromColumns({
   categories: "Sales!$A$2:$A$7",
   values: "Sales!$B$2:$B$7",
@@ -518,7 +537,7 @@ const s = ws.seriesFromColumns({
 ws.addChart({ type: "line", series: [s] }, "A20:I35");
 ```
 
-### 组合图、ChartEx、数据透视图、图表工作表
+### 组合图、ChartEx、透视图与图表工作表
 
 ```typescript
 ws.addComboChart(
@@ -541,9 +560,9 @@ ws.addComboChart(
   "N1:V16"
 );
 
-// ChartEx —— Office 2016+ 的现代图表类型
-// (histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap)
-// 每个类型都有快捷方法；需要完全控制时直接传 `AddChartExOptions` 给 `addChartEx`
+// ChartEx —— Office 2016+ 现代类型（histogram/pareto/waterfall/funnel/
+// treemap/sunburst/boxWhisker/regionMap）。每种类型都有专门的
+// 快捷方法；如需完全控制，请将 `AddChartExOptions` 传入 `addChartEx`。
 ws.addHistogramChart(
   { series: [{ name: "Distribution", values: "Sales!$B$2:$B$4" }], binning: { binType: "auto" } },
   "N18:V32"
@@ -572,9 +591,9 @@ ws.addTreemapChart(
   "N50:V64"
 );
 
-// 数据透视图 —— 选项和 classic chart 相同，再加上对 pivot table 的引用；
-// `pivotChartOptions` 控制 drop-zone 显示、打开时刷新、以及 Office 2014
-// 引入的展开/收起字段按钮
+// 透视图——与经典图表选项相同，外加回到透视表的链接；
+// `pivotChartOptions` 控制拖放区可见性、打开时刷新，
+// 以及 Office 2014 的展开/折叠字段按钮。
 const pivot = ws.addPivotTable({ sourceTable: src, rows: ["Region"], values: ["Revenue"] });
 ws.addPivotChart(
   pivot,
@@ -595,8 +614,8 @@ ws.addPivotChart(
 );
 ws.addPivotComboChart(pivot, { groups: [...] }, "F22:N40");
 
-// Chartsheet —— 独占一个 sheet tab 的整页图。支持
-// `AddChartOptions` / `AddComboChartOptions` / `AddChartExOptions` 任一形式
+// 图表工作表——独立标签页上的整页图表。可与
+// `AddChartOptions`、`AddComboChartOptions` 或 `AddChartExOptions` 中的任意一种配合使用。
 workbook.addChartsheet("Revenue Chart", {
   tabSelected: true,
   zoomToFit: true,
@@ -608,23 +627,24 @@ workbook.addPivotChartsheet("Pivot Dashboard", pivot, {
 });
 ```
 
-### 锚点形式
+### 锚定形式
 
 ```typescript
-// 字符串形式的 A1 区间 (two-cell anchor, 最常用)
+// 字符串 A1 区域（双格锚定，最常见的形式）。
 ws.addChart({ type: "bar", series: [...] }, "A1:H15");
 
-// 两格锚点 —— 显式 row/col 坐标
+// 带行/列坐标的双格锚定。
 ws.addChart(options, { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } });
 
-// 单格锚点 —— 固定在一个 cell，尺寸按 EMU 给（5×3 英寸；914400 EMU = 1 英寸）
+// 单格锚定——固定到某单元格，带固定的 EMU 范围（5×3 英寸）。
+// 914400 EMU = 1 英寸。
 ws.addChart(options, {
   tl: { col: 1, row: 19 },
   ext: { cx: 5 * 914400, cy: 3 * 914400 },
   editAs: "oneCell"
 });
 
-// 绝对锚点 —— 位置和大小都按 EMU 给，不跟随行高列宽
+// 绝对锚定——固定的 EMU 位置 + 尺寸，忽略行/列。
 ws.addChart(options, {
   pos: { x: 914400, y: 36 * 914400 },
   ext: { cx: 5 * 914400, cy: 3 * 914400 },
@@ -632,7 +652,7 @@ ws.addChart(options, {
 });
 ```
 
-### 高级 series 格式化
+### 高级系列格式化
 
 ```typescript
 ws.addChart(
@@ -667,7 +687,7 @@ ws.addChart(
           value: 10
         },
         dataLabels: { showVal: true, position: "t", numFmt: "$#,##0" },
-        // 单点 override
+        // 单点覆盖
         dataPoints: [
           { index: 0, fill: "C00000" },
           { index: 5, fill: "70AD47", marker: { symbol: "diamond", size: 10 } }
@@ -693,9 +713,9 @@ ws.addChart(
   "A1:L20"
 );
 
-// 图片填充 (pictureFill) —— 柱状条用图像填充。输入可接受
-// 原始 Uint8Array、`data:` URL、base64 字符串、
-// `{ workbookImageId }` 句柄，或结构化 `ChartPictureFillImageData`
+// 图片填充（用图片填充柱形）。接受原始 Uint8Array、
+// `data:` URL、裸 base64 字符串、`{ workbookImageId }` 句柄，
+// 或结构化的 `ChartPictureFillImageData`。
 ws.addChart(
   {
     type: "bar",
@@ -713,15 +733,15 @@ ws.addChart(
 );
 ```
 
-### 图表 style
+### 图表样式
 
 ```typescript
-// 旧版 2007/2010 built-in style (1..48)，写 `<c:style val="N"/>`
+// 传统 2007/2010 内置样式（1..48）。发出 `<c:style val="N"/>`。
 chart.setStyle(42);
-chart.setBuiltInStyle(42); // xlsxwriter 风格的别名
+chart.setBuiltInStyle(42); // 内置样式索引的别名
 
-// 现代 Office 2013+ sidecar —— 完整 styleN.xml + colorsN.xml
-// 通过 `addChart` options 带入，或后续复制
+// 现代 Office 2013+ 附属文件——完整的 styleN.xml + colorsN.xml。
+// 通过 `addChart` 选项应用，或之后通过图表条目复制进来。
 ws.addChart(
   {
     type: "bar",
@@ -746,43 +766,46 @@ ws.addChart(
 ### 预览导出
 
 ```typescript
-import { chartToPdf } from "@cj-tech-master/excelts/pdf";
+import { Chart } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
-const chart = ws.getCharts()[0];
+const chart = Chart.get(ws)[0];
 
-// SVG / PNG 预览 —— PNG 返回 Promise，因为 Node 侧的 rasterizer 是异步的
-const svg = chart.toSVG({ width: 800, height: 450, backgroundColor: "transparent" });
-const png = await chart.toPNG({ width: 800, height: 450, scale: 2, dpi: 192 });
+// SVG / PNG 预览——PNG 返回 Promise，因为 Node 栅格化器是异步的。
+const svg = Chart.toSVG(chart, { width: 800, height: 450, backgroundColor: "transparent" });
+const png = await Chart.toPNG(chart, { width: 800, height: 450, scale: 2, dpi: 192 });
 
-// 单图单页 PDF —— classic chart 走矢量 (文本可选中、缩放不糊)；
-// ChartEx 能走矢量时也走矢量，必要时可通过 `forceRaster: true` 强制栅格
-const pdf = await chartToPdf(chart, {
+// 独立的单页 PDF——经典图表渲染为矢量内容
+//（可选中的文本、与分辨率无关的形状）；ChartEx 类型
+// 在受支持时也渲染为矢量，或通过 `forceRaster: true` 栅格化。
+const pdf = await Pdf.fromChart(chart, {
   title: "Revenue",
   width: 640,
   height: 400,
   margin: 36
 });
 
-// 从外部查询矢量/栅格路径选择：
-import { canRenderChartExAsVectorPdf } from "@cj-tech-master/excelts/chart";
-if (chart.chartExModel) {
-  console.log(canRenderChartExAsVectorPdf(chart.chartExModel));
+// 显式检查矢量与栅格的决策：
+import { canRenderChartExAsVectorPdf } from "documonster/chart";
+const chartExModel = Chart.chartExModel(chart);
+if (chartExModel) {
+  console.log(canRenderChartExAsVectorPdf(chartExModel));
 }
 ```
 
-预览渲染是确定性、零依赖的。浏览器 PNG 使用 canvas，Node.js PNG 使用内置基础 rasterizer。它会绘制核心图表几何、坐标轴、次坐标轴、坐标轴标题、图例、标签、marker、趋势线和误差线，适合缩略图、测试、服务端预览；不是 Excel/Aspose 级 pixel-perfect 渲染器，也不是 Excel 完全一致的布局引擎。ChartEx `regionMap` 预览对已知国家使用内置小型 centroid 表和投影计算，对未知标签使用确定性 tile fallback；这是地理近似预览，不是 GIS/行政边界地图渲染器。
+预览渲染有意做到确定性且无依赖。浏览器 PNG 导出使用 canvas。Node.js PNG 导出使用内置的基础栅格化器。它为缩略图、测试和服务端预览绘制核心图表几何、坐标轴、次坐标轴、坐标轴标题、图例、标签、标记、趋势线和误差线；它不是 Excel 像素级精确的渲染器，也不是与 Excel 一致的布局引擎。ChartEx 的 `regionMap` 预览对已知区域使用一个小型内置的国家质心表加投影数学，对未知标签使用确定性瓦片回退；它们是地理预览，而非 GIS/地图边界渲染器。
 
-### 模板保真
+### 模板保留
 
-加载后的图表 XML 如果不修改，会按字节原样保留。安全的高层 mutation 会只 patch 已知 XML 块，并保留未知扩展：
+加载的图表 XML 在未被修改时会逐字节保留。对于安全的高级修改，Documonster 仅修补已知的 XML 块，并保持不支持的扩展完好无损：
 
-- classic charts：标题、图例、series 引用、series 格式、marker、data point、数据标签、趋势线、误差线、坐标轴、plot layout
-- ChartEx charts：chart data、标题、图例、auto-title deletion、chart/plot 形状、plot-region layout、series 可见性/名称/axis 绑定、series data refs、layoutPr（含 `extLst` passthrough）、数据标签、data point、坐标轴
-- 不安全的结构性 mutation 会回退到结构化重渲染
+- 经典图表：标题、图例、系列引用、系列格式化、标记、数据点、数据标签、趋势线、误差线、坐标轴、绘图区布局
+- ChartEx 图表：图表数据、标题、图例、自动标题删除、图表/绘图形状、绘图区布局、系列可见性/名称/坐标轴绑定、系列数据引用、布局属性（包括 `extLst` 透传）、数据标签、数据点和坐标轴
+- 不安全的结构性修改回退到结构化重新渲染
 
-编辑已加载模板图表时，如果希望优先局部 patch，可使用 `chart.mutate(model => { ... }, { preferRawPatch: true })`。
+当你想在编辑已加载的模板图表后进行局部 XML 修补时，使用 `chart.mutate(model => { ... }, { preferRawPatch: true })`。
 
-严格模板工作流可以使用 `requireRawPatch: true`：如果 mutation 不能安全局部 patch，就直接失败，而不是回退结构化重渲染。
+对于严格的模板工作流，使用 `requireRawPatch: true`，以便在修改无法被安全修补时失败，而不是回退到结构化重新渲染：
 
 ```typescript
 chart.mutate(
@@ -795,9 +818,9 @@ chart.mutate(
 );
 ```
 
-这提供的是“支持的 patch 类型必须保留 raw 模板 XML，否则抛错”的硬保证。它不声称任意未知 OOXML 都能安全 mutation；不支持的结构性编辑会在 `requireRawPatch` 开启时被拒绝。
+这为受支持的修补类别提供了"保留原始模板 XML，否则抛出"的硬性保证。它并不声称任意未知的 OOXML 都能被安全修改；当设置了 `requireRawPatch` 时，不支持的结构性编辑会被拒绝。
 
-也可以在一次写出中对所有加载自模板的 chart/chartEx part 启用这个规则：
+你也可以在写入时对每一个加载的 chart/chartEx 部件强制执行该规则：
 
 ```typescript
 await workbook.xlsx.writeBuffer({ templateMode: "strict" });
@@ -805,40 +828,40 @@ await workbook.xlsx.writeBuffer({ templateMode: "strict" });
 await workbook.xlsx.writeBuffer({ strictTemplateMode: true });
 ```
 
-严格模板模式只影响从已有 workbook 加载并被编辑过的图表 part；新建图表仍按结构化 XML 正常写出。
+严格模板模式影响从现有工作簿加载的、被编辑过的图表部件。新创建的图表仍按结构化方式渲染。
 
-### Oracle 和语料库测试
+### Oracle 与语料库测试
 
-仓库提供可选的真实应用验证 harness。默认关闭，因为它们需要外部程序或私有 fixture 语料。
+该仓库包含用于真实应用验证的可选测试框架。它们默认禁用，因为需要外部二进制文件或私有的固定语料库。
 
-这些 harness 中生成的每个工作簿也会先跑 OOXML 包结构审计。审计会检查必要 part 的 content type、relationship target、重复 relationship ID、chart/ChartEx/drawing/chartsheet 基础结构、ChartEx data/axis 引用，以及 ChartEx external-data relationship ID，让常见 Excel “修复记录”类问题在 CI 中提前失败。启用 Office/LibreOffice open-validation 后，如果命令日志包含 repair/corruption/error 文本，测试会按硬失败处理。
+这些测试框架中每一个生成的工作簿在外部转换前还会运行一次 OOXML 包审计。该审计检查必需的部件内容类型、关系目标、重复的关系 ID、chart/ChartEx/drawing/chartsheet 结构、ChartEx 数据/坐标轴引用以及 ChartEx 外部数据关系 ID，从而让常见的 Excel"已修复记录"问题在 CI 中尽早失败。当已启用的 Office/LibreOffice 打开验证命令记录了修复/损坏/错误文本时，测试会将其视为硬性验证失败。
 
 ```bash
-# LibreOffice 视觉/PDF 导出 oracle
-EXCELTS_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
+# LibreOffice 可视化/PDF 导出 oracle
+DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
-# LibreOffice 打开/转换验证生成的工作簿
-EXCELTS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+# 对生成的工作簿进行 LibreOffice 打开/转换验证
+DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
-# 专有 Office/Aspose 风格 CLI 验证 hook。命令参数通过
-# EXCELTS_OFFICE_OPEN_ARGS 提供 {input} 和 {outDir} 占位符。
-EXCELTS_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
-EXCELTS_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
+# 专有 Office CLI 验证钩子。该命令必须通过
+# DOCUMONSTER_OFFICE_OPEN_ARGS 接受 {input} 和 {outDir} 占位符。
+DOCUMONSTER_OFFICE_OPEN_VALIDATION=1 EXCEL_OFFICE_BIN=/path/to/validator \
+DOCUMONSTER_OFFICE_OPEN_ARGS="--open {input} --outdir {outDir}" \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
-# 企业语料 round-trip harness
-EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+# 企业语料库往返测试框架
+DOCUMONSTER_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 
-# 企业语料 + LibreOffice 打开验证
-EXCELTS_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
-EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
+# 企业语料库加上 LibreOffice 打开验证
+DOCUMONSTER_ENTERPRISE_CORPUS_DIR=/path/to/private/xlsx-corpus \
+DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
   pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts
 ```
 
-语料目录可放一个可选 `manifest.json` 标记预期结构：
+语料库目录中可选的 `manifest.json` 可以标记预期的结构：
 
 ```json
 {
@@ -860,82 +883,141 @@ EXCELTS_CORPUS_LIBREOFFICE_OPEN_VALIDATION=1 LIBREOFFICE_BIN=/path/to/soffice \
 }
 ```
 
-Excel、WPS、Aspose 可以用相同模式接入 CI：把生成工作簿导出成 PDF/图片，再和批准件对比。ExcelTS 自身保持零依赖，不内置专有渲染器。内置审计是结构 gate，不能替代真实 Office 的视觉/open-repair 验证。
+Excel 和 WPS 可以通过提供 CI 作业接入同样的模式，这些作业将每个生成的工作簿转换为 PDF/图像并与已批准的工件比对。Documonster 本身保持零依赖，且不捆绑专有渲染器。内置审计是一道结构性关卡，而非真实 Office 可视化/打开修复验证的替代品。
 
-### 兼容矩阵
+### 能力矩阵
 
-| 能力           | 状态                                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Classic charts | bar、bar3D、line、line3D、pie、pie3D、doughnut、area、area3D、scatter、bubble、radar、stock、surface、surface3D、ofPie（见 3D 说明）                                                                                                                                                                                                                                                                  |
-| ChartEx        | sunburst、treemap、waterfall、funnel、histogram、pareto、boxWhisker、regionMap（见 regionMap 说明）                                                                                                                                                                                                                                                                                                   |
-| 高级图表能力   | 组合图、secondary axes、markers、data labels（`DataLabelPosition`、饼图 leader line、柱/线图碰撞避让）、trendlines、error bars、manual plot layout（edge 模式）、chartsheets                                                                                                                                                                                                                          |
-| 数据透视图     | classic pivot chart source metadata、field buttons/filter metadata、pivot chartsheets                                                                                                                                                                                                                                                                                                                 |
-| 预设           | 99 个 classic preset + 10 个 ChartEx preset —— cone/cylinder/pyramid、scatter variants、stock、surface/contour、exploded pie/doughnut、histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (通过 `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS` 访问)                                                                                                                           |
-| 渲染           | 确定性 SVG、浏览器 PNG、Node PNG fallback（支持文本 `rotate`）、PDF drawing bridge 已与 SVG 完全对齐：labels/markers/errorBars/trendlines/leader lines、文本 anchor/rotation/color/fontFamily（`bold`/`italic` 来自 `txPr/a:latin`）、radar/area/bubble/bar3D 真 alpha 经由 `PdfColor.a` → `/ExtGState`；文本宽度来自 `@excel/utils/text-metrics`（Calibri/Arial/Times 等 9 字体 + ~230 factor 兜底） |
-| 商业级差距     | Excel 级精确渲染、任意未知 XML mutation、完整真实文件兼容矩阵仍需要外部 oracle 验证                                                                                                                                                                                                                                                                                                                   |
+#### 高层能力图
 
-**3D 说明：** `bar3D`、`line3D`、`pie3D`、`area3D`、`surface3D` 以及 `view3D` 的旋转/透视/厚度元数据会**完整保留在 XML** 中，`Scene3D` / `View3D` / `ShapeProperties3D` 的解析器全部可用，round-trip 与 Excel 再打开不受影响。内置 SVG/PNG/PDF 预览有意把所有 3D 变体渲染为对应的 2D 形态（bar3D 仅加一个固定 6 像素的 depth 提示）——没有投影矩阵、没有光照、没有深度排序。这是 OOXML 保真的预览而非 3D 渲染引擎；需要商业级 3D 输出请用 Excel 或 LibreOffice。
+| 领域             | 状态                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 经典图表         | bar、bar3D、line、line3D、pie、pie3D、doughnut、area、area3D、scatter、bubble、radar、stock、surface、surface3D、ofPie（参见 3D 说明）                                                                                                                                                                                                                                                                                                                                                           |
+| ChartEx          | sunburst、treemap、waterfall、funnel、histogram、pareto、boxWhisker、regionMap（参见 regionMap 说明）                                                                                                                                                                                                                                                                                                                                                                                            |
+| 高级图表特性     | 组合图、次坐标轴、标记、数据标签（`DataLabelPosition`、饼图引导线、柱/线碰撞避免）、趋势线、误差线、手动绘图区布局（边缘模式）、图表工作表、数据表（`c:dTable` —— 渲染在绘图区下方）、用户形状覆盖（`c:userShapes` 字节保留 + 程序化替换；不在 SVG/PNG/PDF 预览中渲染）                                                                                                                                                                                                                          |
+| 透视图           | 经典透视图源元数据、字段按钮/筛选元数据、透视图图表工作表（仅元数据 —— 参见下方透视图说明）                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 预设             | 99 个经典预设 + 10 个 ChartEx 预设 —— 圆锥/圆柱/棱锥、散点变体、股价、曲面/等高线、分离饼图/圆环图、histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap（通过 `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`）                                                                                                                                                                                                                                                             |
+| ChartEx 辅助方法 | `chartExOptionsFromTable` / `chartExOptionsFromRows`（+ `worksheet.addChartExFromTable/FromRows`），用于 sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                           |
+| 模板保真度       | 字节保留往返、用于狭窄编辑的原始 XML 修补、`templateMode: "strict"` 以拒绝静默丢失、`Chart.unknownElements` 浮现 `c15:` / `cx14:` 厂商标签                                                                                                                                                                                                                                                                                                                                                       |
+| 渲染范围         | **零依赖确定性预览** —— 并非与 Excel 一致的合成器。经典图表对 SVG、PNG、PDF 使用 `ChartScene` IR；ChartEx 对 SVG 和矢量 PDF 使用专门的几何收集器。对于像素级精确的输出，请通过 `soffice --convert-to pdf` 对 `.xlsx` 进行往返转换                                                                                                                                                                                                                                                                |
+| 渲染特性         | 确定性 SVG、浏览器 PNG、Node PNG 回退（遵循文本 `rotate`）、PDF 绘图桥（标签/标记/误差线/趋势线/引导线/数据表）；文本锚点+旋转+颜色+字体族（来自 `txPr/a:latin` 的 `bold`/`italic`）；radar/area/bubble 通过 `PdfColor.a` → `/ExtGState` 实现真实 alpha；bar3D 真实轴测投影（`view3D.rotX` / `rotY` / `rAngAx`）带三个着色面；文本尺寸通过 `@excel/utils/text-metrics` 计算（Calibri/Arial/Times/9 种字体 + 约 230 个类别因子）。DrawingML 效果滤镜以 SVG `<filter>` 形式输出，但在 PDF 中不复现 |
+| 商业级差距       | Excel 完美渲染、line3D/pie3D/area3D/surface3D 的真实 3D、任意未知 XML 修改，以及完整的真实文件兼容性矩阵，都需要外部 oracle 测试                                                                                                                                                                                                                                                                                                                                                                 |
 
-**字体与 CJK：** `PdfDocumentBuilder` 在页面含非 WinAnsi 字符且未显式 `embedFont` 时会自动发现系统字体（与 `excelToPdf` 相同机制）。需要跨机器字节稳定的输出请调用 `disableFontAutoDiscovery()`，或通过 `embedFont(ttfBytes)` 显式指定字体。注册 `onWarning(handler)` 可按 build 收到一次诊断：每个未识别的 `fontFamily`（退回 Helvetica metrics）一条，每次 build 中出现但无字体覆盖的非 WinAnsi 字符（将渲染 Type3 NOTDEF 方块）一条。
+#### 各类型能力网格
 
-**最小 PDF surface：** `ChartPdfDrawingSurface.drawPath?` 与 `drawCircle?` 为可选。surface 缺 `drawPath` 时，饼 / 甜甜圈 / ofPie 的扇形轮廓降级为 `drawLine` 多段线描边（形状保留，填色丢失）；area 与 radar-filled 的 fill 会丢失但周围的描边依然输出；marker 按 circle→rect→line 逐级降级。`PdfPageBuilder` / `PdfEditorPage` 两者都实现了完整接口，因此这只影响自定义 surface 的使用者。
+行是图表类型。列的含义：
 
-**regionMap 说明：** ChartEx `regionMap` 预览内置 ~180 国的质心表与四种真投影公式（`mercator`、`miller`、`albers` 等积圆锥、`robinson`）。默认是质心打点的地理预览，未匹配标签回退到六边形 tile 网格。需要真国界多边形时，通过渲染选项 `regionMap: { topology, objectName, match, projection }` 传入 TopoJSON——渲染器会解码 features、按 `feature.id` 或 `feature.properties.<key>` 匹配标签、并绘制分级 choropleth。库本身保持零数据内置——调用方自行加载 `world-atlas`/`natural-earth` 文件。同一条三阶段管线（TopoJSON → 质心预览 → 六边形 tile 回退）**SVG 与矢量 PDF 两条后端都实现了**，`chartToPdf` 会把同一个 `regionMap` option 透传给 `drawChartExPdf`。详见 `src/modules/excel/chart/topojson.ts` 与导出的 `RegionMapDataOptions` / `TopologyLike` 类型。
+- **Create** —— 程序化 `addChart` / `addChartEx`（结构化 API，无需模板）
+- **Read** —— 将现有的 `chartN.xml` / `chartExN.xml` 解析为结构化模型
+- **Edit** —— `chart.mutate(fn, { preferRawPatch })` 对此类型有效（狭窄编辑用原始修补，其余用结构化重建）
+- **Round-trip** —— 加载 → 写入 → 加载产出等价的模型 + 包审计通过
+- **Raw preserve** —— 当图表未被编辑时逐字保留加载的字节（狭窄编辑则通过原始修补）
+- **SVG** —— 内容断言测试（不仅仅是"不抛出"）：文本 / 路径 / 颜色 / 哈希
+- **PNG** —— 内容断言测试（IHDR / IDAT 签名或值级哈希）
+- **PDF** —— 超出通用 `drawChartPdf` 冒烟测试的类型特定 PDF 表面测试
+- **LibreOffice** —— 选择启用的 `chart-oracle` 集成运行，通过 LibreOffice 无错误地打开导出的 xlsx
 
-**ChartEx PDF 说明：** classic charts 走 `drawChartPdf` 矢量路径。ChartEx 所有 layout 现在也全部走 `drawChartExPdf` 矢量路径：
+图例：✅ 直接的类型特定测试 · ⬛ 通过通用/预设扫描循环执行（无值级断言）· ➖ 未实现 / 不适用
 
-- **矢量路径（默认）** — `sunburst`、`treemap`、`waterfall`、`funnel`、`histogram`、`pareto`、`boxWhisker`、`regionMap` 八种类型全部走 `drawChartExPdf`，与 SVG 渲染器共用几何 collectors，两条后端像素级等价（sunburst 圆弧用 cubic Bézier 近似，最大误差 ≤ 0.03%）。`regionMap` 复用同一套 TopoJSON 解码 + 投影 + 质心表。文本可选中、缩放不糊、PDF 文件小。唯一的故意视觉差异：SVG 的圆角框（`rx="14"`）在 PDF 中是直角框（`drawRect` 不暴露圆角半径）。
-- **栅格按需** — 任何 ChartEx 类型都可通过 `chartToPdf(chart, { forceRaster: true })` 强制走栅格路径，适合需要与 SVG 预览像素完全一致而不在意文本可选中的场景。
+##### 经典图表
 
-统一入口仍是 `chartToPdf(chart, options)`（从 `@cj-tech-master/excelts/pdf`）—— 自动选择路径，可用 `{ forceRaster: true }` 强制栅格（例如需要与 SVG 预览像素一致而非可选中文本时）；或直接检查 `canRenderChartExAsVectorPdf(model)` 了解路由决策。
+| Type      | Create | Read | Edit | Round-trip | Raw preserve | SVG | PNG | PDF | LibreOffice |
+| --------- | :----: | :--: | :--: | :--------: | :----------: | :-: | :-: | :-: | :---------: |
+| bar       |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ✅      |
+| bar3D     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| line      |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ✅      |
+| line3D    |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| pie       |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| pie3D     |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| doughnut  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| area      |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| area3D    |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| scatter   |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| bubble    |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| radar     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| stock     |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| surface   |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
+| surface3D |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ⬛  | ⬛  | ⬛  |     ⬛      |
+| ofPie     |   ✅   |  ✅  |  ✅  |     ⬛     |      ✅      | ✅  | ⬛  | ⬛  |     ⬛      |
 
-**内置 chart style：** `chart.setStyle(1..48)`（别名 `chart.setBuiltInStyle(1..48)`）在经典 chart 上写 `<c:style val="N"/>`，语义对齐 xlsxwriter 的 `chart.set_style(N)`。这是对应 2007/2010 style 目录的轻量开关。需要 Office 2013+ 现代 style（带 `styleN.xml` / `colorsN.xml` sidecar）时，用 `worksheet.addChart({ …, chartStyle: ChartStyleModel })`。
+##### ChartEx 类型
 
-**3D 渲染边界（刻意不做）：** 除 `bar3D` 的提示性 depth 外，我们有意**不**实现:
+| Type       | Create | Read | Edit | Round-trip | Raw preserve | SVG | PNG | PDF | LibreOffice |
+| ---------- | :----: | :--: | :--: | :--------: | :----------: | :-: | :-: | :-: | :---------: |
+| sunburst   |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| treemap    |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ✅      |
+| waterfall  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| funnel     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ✅      |
+| histogram  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| pareto     |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| boxWhisker |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
+| regionMap  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
 
-- 任何 3D chart 类型的真 3D 投影（rotX/rotY/perspective → 矩阵 + 深度排序 + 光照）
-- surface3D 的三角网格/线框/等高线渲染
+🟨 =（此表中不再使用）—— 自 regionMap 矢量移植以来，每个 ChartEx 布局都通过 `drawChartExPdf` 走矢量路径。当与 SVG 预览的像素一致性比可选中文本更重要时，调用方仍可在每次调用时通过 `chartToPdf(chart, { forceRaster: true })` 选择栅格化。参见下方的"ChartEx PDF 说明"。
 
-这些特性对预览级渲染器价值比不上多周投入;需要 Excel 级 3D 输出请通过 Excel 或 LibreOffice round-trip。所需元数据（`Scene3D`、`View3D`、`ShapeProperties3D`）已在 XML 层完整 round-trip。
+##### 已知但有意为之的能力差距
 
-**严格模板模式：** 写入选项 `{ templateMode: "strict" }`（或 `{ strictTemplateMode: true }`）会拒绝任何会触发结构化重建的 chart / ChartEx 修改。当必须重建时，错误信息会列出 parser 观察到的未结构化 XML 元素路径（同时可通过 `ChartExModel.unknownElements` 读取），避免厂商扩展在加载的模板上被静默丢弃。
+- **经典 PNG 内容断言**是通用的：每种类型都会经过 PNG 流水线，但只有 `bar` 有哈希黄金值，因为跨图表类型的二进制级稳定性会让测试与渲染器内部过度耦合。
+- **经典 PDF 内容断言**仅在 PDF 路径与 SVG 有显著分歧之处存在（通过 `/ExtGState` 实现的 alpha、饼图引导线、标记几何）。其他类型复用相同的调用图，因此一个 SVG 断言加上通用的 `drawChartPdf` 冒烟测试被认为已足够。
+- **LibreOffice 可视化 oracle**受 `DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE` 控制，且 CI 默认不安装 LibreOffice 以保持矩阵作业的快速；为 `bar`（单独）和 combo/chartsheet/ChartEx-treemap/funnel 固定数据提供了直接的逐类型打开验证，完整目录可通过 `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` 选择启用（参见 `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`）。
+- **ChartEx PDF 矢量路径**（`drawChartExPdf`）覆盖了构建器目前发出的每一种 ChartEx 布局；参见专门的说明。
 
-**测试范围边界（本库**不**测试的内容）：**
+**3D 说明：** `bar3D` 渲染为一个**真实的拉伸盒体**，其轴测投影由 `view3D.rotX` / `view3D.rotY` / `view3D.rAngAx` 驱动——每根柱形有三个着色面（顶 + 前 + 右），深度按柱宽缩放，使 3D 效果在各种图表尺寸下保持可读。默认回退（`rotX=15°, rotY=20°, rAngAx=true`）匹配 Excel 的新建图表默认值。`line3D`、`pie3D`、`area3D`、`surface3D` 以及更丰富的 `view3D` / `Scene3D` / `ShapeProperties3D` 元数据**在 XML 中保留**，因此干净的往返和 Excel 重新打开都能完好无损地存活，但预览仍将这些类型渲染为其 2D 等价形式——对于非柱形的 3D，没有投影矩阵、没有光照装置、没有深度排序。这是一个预览级渲染器，不是 3D 引擎；需要商业级 3D 输出的用户应使用 Excel 或 LibreOffice。
 
-- **没有像素级视觉 diff。** 预览输出通过 SVG 结构断言 + PNG 头/签名 hash 验证 — 真正的 RMS/SSIM 像素 diff 需要打包 PNG 解码器和 diff 算法，而且预览本身明确**不是**像素对齐 Excel 的（见上面的渲染说明）。若工作流需要像素级对齐 Excel，请用 `chartToPdf(chart)` 经 LibreOffice headless PDF 导出后做比较。
-- **仓库内不含 Excel/WPS/Aspose 真实生成的 fixture。** `src/modules/excel/__tests__/data/` 的每个 .xlsx 要么是 ExcelTS 自身生成要么是为回归测试手工写的最小样本。需要宿主应用兼容性覆盖时使用 opt-in 的 `EXCELTS_ENTERPRISE_CORPUS_DIR` — 指向一个用户自备的 fixture 目录，`chart-oracle.integration.test.ts` 会逐个审计。参考 `docs/enterprise-corpus-manifest.example.json` 的 manifest 格式，以及 `scripts/compatibility-report.ts`（`pnpm compatibility:report`）的报告生成器。
-- **CI 没有自动化的 Excel / WPS 运行时。** CI 的 open-validation 仅 gate 到 LibreOffice 上；Excel / WPS 二进制不出现在任何 CI runner 中，GUI 驱动的这两款 app 的 validation 超出范围。`EXCELTS_OFFICE_OPEN_VALIDATION` + `EXCELTS_OFFICE_OPEN_ARGS` 钩子允许自建的安装了 Office 的 runner 按同一 pattern 参与这一检查。
+**字体与 CJK：** 每当页面包含非 WinAnsi 字符且未显式嵌入字体时，`PdfDocumentBuilder` 会自动发现系统字体（与 `excelToPdf` 相同的机制）。传入 `disableFontAutoDiscovery()` 可在各宿主间获得字节稳定的输出，或传入 `embedFont(ttfBytes)` 以使用确定性的字型。注册 `onWarning(handler)` 可在以下情况各收到一条诊断：每个不同的未知 `fontFamily`（例如回退到 Helvetica 度量的非标准名称），以及每次构建中当非 WinAnsi 字符落在没有覆盖字体的页面上时（渲染 Type3 NOTDEF 方框）。
 
-相比 ExcelJS，ExcelTS 有原生图表创建和编辑。相比 xlsx-populate，ExcelTS 在安全场景保留模板 XML 的同时提供结构化 chart API。相比 XlsxWriter/openpyxl/excelize，ExcelTS 提供 TypeScript/浏览器支持、ChartEx、数据透视图元数据、图表工作表和预览渲染入口。
+**最小化 PDF 表面：** `ChartPdfDrawingSurface.drawPath?` 和 `drawCircle?` 是可选的。当某个表面缺少 `drawPath` 时，pie/doughnut/ofPie 切片轮廓降级为 `drawLine` 折线描边（形状保留，填充丢失）；area 和 radar 填充被丢弃，但周围的描边仍会发出；标记回退到 circle→rect→line 链。`PdfPageBuilder` / `PdfEditorPage` 都提供完整接口，因此这只对自定义表面才有影响。
 
-### 迁移指南
+**regionMap 说明：** ChartEx 的 `regionMap` 预览附带一张约 180 条目的国家质心表和四个真实投影公式（`mercator`、`miller`、`albers` 等积圆锥投影、`robinson`）。默认情况下这是质心点地理预览；未匹配的标签回退到确定性的六边形瓦片布局。对于真实的国家多边形，请通过渲染选项 `regionMap: { topology, objectName, match, projection }` 传入 TopoJSON 拓扑——渲染器将解码要素、将标签匹配到 `feature.id` 或 `feature.properties.<key>`，并绘制 choropleth 路径。这使得本库保持零数据捆绑：调用方加载他们自己的 `world-atlas`/`natural-earth` 文件。相同的三模式流水线（TopoJSON → 质心预览 → 六边形瓦片回退）对 **SVG 和矢量 PDF 都**实现了——`chartToPdf` 会将相同的 `regionMap` 选项透传给 `drawChartExPdf`。参见 `src/modules/excel/chart/topojson.ts` 以及导出的 `RegionMapDataOptions` / `TopologyLike` 类型。
 
-详细 API 映射在独立文档中：
+**内置图表样式：** `chart.setStyle(1..48)`（别名 `chart.setBuiltInStyle(1..48)`）在经典图表上写入 `<c:style val="N"/>`，从内置样式索引中选择一个。这是映射到 2007/2010 样式目录的轻量级旋钮。对于带完整 `styleN.xml` / `colorsN.xml` 附属文件的现代 Office-2013 时代样式，请使用 `worksheet.addChart({ …, chartStyle: ChartStyleModel })`。
 
-- **[`docs/FROM_EXCELJS.md`](../../../docs/FROM_EXCELJS.md)** — ExcelJS 没有原生 chart 创建 API；本文档说明如何把"模板原样导出"和"手工编辑 chart XML"的流程改为结构化的 `addChart` / `mutate` 调用，并介绍 ExcelJS 没有的预览渲染助手。
-- **[`docs/FROM_XLSXWRITER.md`](../../../docs/FROM_XLSXWRITER.md)** — 逐条 cheat sheet，覆盖 XlsxWriter (Python)、openpyxl (Python)、excelize (Go)。内容包括 `set_style`、`add_series`、`set_x_axis`/`set_y_axis`、chart 尺寸、以及这些库都没有的现代 ChartEx 类型（sunburst/waterfall/funnel/boxWhisker/regionMap）。
-- 企业语料验证 manifest 示例：[`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json)。
+**3D 渲染边界（非目标）：** 除了用于 `bar3D` 的轴测盒体外，我们有意**不**渲染：
+
+- `line3D`、`pie3D`、`area3D`、`surface3D` 的真实 3D 投影（rotX/rotY/透视 → 矩阵 + 深度排序 + 光照装置）
+- 作为三角网格/线框/带状等高线的 surface3D
+
+这些特性需要数周的投入，而对于预览级渲染器回报很低；需要与 Excel 一致的 3D 输出的用户应通过 Excel 或 LibreOffice 往返。完成这一点所需的所有元数据（`Scene3D`、`View3D`、`ShapeProperties3D`）都已通过 XML 往返。
+
+**ChartEx PDF 说明：** 经典图表通过 `drawChartPdf` 渲染为矢量 PDF 内容（文本保持可选中，形状保持与分辨率无关）。ChartEx 图表现在全部通过 `drawChartExPdf` 渲染为矢量 PDF 内容：
+
+- **矢量路径（默认）** —— `sunburst`、`treemap`、`waterfall`、`funnel`、`histogram`、`pareto`、`boxWhisker`、`regionMap` 全都经过 `drawChartExPdf`，它与 SVG 渲染器共享几何收集器，因此两个后端在栅格化之外保持像素等价。Sunburst 弧线以三次贝塞尔近似发出（最大误差 ≤ 0.03 %）；其余都是 PDF 原生理解的直接 `drawRect` / `drawLine` / `drawPath` 基元。`regionMap` 复用与 SVG 渲染器相同的 TopoJSON 解码器 + 投影数学 + 质心表；唯一有意的视觉分歧是圆角框（`rx="14"`）在 PDF 中变为尖角框（`drawRect` 不暴露圆角半径）。
+- **栅格选择启用** —— 当与 SVG 预览的像素一致性比可选中文本或矢量可缩放性更重要时，任何 ChartEx 类型都可按需通过 `chartToPdf(chart, { forceRaster: true })` 栅格化。
+
+使用来自 `documonster/pdf` 的 `chartToPdf(chart, options)` —— 它会自动选择路径，在你有意需要栅格路径时遵循 `forceRaster: true`，并暴露 `canRenderChartExAsVectorPdf(model)`，以便你想从辅助方法外部检查该决策。
+
+**透视图说明：** Documonster 支持**仅元数据**的透视图 —— `pivotSource`、字段按钮、拖放区选项、`refreshOnOpen` 和 `c16:showExpandCollapseFieldButtons` 扩展全都通过 XML 往返，`addPivotChart` / `addPivotChartsheet` 创建 Excel 重建图表所需的引用。**不存在**运行时透视图引擎：预览渲染器将透视图视为普通图表，不绘制字段按钮、拖放区提示，也不对数据应用透视筛选。一旦文件在 Excel / LibreOffice / WPS 中打开，宿主应用程序便会从透视表驱动真实渲染。对于透视缓存数据的程序化操作，请直接使用 `pivotTable` 模块；图表这一侧有意保持轻量。
+
+**严格模板模式：** 写入器接受 `{ templateMode: "strict" }`（或 `{ strictTemplateMode: true }`），以拒绝任何会强制结构性重建的 chart/ChartEx 编辑。当重建不可避免时，错误消息现在会列出解析器观察到的任何非结构化 XML 元素（可作为 `ChartExModel.unknownElements` 获取），这样厂商扩展就永远不会从加载的模板中静默消失。
+
+**测试范围边界（本库*不*测试的内容）：**
+
+- **没有像素级视觉差异。** 预览输出通过 SVG 结构断言和 PNG 头/签名哈希进行测试——真正的 RMS/SSIM 像素差异需要捆绑一个 PNG 解码器和一个差异算法，而且预览本来就明确不是像素级精确的（参见上方的渲染说明）。如果你的工作流需要与 Excel 的像素对等，请通过 LibreOffice 的无头 PDF 导出运行 `chartToPdf(chart)` 并在那里比较。
+- **没有树内的 Office 生成的固定数据。** 该仓库中每一个真实文件固定数据（`src/modules/excel/__tests__/data/`）要么由 Documonster 自身生成，要么为回归测试而最小化手工编写。对于宿主应用程序兼容性覆盖，请使用选择启用的 `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` 机制：将其指向一个由三家厂商生成的文件目录，`chart-oracle.integration.test.ts` 将审计其中每一个。manifest 形态参见 `docs/enterprise-corpus-manifest.example.json`。
+- **没有自动化的 Excel / WPS 运行时。** CI 仅在 LibreOffice 上对打开验证设关卡。任何 CI 运行器中都不附带 Excel 和 WPS 二进制文件，对这些应用的 GUI 驱动验证超出范围。`DOCUMONSTER_OFFICE_OPEN_VALIDATION` + `DOCUMONSTER_OFFICE_OPEN_ARGS` 钩子让安装了 Office 的自托管运行器能参与相同的检查模式。
+
+企业语料库验证 manifest 示例：[`docs/enterprise-corpus-manifest.example.json`](../../../docs/enterprise-corpus-manifest.example.json)。
 
 ## PDF 导出
 
-零外部依赖将任意工作簿导出为 PDF：
+零外部依赖地将任意工作簿导出为 PDF：
 
 ```typescript
-import { Workbook, excelToPdf } from "@cj-tech-master/excelts";
+import { Workbook, Worksheet, Column } from "documonster/excel";
+import { Pdf } from "documonster/pdf";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("报告");
-sheet.columns = [
-  { header: "产品", key: "product", width: 20 },
-  { header: "收入", key: "revenue", width: 15 }
-];
-sheet.addRow({ product: "小工具", revenue: 1000 });
-sheet.getColumn("revenue").numFmt = "$#,##0.00";
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Report");
+Worksheet.setColumns(sheet, [
+  { header: "Product", key: "product", width: 20 },
+  { header: "Revenue", key: "revenue", width: 15 }
+]);
+Worksheet.addRow(sheet, { product: "Widget", revenue: 1000 });
+Column.setStyle(sheet, "revenue", { numFmt: "$#,##0.00" });
 
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   showGridLines: true,
   showPageNumbers: true,
-  title: "销售报告"
+  title: "Sales Report"
 });
 
 // Node.js
@@ -947,18 +1029,18 @@ const blob = new Blob([pdf], { type: "application/pdf" });
 window.open(URL.createObjectURL(blob));
 ```
 
-### XLSX 转 PDF
+### XLSX 转 PDF 转换
 
 ```typescript
-const workbook = new Workbook();
-await workbook.xlsx.readFile("input.xlsx");
-const pdf = await excelToPdf(workbook);
+const workbook = Workbook.create();
+await Workbook.readFile(workbook, "input.xlsx");
+const pdf = await Pdf.fromExcel(workbook);
 ```
 
 ### PDF 加密
 
 ```typescript
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "reader",
@@ -971,7 +1053,7 @@ const pdf = await excelToPdf(workbook, {
 
 ```typescript
 import { readFileSync } from "fs";
-const pdf = await excelToPdf(workbook, {
+const pdf = await Pdf.fromExcel(workbook, {
   font: readFileSync("NotoSansSC-Regular.ttf")
 });
 ```
@@ -979,57 +1061,71 @@ const pdf = await excelToPdf(workbook, {
 ## CSV 导入/导出
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster/excel";
+import {
+  readCsv,
+  writeCsv,
+  writeCsvBuffer,
+  readCsvFile,
+  writeCsvFile
+} from "documonster/excel/csv";
 import fs from "fs";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
-// Node.js：读写 CSV 文件
-await workbook.readCsvFile("data.csv");
-await workbook.writeCsvFile("output.csv");
+// Node.js：读取/写入 CSV 文件
+await readCsvFile(workbook, "data.csv");
+await writeCsvFile(workbook, "output.csv");
 
 // 从流读取 CSV
-await workbook.readCsv(fs.createReadStream("data.csv"), { sheetName: "导入数据" });
+await readCsv(workbook, fs.createReadStream("data.csv"), { sheetName: "Imported" });
 
-// 写入 CSV 到流
-await workbook.writeCsv(fs.createWriteStream("output.csv"));
+// 将 CSV 写入流
+await writeCsv(workbook, fs.createWriteStream("output.csv"));
 
-// 写入 CSV 到字符串 / 字节
-const csvText = workbook.writeCsv();
-const bytes = await workbook.writeCsvBuffer();
+// 将 CSV 写入字符串 / 字节
+const csvText = writeCsv(workbook);
+const bytes = await writeCsvBuffer(workbook);
 
 // 浏览器：从字符串/ArrayBuffer/File 读取
-await workbook.readCsv(csvString);
-await workbook.readCsv(arrayBuffer);
+await readCsv(workbook, csvString);
+await readCsv(workbook, arrayBuffer);
 ```
 
 ## Markdown 导入/导出
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster/excel";
+import {
+  readMarkdown,
+  writeMarkdown,
+  writeMarkdownBuffer,
+  readMarkdownFile,
+  writeMarkdownFile
+} from "documonster/excel/markdown";
 
-const workbook = new Workbook();
+const workbook = Workbook.create();
 
 // 读取 Markdown 表格
-workbook.readMarkdown("| 姓名 | 年龄 |\n| --- | --- |\n| Alice | 30 |");
-await workbook.readMarkdownFile("table.md");
+readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+await readMarkdownFile(workbook, "table.md");
 
 // 写入 Markdown
-const mdText = workbook.writeMarkdown();
-await workbook.writeMarkdownFile("output.md");
-const bytes = workbook.writeMarkdownBuffer();
+const mdText = writeMarkdown(workbook);
+await writeMarkdownFile(workbook, "output.md");
+const bytes = writeMarkdownBuffer(workbook);
 ```
 
 ## 流式 API
 
 ### 流式读取器
 
-以最小内存使用量读取大型 XLSX 文件：
+以最小的内存占用读取大型 XLSX 文件：
 
 ```typescript
-import { WorkbookReader } from "@cj-tech-master/excelts";
+import { Stream } from "documonster/excel";
 
-const reader = new WorkbookReader("large-file.xlsx", {
+const reader = new Stream.WorkbookReader("large-file.xlsx", {
   worksheets: "emit",
   sharedStrings: "cache",
   hyperlinks: "ignore",
@@ -1037,7 +1133,7 @@ const reader = new WorkbookReader("large-file.xlsx", {
 });
 
 for await (const worksheet of reader) {
-  console.log(`正在读取：${worksheet.name}`);
+  console.log(`Reading: ${worksheet.name}`);
   for await (const row of worksheet) {
     console.log(row.values);
   }
@@ -1049,17 +1145,17 @@ for await (const worksheet of reader) {
 逐行写入大型 XLSX 文件：
 
 ```typescript
-import { WorkbookWriter } from "@cj-tech-master/excelts";
+import { Stream } from "documonster/excel";
 
-const workbook = new WorkbookWriter({
+const workbook = new Stream.WorkbookWriter({
   filename: "output.xlsx",
   useSharedStrings: true,
   useStyles: true
 });
 
-const sheet = workbook.addWorksheet("数据");
+const sheet = workbook.addWorksheet("Data");
 for (let i = 0; i < 1000000; i++) {
-  sheet.addRow([`行 ${i}`, i, new Date()]).commit();
+  sheet.addRow([`Row ${i}`, i, new Date()]).commit();
 }
 
 sheet.commit();
@@ -1069,9 +1165,9 @@ await workbook.commit();
 ### Web Streams（Node.js 22+ 和浏览器）
 
 ```typescript
-import { WorkbookWriter, WorkbookReader } from "@cj-tech-master/excelts";
+import { Stream } from "documonster/excel";
 
-// 写入到 Web WritableStream
+// 写入 Web WritableStream
 const chunks: Uint8Array[] = [];
 const writable = new WritableStream({
   write(chunk) {
@@ -1079,9 +1175,9 @@ const writable = new WritableStream({
   }
 });
 
-const writer = new WorkbookWriter({ stream: writable });
+const writer = new Stream.WorkbookWriter({ stream: writable });
 const sheet = writer.addWorksheet("Sheet1");
-sheet.addRow(["姓名", "分数"]).commit();
+sheet.addRow(["Name", "Score"]).commit();
 sheet.addRow(["Alice", 98]).commit();
 await sheet.commit();
 await writer.commit();
@@ -1101,7 +1197,7 @@ const readable = new ReadableStream({
   }
 });
 
-const reader = new WorkbookReader(readable, { worksheets: "emit" });
+const reader = new Stream.WorkbookReader(readable, { worksheets: "emit" });
 for await (const ws of reader) {
   for await (const row of ws) {
     console.log(row.values);
@@ -1111,39 +1207,39 @@ for await (const ws of reader) {
 
 ## 浏览器支持
 
-### 使用打包工具（Vite、Webpack、Rollup、esbuild）
+### 与打包工具配合使用（Vite、Webpack、Rollup、esbuild）
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook, Cell } from "documonster/excel";
 
-const workbook = new Workbook();
-const sheet = workbook.addWorksheet("Sheet1");
-sheet.getCell("A1").value = "你好，浏览器！";
+const workbook = Workbook.create();
+const sheet = Workbook.addWorksheet(workbook, "Sheet1");
+Cell.setValue(sheet, "A1", "Hello, Browser!");
 
-const buffer = await workbook.xlsx.writeBuffer();
+const buffer = await Workbook.toBuffer(workbook);
 const blob = new Blob([buffer], {
   type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 });
 const url = URL.createObjectURL(blob);
 ```
 
-### 使用 Script 标签
+### 与 Script 标签配合使用
 
 ```html
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+<script src="https://unpkg.com/documonster/dist/iife/documonster.iife.min.js"></script>
 <script>
-  const { Workbook } = ExcelTS;
-  const wb = new Workbook();
+  const { Workbook } = Documonster;
+  const wb = Workbook.create();
 </script>
 ```
 
 ### 浏览器注意事项
 
-- 使用 `xlsx.load(arrayBuffer)` 代替 `xlsx.readFile()`
-- 使用 `xlsx.writeBuffer()` 代替 `xlsx.writeFile()`
-- PDF 导出完全支持
-- CSV 和 Markdown 操作完全支持
-- 工作表密码保护使用纯 JS SHA-512
+- 使用 `Workbook.read(workbook, arrayBuffer)` 而非 `Workbook.readFile(...)`
+- 使用 `Workbook.toBuffer(workbook)` 而非 `Workbook.writeFile(...)`
+- 完全支持 PDF 导出
+- 支持 CSV 和 Markdown 操作
+- 带密码的工作表保护使用纯 JS SHA-512
 
 ## 工具导出
 
@@ -1176,21 +1272,21 @@ import {
   PdfError,
   isPdfError,
 
-  // 错误处理
+  // 错误
   BaseError,
   ExcelError,
   toError,
   errorToJSON,
   getErrorChain,
   getRootCause
-} from "@cj-tech-master/excelts";
+} from "documonster";
 ```
 
 ## 示例
 
-查看 [examples 目录](examples/) 获取覆盖所有功能的可运行代码：
+参见[示例目录](examples/)，其中包含覆盖所有特性的可运行代码：
 
-- 工作簿创建、读取和复制
+- 工作簿的创建、读取和复制
 - 单元格样式、字体、边框、填充
 - 公式、数据验证、条件格式
 - 图片（JPEG、PNG）、超链接、批注
@@ -1199,4 +1295,4 @@ import {
 - 流式读取器和写入器
 - Web Streams 集成
 - PDF 导出
-- 更多...
+- 以及更多……

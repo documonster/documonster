@@ -2,7 +2,7 @@
  * Encryption-related types and utilities for ZIP files.
  */
 
-import type { AesKeyStrength } from "./aes";
+import type { AesKeyStrength } from "@archive/crypto/aes";
 
 /**
  * Encryption method used for a ZIP entry.

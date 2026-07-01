@@ -4,7 +4,7 @@
  * Environment-agnostic interfaces and utilities for worker pool management.
  */
 
-import type { WorkerPoolOptions } from "./types";
+import type { WorkerPoolOptions } from "@archive/compression/worker-pool/types";
 
 export type { WorkerPoolOptions };
 
@@ -78,4 +78,4 @@ export function hasWorkerSupport(): boolean {
 }
 
 // Re-export from shared errors module
-export { createAbortError } from "@archive/shared/errors";
+export { createAbortError } from "@archive/core/errors";

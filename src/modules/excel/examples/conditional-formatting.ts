@@ -1,30 +1,37 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
-import { Range } from "@excel/range";
+import { Cell, Range, Workbook, Worksheet } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "conditional-formatting.xlsx");
 
-const [, , filename] = process.argv;
-
-const wb = new Workbook();
+const wb = Workbook.create();
 
 function addTable(ws, ref) {
-  const range = new Range(ref);
+  const range = Range.create(ref);
   ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].forEach((day, index) => {
-    ws.getCell(range.top, range.left + index).value = day;
+    Cell.setValue(ws, range.top, range.left + index, day);
   });
   let count = 1;
   for (let i = 1; i <= 6; i++) {
     for (let j = 0; j < 5; j++) {
-      ws.getCell(range.top + i, range.left + j).value = count++;
+      Cell.setValue(ws, range.top + i, range.left + j, count++);
     }
   }
 }
 
 function addDateTable(ws, ref) {
-  const range = new Range(ref);
+  const range = Range.create(ref);
   ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].forEach(
     (day, index) => {
-      ws.getCell(range.top, range.left + index).value = day;
+      Cell.setValue(ws, range.top, range.left + index, day);
     }
   );
   const DAY = 86400000;
@@ -37,9 +44,8 @@ function addDateTable(ws, ref) {
 
   for (let i = 1; i <= 9; i++) {
     for (let j = 0; j < 7; j++) {
-      const cell = ws.getCell(range.top + i, range.left + j);
-      cell.value = dt;
-      cell.numFmt = "DD MMM";
+      Cell.setValue(ws, range.top + i, range.left + j, dt);
+      Cell.setStyle(ws, range.top + i, range.left + j, { numFmt: "DD MMM" });
       dt = new Date(dt.getTime() + DAY);
     }
   }
@@ -47,10 +53,10 @@ function addDateTable(ws, ref) {
 
 // ============================================================================
 // Expression
-const expressionWS = wb.addWorksheet("Formula");
+const expressionWS = Workbook.addWorksheet(wb, "Formula");
 
 addTable(expressionWS, "A1:E7");
-expressionWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(expressionWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -63,7 +69,7 @@ expressionWS.addConditionalFormatting({
 });
 
 // testing priority
-expressionWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(expressionWS, {
   ref: "A2",
   rules: [
     {
@@ -87,10 +93,10 @@ expressionWS.addConditionalFormatting({
 
 // ============================================================================
 // Highlight Cells
-const highlightWS = wb.addWorksheet("Highlight");
+const highlightWS = Workbook.addWorksheet(wb, "Highlight");
 
 addTable(highlightWS, "A1:E7");
-highlightWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(highlightWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -106,10 +112,10 @@ highlightWS.addConditionalFormatting({
 
 // ============================================================================
 // Top 10% (and bottom)
-const top10pcWS = wb.addWorksheet("Top 10%");
+const top10pcWS = Workbook.addWorksheet(wb, "Top 10%");
 
 addTable(top10pcWS, "A1:E7");
-top10pcWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(top10pcWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -130,7 +136,7 @@ top10pcWS.addConditionalFormatting({
 
 // top and bottom 8
 addTable(top10pcWS, "G1:K7");
-top10pcWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(top10pcWS, {
   ref: "G1:K7",
   rules: [
     {
@@ -151,7 +157,7 @@ top10pcWS.addConditionalFormatting({
 
 // above and below average
 addTable(top10pcWS, "M1:Q7");
-top10pcWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(top10pcWS, {
   ref: "M1:Q7",
   rules: [
     {
@@ -168,10 +174,10 @@ top10pcWS.addConditionalFormatting({
 
 // ============================================================================
 // Colour Scales
-const colourScaleWS = wb.addWorksheet("Colour Scales");
+const colourScaleWS = Workbook.addWorksheet(wb, "Colour Scales");
 
 addTable(colourScaleWS, "A1:E7");
-colourScaleWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(colourScaleWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -184,7 +190,7 @@ colourScaleWS.addConditionalFormatting({
 
 // top and bottom 8
 addTable(colourScaleWS, "G1:K7");
-colourScaleWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(colourScaleWS, {
   ref: "G1:K7",
   rules: [
     {
@@ -197,10 +203,10 @@ colourScaleWS.addConditionalFormatting({
 
 // ============================================================================
 // Arrows
-const arrowsWS = wb.addWorksheet("Arrows");
+const arrowsWS = Workbook.addWorksheet(wb, "Arrows");
 
 addTable(arrowsWS, "A1:E7");
-arrowsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(arrowsWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -216,7 +222,7 @@ arrowsWS.addConditionalFormatting({
 });
 
 addTable(arrowsWS, "G1:K7");
-arrowsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(arrowsWS, {
   ref: "G1:K7",
   rules: [
     {
@@ -233,7 +239,7 @@ arrowsWS.addConditionalFormatting({
 });
 
 addTable(arrowsWS, "M1:Q7");
-arrowsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(arrowsWS, {
   ref: "M1:Q7",
   rules: [
     {
@@ -251,7 +257,7 @@ arrowsWS.addConditionalFormatting({
 });
 
 addTable(arrowsWS, "A9:E15");
-arrowsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(arrowsWS, {
   ref: "A9:E15",
   rules: [
     {
@@ -268,7 +274,7 @@ arrowsWS.addConditionalFormatting({
 });
 
 addTable(arrowsWS, "G9:K15");
-arrowsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(arrowsWS, {
   ref: "G9:K15",
   rules: [
     {
@@ -285,10 +291,10 @@ arrowsWS.addConditionalFormatting({
 
 // ============================================================================
 // Shapes
-const shapesWS = wb.addWorksheet("Shapes");
+const shapesWS = Workbook.addWorksheet(wb, "Shapes");
 
 addTable(shapesWS, "A1:E7");
-shapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(shapesWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -304,7 +310,7 @@ shapesWS.addConditionalFormatting({
 });
 
 addTable(shapesWS, "G1:K6");
-shapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(shapesWS, {
   ref: "G1:K6",
   rules: [
     {
@@ -322,7 +328,7 @@ shapesWS.addConditionalFormatting({
 });
 
 addTable(shapesWS, "M1:Q7");
-shapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(shapesWS, {
   ref: "M1:Q7",
   rules: [
     {
@@ -339,7 +345,7 @@ shapesWS.addConditionalFormatting({
 });
 
 addTable(shapesWS, "A9:E15");
-shapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(shapesWS, {
   ref: "A9:E15",
   rules: [
     {
@@ -357,10 +363,10 @@ shapesWS.addConditionalFormatting({
 
 // ============================================================================
 // Shapes
-const extSshapesWS = wb.addWorksheet("Ext Shapes");
+const extSshapesWS = Workbook.addWorksheet(wb, "Ext Shapes");
 
 addTable(extSshapesWS, "A1:E7");
-extSshapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(extSshapesWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -376,7 +382,7 @@ extSshapesWS.addConditionalFormatting({
 });
 
 addTable(extSshapesWS, "G1:K7");
-extSshapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(extSshapesWS, {
   ref: "G1:K7",
   rules: [
     {
@@ -392,7 +398,7 @@ extSshapesWS.addConditionalFormatting({
 });
 
 addTable(extSshapesWS, "M1:Q7");
-extSshapesWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(extSshapesWS, {
   ref: "M1:Q7",
   rules: [
     {
@@ -411,10 +417,10 @@ extSshapesWS.addConditionalFormatting({
 
 // ============================================================================
 // Databar
-const databarWS = wb.addWorksheet("Databar");
+const databarWS = Workbook.addWorksheet(wb, "Databar");
 
 addTable(databarWS, "A1:E7");
-databarWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(databarWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -430,7 +436,7 @@ databarWS.addConditionalFormatting({
 });
 
 addTable(databarWS, "G1:K7");
-databarWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(databarWS, {
   ref: "G1:K7",
   rules: [
     {
@@ -447,10 +453,10 @@ databarWS.addConditionalFormatting({
 
 // ============================================================================
 // Cell Is
-const cellIsWS = wb.addWorksheet("Cell Is");
+const cellIsWS = Workbook.addWorksheet(wb, "Cell Is");
 
 addTable(cellIsWS, "A1:E7");
-cellIsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(cellIsWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -482,10 +488,10 @@ cellIsWS.addConditionalFormatting({
 
 // ============================================================================
 // Contains
-const containsWS = wb.addWorksheet("Contains");
+const containsWS = Workbook.addWorksheet(wb, "Contains");
 
 addTable(containsWS, "A1:E7");
-containsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(containsWS, {
   ref: "A1:E7",
   rules: [
     {
@@ -500,7 +506,7 @@ containsWS.addConditionalFormatting({
 });
 
 addTable(containsWS, "G1:K7");
-containsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(containsWS, {
   ref: "G1:K7",
   rules: [
     {
@@ -514,7 +520,7 @@ containsWS.addConditionalFormatting({
 });
 
 addTable(containsWS, "M1:Q7");
-containsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(containsWS, {
   ref: "M1:Q7",
   rules: [
     {
@@ -528,7 +534,7 @@ containsWS.addConditionalFormatting({
 });
 
 addTable(containsWS, "A9:E15");
-containsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(containsWS, {
   ref: "A9:E15",
   rules: [
     {
@@ -542,7 +548,7 @@ containsWS.addConditionalFormatting({
 });
 
 addTable(containsWS, "G9:K15");
-containsWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(containsWS, {
   ref: "G9:K15",
   rules: [
     {
@@ -557,10 +563,10 @@ containsWS.addConditionalFormatting({
 
 // ============================================================================
 // Dates
-const dateWS = wb.addWorksheet("Dates");
+const dateWS = Workbook.addWorksheet(wb, "Dates");
 
 addDateTable(dateWS, "A1:G10");
-dateWS.addConditionalFormatting({
+Worksheet.addConditionalFormatting(dateWS, {
   ref: "A1:G10",
   rules: [
     {
@@ -640,7 +646,7 @@ dateWS.addConditionalFormatting({
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

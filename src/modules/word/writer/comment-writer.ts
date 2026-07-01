@@ -4,12 +4,11 @@
  * Renders word/comments.xml and word/commentsExtended.xml parts.
  */
 
+import { NS_W, NS_W15, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import type { CommentDef } from "@word/types";
+import { renderParagraph } from "@word/writer/paragraph-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
 import type { XmlSink } from "@xml/types";
-
-import { NS_W, NS_W15, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
-import type { CommentDef } from "../types";
-import { renderParagraph } from "./paragraph-writer";
-import type { RenderHelpers } from "./render-context";
 
 /** Render word/comments.xml. */
 export function renderComments(

@@ -11,7 +11,7 @@
  *     row/col position.
  *   - resolveThemeColor: convert a theme color spec into a literal hex.
  *   - parseStyleMap / createStyleMap / mergeStyleMaps / matchStyleMap +
- *     DEFAULT_STYLE_MAP — the mammoth-style mapping DSL used by HTML/MD
+ *     DEFAULT_STYLE_MAP — the style-mapping DSL used by HTML/MD
  *     converters.
  *
  * Output: tmp/word-examples/32-styles/...
@@ -20,24 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  toBuffer,
-  resolveStyle,
-  resolveRunStyle,
-  resolveNumberingLevel,
-  resolveTableStyle,
-  resolveThemeColor,
-  parseStyleMap,
-  createStyleMap,
-  mergeStyleMaps,
-  matchStyleMap,
-  DEFAULT_STYLE_MAP,
-  ptToHalfPoint
-} from "../index";
+import { Document, Build, Io, Query, Styles, Theme, Units } from "../index";
 import type { StyleDef, AbstractNumbering, NumberingInstance, DocumentTheme } from "../index";
 
 const outDir = path.resolve(
@@ -61,7 +44,7 @@ const grandparent: StyleDef = {
   name: "Base",
   basedOn: "Normal",
   paragraphProperties: { spacing: { before: 240, after: 120 } },
-  runProperties: { font: "Calibri", size: ptToHalfPoint(11), color: "262626" }
+  runProperties: { font: "Calibri", size: Units.ptToHalfPoint(11), color: "262626" }
 };
 const parent: StyleDef = {
   type: "paragraph",
@@ -76,7 +59,7 @@ const child: StyleDef = {
   name: "Lead Paragraph",
   basedOn: "ColoredBase",
   paragraphProperties: { alignment: "both" },
-  runProperties: { italic: true, size: ptToHalfPoint(12) }
+  runProperties: { italic: true, size: Units.ptToHalfPoint(12) }
 };
 Document.addStyle(d, grandparent);
 Document.addStyle(d, parent);
@@ -115,10 +98,10 @@ const numInst: NumberingInstance = { numId: 50, abstractNumId: 50 };
 
 Document.addParagraphElement(
   d,
-  paragraph(
+  Build.paragraph(
     [
-      text("This paragraph uses the resolved Lead style; "),
-      text("Strong run", { style: "Strong" })
+      Build.text("This paragraph uses the resolved Lead style; "),
+      Build.text("Strong run", { style: "Strong" })
     ],
     { style: "Lead" }
   )
@@ -126,11 +109,11 @@ Document.addParagraphElement(
 
 Document.addParagraphElement(
   d,
-  textParagraph("List item one", { numbering: { numId: 50, level: 0 } })
+  Build.textParagraph("List item one", { numbering: { numId: 50, level: 0 } })
 );
 Document.addParagraphElement(
   d,
-  textParagraph("Sub-item a", { numbering: { numId: 50, level: 1 } })
+  Build.textParagraph("Sub-item a", { numbering: { numId: 50, level: 1 } })
 );
 
 // Add custom theme so resolveThemeColor returns a useful colour
@@ -176,7 +159,7 @@ const leadPara = docModel.body.find(
   b => "type" in b && b.type === "paragraph" && b.properties?.style === "Lead"
 );
 if (leadPara && leadPara.type === "paragraph") {
-  const resolved = resolveStyle(docModel, leadPara);
+  const resolved = Query.resolveStyle(docModel, leadPara);
   console.log(`  resolveStyle("Lead") chain: ${resolved.chain.join(" → ")}`);
   console.log(`    paragraphProperties: ${JSON.stringify(resolved.paragraphProperties)}`);
   console.log(`    runProperties:       ${JSON.stringify(resolved.runProperties)}`);
@@ -190,7 +173,7 @@ if (leadPara && leadPara.type === "paragraph") {
     c => "properties" in c && c.properties?.style === "Strong"
   );
   if (strongRun && "content" in strongRun) {
-    const resolved = resolveRunStyle(docModel, strongRun);
+    const resolved = Query.resolveRunStyle(docModel, strongRun);
     console.log(`  resolveRunStyle("Strong") chain: ${resolved.chain.join(" → ")}`);
     console.log(`    runProperties: ${JSON.stringify(resolved.runProperties)}`);
   }
@@ -203,7 +186,7 @@ const listPara = docModel.body.find(
   b => "type" in b && b.type === "paragraph" && b.properties?.numbering?.numId === 50
 );
 if (listPara && listPara.type === "paragraph") {
-  const lvl = resolveNumberingLevel(docModel, listPara);
+  const lvl = Query.resolveNumberingLevel(docModel, listPara);
   console.log(
     `  resolveNumberingLevel: level=${lvl?.level}, format=${lvl?.format}, text="${lvl?.text}"`
   );
@@ -229,14 +212,14 @@ const customTableStyle: StyleDef = {
       right: { value: 100, type: "dxa" }
     }
   },
-  runProperties: { font: "Calibri", size: ptToHalfPoint(10) },
+  runProperties: { font: "Calibri", size: Units.ptToHalfPoint(10) },
   tableStyleConditions: [
     { type: "firstRow", runProperties: { bold: true, color: "FFFFFF" } },
     { type: "evenRowBanding", cellProperties: { shading: { fill: "F2F2F2", pattern: "clear" } } }
   ]
 };
 const docWithTableStyle = { ...docModel, styles: [...(docModel.styles ?? []), customTableStyle] };
-const resolvedTbl = resolveTableStyle(docWithTableStyle, "BandedGrid");
+const resolvedTbl = Query.resolveTableStyle(docWithTableStyle, "BandedGrid");
 console.log(`  resolveTableStyle("BandedGrid") chain: ${resolvedTbl.chain.join(" → ")}`);
 console.log(`    runProperties: ${JSON.stringify(resolvedTbl.runProperties)}`);
 console.log(`    tableProperties.width: ${JSON.stringify(resolvedTbl.tableProperties?.width)}`);
@@ -246,23 +229,23 @@ console.log(`    tableProperties.width: ${JSON.stringify(resolvedTbl.tableProper
 //    applying theme-color lookup + tint/shade.
 // ---------------------------------------------------------------------------
 console.log(
-  `  resolveThemeColor(accent1):              ${resolveThemeColor({ val: "auto", themeColor: "accent1" }, theme)}`
+  `  resolveThemeColor(accent1):              ${Theme.resolveColor({ val: "auto", themeColor: "accent1" }, theme)}`
 );
 console.log(
-  `  resolveThemeColor(accent1, tint 7F):     ${resolveThemeColor({ val: "auto", themeColor: "accent1", themeTint: "7F" }, theme)}`
+  `  resolveThemeColor(accent1, tint 7F):     ${Theme.resolveColor({ val: "auto", themeColor: "accent1", themeTint: "7F" }, theme)}`
 );
 console.log(
-  `  resolveThemeColor(accent1, shade 7F):    ${resolveThemeColor({ val: "auto", themeColor: "accent1", themeShade: "7F" }, theme)}`
+  `  resolveThemeColor(accent1, shade 7F):    ${Theme.resolveColor({ val: "auto", themeColor: "accent1", themeShade: "7F" }, theme)}`
 );
-console.log(`  resolveThemeColor(plain hex "FF8800"):   ${resolveThemeColor("FF8800", theme)}`);
-console.log(`  resolveThemeColor(undefined):              ${resolveThemeColor(undefined, theme)}`);
+console.log(`  resolveThemeColor(plain hex "FF8800"):   ${Theme.resolveColor("FF8800", theme)}`);
+console.log(`  resolveThemeColor(undefined):              ${Theme.resolveColor(undefined, theme)}`);
 
 // ---------------------------------------------------------------------------
 // 6. Style mapping DSL — used by HTML/Markdown converters
 // ---------------------------------------------------------------------------
-const userMap = parseStyleMap(
+const userMap = Styles.parse(
   `
-  // mammoth-style DSL
+  // style-mapping DSL
   p[style-name='Lead'] => p.lead
   p[style-name='Heading 1'] => h1.title
   r[style-name='Strong'] => strong.attention
@@ -271,7 +254,7 @@ const userMap = parseStyleMap(
 );
 console.log(`  parseStyleMap rules: ${userMap.rules.length}`);
 
-const programmaticMap = createStyleMap([
+const programmaticMap = Styles.create([
   {
     source: "p",
     conditions: [{ attribute: "style-name", value: "Quote" }],
@@ -279,17 +262,17 @@ const programmaticMap = createStyleMap([
     priority: 5
   }
 ]);
-const merged = mergeStyleMaps(DEFAULT_STYLE_MAP, userMap, programmaticMap);
+const merged = Styles.merge(Styles.DEFAULT, userMap, programmaticMap);
 console.log(`  mergeStyleMaps: ${merged.rules.length} total rules`);
 
-const matched = matchStyleMap(merged, "p", { "style-name": "Lead" });
+const matched = Styles.match(merged, "p", { "style-name": "Lead" });
 console.log(`  matchStyleMap('p[Lead]') → ${matched?.tagName}.${matched?.className ?? ""}`);
-const matched2 = matchStyleMap(merged, "r", { "style-name": "Strong" });
+const matched2 = Styles.match(merged, "r", { "style-name": "Strong" });
 console.log(`  matchStyleMap('r[Strong]') → ${matched2?.tagName}.${matched2?.className ?? ""}`);
-const noMatch = matchStyleMap(merged, "p", { "style-name": "NoSuchStyle" });
+const noMatch = Styles.match(merged, "p", { "style-name": "NoSuchStyle" });
 console.log(`  matchStyleMap unknown → ${noMatch}`);
 
 // Save the underlying document for visual inspection
-const buf = await toBuffer(docModel);
+const buf = await Io.toBuffer(docModel);
 fs.writeFileSync(path.join(outDir, "01-styled.docx"), buf);
 console.log(`  → 01-styled.docx (${buf.length} bytes)`);

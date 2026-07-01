@@ -39,16 +39,15 @@
 
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
+import { PartPath } from "@word/constants";
+import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import { walkBlocks } from "@word/core/walker";
+import { DocxUnsupportedFeatureError } from "@word/errors";
+import type { BodyContent, DocxDocument, Paragraph, Table } from "@word/types";
+import { renderBodyContent, renderDocument } from "@word/writer/document-writer";
+import { renderHeader, renderFooter } from "@word/writer/header-footer-writer";
+import { createRenderContext } from "@word/writer/render-context";
 import { XmlWriter } from "@xml/writer";
-
-import { PartPath } from "./constants";
-import { utf8Decoder, utf8Encoder } from "./core/internal-utils";
-import { walkBlocks } from "./core/walker";
-import { DocxUnsupportedFeatureError } from "./errors";
-import type { BodyContent, DocxDocument, Paragraph, Table } from "./types";
-import { renderBodyContent, renderDocument } from "./writer/document-writer";
-import { renderHeader, renderFooter } from "./writer/header-footer-writer";
-import { createRenderContext } from "./writer/render-context";
 
 // =============================================================================
 // Public API

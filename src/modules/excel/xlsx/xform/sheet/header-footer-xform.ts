@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface HeaderFooterModel {
   differentFirst?: boolean;
@@ -18,7 +19,7 @@ class HeaderFooterXform extends BaseXform {
     return "headerFooter";
   }
 
-  render(xmlStream: any, model?: HeaderFooterModel): void {
+  render(xmlStream: XmlSink, model?: HeaderFooterModel): void {
     if (!model) {
       return;
     }
@@ -54,13 +55,13 @@ class HeaderFooterXform extends BaseXform {
     if (Object.keys(attrs).length > 0 || children.length > 0) {
       xmlStream.openNode("headerFooter", attrs);
       for (const child of children) {
-        xmlStream.leafNode(child.name, null, child.text);
+        xmlStream.leafNode(child.name, undefined, child.text);
       }
       xmlStream.closeNode();
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "headerFooter":
         this.model = {};

@@ -10,10 +10,16 @@
  * - Page headers (sheet names) and footers (page numbers)
  */
 
-import { parseImageDimensions } from "../builder/image-utils";
-import { PdfContentStream } from "../core/pdf-stream";
-import type { FontManager } from "../font/font-manager";
-import { resolvePdfFontName } from "../font/font-manager";
+import { parseImageDimensions } from "@pdf/builder/image-utils";
+import { PdfContentStream } from "@pdf/core/pdf-stream";
+import type { FontManager } from "@pdf/font/font-manager";
+import { resolvePdfFontName } from "@pdf/font/font-manager";
+import {
+  CELL_PADDING_H,
+  CELL_PADDING_V,
+  LINE_HEIGHT_FACTOR,
+  INDENT_WIDTH
+} from "@pdf/render/constants";
 import type {
   LayoutPage,
   LayoutCell,
@@ -25,8 +31,7 @@ import type {
   PdfImageWatermark,
   PdfWatermark,
   PdfColor
-} from "../types";
-import { CELL_PADDING_H, CELL_PADDING_V, LINE_HEIGHT_FACTOR, INDENT_WIDTH } from "./constants";
+} from "@pdf/types";
 
 // =============================================================================
 // Border-aware Padding

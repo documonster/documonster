@@ -14,14 +14,14 @@
  *   - The package root rels include an officeDocument rel to `xl/workbook.xml`.
  */
 
-import type { ValidationContext } from "./context";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
 import {
   getRelsSourceDir,
   isSafeResolvedPath,
   posixBasename,
   resolveRelTarget,
   sourcePartForRels
-} from "./path-utils";
+} from "@excel/utils/ooxml-validator/path-utils";
 
 // -----------------------------------------------------------------------------
 // Rel-type -> expected target pattern.

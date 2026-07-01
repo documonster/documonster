@@ -1,10 +1,9 @@
 /**
  * Formula Calculation Engine
  *
- * Provides `calculateFormulas()` as the primary function-style entry
- * point. The same work runs when a host calls
- * `Workbook.calculateFormulas()` — both paths dispatch through the
- * engine registered via `installFormulaEngine()`.
+ * Provides `calculateFormulas()` as the sole function-style entry point
+ * for formula evaluation. Call it directly with a workbook — there is no
+ * `Workbook.calculateFormulas()` method and no host-registry indirection.
  *
  * ## Architecture
  *
@@ -18,11 +17,11 @@
  * 8. **Apply** — write plan to live workbook
  */
 
-import type { WorkbookLike } from "../materialize/types";
-import { calculateFormulasImpl } from "./calculate-formulas-impl";
+import { calculateFormulasImpl } from "@formula/integration/calculate-formulas-impl";
+import type { WorkbookLike } from "@formula/materialize/types";
 
 // Re-export shared types for external consumers
-export type { DefinedNamesLike, WorkbookLike } from "../materialize/types";
+export type { DefinedNamesLike, WorkbookLike } from "@formula/materialize/types";
 
 /**
  * Recalculate all formula cells in a workbook.

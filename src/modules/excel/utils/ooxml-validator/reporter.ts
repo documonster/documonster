@@ -10,7 +10,11 @@
  * order, which is stable across runs for the same input.
  */
 
-import type { OoxmlProblemKind, OoxmlProblemSeverity, OoxmlValidationProblem } from "./types";
+import type {
+  OoxmlProblemKind,
+  OoxmlProblemSeverity,
+  OoxmlValidationProblem
+} from "@excel/utils/ooxml-validator/types";
 
 export interface ReporterOptions {
   maxProblems?: number;

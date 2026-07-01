@@ -14,7 +14,7 @@
  *
  * @example Edit an existing PDF:
  * ```typescript
- * import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+ * import { PdfEditor } from "documonster/pdf";
  *
  * const editor = PdfEditor.load(existingPdfBytes);
  * editor.getPage(0).drawText("APPROVED", { x: 200, y: 400, fontSize: 48, color: { r: 0, g: 0.5, b: 0 } });
@@ -23,27 +23,7 @@
  * ```
  */
 
-import { PdfDict, pdfRef, pdfString, pdfHexString, pdfNumber } from "../core/pdf-object";
-import type { PdfContentStream } from "../core/pdf-stream";
-import { PdfWriter, buildIncremental } from "../core/pdf-writer";
-import { PdfStructureError } from "../errors";
-import { FontManager } from "../font/font-manager";
-import { parseTtf } from "../font/ttf-parser";
-import { extractFormFields } from "../reader/form-extractor";
-import type { PdfFormField } from "../reader/form-extractor";
-import { extractMetadata } from "../reader/metadata-reader";
-import { initDecryption, isEncrypted } from "../reader/pdf-decrypt";
-import { PdfDocument } from "../reader/pdf-document";
-import {
-  isPdfArray,
-  isPdfRef,
-  dictGetName,
-  dictGetNumber,
-  decodePdfStringBytes
-} from "../reader/pdf-parser";
-import type { PdfDictValue, PdfObject, PdfRef } from "../reader/pdf-parser";
-import { alphaGsName } from "../render/page-renderer";
-import { PdfPageBuilder } from "./document-builder";
+import { PdfPageBuilder } from "@pdf/builder/document-builder";
 import type {
   DrawTextOptions,
   DrawRectOptions,
@@ -57,11 +37,35 @@ import type {
   AnnotationOptions,
   FormFieldOptions,
   PdfSignatureOptions
-} from "./document-builder";
-import { generateTextFieldAppearance, buildAppearanceBBox } from "./form-appearance";
-import { writeImageXObject, parseImageDimensions } from "./image-utils";
-import { parseResourceDict, mergeResourceDicts, serializeResourceDict } from "./resource-merger";
-import type { PdfResourceDict } from "./resource-merger";
+} from "@pdf/builder/document-builder";
+import { generateTextFieldAppearance, buildAppearanceBBox } from "@pdf/builder/form-appearance";
+import { writeImageXObject, parseImageDimensions } from "@pdf/builder/image-utils";
+import {
+  parseResourceDict,
+  mergeResourceDicts,
+  serializeResourceDict
+} from "@pdf/builder/resource-merger";
+import type { PdfResourceDict } from "@pdf/builder/resource-merger";
+import { PdfDict, pdfRef, pdfString, pdfHexString, pdfNumber } from "@pdf/core/pdf-object";
+import type { PdfContentStream } from "@pdf/core/pdf-stream";
+import { PdfWriter, buildIncremental } from "@pdf/core/pdf-writer";
+import { PdfStructureError } from "@pdf/errors";
+import { FontManager } from "@pdf/font/font-manager";
+import { parseTtf } from "@pdf/font/ttf-parser";
+import { extractFormFields } from "@pdf/reader/form-extractor";
+import type { PdfFormField } from "@pdf/reader/form-extractor";
+import { extractMetadata } from "@pdf/reader/metadata-reader";
+import { initDecryption, isEncrypted } from "@pdf/reader/pdf-decrypt";
+import { PdfDocument } from "@pdf/reader/pdf-document";
+import {
+  isPdfArray,
+  isPdfRef,
+  dictGetName,
+  dictGetNumber,
+  decodePdfStringBytes
+} from "@pdf/reader/pdf-parser";
+import type { PdfDictValue, PdfObject, PdfRef } from "@pdf/reader/pdf-parser";
+import { alphaGsName } from "@pdf/render/page-renderer";
 
 // =============================================================================
 // Types
@@ -501,7 +505,7 @@ export class PdfEditor {
   /** @internal Full rebuild implementation, extracted for try/finally cleanup. */
   private async _buildFullSave(writer: PdfWriter): Promise<Uint8Array> {
     // Write font resources for any overlay content
-    const fontObjectMap = this._fontManager.writeFontResources(writer);
+    const fontObjectMap = await this._fontManager.writeFontResources(writer);
     const fontDictStr = this._fontManager.buildFontDictString(fontObjectMap);
 
     const pagesTreeObjNum = writer.allocObject();
@@ -863,7 +867,7 @@ export class PdfEditor {
       title: originalMeta.title || undefined,
       author: originalMeta.author || undefined,
       subject: originalMeta.subject || undefined,
-      creator: originalMeta.creator || "excelts"
+      creator: originalMeta.creator || "documonster"
     });
 
     return writer.build();
@@ -946,7 +950,7 @@ export class PdfEditor {
 
     if (hasOverlays) {
       // Write font resources via the writer (to serialize font objects)
-      const fontObjectMap = this._fontManager.writeFontResources(writer);
+      const fontObjectMap = await this._fontManager.writeFontResources(writer);
 
       // Remap all writer-allocated objects (fonts + their dependencies like
       // CID font descriptors, ToUnicode CMaps, etc.) into the incremental
@@ -1427,7 +1431,7 @@ export class PdfEditor {
    * ```
    */
   async sign(options: PdfSignatureOptions): Promise<Uint8Array> {
-    const { buildSignatureDictPlaceholder, signPdf } = await import("../core/digital-signature");
+    const { buildSignatureDictPlaceholder, signPdf } = await import("@pdf/core/digital-signature");
 
     const { dictString } = buildSignatureDictPlaceholder({
       name: options.name,

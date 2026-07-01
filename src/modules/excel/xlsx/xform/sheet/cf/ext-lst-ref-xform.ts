@@ -1,13 +1,19 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
+import type { XmlSink } from "@xml/types";
 
-class X14IdXform extends BaseXform {
+/** The x14 conditional-formatting extension reference: just the rule's x14 id. */
+interface ExtLstRefModel {
+  x14Id?: string;
+}
+
+class X14IdXform extends BaseXform<string> {
   get tag(): string {
     return "x14:id";
   }
 
-  render(xmlStream: any, model: any): void {
-    xmlStream.leafNode(this.tag, null, model);
+  render(xmlStream: XmlSink, model?: string): void {
+    xmlStream.leafNode(this.tag, undefined, model);
   }
 
   parseOpen(): void {
@@ -25,6 +31,7 @@ class X14IdXform extends BaseXform {
 
 class ExtXform extends CompositeXform {
   idXform: X14IdXform;
+  declare public model: ExtLstRefModel;
 
   constructor() {
     super();
@@ -38,7 +45,7 @@ class ExtXform extends CompositeXform {
     return "ext";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: ExtLstRefModel): void {
     xmlStream.openNode(this.tag, {
       uri: "{B025F937-C7B1-47D3-B67F-A62EFF666E3E}",
       "xmlns:x14": "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
@@ -49,16 +56,18 @@ class ExtXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel(): any {
+  createNewModel(): ExtLstRefModel {
     return {};
   }
 
-  onParserClose(name: string, parser: any): void {
-    this.model.x14Id = parser.model;
+  onParserClose(name: string, parser: BaseXform): void {
+    this.model.x14Id = parser.model as string;
   }
 }
 
 class ExtLstRefXform extends CompositeXform {
+  declare public model: ExtLstRefModel;
+
   constructor() {
     super();
     this.map = {
@@ -70,7 +79,7 @@ class ExtLstRefXform extends CompositeXform {
     return "extLst";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: ExtLstRefModel): void {
     if (!model.x14Id) {
       return;
     }
@@ -79,11 +88,11 @@ class ExtLstRefXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel(): any {
+  createNewModel(): ExtLstRefModel {
     return {};
   }
 
-  onParserClose(name: string, parser: any): void {
+  onParserClose(name: string, parser: BaseXform): void {
     Object.assign(this.model, parser.model);
   }
 }

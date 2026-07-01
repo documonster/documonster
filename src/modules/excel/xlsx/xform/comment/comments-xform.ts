@@ -1,16 +1,18 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CommentXform } from "@excel/xlsx/xform/comment/comment-xform";
+import type { CommentModel } from "@excel/xlsx/xform/comment/comment-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface CommentsModel {
-  comments: any[];
+  comments: CommentModel[];
 }
 
 const DEFAULT_AUTHOR = "Author";
 
 class CommentsXform extends BaseXform<CommentsModel> {
   declare public map: { [key: string]: CommentXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   /** Authors collected while parsing the <authors> element. */
   private _authors: string[] = [];
@@ -29,7 +31,7 @@ class CommentsXform extends BaseXform<CommentsModel> {
     this.model = { comments: [] };
   }
 
-  render(xmlStream: any, model?: CommentsModel): void {
+  render(xmlStream: XmlSink, model?: CommentsModel): void {
     const renderModel = model || this.model;
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("comments", CommentsXform.COMMENTS_ATTRIBUTES);
@@ -43,7 +45,7 @@ class CommentsXform extends BaseXform<CommentsModel> {
 
     xmlStream.openNode("authors");
     for (const author of authors) {
-      xmlStream.leafNode("author", null, author);
+      xmlStream.leafNode("author", undefined, author);
     }
     xmlStream.closeNode();
 
@@ -58,7 +60,7 @@ class CommentsXform extends BaseXform<CommentsModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -118,7 +120,7 @@ class CommentsXform extends BaseXform<CommentsModel> {
         }
         return false;
       case "comment":
-        this.model!.comments.push(this.parser.model);
+        this.model!.comments.push(this.parser!.model as CommentModel);
         this.parser = undefined;
         return true;
       default:

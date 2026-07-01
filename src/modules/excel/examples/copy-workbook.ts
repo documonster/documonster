@@ -1,19 +1,26 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Workbook } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
+fs.mkdirSync(outDir, { recursive: true });
 
-const filenameIn = process.argv[2];
-const filenameOut = process.argv[3];
+const filenameIn = process.argv[2] ?? path.join(exampleDir, "data/table.xlsx");
+const filenameOut = process.argv[3] ?? path.join(outDir, "copy-workbook.xlsx");
 
 // all this script does is read a file and write to another
 // useful for testing for lost properties
 
 const stopwatch = new HrStopwatch();
-const wb = new Workbook();
+const wb = Workbook.create();
 stopwatch.start();
-wb.xlsx
+Workbook.getXlsxIo(wb)
   .readFile(filenameIn)
-  .then(() => wb.xlsx.writeFile(filenameOut))
+  .then(() => Workbook.writeFile(wb, filenameOut))
   .then(() => {
     const micros = stopwatch.microseconds;
     console.log("Done.");

@@ -1,5 +1,6 @@
-import type { FormCheckboxModel } from "@excel/form-control";
+import type { FormCheckboxModel } from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 /**
@@ -26,7 +27,7 @@ class CtrlPropXform extends BaseXform<FormCheckboxModel> {
     return "formControlPr";
   }
 
-  render(xmlStream: any, model?: FormCheckboxModel): void {
+  render(xmlStream: XmlSink, model?: FormCheckboxModel): void {
     const renderModel = (model || this.model)!;
 
     const attrs: Record<string, string> = {

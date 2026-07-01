@@ -1,19 +1,21 @@
+import type { RangeData } from "@excel/core/range";
+import { rangeRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class DimensionXform extends BaseXform {
-  declare public model: any;
-
+class DimensionXform extends BaseXform<string | RangeData> {
   get tag(): string {
     return "dimension";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: string | RangeData | undefined): void {
     if (model) {
-      xmlStream.leafNode("dimension", { ref: model });
+      const ref = typeof model === "string" ? model : rangeRange(model);
+      xmlStream.leafNode("dimension", { ref });
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "dimension") {
       this.model = node.attributes.ref;
       return true;

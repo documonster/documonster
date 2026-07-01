@@ -13,8 +13,13 @@
  * iterative SHA-based hashing with salt.
  */
 
-import { bytesToBase64, base64ToBytes, stringToUtf16LE, randomBytes } from "../core/internal-utils";
-import type { DocxDocument, DocumentSettings } from "../types";
+import {
+  bytesToBase64,
+  base64ToBytes,
+  stringToUtf16LE,
+  randomBytes
+} from "@word/core/internal-utils";
+import type { DocxDocument, DocumentSettings } from "@word/types";
 
 // =============================================================================
 // Types

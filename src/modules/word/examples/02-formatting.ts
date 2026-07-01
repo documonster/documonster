@@ -23,19 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  bold,
-  italic,
-  underline,
-  strikethrough,
-  symbol,
-  ptToHalfPoint,
-  ptToTwips,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 import type { UnderlineStyle, HighlightColor, RunProperties, Run } from "../index";
 
 const outDir = path.resolve(
@@ -55,21 +43,21 @@ Document.addHeading(doc, "Word Module — Text Formatting", 1);
 Document.addHeading(doc, "Basic toggles", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Plain, "),
-    bold("bold, "),
-    italic("italic, "),
-    underline("underlined, "),
-    strikethrough("struck-through.")
+  Build.paragraph([
+    Build.text("Plain, "),
+    Build.bold("bold, "),
+    Build.italic("italic, "),
+    Build.underline("underlined, "),
+    Build.strikethrough("struck-through.")
   ])
 );
 
 // Combined: bold + italic + underline at once via text()
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Combined: "),
-    text("bold + italic + underline", { bold: true, italic: true, underline: "single" })
+  Build.paragraph([
+    Build.text("Combined: "),
+    Build.text("bold + italic + underline", { bold: true, italic: true, underline: "single" })
   ])
 );
 
@@ -99,17 +87,19 @@ const allUnderlineStyles: UnderlineStyle[] = [
 ];
 Document.addParagraphElement(
   doc,
-  paragraph(
-    allUnderlineStyles.flatMap(s => [text(s, { underline: s }), text("  ")] as const) as Run[]
+  Build.paragraph(
+    allUnderlineStyles.flatMap(
+      s => [Build.text(s, { underline: s }), Build.text("  ")] as const
+    ) as Run[]
   )
 );
 
 // Underline with explicit color (independent of text color)
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Red wavy underline on black text: "),
-    text("attention", { underline: { style: "wave", color: "FF0000" } })
+  Build.paragraph([
+    Build.text("Red wavy underline on black text: "),
+    Build.text("attention", { underline: { style: "wave", color: "FF0000" } })
   ])
 );
 
@@ -119,10 +109,10 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Color", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("RGB ", { color: "1F4E79" }),
-    text("named\u00A0", { color: { val: "1F4E79", themeColor: "accent1" } }),
-    text("auto", { color: "auto" })
+  Build.paragraph([
+    Build.text("RGB ", { color: "1F4E79" }),
+    Build.text("named\u00A0", { color: { val: "1F4E79", themeColor: "accent1" } }),
+    Build.text("auto", { color: "auto" })
   ])
 );
 
@@ -145,20 +135,22 @@ const highlights: HighlightColor[] = [
 ];
 Document.addParagraphElement(
   doc,
-  paragraph(
+  Build.paragraph(
     highlights.flatMap(h => [
-      text(`${h} `, { highlight: h, color: h === "white" ? "000000" : undefined })
+      Build.text(`${h} `, { highlight: h, color: h === "white" ? "000000" : undefined })
     ]) as Run[]
   )
 );
 // Custom shading (background fill, more flexible than highlight)
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Custom shading via shading.fill: "),
-    text(" salmon ", { shading: { fill: "FA8072", pattern: "clear" } }),
-    text("  "),
-    text(" diagonal ", { shading: { fill: "FFFFCC", pattern: "diagStripe", color: "808080" } })
+  Build.paragraph([
+    Build.text("Custom shading via shading.fill: "),
+    Build.text(" salmon ", { shading: { fill: "FA8072", pattern: "clear" } }),
+    Build.text("  "),
+    Build.text(" diagonal ", {
+      shading: { fill: "FFFFCC", pattern: "diagStripe", color: "808080" }
+    })
   ])
 );
 
@@ -169,17 +161,17 @@ Document.addHeading(doc, "Size & font family", 2);
 for (const pt of [8, 10, 12, 14, 18, 24, 36]) {
   Document.addParagraphElement(
     doc,
-    paragraph([text(`${pt}pt sample`, { size: ptToHalfPoint(pt) })])
+    Build.paragraph([Build.text(`${pt}pt sample`, { size: Units.ptToHalfPoint(pt) })])
   );
 }
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Calibri ", { font: { ascii: "Calibri", hAnsi: "Calibri" } }),
-    text("Times ", { font: { ascii: "Times New Roman", hAnsi: "Times New Roman" } }),
-    text("Courier ", { font: "Courier New" }),
-    text("CJK 中文(SimSun) ", { font: { eastAsia: "SimSun", hint: "eastAsia" } }),
-    text("CS العربية", { font: { cs: "Traditional Arabic" }, complexScript: true })
+  Build.paragraph([
+    Build.text("Calibri ", { font: { ascii: "Calibri", hAnsi: "Calibri" } }),
+    Build.text("Times ", { font: { ascii: "Times New Roman", hAnsi: "Times New Roman" } }),
+    Build.text("Courier ", { font: "Courier New" }),
+    Build.text("CJK 中文(SimSun) ", { font: { eastAsia: "SimSun", hint: "eastAsia" } }),
+    Build.text("CS العربية", { font: { cs: "Traditional Arabic" }, complexScript: true })
   ])
 );
 
@@ -189,12 +181,12 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Super/Subscript", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("E = mc"),
-    text("2", { vertAlign: "superscript" }),
-    text("    H"),
-    text("2", { vertAlign: "subscript" }),
-    text("O")
+  Build.paragraph([
+    Build.text("E = mc"),
+    Build.text("2", { vertAlign: "superscript" }),
+    Build.text("    H"),
+    Build.text("2", { vertAlign: "subscript" }),
+    Build.text("O")
   ])
 );
 
@@ -204,16 +196,20 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Caps & visibility", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("All caps: ", { caps: true }),
-    text("hello world", { caps: true }),
-    text("  Small caps: ", { smallCaps: true }),
-    text("hello world", { smallCaps: true })
+  Build.paragraph([
+    Build.text("All caps: ", { caps: true }),
+    Build.text("hello world", { caps: true }),
+    Build.text("  Small caps: ", { smallCaps: true }),
+    Build.text("hello world", { smallCaps: true })
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([text("Visible "), text("[hidden run]", { vanish: true }), text(" — visible again.")])
+  Build.paragraph([
+    Build.text("Visible "),
+    Build.text("[hidden run]", { vanish: true }),
+    Build.text(" — visible again.")
+  ])
 );
 
 // ---------------------------------------------------------------------------
@@ -222,21 +218,21 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Spacing & glyph metrics", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("S P A C E D ", { spacing: ptToTwips(2) }),
-    text("kerned ", { kern: ptToHalfPoint(8) }),
-    text("scaled200% ", { scale: 200 }),
-    text("scaled50% ", { scale: 50 }),
-    text("raised", { position: ptToHalfPoint(4) }),
-    text(" lowered", { position: -ptToHalfPoint(4) })
+  Build.paragraph([
+    Build.text("S P A C E D ", { spacing: Units.ptToTwips(2) }),
+    Build.text("kerned ", { kern: Units.ptToHalfPoint(8) }),
+    Build.text("scaled200% ", { scale: 200 }),
+    Build.text("scaled50% ", { scale: 50 }),
+    Build.text("raised", { position: Units.ptToHalfPoint(4) }),
+    Build.text(" lowered", { position: -Units.ptToHalfPoint(4) })
   ])
 );
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("FitText: "),
-    text("squeezed into 1.5\u201d", {
-      fitText: { val: ptToTwips(108), id: 1 }
+  Build.paragraph([
+    Build.text("FitText: "),
+    Build.text("squeezed into 1.5\u201d", {
+      fitText: { val: Units.ptToTwips(108), id: 1 }
     })
   ])
 );
@@ -247,11 +243,11 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Decorative effects", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Outline ", { outline: true, size: ptToHalfPoint(20), bold: true }),
-    text("Shadow ", { shadow: true, size: ptToHalfPoint(20), bold: true }),
-    text("Emboss ", { emboss: true, size: ptToHalfPoint(20), bold: true }),
-    text("Imprint", { imprint: true, size: ptToHalfPoint(20), bold: true })
+  Build.paragraph([
+    Build.text("Outline ", { outline: true, size: Units.ptToHalfPoint(20), bold: true }),
+    Build.text("Shadow ", { shadow: true, size: Units.ptToHalfPoint(20), bold: true }),
+    Build.text("Emboss ", { emboss: true, size: Units.ptToHalfPoint(20), bold: true }),
+    Build.text("Imprint", { imprint: true, size: Units.ptToHalfPoint(20), bold: true })
   ])
 );
 
@@ -261,12 +257,12 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Character border", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Plain "),
-    text("[bordered]", {
+  Build.paragraph([
+    Build.text("Plain "),
+    Build.text("[bordered]", {
       border: { style: "single", size: 8, color: "C00000", space: 0 }
     }),
-    text(" plain.")
+    Build.text(" plain.")
   ])
 );
 
@@ -275,9 +271,9 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("着重号:"),
-    text("重要内容", {
+  Build.paragraph([
+    Build.text("着重号:"),
+    Build.text("重要内容", {
       emphasisMark: "dot",
       font: { eastAsia: "SimSun", hint: "eastAsia" }
     })
@@ -289,13 +285,13 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Symbols (Wingdings): "),
-    symbol("Wingdings", "F0FC"), // ✓
-    text("  "),
-    symbol("Wingdings", "F0FB"), // ✗
-    text("  "),
-    symbol("Wingdings", "F046") // ⌚
+  Build.paragraph([
+    Build.text("Symbols (Wingdings): "),
+    Build.symbol("Wingdings", "F0FC"), // ✓
+    Build.text("  "),
+    Build.symbol("Wingdings", "F0FB"), // ✗
+    Build.text("  "),
+    Build.symbol("Wingdings", "F046") // ⌚
   ])
 );
 
@@ -304,20 +300,27 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Edge cases", 2);
 const emptyProps: RunProperties = {};
-Document.addParagraphElement(doc, paragraph([text("Run with empty properties.", emptyProps)]));
+Document.addParagraphElement(
+  doc,
+  Build.paragraph([Build.text("Run with empty properties.", emptyProps)])
+);
 
 // Edge case 2: zero-length text run (writer should still emit valid XML)
 Document.addParagraphElement(
   doc,
-  paragraph([text("Before["), text("", { bold: true }), text("]After (zero-length bold run).")])
+  Build.paragraph([
+    Build.text("Before["),
+    Build.text("", { bold: true }),
+    Build.text("]After (zero-length bold run).")
+  ])
 );
 
 // Edge case 3: many consecutive identical-formatted runs
 Document.addParagraphElement(
   doc,
-  paragraph(
+  Build.paragraph(
     Array.from({ length: 20 }, (_, i) =>
-      text(`r${i} `, { color: "0070C0", italic: i % 2 === 0 })
+      Build.text(`r${i} `, { color: "0070C0", italic: i % 2 === 0 })
     ) as Run[]
   )
 );
@@ -325,16 +328,16 @@ Document.addParagraphElement(
 // Edge case 4: deeply mixed inline formatting
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Mixed: "),
-    bold("B"),
-    italic("I"),
-    underline("U"),
-    strikethrough("S"),
-    text("…and "),
-    text("RED-LARGE-BOLD-ITALIC-CAPS", {
+  Build.paragraph([
+    Build.text("Mixed: "),
+    Build.bold("B"),
+    Build.italic("I"),
+    Build.underline("U"),
+    Build.strikethrough("S"),
+    Build.text("…and "),
+    Build.text("RED-LARGE-BOLD-ITALIC-CAPS", {
       color: "C00000",
-      size: ptToHalfPoint(16),
+      size: Units.ptToHalfPoint(16),
       bold: true,
       italic: true,
       caps: true
@@ -342,6 +345,6 @@ Document.addParagraphElement(
   ])
 );
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "02-formatting.docx"), buf);
 console.log(`  → 02-formatting.docx (${buf.length} bytes)`);

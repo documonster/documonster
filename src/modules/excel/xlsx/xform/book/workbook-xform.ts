@@ -12,11 +12,12 @@ import { WorkbookProtectionXform } from "@excel/xlsx/xform/book/workbook-protect
 import { WorkbookViewXform } from "@excel/xlsx/xform/book/workbook-view-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class WorkbookXform extends BaseXform {
-  declare public parser: any;
-  declare public map: { [key: string]: any };
+  declare public parser?: BaseXform;
+  declare public map: Record<string, BaseXform>;
 
   /**
    * The `<sheet>` xform shared with the `sheets` ListXform. Held as a
@@ -123,7 +124,7 @@ class WorkbookXform extends BaseXform {
     model.sheets.forEach((sheet: any) => {
       if (sheet.pageSetup && sheet.pageSetup.printArea) {
         const ranges: string[] = [];
-        // Split on either `&&` (legacy excelts separator) or `,` (Excel's
+        // Split on either `&&` (legacy documonster separator) or `,` (Excel's
         // native separator) at the *top level* — commas / `&&` inside a
         // quoted sheet name (`'Q1, Forecast'!A1:B5`) must NOT be treated
         // as separators. A naive `split(/&&|,/)` shreds such inputs.
@@ -185,7 +186,7 @@ class WorkbookXform extends BaseXform {
     });
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: any): void {
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("workbook", WorkbookXform.WORKBOOK_ATTRIBUTES);
 
@@ -224,7 +225,7 @@ class WorkbookXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -246,7 +247,7 @@ class WorkbookXform extends BaseXform {
     }
   }
 
-  private static _findRelationshipsPrefixes(node: any): readonly string[] {
+  private static _findRelationshipsPrefixes(node: ParseOpenTag): readonly string[] {
     const RELATIONSHIPS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     const attrs = node.attributes ?? {};
     const prefixes: string[] = [];
@@ -377,7 +378,7 @@ class WorkbookXform extends BaseXform {
     // Without pruning, such worksheets propagate downstream with
     // `id`/`name`/`state` all `undefined`, landing under the literal
     // string key `"undefined"` in `Workbook._worksheets` and becoming
-    // unreachable via `getWorksheet(name)` (issue #166). OOXML treats
+    // unreachable via `getWorksheet(name)`. OOXML treats
     // the workbook's `<sheets>` element as the single source of truth
     // for which parts belong to the workbook; we follow that contract
     // strictly. Genuinely-cursed workbooks reach this branch only when
@@ -418,7 +419,7 @@ class WorkbookXform extends BaseXform {
             // A print-area `<definedName>` may carry multiple ranges as a
             // comma-separated list (Excel's native format) — read every
             // range, not just the first. Rejoin with `&&` so the
-            // worksheet-level `printArea` field uses the legacy excelts
+            // worksheet-level `printArea` field uses the legacy documonster
             // separator (preserved for backwards compatibility on the
             // public API; both `&&` and `,` are accepted on write).
             //
@@ -534,7 +535,7 @@ class WorkbookXform extends BaseXform {
  * the reader (parsing the body of an OOXML `<definedName>` when the
  * defined-name layer hands us the raw text). Recognises both:
  *   - `,` — the OOXML / Excel-native separator
- *   - `&&` — the legacy excelts convention preserved on the public API
+ *   - `&&` — the legacy documonster convention preserved on the public API
  *
  * Quoted sheet names (`'Q1, Forecast'!A1:B5`) are skipped over: any `,`,
  * `&`, or `'` inside a quoted name is preserved verbatim. A doubled
@@ -844,7 +845,7 @@ function normalisePrintAreaRange(input: string, sheetName: string): string | und
  * the canonical OOXML form `'Sheet'!$N:$N` (rows) or `'Sheet'!$L:$L`
  * (columns).
  *
- * Long-standing excelts behaviour lets users put a column expression on
+ * Long-standing documonster behaviour lets users put a column expression on
  * `printTitlesRow` (and vice versa) — the OOXML reader has always
  * re-classified the value onto the correct field on round-trip — so we
  * honour that by letting the parser infer the actual axis from the

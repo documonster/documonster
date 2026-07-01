@@ -1,27 +1,46 @@
+import type { DataValidation, DataValidationWithFormulae } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
-import { isEqual } from "@excel/utils/under-dash";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { deepEqual } from "@utils/object";
 import { parseBoolean, dateToExcel, excelToDate } from "@utils/utils";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-function assign(definedName: any, attributes: any, name: string, defaultValue?: any): void {
+/** A validation stored in the model, optionally with a serialised range key. */
+type StoredValidation = DataValidation;
+/** The data-validations model: a map of cell address (or `range:` key) → validation. */
+type DataValidationModel = Record<string, StoredValidation>;
+/** A validation ready to render: the validation plus the sqref it applies to. */
+type RenderedValidation = DataValidation & { sqref: string };
+
+function assign(
+  target: Record<string, unknown>,
+  attributes: Record<string, string>,
+  name: string,
+  defaultValue?: unknown
+): void {
   const value = attributes[name];
   if (value !== undefined) {
-    definedName[name] = value;
+    target[name] = value;
   } else if (defaultValue !== undefined) {
-    definedName[name] = defaultValue;
+    target[name] = defaultValue;
   }
 }
 
-function assignBool(definedName: any, attributes: any, name: string, defaultValue?: any): void {
+function assignBool(
+  target: Record<string, unknown>,
+  attributes: Record<string, string>,
+  name: string,
+  defaultValue?: unknown
+): void {
   const value = attributes[name];
   if (value !== undefined) {
-    definedName[name] = parseBoolean(value);
+    target[name] = parseBoolean(value);
   } else if (defaultValue !== undefined) {
-    definedName[name] = defaultValue;
+    target[name] = defaultValue;
   }
 }
 
-function optimiseDataValidations(model: any): any[] {
+function optimiseDataValidations(model: DataValidationModel | undefined): RenderedValidation[] {
   // Squeeze alike data validations together into rectangular ranges
   // to reduce file size and speed up Excel load time
   if (!model) {
@@ -29,8 +48,8 @@ function optimiseDataValidations(model: any): any[] {
   }
 
   // First, handle range: prefixed keys directly (large ranges stored during parsing)
-  const rangeValidations: any[] = [];
-  const regularModel: any = {};
+  const rangeValidations: RenderedValidation[] = [];
+  const regularModel: DataValidationModel = {};
 
   for (const [key, value] of Object.entries(model)) {
     // Skip undefined/null values (removed validations)
@@ -40,11 +59,11 @@ function optimiseDataValidations(model: any): any[] {
     if (key.startsWith("range:")) {
       // Large range stored during parsing - output directly
       const rangeStr = key.slice(6); // Remove "range:" prefix
-      const { sqref: _sqref, ...rest } = value as any;
+      const { sqref: _sqref, ...rest } = value as DataValidation & { sqref?: string };
       rangeValidations.push({
         ...rest,
         sqref: rangeStr
-      });
+      } as RenderedValidation);
     } else {
       regularModel[key] = value;
     }
@@ -56,19 +75,23 @@ function optimiseDataValidations(model: any): any[] {
   }
 
   const dvList = Object.entries(regularModel)
-    .map(([address, dataValidation]: [string, any]) => ({
+    .map(([address, dataValidation]) => ({
       address,
       dataValidation,
       marked: false
     }))
     .sort((a, b) => colCache.compareAddress(a.address, b.address));
   const dvMap = Object.fromEntries(dvList.map(dv => [dv.address, dv]));
-  const matchCol = (addr: any, height: number, col: number): boolean => {
+  const matchCol = (
+    addr: { row: number; col: number; address: string },
+    height: number,
+    col: number
+  ): boolean => {
     for (let i = 0; i < height; i++) {
       const otherAddress = colCache.encodeAddress(addr.row + i, col);
       if (
         !regularModel[otherAddress] ||
-        !isEqual(regularModel[addr.address], regularModel[otherAddress])
+        !deepEqual(regularModel[addr.address], regularModel[otherAddress])
       ) {
         return false;
       }
@@ -78,13 +101,18 @@ function optimiseDataValidations(model: any): any[] {
   const optimized = dvList
     .map(dv => {
       if (!dv.marked) {
-        const addr: any = colCache.decodeEx(dv.address);
+        const addr = colCache.decodeEx(dv.address) as {
+          row: number;
+          col: number;
+          address: string;
+          dimensions?: string;
+        };
         if (addr.dimensions) {
           dvMap[addr.dimensions].marked = true;
           return {
             ...dv.dataValidation,
             sqref: dv.address
-          };
+          } as RenderedValidation;
         }
 
         // iterate downwards - finding matching cells
@@ -92,7 +120,7 @@ function optimiseDataValidations(model: any): any[] {
         let otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
         while (
           regularModel[otherAddress] &&
-          isEqual(dv.dataValidation, regularModel[otherAddress])
+          deepEqual(dv.dataValidation, regularModel[otherAddress])
         ) {
           height++;
           otherAddress = colCache.encodeAddress(addr.row + height, addr.col);
@@ -119,35 +147,35 @@ function optimiseDataValidations(model: any): any[] {
           return {
             ...dv.dataValidation,
             sqref: `${dv.address}:${colCache.encodeAddress(bottom, right)}`
-          };
+          } as RenderedValidation;
         }
         return {
           ...dv.dataValidation,
           sqref: dv.address
-        };
+        } as RenderedValidation;
       }
       return null;
     })
-    .filter(Boolean);
+    .filter((v): v is RenderedValidation => v !== null);
 
   return [...rangeValidations, ...optimized];
 }
 
-class DataValidationsXform extends BaseXform {
+class DataValidationsXform extends BaseXform<DataValidationModel> {
   declare private _address: string;
-  declare private _dataValidation: any;
-  declare private _formula: string[];
+  declare private _dataValidation: DataValidation;
+  declare private _formula: string[] | undefined;
 
   get tag(): string {
     return "dataValidations";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model?: DataValidationModel): void {
     const optimizedModel = optimiseDataValidations(model);
     if (optimizedModel.length) {
       xmlStream.openNode("dataValidations", { count: optimizedModel.length });
 
-      optimizedModel.forEach((value: any) => {
+      optimizedModel.forEach(value => {
         xmlStream.openNode("dataValidation");
 
         if (value.type !== "any") {
@@ -182,12 +210,13 @@ class DataValidationsXform extends BaseXform {
           xmlStream.addAttribute("error", value.error);
         }
         xmlStream.addAttribute("sqref", value.sqref);
-        (value.formulae ?? []).forEach((formula: any, index: number) => {
+        const formulae = value.type !== "any" ? (value.formulae ?? []) : [];
+        formulae.forEach((formula, index) => {
           xmlStream.openNode(`formula${index + 1}`);
           if (value.type === "date") {
             xmlStream.writeText(dateToExcel(new Date(formula)));
           } else {
-            xmlStream.writeText(formula);
+            xmlStream.writeText(typeof formula === "string" ? formula : String(formula));
           }
           xmlStream.closeNode();
         });
@@ -197,7 +226,7 @@ class DataValidationsXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "dataValidations":
         this.model = {};
@@ -205,7 +234,10 @@ class DataValidationsXform extends BaseXform {
 
       case "dataValidation": {
         this._address = node.attributes.sqref;
-        const dataValidation: any = { type: node.attributes.type ?? "any", formulae: [] };
+        const dataValidation: Record<string, unknown> = {
+          type: node.attributes.type ?? "any",
+          formulae: []
+        };
 
         if (node.attributes.type) {
           assignBool(dataValidation, node.attributes, "allowBlank");
@@ -228,7 +260,7 @@ class DataValidationsXform extends BaseXform {
         assign(dataValidation, node.attributes, "errorTitle");
         assign(dataValidation, node.attributes, "error");
 
-        this._dataValidation = dataValidation;
+        this._dataValidation = dataValidation as unknown as DataValidation;
         return true;
       }
 
@@ -253,9 +285,13 @@ class DataValidationsXform extends BaseXform {
       case "dataValidations":
         return false;
       case "dataValidation": {
-        if (!this._dataValidation.formulae || !this._dataValidation.formulae.length) {
-          delete this._dataValidation.formulae;
-          delete this._dataValidation.operator;
+        const dv = this._dataValidation as DataValidation & {
+          formulae?: (string | number | Date)[];
+          operator?: unknown;
+        };
+        if (!dv.formulae || !dv.formulae.length) {
+          delete dv.formulae;
+          delete dv.operator;
         }
         // The four known cases: 1. E4:L9 N4:U9  2.E4 L9  3. N4:U9  4. E4
         const list = this._address.split(/\s+/g);
@@ -263,17 +299,18 @@ class DataValidationsXform extends BaseXform {
           if (addr.includes(":")) {
             // Store ranges directly to avoid expanding large (or many) validations.
             // The key format "range:A1:Z100" allows DataValidations.find() to detect it.
-            this.model[`range:${addr}`] = this._dataValidation;
+            this.model![`range:${addr}`] = this._dataValidation;
           } else {
-            this.model[addr] = this._dataValidation;
+            this.model![addr] = this._dataValidation;
           }
         });
         return true;
       }
       case "formula1":
       case "formula2": {
-        let formula: any = this._formula.join("");
-        switch (this._dataValidation.type) {
+        const dv = this._dataValidation as DataValidationWithFormulae;
+        let formula: string | number | Date = this._formula!.join("");
+        switch (dv.type) {
           case "whole":
           case "textLength":
             formula = parseInt(formula, 10);
@@ -287,8 +324,8 @@ class DataValidationsXform extends BaseXform {
           default:
             break;
         }
-        this._dataValidation.formulae.push(formula);
-        this._formula = undefined as any;
+        dv.formulae.push(formula);
+        this._formula = undefined;
         return true;
       }
       default:

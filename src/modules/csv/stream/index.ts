@@ -11,10 +11,10 @@
 // Parser Stream
 // =============================================================================
 
-export { CsvParserStream, createCsvParserStream } from "./parser";
+export { CsvParserStream, createCsvParserStream } from "@csv/stream/parser";
 
 // =============================================================================
 // Formatter Stream
 // =============================================================================
 
-export { CsvFormatterStream, createCsvFormatterStream } from "./formatter";
+export { CsvFormatterStream, createCsvFormatterStream } from "@csv/stream/formatter";

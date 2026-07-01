@@ -13,19 +13,15 @@ import {
 } from "stream";
 import { pipeline as nodePipeline } from "stream/promises";
 
-import { createFinishedAll } from "@stream/common/finished-all";
-import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/common/options";
-import { isPipelineOptions } from "@stream/common/options";
-import {
-  isReadableStream,
-  isTransformStream,
-  isWritableStream
-} from "@stream/internal/type-guards";
+import { createFinishedAll } from "@stream/core/finished-all";
+import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/core/options";
+import { isPipelineOptions } from "@stream/core/options";
+import { isReadableStream, isTransformStream, isWritableStream } from "@stream/core/type-guards";
 import type { PipelineStreamLike } from "@stream/types";
 
 // Re-export for consumers
-export type { PipelineOptions, FinishedOptions } from "@stream/common/options";
-export { isPipelineOptions } from "@stream/common/options";
+export type { PipelineOptions, FinishedOptions } from "@stream/core/options";
+export { isPipelineOptions } from "@stream/core/options";
 
 // =============================================================================
 // Pipeline
@@ -33,7 +29,7 @@ export { isPipelineOptions } from "@stream/common/options";
 
 type PipelineStream = PipelineStreamLike;
 
-export const toNodePipelineStream = (stream: PipelineStream): unknown => {
+export function toNodePipelineStream(stream: PipelineStream): unknown {
   // Node native streams (Readable/Transform/Duplex/Writable) are already compatible.
   if (
     stream instanceof Readable ||
@@ -44,18 +40,20 @@ export const toNodePipelineStream = (stream: PipelineStream): unknown => {
     return stream;
   }
 
+  // Boundary: bridge Web streams into Node streams. The DOM and
+  // node:stream/web stream types differ nominally, so reconcile at the edge.
   if (isTransformStream(stream)) {
-    return (Transform as any).fromWeb(stream as any);
+    return Transform.fromWeb(stream as unknown as Parameters<typeof Transform.fromWeb>[0]);
   }
   if (isReadableStream(stream)) {
-    return (Readable as any).fromWeb(stream as any);
+    return Readable.fromWeb(stream as unknown as Parameters<typeof Readable.fromWeb>[0]);
   }
   if (isWritableStream(stream)) {
-    return (NodeWritable as any).fromWeb(stream as any);
+    return NodeWritable.fromWeb(stream as unknown as Parameters<typeof NodeWritable.fromWeb>[0]);
   }
 
   return stream;
-};
+}
 
 /**
  * Pipeline streams together with proper error handling and cleanup.
@@ -94,9 +92,13 @@ export function pipeline(
     return Promise.reject(new Error("Pipeline requires at least 2 streams"));
   }
 
+  // Boundary: Node's `pipeline` is heavily overloaded and accepts a variadic
+  // mix of streams/iterables; our normalized list is dynamic, so invoke through
+  // a permissive call signature.
+  const runPipeline = nodePipeline as (...pipelineArgs: unknown[]) => Promise<void>;
   const promise: Promise<void> = options
-    ? (nodePipeline as any)(...normalizedStreams, options)
-    : (nodePipeline as any)(...normalizedStreams);
+    ? runPipeline(...normalizedStreams, options)
+    : runPipeline(...normalizedStreams);
 
   if (callback) {
     promise.then(() => callback!()).catch(err => callback!(err));
@@ -130,7 +132,14 @@ export function finished(
 
   const promise = new Promise<void>((resolve, reject) => {
     const normalizedStream = toNodePipelineStream(stream);
-    (nodeFinished as any)(normalizedStream, options, (err: Error | null) => {
+    // Boundary: Node's `finished` accepts a broad stream union; the normalized
+    // stream is dynamic, so invoke through a permissive call signature.
+    const runFinished = nodeFinished as (
+      target: unknown,
+      opts: FinishedOptions | undefined,
+      done: (err: Error | null) => void
+    ) => void;
+    runFinished(normalizedStream, options, (err: Error | null) => {
       // Node.js native finished() already handles options.error internally.
       // With error:false it still passes the error through the close handler
       // (via stream.errored check), so we must NOT filter it here.

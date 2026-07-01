@@ -1,3 +1,8 @@
+import { cellFormula, cellResult } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getCell } from "@excel/core/worksheet";
+import { Cell, Workbook } from "@excel/index";
+
 /**
  * Example: Text Formulas
  *
@@ -10,45 +15,40 @@
  * - Character codes (CHAR, UNICHAR, CODE, UNICODE)
  * - Regex (REGEXTEST, REGEXEXTRACT, REGEXREPLACE)
  */
-import { Workbook } from "../../../index";
-import { installFormulaEngine } from "../index";
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Text");
 
-installFormulaEngine();
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("Text");
-
-ws.getCell("A1").value = "  hello WORLD  ";
-ws.getCell("A2").value = "name@example.com";
-ws.getCell("A3").value = "Phone: +1-415-555-0123";
+Cell.setValue(ws, "A1", "  hello WORLD  ");
+Cell.setValue(ws, "A2", "name@example.com");
+Cell.setValue(ws, "A3", "Phone: +1-415-555-0123");
 
 // Case & trim
-ws.getCell("B1").value = { formula: "TRIM(A1)" }; // "hello WORLD"
-ws.getCell("B2").value = { formula: "UPPER(TRIM(A1))" }; // "HELLO WORLD"
-ws.getCell("B3").value = { formula: "PROPER(TRIM(A1))" }; // "Hello World"
+Cell.setValue(ws, "B1", { formula: "TRIM(A1)" }); // "hello WORLD"
+Cell.setValue(ws, "B2", { formula: "UPPER(TRIM(A1))" }); // "HELLO WORLD"
+Cell.setValue(ws, "B3", { formula: "PROPER(TRIM(A1))" }); // "Hello World"
 
 // Slicing
-ws.getCell("C1").value = { formula: "LEFT(A2, 4)" }; // "name"
-ws.getCell("C2").value = { formula: 'MID(A2, FIND("@",A2)+1, 100)' }; // "example.com"
-ws.getCell("C3").value = { formula: "LEN(A2)" }; // 16
+Cell.setValue(ws, "C1", { formula: "LEFT(A2, 4)" }); // "name"
+Cell.setValue(ws, "C2", { formula: 'MID(A2, FIND("@",A2)+1, 100)' }); // "example.com"
+Cell.setValue(ws, "C3", { formula: "LEN(A2)" }); // 16
 
 // Search / substitute
-ws.getCell("D1").value = { formula: 'SUBSTITUTE(A2,"example","acme")' };
-ws.getCell("D2").value = { formula: 'FIND("@", A2)' }; // 5
+Cell.setValue(ws, "D1", { formula: 'SUBSTITUTE(A2,"example","acme")' });
+Cell.setValue(ws, "D2", { formula: 'FIND("@", A2)' }); // 5
 
 // Concatenation
-ws.getCell("E1").value = { formula: 'CONCAT("Hi, ", PROPER(TRIM(A1)), "!")' };
-ws.getCell("E2").value = { formula: 'TEXTJOIN(", ", TRUE, B1, B2, B3)' };
+Cell.setValue(ws, "E1", { formula: 'CONCAT("Hi, ", PROPER(TRIM(A1)), "!")' });
+Cell.setValue(ws, "E2", { formula: 'TEXTJOIN(", ", TRUE, B1, B2, B3)' });
 
 // Formatting
-ws.getCell("F1").value = { formula: 'TEXT(1234567.89, "#,##0.00")' }; // "1,234,567.89"
-ws.getCell("F2").value = { formula: 'VALUE("42.5")' }; // 42.5
+Cell.setValue(ws, "F1", { formula: 'TEXT(1234567.89, "#,##0.00")' }); // "1,234,567.89"
+Cell.setValue(ws, "F2", { formula: 'VALUE("42.5")' }); // 42.5
 
 // Regex (Excel 365)
-ws.getCell("G1").value = { formula: 'REGEXTEST(A2, "^[^@]+@[^@]+$")' }; // TRUE
-ws.getCell("G2").value = { formula: 'REGEXEXTRACT(A3, "[0-9]{3}-[0-9]{3}-[0-9]{4}")' }; // "415-555-0123"
+Cell.setValue(ws, "G1", { formula: 'REGEXTEST(A2, "^[^@]+@[^@]+$")' }); // TRUE
+Cell.setValue(ws, "G2", { formula: 'REGEXEXTRACT(A3, "[0-9]{3}-[0-9]{3}-[0-9]{4}")' }); // "415-555-0123"
 
-wb.calculateFormulas();
+calculateFormulas(wb);
 
 for (const addr of [
   "B1",
@@ -66,6 +66,6 @@ for (const addr of [
   "G1",
   "G2"
 ]) {
-  const c = ws.getCell(addr);
-  console.log(`${addr}  ${String(c.formula).padEnd(48)}  = ${JSON.stringify(c.result)}`);
+  const c = getCell(ws, addr);
+  console.log(`${addr}  ${String(cellFormula(c)).padEnd(48)}  = ${JSON.stringify(cellResult(c))}`);
 }

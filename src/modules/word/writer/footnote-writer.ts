@@ -4,12 +4,11 @@
  * Renders word/footnotes.xml and word/endnotes.xml parts.
  */
 
+import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
+import type { FootnoteDef, EndnoteDef } from "@word/types";
+import { renderParagraph } from "@word/writer/paragraph-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
 import type { XmlSink } from "@xml/types";
-
-import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "../constants";
-import type { FootnoteDef, EndnoteDef } from "../types";
-import { renderParagraph } from "./paragraph-writer";
-import type { RenderHelpers } from "./render-context";
 
 /** Render the default separator/continuation separator entries (required by Word). */
 function renderDefaultSeparators(xml: XmlSink, elementName: string): void {

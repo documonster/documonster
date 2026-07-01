@@ -1,13 +1,14 @@
+import type { PivotTableSource } from "@excel/core/pivot-table";
 import type {
   CacheField as CacheFieldType,
-  ParsedCacheDefinition,
-  PivotTableSource
-} from "@excel/pivot-table";
+  ParsedCacheDefinition
+} from "@excel/core/pivot-table-types";
+import { rangeShortRange } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { renderCacheField } from "@excel/xlsx/xform/pivot-table/cache-field";
 import { CacheFieldXform } from "@excel/xlsx/xform/pivot-table/cache-field-xform";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /** Attribute keys on <pivotCacheDefinition> that are individually parsed (not collected into extraRootAttrs). */
@@ -108,7 +109,7 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
     // Otherwise, reference by sheet + cell range (static).
     const worksheetSourceAttrs: Record<string, string | undefined> = source.tableName
       ? { name: source.tableName }
-      : { ref: source.dimensions.shortRange, sheet: source.name };
+      : { ref: rangeShortRange(source.dimensions), sheet: source.name };
     xmlStream.leafNode("worksheetSource", worksheetSourceAttrs);
     xmlStream.closeNode();
 
@@ -207,7 +208,7 @@ class PivotCacheDefinitionXform extends BaseXform<ParsedCacheDefinition | null> 
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
     // Collect extLst XML verbatim for roundtrip preservation

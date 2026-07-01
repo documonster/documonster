@@ -5,9 +5,9 @@
  * mutable parsing state. Also includes field building operations.
  */
 
-import type { HeaderArray } from "../types";
-import type { ParseConfig } from "./config";
-import { processHeaders } from "./helpers";
+import type { ParseConfig } from "@csv/parse/config";
+import { processHeaders } from "@csv/parse/helpers";
+import type { HeaderArray } from "@csv/types";
 
 // =============================================================================
 // Types

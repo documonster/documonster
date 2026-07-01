@@ -1,5 +1,6 @@
-import type { DefinedNameModel } from "@excel/defined-names";
+import type { DefinedNameModel } from "@excel/core/defined-names";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 class DefinedNamesXform extends BaseXform {
   declare private _parsedName?: string;
@@ -12,13 +13,13 @@ class DefinedNamesXform extends BaseXform {
     this._parsedText = [];
   }
 
-  render(xmlStream: any, model: DefinedNameModel): void {
+  render(xmlStream: XmlSink, model: DefinedNameModel): void {
     // <definedNames>
     //   <definedName name="name">text</definedName>
     //   <definedName name="_xlnm.Print_Area" localSheetId="0">text</definedName>
     //   <definedName name="_xlchart.v1.0" hidden="1">Sheet1!$A$1:$A$3</definedName>
     // </definedNames>
-    const attrs: Record<string, unknown> = {
+    const attrs: XmlAttributes = {
       name: model.name,
       localSheetId: model.localSheetId
     };
@@ -36,7 +37,7 @@ class DefinedNamesXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "definedName":
         this._parsedName = node.attributes.name;

@@ -4,12 +4,11 @@
  * A writable stream that collects all chunks.
  */
 
-import { toBinaryChunk } from "@stream/common/binary-chunk";
+import { toBinaryChunk } from "@stream/core/binary-chunk";
 import { StreamTypeError } from "@stream/errors";
+import { Writable } from "@stream/node/writable";
 import type { WritableStreamOptions, ICollector } from "@stream/types";
 import { chunksToString, concatUint8Arrays } from "@utils/binary";
-
-import { Writable } from "./writable";
 
 // =============================================================================
 // Collector Stream - Collects all chunks into an array
@@ -19,17 +18,21 @@ import { Writable } from "./writable";
  * A writable stream that collects all chunks
  */
 export class Collector<T = Uint8Array> extends Writable<T> {
-  public chunks: T[] = [];
+  public chunks: T[];
 
   constructor(options?: WritableStreamOptions) {
+    // The write handler collects into a closed-over array exposed as
+    // `this.chunks` after construction, mirroring the browser Collector.
+    const chunks: T[] = [];
     super({
       ...options,
       objectMode: options?.objectMode ?? true,
-      write: ((chunk: T, _encoding: BufferEncoding, callback: (error?: Error | null) => void) => {
-        this.chunks.push(chunk);
+      write(chunk: T, _encoding: string, callback: (error?: Error | null) => void) {
+        chunks.push(chunk);
         callback();
-      }) as any
+      }
     });
+    this.chunks = chunks;
   }
 
   /**

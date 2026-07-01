@@ -6,20 +6,19 @@
  * (`styles-writer.ts` and `numbering-writer.ts` are already separate).
  */
 
-import { parseXml } from "@xml/dom";
-
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
+import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
+import { parseRunProperties, parseShading } from "@word/reader/properties-parsers";
+import { parseTableBorders, parseTableProperties } from "@word/reader/table-properties-parsers";
 import type {
   DocDefaults,
   StyleDef,
   TableCellProperties,
   TableRowProperties,
   TableStyleConditionalFormat
-} from "../types";
-import { parseParagraphProperties } from "./paragraph-section-parsers";
-import { attrInt, attrVal, findChildNs, findChildrenNs } from "./parse-utils";
-import { parseRunProperties, parseShading } from "./properties-parsers";
-import { parseTableBorders, parseTableProperties } from "./table-properties-parsers";
+} from "@word/types";
+import { parseXml } from "@xml/dom";
 
 export function parseStyles(xmlStr: string): { docDefaults?: DocDefaults; styles: StyleDef[] } {
   const doc = parseXml(xmlStr);

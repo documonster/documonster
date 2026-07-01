@@ -13,14 +13,13 @@
  * - ECMA-376 Part 2 (OPC) Annex C (non-normative)
  */
 
+import { NS_PKG } from "@word/constants";
+import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import { getFileExt } from "@word/core/opc-paths";
+import { DocxParseError } from "@word/errors";
 import { parseXml } from "@xml/dom";
 import type { XmlElement, XmlNode } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
-
-import { NS_PKG } from "../constants";
-import { utf8Decoder, utf8Encoder } from "../core/internal-utils";
-import { getFileExt } from "../core/opc-paths";
-import { DocxParseError } from "../errors";
 
 // =============================================================================
 // Types

@@ -1,6 +1,13 @@
-import { FormCheckbox, type FormCheckboxModel } from "@excel/form-control";
+import type { FormCheckboxModel } from "@excel/core/form-control";
+import {
+  formCheckboxVmlAnchor,
+  formCheckboxVmlCheckedValue,
+  formCheckboxVmlStyle
+} from "@excel/core/form-control";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ShapeModel } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /**
@@ -25,7 +32,7 @@ interface VmlHeaderImageModel {
 
 interface VmlDrawingModel {
   /** Comment/note shapes */
-  comments?: any[];
+  comments?: ShapeModel[];
   /** Form control checkboxes */
   formControls?: FormCheckboxModel[];
   /** Header/footer image (for watermark in header mode) */
@@ -33,8 +40,8 @@ interface VmlDrawingModel {
 }
 
 class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -51,7 +58,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   /**
    * Render VML drawing containing both notes and form controls
    */
-  render(xmlStream: any, model?: VmlDrawingModel): void {
+  render(xmlStream: XmlSink, model?: VmlDrawingModel): void {
     const renderModel = (model || this.model)!;
     const comments = renderModel.comments;
     const formControls = renderModel.formControls;
@@ -139,7 +146,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     // Render comment shapes
     if (hasComments) {
       for (let i = 0; i < comments.length; i++) {
-        this.map["v:shape"].render(xmlStream, comments[i], i);
+        (this.map["v:shape"] as VmlShapeXform).render(xmlStream, comments[i], i);
       }
     }
 
@@ -161,7 +168,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   /**
    * Render a header/footer image shape for watermark
    */
-  private _renderHeaderImageShape(xmlStream: any, headerImage: VmlHeaderImageModel): void {
+  private _renderHeaderImageShape(xmlStream: XmlSink, headerImage: VmlHeaderImageModel): void {
     const width = headerImage.width ?? 467.25;
     const height = headerImage.height ?? 311.25;
 
@@ -183,11 +190,11 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   /**
    * Render a checkbox form control shape
    */
-  private _renderCheckboxShape(xmlStream: any, control: FormCheckboxModel): void {
+  private _renderCheckboxShape(xmlStream: XmlSink, control: FormCheckboxModel): void {
     const shapeAttrs: Record<string, string> = {
       id: `_x0000_s${control.shapeId}`,
       type: "#_x0000_t201",
-      style: FormCheckbox.getVmlStyle(control),
+      style: formCheckboxVmlStyle(control),
       "o:insetmode": "auto",
       fillcolor: "buttonFace [67]",
       strokecolor: "windowText [64]",
@@ -228,7 +235,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
 
     // Anchor position
     xmlStream.openNode("x:Anchor");
-    xmlStream.writeText(FormCheckbox.getVmlAnchor(control));
+    xmlStream.writeText(formCheckboxVmlAnchor(control));
     xmlStream.closeNode();
 
     // Protection / text locking
@@ -253,7 +260,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     }
 
     // Checked state (0 = unchecked, 1 = checked, 2 = mixed)
-    xmlStream.leafNode("x:Checked", undefined, String(FormCheckbox.getVmlCheckedValue(control)));
+    xmlStream.leafNode("x:Checked", undefined, String(formCheckboxVmlCheckedValue(control)));
 
     // Cell address (0-based row/column)
     xmlStream.leafNode("x:Row", undefined, String(control.tl.row));
@@ -264,7 +271,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   }
 
   // Parsing - delegate to VmlShapeXform for notes, handle header images directly
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

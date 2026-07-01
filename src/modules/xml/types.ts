@@ -163,6 +163,16 @@ export interface SaxTag {
   ns?: Record<string, string>;
 }
 
+/**
+ * The subset of a {@link SaxTag} a parser consumer needs at open-tag time:
+ * the element name, its attributes, and (optionally) whether it self-closes.
+ * A full `SaxTag` is assignable to this, while test fixtures can supply just
+ * `{ name, attributes }`. Use this for `parseOpen`-style handler parameters.
+ */
+export type ParseOpenTag = Pick<SaxTag, "name" | "attributes"> & {
+  isSelfClosing?: boolean;
+};
+
 /** SAX event discriminated union. */
 export type SaxEvent =
   | { eventType: "opentag"; value: SaxTag }
@@ -176,10 +186,14 @@ export type SaxEvent =
 /**
  * Loose-typed SAX event for legacy consumers that don't narrow on eventType.
  * New code should use {@link SaxEvent} with proper discriminant checks.
+ *
+ * `value` is the union of every event payload rather than `any`, so a consumer
+ * that ignores `eventType` still gets a checked type (and `any` never leaks out
+ * of the parser into caller code).
  */
 export interface SaxEventAny {
   eventType: "opentag" | "text" | "closetag" | "cdata" | "comment" | "pi" | "error";
-  value: any;
+  value: SaxTag | string | { target: string; body: string } | Error;
 }
 
 /** SAX event handler map. */
@@ -259,7 +273,7 @@ export interface SaxOptions {
  *      the assembled bytes to the slow sink with proper backpressure
  *      (e.g. via `pipeline()`).
  *
- * `XmlStreamWriter` is used internally by excelts's xlsx writer. The xlsx
+ * `XmlStreamWriter` is used internally by documonster's xlsx writer. The xlsx
  * writer wraps it in a backpressure-aware zip pipeline that awaits drain
  * BETWEEN zip entries — so memory grows at most by one entry's worth of
  * uncompressed XML before the producer is parked. Within a single very

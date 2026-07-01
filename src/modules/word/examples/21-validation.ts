@@ -16,17 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bookmarkStart,
-  bookmarkEnd,
-  hyperlink,
-  validateDocument,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Validation } from "../index";
 import type { DocxDocument, BodyContent } from "../index";
 
 const outDir = path.resolve(
@@ -36,10 +26,10 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 const lines: string[] = [];
-const log = (s: string): void => {
+function log(s: string): void {
   console.log(s);
   lines.push(s);
-};
+}
 
 // ---------------------------------------------------------------------------
 // 1. Clean document — should produce no errors
@@ -51,10 +41,14 @@ const log = (s: string): void => {
   Document.addParagraph(d, "Hello world.");
   Document.addParagraphElement(
     d,
-    paragraph([bookmarkStart(0, "intro"), text("anchored content"), bookmarkEnd(0)])
+    Build.paragraph([
+      Build.bookmarkStart(0, "intro"),
+      Build.text("anchored content"),
+      Build.bookmarkEnd(0)
+    ])
   );
 
-  const result = validateDocument(Document.build(d));
+  const result = Validation.document(Document.build(d));
   log(`# Clean document`);
   log(`  valid: ${result.valid}`);
   log(`  errors: ${result.errorCount}, warnings: ${result.warningCount}`);
@@ -72,21 +66,21 @@ const log = (s: string): void => {
 // ---------------------------------------------------------------------------
 {
   const body: BodyContent[] = [
-    paragraph([
+    Build.paragraph([
       // Hyperlink → anchor that doesn't exist
-      hyperlink("link to missing", { anchor: "no-such-bookmark" }),
-      text(" "),
+      Build.hyperlink("link to missing", { anchor: "no-such-bookmark" }),
+      Build.text(" "),
       // bookmarkStart with no matching end
-      bookmarkStart(99, "lonely"),
-      text("dangling bookmark text")
+      Build.bookmarkStart(99, "lonely"),
+      Build.text("dangling bookmark text")
     ]),
     // Paragraph that references numId 12345 (undefined)
-    textParagraph("Numbered without numbering def", {
+    Build.textParagraph("Numbered without numbering def", {
       numbering: { numId: 12345, level: 0 }
     })
   ];
   const malformed: DocxDocument = { body };
-  const result = validateDocument(malformed);
+  const result = Validation.document(malformed);
   log(`\n# Malformed document`);
   log(`  valid: ${result.valid}`);
   log(`  errors: ${result.errorCount}, warnings: ${result.warningCount}`);
@@ -102,10 +96,10 @@ const log = (s: string): void => {
   const body: BodyContent[] = [
     // Empty paragraph normally is fine, but combined with strict=true some
     // warnings get promoted.
-    textParagraph(""),
-    paragraph([hyperlink("dangling", { anchor: "missing" }), text(" tail")])
+    Build.textParagraph(""),
+    Build.paragraph([Build.hyperlink("dangling", { anchor: "missing" }), Build.text(" tail")])
   ];
-  const r = validateDocument({ body }, { strict: true });
+  const r = Validation.document({ body }, { strict: true });
   log(`\n# Strict mode (warnings → errors)`);
   log(`  valid: ${r.valid}, errors: ${r.errorCount}, warnings: ${r.warningCount}`);
 }
@@ -127,7 +121,7 @@ const log = (s: string): void => {
     altText: "treemap"
   });
 
-  const r = validateDocument(Document.build(d), { compatibilityMode: "word2007" });
+  const r = Validation.document(Document.build(d), { compatibilityMode: "word2007" });
   log(`\n# Word 2007 compatibility`);
   log(`  valid: ${r.valid}, errors: ${r.errorCount}, warnings: ${r.warningCount}`);
   for (const issue of r.issues.slice(0, 5)) {
@@ -140,9 +134,9 @@ const log = (s: string): void => {
 // ---------------------------------------------------------------------------
 {
   const body: BodyContent[] = Array.from({ length: 50 }, (_, i) =>
-    textParagraph(`numbered ${i}`, { numbering: { numId: 999 + i, level: 0 } })
+    Build.textParagraph(`numbered ${i}`, { numbering: { numId: 999 + i, level: 0 } })
   );
-  const r = validateDocument({ body }, { maxErrors: 5 });
+  const r = Validation.document({ body }, { maxErrors: 5 });
   log(`\n# maxErrors=5`);
   log(`  reported issues: ${r.issues.length} (capped)`);
 }
@@ -154,4 +148,4 @@ console.log(`  → 21-validation.txt`);
 const ok = Document.create();
 Document.useDefaultStyles(ok);
 Document.addParagraph(ok, "(See 21-validation.txt for the report.)");
-fs.writeFileSync(path.join(outDir, "21-validation.docx"), await toBuffer(Document.build(ok)));
+fs.writeFileSync(path.join(outDir, "21-validation.docx"), await Io.toBuffer(Document.build(ok)));

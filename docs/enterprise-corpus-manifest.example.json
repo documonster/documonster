@@ -18,14 +18,14 @@
     },
     {
       "path": "wps/kpi-waterfall.xlsx",
-      "source": "WPS Office 2024 / Kingsoft",
+      "source": "WPS Office 2024",
       "tags": ["chartEx", "waterfall", "wps-origin"],
       "expectChartEx": true,
       "openValidation": true
     },
     {
-      "path": "aspose/exported-boxplot.xlsx",
-      "source": "Aspose.Cells for Java 24.8",
+      "path": "third-party/exported-boxplot.xlsx",
+      "source": "Third-party library export",
       "tags": ["chartEx", "boxWhisker"],
       "expectChartEx": true
     },

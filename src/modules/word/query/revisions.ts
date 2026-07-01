@@ -4,7 +4,7 @@
  * Functions for accepting or rejecting tracked changes in a DocxDocument.
  */
 
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
 import type {
   DocxDocument,
   BodyContent,
@@ -22,7 +22,7 @@ import type {
   DeletedRun,
   MovedFromRun,
   MovedToRun
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Public API
@@ -335,10 +335,10 @@ function acceptRevisionsInParagraph(para: Paragraph): number {
           // same accept logic. Other revision APIs (replaceText, fillFormFields)
           // already descend into hyperlinks; revisions must agree.
           const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
-          const synth = {
+          const synth: Paragraph = {
             type: "paragraph",
             children: [...hl.children]
-          } as unknown as Paragraph;
+          };
           count += acceptRevisionsInParagraph(synth);
           newChildren.push({
             ...(hl as object),
@@ -410,10 +410,10 @@ function rejectRevisionsInParagraph(para: Paragraph): number {
           break;
         case "hyperlink": {
           const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
-          const synth = {
+          const synth: Paragraph = {
             type: "paragraph",
             children: [...hl.children]
-          } as unknown as Paragraph;
+          };
           count += rejectRevisionsInParagraph(synth);
           newChildren.push({
             ...(hl as object),
@@ -796,10 +796,10 @@ function processSingleRevision(
           // Hyperlinks can wrap tracked-change runs. Recurse via a
           // synthetic paragraph so the same id-matching logic applies.
           const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
-          const synth = {
+          const synth: Paragraph = {
             type: "paragraph",
             children: [...hl.children]
-          } as unknown as Paragraph;
+          };
           processParagraph(synth);
           newChildren.push({
             ...(hl as object),

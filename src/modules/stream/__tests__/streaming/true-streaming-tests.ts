@@ -10,6 +10,7 @@
  * Tests are designed to work in both Node.js and Browser environments.
  */
 
+import type { PhaseLog } from "@stream/__tests__/streaming/streaming-test-base";
 import {
   createMetrics,
   recordChunk,
@@ -21,8 +22,7 @@ import {
   strongYield,
   generateRowData,
   generateLargeText,
-  assertTrueStreaming,
-  type PhaseLog
+  assertTrueStreaming
 } from "@stream/__tests__/streaming/streaming-test-base";
 import { describe, it, expect, beforeAll } from "vitest";
 

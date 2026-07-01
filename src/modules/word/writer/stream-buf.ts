@@ -12,8 +12,7 @@
  */
 
 import { EventEmitter } from "@utils/event-emitter";
-
-import type { StringBuf } from "./string-buf";
+import type { StringBuf } from "@word/writer/string-buf";
 
 interface StreamBufOptions {
   bufSize?: number;

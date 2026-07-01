@@ -3,24 +3,35 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AbsoluteAnchorXform } from "@excel/xlsx/xform/drawing/absolute-anchor-xform";
 import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
-function getAnchorType(model: any): string {
+/** A drawing anchor: its range discriminates the anchor element used. */
+interface DrawingAnchor {
+  range?: string | { pos?: unknown; br?: unknown };
+  br?: unknown;
+  anchorType?: string;
+  alternateContent?: { requires: string };
+}
+
+function getAnchorType(model: DrawingAnchor): string {
   const range = typeof model.range === "string" ? colCache.decode(model.range) : model.range;
 
-  if (range.pos !== undefined) {
+  if (range && typeof range === "object" && "pos" in range && range.pos !== undefined) {
     return "xdr:absoluteAnchor";
   }
-  return range.br ? "xdr:twoCellAnchor" : "xdr:oneCellAnchor";
+  return range && typeof range === "object" && "br" in range && range.br
+    ? "xdr:twoCellAnchor"
+    : "xdr:oneCellAnchor";
 }
 
 interface DrawingModel {
-  anchors: any[];
+  anchors: DrawingAnchor[];
 }
 
 class DrawingXform extends BaseXform<DrawingModel> {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   // mc:AlternateContent parse state
   private _inAlternateContent = false;
@@ -55,7 +66,7 @@ class DrawingXform extends BaseXform<DrawingModel> {
     return "xdr:wsDr";
   }
 
-  render(xmlStream: any, model?: DrawingModel): void {
+  render(xmlStream: XmlSink, model?: DrawingModel): void {
     const renderModel = model || this.model;
     xmlStream.openXml(StdDocAttributes);
     // `<xdr:wsDr>` must declare every namespace prefix any descendant
@@ -81,14 +92,14 @@ class DrawingXform extends BaseXform<DrawingModel> {
     xmlStream.openNode(this.tag, rootAttrs);
 
     renderModel!.anchors.forEach(item => {
-      const anchor = this.map[item.anchorType];
+      const anchor = this.map[item.anchorType ?? getAnchorType(item)];
       anchor.render(xmlStream, item);
     });
 
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Inside mc:Fallback — skip everything
     if (this._inFallback) {
       this._fallbackDepth++;
@@ -197,9 +208,11 @@ class DrawingXform extends BaseXform<DrawingModel> {
     }
   }
 
-  reconcile(model: DrawingModel, options: any): void {
+  reconcile(model: DrawingModel, options: Parameters<BaseXform["reconcile"]>[1]): void {
     model.anchors.forEach(anchor => {
-      if (anchor.range?.pos !== undefined) {
+      const range = anchor.range;
+      const pos = range && typeof range === "object" ? range.pos : undefined;
+      if (pos !== undefined) {
         this.map["xdr:absoluteAnchor"].reconcile(anchor, options);
       } else if (anchor.br) {
         this.map["xdr:twoCellAnchor"].reconcile(anchor, options);

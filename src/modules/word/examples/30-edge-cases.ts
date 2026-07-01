@@ -21,25 +21,19 @@ import { fileURLToPath } from "node:url";
 
 import {
   Document,
-  paragraph,
-  textParagraph,
-  text,
-  hyperlink,
-  toBuffer,
-  toBase64,
-  readDocx,
-  patchDocument,
-  validateDocument,
-  isDocxError,
-  DocxError,
-  DocxParseError,
-  DocxWriteError,
-  DocxMissingPartError,
-  DocxInvalidStructureError,
-  DocxUnsupportedFeatureError,
   DocxEncryptedError,
+  DocxError,
+  DocxInvalidStructureError,
   DocxLimitExceededError,
-  encryptDocx
+  DocxMissingPartError,
+  DocxParseError,
+  DocxUnsupportedFeatureError,
+  DocxWriteError,
+  isDocxError,
+  Build,
+  Io,
+  Security,
+  Validation
 } from "../index";
 import type { Table } from "../index";
 
@@ -57,8 +51,8 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "Round trip");
   const built = Document.build(d);
-  const buf = await toBuffer(built);
-  const b64 = await toBase64(built);
+  const buf = await Io.toBuffer(built);
+  const b64 = await Io.toBase64(built);
   console.log(`  toBuffer: ${buf.length} bytes, toBase64: ${b64.length} chars`);
 }
 
@@ -69,12 +63,12 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "secret content");
-  const plain = await toBuffer(Document.build(d));
-  const encrypted = await encryptDocx(plain, "shibboleth");
+  const plain = await Io.toBuffer(Document.build(d));
+  const encrypted = await Security.encrypt(plain, "shibboleth");
   fs.writeFileSync(path.join(outDir, "encrypted.docx"), encrypted);
 
   try {
-    await readDocx(encrypted);
+    await Io.read(encrypted);
     console.log("  ERROR: expected DocxEncryptedError to be thrown");
   } catch (err) {
     if (err instanceof DocxEncryptedError) {
@@ -95,17 +89,17 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addParagraphElement(
     d,
-    paragraph([
-      text("Hello, "),
-      text("{NAME}"),
-      text("! Click "),
-      hyperlink("{ANCHOR}", { url: "https://example.com" })
+    Build.paragraph([
+      Build.text("Hello, "),
+      Build.text("{NAME}"),
+      Build.text("! Click "),
+      Build.hyperlink("{ANCHOR}", { url: "https://example.com" })
     ])
   );
   Document.addParagraph(d, "Total: $" + "{TOTAL}");
 
-  const buf = await toBuffer(Document.build(d));
-  const patched = await patchDocument(buf, [
+  const buf = await Io.toBuffer(Document.build(d));
+  const patched = await Io.patchDocument(buf, [
     { placeholder: "{NAME}", content: { type: "text", text: "Alice" } },
     { placeholder: "{ANCHOR}", content: { type: "text", text: "here" } },
     { placeholder: "$" + "{TOTAL}", content: { type: "text", text: "$1,234" } }
@@ -123,10 +117,10 @@ fs.mkdirSync(outDir, { recursive: true });
 // validator flags the dangling reference via the "xref-numbering-missing" rule.
 // ---------------------------------------------------------------------------
 {
-  const result = validateDocument({
+  const result = Validation.document({
     body: [
-      textParagraph("valid ref", { numbering: { numId: 1, level: 0 } }),
-      textParagraph("dangling ref", { numbering: { numId: 999, level: 0 } })
+      Build.textParagraph("valid ref", { numbering: { numId: 1, level: 0 } }),
+      Build.textParagraph("dangling ref", { numbering: { numId: 999, level: 0 } })
     ],
     abstractNumberings: [{ abstractNumId: 0, levels: [] }],
     numberingInstances: [{ numId: 1, abstractNumId: 0 }]
@@ -144,10 +138,10 @@ fs.mkdirSync(outDir, { recursive: true });
 {
   const d = Document.create();
   // do not add any content
-  const buf = await toBuffer(Document.build(d));
+  const buf = await Io.toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "empty.docx"), buf);
   // and re-read it without errors
-  const reread = await readDocx(buf);
+  const reread = await Io.read(buf);
   console.log(`  empty doc: ${buf.length} bytes, body length after re-read: ${reread.body.length}`);
 }
 
@@ -161,7 +155,7 @@ fs.mkdirSync(outDir, { recursive: true });
   for (let i = 0; i < 2000; i++) {
     Document.addParagraph(d, `Paragraph ${i + 1}: ${"Lorem ipsum ".repeat(10)}`);
   }
-  const buf = await toBuffer(Document.build(d));
+  const buf = await Io.toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "stress.docx"), buf);
   console.log(`  stress.docx: ${(buf.length / 1024).toFixed(1)} KB (2000 paragraphs)`);
 }
@@ -174,12 +168,12 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   // Word does not allow nested hyperlinks; we just stack runs deep.
-  let runs = [text("deep")];
+  let runs = [Build.text("deep")];
   for (let i = 0; i < 30; i++) {
-    runs = [text("("), ...runs, text(")")];
+    runs = [Build.text("("), ...runs, Build.text(")")];
   }
-  Document.addParagraphElement(d, paragraph(runs));
-  const buf = await toBuffer(Document.build(d));
+  Document.addParagraphElement(d, Build.paragraph(runs));
+  const buf = await Io.toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "deep.docx"), buf);
   console.log(`  deep.docx: ${buf.length} bytes`);
 }
@@ -191,12 +185,12 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "valid");
-  const ok = await toBuffer(Document.build(d));
+  const ok = await Io.toBuffer(Document.build(d));
 
   // Truncate to 200 bytes (after the ZIP local file header but before EOCD)
   const corrupted = ok.slice(0, 200);
   try {
-    await readDocx(corrupted);
+    await Io.read(corrupted);
     console.log("  ERROR: expected truncated docx to reject");
   } catch (err) {
     console.log(
@@ -210,7 +204,7 @@ fs.mkdirSync(outDir, { recursive: true });
     random[i] = (i * 31) & 0xff;
   }
   try {
-    await readDocx(random);
+    await Io.read(random);
     console.log("  ERROR: expected random bytes to reject");
   } catch (err) {
     console.log(
@@ -230,7 +224,7 @@ fs.mkdirSync(outDir, { recursive: true });
   let inner: Table = {
     type: "table",
     properties: { width: { value: 5000, type: "pct" } },
-    rows: [{ cells: [{ content: [textParagraph("innermost")] }] }]
+    rows: [{ cells: [{ content: [Build.textParagraph("innermost")] }] }]
   };
   for (let level = 4; level >= 0; level--) {
     inner = {
@@ -238,13 +232,13 @@ fs.mkdirSync(outDir, { recursive: true });
       properties: { width: { value: 5000, type: "pct" } },
       rows: [
         {
-          cells: [{ content: [textParagraph(`level ${level} label`)] }, { content: [inner] }]
+          cells: [{ content: [Build.textParagraph(`level ${level} label`)] }, { content: [inner] }]
         }
       ]
     };
   }
   Document.addTableElement(d, inner);
-  const buf = await toBuffer(Document.build(d));
+  const buf = await Io.toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "nested-tables.docx"), buf);
   console.log(`  nested-tables.docx: ${buf.length} bytes (5-level nesting)`);
 }
@@ -259,14 +253,14 @@ fs.mkdirSync(outDir, { recursive: true });
     const id = Document.nextBookmarkId(d);
     Document.addParagraphElement(
       d,
-      paragraph([
+      Build.paragraph([
         { type: "bookmarkStart", id, name: `bm-${i}` },
-        text(`Item ${i}`),
+        Build.text(`Item ${i}`),
         { type: "bookmarkEnd", id }
       ])
     );
   }
-  const buf = await toBuffer(Document.build(d));
+  const buf = await Io.toBuffer(Document.build(d));
   fs.writeFileSync(path.join(outDir, "many-bookmarks.docx"), buf);
   console.log(`  many-bookmarks.docx: ${buf.length} bytes (1 000 bookmarks)`);
 }

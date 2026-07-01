@@ -1,3 +1,5 @@
+import type { ImageModel } from "@excel/core/image";
+import type { ConditionalFormattingRule } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import {
   buildDrawingAnchorsAndRels,
@@ -19,6 +21,7 @@ import {
 } from "@excel/utils/ooxml-paths";
 import { RelType } from "@excel/xlsx/rel-type";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
@@ -44,19 +47,27 @@ import { SheetPropertiesXform } from "@excel/xlsx/xform/sheet/sheet-properties-x
 import { SheetProtectionXform } from "@excel/xlsx/xform/sheet/sheet-protection-xform";
 import { SheetViewXform } from "@excel/xlsx/xform/sheet/sheet-view-xform";
 import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
+import { emuToPx } from "@utils/units";
 import { StdDocAttributes } from "@xml/writer";
 
-const mergeRule = (rule, extRule) => {
-  Object.keys(extRule).forEach(key => {
+function mergeRule<T extends object>(rule: T, extRule: T): void {
+  (Object.keys(extRule) as (keyof T)[]).forEach(key => {
     const value = rule[key];
     const extValue = extRule[key];
     if (value === undefined && extValue !== undefined) {
       rule[key] = extValue;
     }
   });
-};
+}
 
-const mergeConditionalFormattings = (model, extModel) => {
+/** A CF rule carrying the transient x14Id used to pair classic and ext rules. */
+type MergeableCfRule = ConditionalFormattingRule & { x14Id?: string };
+type MergeableCf = { ref: string; rules: MergeableCfRule[] };
+
+function mergeConditionalFormattings(
+  model: MergeableCf[] | undefined,
+  extModel: MergeableCf[] | undefined
+): MergeableCf[] | undefined {
   // conditional formattings are rendered in worksheet.conditionalFormatting and also in
   // worksheet.extLst.ext.x14:conditionalFormattings
   // some (e.g. dataBar) are even spread across both!
@@ -68,8 +79,8 @@ const mergeConditionalFormattings = (model, extModel) => {
   }
 
   // index model rules by x14Id
-  const cfMap = {};
-  const ruleMap = {};
+  const cfMap: Record<string, MergeableCf> = {};
+  const ruleMap: Record<string, MergeableCfRule> = {};
   model.forEach(cf => {
     cfMap[cf.ref] = cf;
     cf.rules.forEach(rule => {
@@ -82,7 +93,7 @@ const mergeConditionalFormattings = (model, extModel) => {
 
   extModel.forEach(extCf => {
     extCf.rules.forEach(extRule => {
-      const rule = ruleMap[extRule.x14Id];
+      const rule = extRule.x14Id ? ruleMap[extRule.x14Id] : undefined;
       if (rule) {
         // merge with matching rule
         mergeRule(rule, extRule);
@@ -101,12 +112,12 @@ const mergeConditionalFormattings = (model, extModel) => {
 
   // need to cope with rules in extModel that don't exist in model
   return model;
-};
+}
 
 class WorkSheetXform extends BaseXform {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
   declare private ignoreNodes: string[];
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   static WORKSHEET_ATTRIBUTES = {
     xmlns: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
@@ -116,7 +127,7 @@ class WorkSheetXform extends BaseXform {
     "mc:Ignorable": "x14ac"
   };
 
-  constructor(options?: any) {
+  constructor(options?: { maxRows?: number; maxCols?: number; ignoreNodes?: string[] }) {
     super();
 
     const { maxRows, maxCols, ignoreNodes } = options || {};
@@ -195,9 +206,9 @@ class WorkSheetXform extends BaseXform {
     model.mergeCells = options.merges.mergeCells;
 
     // prepare relationships
-    const rels: any[] = (model.rels = []);
+    const rels: RelationshipModel[] = (model.rels = []);
 
-    function nextRid(r) {
+    function nextRid(r: readonly unknown[]) {
       return `rId${r.length + 1}`;
     }
 
@@ -271,7 +282,9 @@ class WorkSheetXform extends BaseXform {
         drawing.name = `drawing${++options.drawingsCount}`;
       }
 
-      // Separate chart anchors from non-chart anchors
+      // Separate chart anchors from non-chart anchors. `a` is a drawing-anchor
+      // model element (a prepare()-model substructure shared with the drawing
+      // xform); kept `any` until that model is typed.
       const chartAnchors = drawing.anchors.filter((a: any) => a.chartNumber || a.chartExNumber);
 
       // Reset anchors — chart anchors will be re-added, image anchors rebuilt below
@@ -348,6 +361,8 @@ class WorkSheetXform extends BaseXform {
         }
       }
 
+      // `c` is a model.charts element (prepare()-model substructure); kept
+      // `any` until that model is typed.
       const newCharts = model.charts.filter((c: any) => {
         if (c.chartNumber && !existingChartNumbers.has(c.chartNumber)) {
           return true;
@@ -392,18 +407,17 @@ class WorkSheetXform extends BaseXform {
           // `<xdr:ext cx="NaN" cy="NaN"/>` because `ext` carried
           // `{ cx, cy }` keys but ExtXform looked for `{ width,
           // height }`.
-          const emuToPixel = 9525; // EMU_PER_PIXEL_AT_96_DPI
           const normalizedRange: Record<string, unknown> = { ...chartAnchor.range };
           if (chartAnchor.range.pos) {
             normalizedRange.pos = {
-              x: chartAnchor.range.pos.x / emuToPixel,
-              y: chartAnchor.range.pos.y / emuToPixel
+              x: emuToPx(chartAnchor.range.pos.x),
+              y: emuToPx(chartAnchor.range.pos.y)
             };
           }
           if (chartAnchor.range.ext && chartAnchor.range.ext.cx !== undefined) {
             normalizedRange.ext = {
-              width: chartAnchor.range.ext.cx / emuToPixel,
-              height: chartAnchor.range.ext.cy / emuToPixel
+              width: emuToPx(chartAnchor.range.ext.cx),
+              height: emuToPx(chartAnchor.range.ext.cy)
             };
           }
           const chartRId = nextRid(drawing.rels);
@@ -442,12 +456,21 @@ class WorkSheetXform extends BaseXform {
       }
     }
 
-    // Process background and image media entries
-    const backgroundMedia: any[] = [];
-    const imageMedia: any[] = [];
-    const watermarkMedia: any[] = [];
-    const headerImageMedia: any[] = [];
-    model.media.forEach(medium => {
+    // Split `model.media` (a discriminated union keyed by `type`) into the four
+    // concrete member types so each downstream branch is typed.
+    //
+    // NOTE: `imageMedia` is typed as the `ImageModel` `image` member here, but it
+    // flows into `buildDrawingAnchorsAndRels`, whose `ImageMedium.range` is the
+    // looser `DrawingRange` whose `ext` requires `{ width: number; height: number }`
+    // (or `{ cx; cy }`), while `ImageRangeModel.ext` is `{ width?; height? }`. The
+    // two are NOT assignable (optional vs required ext dims), so the call site below
+    // bridges via `unknown`. Unifying `ImageRangeModel`/`DrawingRange` is a separate
+    // drawing-subsystem refactor; until then the bridge cast is explicit and local.
+    const backgroundMedia: Extract<ImageModel, { type: "background" }>[] = [];
+    const imageMedia: Extract<ImageModel, { type: "image" }>[] = [];
+    const watermarkMedia: Extract<ImageModel, { type: "watermark" }>[] = [];
+    const headerImageMedia: Extract<ImageModel, { type: "headerImage" }>[] = [];
+    (model.media as ImageModel[]).forEach(medium => {
       if (medium.type === "background") {
         backgroundMedia.push(medium);
       } else if (medium.type === "image") {
@@ -496,10 +519,18 @@ class WorkSheetXform extends BaseXform {
         });
       }
 
-      const result = buildDrawingAnchorsAndRels(imageMedia, drawing.rels, {
-        getBookImage: id => options.media[id as number],
-        nextRId: currentRels => nextRid(currentRels)
-      });
+      // Bridge to the drawing subsystem's looser media shape — see the NOTE on
+      // `imageMedia` above. `ImageRangeModel.ext` (`{ width?; height? }`) is not
+      // assignable to `DrawingRange.ext` (`{ width; height }` | `{ cx; cy }`),
+      // so cross via `unknown`. The runtime shapes are compatible.
+      const result = buildDrawingAnchorsAndRels(
+        imageMedia as unknown as Parameters<typeof buildDrawingAnchorsAndRels>[0],
+        drawing.rels,
+        {
+          getBookImage: id => options.media[id as number],
+          nextRId: currentRels => nextRid(currentRels)
+        }
+      );
       drawing.anchors.push(...result.anchors);
       drawing.rels = result.rels;
     }
@@ -584,7 +615,10 @@ class WorkSheetXform extends BaseXform {
         // Mirror the three image anchoring modes. `getAnchorType` (drawing
         // xform) dispatches on `pos`/`br`: absolute when `pos` is present,
         // two-cell when `br` is present, one-cell otherwise (needs `ext`).
-        let range: any;
+        let range:
+          | { pos: unknown; ext: unknown; editAs: "absolute" }
+          | { tl: unknown; br: unknown; editAs: string }
+          | { tl: unknown; ext: unknown; editAs: string };
         if (anchorRange.pos) {
           range = { pos: anchorRange.pos, ext: anchorRange.ext, editAs: "absolute" };
         } else if (anchorRange.br) {
@@ -651,8 +685,8 @@ class WorkSheetXform extends BaseXform {
           model.headerFooter = {};
         }
         const applyTo = medium.applyTo || "all";
-        const insertG = (field: string): string => {
-          const existing = (model.headerFooter as any)[field] || "";
+        const insertG = (field: "oddHeader" | "evenHeader" | "firstHeader"): string => {
+          const existing: string = model.headerFooter[field] || "";
           if (existing.includes("&G")) {
             return existing;
           }
@@ -697,7 +731,7 @@ class WorkSheetXform extends BaseXform {
     });
 
     // prepare pivot tables
-    (model.pivotTables ?? []).forEach((pivotTable: any) => {
+    (model.pivotTables ?? []).forEach((pivotTable: { tableNumber: number }) => {
       rels.push({
         Id: nextRid(rels),
         Type: RelType.PivotTable,
@@ -737,7 +771,7 @@ class WorkSheetXform extends BaseXform {
 
       // Add hidden DrawingML shapes that bridge to the VML shape ids.
       // This mirrors what Excel writes when it "repairs" legacy form controls.
-      const toNativePos = (p: any) => ({
+      const toNativePos = (p: { col: number; colOff: number; row: number; rowOff: number }) => ({
         nativeCol: p.col,
         nativeColOff: p.colOff,
         nativeRow: p.row,
@@ -767,7 +801,7 @@ class WorkSheetXform extends BaseXform {
           alternateContent: { requires: "a14" },
           shape: {
             cNvPrId: control.shapeId,
-            name: (control as any).name || defaultName,
+            name: control.name || defaultName,
             hidden: true,
             spid: `_x0000_s${control.shapeId}`,
             text: control.text
@@ -782,7 +816,7 @@ class WorkSheetXform extends BaseXform {
 
   render(xmlStream, model) {
     xmlStream.openXml(StdDocAttributes);
-    const worksheetAttrs: any = { ...WorkSheetXform.WORKSHEET_ATTRIBUTES };
+    const worksheetAttrs: Record<string, string> = { ...WorkSheetXform.WORKSHEET_ATTRIBUTES };
     if (model.formControls && model.formControls.length > 0) {
       worksheetAttrs["xmlns:x14"] = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main";
       worksheetAttrs["xmlns:xdr"] =
@@ -791,18 +825,18 @@ class WorkSheetXform extends BaseXform {
     }
     xmlStream.openNode("worksheet", worksheetAttrs);
 
-    const sheetFormatPropertiesModel: any = model.properties
+    const sheetFormatPropertiesModel = model.properties
       ? {
           defaultRowHeight: model.properties.defaultRowHeight,
           dyDescent: model.properties.dyDescent,
           outlineLevelCol: model.properties.outlineLevelCol,
           outlineLevelRow: model.properties.outlineLevelRow,
-          customHeight: model.properties.customHeight
+          customHeight: model.properties.customHeight,
+          ...(model.properties.defaultColWidth
+            ? { defaultColWidth: model.properties.defaultColWidth }
+            : {})
         }
       : undefined;
-    if (model.properties && model.properties.defaultColWidth) {
-      sheetFormatPropertiesModel.defaultColWidth = model.properties.defaultColWidth;
-    }
     const sheetPropertiesModel = {
       outlineProperties: model.properties && model.properties.outlineProperties,
       tabColor: model.properties && model.properties.tabColor,
@@ -902,7 +936,7 @@ class WorkSheetXform extends BaseXform {
         xmlStream.openNode("control", {
           shapeId: control.shapeId,
           "r:id": control.ctrlPropRelId,
-          name: (control as any).name || defaultName
+          name: control.name || defaultName
         });
         xmlStream.openNode("controlPr", {
           locked: 0,
@@ -958,7 +992,7 @@ class WorkSheetXform extends BaseXform {
     }
 
     if (node.name === "worksheet") {
-      Object.values(this.map).forEach((xform: any) => {
+      Object.values(this.map).forEach((xform: BaseXform) => {
         xform.reset();
       });
       return true;
@@ -1078,6 +1112,8 @@ class WorkSheetXform extends BaseXform {
             // Build a ref-keyed map from VML comments for order-independent merge.
             // Fall back to index-based merge if VML entries lack row/col.
             const vmlComments = vmlEntry.comments;
+            // Value type is the VML comment element from `options.vmlDrawings`;
+            // `any` because `options` is the untyped prepare()/render() bag.
             const vmlByRef: Record<string, any> = {};
             let hasRefInfo = false;
             for (const vc of vmlComments) {
@@ -1131,12 +1167,12 @@ class WorkSheetXform extends BaseXform {
 
     // compact the rows and cells — remove any holes from sparse parse results
     if (model.rows) {
-      if (model.rows.includes(undefined as any)) {
+      if (model.rows.includes(undefined)) {
         model.rows = model.rows.filter(Boolean);
       }
       for (let i = 0; i < model.rows.length; i++) {
         const row = model.rows[i];
-        if (row.cells?.includes(undefined as any)) {
+        if (row.cells?.includes(undefined)) {
           row.cells = row.cells.filter(Boolean);
         }
       }

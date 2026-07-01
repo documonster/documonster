@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlPositionXform } from "@excel/xlsx/xform/comment/style/vml-position-xform";
 import { VmlProtectionXform } from "@excel/xlsx/xform/comment/style/vml-protection-xform";
 import { VmlAnchorXform } from "@excel/xlsx/xform/comment/vml-anchor-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const POSITION_TYPE = ["twoCells", "oneCells", "absolute"];
 
@@ -11,7 +12,8 @@ interface Protection {
 }
 
 interface ClientDataModel {
-  anchor: any;
+  /** Raw VML anchor string (comma-separated cell/offset values) parsed from `<x:Anchor>`. */
+  anchor: string;
   protection: Protection;
   editAs: string;
   row?: number;
@@ -31,7 +33,7 @@ interface RenderModel {
 
 class VmlClientDataXform extends BaseXform<ClientDataModel> {
   declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public parser?: BaseXform;
   /** Name of the current simple leaf element being parsed (e.g. "x:Row"). */
   private _leafName: string | undefined;
   /** Accumulated text for the current leaf element. */
@@ -46,33 +48,33 @@ class VmlClientDataXform extends BaseXform<ClientDataModel> {
       "x:SizeWithCells": new VmlPositionXform({ tag: "x:SizeWithCells" }),
       "x:MoveWithCells": new VmlPositionXform({ tag: "x:MoveWithCells" })
     };
-    this.model = { anchor: [], protection: {}, editAs: "" };
+    this.model = { anchor: "", protection: {}, editAs: "" };
   }
 
   get tag(): string {
     return "x:ClientData";
   }
 
-  render(xmlStream: any, model: RenderModel): void {
+  render(xmlStream: XmlSink, model: RenderModel): void {
     const { protection, editAs } = model.note;
     xmlStream.openNode(this.tag, { ObjectType: "Note" });
     this.map["x:MoveWithCells"].render(xmlStream, editAs, POSITION_TYPE);
     this.map["x:SizeWithCells"].render(xmlStream, editAs, POSITION_TYPE);
     this.map["x:Anchor"].render(xmlStream, model);
     this.map["x:Locked"].render(xmlStream, protection.locked);
-    xmlStream.leafNode("x:AutoFill", null, "False");
+    xmlStream.leafNode("x:AutoFill", undefined, "False");
     this.map["x:LockText"].render(xmlStream, protection.lockText);
-    xmlStream.leafNode("x:Row", null, model.refAddress.row - 1);
-    xmlStream.leafNode("x:Column", null, model.refAddress.col - 1);
+    xmlStream.leafNode("x:Row", undefined, model.refAddress.row - 1);
+    xmlStream.leafNode("x:Column", undefined, model.refAddress.col - 1);
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.reset();
         this.model = {
-          anchor: [],
+          anchor: "",
           protection: {},
           editAs: ""
         };

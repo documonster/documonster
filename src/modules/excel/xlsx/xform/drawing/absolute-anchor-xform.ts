@@ -1,17 +1,28 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
+import type { ExtModel } from "@excel/xlsx/xform/drawing/ext-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
+import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
+import type { PicModel } from "@excel/xlsx/xform/drawing/pic-xform";
 import { ShapeXform } from "@excel/xlsx/xform/drawing/shape-xform";
+import type { ShapeRenderModel } from "@excel/xlsx/xform/drawing/shape-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
-
-/** https://en.wikipedia.org/wiki/Office_Open_XML_file_formats#DrawingML */
-const EMU_PER_PIXEL_AT_96_DPI = 9525;
+import { EMU_PER_PX } from "@utils/units";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface PosModel {
   x: number;
   y: number;
+}
+
+interface AbsoluteModel {
+  range: { pos?: PosModel; ext?: ExtModel };
+  picture?: PicModel;
+  graphicFrame?: GraphicFrameModel;
+  shape?: ShapeRenderModel;
+  medium?: unknown;
 }
 
 /**
@@ -19,7 +30,7 @@ interface PosModel {
  * Converts between EMU (in XML) and pixels (in model).
  */
 class PosXform extends BaseXform<PosModel> {
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
 
   constructor() {
     super();
@@ -31,18 +42,18 @@ class PosXform extends BaseXform<PosModel> {
     return "xdr:pos";
   }
 
-  render(xmlStream: any, model: PosModel): void {
+  render(xmlStream: XmlSink, model: PosModel): void {
     xmlStream.leafNode(this.tag, {
-      x: Math.floor(model.x * EMU_PER_PIXEL_AT_96_DPI),
-      y: Math.floor(model.y * EMU_PER_PIXEL_AT_96_DPI)
+      x: Math.floor(model.x * EMU_PER_PX),
+      y: Math.floor(model.y * EMU_PER_PX)
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
-        x: parseInt(node.attributes.x ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI,
-        y: parseInt(node.attributes.y ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI
+        x: parseInt(node.attributes.x ?? "0", 10) / EMU_PER_PX,
+        y: parseInt(node.attributes.y ?? "0", 10) / EMU_PER_PX
       };
       return true;
     }
@@ -96,7 +107,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     return "xdr:absoluteAnchor";
   }
 
-  prepare(model: any, options: { index: number }): void {
+  prepare(model: AbsoluteModel, options: { index: number }): void {
     if (model.picture) {
       this.map["xdr:pic"].prepare(model.picture, options);
     } else if (model.graphicFrame) {
@@ -104,7 +115,7 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: AbsoluteModel): void {
     xmlStream.openNode(this.tag);
 
     this.map["xdr:pos"].render(xmlStream, model.range.pos ?? { x: 0, y: 0 });
@@ -140,7 +151,10 @@ class AbsoluteAnchorXform extends BaseCellAnchorXform {
     }
   }
 
-  reconcile(model: any, options: any): void {
+  reconcile(
+    model: AbsoluteModel,
+    options: Parameters<BaseCellAnchorXform["reconcilePicture"]>[1]
+  ): void {
     if (model.picture) {
       model.medium = this.reconcilePicture(model.picture, options);
     }

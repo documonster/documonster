@@ -11,14 +11,14 @@
 
 import { describe, it, expect } from "vitest";
 
-import { DocxWriteError, createDocxStream, textParagraph } from "../index";
+import { DocxWriteError, Build, Streaming } from "../index";
 
 describe("StreamingDocxWriter — sink mode", () => {
   it("delivers byte-identical output through a Web WritableStream", async () => {
     // Build the same document twice: once buffered, once via sink.
-    const buffered = createDocxStream();
+    const buffered = Streaming.createDocxStream();
     for (let i = 0; i < 50; i++) {
-      buffered.add(textParagraph(`Paragraph ${i}`));
+      buffered.add(Build.textParagraph(`Paragraph ${i}`));
     }
     const reference = await buffered.finalize();
 
@@ -29,9 +29,9 @@ describe("StreamingDocxWriter — sink mode", () => {
       }
     });
 
-    const piped = createDocxStream({ sink: ws });
+    const piped = Streaming.createDocxStream({ sink: ws });
     for (let i = 0; i < 50; i++) {
-      piped.add(textParagraph(`Paragraph ${i}`));
+      piped.add(Build.textParagraph(`Paragraph ${i}`));
     }
     const result = await piped.finalize();
     expect(result.length).toBe(0); // sentinel — bytes are in `collected`
@@ -66,12 +66,12 @@ describe("StreamingDocxWriter — sink mode", () => {
       new ByteLengthQueuingStrategy({ highWaterMark: 1 })
     );
 
-    const writer = createDocxStream({ sink: ws });
+    const writer = Streaming.createDocxStream({ sink: ws });
     for (let i = 0; i < 10; i++) {
       // Each addAsync awaits everything queued so far. If backpressure
       // were ignored the writes would all batch up at finalize time and
       // writeOrder would only be populated then.
-      await writer.addAsync(textParagraph(`P${i}`));
+      await writer.addAsync(Build.textParagraph(`P${i}`));
     }
 
     // Even without finalize, at least one chunk should have flowed
@@ -92,13 +92,13 @@ describe("StreamingDocxWriter — sink mode", () => {
       }
     });
 
-    const writer = createDocxStream({ sink: ws });
+    const writer = Streaming.createDocxStream({ sink: ws });
     let caught: unknown = null;
     try {
       // Push enough content that at least one ZIP chunk has been emitted
       // by the time we await; the error then surfaces from addAsync.
       for (let i = 0; i < 200; i++) {
-        await writer.addAsync(textParagraph(`P${i}`));
+        await writer.addAsync(Build.textParagraph(`P${i}`));
       }
       await writer.finalize();
     } catch (e) {
@@ -110,18 +110,18 @@ describe("StreamingDocxWriter — sink mode", () => {
 
   it("rejects reset() in sink mode", async () => {
     const ws = new WritableStream<Uint8Array>({ write(): void {} });
-    const writer = createDocxStream({ sink: ws });
-    writer.add(textParagraph("once"));
+    const writer = Streaming.createDocxStream({ sink: ws });
+    writer.add(Build.textParagraph("once"));
     expect(() => writer.reset()).toThrow(/sink mode/);
     await writer.finalize();
   });
 
   it("synchronous add() throws after a sink write has already failed", async () => {
-    // Build two writers fed from the same failing-sink template. The
-    // first observes the failure via finalize(); we then construct a
-    // second one with the *same* failing pattern, drain it asynchronously
-    // until the sink write rejects, and then assert the synchronous
-    // add() path surfaces that captured failure.
+    // A sink whose every write throws. We drive the writer with `addAsync`
+    // (which awaits the sink-write drain chain and surfaces `_streamError`)
+    // until the failure is observed, rather than racing a fixed timeout —
+    // this is deterministic on both the Node (sync deflate) and browser
+    // (async CompressionStream deflate) paths.
     const failingSinkOpts = {
       sink: new WritableStream<Uint8Array>({
         write(_chunk): void {
@@ -129,28 +129,26 @@ describe("StreamingDocxWriter — sink mode", () => {
         }
       })
     };
-    const writer = createDocxStream(failingSinkOpts);
-    // Inject content and push past the zip buffer so a chunk reaches
-    // the sink. Catch and discard the eventual finalize-time rejection
-    // so the test can continue.
-    for (let i = 0; i < 500; i++) {
-      writer.add(textParagraph(`P${i}`));
-    }
-    // Drive the pending sink writes to completion. We don't await
-    // finalize because finalize() also wants to write more bytes and
-    // the failure model is a once-error-anywhere-fails-everywhere
-    // contract; instead we let the microtask + macrotask queue drain
-    // a few times so the sink's WritableStream rejection lands in
-    // `_streamError`. 200 ms is a generous upper bound for slow CI;
-    // the actual flush completes in <5 ms locally.
-    await new Promise(r => setTimeout(r, 200));
+    const writer = Streaming.createDocxStream(failingSinkOpts);
 
-    // By now the sink callback has rejected at least once; the
-    // adapter captured it into `_streamError`. Synchronous add() must
-    // throw rather than queue more doomed work.
+    // Feed elements via addAsync until a sink write has actually failed and
+    // been captured. The first compressed chunk reaching the sink rejects;
+    // addAsync surfaces it. Bounded so a logic regression can't hang.
+    let sinkFailed = false;
+    for (let i = 0; i < 2000 && !sinkFailed; i++) {
+      try {
+        await writer.addAsync(Build.textParagraph(`P${i}`));
+      } catch {
+        sinkFailed = true;
+      }
+    }
+    expect(sinkFailed).toBe(true);
+
+    // Once the sink has failed, the synchronous add() path must throw
+    // rather than queue more doomed work.
     let threw = false;
     try {
-      writer.add(textParagraph("never reaches sink"));
+      writer.add(Build.textParagraph("never reaches sink"));
     } catch (e) {
       threw = true;
       expect(String(e)).toMatch(/sink already failed/);
@@ -162,11 +160,52 @@ describe("StreamingDocxWriter — sink mode", () => {
   });
 
   it("buffered mode (no sink) is unaffected — finalize returns full bytes", async () => {
-    const writer = createDocxStream();
-    writer.add(textParagraph("alpha"));
+    const writer = Streaming.createDocxStream();
+    writer.add(Build.textParagraph("alpha"));
     const bytes = await writer.finalize();
     expect(bytes.length).toBeGreaterThan(0);
     expect(bytes[0]).toBe(0x50); // 'P'
     expect(bytes[1]).toBe(0x4b); // 'K'
   });
+
+  it("true streaming: bytes reach the sink incrementally, body is not buffered to finalize", async () => {
+    // A large body whose compressed output far exceeds any per-entry buffering.
+    // If the writer were buffering the whole document until finalize(), the
+    // sink would receive (almost) nothing during the addAsync loop and then a
+    // burst at finalize. True streaming delivers compressed bytes continuously.
+    let bytesBeforeFinalize = 0;
+    let totalBytes = 0;
+    let sawFinalize = false;
+    const ws = new WritableStream<Uint8Array>({
+      write(chunk): void {
+        totalBytes += chunk.length;
+        if (!sawFinalize) {
+          bytesBeforeFinalize += chunk.length;
+        }
+      }
+    });
+
+    const writer = Streaming.createDocxStream({ sink: ws });
+
+    // ~6000 paragraphs of incompressible-ish text — multi-MB uncompressed body.
+    const big = "x9q7-streaming-body-".repeat(120); // ~2.4 KB per paragraph
+    for (let i = 0; i < 6000; i++) {
+      await writer.addAsync(Build.textParagraph(`${i}:${big}`));
+    }
+
+    // The decisive assertion: a substantial fraction of the compressed output
+    // must have already been delivered to the sink BEFORE finalize() runs.
+    // (If the body were retained and only flushed at finalize, this would be
+    // ~0.) We require the pre-finalize bytes to be the clear majority.
+    expect(bytesBeforeFinalize).toBeGreaterThan(0);
+
+    sawFinalize = true;
+    await writer.finalize();
+
+    expect(totalBytes).toBeGreaterThan(0);
+    // Pre-finalize delivery should dominate: the document body was streamed
+    // out during addAsync; finalize only appends the small trailing parts
+    // (styles/settings/relationships/central directory).
+    expect(bytesBeforeFinalize).toBeGreaterThan(totalBytes * 0.5);
+  }, 120_000);
 });

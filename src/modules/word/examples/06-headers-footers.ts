@@ -17,24 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  textParagraph,
-  text,
-  bold,
-  tab,
-  pageBreak,
-  pageNumberField,
-  totalPagesField,
-  dateField,
-  cell,
-  row,
-  table,
-  border,
-  cmToTwips,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Units } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -49,11 +32,11 @@ Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Headers & Footers demo", 1);
 Document.addParagraph(doc, "First page body. ");
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "Page 2", 2);
 Document.addParagraph(doc, "Even page; check the even-page header.");
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "Page 3", 2);
 Document.addParagraph(doc, "Odd page; default odd-page header should appear.");
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
@@ -63,10 +46,19 @@ Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
 // ---------------------------------------------------------------------------
 Document.setHeader(doc, "default", {
   children: [
-    paragraph([bold("My Report"), tab(), tab(), text("Date: "), dateField("MMMM d, yyyy")], {
-      tabs: [{ position: 9072, type: "right" }],
-      style: "Header"
-    })
+    Build.paragraph(
+      [
+        Build.bold("My Report"),
+        Build.tab(),
+        Build.tab(),
+        Build.text("Date: "),
+        Build.dateField("MMMM d, yyyy")
+      ],
+      {
+        tabs: [{ position: 9072, type: "right" }],
+        style: "Header"
+      }
+    )
   ]
 });
 
@@ -75,7 +67,7 @@ Document.setHeader(doc, "default", {
 // ---------------------------------------------------------------------------
 Document.setHeader(doc, "even", {
   children: [
-    paragraph([text("v1.0"), tab(), bold("My Report")], {
+    Build.paragraph([Build.text("v1.0"), Build.tab(), Build.bold("My Report")], {
       tabs: [{ position: 9072, type: "right" }],
       style: "Header"
     })
@@ -87,9 +79,9 @@ Document.setHeader(doc, "even", {
 // ---------------------------------------------------------------------------
 Document.setHeader(doc, "first", {
   children: [
-    paragraph(
+    Build.paragraph(
       [
-        text("DRAFT — INTERNAL USE ONLY", {
+        Build.text("DRAFT — INTERNAL USE ONLY", {
           color: "C00000",
           bold: true,
           caps: true
@@ -104,41 +96,49 @@ Document.setHeader(doc, "first", {
 // Footer (default) — three-cell table for left/center/right alignment.
 // Real-world DOCX style for "Page X of Y" with author on the left.
 // ---------------------------------------------------------------------------
-const footerTable = table(
+const footerTable = Build.table(
   [
-    row([
-      cell([textParagraph("© 2026 Example Co.")], {
+    Build.row([
+      Build.cell([Build.textParagraph("© 2026 Example Co.")], {
         width: { value: 33, type: "pct" },
         borders: {
-          top: border("nil"),
-          bottom: border("nil"),
-          left: border("nil"),
-          right: border("nil")
+          top: Build.border("nil"),
+          bottom: Build.border("nil"),
+          left: Build.border("nil"),
+          right: Build.border("nil")
         }
       }),
-      cell(
+      Build.cell(
         [
-          paragraph([text("Page "), pageNumberField(), text(" of "), totalPagesField()], {
-            alignment: "center"
-          })
+          Build.paragraph(
+            [
+              Build.text("Page "),
+              Build.pageNumberField(),
+              Build.text(" of "),
+              Build.totalPagesField()
+            ],
+            {
+              alignment: "center"
+            }
+          )
         ],
         {
           width: { value: 34, type: "pct" },
           borders: {
-            top: border("nil"),
-            bottom: border("nil"),
-            left: border("nil"),
-            right: border("nil")
+            top: Build.border("nil"),
+            bottom: Build.border("nil"),
+            left: Build.border("nil"),
+            right: Build.border("nil")
           }
         }
       ),
-      cell([paragraph([text("Confidential")], { alignment: "right" })], {
+      Build.cell([Build.paragraph([Build.text("Confidential")], { alignment: "right" })], {
         width: { value: 33, type: "pct" },
         borders: {
-          top: border("nil"),
-          bottom: border("nil"),
-          left: border("nil"),
-          right: border("nil")
+          top: Build.border("nil"),
+          bottom: Build.border("nil"),
+          left: Build.border("nil"),
+          right: Build.border("nil")
         }
       })
     ])
@@ -146,12 +146,12 @@ const footerTable = table(
   {
     width: { value: 5000, type: "pct" },
     borders: {
-      top: border("nil"),
-      bottom: border("nil"),
-      left: border("nil"),
-      right: border("nil"),
-      insideH: border("nil"),
-      insideV: border("nil")
+      top: Build.border("nil"),
+      bottom: Build.border("nil"),
+      left: Build.border("nil"),
+      right: Build.border("nil"),
+      insideH: Build.border("nil"),
+      insideV: Build.border("nil")
     }
   }
 );
@@ -159,13 +159,15 @@ Document.setFooter(doc, "default", { children: [footerTable] });
 
 // First-page footer (different)
 Document.setFooter(doc, "first", {
-  children: [textParagraph("(this footer appears only on the title page)", { alignment: "center" })]
+  children: [
+    Build.textParagraph("(this footer appears only on the title page)", { alignment: "center" })
+  ]
 });
 
 // Even-page footer
 Document.setFooter(doc, "even", {
   children: [
-    paragraph([pageNumberField(), tab(), text("My Report")], {
+    Build.paragraph([Build.pageNumberField(), Build.tab(), Build.text("My Report")], {
       tabs: [{ position: 9072, type: "right" }],
       style: "Footer"
     })
@@ -174,14 +176,14 @@ Document.setFooter(doc, "even", {
 
 // Tell the section to honour title-page (first) and even/odd headers.
 Document.setSectionProperties(doc, {
-  pageSize: { width: cmToTwips(21), height: cmToTwips(29.7) },
+  pageSize: { width: Units.cmToTwips(21), height: Units.cmToTwips(29.7) },
   margins: {
-    top: cmToTwips(2.5),
-    bottom: cmToTwips(2.5),
-    left: cmToTwips(2.5),
-    right: cmToTwips(2.5),
-    header: cmToTwips(1.25),
-    footer: cmToTwips(1.25)
+    top: Units.cmToTwips(2.5),
+    bottom: Units.cmToTwips(2.5),
+    left: Units.cmToTwips(2.5),
+    right: Units.cmToTwips(2.5),
+    header: Units.cmToTwips(1.25),
+    footer: Units.cmToTwips(1.25)
   },
   titlePage: true
 });
@@ -189,6 +191,6 @@ Document.setSectionProperties(doc, {
 // Tell the document settings to enable evenAndOddHeaders globally.
 Document.setSettings(doc, { evenAndOddHeaders: true });
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "06-headers-footers.docx"), buf);
 console.log(`  → 06-headers-footers.docx (${buf.length} bytes)`);

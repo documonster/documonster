@@ -1,16 +1,18 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import type { ShapeModel } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface VmlNotesModel {
-  comments: any[];
+  comments: ShapeModel[];
 }
 
 // This class is (currently) single purposed to insert the triangle
 // drawing icons on commented cells
 class VmlNotesXform extends BaseXform<VmlNotesModel> {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -24,7 +26,7 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
     return "xml";
   }
 
-  render(xmlStream: any, model?: VmlNotesModel): void {
+  render(xmlStream: XmlSink, model?: VmlNotesModel): void {
     const renderModel = model || this.model;
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode(this.tag, VmlNotesXform.DRAWING_ATTRIBUTES);
@@ -44,13 +46,13 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
     xmlStream.closeNode();
 
     renderModel!.comments.forEach((item, index) => {
-      this.map["v:shape"].render(xmlStream, item, index);
+      (this.map["v:shape"] as VmlShapeXform).render(xmlStream, item, index);
     });
 
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -95,8 +97,11 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
     }
   }
 
-  reconcile(model: any, options: any): void {
-    model.anchors.forEach((anchor: any) => {
+  reconcile(
+    model: { anchors: { br?: unknown }[] },
+    options: Parameters<BaseXform["reconcile"]>[1]
+  ): void {
+    model.anchors.forEach(anchor => {
       if (anchor.br) {
         this.map["xdr:twoCellAnchor"].reconcile(anchor, options);
       } else {

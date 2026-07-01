@@ -1,4 +1,5 @@
-import { zip, isAbortError } from "@archive";
+import { isAbortError } from "@archive/core/errors";
+import { zip } from "@archive/create-archive";
 import { describe, expect, it } from "vitest";
 
 function delay(ms = 0): Promise<void> {

@@ -10,11 +10,11 @@
 // Configuration
 // =============================================================================
 
-export type { FormatConfig, FormatRowOptions } from "./config";
-export { createFormatConfig } from "./config";
+export type { FormatConfig, FormatRowOptions } from "@csv/format/config";
+export { createFormatConfig } from "@csv/format/config";
 
 // =============================================================================
 // Formatting
 // =============================================================================
 
-export { formatCsv, formatRowWithLookup } from "./formatter";
+export { formatCsv, formatRowWithLookup } from "@csv/format/formatter";

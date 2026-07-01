@@ -1,5 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { validInt, parseBoolean } from "@utils/utils";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const Enums = {
   ReadingOrder: {
@@ -122,7 +123,7 @@ class AlignmentXform extends BaseXform {
     return "alignment";
   }
 
-  render(xmlStream: any, model: AlignmentModel): void {
+  render(xmlStream: XmlSink, model: AlignmentModel): void {
     // Collect valid attributes first, only write if any exist
     const attrs: Record<string, string | number> = {};
     function add(name: string, value: string | number | boolean | undefined): void {
@@ -143,11 +144,11 @@ class AlignmentXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
-    const model: any = {};
+  parseOpen(node: ParseOpenTag): void {
+    const model: Record<string, unknown> = {};
 
     let valid = false;
-    function add(truthy: any, name: string, value: any): void {
+    function add(truthy: unknown, name: string, value: unknown): void {
       if (truthy) {
         model[name] = value;
         valid = true;

@@ -3,7 +3,7 @@ import { extractAll } from "@archive/unzip/extract";
  * Tests for the body-level `<w14:checkbox>` SDT writer.
  *
  * The writer is reachable from the public API via the `checkBox()` builder
- * exposed at `excelts/word`. ECMA-376 Part 4 §17.5.2.41 says
+ * exposed at `documonster/word`. ECMA-376 Part 4 §17.5.2.41 says
  * `w14:checkedState/@w14:val` must be a hexadecimal Unicode code point —
  * but the public TS type only declares it as `string`, so callers will
  * naturally try to pass a literal glyph (e.g. `"✓"`). Earlier the writer
@@ -18,7 +18,7 @@ import { extractAll } from "@archive/unzip/extract";
  */
 import { describe, it, expect } from "vitest";
 
-import { Document, checkBox, toBuffer } from "../index";
+import { Document, Build, Io } from "../index";
 
 async function getDocumentXml(buf: Uint8Array): Promise<string> {
   const entries = await extractAll(buf);
@@ -33,9 +33,9 @@ describe("checkBox builder + w14:checkbox writer", () => {
   it("default checked state renders ☒ and uses the canonical hex 2612", async () => {
     const d = Document.create();
     Document.useDefaultStyles(d);
-    Document.addContent(d, checkBox({ checked: true }));
+    Document.addContent(d, Build.checkBox({ checked: true }));
 
-    const buf = await toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(Document.build(d));
     const xml = await getDocumentXml(buf);
 
     expect(xml).toContain('<w14:checked w14:val="1"/>');
@@ -47,9 +47,9 @@ describe("checkBox builder + w14:checkbox writer", () => {
   it("default unchecked state renders ☐", async () => {
     const d = Document.create();
     Document.useDefaultStyles(d);
-    Document.addContent(d, checkBox({ checked: false }));
+    Document.addContent(d, Build.checkBox({ checked: false }));
 
-    const buf = await toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(Document.build(d));
     const xml = await getDocumentXml(buf);
 
     expect(xml).toContain('<w14:checked w14:val="0"/>');
@@ -64,9 +64,9 @@ describe("checkBox builder + w14:checkbox writer", () => {
     // paragraph — otherwise Word refuses to open the file.
     const d = Document.create();
     Document.useDefaultStyles(d);
-    Document.addContent(d, checkBox({ checked: true }));
+    Document.addContent(d, Build.checkBox({ checked: true }));
 
-    const buf = await toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(Document.build(d));
     const xml = await getDocumentXml(buf);
 
     // The SDT must be wrapped: <w:p><w:sdt>…</w:sdt></w:p>, never <w:body><w:sdt>.
@@ -79,14 +79,14 @@ describe("checkBox builder + w14:checkbox writer", () => {
     Document.useDefaultStyles(d);
     Document.addContent(
       d,
-      checkBox({
+      Build.checkBox({
         checked: true,
         checkedState: { value: "\u2713", font: "Arial" }, // ✓
         uncheckedState: { value: "\u2717", font: "Arial" } // ✗
       })
     );
 
-    const buf = await toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(Document.build(d));
     const xml = await getDocumentXml(buf);
 
     // Hex normalisation in the attribute …
@@ -101,13 +101,13 @@ describe("checkBox builder + w14:checkbox writer", () => {
     Document.useDefaultStyles(d);
     Document.addContent(
       d,
-      checkBox({
+      Build.checkBox({
         checked: true,
         checkedState: { value: "2611", font: "MS Gothic" } // ☑
       })
     );
 
-    const buf = await toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(Document.build(d));
     const xml = await getDocumentXml(buf);
 
     expect(xml).toContain('w14:val="2611"');
@@ -120,13 +120,13 @@ describe("checkBox builder + w14:checkbox writer", () => {
     Document.useDefaultStyles(d);
     Document.addContent(
       d,
-      checkBox({
+      Build.checkBox({
         checked: true,
         checkedState: { value: "\u{1F4AF}", font: "Segoe UI Emoji" } // 💯
       })
     );
 
-    const buf = await toBuffer(Document.build(d));
+    const buf = await Io.toBuffer(Document.build(d));
     const xml = await getDocumentXml(buf);
 
     // Hex form of U+1F4AF is 1F4AF

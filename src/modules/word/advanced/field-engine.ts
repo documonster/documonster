@@ -10,9 +10,10 @@
  * modified portions of the tree).
  */
 
-import { extractParagraphText, isRun } from "../core/text-utils";
-import { walkBlocks } from "../core/walker";
-import { layoutDocument, type LayoutOptions, type LayoutResult } from "../layout/layout";
+import { extractParagraphText, isRun } from "@word/core/text-utils";
+import { walkBlocks } from "@word/core/walker";
+import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
+import { layoutDocument } from "@word/layout/layout";
 import type {
   BodyContent,
   BookmarkStart,
@@ -26,7 +27,7 @@ import type {
   Table,
   TableCell,
   TableOfContents
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Public API Types
@@ -1453,7 +1454,7 @@ function updateParagraphFields(
       });
       if (hlChanged) {
         childrenChanged = true;
-        newChildren.push({ ...(hl as object), children: newRuns } as unknown as ParagraphChild);
+        newChildren.push({ ...hl, children: newRuns } as ParagraphChild);
       } else {
         newChildren.push(child);
       }
@@ -1469,7 +1470,7 @@ function updateParagraphFields(
       const updated = updateRun(wrap.run);
       if (updated !== wrap.run) {
         childrenChanged = true;
-        newChildren.push({ ...(wrap as object), run: updated } as unknown as ParagraphChild);
+        newChildren.push({ ...wrap, run: updated } as ParagraphChild);
       } else {
         newChildren.push(child);
       }

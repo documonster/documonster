@@ -4,7 +4,7 @@
  * Shared by streaming zip writer and buffer zip builder.
  */
 
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { concatUint8Arrays } from "@utils/binary";
 
 // =============================================================================

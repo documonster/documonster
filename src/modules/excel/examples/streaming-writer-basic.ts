@@ -1,8 +1,17 @@
-import { WorkbookWriter } from "../../../index";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const filename = process.argv[2];
+import { Stream } from "@excel/index";
 
-const wb = new WorkbookWriter({
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "streaming-writer-basic.xlsx");
+
+const wb = new Stream.WorkbookWriter({
   filename,
   useSharedStrings: false,
   useStyles: false
@@ -179,107 +188,107 @@ ws.columns = [
   }
 ];
 
-ws.getCell("A2").value = 7;
-ws.getCell("B2").value = "Hello, World!";
-ws.getCell("B2").font = fonts.comicSansUdB16;
-ws.getCell("B2").border = borders.thin;
+Stream.setCellValue(ws.getCell("A2"), 7);
+Stream.setCellValue(ws.getCell("B2"), "Hello, World!");
+Stream.setCellFont(ws.getCell("B2"), fonts.comicSansUdB16);
+Stream.setCellBorder(ws.getCell("B2"), borders.thin);
 
-ws.getCell("C2").value = -5.55;
-ws.getCell("C2").numFmt = "'£'#,##0.00;[Red]-'£'#,##0.00";
-ws.getCell("C2").font = fonts.arialBlackUI14;
+Stream.setCellValue(ws.getCell("C2"), -5.55);
+Stream.setCellNumFmt(ws.getCell("C2"), "'£'#,##0.00;[Red]-'£'#,##0.00");
+Stream.setCellFont(ws.getCell("C2"), fonts.arialBlackUI14);
 
-ws.getCell("D2").value = 3.14;
-ws.getCell("D2").value = new Date();
-ws.getCell("D2").numFmt = "d-mmm-yyyy";
-ws.getCell("D2").font = fonts.comicSansUdB16;
-ws.getCell("D2").border = borders.doubleRed;
+Stream.setCellValue(ws.getCell("D2"), 3.14);
+Stream.setCellValue(ws.getCell("D2"), new Date());
+Stream.setCellNumFmt(ws.getCell("D2"), "d-mmm-yyyy");
+Stream.setCellFont(ws.getCell("D2"), fonts.comicSansUdB16);
+Stream.setCellBorder(ws.getCell("D2"), borders.doubleRed);
 
-ws.getCell("E2").value = `${["Hello", "World"].join(", ")}!`;
-ws.getRow(2).commit();
+Stream.setCellValue(ws.getCell("E2"), `${["Hello", "World"].join(", ")}!`);
+Stream.commitRow(ws.getRow(2));
 
-ws.getCell("A3").value = {
+Stream.setCellValue(ws.getCell("A3"), {
   text: "www.google.com",
   hyperlink: "http://www.google.com"
-};
-ws.getCell("A4").value = "Boo!";
-ws.getCell("C4").value = "Hoo!";
+});
+Stream.setCellValue(ws.getCell("A4"), "Boo!");
+Stream.setCellValue(ws.getCell("C4"), "Hoo!");
 ws.mergeCells("A4", "C4");
-ws.getRow(4).commit();
+Stream.commitRow(ws.getRow(4));
 
-ws.getCell("A5").value = 1;
-ws.getCell("B5").value = 2;
-ws.getCell("C5").value = { formula: "A5+B5", result: 3 };
-ws.getRow(5).commit();
+Stream.setCellValue(ws.getCell("A5"), 1);
+Stream.setCellValue(ws.getCell("B5"), 2);
+Stream.setCellValue(ws.getCell("C5"), { formula: "A5+B5", result: 3 });
+Stream.commitRow(ws.getRow(5));
 
-ws.getCell("A6").value = "Hello";
-ws.getCell("B6").value = "World";
-ws.getCell("C6").value = {
+Stream.setCellValue(ws.getCell("A6"), "Hello");
+Stream.setCellValue(ws.getCell("B6"), "World");
+Stream.setCellValue(ws.getCell("C6"), {
   formula: "CONCATENATE(A6,', ',B6,'!')",
   result: "Hello, World!"
-};
-ws.getCell("C6").border = borders.thickRainbow;
-ws.getRow(6).commit();
+});
+Stream.setCellBorder(ws.getCell("C6"), borders.thickRainbow);
+Stream.commitRow(ws.getRow(6));
 
-ws.getCell("A7").value = 1;
-ws.getCell("B7").value = 2;
-ws.getCell("C7").value = { formula: "A7+B7" };
-ws.getRow(7).commit();
+Stream.setCellValue(ws.getCell("A7"), 1);
+Stream.setCellValue(ws.getCell("B7"), 2);
+Stream.setCellValue(ws.getCell("C7"), { formula: "A7+B7" });
+Stream.commitRow(ws.getRow(7));
 
 const now = new Date();
-ws.getCell("A8").value = now;
-ws.getCell("B8").value = 0;
-ws.getCell("C8").value = { formula: "A8+B8", result: now };
-ws.getRow(8).commit();
+Stream.setCellValue(ws.getCell("A8"), now);
+Stream.setCellValue(ws.getCell("B8"), 0);
+Stream.setCellValue(ws.getCell("C8"), { formula: "A8+B8", result: now });
+Stream.commitRow(ws.getRow(8));
 
-ws.getCell("A9").value = 1.6;
-ws.getCell("A9").numFmt = "# ?/?";
-ws.getCell("B9").value = 1.6;
-ws.getCell("B9").numFmt = "h:mm:ss";
-ws.getCell("C9").value = 0.016;
-ws.getCell("C9").numFmt = "0.00%";
-ws.getCell("D9").value = 1.6;
-ws.getCell("D9").numFmt = "[Green]#,##0 ;[Red](#,##0)";
-ws.getCell("E9").value = 1.6;
-ws.getCell("E9").numFmt = "#0.000";
-ws.getCell("F9").value = 0.016;
-ws.getCell("F9").numFmt = "# ?/?%";
-ws.getRow(9).commit();
+Stream.setCellValue(ws.getCell("A9"), 1.6);
+Stream.setCellNumFmt(ws.getCell("A9"), "# ?/?");
+Stream.setCellValue(ws.getCell("B9"), 1.6);
+Stream.setCellNumFmt(ws.getCell("B9"), "h:mm:ss");
+Stream.setCellValue(ws.getCell("C9"), 0.016);
+Stream.setCellNumFmt(ws.getCell("C9"), "0.00%");
+Stream.setCellValue(ws.getCell("D9"), 1.6);
+Stream.setCellNumFmt(ws.getCell("D9"), "[Green]#,##0 ;[Red](#,##0)");
+Stream.setCellValue(ws.getCell("E9"), 1.6);
+Stream.setCellNumFmt(ws.getCell("E9"), "#0.000");
+Stream.setCellValue(ws.getCell("F9"), 0.016);
+Stream.setCellNumFmt(ws.getCell("F9"), "# ?/?%");
+Stream.commitRow(ws.getRow(9));
 
-ws.getCell("A10").value = "<";
-ws.getCell("B10").value = ">";
-ws.getCell("C10").value = "<a>";
-ws.getCell("D10").value = "><";
-ws.getRow(10).commit();
+Stream.setCellValue(ws.getCell("A10"), "<");
+Stream.setCellValue(ws.getCell("B10"), ">");
+Stream.setCellValue(ws.getCell("C10"), "<a>");
+Stream.setCellValue(ws.getCell("D10"), "><");
+Stream.commitRow(ws.getRow(10));
 
 ws.getRow(11).height = 40;
 alignments.forEach((alignment, index) => {
   const rowNumber = 11;
   const colNumber = index + 1;
   const cell = ws.getCell(rowNumber, colNumber);
-  cell.value = alignment.text;
-  cell.alignment = alignment.alignment;
+  Stream.setCellValue(cell, alignment.text);
+  Stream.setCellAlignment(cell, alignment.alignment);
 });
-ws.getRow(11).commit();
+Stream.commitRow(ws.getRow(11));
 
 const row12 = ws.getRow(12);
 row12.height = 40;
-row12.getCell(1).value = "Blue White Horizontal Gradient";
-row12.getCell(1).fill = fills.blueWhiteHGrad;
-row12.getCell(2).value = "Red Dark Vertical";
-row12.getCell(2).fill = fills.redDarkVertical;
-row12.getCell(3).value = "Red Green Dark Trellis";
-row12.getCell(3).fill = fills.redGreenDarkTrellis;
-row12.getCell(4).value = "RGB Path Gradient";
-row12.getCell(4).fill = fills.rgbPathGrad;
+Stream.setCellValue(Stream.rowCell(row12, 1), "Blue White Horizontal Gradient");
+Stream.setCellFill(Stream.rowCell(row12, 1), fills.blueWhiteHGrad);
+Stream.setCellValue(Stream.rowCell(row12, 2), "Red Dark Vertical");
+Stream.setCellFill(Stream.rowCell(row12, 2), fills.redDarkVertical);
+Stream.setCellValue(Stream.rowCell(row12, 3), "Red Green Dark Trellis");
+Stream.setCellFill(Stream.rowCell(row12, 3), fills.redGreenDarkTrellis);
+Stream.setCellValue(Stream.rowCell(row12, 4), "RGB Path Gradient");
+Stream.setCellFill(Stream.rowCell(row12, 4), fills.rgbPathGrad);
 
 // row and column styles
-ws.getRow(13).font = fonts.arialBlackUI14;
-ws.getCell("H12").value = "Foo";
-ws.getCell("G13").value = "Foo";
-ws.getCell("H13").value = "Bar";
-ws.getCell("I13").value = "Baz";
-ws.getCell("H14").value = "Baz";
-// ws.getRow(13).commit();
+Stream.setRowFont(ws.getRow(13), fonts.arialBlackUI14);
+Stream.setCellValue(ws.getCell("H12"), "Foo");
+Stream.setCellValue(ws.getCell("G13"), "Foo");
+Stream.setCellValue(ws.getCell("H13"), "Bar");
+Stream.setCellValue(ws.getCell("I13"), "Baz");
+Stream.setCellValue(ws.getCell("H14"), "Baz");
+// Row.commit(ws.getRow(13));
 
 wb.commit()
   .then(() => {

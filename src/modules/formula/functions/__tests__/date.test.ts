@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import type { NumberValue, RuntimeValue } from "../../runtime/values";
 import {
   ERRORS,
   RVKind,
@@ -16,9 +17,7 @@ import {
   rvNumber,
   rvString,
   rvBoolean,
-  BLANK,
-  type NumberValue,
-  type RuntimeValue
+  BLANK
 } from "../../runtime/values";
 import {
   fnDATE,

@@ -13,6 +13,17 @@ import { RelType } from "@excel/xlsx/rel-type";
 // Types
 // =============================================================================
 
+/** An anchor's placement: cell anchors (tl/br), absolute (pos/ext), or string ref. */
+type DrawingRange =
+  | string
+  | {
+      tl?: unknown;
+      br?: unknown;
+      pos?: { x: number; y: number };
+      ext?: { cx: number; cy: number } | { width: number; height: number };
+      editAs?: string;
+    };
+
 export interface DrawingAnchor {
   picture: {
     rId: string;
@@ -31,7 +42,7 @@ export interface DrawingAnchor {
      */
     svgRId?: string;
   };
-  range: any;
+  range: DrawingRange;
 }
 
 export interface DrawingRel {
@@ -48,7 +59,7 @@ export interface DrawingModel {
 
 interface ImageMedium {
   imageId: string | number;
-  range: any;
+  range: DrawingRange;
   hyperlinks?: { hyperlink?: string; tooltip?: string };
   /** Opacity 0-1 for watermark overlay mode. */
   opacity?: number;
@@ -265,30 +276,40 @@ export function buildDrawingAnchorsAndRels(
  * Shared between streaming `WorkbookWriterBase.addDrawings()` and
  * non-streaming `XLSX.addDrawings()`.
  */
-export function filterDrawingAnchors(anchors: any[]): any[] {
+export function filterDrawingAnchors<
+  T extends {
+    range?: string | { pos?: unknown; br?: unknown };
+    picture?: unknown;
+    graphicFrame?: unknown;
+    shape?: unknown;
+  } | null
+>(anchors: T[]): T[] {
   return anchors.filter(a => {
     if (a == null) {
       return false;
     }
+    // A string range (named-cell ref) carries no pos/br; treat it as a
+    // cell-anchor with neither, falling through to the validity checks below.
+    const range = typeof a.range === "string" ? undefined : a.range;
     // Absolute anchors need either a picture (image with pos+ext) or a
     // graphicFrame (chart placed via `{ pos, ext }`). The previous
     // filter returned `!!a.picture` for every absolute anchor,
     // silently dropping every chart anchored via `{ pos: { x, y },
     // ext: { cx, cy } }` on write — the drawing XML came out empty
     // and the chart disappeared from the saved file.
-    if (a.range?.pos !== undefined) {
+    if (range?.pos !== undefined) {
       return !!a.picture || !!a.graphicFrame || !!a.shape;
     }
     // Form controls have range.br and shape properties
-    if (a.range?.br && a.shape) {
+    if (range?.br && a.shape) {
       return true;
     }
     // One-cell anchors need a valid picture, graphicFrame (charts) or shape.
-    if (!a.range?.br && !a.picture && !a.graphicFrame && !a.shape) {
+    if (!range?.br && !a.picture && !a.graphicFrame && !a.shape) {
       return false;
     }
     // Two-cell anchors need either picture, shape, or graphicFrame (charts)
-    if (a.range?.br && !a.picture && !a.shape && !a.graphicFrame) {
+    if (range?.br && !a.picture && !a.shape && !a.graphicFrame) {
       return false;
     }
     return true;

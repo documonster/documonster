@@ -204,7 +204,7 @@ const colCache: ColCache = {
   // convert address string into structure
   decodeAddress(value: string): CachedAddress {
     if (!value || typeof value !== "string") {
-      throw new Error(`Invalid Address: ${value}`);
+      throw new InvalidAddressError(String(value));
     }
     const addr = value.length < 5 && this._hash[value];
     if (addr) {
@@ -213,8 +213,8 @@ const colCache: ColCache = {
 
     // Fast path: parse column letters and row digits directly from char codes.
     // Avoids intermediate string concatenation for the common case.
-    let colNumber = 0;
-    let rowNumber = 0;
+    let colNumber: number | undefined = 0;
+    let rowNumber: number | undefined = 0;
     let hasCol = false;
     let hasRow = false;
     let colEnd = 0; // index where col letters end
@@ -242,13 +242,13 @@ const colCache: ColCache = {
     }
 
     if (!hasCol) {
-      colNumber = undefined as any;
+      colNumber = undefined;
     } else if (colNumber > 16384) {
       const col = value.slice(0, colEnd);
       throw new ColumnOutOfBoundsError(col, `Invalid column letter: ${col}`);
     }
     if (!hasRow) {
-      rowNumber = undefined as any;
+      rowNumber = undefined;
     }
 
     // Build canonical address string only when needed
@@ -284,7 +284,7 @@ const colCache: ColCache = {
   // convert [address], [tl:br] into address structures
   decode(value: string) {
     if (!value || typeof value !== "string") {
-      throw new Error(`Invalid Address: ${value}`);
+      throw new InvalidAddressError(String(value));
     }
     const parts = value.split(":");
     if (parts.length === 2) {
@@ -311,7 +311,7 @@ const colCache: ColCache = {
   // convert [sheetName!][$]col[$]row[[$]col[$]row] into address or range structures
   decodeEx(value: string): DecodeExResult {
     if (!value || typeof value !== "string") {
-      throw new Error(`Invalid Address: ${value}`);
+      throw new InvalidAddressError(String(value));
     }
     // Use possessive quantifiers to prevent catastrophic backtracking (ReDoS)
     const groups = value.match(/^(?:(?:(?:'((?:[^']|'')+?)')|([^'^ !]+?))!)?(.*)$/);

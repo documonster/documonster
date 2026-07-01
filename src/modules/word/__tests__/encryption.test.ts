@@ -25,15 +25,8 @@ function createMinimalDoc(): DocxDocument {
         type: "paragraph",
         children: [{ content: [{ type: "text", text: "Encryption test content" }] }]
       }
-    ],
-    contentTypes: [
-      {
-        partName: "/word/document.xml",
-        contentType:
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
-      }
     ]
-  } as unknown as DocxDocument;
+  };
 }
 
 describe("isEncryptedDocx", () => {

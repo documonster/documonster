@@ -44,7 +44,9 @@ function bytesToUuidV4(bytes: Uint8Array): string {
  * - Last-resort fallback uses `Math.random()` (NOT cryptographically secure).
  */
 export function uuidV4(): string {
-  const cryptoObj: any = (globalThis as any).crypto;
+  // `globalThis.crypto` is typed `Crypto` but may be absent on older runtimes,
+  // so treat it as possibly-undefined rather than casting through `any`.
+  const cryptoObj: Crypto | undefined = globalThis.crypto;
 
   if (cryptoObj?.randomUUID) {
     return cryptoObj.randomUUID();

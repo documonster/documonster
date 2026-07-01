@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface PivotCacheModel {
   cacheId: string;
@@ -6,14 +7,14 @@ interface PivotCacheModel {
 }
 
 class WorkbookPivotCacheXform extends BaseXform {
-  render(xmlStream: any, model: PivotCacheModel): void {
+  render(xmlStream: XmlSink, model: PivotCacheModel): void {
     xmlStream.leafNode("pivotCache", {
       cacheId: model.cacheId,
       "r:id": model.rId
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "pivotCache") {
       this.model = {
         cacheId: node.attributes.cacheId,

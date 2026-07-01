@@ -6,8 +6,6 @@
  * text boxes, and structured document tags.
  */
 
-import type { XmlSink } from "@xml/types";
-
 import {
   DOCUMENT_NAMESPACES,
   STD_DOC_ATTRIBUTES,
@@ -15,8 +13,8 @@ import {
   NS_C_CHART,
   NS_CX_CHART,
   NS_WPS
-} from "../constants";
-import { DocxRawXmlPolicyError, DocxWriteError } from "../errors";
+} from "@word/constants";
+import { DocxRawXmlPolicyError, DocxWriteError } from "@word/errors";
 import type {
   DocxDocument,
   BodyContent,
@@ -26,26 +24,28 @@ import type {
   OpaqueDrawing,
   ChartContent,
   ChartExContent
-} from "../types";
+} from "@word/types";
 import {
   DEFAULT_CHART_HEIGHT_EMU,
   DEFAULT_CHART_EX_HEIGHT_EMU,
   DEFAULT_CHART_WIDTH_EMU,
   DEFAULT_RELATIVE_HEIGHT,
   DEFAULT_WRAP_MARGIN_EMU
-} from "../units";
-import { renderCheckBox } from "./checkbox-writer";
-import { renderFloatingImage } from "./image-writer";
-import { renderMathBlock } from "./math-writer";
-import { renderParagraph } from "./paragraph-writer";
-import { renderDocumentBackground } from "./parts-writer";
-import { createRenderContext, type RenderHelpers, type WordRenderContext } from "./render-context";
-import { renderRun } from "./run-writer";
-import { renderSdtPr } from "./sdt-writer";
-import { renderSectionProperties } from "./section-writer";
-import { renderTable } from "./table-writer";
-import { renderTextBox } from "./textbox-writer";
-import { renderTableOfContents } from "./toc-writer";
+} from "@word/units";
+import { renderCheckBox } from "@word/writer/checkbox-writer";
+import { renderFloatingImage } from "@word/writer/image-writer";
+import { renderMathBlock } from "@word/writer/math-writer";
+import { renderParagraph } from "@word/writer/paragraph-writer";
+import { renderDocumentBackground } from "@word/writer/parts-writer";
+import type { RenderHelpers, WordRenderContext } from "@word/writer/render-context";
+import { createRenderContext } from "@word/writer/render-context";
+import { renderRun } from "@word/writer/run-writer";
+import { renderSdtPr } from "@word/writer/sdt-writer";
+import { renderSectionProperties } from "@word/writer/section-writer";
+import { renderTable } from "@word/writer/table-writer";
+import { renderTextBox } from "@word/writer/textbox-writer";
+import { renderTableOfContents } from "@word/writer/toc-writer";
+import type { XmlSink } from "@xml/types";
 
 /**
  * Render a structured document tag.

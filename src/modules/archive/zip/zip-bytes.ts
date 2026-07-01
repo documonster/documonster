@@ -8,26 +8,30 @@
  * For true streaming (push chunks while reading sources), use `zip()` / `ZipArchive.stream()`.
  */
 
-import { compress, compressSync, type CompressOptions } from "@archive/compression/compress";
+import type { CompressOptions } from "@archive/compression/compress";
+import { compress, compressSync } from "@archive/compression/compress";
 import { crc32 } from "@archive/compression/crc32";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import {
+  DEFAULT_ZIP_LEVEL,
+  DEFAULT_ZIP_TIMESTAMPS,
+  REPRODUCIBLE_ZIP_MOD_TIME
+} from "@archive/core/defaults";
+import { ArchiveError } from "@archive/core/errors";
+import type { ZipStringEncoding } from "@archive/core/text";
+import { encodeZipString } from "@archive/core/text";
+import type { ZipEncryptionMethod } from "@archive/crypto";
 import {
   zipCryptoEncrypt,
   aesEncrypt,
   buildAesExtraField,
   randomBytes,
-  type ZipEncryptionMethod,
   isAesEncryption,
   getAesKeyStrength
 } from "@archive/crypto";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import {
-  DEFAULT_ZIP_LEVEL,
-  DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
-} from "@archive/shared/defaults";
-import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
-import { type ZipTimestampMode } from "@archive/zip-spec/timestamps";
-import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
+import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { normalizeZipPath } from "@archive/zip-spec/zip-path";
 import {
   FLAG_ENCRYPTED,
   COMPRESSION_AES,
@@ -40,13 +44,15 @@ import {
 } from "@archive/zip-spec/zip-records";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import { isProbablyIncompressible } from "@archive/zip/compressibility";
+import {
+  measureCentralDirectoryAndEocd,
+  writeCentralDirectoryAndEocdInto
+} from "@archive/zip/writer-core";
 import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
 import {
   buildZipEntryMetadata,
   resolveZipCompressionMethod
 } from "@archive/zip/zip-entry-metadata";
-
-import { measureCentralDirectoryAndEocd, writeCentralDirectoryAndEocdInto } from "./writer-core";
 
 interface ProcessedEntry {
   name: Uint8Array;
@@ -116,8 +122,9 @@ export interface ZipEntry {
 }
 
 // Re-export ZipRawEntry from shared module
-export type { ZipRawEntry } from "./raw-entry";
-import { type ZipRawEntry, isZipRawEntry } from "./raw-entry";
+export type { ZipRawEntry } from "@archive/zip/raw-entry";
+import type { ZipRawEntry } from "@archive/zip/raw-entry";
+import { isZipRawEntry } from "@archive/zip/raw-entry";
 
 export type ZipBuildEntry = ZipEntry | ZipRawEntry;
 
@@ -167,10 +174,10 @@ function validateEncryptionOptions(
   isSync: boolean
 ): void {
   if (encryptionMethod !== "none" && !password) {
-    throw new Error("Password is required when encryption is enabled");
+    throw new ArchiveError("Password is required when encryption is enabled");
   }
   if (isSync && isAesEncryption(encryptionMethod)) {
-    throw new Error(
+    throw new ArchiveError(
       "AES encryption requires async API. Use createZip() instead of createZipSync()."
     );
   }
@@ -276,7 +283,12 @@ function buildProcessedEntry(
   path: ZipPathOptionValue,
   compressedData: Uint8Array,
   deflate: boolean,
-  encryptionResult?: { data: Uint8Array; extraField?: Uint8Array; compressionMethod: number }
+  encryptionResult?: {
+    data: Uint8Array;
+    extraField?: Uint8Array;
+    compressionMethod: number;
+    crcOverride?: number;
+  }
 ): ProcessedEntry {
   const resolvedName = path ? normalizeZipPath(entry.name, path) : entry.name;
   const modDate = entry.modTime ?? settings.defaultModTime;
@@ -298,6 +310,9 @@ function buildProcessedEntry(
   let finalCompressionMethod: number;
   let finalExtraField: Uint8Array = metadata.extraField;
   let flags = metadata.flags;
+  // CRC-32 stored in the headers. WinZip AE-2 mandates a zero CRC field, so the
+  // encryption layer may override the real CRC (crcOverride === 0).
+  let finalCrc = crc32(entry.data);
 
   if (encryptionResult) {
     finalData = encryptionResult.data;
@@ -305,6 +320,9 @@ function buildProcessedEntry(
     flags |= FLAG_ENCRYPTED;
     if (encryptionResult.extraField) {
       finalExtraField = concatExtraFields(metadata.extraField, encryptionResult.extraField);
+    }
+    if (encryptionResult.crcOverride !== undefined) {
+      finalCrc = encryptionResult.crcOverride;
     }
   } else {
     finalData = compressedData;
@@ -324,7 +342,7 @@ function buildProcessedEntry(
     sortKey: resolvedName.toLowerCase(),
     uncompressedSize: entry.data.length,
     compressedData: finalData,
-    crc: crc32(entry.data),
+    crc: finalCrc,
     compressionMethod: finalCompressionMethod,
     modTime: metadata.dosTime,
     modDate: metadata.dosDate,
@@ -469,7 +487,12 @@ async function encryptData(
   encryptionMethod: ZipEncryptionMethod,
   password: string | Uint8Array,
   originalCompressionMethod: number
-): Promise<{ data: Uint8Array; extraField?: Uint8Array; compressionMethod: number }> {
+): Promise<{
+  data: Uint8Array;
+  extraField?: Uint8Array;
+  compressionMethod: number;
+  crcOverride?: number;
+}> {
   if (encryptionMethod === "zipcrypto") {
     // ZipCrypto encryption
     const encrypted = zipCryptoEncrypt(compressedData, password, originalCrc, randomBytes);
@@ -480,14 +503,18 @@ async function encryptData(
   }
 
   if (isAesEncryption(encryptionMethod)) {
-    // AES encryption
+    // AES encryption (WinZip AE-2). AE-2 does NOT store the real CRC-32 — the
+    // field must be 0 (integrity is provided by the HMAC). Writing the real
+    // CRC violates the spec and causes strict readers (WinZip, 7-Zip,
+    // pyzipper, …) to reject the entry with a CRC error.
     const keyStrength = getAesKeyStrength(encryptionMethod)!;
     const encrypted = await aesEncrypt(compressedData, password, keyStrength);
     const aesExtraField = buildAesExtraField(2, keyStrength, originalCompressionMethod);
     return {
       data: encrypted,
       extraField: aesExtraField,
-      compressionMethod: COMPRESSION_AES
+      compressionMethod: COMPRESSION_AES,
+      crcOverride: 0
     };
   }
 
@@ -517,7 +544,7 @@ function encryptDataSync(
   }
 
   if (isAesEncryption(encryptionMethod)) {
-    throw new Error(
+    throw new ArchiveError(
       "AES encryption requires async API. Use createZip() instead of createZipSync()."
     );
   }

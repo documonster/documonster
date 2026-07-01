@@ -5,82 +5,14 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  strikethrough,
-  columnBreak,
-  carriageReturn,
-  noBreakHyphen,
-  softHyphen,
-  symbol,
-  pageNumberField,
-  totalPagesField,
-  sectionPagesField,
-  sectionField,
-  dateField,
-  sequenceField,
-  timeField,
-  authorField,
-  titleField,
-  subjectField,
-  keywordsField,
-  fileNameField,
-  fileSizeField,
-  styleRefField,
-  refField,
-  pageRefField,
-  noteRefField,
-  hyperlinkField,
-  quoteField,
-  tocField,
-  tcField,
-  indexEntryField,
-  indexField,
-  ifField,
-  includeTextField,
-  includePictureField,
-  formTextField,
-  formCheckboxField,
-  formDropdownField,
-  commentRangeStart,
-  commentRangeEnd,
-  commentReference,
-  movedFromRun,
-  movedToRun,
-  moveFromRangeStart,
-  moveFromRangeEnd,
-  moveToRangeStart,
-  moveToRangeEnd,
-  mathBlock,
-  mathFraction,
-  mathSqrt,
-  mathRoot,
-  mathSum,
-  mathIntegral,
-  mathProduct,
-  mathSuperScript,
-  mathSubScript,
-  mathSubSuperScript,
-  mathDelimiter,
-  mathNary,
-  mathFunction,
-  mathLimit,
-  mathMatrix,
-  mathAccent,
-  mathBar,
-  mathBox,
-  mathEquationArray,
-  structuredDocumentTag,
-  resolveThemeColor,
-  listSections,
-  toBase64,
-  fillTemplateFromBuffer,
-  DocxWriteError,
+  Document,
   DocxInvalidStructureError,
   DocxUnsupportedFeatureError,
-  text,
-  paragraph,
-  textParagraph,
-  packageDocx,
-  Document
+  DocxWriteError,
+  Build,
+  Io,
+  Query,
+  Theme
 } from "../index";
 import type { DocxDocument, MathContent, Paragraph } from "../types";
 
@@ -90,33 +22,33 @@ import type { DocxDocument, MathContent, Paragraph } from "../types";
 
 describe("Run content helpers", () => {
   it("strikethrough creates a strike run", () => {
-    const run = strikethrough("deleted");
+    const run = Build.strikethrough("deleted");
     expect(run.properties?.strike).toBe(true);
     expect(run.content[0]).toEqual({ type: "text", text: "deleted" });
   });
 
   it("columnBreak creates a column break run", () => {
-    const run = columnBreak();
+    const run = Build.columnBreak();
     expect(run.content[0]).toEqual({ type: "break", breakType: "column" });
   });
 
   it("carriageReturn creates a CR run", () => {
-    const run = carriageReturn();
+    const run = Build.carriageReturn();
     expect(run.content[0]).toEqual({ type: "carriageReturn" });
   });
 
   it("noBreakHyphen creates a no-break hyphen run", () => {
-    const run = noBreakHyphen();
+    const run = Build.noBreakHyphen();
     expect(run.content[0]).toEqual({ type: "noBreakHyphen" });
   });
 
   it("softHyphen creates a soft hyphen run", () => {
-    const run = softHyphen();
+    const run = Build.softHyphen();
     expect(run.content[0]).toEqual({ type: "softHyphen" });
   });
 
   it("symbol creates a symbol run", () => {
-    const run = symbol("Wingdings", "F0FC");
+    const run = Build.symbol("Wingdings", "F0FC");
     expect(run.content[0]).toEqual({ type: "symbol", font: "Wingdings", char: "F0FC" });
   });
 });
@@ -127,7 +59,7 @@ describe("Run content helpers", () => {
 
 describe("Field helpers", () => {
   it("pageNumberField", () => {
-    const run = pageNumberField("3");
+    const run = Build.pageNumberField("3");
     expect(run.content[0]).toMatchObject({
       type: "field",
       instruction: " PAGE ",
@@ -136,38 +68,38 @@ describe("Field helpers", () => {
   });
 
   it("totalPagesField", () => {
-    const run = totalPagesField();
+    const run = Build.totalPagesField();
     expect(run.content[0]).toMatchObject({ type: "field", instruction: " NUMPAGES " });
   });
 
   it("sectionPagesField", () => {
-    const run = sectionPagesField();
+    const run = Build.sectionPagesField();
     expect(run.content[0]).toMatchObject({ type: "field", instruction: " SECTIONPAGES " });
   });
 
   it("sectionField", () => {
-    const run = sectionField();
+    const run = Build.sectionField();
     expect(run.content[0]).toMatchObject({ type: "field", instruction: " SECTION " });
   });
 
   it("dateField with format", () => {
-    const run = dateField("dd/MM/yyyy");
+    const run = Build.dateField("dd/MM/yyyy");
     expect((run.content[0] as any).instruction).toContain("DATE");
     expect((run.content[0] as any).instruction).toContain("dd/MM/yyyy");
   });
 
   it("sequenceField", () => {
-    const run = sequenceField("Figure");
+    const run = Build.sequenceField("Figure");
     expect((run.content[0] as any).instruction).toContain("SEQ Figure");
   });
 
   it("timeField", () => {
-    const run = timeField("HH:mm");
+    const run = Build.timeField("HH:mm");
     expect((run.content[0] as any).instruction).toContain("TIME");
   });
 
   it("authorField", () => {
-    const run = authorField("John");
+    const run = Build.authorField("John");
     expect(run.content[0]).toMatchObject({
       type: "field",
       instruction: " AUTHOR ",
@@ -176,66 +108,66 @@ describe("Field helpers", () => {
   });
 
   it("titleField", () => {
-    const run = titleField("My Doc");
+    const run = Build.titleField("My Doc");
     expect(run.content[0]).toMatchObject({ type: "field", instruction: " TITLE " });
   });
 
   it("subjectField", () => {
-    const run = subjectField();
+    const run = Build.subjectField();
     expect((run.content[0] as any).instruction).toContain("SUBJECT");
   });
 
   it("keywordsField", () => {
-    const run = keywordsField();
+    const run = Build.keywordsField();
     expect((run.content[0] as any).instruction).toContain("KEYWORDS");
   });
 
   it("fileNameField", () => {
-    const run = fileNameField({ includePath: true });
+    const run = Build.fileNameField({ includePath: true });
     expect((run.content[0] as any).instruction).toContain("FILENAME");
     expect((run.content[0] as any).instruction).toContain("\\p");
   });
 
   it("fileSizeField", () => {
-    const run = fileSizeField();
+    const run = Build.fileSizeField();
     expect((run.content[0] as any).instruction).toContain("FILESIZE");
   });
 
   it("styleRefField", () => {
-    const run = styleRefField("Heading 1", { fromBottom: true });
+    const run = Build.styleRefField("Heading 1", { fromBottom: true });
     expect((run.content[0] as any).instruction).toContain("STYLEREF");
     expect((run.content[0] as any).instruction).toContain("\\l");
   });
 
   it("refField", () => {
-    const run = refField("_Ref123", { hyperlink: true });
+    const run = Build.refField("_Ref123", { hyperlink: true });
     expect((run.content[0] as any).instruction).toContain("REF _Ref123");
     expect((run.content[0] as any).instruction).toContain("\\h");
   });
 
   it("pageRefField", () => {
-    const run = pageRefField("bk1");
+    const run = Build.pageRefField("bk1");
     expect((run.content[0] as any).instruction).toContain("PAGEREF bk1");
   });
 
   it("noteRefField", () => {
-    const run = noteRefField("fn1", { hyperlink: true });
+    const run = Build.noteRefField("fn1", { hyperlink: true });
     expect((run.content[0] as any).instruction).toContain("NOTEREF fn1");
   });
 
   it("hyperlinkField", () => {
-    const run = hyperlinkField("https://example.com", { anchor: "top" });
+    const run = Build.hyperlinkField("https://example.com", { anchor: "top" });
     expect((run.content[0] as any).instruction).toContain("HYPERLINK");
     expect((run.content[0] as any).instruction).toContain("\\l");
   });
 
   it("quoteField", () => {
-    const run = quoteField("hello");
+    const run = Build.quoteField("hello");
     expect((run.content[0] as any).instruction).toContain("QUOTE");
   });
 
   it("tocField", () => {
-    const run = tocField({ headingLevels: "1-3", hyperlink: true });
+    const run = Build.tocField({ headingLevels: "1-3", hyperlink: true });
     expect((run.content[0] as any).instruction).toContain("TOC");
     expect((run.content[0] as any).instruction).toContain("\\h");
   });
@@ -243,7 +175,7 @@ describe("Field helpers", () => {
   it("tocField does not emit \\p for tabLeader (would disable dot leader)", () => {
     // The dotted leader is the TOC default; `\p` sets a single separator char
     // and would DISABLE the leader + right-aligned page number.
-    const run = tocField({ headingLevels: "1-3", tabLeader: "." });
+    const run = Build.tocField({ headingLevels: "1-3", tabLeader: "." });
     const instr = (run.content[0] as any).instruction as string;
     expect(instr).toContain("TOC");
     expect(instr).not.toContain("\\p");
@@ -252,60 +184,60 @@ describe("Field helpers", () => {
   it("tocField does not emit \\z for rightAlignedPageNumbers", () => {
     // `\z` hides the leader/page numbers in Web layout view — it is NOT a
     // right-align switch. Right alignment is the TOC default via styles.
-    const run = tocField({ headingLevels: "1-3", rightAlignedPageNumbers: true });
+    const run = Build.tocField({ headingLevels: "1-3", rightAlignedPageNumbers: true });
     const instr = (run.content[0] as any).instruction as string;
     expect(instr).toContain("TOC");
     expect(instr).not.toContain("\\z");
   });
 
   it("tcField", () => {
-    const run = tcField("Entry", { level: 2 });
+    const run = Build.tcField("Entry", { level: 2 });
     expect((run.content[0] as any).instruction).toContain("TC");
     expect((run.content[0] as any).instruction).toContain("\\l 2");
   });
 
   it("indexEntryField", () => {
-    const run = indexEntryField("Term", { bold: true });
+    const run = Build.indexEntryField("Term", { bold: true });
     expect((run.content[0] as any).instruction).toContain("XE");
     expect((run.content[0] as any).instruction).toContain("\\b");
   });
 
   it("indexField", () => {
-    const run = indexField({ columns: 2 });
+    const run = Build.indexField({ columns: 2 });
     expect((run.content[0] as any).instruction).toContain("INDEX");
     expect((run.content[0] as any).instruction).toContain("\\c 2");
   });
 
   it("ifField", () => {
-    const run = ifField("1 = 1", "yes", "no");
+    const run = Build.ifField("1 = 1", "yes", "no");
     expect((run.content[0] as any).instruction).toContain("IF 1 = 1");
   });
 
   it("includeTextField", () => {
-    const run = includeTextField("C:\\doc.txt");
+    const run = Build.includeTextField("C:\\doc.txt");
     expect((run.content[0] as any).instruction).toContain("INCLUDETEXT");
   });
 
   it("includePictureField", () => {
-    const run = includePictureField("logo.png");
+    const run = Build.includePictureField("logo.png");
     expect((run.content[0] as any).instruction).toContain("INCLUDEPICTURE");
   });
 
   it("formTextField", () => {
-    const run = formTextField({ name: "Name", maxLength: 50 });
+    const run = Build.formTextField({ name: "Name", maxLength: 50 });
     expect((run.content[0] as any).instruction).toContain("FORMTEXT");
     expect((run.content[0] as any).formField.type).toBe("text");
     expect((run.content[0] as any).formField.name).toBe("Name");
   });
 
   it("formCheckboxField", () => {
-    const run = formCheckboxField({ checked: true });
+    const run = Build.formCheckboxField({ checked: true });
     expect((run.content[0] as any).formField.type).toBe("checkBox");
     expect((run.content[0] as any).formField.checked).toBe(true);
   });
 
   it("formDropdownField", () => {
-    const run = formDropdownField({ entries: ["A", "B"] });
+    const run = Build.formDropdownField({ entries: ["A", "B"] });
     expect((run.content[0] as any).formField.type).toBe("dropDown");
     expect((run.content[0] as any).formField.entries).toEqual(["A", "B"]);
   });
@@ -317,17 +249,17 @@ describe("Field helpers", () => {
 
 describe("Comment helpers", () => {
   it("commentRangeStart", () => {
-    const marker = commentRangeStart(1);
+    const marker = Build.commentRangeStart(1);
     expect(marker).toEqual({ type: "commentRangeStart", id: 1 });
   });
 
   it("commentRangeEnd", () => {
-    const marker = commentRangeEnd(1);
+    const marker = Build.commentRangeEnd(1);
     expect(marker).toEqual({ type: "commentRangeEnd", id: 1 });
   });
 
   it("commentReference", () => {
-    const ref = commentReference(1);
+    const ref = Build.commentReference(1);
     expect(ref).toEqual({ type: "commentReference", id: 1 });
   });
 });
@@ -338,43 +270,43 @@ describe("Comment helpers", () => {
 
 describe("Track changes helpers", () => {
   const revision = { id: 1, author: "user", date: "2024-01-01T00:00:00Z" };
-  const run = text("moved");
+  const run = Build.text("moved");
 
   it("movedFromRun", () => {
-    const result = movedFromRun(run, revision);
+    const result = Build.movedFromRun(run, revision);
     expect(result.type).toBe("movedFromRun");
     expect(result.revision).toEqual(revision);
     expect(result.run).toBe(run);
   });
 
   it("movedToRun", () => {
-    const result = movedToRun(run, revision);
+    const result = Build.movedToRun(run, revision);
     expect(result.type).toBe("movedToRun");
     expect(result.revision).toEqual(revision);
   });
 
   it("moveFromRangeStart", () => {
-    const marker = moveFromRangeStart(1, "author1");
+    const marker = Build.moveFromRangeStart(1, "author1");
     expect(marker.type).toBe("moveFromRangeStart");
     expect(marker.id).toBe(1);
     expect(marker.author).toBe("author1");
   });
 
   it("moveFromRangeEnd", () => {
-    const marker = moveFromRangeEnd(1);
+    const marker = Build.moveFromRangeEnd(1);
     expect(marker.type).toBe("moveFromRangeEnd");
     expect(marker.id).toBe(1);
   });
 
   it("moveToRangeStart", () => {
-    const marker = moveToRangeStart(2, "author2");
+    const marker = Build.moveToRangeStart(2, "author2");
     expect(marker.type).toBe("moveToRangeStart");
     expect(marker.id).toBe(2);
     expect(marker.author).toBe("author2");
   });
 
   it("moveToRangeEnd", () => {
-    const marker = moveToRangeEnd(2);
+    const marker = Build.moveToRangeEnd(2);
     expect(marker.type).toBe("moveToRangeEnd");
     expect(marker.id).toBe(2);
   });
@@ -388,91 +320,91 @@ describe("Math helpers", () => {
   const mc = [{ type: "mathRun", text: "x" }] as any as MathContent[];
 
   it("mathBlock", () => {
-    const block = mathBlock(mc);
+    const block = Build.mathBlock(mc);
     expect(block.type).toBe("math");
     expect(block.content).toBe(mc);
   });
 
   it("mathFraction", () => {
-    const frac = mathFraction(mc, mc);
+    const frac = Build.mathFraction(mc, mc);
     expect((frac as any).type).toBe("mathFraction");
     expect((frac as any).numerator).toBe(mc);
     expect((frac as any).denominator).toBe(mc);
   });
 
   it("mathSqrt", () => {
-    const sqrt = mathSqrt(mc);
+    const sqrt = Build.mathSqrt(mc);
     expect((sqrt as any).type).toBe("mathRadical");
     expect((sqrt as any).hideDegree).toBe(true);
   });
 
   it("mathRoot", () => {
-    const root = mathRoot(mc, mc);
+    const root = Build.mathRoot(mc, mc);
     expect((root as any).type).toBe("mathRadical");
     expect((root as any).degree).toBe(mc);
   });
 
   it("mathSum", () => {
-    const sum = mathSum(mc, mc, mc);
+    const sum = Build.mathSum(mc, mc, mc);
     expect((sum as any).type).toBe("mathNary");
     expect((sum as any).char).toBe("\u2211");
     expect((sum as any).content).toBe(mc);
   });
 
   it("mathIntegral", () => {
-    const integral = mathIntegral(mc, mc, mc);
+    const integral = Build.mathIntegral(mc, mc, mc);
     expect((integral as any).type).toBe("mathNary");
     expect((integral as any).char).toBe("\u222B");
   });
 
   it("mathProduct", () => {
-    const product = mathProduct(mc, mc, mc);
+    const product = Build.mathProduct(mc, mc, mc);
     expect((product as any).type).toBe("mathNary");
     expect((product as any).char).toBe("\u220F");
   });
 
   it("mathSuperScript", () => {
-    const sup = mathSuperScript(mc, mc);
+    const sup = Build.mathSuperScript(mc, mc);
     expect((sup as any).type).toBe("mathSuperScript");
   });
 
   it("mathSubScript", () => {
-    const sub = mathSubScript(mc, mc);
+    const sub = Build.mathSubScript(mc, mc);
     expect((sub as any).type).toBe("mathSubScript");
   });
 
   it("mathSubSuperScript", () => {
-    const ss = mathSubSuperScript(mc, mc, mc);
+    const ss = Build.mathSubSuperScript(mc, mc, mc);
     expect((ss as any).type).toBe("mathSubSuperScript");
   });
 
   it("mathDelimiter", () => {
-    const delim = mathDelimiter([mc, mc]);
+    const delim = Build.mathDelimiter([mc, mc]);
     expect((delim as any).type).toBe("mathDelimiter");
     expect((delim as any).content).toHaveLength(2);
   });
 
   it("mathNary", () => {
-    const nary = mathNary("\u222E", mc, mc, mc);
+    const nary = Build.mathNary("\u222E", mc, mc, mc);
     expect((nary as any).type).toBe("mathNary");
     expect((nary as any).char).toBe("\u222E");
   });
 
   it("mathFunction", () => {
-    const fn = mathFunction(mc, mc);
+    const fn = Build.mathFunction(mc, mc);
     expect((fn as any).type).toBe("mathFunction");
     expect((fn as any).name).toBe(mc);
     expect((fn as any).content).toBe(mc);
   });
 
   it("mathLimit", () => {
-    const lim = mathLimit(mc, mc, "lower");
+    const lim = Build.mathLimit(mc, mc, "lower");
     expect((lim as any).type).toBe("mathLimit");
     expect((lim as any).limitType).toBe("lower");
   });
 
   it("mathMatrix", () => {
-    const mat = mathMatrix([
+    const mat = Build.mathMatrix([
       [mc, mc],
       [mc, mc]
     ]);
@@ -481,25 +413,25 @@ describe("Math helpers", () => {
   });
 
   it("mathAccent", () => {
-    const accent = mathAccent(mc, "\u0302");
+    const accent = Build.mathAccent(mc, "\u0302");
     expect((accent as any).type).toBe("mathAccent");
     expect((accent as any).char).toBe("\u0302");
   });
 
   it("mathBar", () => {
-    const bar = mathBar(mc, "top");
+    const bar = Build.mathBar(mc, "top");
     expect((bar as any).type).toBe("mathBar");
     expect((bar as any).position).toBe("top");
   });
 
   it("mathBox", () => {
-    const box = mathBox(mc);
+    const box = Build.mathBox(mc);
     expect((box as any).type).toBe("mathBox");
     expect((box as any).content).toBe(mc);
   });
 
   it("mathEquationArray", () => {
-    const eq = mathEquationArray([mc, mc]);
+    const eq = Build.mathEquationArray([mc, mc]);
     expect((eq as any).type).toBe("mathEquationArray");
     expect((eq as any).rows).toHaveLength(2);
   });
@@ -511,15 +443,15 @@ describe("Math helpers", () => {
 
 describe("structuredDocumentTag", () => {
   it("creates SDT with content and properties", () => {
-    const p = textParagraph("Hello") as Paragraph;
-    const sdt = structuredDocumentTag([p], { alias: "test" });
+    const p = Build.textParagraph("Hello") as Paragraph;
+    const sdt = Build.structuredDocumentTag([p], { alias: "test" });
     expect(sdt.type).toBe("sdt");
     expect(sdt.content).toHaveLength(1);
     expect(sdt.properties?.alias).toBe("test");
   });
 
   it("creates SDT with default empty properties", () => {
-    const sdt = structuredDocumentTag([]);
+    const sdt = Build.structuredDocumentTag([]);
     expect(sdt.properties).toEqual({});
   });
 });
@@ -530,15 +462,15 @@ describe("structuredDocumentTag", () => {
 
 describe("resolveThemeColor", () => {
   it("returns hex string directly if color is a string", () => {
-    expect(resolveThemeColor("FF0000")).toBe("FF0000");
+    expect(Theme.resolveColor("FF0000")).toBe("FF0000");
   });
 
   it("returns undefined for undefined", () => {
-    expect(resolveThemeColor(undefined)).toBeUndefined();
+    expect(Theme.resolveColor(undefined)).toBeUndefined();
   });
 
   it("returns val from ColorSpec", () => {
-    expect(resolveThemeColor({ val: "00FF00" })).toBe("00FF00");
+    expect(Theme.resolveColor({ val: "00FF00" })).toBe("00FF00");
   });
 });
 
@@ -549,10 +481,10 @@ describe("resolveThemeColor", () => {
 describe("listSections", () => {
   it("returns sections from document", () => {
     const doc: DocxDocument = {
-      body: [textParagraph("para1"), textParagraph("para2")],
+      body: [Build.textParagraph("para1"), Build.textParagraph("para2")],
       sectionProperties: { pageSize: { width: 12240, height: 15840 } }
     } as any;
-    const sections = listSections(doc);
+    const sections = Query.listSections(doc);
     expect(sections.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -565,7 +497,7 @@ describe("toBase64", () => {
   it("produces a base64 string from a document", async () => {
     const doc = Document.create();
     Document.addParagraph(doc, "Hello");
-    const b64 = await toBase64(Document.build(doc));
+    const b64 = await Io.toBase64(Document.build(doc));
     expect(typeof b64).toBe("string");
     expect(b64.length).toBeGreaterThan(0);
   });
@@ -574,9 +506,9 @@ describe("toBase64", () => {
 describe("fillTemplateFromBuffer", () => {
   it("fills a template buffer with data", async () => {
     const doc = Document.create();
-    Document.addParagraphElement(doc, paragraph([text("{{name}}")]));
-    const buffer = await packageDocx(Document.build(doc));
-    const result = await fillTemplateFromBuffer(buffer, { name: "Alice" });
+    Document.addParagraphElement(doc, Build.paragraph([Build.text("{{name}}")]));
+    const buffer = await Io.package(Document.build(doc));
+    const result = await Io.fillTemplateFromBuffer(buffer, { name: "Alice" });
     expect(result).toBeInstanceOf(Uint8Array);
     expect(result.length).toBeGreaterThan(0);
   });

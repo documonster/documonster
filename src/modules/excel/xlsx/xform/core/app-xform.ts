@@ -2,17 +2,18 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AppHeadingPairsXform } from "@excel/xlsx/xform/core/app-heading-pairs-xform";
 import { AppTitlesOfPartsXform } from "@excel/xlsx/xform/core/app-titles-of-parts-xform";
 import { StringXform } from "@excel/xlsx/xform/simple/string-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 interface AppModel {
-  worksheets: any[];
+  worksheets: { name: string }[];
   company?: string;
   manager?: string;
 }
 
 class AppXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -25,7 +26,7 @@ class AppXform extends BaseXform {
     };
   }
 
-  render(xmlStream: any, model: AppModel): void {
+  render(xmlStream: XmlSink, model: AppModel): void {
     xmlStream.openXml(StdDocAttributes);
 
     xmlStream.openNode("Properties", AppXform.PROPERTY_ATTRIBUTES);
@@ -47,7 +48,7 @@ class AppXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -93,9 +94,9 @@ class AppXform extends BaseXform {
     }
   }
 
-  static DateFormat = function (dt: Date): string {
+  static DateFormat(dt: Date): string {
     return dt.toISOString().replace(/[.]\d{3,6}/, "");
-  };
+  }
 
   static DateAttrs = { "xsi:type": "dcterms:W3CDTF" };
 

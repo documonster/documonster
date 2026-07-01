@@ -1,6 +1,8 @@
+import type { Alignment, Protection } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AlignmentXform } from "@excel/xlsx/xform/style/alignment-xform";
 import { ProtectionXform } from "@excel/xlsx/xform/style/protection-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <xf numFmtId="[numFmtId]" fontId="[fontId]" fillId="[fillId]" borderId="[xf.borderId]" xfId="[xfId]">
 //   Optional <alignment>
@@ -13,8 +15,8 @@ interface StyleModel {
   fillId?: number;
   borderId?: number;
   xfId?: number;
-  alignment?: any;
-  protection?: any;
+  alignment?: Partial<Alignment>;
+  protection?: Partial<Protection>;
   checkbox?: boolean;
   xfComplementIndex?: number;
   pivotButton?: boolean;
@@ -34,7 +36,7 @@ interface StyleOptions {
 class StyleXform extends BaseXform {
   declare private xfId: boolean;
   declare public map: { alignment: AlignmentXform; protection: ProtectionXform };
-  declare public parser: any;
+  declare public parser?: BaseXform;
 
   constructor(options?: StyleOptions) {
     super();
@@ -50,7 +52,7 @@ class StyleXform extends BaseXform {
     return "xf";
   }
 
-  render(xmlStream: any, model: StyleModel): void {
+  render(xmlStream: XmlSink, model: StyleModel): void {
     xmlStream.openNode("xf", {
       numFmtId: model.numFmtId ?? 0,
       fontId: model.fontId ?? 0,
@@ -110,7 +112,7 @@ class StyleXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

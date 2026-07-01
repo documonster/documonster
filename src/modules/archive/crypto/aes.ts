@@ -14,7 +14,8 @@
  * Works in both Node.js and browsers using the Web Crypto API.
  */
 
-import { toArrayBuffer } from "@archive/shared/text";
+import { ArchiveError } from "@archive/core/errors";
+import { toArrayBuffer } from "@archive/core/text";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { randomBytes } from "@utils/crypto";
 
@@ -141,7 +142,7 @@ function getWebCrypto(): SubtleCrypto {
   if (typeof globalThis.crypto?.subtle !== "undefined") {
     return globalThis.crypto.subtle;
   }
-  throw new Error("Web Crypto API not available");
+  throw new ArchiveError("Web Crypto API not available");
 }
 
 /**
@@ -149,7 +150,7 @@ function getWebCrypto(): SubtleCrypto {
  *
  * The derived key material is split into:
  * - Encryption key (16/24/32 bytes)
- * - HMAC key (32 bytes)
+ * - HMAC key (16/24/32 bytes, same length as the encryption key)
  * - Password verification (2 bytes)
  */
 export async function aesDerive(
@@ -161,8 +162,13 @@ export async function aesDerive(
   const passwordBytes = typeof password === "string" ? encodeUtf8(password) : password;
   const keyLen = AES_KEY_LENGTH[keyStrength];
 
-  // Total derived bytes: encryption key + HMAC key (32 bytes) + verification (2 bytes)
-  const derivedLen = keyLen + 32 + 2;
+  // WinZip AES uses an HMAC-SHA1 key of the SAME length as the AES key
+  // (16/24/32 bytes for AES-128/192/256), NOT a fixed 32 bytes. Hard-coding 32
+  // only happens to be correct for AES-256; for AES-128/192 it shifts the
+  // password-verification bytes, so interop readers (WinZip, 7-Zip, pyzipper)
+  // reject the entry with "bad password".
+  // Total derived bytes: encryption key + HMAC key (keyLen) + verification (2 bytes)
+  const derivedLen = keyLen + keyLen + 2;
 
   // Import password as PBKDF2 key
   const baseKey = await crypto.importKey("raw", toArrayBuffer(passwordBytes), "PBKDF2", false, [
@@ -185,15 +191,15 @@ export async function aesDerive(
 
   return {
     encryptionKey: derived.subarray(0, keyLen),
-    hmacKey: derived.subarray(keyLen, keyLen + 32),
-    passwordVerify: derived.subarray(keyLen + 32, keyLen + 34)
+    hmacKey: derived.subarray(keyLen, keyLen + keyLen),
+    passwordVerify: derived.subarray(keyLen + keyLen, keyLen + keyLen + 2)
   };
 }
 
 /**
  * Compute HMAC-SHA1 authentication code.
  *
- * @param key - HMAC key (32 bytes)
+ * @param key - HMAC key (16/24/32 bytes, matching the AES key strength)
  * @param data - Data to authenticate
  * @returns 10-byte authentication code (truncated from 20 bytes)
  */
@@ -215,7 +221,7 @@ export async function aesComputeHmac(key: Uint8Array, data: Uint8Array): Promise
 
 /**
  * AES-CTR counter block.
- * WinZip uses little-endian counter starting at 1.
+ * WinZip uses a little-endian counter starting at 1, held in the low bytes.
  */
 function createCtrCounter(counter: number): Uint8Array {
   const block = new Uint8Array(16);
@@ -225,14 +231,21 @@ function createCtrCounter(counter: number): Uint8Array {
 }
 
 /**
- * AES-CTR encryption/decryption.
+ * AES-CTR encryption/decryption (WinZip AES variant).
  *
- * WinZip uses a custom CTR mode with:
+ * WinZip uses a custom CTR mode that differs from the WebCrypto built-in
+ * AES-CTR counter semantics:
  * - 16-byte blocks
- * - Little-endian counter starting at 1
- * - Counter in the low bytes of the IV
+ * - A LITTLE-ENDIAN counter starting at 1, incremented per block
  *
- * Note: AES-CTR is symmetric - encrypt and decrypt are the same operation.
+ * The WebCrypto `AES-CTR` algorithm increments the counter as a BIG-ENDIAN
+ * integer, so it can only be relied upon for the first block. To stay
+ * interoperable with WinZip / 7-Zip / pyzipper we generate the keystream one
+ * block at a time: for each block we AES-encrypt that block's little-endian
+ * counter (by running WebCrypto AES-CTR over 16 zero bytes, which yields
+ * `AES(counterBlock) XOR 0 = AES(counterBlock)`), then XOR it into the data.
+ *
+ * Note: AES-CTR is symmetric — encrypt and decrypt are the same operation.
  */
 export async function aesCtr(
   key: Uint8Array,
@@ -241,22 +254,32 @@ export async function aesCtr(
 ): Promise<Uint8Array> {
   const crypto = getWebCrypto();
 
-  // Import AES key
   const aesKey = await crypto.importKey("raw", toArrayBuffer(key), { name: "AES-CTR" }, false, [
-    "encrypt",
-    "decrypt"
+    "encrypt"
   ]);
 
-  // WinZip AES uses counter starting at 1, not 0
-  const counter = createCtrCounter(1);
+  const out = new Uint8Array(data.length);
+  const zeroBlock = new Uint8Array(16);
+  const blockCount = Math.ceil(data.length / 16);
 
-  // AES-CTR is symmetric, so we can always use encrypt
-  const result = await crypto.encrypt(
-    { name: "AES-CTR", counter: toArrayBuffer(counter), length: 128 },
-    aesKey,
-    toArrayBuffer(data)
-  );
-  return new Uint8Array(result);
+  for (let i = 0; i < blockCount; i++) {
+    // WinZip counter starts at 1 for the first block, little-endian.
+    const counterBlock = createCtrCounter(i + 1);
+    const keystreamBuf = await crypto.encrypt(
+      { name: "AES-CTR", counter: toArrayBuffer(counterBlock), length: 128 },
+      aesKey,
+      toArrayBuffer(zeroBlock)
+    );
+    const keystream = new Uint8Array(keystreamBuf);
+
+    const start = i * 16;
+    const end = Math.min(start + 16, data.length);
+    for (let j = start; j < end; j++) {
+      out[j] = data[j]! ^ keystream[j - start]!;
+    }
+  }
+
+  return out;
 }
 
 /**
@@ -389,7 +412,7 @@ export async function aesDecrypt(
 ): Promise<Uint8Array> {
   const components = extractAesComponents(encryptedData, keyStrength);
   if (!components) {
-    throw new Error("Encrypted data too short");
+    throw new ArchiveError("Encrypted data too short");
   }
 
   const { salt, storedVerify, ciphertext, storedHmac } = components;
@@ -399,13 +422,13 @@ export async function aesDecrypt(
 
   // Verify password
   if (!verifyPasswordBytes(keys.passwordVerify, storedVerify)) {
-    throw new Error("Password verification failed");
+    throw new ArchiveError("Password verification failed");
   }
 
   // Verify HMAC (constant-time comparison to prevent timing attacks)
   const computedHmac = await aesComputeHmac(keys.hmacKey, ciphertext);
   if (!constantTimeEqual(computedHmac, storedHmac)) {
-    throw new Error("HMAC verification failed");
+    throw new ArchiveError("HMAC verification failed");
   }
 
   // Decrypt data
@@ -521,7 +544,7 @@ export async function aesCheckSignature(
 ): Promise<boolean> {
   const components = extractAesComponents(encryptedData, keyStrength);
   if (!components) {
-    throw new Error("Encrypted data too short");
+    throw new ArchiveError("Encrypted data too short");
   }
 
   const { salt, storedVerify, ciphertext, storedHmac } = components;
@@ -531,7 +554,7 @@ export async function aesCheckSignature(
 
   // Verify password first
   if (!verifyPasswordBytes(keys.passwordVerify, storedVerify)) {
-    throw new Error("Password verification failed");
+    throw new ArchiveError("Password verification failed");
   }
 
   // Compute and compare HMAC (constant-time)

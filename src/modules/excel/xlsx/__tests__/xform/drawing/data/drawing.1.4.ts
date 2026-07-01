@@ -9,7 +9,7 @@ export const drawing14 = {
       picture: {
         rId: "rId1",
         hyperlinks: {
-          tooltip: "excelts",
+          tooltip: "documonster",
           rId: "rId3"
         }
       }

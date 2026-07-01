@@ -34,22 +34,20 @@
  */
 
 import { Zip, ZipDeflate } from "@archive/zip/stream";
-import { SinkAdapter, type AnySink } from "@stream/internal/sink-adapter";
-import { xmlEncodeAttr } from "@xml/encode";
-import { XmlWriter } from "@xml/writer";
-
+import type { AnySink } from "@stream/core/sink-adapter";
+import { SinkAdapter } from "@stream/core/sink-adapter";
 import {
   ContentType,
   RelType,
   PartPath,
   DOCUMENT_NAMESPACES,
   STD_DOC_ATTRIBUTES
-} from "../constants";
-import { sanitizeMediaFileName, sanitizeUrl, utf8Encoder } from "../core/internal-utils";
-import { getFileExt, getPartRelsPath } from "../core/opc-paths";
-import { walkBlocks } from "../core/walker";
-import { DocxWriteError } from "../errors";
-import type { WordSecurityPolicy } from "../security/policy";
+} from "@word/constants";
+import { sanitizeMediaFileName, sanitizeUrl, utf8Encoder } from "@word/core/internal-utils";
+import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
+import { walkBlocks } from "@word/core/walker";
+import { DocxWriteError } from "@word/errors";
+import type { WordSecurityPolicy } from "@word/security/policy";
 import type {
   AbstractNumbering,
   AppProperties,
@@ -79,38 +77,45 @@ import type {
   SectionProperties,
   StyleDef,
   Watermark
-} from "../types";
-import { renderChartPart } from "./chart-writer";
-import { renderComments, renderCommentsExtended } from "./comment-writer";
-import { buildCommonAuxiliaryParts } from "./common-parts";
+} from "@word/types";
+import { renderChartPart } from "@word/writer/chart-writer";
+import { renderComments, renderCommentsExtended } from "@word/writer/comment-writer";
+import { buildCommonAuxiliaryParts } from "@word/writer/common-parts";
 import {
   createContentTypes,
   addContentTypeDefault,
   addContentTypeOverride,
   addImageContentTypeDefaults,
   renderContentTypes
-} from "./content-types";
-import { renderBodyContent } from "./document-writer";
-import { renderHeader, renderFooter, renderWatermarkHeader } from "./header-footer-writer";
+} from "@word/writer/content-types";
+import { renderBodyContent } from "@word/writer/document-writer";
+import {
+  renderHeader,
+  renderFooter,
+  renderWatermarkHeader
+} from "@word/writer/header-footer-writer";
 import {
   collectChartsFromHeaderFooter,
   collectHyperlinksFromHeaderFooter,
   collectHyperlinksFromNotes,
   collectImageRidsFromContent,
   collectImageRidsFromNotes
-} from "./reference-scanners";
+} from "@word/writer/reference-scanners";
+import type { RelationshipsState } from "@word/writer/relationships";
 import {
   createRelationships,
   addRelationship,
   addRelationshipWithId,
   getRelationshipCount,
-  renderRelationships,
-  type RelationshipsState
-} from "./relationships";
-import { createRenderContext, type WordRenderContext } from "./render-context";
-import { renderSectionProperties } from "./section-writer";
-import { StreamBuf } from "./stream-buf";
-import { StringBuf } from "./string-buf";
+  renderRelationships
+} from "@word/writer/relationships";
+import type { WordRenderContext } from "@word/writer/render-context";
+import { createRenderContext } from "@word/writer/render-context";
+import { renderSectionProperties } from "@word/writer/section-writer";
+import { StreamBuf } from "@word/writer/stream-buf";
+import { StringBuf } from "@word/writer/string-buf";
+import { xmlEncodeAttr } from "@xml/encode";
+import { XmlWriter } from "@xml/writer";
 
 // Per-instance StringBuf is created in the constructor (see _xmlBuffer field below).
 // Previously this was a module-level singleton which caused data races with concurrent instances.
@@ -269,6 +274,16 @@ export class StreamingDocxWriter {
    * `addAsync` / `finalize` await the chain.
    */
   private _pendingDrain: Promise<void> = Promise.resolve();
+  /**
+   * Resolves when the `Zip` archive emits its terminal callback (`final`).
+   * In the browser the deflate pipeline (CompressionStream) is asynchronous,
+   * so `_zip.end()` returns before the trailing chunks and central directory
+   * have been produced; `finalize()` awaits this before reading
+   * `_outputChunks` / closing the sink. In Node the deflate is synchronous and
+   * this resolves before `_zip.end()` returns, so the await is a no-op.
+   */
+  private _zipComplete!: Promise<void>;
+  private _resolveZipComplete!: () => void;
   private _documentStream!: StreamBuf;
   private _documentZipFile!: InstanceType<typeof ZipDeflate>;
   private _headerWritten = false;
@@ -501,6 +516,12 @@ export class StreamingDocxWriter {
     // `_streamError`; surface them as a rejection.
     this._zip.end();
 
+    // Wait for the archive to fully drain. On the browser deflate path the
+    // trailing chunks + central directory are produced asynchronously after
+    // `end()` returns; without this the buffered output would be assembled
+    // from an empty / partial `_outputChunks`. No-op on Node's sync path.
+    await this._zipComplete;
+
     // In sink mode the Zip callback queued every chunk onto _pendingDrain;
     // wait for that promise chain to complete before declaring the writer
     // finished. In buffered mode this is a no-op (resolved promise).
@@ -577,6 +598,9 @@ export class StreamingDocxWriter {
       imageRIdRemap: new Map(),
       hyperlinkRIds: new WeakMap()
     });
+    this._zipComplete = new Promise<void>(resolve => {
+      this._resolveZipComplete = resolve;
+    });
     this._zip = new Zip((err, data, _final) => {
       // The ZIP callback reports compression / framing errors out-of-band.
       // Capture only the first error; subsequent callbacks may still be
@@ -609,6 +633,12 @@ export class StreamingDocxWriter {
         } else {
           this._outputChunks.push(data);
         }
+      }
+      // Terminal callback: the archive (incl. trailing central directory) is
+      // fully emitted. On the async browser deflate path this fires after
+      // `_zip.end()` returns, so `finalize()` must await `_zipComplete`.
+      if (_final || err) {
+        this._resolveZipComplete?.();
       }
     });
 

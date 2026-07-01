@@ -2,26 +2,21 @@
  * Browser Stream - Pipeline & Finished
  */
 
-import { createFinishedAll } from "@stream/common/finished-all";
-import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/common/options";
-import { isPipelineOptions } from "@stream/common/options";
+import { Duplex } from "@stream/browser/duplex";
+import { createListenerRegistry } from "@stream/browser/helpers";
+import { Readable } from "@stream/browser/readable";
+import { Transform } from "@stream/browser/transform";
+import { Writable } from "@stream/browser/writable";
+import { createFinishedAll } from "@stream/core/finished-all";
+import type { PipelineOptions, PipelineCallback, FinishedOptions } from "@stream/core/options";
+import { isPipelineOptions } from "@stream/core/options";
+import { isReadableStream, isTransformStream, isWritableStream } from "@stream/core/type-guards";
 import { createAbortError } from "@stream/errors";
-import {
-  isReadableStream,
-  isTransformStream,
-  isWritableStream
-} from "@stream/internal/type-guards";
-import type { PipelineStreamLike } from "@stream/types";
-
-import { Duplex } from "./duplex";
-import { createListenerRegistry } from "./helpers";
-import { Readable } from "./readable";
-import { Transform } from "./transform";
-import { Writable } from "./writable";
+import type { EventEmitterLike, PipelineStreamLike } from "@stream/types";
 
 // Re-export for consumers
-export type { PipelineOptions, FinishedOptions } from "@stream/common/options";
-export { isPipelineOptions } from "@stream/common/options";
+export type { PipelineOptions, FinishedOptions } from "@stream/core/options";
+export { isPipelineOptions } from "@stream/core/options";
 
 // =============================================================================
 // Pipeline
@@ -29,29 +24,68 @@ export { isPipelineOptions } from "@stream/common/options";
 
 type PipelineStream = PipelineStreamLike;
 
-const supportsReadableSide = (stream: any): boolean => {
+/**
+ * Structural view of the runtime stream-state properties this module inspects
+ * to drive pipeline/finished completion logic. Members are optional because
+ * the inputs may be our own Readable/Writable/Transform/Duplex, Web streams,
+ * or third-party duck-typed streams that expose only a subset.
+ */
+interface StreamStateProbe {
+  read?: unknown;
+  write?: (chunk: unknown) => boolean;
+  pipe?: (destination: unknown, options?: { end?: boolean }) => unknown;
+  pause?: () => unknown;
+  resume?: () => unknown;
+  destroy?: (error?: Error) => unknown;
+  on?: (event: string, listener: (...args: any[]) => void) => unknown;
+  once?: (event: string, listener: (...args: any[]) => void) => unknown;
+  off?: (event: string, listener: (...args: any[]) => void) => unknown;
+  removeListener?: (event: string, listener: (...args: any[]) => void) => unknown;
+  readable?: boolean;
+  writable?: boolean;
+  readableEnded?: boolean;
+  writableFinished?: boolean;
+  destroyed?: boolean;
+  closed?: boolean;
+  errored?: Error | null;
+  _closed?: boolean;
+  _destroyed?: boolean;
+  _errored?: Error | null;
+  _endEmitted?: boolean;
+  _finished?: boolean;
+  _emitClose?: boolean;
+  _autoDestroy?: boolean;
+  // Runtime streams produced by generator stages are async-iterable Readables.
+  [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
+}
+
+function asProbe(stream: unknown): StreamStateProbe {
+  return stream as StreamStateProbe;
+}
+
+function supportsReadableSide(stream: StreamStateProbe): boolean {
   // Check for readable-side properties/methods.  Writable.pipe() is a no-op
   // that emits ERR_STREAM_CANNOT_PIPE, so `typeof pipe === "function"` alone
   // is not sufficient — we must also see an actual readable indicator.
   return "readableEnded" in stream || "readable" in stream || typeof stream.read === "function";
-};
+}
 
-const supportsWritableSide = (stream: any): boolean => {
+function supportsWritableSide(stream: StreamStateProbe): boolean {
   return "writableFinished" in stream || "writable" in stream || typeof stream.write === "function";
-};
+}
 
-const isStreamCompleted = (stream: any): boolean => {
+function isStreamCompleted(stream: StreamStateProbe): boolean {
   const readableDone = !supportsReadableSide(stream) || !!stream.readableEnded;
   const writableDone = !supportsWritableSide(stream) || !!stream.writableFinished;
   return readableDone && writableDone;
-};
+}
 
-const createPrematureCloseError = (): Error & { code: string } => {
+function createPrematureCloseError(): Error & { code: string } {
   const err = new Error("Premature close") as Error & { code: string };
   err.code = "ERR_STREAM_PREMATURE_CLOSE";
   err.name = "Error [ERR_STREAM_PREMATURE_CLOSE]";
   return err;
-};
+}
 
 /**
  * Wait for a stream's 'close' event after it has finished/ended.
@@ -59,27 +93,29 @@ const createPrematureCloseError = (): Error & { code: string } => {
  * Otherwise resolve immediately (matching Node.js pipeline behavior where
  * autoDestroy:false streams don't wait for close).
  */
-const waitForClose = (
-  stream: any,
+function waitForClose(
+  stream: StreamStateProbe,
   done: (err?: Error) => void,
-  registry: { once: (emitter: any, event: string, listener: (...args: any[]) => void) => void }
-): void => {
-  const s = stream as any;
+  registry: {
+    once: (emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void) => void;
+  }
+): void {
   // Already closed — resolve immediately.
-  if (s.closed || s._closed) {
+  if (stream.closed || stream._closed) {
     done();
     return;
   }
-  const hasInternals = "_emitClose" in s && "_autoDestroy" in s;
-  const willEmitClose = hasInternals && s._emitClose !== false && s._autoDestroy !== false;
+  const hasInternals = "_emitClose" in stream && "_autoDestroy" in stream;
+  const willEmitClose =
+    hasInternals && stream._emitClose !== false && stream._autoDestroy !== false;
   if (willEmitClose) {
     registry.once(stream, "close", () => done());
   } else {
     done();
   }
-};
+}
 
-export const toBrowserPipelineStream = (stream: PipelineStream): any => {
+export function toBrowserPipelineStream(stream: PipelineStream): PipelineStream {
   if (
     stream instanceof Readable ||
     stream instanceof Writable ||
@@ -100,30 +136,36 @@ export const toBrowserPipelineStream = (stream: PipelineStream): any => {
   }
 
   return stream;
-};
+}
+
+/**
+ * A pipeline stage that is a generator/async generator transform function:
+ * `fn(source) => AsyncIterable | Iterable`.
+ */
+type GeneratorStage = (
+  source: AsyncIterable<unknown>
+) => AsyncIterable<unknown> | Iterable<unknown>;
 
 /**
  * Check if a pipeline stage is a generator/async generator function.
  * These are used as transform stages: fn(source) => AsyncIterable.
  */
-const isGeneratorFunction = (
-  fn: any
-): fn is (source: any) => AsyncIterable<any> | Iterable<any> => {
+function isGeneratorFunction(fn: unknown): fn is GeneratorStage {
   return typeof fn === "function" && !(fn instanceof Readable) && !(fn instanceof Writable);
-};
+}
 
 /**
  * Apply a generator function as a transform stage.
  * Consumes the source stream via its async iterator, passes it through the
  * generator function, and produces a new Readable from the resulting iterable.
  */
-const applyGeneratorStage = (
-  source: any,
-  fn: (source: any) => AsyncIterable<any> | Iterable<any>
-): Readable => {
+function applyGeneratorStage(
+  source: AsyncIterable<unknown>,
+  fn: GeneratorStage
+): Readable<unknown> {
   const iterable = fn(source);
-  return Readable.from(iterable as AsyncIterable<any>);
-};
+  return Readable.from(iterable as AsyncIterable<unknown>);
+}
 
 /**
  * Pipeline streams together with proper error handling and cleanup.
@@ -188,10 +230,10 @@ export function pipeline(
 
     // allStreams: every stream created (for cleanup on error).
     // pipeStages: only the streams that need .pipe() chaining.
-    const allStreams: any[] = [];
-    const pipeStages: any[] = [];
+    const allStreams: StreamStateProbe[] = [];
+    const pipeStages: StreamStateProbe[] = [];
 
-    let current: any = rawStages[0];
+    let current: StreamStateProbe = asProbe(rawStages[0]);
     allStreams.push(current);
     pipeStages.push(current);
 
@@ -200,16 +242,17 @@ export function pipeline(
       if (isGeneratorFunction(stage)) {
         // Generator consumes `current` internally → produces a new Readable.
         // This Readable replaces `current` as the source for subsequent stages.
-        current = applyGeneratorStage(current, stage);
+        current = asProbe(applyGeneratorStage(current as AsyncIterable<unknown>, stage));
         allStreams.push(current);
         // Replace the last entry in pipeStages (the consumed source) with
         // the generator-produced Readable, so the next real stream stage
         // will be piped FROM this Readable.
         pipeStages[pipeStages.length - 1] = current;
       } else {
-        allStreams.push(stage);
-        pipeStages.push(stage);
-        current = stage;
+        const probe = asProbe(stage);
+        allStreams.push(probe);
+        pipeStages.push(probe);
+        current = probe;
       }
     }
 
@@ -271,23 +314,23 @@ export function pipeline(
     // Handle abort signal
     if (options.signal) {
       if (options.signal.aborted) {
-        cleanupWithSignal(createAbortError((options.signal as any).reason));
+        cleanupWithSignal(createAbortError(options.signal.reason));
         return;
       }
-      onAbort = () => cleanupWithSignal(createAbortError((options.signal as any).reason));
+      onAbort = () => cleanupWithSignal(createAbortError(options.signal!.reason));
       options.signal.addEventListener("abort", onAbort);
     }
 
     // Chain the streams
     current = source;
     for (const transform of transforms) {
-      current.pipe(transform);
+      current.pipe!(transform);
       current = transform;
     }
 
     // Pipe to destination
     if (options.end !== false) {
-      current.pipe(destination);
+      current.pipe!(destination);
     } else {
       // Don't end destination
       let paused = false;
@@ -300,8 +343,8 @@ export function pipeline(
         }
       };
 
-      const onData = (chunk: any): void => {
-        const ok = destination.write(chunk);
+      const onData = (chunk: unknown): void => {
+        const ok = destination.write!(chunk);
         if (!ok && !waitingForDrain) {
           waitingForDrain = true;
           if (!paused && typeof current.pause === "function") {
@@ -429,16 +472,16 @@ export function finished(
     // Handle abort signal
     if (options.signal) {
       if (options.signal.aborted) {
-        done(createAbortError((options.signal as any).reason));
+        done(createAbortError(options.signal.reason));
         return;
       }
-      onAbort = () => done(createAbortError((options.signal as any).reason));
+      onAbort = () => done(createAbortError(options.signal!.reason));
       options.signal.addEventListener("abort", onAbort);
     }
 
     // Node.js: if the stream is already destroyed, resolve/reject immediately.
     // An already-destroyed stream with an error rejects; otherwise it's premature close.
-    const s = normalizedStream as any;
+    const s = asProbe(normalizedStream);
     if (s.destroyed || s._destroyed) {
       if (s.errored || s._errored) {
         done(s.errored ?? s._errored);
@@ -463,20 +506,17 @@ export function finished(
       return;
     }
 
+    const probe = asProbe(normalizedStream);
     const supportsReadable =
-      "readableEnded" in (normalizedStream as any) ||
-      "readable" in (normalizedStream as any) ||
-      typeof (normalizedStream as any).read === "function";
+      "readableEnded" in probe || "readable" in probe || typeof probe.read === "function";
     const supportsWritable =
-      "writableFinished" in (normalizedStream as any) ||
-      "writable" in (normalizedStream as any) ||
-      typeof (normalizedStream as any).write === "function";
+      "writableFinished" in probe || "writable" in probe || typeof probe.write === "function";
 
     const checkReadable = options.readable !== false && supportsReadable;
     const checkWritable = options.writable !== false && supportsWritable;
 
-    let readableDone = !checkReadable || !!(normalizedStream as any).readableEnded;
-    let writableDone = !checkWritable || !!(normalizedStream as any).writableFinished;
+    let readableDone = !checkReadable || !!probe.readableEnded;
+    let writableDone = !checkWritable || !!probe.writableFinished;
 
     // Node.js finished() waits for the 'close' event before resolving when
     // the stream will actually emit 'close'.  Node.js computes willEmitClose as:
@@ -488,7 +528,7 @@ export function finished(
     // exposes them (i.e. our own Readable/Writable/Transform/Duplex instances).
     // Third-party or duck-typed streams may lack these internals — for those we
     // default to NOT waiting for 'close', which avoids a deadlock.
-    const s2 = normalizedStream as any;
+    const s2 = probe;
     const hasInternals = "_emitClose" in s2 && "_autoDestroy" in s2;
     const willEmitClose =
       hasInternals && s2._emitClose !== false && s2._autoDestroy !== false && !s2._closed;
@@ -506,7 +546,7 @@ export function finished(
     // Already finished?
     if (readableDone && writableDone) {
       // If the stream is already closed (or won't emit close), resolve now
-      if (!willEmitClose || (normalizedStream as any).closed) {
+      if (!willEmitClose || probe.closed) {
         done();
         return;
       }
@@ -515,14 +555,14 @@ export function finished(
 
     // Listen for events
     if (checkWritable && !writableDone) {
-      registry.once(normalizedStream, "finish", () => {
+      registry.once(probe, "finish", () => {
         writableDone = true;
         maybeDone();
       });
     }
 
     if (checkReadable && !readableDone) {
-      registry.once(normalizedStream, "end", () => {
+      registry.once(probe, "end", () => {
         readableDone = true;
         maybeDone();
       });
@@ -531,25 +571,25 @@ export function finished(
     // Node.js: with error:false, don't listen for the 'error' event.
     // Errors are still detected via stream.errored in the close handler.
     if (options.error !== false) {
-      registry.once(normalizedStream, "error", (err: Error) => done(err));
+      registry.once(probe, "error", (err: Error) => done(err));
     }
-    registry.once(normalizedStream, "close", () => {
-      const closedReadableDone = readableDone || !!(normalizedStream as any).readableEnded;
-      const closedWritableDone = writableDone || !!(normalizedStream as any).writableFinished;
+    registry.once(probe, "close", () => {
+      const closedReadableDone = readableDone || !!probe.readableEnded;
+      const closedWritableDone = writableDone || !!probe.writableFinished;
 
       if (closedReadableDone && closedWritableDone) {
         readableDone = closedReadableDone;
         writableDone = closedWritableDone;
         // Even with error:false, check stream.errored — Node.js close handler
         // still passes errors detected via stream.errored to the callback.
-        const streamErr = (normalizedStream as any).errored ?? (normalizedStream as any)._errored;
+        const streamErr = probe.errored ?? probe._errored;
         done(streamErr ?? undefined);
         return;
       }
 
       // Premature close — stream closed before finishing.
       // Check for stream error first (e.g. destroyed with error).
-      const streamErr = (normalizedStream as any).errored ?? (normalizedStream as any)._errored;
+      const streamErr = probe.errored ?? probe._errored;
       if (streamErr) {
         done(streamErr);
         return;

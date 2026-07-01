@@ -4,15 +4,15 @@ import type {
   PivotTableChartFormat,
   PivotTableSubtotal,
   SharedItemValue
-} from "@excel/pivot-table";
-import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/pivot-table";
+} from "@excel/core/pivot-table-types";
+import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/core/pivot-table-types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import {
   RawXmlCollector,
   serializeAttributes
 } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 /** OOXML sentinel field index meaning "data values" pseudo-field (used in pivotArea references) */
@@ -943,7 +943,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   // TODO: Consider migrating to map-based child xform delegation (like table-xform.ts)
   // to replace this large manual switch. Currently kept as-is because the manual SAX
   // approach, while verbose, handles all OOXML edge cases correctly.
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
     // Collect raw XML verbatim for roundtrip preservation (5 collectors)

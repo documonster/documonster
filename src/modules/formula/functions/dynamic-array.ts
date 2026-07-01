@@ -2,27 +2,22 @@
  * Dynamic Array Functions — Native RuntimeValue Implementation
  */
 
-import type { RuntimeValue, ScalarValue, ArrayValue } from "../runtime/values";
-import {
-  RVKind,
-  ERRORS,
-  compareScalarsSameKind,
-  rvNumber,
-  rvArray,
-  toNumberRV,
-  toBooleanRV,
-  topLeft,
-  isError,
-  isArray
-} from "../runtime/values";
 import {
   asArray,
   getCell,
   stripErrorCells,
   stripHiddenRowCells,
   stripSubtotalMaskedCells
-} from "./_shared";
-import { fnSUM, fnAVERAGE, fnMIN, fnMAX, fnCOUNT, fnCOUNTA, fnPRODUCT } from "./math";
+} from "@formula/functions/_shared";
+import {
+  fnSUM,
+  fnAVERAGE,
+  fnMIN,
+  fnMAX,
+  fnCOUNT,
+  fnCOUNTA,
+  fnPRODUCT
+} from "@formula/functions/math";
 import {
   fnSTDEV,
   fnSTDEVP,
@@ -36,7 +31,20 @@ import {
   fnPERCENTILEEXC,
   fnQUARTILE,
   fnQUARTILEEXC
-} from "./statistical";
+} from "@formula/functions/statistical";
+import type { RuntimeValue, ScalarValue, ArrayValue } from "@formula/runtime/values";
+import {
+  RVKind,
+  ERRORS,
+  compareScalarsSameKind,
+  rvNumber,
+  rvArray,
+  toNumberRV,
+  toBooleanRV,
+  topLeft,
+  isError,
+  isArray
+} from "@formula/runtime/values";
 
 function isScalarError(v: ScalarValue): boolean {
   return v.kind === RVKind.Error;

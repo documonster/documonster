@@ -7,7 +7,7 @@
  *  - Misc Symbols Full (U+2600–U+26FF)
  */
 
-import type { GlyphDef, GlyphPen } from "./type3-glyphs";
+import type { GlyphDef, GlyphPen } from "@pdf/font/type3-glyphs";
 
 const W = 600;
 

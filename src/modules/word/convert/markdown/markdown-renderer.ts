@@ -6,7 +6,7 @@
  * footnotes, code spans, horizontal rules, and more.
  */
 
-import { extractMathText, isRun } from "../../core/text-utils";
+import { extractMathText, isRun } from "@word/core/text-utils";
 import type {
   DocxDocument,
   BodyContent,
@@ -22,7 +22,7 @@ import type {
   TextContent,
   MathBlock,
   StructuredDocumentTag
-} from "../../types";
+} from "@word/types";
 
 /** Options for Markdown rendering. */
 export interface MarkdownRenderOptions {
@@ -725,7 +725,3 @@ function getEndnoteText(state: MdRenderState, noteId: number): string {
   }
   return parts.join(" ");
 }
-
-// =============================================================================
-// Deprecated aliases (kept for backward compatibility)
-// =============================================================================

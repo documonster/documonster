@@ -26,14 +26,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { getWorksheets } from "@excel/core/workbook";
+import { addWorkbookImage } from "@excel/core/workbook-core";
+import { addImage } from "@excel/core/worksheet";
+import { Workbook, Worksheet } from "@excel/index";
+
 import { PdfStructureError } from "../errors";
+import { Pdf } from "../index";
 import { pdf } from "../pdf";
 import { readPdf } from "../reader/pdf-reader";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/pdf-reader-stress"
+  "../../../../tmp/pdf-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -212,17 +217,17 @@ log();
 
 log("STEP 1: Build workbook (6 departments, mixed data, special chars)\n");
 
-const wb = new Workbook();
+const wb = Workbook.create();
 
 // --- Sheet 1: Executive Summary ---
-const ws1 = wb.addWorksheet("Executive Summary");
-ws1.columns = [
+const ws1 = Workbook.addWorksheet(wb, "Executive Summary");
+Worksheet.setColumns(ws1, [
   { header: "Metric", key: "metric", width: 30 },
   { header: "Value", key: "value", width: 20 },
   { header: "Change", key: "change", width: 15 },
   { header: "Status", key: "status", width: 12 }
-];
-ws1.addRows([
+]);
+Worksheet.addRows(ws1, [
   { metric: "Total Revenue", value: 12750000, change: "+8.3%", status: true },
   { metric: "Operating Profit", value: 3825000, change: "+12.1%", status: true },
   { metric: "Headcount", value: 1247, change: "+3.5%", status: true },
@@ -232,7 +237,7 @@ ws1.addRows([
 ]);
 // Bulk: 200 additional KPI rows
 for (let i = 0; i < 200; i++) {
-  ws1.addRow({
+  Worksheet.addRow(ws1, {
     metric: `KPI-${String(i + 1).padStart(3, "0")}`,
     value: Math.round(Math.random() * 10000000) / 100,
     change: `${Math.random() > 0.5 ? "+" : "-"}${(Math.random() * 20).toFixed(1)}%`,
@@ -241,15 +246,15 @@ for (let i = 0; i < 200; i++) {
 }
 
 // --- Sheet 2: Engineering (with special chars) ---
-const ws2 = wb.addWorksheet("Engineering");
-ws2.columns = [
+const ws2 = Workbook.addWorksheet(wb, "Engineering");
+Worksheet.setColumns(ws2, [
   { header: "Engineer", key: "name", width: 25 },
   { header: "Specialty", key: "spec", width: 20 },
   { header: "Projects", key: "projects", width: 10 },
   { header: "Rating", key: "rating", width: 10 },
   { header: "Notes", key: "notes", width: 35 }
-];
-ws2.addRows([
+]);
+Worksheet.addRows(ws2, [
   {
     name: "Ren\u00e9 M\u00fcller",
     spec: "Backend",
@@ -307,7 +312,7 @@ const specs = [
   "QA"
 ];
 for (let i = 0; i < 150; i++) {
-  ws2.addRow({
+  Worksheet.addRow(ws2, {
     name: `Engineer-${String(i + 1).padStart(3, "0")}`,
     spec: specs[i % specs.length],
     projects: Math.floor(Math.random() * 25),
@@ -317,15 +322,15 @@ for (let i = 0; i < 150; i++) {
 }
 
 // --- Sheet 3: Finance (numbers, currency symbols) ---
-const ws3 = wb.addWorksheet("Finance");
-ws3.columns = [
+const ws3 = Workbook.addWorksheet(wb, "Finance");
+Worksheet.setColumns(ws3, [
   { header: "Region", key: "region", width: 20 },
   { header: "Revenue (\u20ac)", key: "revenue", width: 18 },
   { header: "Cost (\u20ac)", key: "cost", width: 18 },
   { header: "Margin %", key: "margin", width: 12 },
   { header: "FX Rate", key: "fx", width: 12 }
-];
-ws3.addRows([
+]);
+Worksheet.addRows(ws3, [
   { region: "North America", revenue: 5500000, cost: 3850000, margin: "30.0%", fx: 1.0 },
   { region: "Europe (EU)", revenue: 3200000, cost: 2240000, margin: "30.0%", fx: 0.92 },
   { region: "Asia-Pacific", revenue: 2800000, cost: 2100000, margin: "25.0%", fx: 156.8 },
@@ -337,7 +342,7 @@ const regions = ["NA-East", "NA-West", "EU-North", "EU-South", "APAC-1", "APAC-2
 for (let i = 0; i < 200; i++) {
   const rev = Math.round(Math.random() * 2000000);
   const cost = Math.round(rev * (0.6 + Math.random() * 0.25));
-  ws3.addRow({
+  Worksheet.addRow(ws3, {
     region: `${regions[i % regions.length]}-Q${(i % 4) + 1}-${2020 + Math.floor(i / 32)}`,
     revenue: rev,
     cost,
@@ -347,12 +352,12 @@ for (let i = 0; i < 200; i++) {
 }
 
 // --- Sheet 4: Legal (very long text) ---
-const ws4 = wb.addWorksheet("Legal");
-ws4.columns = [
+const ws4 = Workbook.addWorksheet(wb, "Legal");
+Worksheet.setColumns(ws4, [
   { header: "Clause", key: "clause", width: 12 },
   { header: "Text", key: "text", width: 60 },
   { header: "Status", key: "status", width: 10 }
-];
+]);
 const legalDisclaimer =
   "This document contains confidential and proprietary information of ACME Corporation. " +
   "Any unauthorized reproduction, distribution, or disclosure of this material is strictly " +
@@ -363,7 +368,7 @@ const legalDisclaimer =
   "Patent pending \u2014 Application No. PCT/US2025/012345. Trademarks: ACME\u2122, " +
   "PowerWidget\u00ae, SmartSync\u2122 are registered trademarks of ACME Corporation.";
 
-ws4.addRows([
+Worksheet.addRows(ws4, [
   { clause: "\u00a71.1", text: legalDisclaimer, status: true },
   { clause: "\u00a71.2", text: "Governing law: State of California, United States.", status: true },
   {
@@ -377,7 +382,7 @@ ws4.addRows([
 for (let i = 0; i < 100; i++) {
   const section = Math.floor(i / 10) + 3;
   const sub = (i % 10) + 1;
-  ws4.addRow({
+  Worksheet.addRow(ws4, {
     clause: `\u00a7${section}.${sub}`,
     text:
       `Clause ${section}.${sub}: ` +
@@ -387,14 +392,14 @@ for (let i = 0; i < 100; i++) {
 }
 
 // --- Sheet 5: Product Catalog (with images) ---
-const ws5 = wb.addWorksheet("Products");
-ws5.columns = [
+const ws5 = Workbook.addWorksheet(wb, "Products");
+Worksheet.setColumns(ws5, [
   { header: "Product", key: "product", width: 22 },
   { header: "Price (\u00a3)", key: "price", width: 14 },
   { header: "Stock", key: "stock", width: 10 },
   { header: "Category", key: "cat", width: 18 }
-];
-ws5.addRows([
+]);
+Worksheet.addRows(ws5, [
   { product: "PowerWidget\u00ae X1", price: 299.99, stock: 1500, cat: "Hardware" },
   { product: "SmartSync\u2122 Pro", price: 49.99, stock: 25000, cat: "Software" },
   { product: "NanoCore \u00b5Controller", price: 12.5, stock: 50000, cat: "Components" },
@@ -412,7 +417,7 @@ const categories = [
   "Bundles"
 ];
 for (let i = 0; i < 150; i++) {
-  ws5.addRow({
+  Worksheet.addRow(ws5, {
     product: `Product-${String(i + 1).padStart(4, "0")}`,
     price: Math.round(Math.random() * 5000 * 100) / 100,
     stock: Math.floor(Math.random() * 100000),
@@ -421,17 +426,17 @@ for (let i = 0; i < 150; i++) {
 }
 
 const jpegData = buildJpeg();
-const jpegId = wb.addImage({ buffer: Buffer.from(jpegData), extension: "jpeg" });
-ws5.addImage(jpegId, { tl: { col: 0, row: 6 }, ext: { width: 80, height: 60 } });
+const jpegId = addWorkbookImage(wb, { buffer: Buffer.from(jpegData), extension: "jpeg" });
+addImage(ws5, jpegId, { tl: { col: 0, row: 6 }, ext: { width: 80, height: 60 } });
 
 // --- Sheet 6: Symbols & Edge Cases ---
-const ws6 = wb.addWorksheet("Edge Cases");
-ws6.columns = [
+const ws6 = Workbook.addWorksheet(wb, "Edge Cases");
+Worksheet.setColumns(ws6, [
   { header: "Test Case", key: "test", width: 30 },
   { header: "Input", key: "input", width: 35 },
   { header: "Expected", key: "expected", width: 12 }
-];
-ws6.addRows([
+]);
+Worksheet.addRows(ws6, [
   { test: "Copyright", input: "\u00a9 2025 ACME Corp", expected: true },
   { test: "Trademark", input: "ACME\u2122 PowerWidget\u00ae", expected: true },
   { test: "Currency symbols", input: "\u00a3100 / \u20ac120 / \u00a515000", expected: true },
@@ -449,15 +454,15 @@ ws6.addRows([
 // --- Sheet 7-10: Sales by quarter (200 rows each) ---
 const quarters = ["Q1-2025", "Q2-2025", "Q3-2025", "Q4-2025"];
 for (const q of quarters) {
-  const wsQ = wb.addWorksheet(`Sales ${q}`);
-  wsQ.columns = [
+  const wsQ = Workbook.addWorksheet(wb, `Sales ${q}`);
+  Worksheet.setColumns(wsQ, [
     { header: "Sales Rep", key: "rep", width: 22 },
     { header: "Client", key: "client", width: 25 },
     { header: "Deal Size", key: "deal", width: 14 },
     { header: "Closed", key: "closed", width: 10 },
     { header: "Product", key: "product", width: 20 },
     { header: "Region", key: "region", width: 16 }
-  ];
+  ]);
   const reps = [
     "Alice Wang",
     "Bob Johnson",
@@ -481,7 +486,7 @@ for (const q of quarters) {
     "Atlas Group"
   ];
   for (let i = 0; i < 200; i++) {
-    wsQ.addRow({
+    Worksheet.addRow(wsQ, {
       rep: reps[i % reps.length],
       client: `${clients[i % clients.length]}-${Math.floor(i / 8) + 1}`,
       deal: Math.round(Math.random() * 500000 * 100) / 100,
@@ -492,8 +497,10 @@ for (const q of quarters) {
   }
 }
 
-log(`  Sheets: ${wb.worksheets.length}`);
-log(`  Cells: ~${wb.worksheets.reduce((n, ws) => n + ws.rowCount * (ws.columnCount || 0), 0)}`);
+log(`  Sheets: ${getWorksheets(wb).length}`);
+log(
+  `  Cells: ~${getWorksheets(wb).reduce((n, ws) => n + Worksheet.rowCount(ws) * (Worksheet.columnCount(ws) || 0), 0)}`
+);
 
 // =============================================================================
 // Step 2: Export as encrypted landscape PDF with images
@@ -501,7 +508,7 @@ log(`  Cells: ~${wb.worksheets.reduce((n, ws) => n + ws.rowCount * (ws.columnCou
 
 log("\nSTEP 2: Export encrypted PDF (landscape, images, full metadata)\n");
 
-const pdfBytes = await excelToPdf(wb, {
+const pdfBytes = await Pdf.fromExcel(wb, {
   title: "ACME Corp \u2014 Annual Report 2025",
   author: "CFO Office / Ren\u00e9 M\u00fcller",
   subject: "Confidential financial & operational report with 6 departments",

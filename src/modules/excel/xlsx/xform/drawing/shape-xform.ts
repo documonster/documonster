@@ -1,4 +1,6 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { EMU_PER_POINT } from "@utils/units";
+import type { XmlSink } from "@xml/types";
 
 /** Fill specification for a drawing shape. */
 export interface ShapeFill {
@@ -36,13 +38,11 @@ export interface ShapeRenderModel {
   text?: string;
 }
 
-const EMU_PER_POINT = 12700;
-
 /**
  * Normalize a user-supplied colour to the bare 6-digit RGB hex that OOXML's
  * `<a:srgbClr val="...">` requires:
  * - strips a leading `#`
- * - accepts 8-digit ARGB (the form excelts uses for cell fills) and drops the
+ * - accepts 8-digit ARGB (the form documonster uses for cell fills) and drops the
  *   leading alpha byte, since `srgbClr` carries no alpha channel
  * - upper-cases
  *
@@ -75,7 +75,7 @@ class ShapeXform extends BaseXform {
     return "xdr:sp";
   }
 
-  render(xmlStream: any, model: ShapeRenderModel): void {
+  render(xmlStream: XmlSink, model: ShapeRenderModel): void {
     xmlStream.openNode("xdr:sp", { macro: "", textlink: "" });
 
     // --- Non-visual shape properties ---

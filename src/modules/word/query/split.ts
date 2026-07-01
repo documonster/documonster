@@ -5,8 +5,8 @@
  * sections, page breaks, or heading levels.
  */
 
-import { isRun } from "../core/text-utils";
-import type { DocxDocument, BodyContent, Paragraph, ParagraphChild } from "../types";
+import { isRun } from "@word/core/text-utils";
+import type { DocxDocument, BodyContent, Paragraph, ParagraphChild } from "@word/types";
 
 // =============================================================================
 // Public API

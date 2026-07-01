@@ -1,11 +1,12 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface WorkbookPropertiesModel {
   date1904?: boolean;
 }
 
 class WorkbookPropertiesXform extends BaseXform {
-  render(xmlStream: any, model: WorkbookPropertiesModel): void {
+  render(xmlStream: XmlSink, model: WorkbookPropertiesModel): void {
     xmlStream.leafNode("workbookPr", {
       date1904: model.date1904 ? 1 : undefined,
       // Excel doesn't output defaultThemeVersion
@@ -13,7 +14,7 @@ class WorkbookPropertiesXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "workbookPr") {
       this.model = {
         date1904: node.attributes.date1904 === "1"

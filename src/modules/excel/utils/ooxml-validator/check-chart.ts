@@ -29,9 +29,7 @@
  *     belongs in `extLst`-based extensions.
  */
 
-import type { XmlElement } from "@xml/types";
-
-import type { ValidationContext } from "./context";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
 import {
   attrByLocalName,
   collectDescendantsLocal,
@@ -40,7 +38,8 @@ import {
   hasDescendantLocal,
   localName,
   matchesLocal
-} from "./xml-utils";
+} from "@excel/utils/ooxml-validator/xml-utils";
+import type { XmlElement } from "@xml/types";
 
 const CHART_PATH_RE = /^xl\/charts\/chart\d+\.xml$/;
 const CHARTEX_PATH_RE = /^xl\/charts\/chartEx\d+\.xml$/;

@@ -16,10 +16,38 @@
  */
 
 import { measureTextWidth, mapToStandardFont, styledFontVariant } from "@utils/font-metrics";
-
-import { ommlToMathML } from "../advanced/math-convert";
-import { extractMathText, isHyperlink, isRun } from "../core/text-utils";
-import { resolveStyle } from "../query/style-resolve";
+import { ommlToMathML } from "@word/advanced/math-convert";
+import { extractMathText, isHyperlink, isRun } from "@word/core/text-utils";
+import { layoutDocument } from "@word/layout/layout";
+import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
+import {
+  DEFAULT_PAGE_HEIGHT_TWIPS,
+  DEFAULT_PAGE_MARGIN_TWIPS,
+  DEFAULT_PAGE_WIDTH_TWIPS
+} from "@word/layout/layout-constants";
+import type {
+  LayoutAltChunk,
+  LayoutChart,
+  LayoutCheckBox,
+  LayoutDocument,
+  LayoutFloat,
+  LayoutImage,
+  LayoutMath,
+  LayoutOpaqueDrawing,
+  LayoutPage,
+  LayoutParagraph,
+  LayoutSdt,
+  LayoutShape,
+  LayoutTable,
+  LayoutTableCell,
+  LayoutTableOfContents,
+  LayoutTextBox,
+  LineBox,
+  LineBoxItem,
+  PageContent,
+  PageGeometry
+} from "@word/layout/layout-model";
+import { resolveStyle } from "@word/query/style-resolve";
 import type {
   AltChunk,
   BodyContent,
@@ -45,37 +73,8 @@ import type {
   TableBorders,
   TableOfContents,
   TextBox
-} from "../types";
-import { EMU_PER_POINT } from "../units";
-import { layoutDocument } from "./layout";
-import type { LayoutOptions, LayoutResult } from "./layout";
-import {
-  DEFAULT_PAGE_HEIGHT_TWIPS,
-  DEFAULT_PAGE_MARGIN_TWIPS,
-  DEFAULT_PAGE_WIDTH_TWIPS
-} from "./layout-constants";
-import type {
-  LayoutAltChunk,
-  LayoutChart,
-  LayoutCheckBox,
-  LayoutDocument,
-  LayoutFloat,
-  LayoutImage,
-  LayoutMath,
-  LayoutOpaqueDrawing,
-  LayoutPage,
-  LayoutParagraph,
-  LayoutSdt,
-  LayoutShape,
-  LayoutTable,
-  LayoutTableCell,
-  LayoutTableOfContents,
-  LayoutTextBox,
-  LineBox,
-  LineBoxItem,
-  PageContent,
-  PageGeometry
-} from "./layout-model";
+} from "@word/types";
+import { EMU_PER_POINT, twipsToPt } from "@word/units";
 
 // =============================================================================
 // Public API
@@ -354,10 +353,6 @@ function availableSlotForLine(
     }
   }
   return { xOffset: best.x, width: best.width };
-}
-
-function twipsToPt(twips: number): number {
-  return twips / 20;
 }
 
 /**
@@ -1110,7 +1105,7 @@ function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
 
   // Per (numId) counters, one slot per level. Counters reset at deeper
   // levels when a shallower level advances.
-  const counters = new Map<number, number[]>();
+  const counters = new Map<number, (number | undefined)[]>();
   // numIds whose list was interrupted by non-list content since their last
   // item; the next item with that numId restarts its numbering. This makes
   // two visually separate ordered lists (sharing a numId, separated by a
@@ -1195,14 +1190,14 @@ function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
     if (levelCounts[level] === undefined) {
       levelCounts[level] = start;
     } else {
-      levelCounts[level] += 1;
+      levelCounts[level]! += 1;
     }
     // Reset any deeper levels.
     for (let l = level + 1; l < levelCounts.length; l++) {
-      levelCounts[l] = undefined as unknown as number;
+      levelCounts[l] = undefined;
     }
 
-    const counter = levelCounts[level];
+    const counter = levelCounts[level]!;
     const numeral = formatListCounter(counter, levelDef.format);
     // Honour the level's `text` template (e.g. "%1.") when present; else
     // fall back to "<n>.".

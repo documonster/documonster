@@ -5,22 +5,21 @@
  * Works identically in both Node.js and Browser environments.
  */
 
-import { Transform } from "@stream";
-
-import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "../constants";
+import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "@csv/constants";
 // Import shared core functionality from parse/
-import type { ParseConfig } from "../parse/config";
-import { createParseConfig, toScannerConfig } from "../parse/config";
-import { convertRowToObject, filterValidHeaders } from "../parse/helpers";
-import { splitLinesWithEndings } from "../parse/lines";
+import type { ParseConfig } from "@csv/parse/config";
+import { createParseConfig, toScannerConfig } from "@csv/parse/config";
+import { convertRowToObject, filterValidHeaders } from "@csv/parse/helpers";
+import { splitLinesWithEndings } from "@csv/parse/lines";
 import {
   processCompletedRow as processCompletedRowCore,
   shouldSkipRow as shouldSkipRowCore
-} from "../parse/row-processor";
+} from "@csv/parse/row-processor";
 // Import Scanner for efficient batch scanning
-import { createScanner, type Scanner } from "../parse/scanner";
-import type { ParseState } from "../parse/state";
-import { createParseState, getUnquotedArray } from "../parse/state";
+import type { Scanner } from "@csv/parse/scanner";
+import { createScanner } from "@csv/parse/scanner";
+import type { ParseState } from "@csv/parse/state";
+import { createParseState, getUnquotedArray } from "@csv/parse/state";
 import type {
   CsvParseOptions,
   RowTransformFunction,
@@ -30,11 +29,13 @@ import type {
   RowValidateCallback,
   ChunkMeta,
   RecordInfo,
+  RecordWithInfo,
   CsvRecordError
-} from "../types";
-import { isSyncTransform, isSyncValidate } from "../types";
-import { detectDelimiter, stripBom } from "../utils/detect";
-import { applyDynamicTypingToRow, applyDynamicTypingToArrayRow } from "../utils/dynamic-typing";
+} from "@csv/types";
+import { isSyncTransform, isSyncValidate } from "@csv/types";
+import { detectDelimiter, stripBom } from "@csv/utils/detect";
+import { applyDynamicTypingToRow, applyDynamicTypingToArrayRow } from "@csv/utils/dynamic-typing";
+import { Transform } from "@stream";
 
 /**
  * Transform stream that parses CSV data row by row
@@ -901,7 +902,11 @@ export class CsvParserStream extends Transform {
       const builtRow = this.buildRow(result.row, result.info);
       // Attach extras to the record for columnMismatch.more: 'keep' (consistent with sync parser)
       if (result.extras && result.extras.length > 0) {
-        const record = this.parseConfig.infoOption ? (builtRow as any).record : builtRow;
+        // When info is enabled, buildRow returns a RecordWithInfo whose
+        // actual record lives on `.record`; otherwise builtRow is the record.
+        const record = this.parseConfig.infoOption
+          ? (builtRow as unknown as RecordWithInfo).record
+          : builtRow;
         (record as Record<string, unknown>)._extra = result.extras;
       }
       pendingRows.push(builtRow);

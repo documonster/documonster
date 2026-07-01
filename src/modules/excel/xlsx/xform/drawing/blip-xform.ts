@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface BlipModel {
   rId: string;
@@ -33,7 +34,7 @@ class BlipXform extends BaseXform<BlipModel> {
     return "a:blip";
   }
 
-  render(xmlStream: any, model: BlipModel): void {
+  render(xmlStream: XmlSink, model: BlipModel): void {
     // External (linked) images use `r:link`; embedded images use `r:embed`.
     const relAttr = model.external ? "r:link" : "r:embed";
     const hasAlpha = model.alphaModFix !== undefined && model.alphaModFix < 100000;
@@ -71,7 +72,7 @@ class BlipXform extends BaseXform<BlipModel> {
     xmlStream.closeNode(); // a:blip
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag: {
         // A blip may carry `r:embed` (embedded) or `r:link` (external linked).

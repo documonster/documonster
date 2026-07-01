@@ -5,6 +5,7 @@
  * comment markers, and track-change run wrappers.
  */
 
+import { text } from "@word/builder/run-builders";
 import type {
   Paragraph,
   ParagraphProperties,
@@ -20,8 +21,7 @@ import type {
   MovedToRun,
   MoveRangeMarker,
   RevisionInfo
-} from "../types";
-import { text } from "./run-builders";
+} from "@word/types";
 
 // =============================================================================
 // Paragraph Builders

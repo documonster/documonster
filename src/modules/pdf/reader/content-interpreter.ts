@@ -22,13 +22,13 @@
  * @see PDF Reference 1.7, Chapter 4 - Graphics
  */
 
-import { resolveFont, decodeText, getCharWidth } from "./font-decoder";
-import type { ResolvedFont } from "./font-decoder";
-import type { PdfDocument } from "./pdf-document";
-import type { PdfDictValue, PdfObject } from "./pdf-parser";
-import { isPdfRef, isPdfArray, dictGetName, dictGetArray } from "./pdf-parser";
-import { PdfTokenizer, TokenType } from "./pdf-tokenizer";
-import type { Token } from "./pdf-tokenizer";
+import { resolveFont, decodeText, getCharWidth } from "@pdf/reader/font-decoder";
+import type { ResolvedFont } from "@pdf/reader/font-decoder";
+import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue, PdfObject } from "@pdf/reader/pdf-parser";
+import { isPdfRef, isPdfArray, dictGetName, dictGetArray } from "@pdf/reader/pdf-parser";
+import { PdfTokenizer, TokenType } from "@pdf/reader/pdf-tokenizer";
+import type { Token } from "@pdf/reader/pdf-tokenizer";
 
 // =============================================================================
 // Constants

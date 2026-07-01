@@ -8,7 +8,7 @@
  * @stability experimental
  */
 
-import { DocxError } from "../errors";
+import { DocxError } from "@word/errors";
 import type {
   DocxDocument,
   BodyContent,
@@ -17,7 +17,7 @@ import type {
   Chart,
   ChartType,
   HexColor
-} from "../types";
+} from "@word/types";
 
 // =============================================================================
 // Public Types

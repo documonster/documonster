@@ -6,20 +6,21 @@
  *
  * @example
  * ```typescript
- * import { Workbook } from "excelts";
- * import { excelToDocx } from "excelts/word/excel";
+ * import { Workbook } from "documonster/excel";
+ * import { excelToDocx } from "documonster/word/excel";
  *
- * const wb = new Workbook();
- * await wb.xlsx.load(buffer);
+ * const wb = Workbook.create();
+ * await Workbook.read(wb, buffer);
  * const doc = excelToDocx(wb);
  * ```
  */
 
-import type { Cell as ExcelCell } from "@excel/cell";
-import { buildChartExModel } from "@excel/chart/chart-ex-builder";
-import { renderChartEx } from "@excel/chart/chart-ex-renderer";
-import type { AddChartExOptions, ChartExModel, ChartExType } from "@excel/chart/chart-ex-types";
-import { renderChartSvg } from "@excel/chart/chart-renderer";
+import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+import type {
+  AddChartExOptions,
+  ChartExModel,
+  ChartExType
+} from "@excel/chart/model/chart-ex-types";
 import type {
   AxisDataSource,
   BarChartGroup,
@@ -45,8 +46,41 @@ import type {
   SurfaceChartGroup,
   SurfaceSeries,
   ChartAxis as ExcelChartAxis
-} from "@excel/chart/types";
-import { ValueType } from "@excel/enums";
+} from "@excel/chart/model/types";
+import { renderChartSvg } from "@excel/chart/render/chart-renderer";
+import { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
+import type { CellData as ExcelCell } from "@excel/core/cell";
+import {
+  cellAlignment,
+  cellBorder,
+  cellFill,
+  cellFont,
+  cellGetValue,
+  cellHyperlink,
+  cellSetValue,
+  cellText,
+  cellType
+} from "@excel/core/cell";
+import { ValueType } from "@excel/core/enums";
+import { rowCellCount } from "@excel/core/row";
+import { addWorksheet, getWorksheets } from "@excel/core/workbook";
+// Use the browser base class so the public `excelToDocx(workbook)` signature
+// is callable from both the Node entry (where `Workbook` is the Node subclass
+// — trivially assignable to the base) and the browser entry (where `Workbook`
+// is already the base). Importing the Node alias `@excel/workbook` would force
+// browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
+// XLSX surface intentionally omits.
+import type { WorkbookData } from "@excel/core/workbook.browser";
+import {
+  getCell,
+  getColumn,
+  getRow,
+  getRowCount,
+  getSheetName,
+  rowGetCell
+} from "@excel/core/worksheet";
+import type { Worksheet } from "@excel/core/worksheet";
+import { Workbook } from "@excel/index";
 import type {
   Font as ExcelFont,
   Fill as ExcelFill,
@@ -55,17 +89,9 @@ import type {
   Alignment as ExcelAlignment,
   Color as ExcelColor
 } from "@excel/types";
-// Use the browser base class so the public `excelToDocx(workbook)` signature
-// is callable from both the Node entry (where `Workbook` is the Node subclass
-// — trivially assignable to the base) and the browser entry (where `Workbook`
-// is already the base). Importing the Node alias `@excel/workbook` would force
-// browser consumers to satisfy `xlsx.readFile`/`writeFile`, which the browser
-// XLSX surface intentionally omits — see issue #160.
-import type { Workbook } from "@excel/workbook.browser";
-import type { Worksheet } from "@excel/worksheet";
-
-import { type Mutable } from "../core/internal-utils";
-import { extractParagraphText } from "../core/text-utils";
+import { CELL_THEME_PALETTE } from "@utils/theme-colors";
+import type { Mutable } from "@word/core/internal-utils";
+import { extractParagraphText } from "@word/core/text-utils";
 import type {
   Alignment,
   Chart,
@@ -85,8 +111,8 @@ import type {
   TableCellProperties,
   Border,
   Shading
-} from "../types";
-import { EMU_PER_INCH } from "../units";
+} from "@word/types";
+import { EMU_PER_INCH, charWidthToPixel, pixelToPoints, ptToTwips } from "@word/units";
 
 // =============================================================================
 // Public API
@@ -122,7 +148,7 @@ export interface ExcelToDocxOptions {
  * @param options - Conversion options.
  * @returns A DocxDocument model ready for packaging, PDF conversion, or Markdown output.
  */
-export function excelToDocx(workbook: Workbook, options?: ExcelToDocxOptions): DocxDocument {
+export function excelToDocx(workbook: WorkbookData, options?: ExcelToDocxOptions): DocxDocument {
   const opts: Required<ExcelToDocxOptions> = {
     sheets: options?.sheets ?? [],
     includeSheetHeadings: options?.includeSheetHeadings ?? true,
@@ -154,7 +180,7 @@ export function excelToDocx(workbook: Workbook, options?: ExcelToDocxOptions): D
 
   for (const ws of worksheets) {
     if (opts.includeSheetHeadings) {
-      body.push(heading(ws.name, opts.sheetHeadingLevel));
+      body.push(heading(getSheetName(ws), opts.sheetHeadingLevel));
     }
 
     const table = sheetToTable(ws, opts);
@@ -215,8 +241,8 @@ export function excelToDocx(workbook: Workbook, options?: ExcelToDocxOptions): D
 // Sheet Selection
 // =============================================================================
 
-function selectSheets(workbook: Workbook, filter: readonly (string | number)[]): Worksheet[] {
-  const all = workbook.worksheets.filter(ws => ws && ws.state !== "veryHidden");
+function selectSheets(workbook: WorkbookData, filter: readonly (string | number)[]): Worksheet[] {
+  const all = getWorksheets(workbook).filter(ws => ws && ws.state !== "veryHidden");
 
   if (filter.length === 0) {
     return all.filter(ws => ws.state !== "hidden");
@@ -230,7 +256,7 @@ function selectSheets(workbook: Workbook, filter: readonly (string | number)[]):
         result.push(ws);
       }
     } else {
-      const ws = all.find(s => s.name === spec);
+      const ws = all.find(s => getSheetName(s) === spec);
       if (ws) {
         result.push(ws);
       }
@@ -244,7 +270,7 @@ function selectSheets(workbook: Workbook, filter: readonly (string | number)[]):
 // =============================================================================
 
 function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table | null {
-  const rowCount = Math.min(ws.rowCount, opts.maxRows);
+  const rowCount = Math.min(getRowCount(ws), opts.maxRows);
   if (rowCount === 0) {
     return null;
   }
@@ -252,9 +278,9 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
   // Find actual column range
   let maxCol = 0;
   for (let r = 1; r <= rowCount; r++) {
-    const row = ws.getRow(r);
-    if (row.cellCount > maxCol) {
-      maxCol = row.cellCount;
+    const row = getRow(ws, r);
+    if (rowCellCount(row) > maxCol) {
+      maxCol = rowCellCount(row);
     }
   }
   maxCol = Math.min(maxCol, opts.maxColumns);
@@ -265,13 +291,13 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
   const rows: TableRow[] = [];
 
   for (let r = 1; r <= rowCount; r++) {
-    const row = ws.getRow(r);
+    const row = getRow(ws, r);
 
     // Skip completely empty rows
     let hasContent = false;
     for (let c = 1; c <= maxCol; c++) {
-      const cell = row.getCell(c);
-      if (cell.type !== ValueType.Null && cell.type !== ValueType.Merge) {
+      const cell = rowGetCell(row, c);
+      if (cellType(cell) !== ValueType.Null && cellType(cell) !== ValueType.Merge) {
         hasContent = true;
         break;
       }
@@ -282,7 +308,7 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
 
     const cells: TableCell[] = [];
     for (let c = 1; c <= maxCol; c++) {
-      const cell = row.getCell(c);
+      const cell = rowGetCell(row, c);
       cells.push(convertCell(cell, opts));
     }
     rows.push({ cells });
@@ -292,12 +318,15 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
     return null;
   }
 
-  // Column widths from worksheet definitions (Excel char width → twips)
+  // Column widths from worksheet definitions (Excel char width → twips),
+  // via the shared char-width→pixel→point chain so the table column widths
+  // match the Excel / PDF column geometry. MDW = 7 (Calibri 11pt default).
   const columnWidths: number[] = [];
   for (let c = 1; c <= maxCol; c++) {
-    const col = ws.getColumn(c);
+    const col = getColumn(ws, c);
     const charWidth = col.width ?? 10;
-    columnWidths.push(Math.round(charWidth * 140));
+    const pt = pixelToPoints(charWidthToPixel(charWidth, 7));
+    columnWidths.push(ptToTwips(pt));
   }
 
   const tableProps: TableProperties = {
@@ -317,12 +346,12 @@ function sheetToTable(ws: Worksheet, opts: Required<ExcelToDocxOptions>): Table 
 // =============================================================================
 
 function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): TableCell {
-  const text = cellText(cell);
+  const text = renderCellText(cell);
   const children: Run[] = [];
 
   if (text) {
-    if (cell.type === ValueType.RichText) {
-      const value = cell.value as {
+    if (cellType(cell) === ValueType.RichText) {
+      const value = cellGetValue(cell) as {
         richText?: ReadonlyArray<{ text?: string; font?: Partial<ExcelFont> }>;
       };
       if (value?.richText) {
@@ -336,7 +365,7 @@ function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): Table
         }
       }
     } else {
-      const runProps = opts.preserveFormatting ? fontToRun(cell.font) : undefined;
+      const runProps = opts.preserveFormatting ? fontToRun(cellFont(cell)) : undefined;
       children.push({
         properties: runProps,
         content: [{ type: "text", text }]
@@ -346,21 +375,21 @@ function convertCell(cell: ExcelCell, opts: Required<ExcelToDocxOptions>): Table
 
   const para: Paragraph = {
     type: "paragraph",
-    properties: opts.preserveFormatting ? alignmentToParaProps(cell.alignment) : undefined,
-    children: wrapHyperlink(cell.hyperlink, children)
+    properties: opts.preserveFormatting ? alignmentToParaProps(cellAlignment(cell)) : undefined,
+    children: wrapHyperlink(cellHyperlink(cell), children)
   };
 
   const cellProps: Mutable<TableCellProperties> = {};
 
-  if (opts.preserveFormatting && cell.fill) {
-    const shading = fillToShading(cell.fill);
+  if (opts.preserveFormatting && cellFill(cell)) {
+    const shading = fillToShading(cellFill(cell));
     if (shading) {
       cellProps.shading = shading;
     }
   }
 
-  if (opts.includeBorders && cell.border) {
-    const borders = bordersToCellBorders(cell.border);
+  if (opts.includeBorders && cellBorder(cell)) {
+    const borders = bordersToCellBorders(cellBorder(cell));
     if (borders) {
       cellProps.borders = borders;
     }
@@ -396,16 +425,16 @@ function wrapHyperlink(
   return [link];
 }
 
-function cellText(cell: ExcelCell): string {
-  if (cell.type === ValueType.Null || cell.type === ValueType.Merge) {
+function renderCellText(cell: ExcelCell): string {
+  if (cellType(cell) === ValueType.Null || cellType(cell) === ValueType.Merge) {
     return "";
   }
 
-  if (cell.text !== undefined && cell.text !== null) {
-    return String(cell.text);
+  if (cellText(cell) !== undefined && cellText(cell) !== null) {
+    return String(cellText(cell));
   }
 
-  const value = cell.value;
+  const value = cellGetValue(cell);
   if (value === null || value === undefined) {
     return "";
   }
@@ -598,19 +627,7 @@ function excelColorToHex(color: Partial<ExcelColor> | undefined): string | undef
     return argb.length === 8 ? argb.slice(2) : argb;
   }
   if (color.theme !== undefined) {
-    const defaults: Record<number, string> = {
-      0: "FFFFFF",
-      1: "000000",
-      2: "44546A",
-      3: "E7E6E6",
-      4: "4472C4",
-      5: "ED7D31",
-      6: "A5A5A5",
-      7: "FFC000",
-      8: "5B9BD5",
-      9: "70AD47"
-    };
-    return defaults[color.theme] ?? "000000";
+    return CELL_THEME_PALETTE[color.theme] ?? "000000";
   }
   return undefined;
 }
@@ -735,26 +752,26 @@ export function renderWordChartSvg(chart: Chart): string {
 export async function generateChartEmbeddedXlsx(
   series: readonly { name: string; categories: readonly string[]; values: readonly number[] }[]
 ): Promise<Uint8Array> {
-  const { Workbook } = await import("@excel/workbook");
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("Sheet1");
+  const { createWorkbook } = await import("@excel/core/workbook");
+  const wb = createWorkbook();
+  const ws = addWorksheet(wb, "Sheet1");
 
   // Row 1: headers — A1 empty, B1..N1 = series names
   for (let c = 0; c < series.length; c++) {
-    ws.getCell(1, c + 2).value = series[c].name;
+    cellSetValue(getCell(ws, 1, c + 2), series[c].name);
   }
 
   // Rows 2+: categories and values
   const categories = series.length > 0 ? series[0].categories : [];
   for (let r = 0; r < categories.length; r++) {
-    ws.getCell(r + 2, 1).value = categories[r];
+    cellSetValue(getCell(ws, r + 2, 1), categories[r]);
     for (let c = 0; c < series.length; c++) {
       const val = r < series[c].values.length ? series[c].values[r] : 0;
-      ws.getCell(r + 2, c + 2).value = val;
+      cellSetValue(getCell(ws, r + 2, c + 2), val);
     }
   }
 
-  return new Uint8Array(await wb.xlsx.writeBuffer());
+  return new Uint8Array(await Workbook.toBuffer(wb));
 }
 
 // =============================================================================

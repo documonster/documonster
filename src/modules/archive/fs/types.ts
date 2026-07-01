@@ -7,9 +7,9 @@
  * @module
  */
 
+import type { ZipStringEncoding } from "@archive/core/text";
+import type { ArchiveFormat } from "@archive/core/types";
 import type { ZipEncryptionMethod } from "@archive/crypto";
-import type { ZipStringEncoding } from "@archive/shared/text";
-import type { ArchiveFormat } from "@archive/shared/types";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";

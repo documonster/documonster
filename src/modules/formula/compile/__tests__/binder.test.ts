@@ -26,25 +26,27 @@ import type {
   WorksheetSnapshot
 } from "../../integration/workbook-snapshot";
 import { scopedNameKey } from "../../integration/workbook-snapshot";
-import { NodeType, type AstNode } from "../../syntax/ast";
+import type { AstNode } from "../../syntax/ast";
+import { NodeType } from "../../syntax/ast";
 import { parse } from "../../syntax/parser";
 import { tokenize } from "../../syntax/tokenizer";
-import { bind, type BindingContext } from "../binder";
-import {
-  BoundExprKind,
-  type BoundAreaRef,
-  type BoundCall,
-  type BoundCellRef,
-  type BoundColRangeRef,
-  type BoundExpr,
-  type BoundLambda,
-  type BoundLiteral,
-  type BoundNameExpr,
-  type BoundRef3D,
-  type BoundRowRangeRef,
-  type BoundSpecialCall,
-  type BoundStructuredRef
+import type { BindingContext } from "../binder";
+import { bind } from "../binder";
+import type {
+  BoundAreaRef,
+  BoundCall,
+  BoundCellRef,
+  BoundColRangeRef,
+  BoundExpr,
+  BoundLambda,
+  BoundLiteral,
+  BoundNameExpr,
+  BoundRef3D,
+  BoundRowRangeRef,
+  BoundSpecialCall,
+  BoundStructuredRef
 } from "../bound-ast";
+import { BoundExprKind } from "../bound-ast";
 
 // ---------------------------------------------------------------------------
 // Test helpers — minimal WorkbookSnapshot builders.

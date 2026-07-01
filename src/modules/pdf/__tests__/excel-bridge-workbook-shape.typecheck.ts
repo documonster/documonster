@@ -1,19 +1,19 @@
-// Type-only regression test for issue #160 (browser-entry side).
+// Type-only regression test for the browser-entry workbook shape.
 //
 // Both `excelToPdf` and `excelToDocx` are exposed under the browser entry. They
 // must accept the *browser* `Workbook` (the public class browser users get from
-// `import { Workbook } from "@cj-tech-master/excelts"`). Before the fix the
+// `import { Workbook } from "documonster"`). Before the fix the
 // bridge files imported `Workbook` from the Node alias `@excel/workbook`, so
 // the parameter type required Node-only `xlsx.readFile` / `writeFile` and
-// browser callers got the issue #160 mismatch:
+// browser callers got the mismatch:
 //
 //     workbook.browser.Workbook is not assignable to workbook.Workbook
 //     XLSX missing readFile, writeFile
 //
 // This file is typechecked by `pnpm type` (tsgo) but is NOT executed by Vitest.
 
-import type { Workbook as NodeWorkbook } from "@excel/workbook";
-import type { Workbook as BrowserWorkbook } from "@excel/workbook.browser";
+import type { Workbook as NodeWorkbook } from "@excel/core/workbook";
+import type { Workbook as BrowserWorkbook } from "@excel/core/workbook.browser";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { excelToDocx } from "@word/bridge/excel-bridge";
 

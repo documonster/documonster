@@ -15,8 +15,9 @@
  *      format for long-term preservation — Part 1: Use of PDF 1.4 (PDF/A-1)
  */
 
-import { PdfDict, pdfNumber, pdfRef } from "./pdf-object";
-import type { PdfWriter } from "./pdf-writer";
+import { PdfDict, pdfNumber, pdfRef } from "@pdf/core/pdf-object";
+import type { PdfWriter } from "@pdf/core/pdf-writer";
+import { xmlEncode } from "@utils/xml-encode";
 
 // =============================================================================
 // sRGB ICC Profile
@@ -205,11 +206,11 @@ export function writePdfAMetadata(
   const now = new Date();
   const isoDate = now.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-  const title = escapeXml(metadata.title ?? "");
-  const author = escapeXml(metadata.author ?? "");
-  const subject = escapeXml(metadata.subject ?? "");
-  const creator = escapeXml(metadata.creator ?? "excelts");
-  const producer = "excelts";
+  const title = xmlEncode(metadata.title ?? "");
+  const author = xmlEncode(metadata.author ?? "");
+  const subject = xmlEncode(metadata.subject ?? "");
+  const creator = xmlEncode(metadata.creator ?? "documonster");
+  const producer = "documonster";
 
   const xmp = [
     '<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>',
@@ -290,18 +291,4 @@ export function writePdfAOutputIntent(writer: PdfWriter): number {
 
   writer.addObject(intentObjNum, intentDict);
   return intentObjNum;
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-/** Escape XML special characters for XMP content. */
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
 }

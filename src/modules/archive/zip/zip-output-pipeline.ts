@@ -7,14 +7,13 @@
  * This module extracts that shared boilerplate into a single reusable function.
  */
 
-import { createAsyncQueue } from "@archive/shared/async-queue";
-import { createLinkedAbortController, createAbortError, toError } from "@archive/shared/errors";
-import { ProgressEmitter } from "@archive/shared/progress";
-import type { ZipStringCodec, ZipStringEncoding } from "@archive/shared/text";
+import { createAsyncQueue } from "@archive/core/async-queue";
+import { createLinkedAbortController, createAbortError, toError } from "@archive/core/errors";
+import { ProgressEmitter } from "@archive/core/progress";
+import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
+import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 import { StreamingZip } from "@archive/zip/stream";
-
-import type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
 
 // =============================================================================
 // Types
@@ -134,7 +133,7 @@ export function createZipOperation(
   );
 
   const onAbort = () => {
-    const err = createAbortError((signal as any).reason);
+    const err = createAbortError(signal.reason);
     progress.update({ phase: "aborted" });
     try {
       zip.abort(err);
@@ -150,7 +149,7 @@ export function createZipOperation(
       await processFn({ zip, signal, progress });
     } catch (e) {
       const err = toError(e);
-      if ((err as any).name === "AbortError") {
+      if (err.name === "AbortError") {
         progress.update({ phase: "aborted" });
         try {
           zip.abort(err);

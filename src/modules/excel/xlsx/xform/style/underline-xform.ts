@@ -1,9 +1,10 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 type UnderlineType = boolean | "single" | "double" | "singleAccounting" | "doubleAccounting";
 
 class UnderlineXform extends BaseXform {
-  static Attributes: { [key: string]: any } = {
+  static Attributes: Record<string, XmlAttributes> = {
     single: {},
     double: { val: "double" },
     singleAccounting: { val: "singleAccounting" },
@@ -19,7 +20,7 @@ class UnderlineXform extends BaseXform {
     return "u";
   }
 
-  render(xmlStream: any, model?: UnderlineType): void {
+  render(xmlStream: XmlSink, model?: UnderlineType): void {
     model = model || this.model;
 
     if (model === true) {
@@ -32,7 +33,7 @@ class UnderlineXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === "u") {
       this.model = node.attributes.val || true;
     }

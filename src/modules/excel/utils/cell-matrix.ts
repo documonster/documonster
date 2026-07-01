@@ -29,35 +29,42 @@ interface CellAddress {
   right?: number;
 }
 
-type Cell = CellAddress & any;
-type Row = Cell[];
+/**
+ * A matrix cell: the fixed address fields plus any extra template-derived
+ * properties (callers attach arbitrary metadata via the constructor template).
+ */
+interface Cell extends CellAddress {
+  [key: string]: unknown;
+}
+/** Rows are sparse: holes appear as `null` (column splice) or `undefined` (removal). */
+type Row = (Cell | null | undefined)[];
 type Sheet = Row[];
 
 class CellMatrix {
-  template: any;
+  template?: Record<string, unknown>;
   sheets: Map<string, Sheet>;
 
-  constructor(template?: any) {
+  constructor(template?: Record<string, unknown>) {
     this.template = template;
     this.sheets = new Map();
   }
 
   addCell(addressStr: string): void {
-    this.addCellEx(colCache.decodeEx(addressStr) as any);
+    this.addCellEx(colCache.decodeEx(addressStr) as CellAddress);
   }
 
   getCell(addressStr: string): Cell {
-    return this.findCellEx(colCache.decodeEx(addressStr) as any, true);
+    return this.findCellEx(colCache.decodeEx(addressStr) as CellAddress, true);
   }
 
   findCell(addressStr: string): Cell | undefined {
-    return this.findCellEx(colCache.decodeEx(addressStr) as any, false);
+    return this.findCellEx(colCache.decodeEx(addressStr) as CellAddress, false);
   }
 
   findCellAt(sheetName: string, rowNumber: number, colNumber: number): Cell | undefined {
     const sheet = this.sheets.get(sheetName);
     const row = sheet && sheet[rowNumber];
-    return row && row[colNumber];
+    return (row && row[colNumber]) || undefined;
   }
 
   addCellEx(address: CellAddress): void {
@@ -76,6 +83,8 @@ class CellMatrix {
     return this.findCellEx(address, true);
   }
 
+  findCellEx(address: CellAddress, create: true): Cell;
+  findCellEx(address: CellAddress, create: boolean): Cell | undefined;
   findCellEx(address: CellAddress, create: boolean): Cell | undefined {
     const sheet = this.findSheet(address, create);
     const row = this.findSheetRow(sheet, address, create);
@@ -147,6 +156,8 @@ class CellMatrix {
     return results;
   }
 
+  findSheet(address: CellAddress, create: true): Sheet;
+  findSheet(address: CellAddress, create: boolean): Sheet | undefined;
   findSheet(address: CellAddress, create: boolean): Sheet | undefined {
     const name = address.sheetName!;
     if (this.sheets.has(name)) {
@@ -160,6 +171,8 @@ class CellMatrix {
     return undefined;
   }
 
+  findSheetRow(sheet: Sheet | undefined, address: CellAddress, create: true): Row;
+  findSheetRow(sheet: Sheet | undefined, address: CellAddress, create: boolean): Row | undefined;
   findSheetRow(sheet: Sheet | undefined, address: CellAddress, create: boolean): Row | undefined {
     const safeRow = address.row >>> 0;
     if (sheet && sheet[safeRow]) {
@@ -171,15 +184,18 @@ class CellMatrix {
     return undefined;
   }
 
+  findRowCell(row: Row | undefined, address: CellAddress, create: true): Cell;
+  findRowCell(row: Row | undefined, address: CellAddress, create: boolean): Cell | undefined;
   findRowCell(row: Row | undefined, address: CellAddress, create: boolean): Cell | undefined {
     const safeCol = address.col >>> 0;
-    if (row && row[safeCol]) {
-      return row[safeCol];
+    const existing = row && row[safeCol];
+    if (existing) {
+      return existing;
     }
     if (create) {
       return (row![safeCol] = this.template
         ? { ...address, ...safeDeepClone(this.template) }
-        : address);
+        : { ...address });
     }
     return undefined;
   }

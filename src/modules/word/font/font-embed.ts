@@ -14,8 +14,8 @@
  * glyphs that are actually used in the document.
  */
 
-import type { DocxDocument, FontDef, EmbeddedFont } from "../types";
-import { obfuscateFont, generateFontKey } from "./font-obfuscation";
+import { obfuscateFont, generateFontKey } from "@word/font/font-obfuscation";
+import type { DocxDocument, FontDef, EmbeddedFont } from "@word/types";
 
 // =============================================================================
 // Types

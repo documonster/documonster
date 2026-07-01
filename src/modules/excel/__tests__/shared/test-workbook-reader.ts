@@ -1,7 +1,9 @@
 import testValuesJson from "@excel/__tests__/shared/data/sheet-values.json" with { type: "json" };
 import { fix } from "@excel/__tests__/shared/tools";
+import { cellGetValue, cellType } from "@excel/core/cell";
+import { rowGetCell } from "@excel/core/worksheet";
 const testValues = fix(testValuesJson);
-import { ValueType } from "@excel/enums";
+import { ValueType } from "@excel/core/enums";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { dateToExcel } from "@utils/utils";
 
@@ -48,78 +50,82 @@ const testWorkbookReader = {
           try {
             switch (row.number) {
               case 1:
-                expect(row.getCell("A").value).toBe(7);
-                expect(row.getCell("A").type).to.equal(ValueType.Number);
-                expect(row.getCell("B").value).toEqual(streamedValues.B1);
-                expect(row.getCell("B").type).to.equal(ValueType.String);
+                expect(cellGetValue(rowGetCell(row, "A"))).toBe(7);
+                expect(cellType(rowGetCell(row, "A"))).to.equal(ValueType.Number);
+                expect(cellGetValue(rowGetCell(row, "B"))).toEqual(streamedValues.B1);
+                expect(cellType(rowGetCell(row, "B"))).to.equal(ValueType.String);
                 expect(
-                  Math.abs((row.getCell("C").value as number) - streamedValues.C1)
+                  Math.abs((cellGetValue(rowGetCell(row, "C")) as number) - streamedValues.C1)
                 ).to.be.below(dateAccuracy);
-                expect(row.getCell("C").type).to.equal(ValueType.Number);
+                expect(cellType(rowGetCell(row, "C"))).to.equal(ValueType.Number);
 
-                expect(row.getCell("D").value).toEqual(streamedValues.D1);
-                expect(row.getCell("D").type).to.equal(ValueType.Formula);
-                expect(row.getCell("E").value).toEqual(streamedValues.E1);
-                expect(row.getCell("E").type).to.equal(ValueType.Formula);
-                expect(row.getCell("F").value).toEqual(streamedValues.F1);
-                expect(row.getCell("F").type).to.equal(ValueType.SharedString);
-                expect(row.getCell("G").value).toEqual(streamedValues.G1);
+                expect(cellGetValue(rowGetCell(row, "D"))).toEqual(streamedValues.D1);
+                expect(cellType(rowGetCell(row, "D"))).to.equal(ValueType.Formula);
+                expect(cellGetValue(rowGetCell(row, "E"))).toEqual(streamedValues.E1);
+                expect(cellType(rowGetCell(row, "E"))).to.equal(ValueType.Formula);
+                expect(cellGetValue(rowGetCell(row, "F"))).toEqual(streamedValues.F1);
+                expect(cellType(rowGetCell(row, "F"))).to.equal(ValueType.SharedString);
+                expect(cellGetValue(rowGetCell(row, "G"))).toEqual(streamedValues.G1);
                 break;
 
               case 2:
                 // A2:B3
-                expect(row.getCell("A").value).toBe(5);
-                expect(row.getCell("A").type).to.equal(ValueType.Number);
+                expect(cellGetValue(rowGetCell(row, "A"))).toBe(5);
+                expect(cellType(rowGetCell(row, "A"))).to.equal(ValueType.Number);
 
-                expect(row.getCell("B").type).toBe(ValueType.Null);
+                expect(cellType(rowGetCell(row, "B"))).toBe(ValueType.Null);
 
                 // C2:D3
-                expect(row.getCell("C").value).toBeNull();
-                expect(row.getCell("C").type).toBe(ValueType.Null);
+                expect(cellGetValue(rowGetCell(row, "C"))).toBeNull();
+                expect(cellType(rowGetCell(row, "C"))).toBe(ValueType.Null);
 
-                expect(row.getCell("D").value).toBeNull();
-                expect(row.getCell("D").type).toBe(ValueType.Null);
+                expect(cellGetValue(rowGetCell(row, "D"))).toBeNull();
+                expect(cellType(rowGetCell(row, "D"))).toBe(ValueType.Null);
 
                 break;
 
               case 3:
-                expect(row.getCell("A").value).toBe(null);
-                expect(row.getCell("A").type).toBe(ValueType.Null);
+                expect(cellGetValue(rowGetCell(row, "A"))).toBe(null);
+                expect(cellType(rowGetCell(row, "A"))).toBe(ValueType.Null);
 
-                expect(row.getCell("B").value).toBe(null);
-                expect(row.getCell("B").type).toBe(ValueType.Null);
+                expect(cellGetValue(rowGetCell(row, "B"))).toBe(null);
+                expect(cellType(rowGetCell(row, "B"))).toBe(ValueType.Null);
 
-                expect(row.getCell("C").value).toBeNull();
-                expect(row.getCell("C").type).toBe(ValueType.Null);
+                expect(cellGetValue(rowGetCell(row, "C"))).toBeNull();
+                expect(cellType(rowGetCell(row, "C"))).toBe(ValueType.Null);
 
-                expect(row.getCell("D").value).toBeNull();
-                expect(row.getCell("D").type).toBe(ValueType.Null);
+                expect(cellGetValue(rowGetCell(row, "D"))).toBeNull();
+                expect(cellType(rowGetCell(row, "D"))).toBe(ValueType.Null);
                 break;
 
               case 4:
-                expect(row.getCell("A").type).to.equal(ValueType.Number);
-                expect(row.getCell("C").type).to.equal(ValueType.Number);
+                expect(cellType(rowGetCell(row, "A"))).to.equal(ValueType.Number);
+                expect(cellType(rowGetCell(row, "C"))).to.equal(ValueType.Number);
                 break;
 
               case 5:
                 // test fonts and formats
-                expect(row.getCell("A").value).toEqual(streamedValues.B1);
-                expect(row.getCell("A").type).to.equal(ValueType.String);
-                expect(row.getCell("B").value).toEqual(streamedValues.B1);
-                expect(row.getCell("B").type).to.equal(ValueType.String);
-                expect(row.getCell("C").value).toEqual(streamedValues.B1);
-                expect(row.getCell("C").type).to.equal(ValueType.String);
+                expect(cellGetValue(rowGetCell(row, "A"))).toEqual(streamedValues.B1);
+                expect(cellType(rowGetCell(row, "A"))).to.equal(ValueType.String);
+                expect(cellGetValue(rowGetCell(row, "B"))).toEqual(streamedValues.B1);
+                expect(cellType(rowGetCell(row, "B"))).to.equal(ValueType.String);
+                expect(cellGetValue(rowGetCell(row, "C"))).toEqual(streamedValues.B1);
+                expect(cellType(rowGetCell(row, "C"))).to.equal(ValueType.String);
 
-                expect(Math.abs((row.getCell("D").value as number) - 1.6)).to.be.below(0.00000001);
-                expect(row.getCell("D").type).to.equal(ValueType.Number);
+                expect(Math.abs((cellGetValue(rowGetCell(row, "D")) as number) - 1.6)).to.be.below(
+                  0.00000001
+                );
+                expect(cellType(rowGetCell(row, "D"))).to.equal(ValueType.Number);
 
-                expect(Math.abs((row.getCell("E").value as number) - 1.6)).to.be.below(0.00000001);
-                expect(row.getCell("E").type).to.equal(ValueType.Number);
+                expect(Math.abs((cellGetValue(rowGetCell(row, "E")) as number) - 1.6)).to.be.below(
+                  0.00000001
+                );
+                expect(cellType(rowGetCell(row, "E"))).to.equal(ValueType.Number);
 
                 expect(
-                  Math.abs((row.getCell("F").value as number) - streamedValues.C1)
+                  Math.abs((cellGetValue(rowGetCell(row, "F")) as number) - streamedValues.C1)
                 ).to.be.below(dateAccuracy);
-                expect(row.getCell("F").type).to.equal(ValueType.Number);
+                expect(cellType(rowGetCell(row, "F"))).to.equal(ValueType.Number);
                 break;
 
               case 6:

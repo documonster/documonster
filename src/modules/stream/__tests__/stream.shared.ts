@@ -34,8 +34,8 @@ export interface StreamModuleImports {
   // Specialized Streams
   BufferedStream: new (options?: any) => any;
   PullStream: new (options?: any) => any;
-  StringChunk: new (data: string) => any;
-  ByteChunk: new (data: Uint8Array) => any;
+  createStringChunk: (data: string) => any;
+  createByteChunk: (data: Uint8Array) => any;
   ChunkedBuilder: new (options?: any) => any;
   TransactionalChunkedBuilder: new (options?: any) => any;
 
@@ -137,8 +137,8 @@ export function runStreamTests(imports: StreamModuleImports): void {
     PassThrough,
     BufferedStream,
     PullStream,
-    StringChunk,
-    ByteChunk,
+    createStringChunk,
+    createByteChunk,
     ChunkedBuilder,
     TransactionalChunkedBuilder,
     createReadable: _createReadable,
@@ -494,27 +494,27 @@ export function runStreamTests(imports: StreamModuleImports): void {
   });
 
   // ==========================================================================
-  // StringChunk and ByteChunk Tests
+  // createStringChunk and createByteChunk Tests
   // ==========================================================================
-  describe("StringChunk and ByteChunk", () => {
-    it("StringChunk should convert to Uint8Array", () => {
-      const chunk = new StringChunk("hello");
+  describe("createStringChunk and createByteChunk", () => {
+    it("createStringChunk should convert to Uint8Array", () => {
+      const chunk = createStringChunk("hello");
       const arr = chunk.toUint8Array();
 
       expect(arr).toBeInstanceOf(Uint8Array);
       expect(uint8ArrayToString(arr)).toBe("hello");
     });
 
-    it("ByteChunk should wrap Uint8Array", () => {
+    it("createByteChunk should wrap Uint8Array", () => {
       const data = stringToUint8Array("world");
-      const chunk = new ByteChunk(data);
+      const chunk = createByteChunk(data);
 
       expect(chunk.length).toBe(data.length);
       expect(chunk.toUint8Array()).toEqual(data);
     });
 
     it("should copy data correctly", () => {
-      const chunk = new StringChunk("hello");
+      const chunk = createStringChunk("hello");
       const target = new Uint8Array(10);
 
       chunk.copy(target, 0, 0, 5);

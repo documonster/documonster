@@ -11,8 +11,12 @@
  * at a pivotCacheRecords file that actually exists.
  */
 
-import type { ValidationContext } from "./context";
-import { attrByLocalName, findChildLocal, findChildrenLocal } from "./xml-utils";
+import type { ValidationContext } from "@excel/utils/ooxml-validator/context";
+import {
+  attrByLocalName,
+  findChildLocal,
+  findChildrenLocal
+} from "@excel/utils/ooxml-validator/xml-utils";
 
 const PIVOT_TABLE_RE = /^xl\/pivotTables\/pivotTable\d+\.xml$/;
 

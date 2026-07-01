@@ -14,6 +14,17 @@ import { decompress, decompressSync } from "@archive/compression/compress";
 import { crc32, crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { createInflateStream } from "@archive/compression/streaming-compress";
 import {
+  ArchiveError,
+  Crc32MismatchError,
+  DecryptionError,
+  EntrySizeMismatchError,
+  FileTooLargeError,
+  PasswordRequiredError,
+  UnsupportedCompressionError,
+  throwIfAborted,
+  toError
+} from "@archive/core/errors";
+import {
   ZIP_CRYPTO_HEADER_SIZE,
   aesDecrypt,
   zipCryptoDecrypt,
@@ -21,16 +32,6 @@ import {
   zipCryptoInitKeys
 } from "@archive/crypto";
 import { collect } from "@archive/io/archive-sink";
-import { createAsyncQueue } from "@archive/shared/async-queue";
-import {
-  Crc32MismatchError,
-  DecryptionError,
-  EntrySizeMismatchError,
-  PasswordRequiredError,
-  UnsupportedCompressionError,
-  throwIfAborted,
-  toError
-} from "@archive/shared/errors";
 import { BinaryReader } from "@archive/zip-spec/binary";
 import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
 import {
@@ -38,6 +39,8 @@ import {
   COMPRESSION_STORE,
   LOCAL_FILE_HEADER_SIG
 } from "@archive/zip-spec/zip-records";
+import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
+import { concatUint8Arrays } from "@utils/binary";
 
 /**
  * Local file header fixed size (30 bytes)
@@ -95,8 +98,9 @@ export async function processEntryData(
   // but does NOT protect against ZIP bombs that lie about their size (for that, use
   // the streaming path processEntryDataStream which validates actual output bytes).
   if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
-    throw new Error(
-      `Entry "${entry.path}" declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+    throw new FileTooLargeError(
+      entry.path,
+      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
         `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
         "Use the streaming API for large entries."
     );
@@ -182,8 +186,9 @@ export function processEntryDataSync(
 
   // Pre-decompression size check (same as async version)
   if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
-    throw new Error(
-      `Entry "${entry.path}" declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+    throw new FileTooLargeError(
+      entry.path,
+      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
         `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
         "Use the streaming API for large entries."
     );
@@ -197,7 +202,7 @@ export function processEntryDataSync(
 
     if (entry.encryptionMethod === "aes") {
       // AES requires async Web Crypto API
-      throw new Error(
+      throw new ArchiveError(
         `File "${entry.path}" uses AES encryption. Use the async extract() method instead of extractSync().`
       );
     } else if (entry.encryptionMethod === "zipcrypto") {
@@ -316,34 +321,78 @@ async function* inflateRawStream(
   const { signal } = options;
 
   const inflator = createInflateStream();
-  const queue = createAsyncQueue<Uint8Array>({
-    onCancel: () => {
-      try {
-        inflator.destroy();
-      } catch {
-        // ignore
-      }
-    }
-  });
 
-  inflator.on("data", (chunk: Uint8Array) => {
-    if (chunk && chunk.length) {
-      queue.push(chunk);
-    }
-  });
-  inflator.on("end", () => {
-    queue.close();
-  });
-  inflator.on("error", (err: Error) => {
-    queue.fail(err);
-  });
+  // Consume the inflator's output through the pull-based adapter, which pauses
+  // the stream after every chunk and only resumes on the consumer's next pull.
+  // This propagates backpressure all the way to the decompressor (and, via its
+  // write callbacks, to the input producer below) so a fast decompressor cannot
+  // run ahead and buffer the whole entry — keeping peak memory at O(one chunk)
+  // and making SAX-driven readers genuinely incremental. A flowing `on("data")`
+  // fan-in into an unbounded queue would defeat that and inflate the whole part
+  // up-front.
+  //
+  // Crucially we obtain the iterator (which attaches the "data"/"end"/"error"
+  // listeners and pauses the stream) BEFORE starting the producer below. The
+  // decompressor can reject input synchronously on the first write — without a
+  // listener already attached, that "error" event would have no handler and
+  // surface as an unhandled rejection.
+  const iterator =
+    eventedReadableToAsyncIterableNoDestroy<Uint8Array>(inflator)[Symbol.asyncIterator]();
 
+  // Mirror the compressed input so we can re-run a deterministic pure-JS inflate
+  // if the native streaming decompressor spuriously rejects valid data before
+  // emitting any output (observed in Chromium under heavy concurrent
+  // `DecompressionStream` creation — see compress.browser.ts). Buffering the
+  // *compressed* bytes is bounded by the entry's on-disk size and only retained
+  // until output starts flowing.
+  const inputChunks: Uint8Array[] = [];
+  let inputDrained = false;
+
+  // Pump the compressed input into the inflator concurrently. Each `write()`
+  // resolves via its callback, which the decompressor delays under backpressure,
+  // so this loop self-throttles against the (paused) output side. On failure the
+  // inflator is destroyed with the error: that surfaces through its "error"
+  // event (forwarded by the iterator), so the consumer below rejects. The
+  // producer itself never rejects, so it can never become an unhandled rejection.
+  //
+  // The source is always read to completion into `inputChunks` (even if the
+  // inflator errors) so the pure-JS fallback below has the full compressed
+  // entry available.
   const producer = (async () => {
+    let writeFailed = false;
     try {
       for await (const chunk of source) {
         throwIfAborted(signal);
+        inputChunks.push(chunk);
+        if (writeFailed) {
+          // Inflator already errored; keep draining source but skip writing.
+          continue;
+        }
+        try {
+          await new Promise<void>((resolve, reject) => {
+            inflator.write(chunk, err => {
+              if (err) {
+                reject(err);
+              } else {
+                resolve();
+              }
+            });
+          });
+        } catch (e) {
+          writeFailed = true;
+          try {
+            inflator.destroy(toError(e));
+          } catch {
+            // ignore
+          }
+        }
+      }
+      inputDrained = true;
+
+      if (!writeFailed) {
+        throwIfAborted(signal);
         await new Promise<void>((resolve, reject) => {
-          inflator.write(chunk, err => {
+          inflator.end(err => {
             if (err) {
               reject(err);
             } else {
@@ -352,19 +401,8 @@ async function* inflateRawStream(
           });
         });
       }
-
-      throwIfAborted(signal);
-      await new Promise<void>((resolve, reject) => {
-        inflator.end(err => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve();
-          }
-        });
-      });
     } catch (e) {
-      queue.fail(toError(e));
+      inputDrained = true;
       try {
         inflator.destroy(toError(e));
       } catch {
@@ -373,19 +411,57 @@ async function* inflateRawStream(
     }
   })();
 
+  let producedOutput = false;
   try {
-    for await (const out of queue.iterable) {
+    while (true) {
       throwIfAborted(signal);
-      yield out;
+      const { value, done } = await iterator.next();
+      if (done) {
+        break;
+      }
+      producedOutput = true;
+      yield value;
     }
+  } catch (err) {
+    throwIfAborted(signal);
+    // A failure after output has started indicates genuine mid-stream
+    // corruption — surface it. A failure before any output is the Chromium
+    // spurious-rejection case: re-decode the (fully buffered) compressed input
+    // with the deterministic pure-JS inflater, preserving streaming by
+    // re-chunking the result so downstream consumers stay incremental.
+    if (producedOutput) {
+      throw err;
+    }
+    await iterator.return?.();
+    await producer;
+    if (!inputDrained) {
+      // Source could not be fully buffered; cannot safely re-decode.
+      throw err;
+    }
+    const compressed = concatUint8Arrays(inputChunks);
+    const inflated = decompressSync(compressed);
+    yield* chunkUint8Array(inflated, STREAM_RECHUNK_SIZE);
+    return;
   } finally {
-    // Ensure producer completion is observed.
-    await producer.catch(() => {});
+    // Stop the adapter (detaches listeners, pauses the stream), settle the
+    // producer (it never rejects), and tear down the inflator.
+    await iterator.return?.();
+    await producer;
     try {
       inflator.destroy();
     } catch {
       // ignore
     }
+  }
+}
+
+/** Output slice size used when re-chunking a fully-inflated buffer. */
+const STREAM_RECHUNK_SIZE = 65536;
+
+/** Split a buffer into fixed-size slices (views, no copy). */
+function* chunkUint8Array(data: Uint8Array, size: number): Generator<Uint8Array> {
+  for (let off = 0; off < data.length; off += size) {
+    yield data.subarray(off, off + size);
   }
 }
 
@@ -485,7 +561,7 @@ export function processEntryDataStream(
 ): AsyncIterable<Uint8Array> {
   const { password, checkCrc32 = false, validateEntrySizes = true, signal } = options;
 
-  const run = async function* (): AsyncIterable<Uint8Array> {
+  async function* run(): AsyncIterable<Uint8Array> {
     throwIfAborted(signal);
 
     if (entry.type === "directory") {
@@ -580,7 +656,7 @@ export function processEntryDataStream(
     for await (const chunk of outStream) {
       yield chunk;
     }
-  };
+  }
 
   return run();
 }
@@ -611,7 +687,7 @@ function decompressDataSync(data: Uint8Array, compressionMethod: number, path: s
 export function readLocalHeaderDataOffset(reader: BinaryReader, expectedOffset: number): number {
   const sig = reader.readUint32();
   if (sig !== LOCAL_FILE_HEADER_SIG) {
-    throw new Error(`Invalid local file header signature at offset ${expectedOffset}`);
+    throw new ArchiveError(`Invalid local file header signature at offset ${expectedOffset}`);
   }
 
   reader.skip(2); // version needed

@@ -1,8 +1,9 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { VmlClientDataXform } from "@excel/xlsx/xform/comment/vml-client-data-xform";
 import { VmlTextboxXform } from "@excel/xlsx/xform/comment/vml-textbox-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
-interface ShapeModel {
+export interface ShapeModel {
   note: {
     margins?: {
       insetmode?: string;
@@ -11,7 +12,7 @@ interface ShapeModel {
     width?: number;
     height?: number;
   };
-  refAddress?: any;
+  refAddress?: { row: number; col: number };
 }
 
 /** Default comment box geometry in points (matches legacy Excel notes). */
@@ -19,8 +20,12 @@ const DEFAULT_NOTE_WIDTH_PT = 97.8;
 const DEFAULT_NOTE_HEIGHT_PT = 59.1;
 
 class VmlShapeXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
+  // NOTE: the render path consumes a ShapeModel (note geometry) while the
+  // parser incrementally builds a distinct flat note model (margins/anchor/
+  // protection/row/col). The two are genuinely different shapes, so this
+  // field is intentionally left loose rather than forced into one type.
   declare public model: any;
 
   constructor() {
@@ -35,7 +40,7 @@ class VmlShapeXform extends BaseXform {
     return "v:shape";
   }
 
-  render(xmlStream: any, model: ShapeModel, index?: number): void {
+  render(xmlStream: XmlSink, model: ShapeModel, index?: number): void {
     xmlStream.openNode("v:shape", VmlShapeXform.V_SHAPE_ATTRIBUTES(model, index ?? 0));
 
     xmlStream.leafNode("v:fill", { color2: "infoBackground [80]" });
@@ -47,7 +52,7 @@ class VmlShapeXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -133,7 +138,7 @@ class VmlShapeXform extends BaseXform {
     return Number.isFinite(value) ? value : undefined;
   }
 
-  static V_SHAPE_ATTRIBUTES = (model: ShapeModel, index: number): any => {
+  static V_SHAPE_ATTRIBUTES(model: ShapeModel, index: number): XmlAttributes {
     const width = model.note?.width ?? DEFAULT_NOTE_WIDTH_PT;
     const height = model.note?.height ?? DEFAULT_NOTE_HEIGHT_PT;
     return {
@@ -144,7 +149,7 @@ class VmlShapeXform extends BaseXform {
       strokecolor: "none [81]",
       "o:insetmode": model.note.margins && model.note.margins.insetmode
     };
-  };
+  }
 }
 
 export { VmlShapeXform };

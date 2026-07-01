@@ -5,14 +5,13 @@
  * Uses a plain data record + free functions for tree-shakeability.
  */
 
-import type { XmlSink } from "@xml/types";
-
 import {
   NS_CONTENT_TYPES,
   STD_DOC_ATTRIBUTES,
   ContentType,
   IMAGE_CONTENT_TYPES
-} from "../constants";
+} from "@word/constants";
+import type { XmlSink } from "@xml/types";
 
 /** Content type override entry. */
 export interface ContentTypeOverride {

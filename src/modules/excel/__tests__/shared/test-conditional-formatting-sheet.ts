@@ -1,5 +1,7 @@
+import { addSheetTo } from "@excel/__tests__/shared/add-sheet-to";
 import conditionalFormattingJson from "@excel/__tests__/shared/data/conditional-formatting.json" with { type: "json" };
 import { fix } from "@excel/__tests__/shared/tools";
+import { Workbook, Worksheet } from "@excel/index";
 import { expect } from "vitest";
 
 const self = {
@@ -8,18 +10,22 @@ const self = {
     return (self.conditionalFormattings as any)[type] || null;
   },
   addSheet(wb: any) {
-    const ws = wb.addWorksheet("conditional-formatting");
+    const ws = addSheetTo(wb, "conditional-formatting");
     const { types } = self.conditionalFormattings as any;
     types.forEach((type: string) => {
       const conditionalFormatting = self.getConditionalFormatting(type);
       if (conditionalFormatting) {
-        ws.addConditionalFormatting(conditionalFormatting);
+        if (typeof (ws as any).addConditionalFormatting === "function") {
+          (ws as any).addConditionalFormatting(conditionalFormatting);
+        } else {
+          Worksheet.addConditionalFormatting(ws, conditionalFormatting);
+        }
       }
     });
   },
 
   checkSheet(wb: any) {
-    const ws = wb.getWorksheet("conditional-formatting");
+    const ws = Workbook.getWorksheet(wb, "conditional-formatting")!;
     expect(ws).toBeDefined();
     expect(ws.conditionalFormattings).toBeDefined();
     ws.conditionalFormattings?.forEach((item: any) => {

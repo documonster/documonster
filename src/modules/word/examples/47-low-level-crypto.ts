@@ -2,7 +2,7 @@
  * Word Example 47 — Low-level crypto building blocks
  *
  * Complements `34-decrypt-roundtrip.ts` by exercising the lower-level helpers
- * exposed via `excelts/word/crypto`:
+ * exposed via `documonster/word/crypto`:
  *   - readCfb / writeCfb — parse and synthesise OLE2 Compound Files. The
  *     encrypted DOCX wire format wraps a ZIP package inside CFB streams; the
  *     same primitives also underpin .doc, .ppt, .xls (legacy formats) and OLE
@@ -29,7 +29,7 @@ import {
   deriveEncryptionKey
 } from "../crypto";
 import type { CfbEntry } from "../crypto";
-import { Document, toBuffer, encryptDocx } from "../index";
+import { Document, Io, Security } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -38,10 +38,10 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 const lines: string[] = [];
-const log = (s: string): void => {
+function log(s: string): void {
   console.log(s);
   lines.push(s);
-};
+}
 
 // ---------------------------------------------------------------------------
 // 1. AGILE_BLOCK_KEYS — exposed for deriveEncryptionKey() callers
@@ -80,7 +80,7 @@ for (const e of decoded) {
 //    stream inside the CFB envelope; we synthesise one with encryptDocx then
 //    locate its EncryptionInfo stream and parse it.
 // ---------------------------------------------------------------------------
-const plain = await toBuffer(
+const plain = await Io.toBuffer(
   (() => {
     const dd = Document.create();
     Document.useDefaultStyles(dd);
@@ -89,7 +89,7 @@ const plain = await toBuffer(
   })()
 );
 const password = "knock-knock";
-const encrypted = await encryptDocx(plain, password, {
+const encrypted = await Security.encrypt(plain, password, {
   keyBits: 256,
   hashAlgorithm: "SHA512",
   spinCount: 50_000

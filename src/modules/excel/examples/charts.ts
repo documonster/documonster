@@ -97,18 +97,33 @@
  * 35.  Loading + mutating a chart (`chart.mutate(fn, { preferRawPatch })`).
  *
  * Output:
- *   tmp/charts-example.xlsx     — one workbook containing every chart
- *   tmp/charts-example-<N>.svg  — per-chart SVG previews
- *   tmp/charts-example-<N>.png  — per-chart PNG previews
- *   tmp/charts-example.pdf      — multi-page PDF of each chart
+ *   tmp/excel-examples/charts-example.xlsx     — one workbook containing every chart
+ *   tmp/excel-examples/charts-example-<N>.svg  — per-chart SVG previews
+ *   tmp/excel-examples/charts-example-<N>.png  — per-chart PNG previews
+ *   tmp/excel-examples/charts-example.pdf      — multi-page PDF of each chart
  *
  * Usage:
  *   pnpm exec tsx src/modules/excel/examples/charts.ts
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+import type {
+  AddChartSeriesOptions,
+  AddChartOptions,
+  ChartStyleModel,
+  ChartColorsModel,
+  ChartRichText,
+  AddTrendlineOptions,
+  AddErrorBarsOptions,
+  ChartMarker,
+  RegionMapDataOptions,
+  TopologyLike,
+  NumberReference,
+  StringReference
+} from "@excel/chart/index";
 import {
   EXCEL_CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
@@ -148,32 +163,28 @@ import {
   buildChartScene,
   buildEffectFilter,
   applyAxisTransform,
-  VECTOR_PDF_CHART_EX_LAYOUT_IDS,
-  type AddChartSeriesOptions,
-  type AddChartOptions,
-  type ChartStyleModel,
-  type ChartColorsModel,
-  type ChartRichText,
-  type AddTrendlineOptions,
-  type AddErrorBarsOptions,
-  type ChartMarker,
-  type RegionMapDataOptions,
-  type TopologyLike,
-  type NumberReference,
-  type StringReference,
-  installChartSupport
+  VECTOR_PDF_CHART_EX_LAYOUT_IDS
 } from "@excel/chart/index";
-import type { AddSparklineGroupOptions, SparklineGroup } from "@excel/sparkline";
+import { drawChartExPdf } from "@excel/chart/render/chart-ex-renderer";
+import { drawChartPdf } from "@excel/chart/render/chart-renderer";
+import {
+  Cell,
+  Chart,
+  Chartsheet,
+  Column,
+  DefinedNames,
+  Image,
+  Pivot,
+  Row,
+  Sparkline,
+  Table,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { chartToPdf } from "@pdf/excel-bridge";
 
-import { Workbook } from "../../../index";
-import { drawChartExPdf } from "../chart/chart-ex-renderer";
-import { drawChartPdf } from "../chart/chart-renderer";
-
-installChartSupport();
-
-const OUT_DIR = resolve(process.cwd(), "tmp");
+const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
 const XLSX_PATH = resolve(OUT_DIR, "charts-example.xlsx");
 const PDF_PATH = resolve(OUT_DIR, "charts-example.pdf");
 
@@ -216,25 +227,25 @@ function cellAddr(col: number, row: number): string {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const wb = new Workbook();
-  wb.title = "ExcelTS — Chart Gallery";
-  wb.creator = "ExcelTS charts example";
+  const wb = Workbook.create();
+  wb.title = "Documonster — Chart Gallery";
+  wb.creator = "Documonster charts example";
   wb.created = new Date();
 
   // "Sales" — month × (revenue, profit, cost, units, growth) grid used by
   // every bar / column / line / area / pivotable chart below. Kept small
   // enough to fit in printouts yet rich enough to exercise trendlines,
   // error bars and secondary axes.
-  const sales = wb.addWorksheet("Sales");
-  sales.columns = [
+  const sales = Workbook.addWorksheet(wb, "Sales");
+  Worksheet.setColumns(sales, [
     { header: "Month", key: "month", width: 12 },
     { header: "Revenue", key: "revenue", width: 14 },
     { header: "Profit", key: "profit", width: 14 },
     { header: "Cost", key: "cost", width: 14 },
     { header: "Units", key: "units", width: 10 },
     { header: "Growth %", key: "growth", width: 12 }
-  ];
-  sales.addRows([
+  ]);
+  Worksheet.addRows(sales, [
     { month: "Jan", revenue: 120, profit: 32, cost: 88, units: 540, growth: 0.04 },
     { month: "Feb", revenue: 180, profit: 49, cost: 131, units: 620, growth: 0.08 },
     { month: "Mar", revenue: 160, profit: 41, cost: 119, units: 610, growth: 0.02 },
@@ -242,16 +253,16 @@ async function main(): Promise<void> {
     { month: "May", revenue: 232, profit: 75, cost: 157, units: 805, growth: 0.13 },
     { month: "Jun", revenue: 248, profit: 81, cost: 167, units: 880, growth: 0.07 }
   ]);
-  sales.getColumn("revenue").numFmt = "$#,##0";
-  sales.getColumn("profit").numFmt = "$#,##0";
-  sales.getColumn("cost").numFmt = "$#,##0";
-  sales.getColumn("growth").numFmt = "0.0%";
+  Column.setStyle(sales, "revenue", { numFmt: "$#,##0" });
+  Column.setStyle(sales, "profit", { numFmt: "$#,##0" });
+  Column.setStyle(sales, "cost", { numFmt: "$#,##0" });
+  Column.setStyle(sales, "growth", { numFmt: "0.0%" });
 
   // "Scatter" — x / y pairs + bubble sizes. Dedicated sheet so scatter /
   // bubble charts have the right shape without interfering with the
   // category-axis data on the Sales sheet.
-  const scatter = wb.addWorksheet("Scatter");
-  scatter.addRows([
+  const scatter = Workbook.addWorksheet(wb, "Scatter");
+  Worksheet.addRows(scatter, [
     ["Hours", "Score", "Attempts"],
     [1, 45, 3],
     [2, 55, 5],
@@ -265,30 +276,30 @@ async function main(): Promise<void> {
   // "Stock" — date / open / high / low / close for a classic OHLC stock
   // chart. Dates are real Date objects so Excel renders them as a date
   // axis.
-  const stockSheet = wb.addWorksheet("Stock");
-  stockSheet.addRow(["Date", "Open", "High", "Low", "Close"]);
+  const stockSheet = Workbook.addWorksheet(wb, "Stock");
+  Worksheet.addRow(stockSheet, ["Date", "Open", "High", "Low", "Close"]);
   const d = (iso: string): Date => new Date(iso);
-  stockSheet.addRows([
+  Worksheet.addRows(stockSheet, [
     [d("2024-01-02"), 150, 156, 149, 154],
     [d("2024-01-03"), 154, 158, 152, 157],
     [d("2024-01-04"), 157, 161, 155, 159],
     [d("2024-01-05"), 159, 162, 156, 160],
     [d("2024-01-08"), 160, 165, 158, 164]
   ]);
-  stockSheet.getColumn(1).numFmt = "yyyy-mm-dd";
+  Column.setStyle(stockSheet, 1, { numFmt: "yyyy-mm-dd" });
 
   // "Surface" — z values on a cat × series grid so surface / surface3D
   // charts have the 2-D matrix they expect.
-  const surfaceSheet = wb.addWorksheet("Surface");
-  surfaceSheet.addRow(["", "Q1", "Q2", "Q3", "Q4"]);
-  surfaceSheet.addRow(["North", 10, 22, 34, 40]);
-  surfaceSheet.addRow(["South", 15, 25, 37, 48]);
-  surfaceSheet.addRow(["East", 12, 20, 30, 42]);
-  surfaceSheet.addRow(["West", 18, 28, 39, 50]);
+  const surfaceSheet = Workbook.addWorksheet(wb, "Surface");
+  Worksheet.addRow(surfaceSheet, ["", "Q1", "Q2", "Q3", "Q4"]);
+  Worksheet.addRow(surfaceSheet, ["North", 10, 22, 34, 40]);
+  Worksheet.addRow(surfaceSheet, ["South", 15, 25, 37, 48]);
+  Worksheet.addRow(surfaceSheet, ["East", 12, 20, 30, 42]);
+  Worksheet.addRow(surfaceSheet, ["West", 18, 28, 39, 50]);
 
   // "Hierarchy" — 3-level category data for sunburst / treemap.
-  const hier = wb.addWorksheet("Hierarchy");
-  hier.addRows([
+  const hier = Workbook.addWorksheet(wb, "Hierarchy");
+  Worksheet.addRows(hier, [
     ["Region", "Country", "City", "Sales"],
     ["Americas", "USA", "New York", 420],
     ["Americas", "USA", "San Francisco", 360],
@@ -302,8 +313,8 @@ async function main(): Promise<void> {
   ]);
 
   // "Distribution" — raw samples for histogram / pareto / boxWhisker.
-  const dist = wb.addWorksheet("Distribution");
-  dist.addRow(["Sample"]);
+  const dist = Workbook.addWorksheet(wb, "Distribution");
+  Worksheet.addRow(dist, ["Sample"]);
   // 40 synthetic samples clustered around two modes to give the
   // histogram a bi-modal shape and the box-whisker chart visible
   // whiskers + outliers.
@@ -311,11 +322,11 @@ async function main(): Promise<void> {
     52, 54, 57, 59, 60, 61, 62, 63, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 78, 80, 82, 84,
     85, 86, 88, 90, 92, 94, 28, 35, 42, 96, 98, 102, 110, 115, 118, 122
   ];
-  samples.forEach(n => dist.addRow([n]));
+  samples.forEach(n => Worksheet.addRow(dist, [n]));
 
   // "Regions" — country → value for a region-map chart.
-  const regions = wb.addWorksheet("Regions");
-  regions.addRows([
+  const regions = Workbook.addWorksheet(wb, "Regions");
+  Worksheet.addRows(regions, [
     ["Country", "Revenue"],
     ["United States", 840],
     ["Germany", 410],
@@ -329,8 +340,8 @@ async function main(): Promise<void> {
   // 1. Classic chart gallery — every type Excel exposes (16 types).
   // ---------------------------------------------------------------------------
 
-  const gallery = wb.addWorksheet("1-Classic Gallery");
-  gallery.addRow(["Type", "Notes"]);
+  const gallery = Workbook.addWorksheet(wb, "1-Classic Gallery");
+  Worksheet.addRow(gallery, ["Type", "Notes"]);
 
   // Compact helper that stamps a label row, then positions the chart in
   // a 9-column × 15-row block to the right of the label so the gallery
@@ -341,13 +352,13 @@ async function main(): Promise<void> {
     options: AddChartOptions,
     opts?: { rows?: number }
   ): number => {
-    gallery.getCell(`A${galleryRow}`).value = label;
-    gallery.getCell(`A${galleryRow}`).font = { bold: true };
+    Cell.setValue(gallery, `A${galleryRow}`, label);
+    Cell.setStyle(gallery, `A${galleryRow}`, { font: { bold: true } });
     const rows = opts?.rows ?? 15;
     const top = galleryRow;
     const bottom = galleryRow + rows;
     galleryRow = bottom + 1;
-    return gallery.addChart(options, `B${top}:J${bottom}`);
+    return Chart.add(gallery, options, `B${top}:J${bottom}`);
   };
 
   // -- Bar / Column family
@@ -703,9 +714,9 @@ async function main(): Promise<void> {
   // 2. Chart presets — 70+ Excel UI aliases exposed through `addPresetChart`.
   // ---------------------------------------------------------------------------
 
-  const presets = wb.addWorksheet("2-Presets");
-  presets.addRow(["Preset", "Notes"]);
-  presets.getCell("A1").font = { bold: true };
+  const presets = Workbook.addWorksheet(wb, "2-Presets");
+  Worksheet.addRow(presets, ["Preset", "Notes"]);
+  Cell.setStyle(presets, "A1", { font: { bold: true } });
 
   // Demonstrate a representative sample from every preset family.
   const presetCatalog: Array<{ preset: string; title: string }> = [
@@ -732,9 +743,9 @@ async function main(): Promise<void> {
 
   presetCatalog.forEach((entry, i) => {
     const row = 2 + i * 16;
-    presets.getCell(`A${row}`).value = entry.preset;
-    presets.getCell(`A${row}`).font = { bold: true };
-    presets.getCell(`A${row + 1}`).value = entry.title;
+    Cell.setValue(presets, `A${row}`, entry.preset);
+    Cell.setStyle(presets, `A${row}`, { font: { bold: true } });
+    Cell.setValue(presets, `A${row + 1}`, entry.title);
 
     // `addPresetChart` auto-fills the `type` from the preset. The caller
     // only has to supply series + any chart-specific overrides.
@@ -778,7 +789,8 @@ async function main(): Promise<void> {
                   }
                 ];
 
-    presets.addPresetChart(
+    Chart.addPreset(
+      presets,
       entry.preset as (typeof EXCEL_CHART_PRESETS)[number],
       { title: entry.title, series },
       `B${row}:J${row + 14}`
@@ -789,13 +801,13 @@ async function main(): Promise<void> {
   // 3. ChartEx gallery — Office 2016+ modern chart types.
   // ---------------------------------------------------------------------------
 
-  const ex = wb.addWorksheet("3-ChartEx Gallery");
-  ex.addRow(["Type"]);
-  ex.getCell("A1").font = { bold: true };
+  const ex = Workbook.addWorksheet(wb, "3-ChartEx Gallery");
+  Worksheet.addRow(ex, ["Type"]);
+  Cell.setStyle(ex, "A1", { font: { bold: true } });
   let exRow = 2;
   const addExChart = (label: string, anchorHeight: number, cb: (range: string) => void): void => {
-    ex.getCell(`A${exRow}`).value = label;
-    ex.getCell(`A${exRow}`).font = { bold: true };
+    Cell.setValue(ex, `A${exRow}`, label);
+    Cell.setStyle(ex, `A${exRow}`, { font: { bold: true } });
     const top = exRow;
     const bottom = exRow + anchorHeight;
     cb(`B${top}:J${bottom}`);
@@ -803,7 +815,8 @@ async function main(): Promise<void> {
   };
 
   addExChart("histogram", 15, range => {
-    ex.addHistogramChart(
+    Chart.addHistogram(
+      ex,
       {
         title: "Histogram",
         series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }],
@@ -814,7 +827,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("pareto", 15, range => {
-    ex.addParetoChart(
+    Chart.addPareto(
+      ex,
       {
         title: "Pareto (histogram + cumulative)",
         series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }],
@@ -825,7 +839,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("waterfall", 15, range => {
-    ex.addWaterfallChart(
+    Chart.addWaterfall(
+      ex,
       {
         title: "Revenue waterfall",
         categories: "Sales!$A$2:$A$7",
@@ -843,7 +858,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("funnel", 15, range => {
-    ex.addFunnelChart(
+    Chart.addFunnel(
+      ex,
       {
         title: "Sales funnel",
         categories: "Sales!$A$2:$A$7",
@@ -854,7 +870,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("treemap", 15, range => {
-    ex.addTreemapChart(
+    Chart.addTreemap(
+      ex,
       {
         title: "Sales treemap",
         categories: "Hierarchy!$C$2:$C$10",
@@ -872,7 +889,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("sunburst", 15, range => {
-    ex.addSunburstChart(
+    Chart.addSunburst(
+      ex,
       {
         title: "Sales sunburst",
         categories: "Hierarchy!$C$2:$C$10",
@@ -889,7 +907,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("boxWhisker", 15, range => {
-    ex.addBoxWhiskerChart(
+    Chart.addBoxWhisker(
+      ex,
       {
         title: "Distribution box-whisker",
         categories: "Distribution!$A$1:$A$1",
@@ -912,7 +931,8 @@ async function main(): Promise<void> {
   });
 
   addExChart("regionMap", 15, range => {
-    ex.addRegionMapChart(
+    Chart.addRegionMap(
+      ex,
       {
         title: "Revenue by country",
         categories: "Regions!$A$2:$A$7",
@@ -930,7 +950,8 @@ async function main(): Promise<void> {
   // ChartEx presets — same shape as classic presets but using
   // `addPresetChartEx` / `EXCEL_CHART_EX_PRESETS`.
   addExChart("preset: boxAndWhisker alias", 15, range => {
-    ex.addPresetChartEx(
+    Chart.addPresetEx(
+      ex,
       "boxAndWhisker",
       {
         title: "Preset alias",
@@ -947,12 +968,13 @@ async function main(): Promise<void> {
   //    up-down bars, data tables, and 3D wall styling.
   // ---------------------------------------------------------------------------
 
-  const combo = wb.addWorksheet("4-Combo");
-  combo.addRow(["Combo charts"]);
-  combo.getCell("A1").font = { bold: true };
+  const combo = Workbook.addWorksheet(wb, "4-Combo");
+  Worksheet.addRow(combo, ["Combo charts"]);
+  Cell.setStyle(combo, "A1", { font: { bold: true } });
 
   // Column + line on secondary axis — the canonical combo layout.
-  combo.addComboChart(
+  Chart.addCombo(
+    combo,
     {
       title: "Revenue (bars) vs Growth (line, secondary axis)",
       groups: [
@@ -992,7 +1014,8 @@ async function main(): Promise<void> {
   );
 
   // Stacked bar + line trend combo
-  combo.addComboChart(
+  Chart.addCombo(
+    combo,
     {
       title: "Stacked revenue + total trend",
       groups: [
@@ -1027,7 +1050,8 @@ async function main(): Promise<void> {
   // Volume-HLC: bar for volume on primary axis + stock on secondary
   // axis — the exact combo that used to be named `stockVHLC` in the
   // preset registry; see `chart-presets.ts` for the removal note.
-  combo.addComboChart(
+  Chart.addCombo(
+    combo,
     {
       title: "Volume + HLC (combo)",
       groups: [
@@ -1063,15 +1087,16 @@ async function main(): Promise<void> {
   //    `addColumnChartFromRows`, `addChartExFromRows`, `seriesFromColumns`.
   // ---------------------------------------------------------------------------
 
-  const helpers = wb.addWorksheet("5-Helper APIs");
-  helpers.addRow(["Helper APIs"]);
-  helpers.getCell("A1").font = { bold: true };
+  const helpers = Workbook.addWorksheet(wb, "5-Helper APIs");
+  Worksheet.addRow(helpers, ["Helper APIs"]);
+  Cell.setStyle(helpers, "A1", { font: { bold: true } });
 
   // -- `addChartFromRows`: write rows + build chart from the JS array.
   // Returns a regular chart, so you can chain formatting later.
-  helpers.getCell("A3").value = "addChartFromRows";
-  helpers.getCell("A3").font = { bold: true };
-  helpers.addChartFromRows(
+  Cell.setValue(helpers, "A3", "addChartFromRows");
+  Cell.setStyle(helpers, "A3", { font: { bold: true } });
+  Chart.addFromRows(
+    helpers,
     [
       { day: "Mon", visits: 312 },
       { day: "Tue", visits: 400 },
@@ -1093,9 +1118,10 @@ async function main(): Promise<void> {
 
   // -- `addColumnChartFromRows`: shortcut — same as above but `type` /
   // `barDir` are implied.
-  helpers.getCell("A20").value = "addColumnChartFromRows";
-  helpers.getCell("A20").font = { bold: true };
-  helpers.addColumnChartFromRows(
+  Cell.setValue(helpers, "A20", "addColumnChartFromRows");
+  Cell.setStyle(helpers, "A20", { font: { bold: true } });
+  Chart.addColumnFromRows(
+    helpers,
     [
       { quarter: "Q1", revenue: 1.2 },
       { quarter: "Q2", revenue: 1.8 },
@@ -1113,8 +1139,8 @@ async function main(): Promise<void> {
 
   // -- `addChartFromTable`: pull series out of a structured Excel Table
   // so the chart expands when the table grows.
-  const tblSheet = wb.addWorksheet("5b-Table-backed");
-  const table = tblSheet.addTable({
+  const tblSheet = Workbook.addWorksheet(wb, "5b-Table-backed");
+  const table = Table.add(tblSheet, {
     name: "MonthlyKpis",
     ref: "A1",
     headerRow: true,
@@ -1135,7 +1161,8 @@ async function main(): Promise<void> {
     ]
   });
 
-  tblSheet.addChartFromTable(
+  Chart.addFromTable(
+    tblSheet,
     table,
     {
       type: "bar",
@@ -1149,19 +1176,20 @@ async function main(): Promise<void> {
   );
 
   // -- `seriesFromColumns`: compose series from raw column ranges.
-  helpers.getCell("A38").value = "seriesFromColumns";
-  helpers.getCell("A38").font = { bold: true };
-  const seriesA = helpers.seriesFromColumns({
+  Cell.setValue(helpers, "A38", "seriesFromColumns");
+  Cell.setStyle(helpers, "A38", { font: { bold: true } });
+  const seriesA = Chart.seriesFromColumns(helpers, {
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$B$2:$B$7",
     name: "Revenue"
   });
-  const seriesB = helpers.seriesFromColumns({
+  const seriesB = Chart.seriesFromColumns(helpers, {
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$C$2:$C$7",
     name: "Profit"
   });
-  helpers.addChart(
+  Chart.add(
+    helpers,
     {
       type: "line",
       title: "Built via seriesFromColumns",
@@ -1172,7 +1200,8 @@ async function main(): Promise<void> {
   );
 
   // -- `addChartExFromTable`: same idea, for modern ChartEx types.
-  tblSheet.addChartExFromTable(
+  Chart.addExFromTable(
+    tblSheet,
     table,
     {
       type: "funnel",
@@ -1188,11 +1217,12 @@ async function main(): Promise<void> {
   //    units, date axis, hidden axis.
   // ---------------------------------------------------------------------------
 
-  const axes = wb.addWorksheet("6-Axes");
-  axes.addRow(["Axis showcase"]);
-  axes.getCell("A1").font = { bold: true };
+  const axes = Workbook.addWorksheet(wb, "6-Axes");
+  Worksheet.addRow(axes, ["Axis showcase"]);
+  Cell.setStyle(axes, "A1", { font: { bold: true } });
 
-  axes.addChart(
+  Chart.add(
+    axes,
     {
       type: "line",
       title: "Log scale axis, rotated labels",
@@ -1223,7 +1253,8 @@ async function main(): Promise<void> {
     "A3:I22"
   );
 
-  axes.addChart(
+  Chart.add(
+    axes,
     {
       type: "line",
       title: "Display units (thousands)",
@@ -1237,7 +1268,8 @@ async function main(): Promise<void> {
     "A24:I43"
   );
 
-  axes.addChart(
+  Chart.add(
+    axes,
     {
       type: "line",
       title: "Hidden value axis, minimalist axes",
@@ -1262,9 +1294,9 @@ async function main(): Promise<void> {
   // 7. Rich titles, legend entries, plot-area layout, picture fills.
   // ---------------------------------------------------------------------------
 
-  const rich = wb.addWorksheet("7-Rich Formatting");
-  rich.addRow(["Rich formatting"]);
-  rich.getCell("A1").font = { bold: true };
+  const rich = Workbook.addWorksheet(wb, "7-Rich Formatting");
+  Worksheet.addRow(rich, ["Rich formatting"]);
+  Cell.setStyle(rich, "A1", { font: { bold: true } });
 
   // Structured rich-text title: two runs, different formatting.
   const richTitle: ChartRichText = {
@@ -1282,7 +1314,8 @@ async function main(): Promise<void> {
   // byte is generated here — no external dependency.
   const demoPng = makeSolidColorPng(256, 160, 0x4472c4);
 
-  rich.addChart(
+  Chart.add(
+    rich,
     {
       type: "bar",
       barDir: "col",
@@ -1319,10 +1352,11 @@ async function main(): Promise<void> {
   );
 
   // Title from a cell formula — stays live when the cell changes.
-  rich.getCell("A25").value = "Live chart title →";
-  rich.getCell("A25").font = { bold: true };
-  rich.getCell("B25").value = "Automatic dashboard";
-  rich.addChart(
+  Cell.setValue(rich, "A25", "Live chart title →");
+  Cell.setStyle(rich, "A25", { font: { bold: true } });
+  Cell.setValue(rich, "B25", "Automatic dashboard");
+  Chart.add(
+    rich,
     {
       type: "line",
       title: { formula: "'7-Rich Formatting'!$B$25" },
@@ -1335,11 +1369,12 @@ async function main(): Promise<void> {
   // 8. Chart styling — built-in 1-48 catalogue + structured sidecars.
   // ---------------------------------------------------------------------------
 
-  const styled = wb.addWorksheet("8-Styles");
-  styled.addRow(["Chart styling"]);
-  styled.getCell("A1").font = { bold: true };
+  const styled = Workbook.addWorksheet(wb, "8-Styles");
+  Worksheet.addRow(styled, ["Chart styling"]);
+  Cell.setStyle(styled, "A1", { font: { bold: true } });
 
-  const styledChartNum = styled.addChart(
+  const styledChartNum = Chart.add(
+    styled,
     {
       type: "bar",
       barDir: "col",
@@ -1351,7 +1386,7 @@ async function main(): Promise<void> {
   );
   // `setStyle(N)` == `setBuiltInStyle(N)` — lightweight `<c:style/>` knob
   // mapped to the 2007/2010 catalogue (1-48).
-  styled.getCharts()[0].setStyle(42);
+  Chart.setStyle(Chart.get(styled)[0], 42);
   console.log(`Built-in-style chart is #${styledChartNum}`);
 
   // Modern styleN.xml / colorsN.xml sidecars — full Office 2013+ styling.
@@ -1368,7 +1403,8 @@ async function main(): Promise<void> {
     id: 10,
     colors: [{ srgb: "4472C4" }, { srgb: "ED7D31" }, { srgb: "A5A5A5" }, { srgb: "FFC000" }]
   };
-  styled.addChart(
+  Chart.add(
+    styled,
     {
       type: "bar",
       barDir: "col",
@@ -1387,7 +1423,7 @@ async function main(): Promise<void> {
   // 9. Chartsheet — full-page chart that takes its own tab.
   // ---------------------------------------------------------------------------
 
-  wb.addChartsheet("Dashboard", {
+  Workbook.addChartsheet(wb, "Dashboard", {
     tabSelected: false,
     zoomToFit: true,
     chart: {
@@ -1406,7 +1442,7 @@ async function main(): Promise<void> {
   });
 
   // ChartEx chartsheet — same interface, modern layout.
-  wb.addChartsheet("Map", {
+  Workbook.addChartsheet(wb, "Map", {
     chart: {
       type: "regionMap",
       title: "Revenue heat-map",
@@ -1420,8 +1456,8 @@ async function main(): Promise<void> {
   // 10. Pivot chart — classic pivot-backed chart + pivot chartsheet.
   // ---------------------------------------------------------------------------
 
-  const pivotSource = wb.addWorksheet("10-Pivot Source");
-  pivotSource.addTable({
+  const pivotSource = Workbook.addWorksheet(wb, "10-Pivot Source");
+  Table.add(pivotSource, {
     name: "PivotSrc",
     ref: "A1",
     headerRow: true,
@@ -1437,16 +1473,17 @@ async function main(): Promise<void> {
       ["South", "B", "Q1", 70]
     ]
   });
-  const pivotSheet = wb.addWorksheet("10-Pivot");
-  const pivot = pivotSheet.addPivotTable({
-    sourceTable: pivotSource.getTable("PivotSrc"),
+  const pivotSheet = Workbook.addWorksheet(wb, "10-Pivot");
+  const pivot = Pivot.add(pivotSheet, {
+    sourceTable: Table.get(pivotSource, "PivotSrc"),
     rows: ["Region"],
     columns: ["Category"],
     values: ["Revenue"],
     metric: "sum"
   });
 
-  pivotSheet.addPivotChart(
+  Chart.addPivot(
+    pivotSheet,
     pivot,
     {
       type: "bar",
@@ -1473,7 +1510,7 @@ async function main(): Promise<void> {
     "F1:N20"
   );
 
-  wb.addPivotChartsheet("Pivot Dashboard", pivot, {
+  Workbook.addPivotChartsheet(wb, "Pivot Dashboard", pivot, {
     chart: {
       type: "line",
       title: "Pivot (chartsheet)",
@@ -1492,12 +1529,13 @@ async function main(): Promise<void> {
   // 11. Anchor variations — one-cell, two-cell and absolute EMU anchors.
   // ---------------------------------------------------------------------------
 
-  const anchors = wb.addWorksheet("11-Anchors");
-  anchors.addRow(["Anchor forms"]);
-  anchors.getCell("A1").font = { bold: true };
+  const anchors = Workbook.addWorksheet(wb, "11-Anchors");
+  Worksheet.addRow(anchors, ["Anchor forms"]);
+  Cell.setStyle(anchors, "A1", { font: { bold: true } });
 
   // Two-cell anchor (default — tl to br).
-  anchors.addChart(
+  Chart.add(
+    anchors,
     {
       type: "bar",
       barDir: "col",
@@ -1508,7 +1546,8 @@ async function main(): Promise<void> {
   );
 
   // One-cell anchor — pinned to a cell, fixed EMU extent (5×3 inches).
-  anchors.addChart(
+  Chart.add(
+    anchors,
     {
       type: "line",
       title: "One-cell anchor (5×3 in)",
@@ -1523,7 +1562,8 @@ async function main(): Promise<void> {
 
   // Absolute anchor — fixed EMU position + size; ignores rows/columns.
   // 0.5 inch top margin, 1 inch left margin, 5×3 in size.
-  anchors.addChart(
+  Chart.add(
+    anchors,
     {
       type: "pie",
       title: "Absolute anchor",
@@ -1544,9 +1584,9 @@ async function main(): Promise<void> {
   //     plotVisOnly / showDLblsOverMax, date axis, null title.
   // ---------------------------------------------------------------------------
 
-  const features = wb.addWorksheet("12-Feature Deep-Dive");
-  features.addRow(["Feature showcase"]);
-  features.getCell("A1").font = { bold: true };
+  const features = Workbook.addWorksheet(wb, "12-Feature Deep-Dive");
+  Worksheet.addRow(features, ["Feature showcase"]);
+  Cell.setStyle(features, "A1", { font: { bold: true } });
 
   // --- 12.1 every trendline type on one chart
   const trendlines: AddTrendlineOptions[] = [
@@ -1557,10 +1597,14 @@ async function main(): Promise<void> {
     { type: "movingAvg", name: "Moving avg (2)", period: 2, line: "5B9BD5", lineDash: "lgDash" },
     { type: "power", name: "Power", line: "A5A5A5", lineDash: "lgDashDot" }
   ];
-  features.getCell("A3").value =
-    "12.1 — every trendline type (linear/exp/log/poly/movingAvg/power)";
-  features.getCell("A3").font = { bold: true };
-  features.addChart(
+  Cell.setValue(
+    features,
+    "A3",
+    "12.1 — every trendline type (linear/exp/log/poly/movingAvg/power)"
+  );
+  Cell.setStyle(features, "A3", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "line",
       title: "All six trendline types",
@@ -1628,9 +1672,10 @@ async function main(): Promise<void> {
       }
     }
   ];
-  features.getCell("A25").value = "12.2 — every error-bar type (one per series)";
-  features.getCell("A25").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A25", "12.2 — every error-bar type (one per series)");
+  Cell.setStyle(features, "A25", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "scatter",
       scatterStyle: "marker",
@@ -1658,9 +1703,10 @@ async function main(): Promise<void> {
     "dash",
     "dot"
   ];
-  features.getCell("A47").value = "12.3 — every marker symbol";
-  features.getCell("A47").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A47", "12.3 — every marker symbol");
+  Cell.setStyle(features, "A47", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "line",
       title: "Marker catalogue",
@@ -1679,9 +1725,10 @@ async function main(): Promise<void> {
   );
 
   // --- 12.4 dropLines + serLines + hiLowLines + upDownBars on one chart
-  features.getCell("A70").value = "12.4 — dropLines / serLines / hiLowLines / upDownBars";
-  features.getCell("A70").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A70", "12.4 — dropLines / serLines / hiLowLines / upDownBars");
+  Cell.setStyle(features, "A70", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "line",
       title: "Drop lines + hi-low lines + up-down bars",
@@ -1700,10 +1747,14 @@ async function main(): Promise<void> {
     "A71:L90"
   );
 
-  features.getCell("A93").value =
-    "12.5 — pie with serLines (leader) + firstSliceAng + exploded point";
-  features.getCell("A93").font = { bold: true };
-  features.addChart(
+  Cell.setValue(
+    features,
+    "A93",
+    "12.5 — pie with serLines (leader) + firstSliceAng + exploded point"
+  );
+  Cell.setStyle(features, "A93", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "ofPie",
       ofPieType: "bar",
@@ -1727,9 +1778,10 @@ async function main(): Promise<void> {
   // --- 12.6 gapWidth / overlap / gapDepth demo — `overlap` is 2-D only
   // (CT_Bar3DChart has no overlap), so we show gapWidth + gapDepth on a
   // bar3D, plus overlap on a 2-D bar alongside.
-  features.getCell("A116").value = "12.6 — gapWidth + gapDepth (bar3D)";
-  features.getCell("A116").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A116", "12.6 — gapWidth + gapDepth (bar3D)");
+  Cell.setStyle(features, "A116", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar3D",
       barDir: "col",
@@ -1752,10 +1804,14 @@ async function main(): Promise<void> {
   );
 
   // --- 12.7 doughnut with several holeSize values (via dataPoints)
-  features.getCell("A139").value =
-    "12.7 — overlap (2-D bar, bar3D has no overlap in CT_Bar3DChart)";
-  features.getCell("A139").font = { bold: true };
-  features.addChart(
+  Cell.setValue(
+    features,
+    "A139",
+    "12.7 — overlap (2-D bar, bar3D has no overlap in CT_Bar3DChart)"
+  );
+  Cell.setStyle(features, "A139", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar",
       barDir: "col",
@@ -1776,9 +1832,10 @@ async function main(): Promise<void> {
     "A140:L159"
   );
 
-  features.getCell("A162").value = "12.8 — doughnut with holeSize=75";
-  features.getCell("A162").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A162", "12.8 — doughnut with holeSize=75");
+  Cell.setStyle(features, "A162", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "doughnut",
       holeSize: 75,
@@ -1802,8 +1859,8 @@ async function main(): Promise<void> {
   );
 
   // --- 12.9 data labels with valueFromCells (Excel 2013+)
-  const labelsSheet = wb.addWorksheet("12b-Value-From-Cells");
-  labelsSheet.addRows([
+  const labelsSheet = Workbook.addWorksheet(wb, "12b-Value-From-Cells");
+  Worksheet.addRows(labelsSheet, [
     ["Label", "Units"],
     ["🔥 Hot", 540],
     ["🌤 Warm", 620],
@@ -1812,10 +1869,14 @@ async function main(): Promise<void> {
     ["💧 Rainy", 805],
     ["⚡ Storm", 880]
   ]);
-  features.getCell("A185").value =
-    "12.9 — data labels valueFromCells (Excel 2013+ 'Value From Cells')";
-  features.getCell("A185").font = { bold: true };
-  features.addChart(
+  Cell.setValue(
+    features,
+    "A185",
+    "12.9 — data labels valueFromCells (Excel 2013+ 'Value From Cells')"
+  );
+  Cell.setStyle(features, "A185", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar",
       barDir: "col",
@@ -1839,10 +1900,14 @@ async function main(): Promise<void> {
   );
 
   // --- 12.10 per-entry data label overrides
-  features.getCell("A208").value =
-    "12.10 — per-entry data label overrides (hide / custom text / recolour)";
-  features.getCell("A208").font = { bold: true };
-  features.addChart(
+  Cell.setValue(
+    features,
+    "A208",
+    "12.10 — per-entry data label overrides (hide / custom text / recolour)"
+  );
+  Cell.setStyle(features, "A208", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar",
       barDir: "col",
@@ -1897,9 +1962,10 @@ async function main(): Promise<void> {
   );
 
   // --- 12.11 gradient fill
-  features.getCell("A231").value = "12.11 — series filled with a linear gradient";
-  features.getCell("A231").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A231", "12.11 — series filled with a linear gradient");
+  Cell.setStyle(features, "A231", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar",
       barDir: "col",
@@ -1928,9 +1994,10 @@ async function main(): Promise<void> {
   );
 
   // --- 12.12 pattern fill
-  features.getCell("A254").value = "12.12 — pattern fill (preset 'dashDnDiag')";
-  features.getCell("A254").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A254", "12.12 — pattern fill (preset 'dashDnDiag')");
+  Cell.setStyle(features, "A254", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar",
       barDir: "col",
@@ -1956,8 +2023,8 @@ async function main(): Promise<void> {
   );
 
   // --- 12.13 scatter with xValueType: "text"
-  const xTextSheet = wb.addWorksheet("12c-Text-X-Axis");
-  xTextSheet.addRows([
+  const xTextSheet = Workbook.addWorksheet(wb, "12c-Text-X-Axis");
+  Worksheet.addRows(xTextSheet, [
     ["Phase", "Value"],
     ["Alpha", 22],
     ["Beta", 41],
@@ -1965,9 +2032,10 @@ async function main(): Promise<void> {
     ["Delta", 52],
     ["Epsilon", 60]
   ]);
-  features.getCell("A277").value = "12.13 — scatter with text x-axis (xValueType='text')";
-  features.getCell("A277").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A277", "12.13 — scatter with text x-axis (xValueType='text')");
+  Cell.setStyle(features, "A277", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "scatter",
       scatterStyle: "lineMarker",
@@ -1986,16 +2054,17 @@ async function main(): Promise<void> {
   );
 
   // --- 12.14 date axis with custom time units
-  const timeSheet = wb.addWorksheet("12d-Date-Axis");
-  timeSheet.addRow(["Date", "Incidents"]);
+  const timeSheet = Workbook.addWorksheet(wb, "12d-Date-Axis");
+  Worksheet.addRow(timeSheet, ["Date", "Incidents"]);
   for (let i = 0; i < 12; i++) {
     const date = new Date(Date.UTC(2024, i, 15));
-    timeSheet.addRow([date, 20 + Math.round(Math.sin(i) * 10) + i]);
+    Worksheet.addRow(timeSheet, [date, 20 + Math.round(Math.sin(i) * 10) + i]);
   }
-  timeSheet.getColumn(1).numFmt = "yyyy-mm-dd";
-  features.getCell("A300").value = "12.14 — date axis (baseTimeUnit=months)";
-  features.getCell("A300").font = { bold: true };
-  features.addChart(
+  Column.setStyle(timeSheet, 1, { numFmt: "yyyy-mm-dd" });
+  Cell.setValue(features, "A300", "12.14 — date axis (baseTimeUnit=months)");
+  Cell.setStyle(features, "A300", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "line",
       title: "Incidents per month",
@@ -2019,9 +2088,10 @@ async function main(): Promise<void> {
   );
 
   // --- 12.15 null title (autoTitleDeleted)
-  features.getCell("A323").value = "12.15 — title: null — Excel will NOT auto-generate a title";
-  features.getCell("A323").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A323", "12.15 — title: null — Excel will NOT auto-generate a title");
+  Cell.setStyle(features, "A323", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "bar",
       barDir: "col",
@@ -2033,9 +2103,10 @@ async function main(): Promise<void> {
   );
 
   // --- 12.16 plotVisOnly / displayBlanksAs / showDLblsOverMax
-  features.getCell("A346").value = "12.16 — plotVisOnly + displayBlanksAs + showDLblsOverMax";
-  features.getCell("A346").font = { bold: true };
-  features.addChart(
+  Cell.setValue(features, "A346", "12.16 — plotVisOnly + displayBlanksAs + showDLblsOverMax");
+  Cell.setStyle(features, "A346", { font: { bold: true } });
+  Chart.add(
+    features,
     {
       type: "line",
       title: "Interpolated across blanks",
@@ -2054,9 +2125,9 @@ async function main(): Promise<void> {
   //     sheet first.
   // ---------------------------------------------------------------------------
 
-  const headless = wb.addWorksheet("13-Headless Literal Data");
-  headless.addRow(["Literal (no worksheet ranges)"]);
-  headless.getCell("A1").font = { bold: true };
+  const headless = Workbook.addWorksheet(wb, "13-Headless Literal Data");
+  Worksheet.addRow(headless, ["Literal (no worksheet ranges)"]);
+  Cell.setStyle(headless, "A1", { font: { bold: true } });
 
   // Literal classic chart — `literalValues` on a regular chart. The
   // builder emits a `c:numLit` for values + `c:strLit` for categories
@@ -2064,20 +2135,24 @@ async function main(): Promise<void> {
   // any cell. (Writers that also want live data should additionally
   // set `categories` / `values` to a real range; the literal caches
   // act as a seed.)
-  headless.getCell("A3").value =
-    "13.1 — classic chart with literalCategories + literalValues (pie)";
-  headless.getCell("A3").font = { bold: true };
+  Cell.setValue(
+    headless,
+    "A3",
+    "13.1 — classic chart with literalCategories + literalValues (pie)"
+  );
+  Cell.setStyle(headless, "A3", { font: { bold: true } });
   // The classic chart literal path writes the cache via a real range
   // pointing at cells we pre-populate here. Excel renders from the
   // cache so the referenced cells never have to be present, but an
   // addressable range keeps the XML valid when the file is re-opened.
-  headless.addRows([
+  Worksheet.addRows(headless, [
     ["Alpha", 30],
     ["Beta", 45],
     ["Gamma", 15],
     ["Delta", 10]
   ]);
-  headless.addChart(
+  Chart.add(
+    headless,
     {
       type: "pie",
       title: "Literal pie",
@@ -2096,9 +2171,10 @@ async function main(): Promise<void> {
 
   // ChartEx treemap with `literalHierarchy` — the modern path that
   // genuinely takes literal arrays and produces a self-contained part.
-  headless.getCell("A23").value = "13.2 — ChartEx treemap with literalCategories + literalValues";
-  headless.getCell("A23").font = { bold: true };
-  headless.addChartEx(
+  Cell.setValue(headless, "A23", "13.2 — ChartEx treemap with literalCategories + literalValues");
+  Cell.setStyle(headless, "A23", { font: { bold: true } });
+  Chart.addEx(
+    headless,
     {
       type: "treemap",
       title: "Literal treemap",
@@ -2127,11 +2203,12 @@ async function main(): Promise<void> {
   // 14. Chart editing — getter/setter + mutation APIs on the Chart object.
   // ---------------------------------------------------------------------------
 
-  const edit = wb.addWorksheet("14-Chart Editing");
-  edit.addRow(["Chart editing"]);
-  edit.getCell("A1").font = { bold: true };
+  const edit = Workbook.addWorksheet(wb, "14-Chart Editing");
+  Worksheet.addRow(edit, ["Chart editing"]);
+  Cell.setStyle(edit, "A1", { font: { bold: true } });
 
-  edit.addChart(
+  Chart.add(
+    edit,
     {
       type: "bar",
       barDir: "col",
@@ -2149,21 +2226,25 @@ async function main(): Promise<void> {
     "A3:L22"
   );
 
-  const editing = edit.getCharts()[0];
+  const editing = Chart.get(edit)[0];
 
   // `chartTypes` — inspect the plot-area groups. Classic charts have one
   // entry per chart-type group; combo charts return one per group.
-  console.log("Editing chart groups:", editing.chartTypes.length, editing.chartTypes[0]?.type);
-  console.log("Initial series count:", editing.getSeriesCount());
+  console.log(
+    "Editing chart groups:",
+    Chart.chartTypes(editing).length,
+    Chart.chartTypes(editing)[0]?.type
+  );
+  console.log("Initial series count:", Chart.getSeriesCount(editing));
 
   // Mutate the title via the setter — triggers a raw-patch.
-  editing.title = "Retitled via setter";
+  Chart.setTitle(editing, "Retitled via setter");
 
   // Pull an existing series, modify it with `updateSeries`.
-  editing.updateSeries(0, { line: "C00000", lineWidth: 2, fill: "C00000" });
+  Chart.updateSeries(editing, 0, { line: "C00000", lineWidth: 2, fill: "C00000" });
 
   // `addSeriesFromOptions` — append a second series after construction.
-  editing.addSeriesFromOptions({
+  Chart.addSeriesFromOptions(editing, {
     name: "Profit",
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$C$2:$C$7",
@@ -2173,18 +2254,19 @@ async function main(): Promise<void> {
 
   // `removeSeries(index)` — drop a series by index (returns the removed
   // object). Here we append a throwaway series then remove it.
-  editing.addSeriesFromOptions({
+  Chart.addSeriesFromOptions(editing, {
     name: "Throwaway",
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$E$2:$E$7"
   });
-  editing.removeSeries(editing.getSeriesCount() - 1);
+  Chart.removeSeries(editing, Chart.getSeriesCount(editing) - 1);
 
   // Low-level `setStyle(N)` toggle — applies one of the 48 built-in styles.
-  editing.setStyle(26);
+  Chart.setStyle(editing, 26);
 
-  // `setBuiltInStyle(N)` — xlsxwriter-compatible alias for `setStyle`.
-  edit.addChart(
+  // `setBuiltInStyle(N)` — alias for `setStyle`.
+  Chart.add(
+    edit,
     {
       type: "bar",
       barDir: "col",
@@ -2193,7 +2275,7 @@ async function main(): Promise<void> {
     },
     "A25:L44"
   );
-  edit.getCharts()[1].setBuiltInStyle(42);
+  Chart.setBuiltInStyle(Chart.get(edit)[1], 42);
 
   // Narrow mutation on an already-built chart via `mutate(fn)`. The
   // callback receives the structured `ChartModel`; any fields touched
@@ -2201,7 +2283,8 @@ async function main(): Promise<void> {
   // `preferRawPatch: true` to keep the bytes for untouched blocks,
   // and `requireRawPatch: true` to FAIL if the edit would force a
   // structural rebuild.
-  edit.addChart(
+  Chart.add(
+    edit,
     {
       type: "line",
       title: "Mutated via chart.mutate()",
@@ -2209,8 +2292,9 @@ async function main(): Promise<void> {
     },
     "A47:L66"
   );
-  const toMutate = edit.getCharts()[2];
-  toMutate.mutate(
+  const toMutate = Chart.get(edit)[2];
+  Chart.mutate(
+    toMutate,
     model => {
       // Flip the first series into a heavy red dashed line.
       const firstGroup = model.chart.plotArea.chartTypes[0];
@@ -2225,9 +2309,10 @@ async function main(): Promise<void> {
   );
 
   // `mutateChartEx(fn)` — same idea for a ChartEx chart.
-  edit.getCell("A69").value = "chart.mutateChartEx() — edit a treemap parentLabelLayout";
-  edit.getCell("A69").font = { bold: true };
-  edit.addChartEx(
+  Cell.setValue(edit, "A69", "chart.mutateChartEx() — edit a treemap parentLabelLayout");
+  Cell.setStyle(edit, "A69", { font: { bold: true } });
+  Chart.addEx(
+    edit,
     {
       type: "treemap",
       title: "Treemap — parentLabelLayout='banner'",
@@ -2242,8 +2327,9 @@ async function main(): Promise<void> {
     },
     "A70:L89"
   );
-  const exChart = edit.getCharts()[3];
-  exChart.mutateChartEx(
+  const exChart = Chart.get(edit)[3];
+  Chart.mutateChartEx(
+    exChart,
     model => {
       const series = model.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0];
       if (series) {
@@ -2255,7 +2341,7 @@ async function main(): Promise<void> {
 
   // `removeUserShapes()` — no-op on freshly-built charts (they carry no
   // user shapes); demonstrated here so the code path is exercised.
-  editing.removeUserShapes();
+  Chart.removeUserShapes(editing);
 
   // ---------------------------------------------------------------------------
   // 15. Low-level builders — call `buildChartModel` /
@@ -2313,12 +2399,13 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const logo = makeSolidColorPng(128, 64, 0x70ad47);
-  const logoId = wb.addImage({ buffer: logo, extension: "png" });
+  const logoId = Image.add(wb, { buffer: logo, extension: "png" });
 
-  const pic = wb.addWorksheet("16-Picture Fill");
-  pic.addRow(["Picture-fill via workbookImageId"]);
-  pic.getCell("A1").font = { bold: true };
-  pic.addChart(
+  const pic = Workbook.addWorksheet(wb, "16-Picture Fill");
+  Worksheet.addRow(pic, ["Picture-fill via workbookImageId"]);
+  Cell.setStyle(pic, "A1", { font: { bold: true } });
+  Chart.add(
+    pic,
     {
       type: "bar",
       barDir: "col",
@@ -2342,9 +2429,9 @@ async function main(): Promise<void> {
   //     differences are purely visual.
   // ---------------------------------------------------------------------------
 
-  const catalogue = wb.addWorksheet("17-Full Preset Catalogue");
-  catalogue.addRow(["All 99 classic presets"]);
-  catalogue.getCell("A1").font = { bold: true };
+  const catalogue = Workbook.addWorksheet(wb, "17-Full Preset Catalogue");
+  Worksheet.addRow(catalogue, ["All 99 classic presets"]);
+  Cell.setStyle(catalogue, "A1", { font: { bold: true } });
 
   const presetNames = Object.keys(CHART_PRESETS);
   console.log(`Writing ${presetNames.length} presets on one sheet …`);
@@ -2361,8 +2448,8 @@ async function main(): Promise<void> {
     const endRow = startRow + chartH - 1;
 
     // Write the preset name above the chart.
-    catalogue.getCell(startRow - 1, startCol + 1).value = name;
-    catalogue.getCell(startRow - 1, startCol + 1).font = { bold: true, size: 10 };
+    Cell.setValue(catalogue, startRow - 1, startCol + 1, name);
+    Cell.setStyle(catalogue, startRow - 1, startCol + 1, { font: { bold: true, size: 10 } });
 
     // Pick series inputs compatible with every preset family — surface
     // needs a 2-D matrix, stock needs OHLC, scatter/bubble need xValues.
@@ -2398,7 +2485,8 @@ async function main(): Promise<void> {
       ];
     }
 
-    catalogue.addPresetChart(
+    Chart.addPreset(
+      catalogue,
       name as (typeof EXCEL_CHART_PRESETS)[number],
       { title: name, series, showLegend: false },
       {
@@ -2412,7 +2500,7 @@ async function main(): Promise<void> {
   // 18. Chartsheet with custom page setup + replaceChart demo
   // ---------------------------------------------------------------------------
 
-  const cs = wb.addChartsheet("Custom Chartsheet", {
+  const cs = Workbook.addChartsheet(wb, "Custom Chartsheet", {
     tabSelected: false,
     zoomScale: 90,
     zoomToFit: false,
@@ -2428,7 +2516,7 @@ async function main(): Promise<void> {
 
   // `replaceChart` — swap the chart out in-place, preserving the tab
   // settings + page setup we just configured.
-  cs.replaceChart({
+  Workbook.replaceChartsheetChart(wb, Chartsheet.name(cs), {
     type: "line",
     title: "Replaced after creation",
     showMarker: true,
@@ -2460,14 +2548,15 @@ async function main(): Promise<void> {
   // (the high-level options don't always expose every leaf of the
   // OOXML schema — this shows how to reach in when you need to).
 
-  const advanced = wb.addWorksheet("19-Advanced Shape & Effects");
-  advanced.addRow(["Advanced shape / effects"]);
-  advanced.getCell("A1").font = { bold: true };
+  const advanced = Workbook.addWorksheet(wb, "19-Advanced Shape & Effects");
+  Worksheet.addRow(advanced, ["Advanced shape / effects"]);
+  Cell.setStyle(advanced, "A1", { font: { bold: true } });
 
   // --- 19.1 chart-level frame — rounded corners + gradient background
-  advanced.getCell("A3").value = "19.1 — chart-level spPr (background gradient + border)";
-  advanced.getCell("A3").font = { bold: true };
-  advanced.addChart(
+  Cell.setValue(advanced, "A3", "19.1 — chart-level spPr (background gradient + border)");
+  Cell.setStyle(advanced, "A3", { font: { bold: true } });
+  Chart.add(
+    advanced,
     {
       type: "bar",
       barDir: "col",
@@ -2476,8 +2565,8 @@ async function main(): Promise<void> {
     },
     "A4:L23"
   );
-  const chartFrame = advanced.getCharts()[0];
-  chartFrame.mutate(model => {
+  const chartFrame = Chart.get(advanced)[0];
+  Chart.mutate(chartFrame, model => {
     model.spPr = {
       fill: {
         gradient: {
@@ -2495,10 +2584,14 @@ async function main(): Promise<void> {
   });
 
   // --- 19.2 every effect kind on one chart
-  advanced.getCell("A26").value =
-    "19.2 — EffectList: outerShadow + glow + softEdge + reflection + blur";
-  advanced.getCell("A26").font = { bold: true };
-  advanced.addChart(
+  Cell.setValue(
+    advanced,
+    "A26",
+    "19.2 — EffectList: outerShadow + glow + softEdge + reflection + blur"
+  );
+  Cell.setStyle(advanced, "A26", { font: { bold: true } });
+  Chart.add(
+    advanced,
     {
       type: "bar",
       barDir: "col",
@@ -2514,8 +2607,8 @@ async function main(): Promise<void> {
     },
     "A27:L46"
   );
-  const withEffects = advanced.getCharts()[1];
-  withEffects.mutate(model => {
+  const withEffects = Chart.get(advanced)[1];
+  Chart.mutate(withEffects, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -2556,9 +2649,10 @@ async function main(): Promise<void> {
   });
 
   // --- 19.3 Scene3D + ShapeProperties3D + Bevel on a bar3D chart
-  advanced.getCell("A49").value = "19.3 — Scene3D + sp3d bevel/extrusion/contour/material";
-  advanced.getCell("A49").font = { bold: true };
-  advanced.addChart(
+  Cell.setValue(advanced, "A49", "19.3 — Scene3D + sp3d bevel/extrusion/contour/material");
+  Cell.setStyle(advanced, "A49", { font: { bold: true } });
+  Chart.add(
+    advanced,
     {
       type: "bar3D",
       barDir: "col",
@@ -2575,8 +2669,8 @@ async function main(): Promise<void> {
     },
     "A50:L69"
   );
-  const with3D = advanced.getCharts()[2];
-  with3D.mutate(model => {
+  const with3D = Chart.get(advanced)[2];
+  Chart.mutate(with3D, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -2612,9 +2706,10 @@ async function main(): Promise<void> {
   });
 
   // --- 19.4 manual plot-area layout in edge mode
-  advanced.getCell("A72").value = "19.4 — manual plot-area layout (edge mode pins coordinates)";
-  advanced.getCell("A72").font = { bold: true };
-  advanced.addChart(
+  Cell.setValue(advanced, "A72", "19.4 — manual plot-area layout (edge mode pins coordinates)");
+  Cell.setStyle(advanced, "A72", { font: { bold: true } });
+  Chart.add(
+    advanced,
     {
       type: "bar",
       barDir: "col",
@@ -2641,9 +2736,10 @@ async function main(): Promise<void> {
   );
 
   // --- 19.5 chart-level PictureOptions (bar3D wall picture fills)
-  advanced.getCell("A95").value = "19.5 — chart-level PictureOptions (applyTo* for bar3D walls)";
-  advanced.getCell("A95").font = { bold: true };
-  advanced.addChart(
+  Cell.setValue(advanced, "A95", "19.5 — chart-level PictureOptions (applyTo* for bar3D walls)");
+  Cell.setStyle(advanced, "A95", { font: { bold: true } });
+  Chart.add(
+    advanced,
     {
       type: "bar3D",
       barDir: "col",
@@ -2667,8 +2763,8 @@ async function main(): Promise<void> {
     },
     "A96:L115"
   );
-  const picOpts = advanced.getCharts()[4];
-  picOpts.mutate(model => {
+  const picOpts = Chart.get(advanced)[4];
+  Chart.mutate(picOpts, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     // `pictureOptions` is a bar/area-specific slot (CT_BarSer /
     // CT_AreaSer / CT_Bar3DSer). Narrow to a bar-series model so TS
@@ -2691,9 +2787,10 @@ async function main(): Promise<void> {
   });
 
   // --- 19.6 bandFormats on surface chart — colour each contour band
-  advanced.getCell("A118").value = "19.6 — bandFormats on surface (per-level colour bands)";
-  advanced.getCell("A118").font = { bold: true };
-  advanced.addChart(
+  Cell.setValue(advanced, "A118", "19.6 — bandFormats on surface (per-level colour bands)");
+  Cell.setStyle(advanced, "A118", { font: { bold: true } });
+  Chart.add(
+    advanced,
     {
       type: "surface",
       title: "Surface with explicit band colours",
@@ -2726,10 +2823,11 @@ async function main(): Promise<void> {
   //         directly into a structured model without going through
   //         workbook I/O.
 
-  const copyPlayground = wb.addWorksheet("20a-Copy Source");
-  copyPlayground.addRow(["Chart copy source"]);
-  copyPlayground.getCell("A1").font = { bold: true };
-  copyPlayground.addChart(
+  const copyPlayground = Workbook.addWorksheet(wb, "20a-Copy Source");
+  Worksheet.addRow(copyPlayground, ["Chart copy source"]);
+  Cell.setStyle(copyPlayground, "A1", { font: { bold: true } });
+  Chart.add(
+    copyPlayground,
     {
       type: "bar",
       barDir: "col",
@@ -2745,35 +2843,38 @@ async function main(): Promise<void> {
     },
     "A3:L22"
   );
-  const sourceChart = copyPlayground.getCharts()[0];
+  const sourceChart = Chart.get(copyPlayground)[0];
 
   // --- 20.1 deep-copy the chart to a different worksheet
-  const copyDest = wb.addWorksheet("20b-Copy Destination");
-  copyDest.addRow(["Copies of the chart on the previous sheet"]);
-  copyDest.getCell("A1").font = { bold: true };
-  const copy1Num = sourceChart.copyTo(copyDest, "A3:L22");
-  const copy2Num = sourceChart.copyTo(copyDest, {
+  const copyDest = Workbook.addWorksheet(wb, "20b-Copy Destination");
+  Worksheet.addRow(copyDest, ["Copies of the chart on the previous sheet"]);
+  Cell.setStyle(copyDest, "A1", { font: { bold: true } });
+  const copy1Num = Chart.copyTo(sourceChart, copyDest, "A3:L22");
+  const copy2Num = Chart.copyTo(sourceChart, copyDest, {
     tl: { col: 1, row: 24 },
     ext: { cx: 5 * 914400, cy: 3 * 914400 },
     editAs: "oneCell"
   });
-  console.log(`Copied chart to sheet '${copyDest.name}' as #${copy1Num} and #${copy2Num}`);
+  console.log(
+    `Copied chart to sheet '${Worksheet.getName(copyDest)}' as #${copy1Num} and #${copy2Num}`
+  );
 
   // Modify the copy without touching the source — prove the clone is detached.
-  copyDest.getCharts()[0].title = "Copy (independent from source)";
-  copyDest.getCharts()[0].updateSeries(0, { fill: "70AD47" });
+  Chart.setTitle(Chart.get(copyDest)[0], "Copy (independent from source)");
+  Chart.updateSeries(Chart.get(copyDest)[0], 0, { fill: "70AD47" });
 
   // --- 20.2 vendor extensions (`c15:` / `cx14:`) round-trip
-  const extSheet = wb.addWorksheet("20c-Vendor Extensions");
-  extSheet.addRow(["Vendor extensions surviving round-trip"]);
-  extSheet.getCell("A1").font = { bold: true };
+  const extSheet = Workbook.addWorksheet(wb, "20c-Vendor Extensions");
+  Worksheet.addRow(extSheet, ["Vendor extensions surviving round-trip"]);
+  Cell.setStyle(extSheet, "A1", { font: { bold: true } });
 
   // Build a chart programmatically, then inject a synthetic `c15:` /
   // `c16:` extension directly into the chart model's `extLst` bag. On
   // re-parse the parser will record any child element it doesn't
   // structurally recognise into `ChartModel.unknownElements`; the
   // writer in strict-template-mode can then refuse to drop it.
-  extSheet.addChart(
+  Chart.add(
+    extSheet,
     {
       type: "bar",
       barDir: "col",
@@ -2782,18 +2883,18 @@ async function main(): Promise<void> {
     },
     "A3:L22"
   );
-  const ext = extSheet.getCharts()[0];
+  const ext = Chart.get(extSheet)[0];
   // Emulate a loaded chart that observed a vendor-only child element.
   // In real usage this happens automatically via `parseChart` when
   // reading an Excel-authored file; here we seed it so we can
   // demonstrate the getter.
-  ext.mutate(model => {
+  Chart.mutate(ext, model => {
     model.unknownElements = [
       { name: "c15:pivotSourceOverride", path: "c:chartSpace/c:extLst/c15:pivotSourceOverride" },
       { name: "c16:cachedValueSource", path: "c:chartSpace/c:extLst/c16:cachedValueSource" }
     ];
   });
-  console.log(`Unknown elements on ext chart:`, ext.unknownElements);
+  console.log(`Unknown elements on ext chart:`, Chart.unknownElements(ext));
 
   // --- 20.3 parse an external ChartEx XML string
   const syntheticChartExXml = [
@@ -2846,7 +2947,7 @@ async function main(): Promise<void> {
 
   // Start with a plain chartsheet we can mutate without breaking anything
   // the preview pipeline depends on.
-  const csLifecycle = wb.addChartsheet("Lifecycle-Original", {
+  const csLifecycle = Workbook.addChartsheet(wb, "Lifecycle-Original", {
     chart: {
       type: "bar",
       barDir: "col",
@@ -2856,56 +2957,55 @@ async function main(): Promise<void> {
   });
 
   // rename — returns true on success
-  csLifecycle.rename("Lifecycle-Renamed");
-  console.log(`Renamed chartsheet: ${csLifecycle.name}`);
+  Workbook.renameChartsheet(wb, Chartsheet.name(csLifecycle), "Lifecycle-Renamed");
+  console.log(`Renamed chartsheet: ${Chartsheet.name(csLifecycle)}`);
 
   // state — "visible" | "hidden" | "veryHidden"
-  csLifecycle.state = "hidden"; // hidden from the tab bar; still valid XLSX
-  console.log(`Hidden chartsheet state: ${csLifecycle.state}`);
+  Chartsheet.setState(csLifecycle, "hidden"); // hidden from the tab bar; still valid XLSX
+  console.log(`Hidden chartsheet state: ${Chartsheet.state(csLifecycle)}`);
 
   // zoomScale / zoomToFit can be adjusted at any time
-  csLifecycle.zoomScale = 110;
-  csLifecycle.zoomToFit = false;
+  Chartsheet.setZoomScale(csLifecycle, 110);
+  Chartsheet.setZoomToFit(csLifecycle, false);
 
   // copy — deep-clones the chartsheet into a new tab with its own chart.
-  const csCopy = csLifecycle.copy("Lifecycle-Copy");
+  const csCopy = Workbook.copyChartsheet(wb, Chartsheet.name(csLifecycle), "Lifecycle-Copy");
   if (csCopy) {
-    csCopy.state = "visible";
-    console.log(`Copied chartsheet: ${csCopy.name}`);
+    Chartsheet.setState(csCopy, "visible");
+    console.log(`Copied chartsheet: ${Chartsheet.name(csCopy)}`);
   }
 
   // A throwaway chartsheet we immediately remove to show the API.
-  const doomed = wb.addChartsheet("Lifecycle-Doomed", {
+  const doomed = Workbook.addChartsheet(wb, "Lifecycle-Doomed", {
     chart: {
       type: "pie",
       title: "To be removed",
       series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
     }
   });
-  const removed = doomed.remove();
+  const removed = Workbook.removeChartsheet(wb, Chartsheet.name(doomed));
   console.log(`Removed 'Lifecycle-Doomed': ${removed}`);
 
   // ---------------------------------------------------------------------------
   // 22. Sparklines — in-cell mini charts (x14:sparklineGroups).
   // ---------------------------------------------------------------------------
   //
-  // Sparklines live in a separate module (@excel/sparkline) because they
-  // are not proper chart parts — they are stored inside the worksheet's
-  // extension list, and Excel renders them as cell-level graphics.
+  // Sparklines are not proper chart parts — they are stored inside the
+  // worksheet's extension list, and Excel renders them as cell-level graphics.
   // Three types are supported: line / column / stacked (win-loss).
 
-  const spark = wb.addWorksheet("22-Sparklines");
-  spark.getColumn(1).width = 16;
-  spark.getColumn(8).width = 22;
-  spark.getRow(1).values = ["Metric", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Trend"];
-  spark.getRow(1).font = { bold: true };
-  spark.addRow(["Revenue", 120, 180, 160, 205, 232, 248]);
-  spark.addRow(["Profit", 32, 49, 41, 64, 75, 81]);
-  spark.addRow(["Delta", -5, 12, -3, 18, -2, 9]);
-  spark.addRow(["Units", 540, 620, 610, 710, 805, 880]);
+  const spark = Workbook.addWorksheet(wb, "22-Sparklines");
+  Column.setWidth(spark, 1, 16);
+  Column.setWidth(spark, 8, 22);
+  Row.setValues(spark, 1, ["Metric", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Trend"]);
+  Row.setFont(spark, 1, { bold: true });
+  Worksheet.addRow(spark, ["Revenue", 120, 180, 160, 205, 232, 248]);
+  Worksheet.addRow(spark, ["Profit", 32, 49, 41, 64, 75, 81]);
+  Worksheet.addRow(spark, ["Delta", -5, 12, -3, 18, -2, 9]);
+  Worksheet.addRow(spark, ["Units", 540, 620, 610, 710, 805, 880]);
 
   // Line sparkline with high/low/first/last markers
-  spark.addSparklineGroup({
+  Sparkline.add(spark, {
     type: "line",
     markers: true,
     high: true,
@@ -2923,14 +3023,14 @@ async function main(): Promise<void> {
   });
 
   // Column sparkline
-  spark.addSparklineGroup({
+  Sparkline.add(spark, {
     type: "column",
     lineColor: "4472C4",
     sparklines: [{ dataRef: "'22-Sparklines'!B3:G3", cellRef: "H3" }]
   });
 
   // Win-loss sparkline (stacked type) with negative bars
-  spark.addSparklineGroup({
+  Sparkline.add(spark, {
     type: "stacked",
     negative: true,
     lineColor: "70AD47",
@@ -2941,7 +3041,7 @@ async function main(): Promise<void> {
   });
 
   // Grouped sparklines — one group, multiple sparklines sharing styling.
-  const shared: AddSparklineGroupOptions = {
+  const shared: Sparkline.AddSparklineGroupOptions = {
     type: "line",
     markers: true,
     lineColor: "264478",
@@ -2953,9 +3053,9 @@ async function main(): Promise<void> {
       { dataRef: "'22-Sparklines'!B5:G5", cellRef: "J5" }
     ]
   };
-  spark.addSparklineGroup(shared);
+  Sparkline.add(spark, shared);
 
-  const allSparklineGroups: SparklineGroup[] = spark.getSparklineGroups();
+  const allSparklineGroups: Sparkline.SparklineGroup[] = Sparkline.list(spark);
   console.log(`Sparkline groups on the sheet: ${allSparklineGroups.length}`);
 
   // ---------------------------------------------------------------------------
@@ -2964,25 +3064,26 @@ async function main(): Promise<void> {
   //     shape properties, transform (rotation).
   // ---------------------------------------------------------------------------
 
-  const rare = wb.addWorksheet("23-Rare Features");
-  rare.addRow(["Rare features"]);
-  rare.getCell("A1").font = { bold: true };
+  const rare = Workbook.addWorksheet(wb, "23-Rare Features");
+  Worksheet.addRow(rare, ["Rare features"]);
+  Cell.setStyle(rare, "A1", { font: { bold: true } });
 
   // --- 23.1 multi-level categorical axis — Year / Quarter / Month
-  const mlData = wb.addWorksheet("23a-MultiLevel Data");
-  mlData.addRow(["Year", "Quarter", "Value"]);
-  mlData.addRow(["2023", "Q1", 120]);
-  mlData.addRow(["", "Q2", 180]);
-  mlData.addRow(["", "Q3", 160]);
-  mlData.addRow(["", "Q4", 205]);
-  mlData.addRow(["2024", "Q1", 232]);
-  mlData.addRow(["", "Q2", 248]);
-  mlData.addRow(["", "Q3", 260]);
-  mlData.addRow(["", "Q4", 290]);
+  const mlData = Workbook.addWorksheet(wb, "23a-MultiLevel Data");
+  Worksheet.addRow(mlData, ["Year", "Quarter", "Value"]);
+  Worksheet.addRow(mlData, ["2023", "Q1", 120]);
+  Worksheet.addRow(mlData, ["", "Q2", 180]);
+  Worksheet.addRow(mlData, ["", "Q3", 160]);
+  Worksheet.addRow(mlData, ["", "Q4", 205]);
+  Worksheet.addRow(mlData, ["2024", "Q1", 232]);
+  Worksheet.addRow(mlData, ["", "Q2", 248]);
+  Worksheet.addRow(mlData, ["", "Q3", 260]);
+  Worksheet.addRow(mlData, ["", "Q4", 290]);
 
-  rare.getCell("A3").value = "23.1 — multi-level string reference (category axis Year→Quarter)";
-  rare.getCell("A3").font = { bold: true };
-  rare.addChart(
+  Cell.setValue(rare, "A3", "23.1 — multi-level string reference (category axis Year→Quarter)");
+  Cell.setStyle(rare, "A3", { font: { bold: true } });
+  Chart.add(
+    rare,
     {
       type: "bar",
       barDir: "col",
@@ -3004,9 +3105,10 @@ async function main(): Promise<void> {
   );
 
   // --- 23.2 view3D with depthPercent + hPercent
-  rare.getCell("A26").value = "23.2 — view3D depthPercent (z-axis depth) + hPercent (wall height)";
-  rare.getCell("A26").font = { bold: true };
-  rare.addChart(
+  Cell.setValue(rare, "A26", "23.2 — view3D depthPercent (z-axis depth) + hPercent (wall height)");
+  Cell.setStyle(rare, "A26", { font: { bold: true } });
+  Chart.add(
+    rare,
     {
       type: "bar3D",
       barDir: "col",
@@ -3025,9 +3127,10 @@ async function main(): Promise<void> {
   );
 
   // --- 23.3 ChartEx rawLayoutId passthrough — vendor / future layoutId
-  rare.getCell("A49").value = "23.3 — ChartEx rawLayoutId (vendor / future layoutId passthrough)";
-  rare.getCell("A49").font = { bold: true };
-  rare.addChartEx(
+  Cell.setValue(rare, "A49", "23.3 — ChartEx rawLayoutId (vendor / future layoutId passthrough)");
+  Cell.setStyle(rare, "A49", { font: { bold: true } });
+  Chart.addEx(
+    rare,
     {
       type: "treemap",
       title: "Preserved rawLayoutId",
@@ -3042,7 +3145,7 @@ async function main(): Promise<void> {
     },
     "A50:L69"
   );
-  rare.getCharts()[2].mutateChartEx(model => {
+  Chart.mutateChartEx(Chart.get(rare)[2], model => {
     const series = model.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0];
     if (series) {
       // Simulate a series whose @layoutId is a vendor extension we
@@ -3055,9 +3158,10 @@ async function main(): Promise<void> {
   });
 
   // --- 23.4 preset geometry + custom geometry on a series spPr
-  rare.getCell("A72").value = "23.4 — PresetGeometry (roundRect) + CustomGeometry (star path)";
-  rare.getCell("A72").font = { bold: true };
-  rare.addChart(
+  Cell.setValue(rare, "A72", "23.4 — PresetGeometry (roundRect) + CustomGeometry (star path)");
+  Cell.setStyle(rare, "A72", { font: { bold: true } });
+  Chart.add(
+    rare,
     {
       type: "bar",
       barDir: "col",
@@ -3066,7 +3170,7 @@ async function main(): Promise<void> {
     },
     "A73:L92"
   );
-  rare.getCharts()[3].mutate(model => {
+  Chart.mutate(Chart.get(rare)[3], model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -3219,8 +3323,9 @@ async function main(): Promise<void> {
   );
 
   // Attach the programmatically-built sidecar to an actual chart.
-  const sidecar = wb.addWorksheet("25-Sidecar Attached");
-  sidecar.addChart(
+  const sidecar = Workbook.addWorksheet(wb, "25-Sidecar Attached");
+  Chart.add(
+    sidecar,
     {
       type: "bar",
       barDir: "col",
@@ -3430,11 +3535,12 @@ async function main(): Promise<void> {
   // Build a regionMap chart that uses the synthetic polygons at
   // render-time. The `categories` / `values` data identifies which
   // feature gets which value; the topology draws the boundary.
-  const topoSheet = wb.addWorksheet("27-TopoJSON RegionMap");
-  topoSheet.addRow(["Country", "Value"]);
-  topoSheet.addRow(["Alphaland", 820]);
-  topoSheet.addRow(["Betaland", 430]);
-  topoSheet.addChartEx(
+  const topoSheet = Workbook.addWorksheet(wb, "27-TopoJSON RegionMap");
+  Worksheet.addRow(topoSheet, ["Country", "Value"]);
+  Worksheet.addRow(topoSheet, ["Alphaland", 820]);
+  Worksheet.addRow(topoSheet, ["Betaland", 430]);
+  Chart.addEx(
+    topoSheet,
     {
       type: "regionMap",
       title: "RegionMap with synthetic TopoJSON polygons",
@@ -3453,8 +3559,8 @@ async function main(): Promise<void> {
     projection: "mercator",
     strokeColor: "#FFFFFF"
   };
-  const regionMapChart = topoSheet.getCharts()[0];
-  const regionMapSvg = regionMapChart.toSVG({
+  const regionMapChart = Chart.get(topoSheet)[0];
+  const regionMapSvg = Chart.toSVG(regionMapChart, {
     width: 640,
     height: 400,
     regionMap: regionMapOpts
@@ -3463,9 +3569,9 @@ async function main(): Promise<void> {
 
   // --- 27.7 applyChartPreset / applyChartExPreset direct invocation
   //
-  // `worksheet.addPresetChart("lineMarkers", opts, range)` is a thin
+  // `worksheet.Chart.addPreset("lineMarkers", opts, range)` is a thin
   // wrapper over `applyChartPreset("lineMarkers", opts)` +
-  // `worksheet.addChart(mergedOpts, range)`. Splitting the two lets
+  // `worksheet.Chart.add(mergedOpts, range)`. Splitting the two lets
   // you transform the merged options bag before it hits the builder
   // (e.g. to mutate colours, inject additional series, etc.).
   const presetMerged: AddChartOptions = applyChartPreset("lineMarkers", {
@@ -3475,15 +3581,15 @@ async function main(): Promise<void> {
   // Post-hoc edit the merged options — swap in a stacked grouping.
   presetMerged.grouping = "stacked";
   presetMerged.showMarker = true;
-  const presetWs = wb.addWorksheet("27b-Applied Presets");
-  presetWs.addChart(presetMerged, "A1:L20");
+  const presetWs = Workbook.addWorksheet(wb, "27b-Applied Presets");
+  Chart.add(presetWs, presetMerged, "A1:L20");
 
   const presetExMerged = applyChartExPreset("boxAndWhisker", {
     title: "Applied ChartEx preset",
     categories: "Distribution!$A$1:$A$1",
     series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }]
   });
-  presetWs.addChartEx(presetExMerged, "A22:L41");
+  Chart.addEx(presetWs, presetExMerged, "A22:L41");
 
   // ---------------------------------------------------------------------------
   // 28. Axis edge cases — every axis / label option Excel exposes that
@@ -3498,8 +3604,8 @@ async function main(): Promise<void> {
   // examples below. 90 rows is enough to force Excel to overlap labels
   // with the default skip=1 setting, so the demo clearly shows the
   // effect of thinning the tick labels.
-  const dense = wb.addWorksheet("28-Dense Daily");
-  dense.addRow(["Date", "Incidents"]);
+  const dense = Workbook.addWorksheet(wb, "28-Dense Daily");
+  Worksheet.addRow(dense, ["Date", "Incidents"]);
   {
     const start = Date.UTC(2024, 0, 1);
     for (let i = 0; i < 90; i++) {
@@ -3507,19 +3613,19 @@ async function main(): Promise<void> {
       // Mild trend + sinusoidal noise so the line chart has visible
       // structure rather than a straight line.
       const value = 20 + Math.round(Math.sin(i / 7) * 5 + i / 10);
-      dense.addRow([date, value]);
+      Worksheet.addRow(dense, [date, value]);
     }
   }
-  dense.getColumn(1).numFmt = "yyyy-mm-dd";
+  Column.setStyle(dense, 1, { numFmt: "yyyy-mm-dd" });
 
   // Monthly P&L with mixed positive/negative results for the
   // `invertIfNegative` demo. Losses in Feb/May make the inverted
   // colour swap visible without editing the existing Sales sheet
   // (which is monotone-positive and is consumed by dozens of
   // upstream charts).
-  const pnl = wb.addWorksheet("28-PnL");
-  pnl.addRow(["Month", "Net"]);
-  pnl.addRows([
+  const pnl = Workbook.addWorksheet(wb, "28-PnL");
+  Worksheet.addRow(pnl, ["Month", "Net"]);
+  Worksheet.addRows(pnl, [
     ["Jan", 120],
     ["Feb", -45],
     ["Mar", 85],
@@ -3527,20 +3633,21 @@ async function main(): Promise<void> {
     ["May", -30],
     ["Jun", 175]
   ]);
-  pnl.getColumn(2).numFmt = "$#,##0;[Red]-$#,##0";
+  Column.setStyle(pnl, 2, { numFmt: "$#,##0;[Red]-$#,##0" });
 
-  const axisEdge = wb.addWorksheet("28-Axis Edge Cases");
-  axisEdge.addRow(["Axis edge cases"]);
-  axisEdge.getCell("A1").font = { bold: true };
+  const axisEdge = Workbook.addWorksheet(wb, "28-Axis Edge Cases");
+  Worksheet.addRow(axisEdge, ["Axis edge cases"]);
+  Cell.setStyle(axisEdge, "A1", { font: { bold: true } });
 
   // --- 28.1 `invertIfNegative` — bars flip fill colour when the value
   //     is negative. Excel's default is `false`; turning it on is the
   //     OOXML equivalent of the "Invert if negative" checkbox in the
   //     Format Data Series dialog. Requires `fill` so Excel has a
   //     positive-side colour to invert from.
-  axisEdge.getCell("A3").value = "28.1 — invertIfNegative (bar auto-flips colour on negatives)";
-  axisEdge.getCell("A3").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A3", "28.1 — invertIfNegative (bar auto-flips colour on negatives)");
+  Cell.setStyle(axisEdge, "A3", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "bar",
       barDir: "col",
@@ -3569,9 +3676,10 @@ async function main(): Promise<void> {
   // --- 28.2 `orientation: "maxMin"` — reverse the axis so values
   //     count down. Common on financial / ranking charts where the
   //     top rank sits at the top of the Y axis.
-  axisEdge.getCell("A26").value = "28.2 — orientation: 'maxMin' (reversed value axis)";
-  axisEdge.getCell("A26").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A26", "28.2 — orientation: 'maxMin' (reversed value axis)");
+  Cell.setStyle(axisEdge, "A26", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "bar",
       barDir: "bar",
@@ -3598,9 +3706,10 @@ async function main(): Promise<void> {
   //     X axis cross the Y axis at a specific value (here the monthly
   //     target $180k). Lets callers draw "above target / below target"
   //     charts where the bars hang off a non-zero baseline.
-  axisEdge.getCell("A49").value = "28.3 — crossesAt: target line at $180k";
-  axisEdge.getCell("A49").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A49", "28.3 — crossesAt: target line at $180k");
+  Cell.setStyle(axisEdge, "A49", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "bar",
       barDir: "col",
@@ -3637,9 +3746,10 @@ async function main(): Promise<void> {
   //     ticks. Mostly visible on line charts: `between` (default) makes
   //     the line start half a tick in from the left; `midCat` starts
   //     it flush against the axis.
-  axisEdge.getCell("A72").value = "28.4 — crossBetween: 'midCat' (line flush against axis)";
-  axisEdge.getCell("A72").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A72", "28.4 — crossBetween: 'midCat' (line flush against axis)");
+  Cell.setStyle(axisEdge, "A72", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "line",
       title: "crossBetween = midCat",
@@ -3662,9 +3772,10 @@ async function main(): Promise<void> {
   //     out. `tickLblSkip: 10` means "label every 10th tick" — the
   //     tick marks themselves still render at each data point, but
   //     only one in ten carries a visible label.
-  axisEdge.getCell("A95").value = "28.5 — tickLblSkip=10 / tickMarkSkip=5 (90-day daily axis)";
-  axisEdge.getCell("A95").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A95", "28.5 — tickLblSkip=10 / tickMarkSkip=5 (90-day daily axis)");
+  Cell.setStyle(axisEdge, "A95", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "line",
       title: "90 days of incidents — labels every 10 days",
@@ -3692,9 +3803,10 @@ async function main(): Promise<void> {
   //     and spacing. `lblAlgn: "l"` left-aligns labels against their
   //     tick; `lblOffset: 200` pushes them further from the axis
   //     (default 100 = flush against tick marks).
-  axisEdge.getCell("A118").value = "28.6 — lblAlgn='l' + lblOffset=200 (left-aligned, pushed away)";
-  axisEdge.getCell("A118").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A118", "28.6 — lblAlgn='l' + lblOffset=200 (left-aligned, pushed away)");
+  Cell.setStyle(axisEdge, "A118", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "bar",
       barDir: "col",
@@ -3735,9 +3847,10 @@ async function main(): Promise<void> {
     "sysDashDot",
     "sysDashDotDot"
   ];
-  axisEdge.getCell("A141").value = "28.7 — every lineDash style (11 variants)";
-  axisEdge.getCell("A141").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A141", "28.7 — every lineDash style (11 variants)");
+  Cell.setStyle(axisEdge, "A141", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "line",
       title: "Catalogue of line-dash presets",
@@ -3761,9 +3874,10 @@ async function main(): Promise<void> {
   // --- 28.8 Log axis with an explicit `logBase: 2` (the Excel UI
   //     defaults to 10, but any integer >= 2 is valid). Showcases
   //     that our log axis isn't hardcoded to base-10.
-  axisEdge.getCell("A178").value = "28.8 — logBase=2 value axis (binary decade ticks)";
-  axisEdge.getCell("A178").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A178", "28.8 — logBase=2 value axis (binary decade ticks)");
+  Cell.setStyle(axisEdge, "A178", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "line",
       title: "Log scale — base 2",
@@ -3792,9 +3906,10 @@ async function main(): Promise<void> {
   //     flag Excel clips the label along with the bar; with it set,
   //     the label "floats" above the plot area so the number stays
   //     readable.
-  axisEdge.getCell("A201").value = "28.9 — showDLblsOverMax: clipped bars still label";
-  axisEdge.getCell("A201").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A201", "28.9 — showDLblsOverMax: clipped bars still label");
+  Cell.setStyle(axisEdge, "A201", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "bar",
       barDir: "col",
@@ -3820,9 +3935,10 @@ async function main(): Promise<void> {
   //     `outEnd` labels emit leader lines connecting each slice to
   //     its label when the flag is on. Turning it off (default on
   //     some Excel builds) leaves the labels visually detached.
-  axisEdge.getCell("A224").value = "28.10 — pie with explicit showLeaderLines";
-  axisEdge.getCell("A224").font = { bold: true };
-  axisEdge.addChart(
+  Cell.setValue(axisEdge, "A224", "28.10 — pie with explicit showLeaderLines");
+  Cell.setStyle(axisEdge, "A224", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "pie",
       title: "Revenue by month — leader lines on",
@@ -3850,11 +3966,12 @@ async function main(): Promise<void> {
   //     without repeating the `Sheet!$A$1:$A$n` formula. Common
   //     when Excel users save a file with named ranges and expect
   //     round-trip fidelity.
-  wb.definedNames.add("Sales!$A$2:$A$7", "MonthCategories");
-  wb.definedNames.add("Sales!$B$2:$B$7", "MonthRevenue");
-  axisEdge.getCell("A247").value = "28.11 — categories / values via defined names";
-  axisEdge.getCell("A247").font = { bold: true };
-  axisEdge.addChart(
+  DefinedNames.add(Workbook.getDefinedNames(wb), "Sales!$A$2:$A$7", "MonthCategories");
+  DefinedNames.add(Workbook.getDefinedNames(wb), "Sales!$B$2:$B$7", "MonthRevenue");
+  Cell.setValue(axisEdge, "A247", "28.11 — categories / values via defined names");
+  Cell.setStyle(axisEdge, "A247", { font: { bold: true } });
+  Chart.add(
+    axisEdge,
     {
       type: "bar",
       barDir: "col",
@@ -3883,9 +4000,9 @@ async function main(): Promise<void> {
   // Sparse monthly data with two "hole" months, used by the three
   // `displayBlanksAs` charts below to visualise each mode against
   // the same numbers.
-  const sparse = wb.addWorksheet("29-Sparse");
-  sparse.addRow(["Month", "Revenue"]);
-  sparse.addRows([
+  const sparse = Workbook.addWorksheet(wb, "29-Sparse");
+  Worksheet.addRow(sparse, ["Month", "Revenue"]);
+  Worksheet.addRows(sparse, [
     ["Jan", 120],
     ["Feb", null],
     ["Mar", 160],
@@ -3894,9 +4011,9 @@ async function main(): Promise<void> {
     ["Jun", 248]
   ]);
 
-  const dataEdge = wb.addWorksheet("29-Data Handling");
-  dataEdge.addRow(["Data-handling edge cases"]);
-  dataEdge.getCell("A1").font = { bold: true };
+  const dataEdge = Workbook.addWorksheet(wb, "29-Data Handling");
+  Worksheet.addRow(dataEdge, ["Data-handling edge cases"]);
+  Cell.setStyle(dataEdge, "A1", { font: { bold: true } });
 
   // --- 29.1 `displayBlanksAs` variants side-by-side. `gap` (default)
   //     leaves visible gaps in the line; `zero` treats blanks as 0
@@ -3906,9 +4023,10 @@ async function main(): Promise<void> {
   for (let i = 0; i < blanksModes.length; i++) {
     const mode = blanksModes[i];
     const row = 3 + i * 22;
-    dataEdge.getCell(`A${row}`).value = `29.1.${i + 1} — displayBlanksAs: '${mode}'`;
-    dataEdge.getCell(`A${row}`).font = { bold: true };
-    dataEdge.addChart(
+    Cell.setValue(dataEdge, `A${row}`, `29.1.${i + 1} — displayBlanksAs: '${mode}'`);
+    Cell.setStyle(dataEdge, `A${row}`, { font: { bold: true } });
+    Chart.add(
+      dataEdge,
       {
         type: "line",
         title: `Sparse data rendered with displayBlanksAs='${mode}'`,
@@ -3933,9 +4051,10 @@ async function main(): Promise<void> {
   //     axis end of each bar — useful for negative values because
   //     it keeps the number anchored at the zero line instead of
   //     floating below the plot area.
-  dataEdge.getCell("A70").value = "29.2 — negative bars with invertIfNegative + dLblPos 'inBase'";
-  dataEdge.getCell("A70").font = { bold: true };
-  dataEdge.addChart(
+  Cell.setValue(dataEdge, "A70", "29.2 — negative bars with invertIfNegative + dLblPos 'inBase'");
+  Cell.setStyle(dataEdge, "A70", { font: { bold: true } });
+  Chart.add(
+    dataEdge,
     {
       type: "bar",
       barDir: "col",
@@ -3967,9 +4086,10 @@ async function main(): Promise<void> {
   //     choice group), but enumerating each point with `delete: true`
   //     achieves the same "silence all labels" outcome against a
   //     chart style that otherwise turns them on.
-  dataEdge.getCell("A93").value = "29.3 — per-entry delete suppresses every auto-label";
-  dataEdge.getCell("A93").font = { bold: true };
-  dataEdge.addChart(
+  Cell.setValue(dataEdge, "A93", "29.3 — per-entry delete suppresses every auto-label");
+  Cell.setStyle(dataEdge, "A93", { font: { bold: true } });
+  Chart.add(
+    dataEdge,
     {
       type: "bar",
       barDir: "col",
@@ -4001,8 +4121,8 @@ async function main(): Promise<void> {
   // 3 series), OHLC (Open-High-Low-Close, 4), VHLC (Volume-High-
   // Low-Close, 4) and VOHLC (Volume-Open-High-Low-Close, 5). The
   // existing gallery covers OHLC — add the other three here.
-  const stockMulti = wb.addWorksheet("30-Stock Variants");
-  stockMulti.addRow(["Date", "Volume", "Open", "High", "Low", "Close"]);
+  const stockMulti = Workbook.addWorksheet(wb, "30-Stock Variants");
+  Worksheet.addRow(stockMulti, ["Date", "Volume", "Open", "High", "Low", "Close"]);
   const stockRows: Array<[Date, number, number, number, number, number]> = [
     [new Date("2024-02-01"), 2_400_000, 150, 156, 149, 154],
     [new Date("2024-02-02"), 2_900_000, 154, 158, 152, 157],
@@ -4010,19 +4130,20 @@ async function main(): Promise<void> {
     [new Date("2024-02-06"), 3_100_000, 159, 162, 156, 160],
     [new Date("2024-02-07"), 2_750_000, 160, 165, 158, 164]
   ];
-  stockMulti.addRows(stockRows);
-  stockMulti.getColumn(1).numFmt = "yyyy-mm-dd";
-  stockMulti.getColumn(2).numFmt = "#,##0";
+  Worksheet.addRows(stockMulti, stockRows);
+  Column.setStyle(stockMulti, 1, { numFmt: "yyyy-mm-dd" });
+  Column.setStyle(stockMulti, 2, { numFmt: "#,##0" });
 
-  const variants = wb.addWorksheet("30-Chart Variants");
-  variants.addRow(["Chart-type variants"]);
-  variants.getCell("A1").font = { bold: true };
+  const variants = Workbook.addWorksheet(wb, "30-Chart Variants");
+  Worksheet.addRow(variants, ["Chart-type variants"]);
+  Cell.setStyle(variants, "A1", { font: { bold: true } });
 
   // --- 30.1 Stock HLC (no Open series) — just High / Low / Close
   //     connected by hiLowLines. The thinnest stock variant.
-  variants.getCell("A3").value = "30.1 — Stock HLC (High-Low-Close)";
-  variants.getCell("A3").font = { bold: true };
-  variants.addChart(
+  Cell.setValue(variants, "A3", "30.1 — Stock HLC (High-Low-Close)");
+  Cell.setStyle(variants, "A3", { font: { bold: true } });
+  Chart.add(
+    variants,
     {
       type: "stock",
       title: "HLC — 3-series stock chart",
@@ -4059,9 +4180,10 @@ async function main(): Promise<void> {
   //     axis. The builder doesn't yet auto-split into combo groups
   //     for VHLC, so we use `addComboChart` to model it precisely
   //     (bar + line groups, volume on primary / OHLC on secondary).
-  variants.getCell("A26").value = "30.2 — Stock VHLC (Volume + High-Low-Close) combo";
-  variants.getCell("A26").font = { bold: true };
-  variants.addComboChart(
+  Cell.setValue(variants, "A26", "30.2 — Stock VHLC (Volume + High-Low-Close) combo");
+  Cell.setStyle(variants, "A26", { font: { bold: true } });
+  Chart.addCombo(
+    variants,
     {
       title: "VHLC — Volume bars + HLC line",
       groups: [
@@ -4119,9 +4241,10 @@ async function main(): Promise<void> {
 
   // --- 30.3 Stock VOHLC — Volume + full OHLC, the richest stock
   //     variant. Same combo idea as VHLC plus an Open series.
-  variants.getCell("A49").value = "30.3 — Stock VOHLC (Volume + Open-High-Low-Close)";
-  variants.getCell("A49").font = { bold: true };
-  variants.addComboChart(
+  Cell.setValue(variants, "A49", "30.3 — Stock VOHLC (Volume + Open-High-Low-Close)");
+  Cell.setStyle(variants, "A49", { font: { bold: true } });
+  Chart.addCombo(
+    variants,
     {
       title: "VOHLC — Volume bars + OHLC with upDownBars",
       groups: [
@@ -4190,9 +4313,9 @@ async function main(): Promise<void> {
   //     + `bubble3D`. Negative sizes are common in scenario analysis
   //     (loss size) and Excel uses a hollow / inverted bubble glyph
   //     to represent them when the flag is on.
-  const bubbleNeg = wb.addWorksheet("30-Bubble Neg");
-  bubbleNeg.addRow(["Hours", "Score", "Impact"]);
-  bubbleNeg.addRows([
+  const bubbleNeg = Workbook.addWorksheet(wb, "30-Bubble Neg");
+  Worksheet.addRow(bubbleNeg, ["Hours", "Score", "Impact"]);
+  Worksheet.addRows(bubbleNeg, [
     [1, 45, 3],
     [2, 55, -5],
     [3, 62, 4],
@@ -4200,9 +4323,10 @@ async function main(): Promise<void> {
     [5, 78, 6],
     [6, 85, 9]
   ]);
-  variants.getCell("A72").value = "30.4 — Bubble with negative sizes + showNegBubbles + bubble3D";
-  variants.getCell("A72").font = { bold: true };
-  variants.addChart(
+  Cell.setValue(variants, "A72", "30.4 — Bubble with negative sizes + showNegBubbles + bubble3D");
+  Cell.setStyle(variants, "A72", { font: { bold: true } });
+  Chart.add(
+    variants,
     {
       type: "bubble",
       title: "Impact bubbles — negatives shown as inverted markers",
@@ -4227,9 +4351,9 @@ async function main(): Promise<void> {
 
   // --- 30.5 Radar with 12 categories + 3 series — wide radar for
   //     comparing skill / balance profiles.
-  const radarWide = wb.addWorksheet("30-Radar Wide");
-  radarWide.addRow(["Attribute", "Rookie", "Journeyman", "Expert"]);
-  radarWide.addRows([
+  const radarWide = Workbook.addWorksheet(wb, "30-Radar Wide");
+  Worksheet.addRow(radarWide, ["Attribute", "Rookie", "Journeyman", "Expert"]);
+  Worksheet.addRows(radarWide, [
     ["Vision", 3, 6, 9],
     ["Tempo", 4, 7, 8],
     ["Precision", 2, 5, 10],
@@ -4243,9 +4367,10 @@ async function main(): Promise<void> {
     ["Grit", 6, 7, 10],
     ["Poise", 4, 6, 9]
   ]);
-  variants.getCell("A95").value = "30.5 — Radar with 12 axes × 3 series";
-  variants.getCell("A95").font = { bold: true };
-  variants.addChart(
+  Cell.setValue(variants, "A95", "30.5 — Radar with 12 axes × 3 series");
+  Cell.setStyle(variants, "A95", { font: { bold: true } });
+  Chart.add(
+    variants,
     {
       type: "radar",
       radarStyle: "marker",
@@ -4281,9 +4406,10 @@ async function main(): Promise<void> {
   // --- 30.6 `ofPie splitType: "val"` — split secondary pie by value
   //     threshold. Every slice below the threshold goes into the
   //     second pie; larger slices stay in the main.
-  variants.getCell("A118").value = "30.6 — ofPie splitType='val' (threshold = $130)";
-  variants.getCell("A118").font = { bold: true };
-  variants.addChart(
+  Cell.setValue(variants, "A118", "30.6 — ofPie splitType='val' (threshold = $130)");
+  Cell.setStyle(variants, "A118", { font: { bold: true } });
+  Chart.add(
+    variants,
     {
       type: "ofPie",
       ofPieType: "pie",
@@ -4306,10 +4432,14 @@ async function main(): Promise<void> {
   //     Demonstrates the `secondPieSize` extreme — pushing it to 150
   //     makes the secondary pie bigger than the primary, a layout
   //     choice Excel allows but rarely produces by default.
-  variants.getCell("A141").value =
-    "30.7 — ofPie secondPieSize=150 (secondary pie larger than primary)";
-  variants.getCell("A141").font = { bold: true };
-  variants.addChart(
+  Cell.setValue(
+    variants,
+    "A141",
+    "30.7 — ofPie secondPieSize=150 (secondary pie larger than primary)"
+  );
+  Cell.setStyle(variants, "A141", { font: { bold: true } });
+  Chart.add(
+    variants,
     {
       type: "ofPie",
       ofPieType: "pie",
@@ -4331,21 +4461,22 @@ async function main(): Promise<void> {
 
   // --- 30.8 Surface with a richer 8×8 matrix — highlights band
   //     transitions better than the 4×4 default gallery surface.
-  const surfaceBig = wb.addWorksheet("30-Surface Big");
+  const surfaceBig = Workbook.addWorksheet(wb, "30-Surface Big");
   // Build an 8×8 grid where z = sin(x/2) * cos(y/2) * 10 — a smooth
   // radial pattern that surface charts render as concentric bands.
   const headers = ["", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"];
-  surfaceBig.addRow(headers);
+  Worksheet.addRow(surfaceBig, headers);
   for (let r = 0; r < 8; r++) {
     const row: Array<string | number> = [`R${r + 1}`];
     for (let c = 0; c < 8; c++) {
       row.push(Math.round(Math.sin(r / 2) * Math.cos(c / 2) * 10 + 20));
     }
-    surfaceBig.addRow(row);
+    Worksheet.addRow(surfaceBig, row);
   }
-  variants.getCell("A164").value = "30.8 — Surface 8×8 matrix (smoother band transitions)";
-  variants.getCell("A164").font = { bold: true };
-  variants.addChart(
+  Cell.setValue(variants, "A164", "30.8 — Surface 8×8 matrix (smoother band transitions)");
+  Cell.setStyle(variants, "A164", { font: { bold: true } });
+  Chart.add(
+    variants,
     {
       type: "surface3D",
       title: "Surface3D — smooth radial z = sin·cos",
@@ -4366,8 +4497,8 @@ async function main(): Promise<void> {
 
   // 4-level hierarchical data for the deep treemap / sunburst demos.
   // `Region → Country → State → City` with a $Sales column.
-  const deepHier = wb.addWorksheet("31-Deep Hierarchy");
-  deepHier.addRows([
+  const deepHier = Workbook.addWorksheet(wb, "31-Deep Hierarchy");
+  Worksheet.addRows(deepHier, [
     ["Region", "Country", "State", "City", "Sales"],
     ["Americas", "USA", "CA", "San Francisco", 360],
     ["Americas", "USA", "CA", "Los Angeles", 220],
@@ -4393,8 +4524,8 @@ async function main(): Promise<void> {
 
   // Wide histogram dataset — 120 samples with long tails so the
   // `byWidth` / `overflow` bin modes show something interesting.
-  const histoWide = wb.addWorksheet("31-Histogram Wide");
-  histoWide.addRow(["Sample"]);
+  const histoWide = Workbook.addWorksheet(wb, "31-Histogram Wide");
+  Worksheet.addRow(histoWide, ["Sample"]);
   {
     const wideSamples: number[] = [];
     for (let i = 0; i < 100; i++) {
@@ -4405,12 +4536,12 @@ async function main(): Promise<void> {
       wideSamples.push(value);
     }
     wideSamples.push(3, 7, 210, 240); // explicit outliers for overflow/underflow demos
-    wideSamples.forEach(n => histoWide.addRow([n]));
+    wideSamples.forEach(n => Worksheet.addRow(histoWide, [n]));
   }
 
   // Conversion-funnel stages for the custom-label funnel.
-  const funnelCustom = wb.addWorksheet("31-Funnel Stages");
-  funnelCustom.addRows([
+  const funnelCustom = Workbook.addWorksheet(wb, "31-Funnel Stages");
+  Worksheet.addRows(funnelCustom, [
     ["Stage", "Visitors"],
     ["Landing page", 10_000],
     ["Viewed pricing", 4_200],
@@ -4420,18 +4551,18 @@ async function main(): Promise<void> {
     ["Retained 30d", 275]
   ]);
 
-  const exDeep = wb.addWorksheet("31-ChartEx Deep");
-  exDeep.addRow(["ChartEx deep-dive"]);
-  exDeep.getCell("A1").font = { bold: true };
+  const exDeep = Workbook.addWorksheet(wb, "31-ChartEx Deep");
+  Worksheet.addRow(exDeep, ["ChartEx deep-dive"]);
+  Cell.setStyle(exDeep, "A1", { font: { bold: true } });
 
   // --- 31.1 Waterfall with explicit `total` bars. Marking specific
   //     points as totals lets Excel render them as standalone bars
   //     (different colour, anchored at zero) instead of floating
   //     on top of the running sum.
-  exDeep.getCell("A3").value = "31.1 — Waterfall with total markers at quarter-ends";
-  exDeep.getCell("A3").font = { bold: true };
-  const wfSheet = wb.addWorksheet("31-Waterfall");
-  wfSheet.addRows([
+  Cell.setValue(exDeep, "A3", "31.1 — Waterfall with total markers at quarter-ends");
+  Cell.setStyle(exDeep, "A3", { font: { bold: true } });
+  const wfSheet = Workbook.addWorksheet(wb, "31-Waterfall");
+  Worksheet.addRows(wfSheet, [
     ["Step", "Delta"],
     ["Starting cash", 1_000],
     ["Q1 revenue", 450],
@@ -4441,7 +4572,8 @@ async function main(): Promise<void> {
     ["Q2 cost", -280],
     ["Q2 total", 1_480]
   ]);
-  exDeep.addChartEx(
+  Chart.addEx(
+    exDeep,
     {
       type: "waterfall",
       title: "Waterfall — Q1/Q2 totals anchored at zero",
@@ -4466,9 +4598,10 @@ async function main(): Promise<void> {
   // --- 31.2 Treemap with 4-level `parentLabelLayout: "overlapping"`.
   //     Deeper hierarchies exercise the label-wrapping / color
   //     cascade more than the gallery's 3-level demo.
-  exDeep.getCell("A26").value = "31.2 — Treemap 4 levels (Region → Country → State → City)";
-  exDeep.getCell("A26").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A26", "31.2 — Treemap 4 levels (Region → Country → State → City)");
+  Cell.setStyle(exDeep, "A26", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "treemap",
       title: "Sales — 4-level treemap with overlapping parent labels",
@@ -4491,9 +4624,10 @@ async function main(): Promise<void> {
 
   // --- 31.3 Sunburst with the same 4-level hierarchy — compare
   //     visual density vs the treemap.
-  exDeep.getCell("A53").value = "31.3 — Sunburst 4 levels (same hierarchy as 31.2)";
-  exDeep.getCell("A53").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A53", "31.3 — Sunburst 4 levels (same hierarchy as 31.2)");
+  Cell.setStyle(exDeep, "A53", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "sunburst",
       title: "Sales — 4-ring sunburst",
@@ -4516,9 +4650,10 @@ async function main(): Promise<void> {
   // --- 31.4 Funnel with custom stage labels — annotating each stage
   //     with `text` on the data-label entry puts a richer, in-bar
   //     caption on top of the default stage name.
-  exDeep.getCell("A80").value = "31.4 — Funnel with per-stage custom labels";
-  exDeep.getCell("A80").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A80", "31.4 — Funnel with per-stage custom labels");
+  Cell.setStyle(exDeep, "A80", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "funnel",
       title: "Conversion funnel — rich per-stage callouts",
@@ -4542,9 +4677,10 @@ async function main(): Promise<void> {
   //     of bins instead of letting Excel auto-choose. The `binning`
   //     shortcut on `AddChartExOptions` is the ergonomic equivalent
   //     of `layout.binning`.
-  exDeep.getCell("A107").value = "31.5 — Histogram binCount=8 bins";
-  exDeep.getCell("A107").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A107", "31.5 — Histogram binCount=8 bins");
+  Cell.setStyle(exDeep, "A107", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "histogram",
       title: "Histogram — 8 auto-width bins",
@@ -4563,9 +4699,10 @@ async function main(): Promise<void> {
   // --- 31.6 Histogram with fixed-width bins (`binSize: 20`) and
   //     explicit overflow / underflow bounds. Outliers above 180
   //     collapse into a single ">" bin; below 20 into a "<" bin.
-  exDeep.getCell("A130").value = "31.6 — Histogram binSize=20 + overflow 180 / underflow 20";
-  exDeep.getCell("A130").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A130", "31.6 — Histogram binSize=20 + overflow 180 / underflow 20");
+  Cell.setStyle(exDeep, "A130", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "histogram",
       title: "Histogram — fixed-width bins with overflow / underflow",
@@ -4591,9 +4728,10 @@ async function main(): Promise<void> {
   //     `type: "pareto"` but passing it explicitly is the escape
   //     hatch for callers that want to keep the base histogram on
   //     a pareto-typed chart without the cumulative curve.
-  exDeep.getCell("A153").value = "31.7 — Pareto with explicit paretoLine toggle";
-  exDeep.getCell("A153").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A153", "31.7 — Pareto with explicit paretoLine toggle");
+  Cell.setStyle(exDeep, "A153", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "pareto",
       title: "Pareto — funnel stages with cumulative line",
@@ -4613,9 +4751,10 @@ async function main(): Promise<void> {
   // --- 31.8 BoxWhisker with every statistical flag on — inner
   //     points, outliers, mean marker and mean line. All flags live
   //     on `layout` for ChartEx, not on the series itself.
-  exDeep.getCell("A176").value = "31.8 — BoxWhisker all flags on (showInner/Outlier/Mean/MeanLine)";
-  exDeep.getCell("A176").font = { bold: true };
-  exDeep.addChartEx(
+  Cell.setValue(exDeep, "A176", "31.8 — BoxWhisker all flags on (showInner/Outlier/Mean/MeanLine)");
+  Cell.setStyle(exDeep, "A176", { font: { bold: true } });
+  Chart.addEx(
+    exDeep,
     {
       type: "boxWhisker",
       title: "Distribution — full statistical detail",
@@ -4642,16 +4781,17 @@ async function main(): Promise<void> {
   //     was not exercised in section 12.
   // ---------------------------------------------------------------------------
 
-  const styleCat = wb.addWorksheet("32-Style Catalogue");
-  styleCat.addRow(["Style catalogue"]);
-  styleCat.getCell("A1").font = { bold: true };
+  const styleCat = Workbook.addWorksheet(wb, "32-Style Catalogue");
+  Worksheet.addRow(styleCat, ["Style catalogue"]);
+  Cell.setStyle(styleCat, "A1", { font: { bold: true } });
 
   // --- 32.1 Trendline with a custom rich-text label — label.txPr
   //     lets callers override the auto-generated "y = 1.2x + 45"
   //     caption with their own bold / coloured text.
-  styleCat.getCell("A3").value = "32.1 — Trendline with custom rich-text label";
-  styleCat.getCell("A3").font = { bold: true };
-  styleCat.addChart(
+  Cell.setValue(styleCat, "A3", "32.1 — Trendline with custom rich-text label");
+  Cell.setStyle(styleCat, "A3", { font: { bold: true } });
+  Chart.add(
+    styleCat,
     {
       type: "scatter",
       scatterStyle: "marker",
@@ -4688,9 +4828,10 @@ async function main(): Promise<void> {
   //     bevelled joins). `ChartLine` does not accept gradients —
   //     Excel's `<a:ln>` grammar only takes a single solid-fill
   //     colour on the error-bar stroke.
-  styleCat.getCell("A26").value = "32.2 — Error bars with structured spPr (compound line)";
-  styleCat.getCell("A26").font = { bold: true };
-  styleCat.addChart(
+  Cell.setValue(styleCat, "A26", "32.2 — Error bars with structured spPr (compound line)");
+  Cell.setStyle(styleCat, "A26", { font: { bold: true } });
+  Chart.add(
+    styleCat,
     {
       type: "scatter",
       scatterStyle: "marker",
@@ -4729,8 +4870,11 @@ async function main(): Promise<void> {
   //     spot layout regressions visually.
   // ---------------------------------------------------------------------------
 
-  const stressData = wb.addWorksheet("33-Stress Data");
-  stressData.addRow(["Category", ...Array.from({ length: 20 }, (_, i) => `Series ${i + 1}`)]);
+  const stressData = Workbook.addWorksheet(wb, "33-Stress Data");
+  Worksheet.addRow(stressData, [
+    "Category",
+    ...Array.from({ length: 20 }, (_, i) => `Series ${i + 1}`)
+  ]);
   for (let r = 0; r < 100; r++) {
     const row: Array<string | number> = [`C${r + 1}`];
     for (let s = 0; s < 20; s++) {
@@ -4738,19 +4882,20 @@ async function main(): Promise<void> {
       // pile visually separates rather than all overlapping.
       row.push(Math.round(50 + Math.sin(r / 8 + s / 3) * 20 + s));
     }
-    stressData.addRow(row);
+    Worksheet.addRow(stressData, row);
   }
 
-  const stress = wb.addWorksheet("33-Stress & Edge");
-  stress.addRow(["Stress & robustness"]);
-  stress.getCell("A1").font = { bold: true };
+  const stress = Workbook.addWorksheet(wb, "33-Stress & Edge");
+  Worksheet.addRow(stress, ["Stress & robustness"]);
+  Cell.setStyle(stress, "A1", { font: { bold: true } });
 
   // --- 33.1 Single series with 100 data points — tests how the
   //     category axis and renderer handle a high point-count without
   //     tick skipping.
-  stress.getCell("A3").value = "33.1 — 100 data points on one series";
-  stress.getCell("A3").font = { bold: true };
-  stress.addChart(
+  Cell.setValue(stress, "A3", "33.1 — 100 data points on one series");
+  Cell.setStyle(stress, "A3", { font: { bold: true } });
+  Chart.add(
+    stress,
     {
       type: "line",
       title: "100 points — dense single series",
@@ -4773,9 +4918,10 @@ async function main(): Promise<void> {
   //     and the colour palette auto-selection. `varyColors` is
   //     true by default on area/line; passing explicit per-series
   //     `line` just to make every series visibly distinct.
-  stress.getCell("A26").value = "33.2 — 20 series at once (palette stress)";
-  stress.getCell("A26").font = { bold: true };
-  stress.addChart(
+  Cell.setValue(stress, "A26", "33.2 — 20 series at once (palette stress)");
+  Cell.setStyle(stress, "A26", { font: { bold: true } });
+  Chart.add(
+    stress,
     {
       type: "line",
       title: "20-series line chart",
@@ -4797,11 +4943,12 @@ async function main(): Promise<void> {
   // --- 33.3 Extremely long titles and axis labels — exercises
   //     Excel's title auto-wrap and tests that the writer doesn't
   //     truncate text at arbitrary limits.
-  stress.getCell("A49").value = "33.3 — very long title + axis titles (wrap test)";
-  stress.getCell("A49").font = { bold: true };
+  Cell.setValue(stress, "A49", "33.3 — very long title + axis titles (wrap test)");
+  Cell.setStyle(stress, "A49", { font: { bold: true } });
   const longTitle =
     "A comprehensive quarterly performance summary of the North American and EMEA revenue streams aligned against our strategic targets for fiscal year 2024";
-  stress.addChart(
+  Chart.add(
+    stress,
     {
       type: "bar",
       barDir: "col",
@@ -4830,8 +4977,8 @@ async function main(): Promise<void> {
   //     categories. Covers CJK, RTL-eligible scripts (Arabic,
   //     Hebrew) and emoji — text that historically tripped up
   //     XML serialisers or measurement code.
-  const unicodeData = wb.addWorksheet("33-Unicode");
-  unicodeData.addRows([
+  const unicodeData = Workbook.addWorksheet(wb, "33-Unicode");
+  Worksheet.addRows(unicodeData, [
     ["Category", "Count"],
     ["销售额 📈", 120],
     ["مبيعات 🌍", 180],
@@ -4840,10 +4987,14 @@ async function main(): Promise<void> {
     ["Продажи ❄", 232],
     ["Ventas 🔥", 248]
   ]);
-  stress.getCell("A72").value =
-    "33.4 — Unicode categories (CJK / Arabic / Hebrew / Cyrillic / emoji)";
-  stress.getCell("A72").font = { bold: true };
-  stress.addChart(
+  Cell.setValue(
+    stress,
+    "A72",
+    "33.4 — Unicode categories (CJK / Arabic / Hebrew / Cyrillic / emoji)"
+  );
+  Cell.setStyle(stress, "A72", { font: { bold: true } });
+  Chart.add(
+    stress,
     {
       type: "bar",
       barDir: "col",
@@ -4866,9 +5017,10 @@ async function main(): Promise<void> {
   //     The OOXML range is 0–90 for rotX, 0–360 for rotY, 0–100 for
   //     perspective — picking values near each extreme tests the
   //     writer's attribute serialisation.
-  stress.getCell("A95").value = "33.5 — extreme view3D (rotX=75 / rotY=340 / perspective=100)";
-  stress.getCell("A95").font = { bold: true };
-  stress.addChart(
+  Cell.setValue(stress, "A95", "33.5 — extreme view3D (rotX=75 / rotY=340 / perspective=100)");
+  Cell.setStyle(stress, "A95", { font: { bold: true } });
+  Chart.add(
+    stress,
     {
       type: "bar3D",
       barDir: "col",
@@ -4892,9 +5044,10 @@ async function main(): Promise<void> {
   //     override wins — useful for programmatic writers that
   //     cascade styles from "everyone shows percent" down to
   //     "except point 3 which shows the value".
-  stress.getCell("A118").value = "33.6 — data-label cascade (chart > series > per-entry)";
-  stress.getCell("A118").font = { bold: true };
-  stress.addChart(
+  Cell.setValue(stress, "A118", "33.6 — data-label cascade (chart > series > per-entry)");
+  Cell.setStyle(stress, "A118", { font: { bold: true } });
+  Chart.add(
+    stress,
     {
       type: "bar",
       barDir: "col",
@@ -4947,16 +5100,17 @@ async function main(): Promise<void> {
   // --- 33.7 Many charts on one sheet — 12 small tile charts packed
   //     in a 3×4 grid to test the per-drawing anchor handling and
   //     that drawing1.xml doesn't buckle under dozens of entries.
-  const manyCharts = wb.addWorksheet("33-Many Charts");
-  manyCharts.getCell("A1").value = "12 small charts on one sheet";
-  manyCharts.getCell("A1").font = { bold: true };
+  const manyCharts = Workbook.addWorksheet(wb, "33-Many Charts");
+  Cell.setValue(manyCharts, "A1", "12 small charts on one sheet");
+  Cell.setStyle(manyCharts, "A1", { font: { bold: true } });
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 3; c++) {
       const tileIndex = r * 3 + c + 1;
       const startCol = 1 + c * 6;
       const startRow = 3 + r * 18;
       const range = `${cellAddr(startCol, startRow)}:${cellAddr(startCol + 5, startRow + 16)}`;
-      manyCharts.addChart(
+      Chart.add(
+        manyCharts,
         {
           type: "line",
           title: `Tile ${tileIndex}`,
@@ -4984,23 +5138,23 @@ async function main(): Promise<void> {
   const previewWorksheets = [gallery, combo, ex, features, advanced];
   let previewCounter = 0;
   const pdfDoc = new PdfDocumentBuilder();
-  pdfDoc.setMetadata({ title: "ExcelTS chart previews", author: "charts example" });
+  pdfDoc.setMetadata({ title: "Documonster chart previews", author: "charts example" });
   for (const ws of previewWorksheets) {
-    for (const chart of ws.getCharts()) {
+    for (const chart of Chart.get(ws)) {
       previewCounter += 1;
-      const title = chart.title ?? `chart-${previewCounter}`;
+      const title = Chart.title(chart) ?? `chart-${previewCounter}`;
       const safe = title.replace(/[^\w\- ]+/g, "_").slice(0, 60);
-      const svg = chart.toSVG({ width: 640, height: 400 });
+      const svg = Chart.toSVG(chart, { width: 640, height: 400 });
       writeFileSync(resolve(OUT_DIR, `charts-example-${previewCounter}-${safe}.svg`), svg, "utf-8");
-      const png = await chart.toPNG({ width: 640, height: 400, scale: 2 });
+      const png = await Chart.toPNG(chart, { width: 640, height: 400, scale: 2 });
       writeFileSync(resolve(OUT_DIR, `charts-example-${previewCounter}-${safe}.png`), png);
 
       // Add a page to the combined PDF. Pick the renderer that matches
       // the chart flavour — classic charts go vector via `drawChartPdf`,
       // ChartEx via `drawChartExPdf`.
       const page = pdfDoc.addPage({ width: 700, height: 500 });
-      const classic = chart.chartModel;
-      const chartEx = chart.chartExModel;
+      const classic = Chart.chartModel(chart);
+      const chartEx = Chart.chartExModel(chart);
       if (classic) {
         drawChartPdf(page, classic, { x: 30, y: 60, width: 640, height: 400 });
       } else if (chartEx) {
@@ -5012,8 +5166,8 @@ async function main(): Promise<void> {
   writeFileSync(PDF_PATH, pdfBytes);
 
   // Single-chart PDF via the high-level `chartToPdf` helper — the
-  // canonical entry point from the `@cj-tech-master/excelts/pdf` bundle.
-  const firstChart = gallery.getCharts()[0];
+  // canonical entry point from the `documonster/pdf` bundle.
+  const firstChart = Chart.get(gallery)[0];
   const solo = await chartToPdf(firstChart, {
     title: "Solo chart PDF",
     width: 600,
@@ -5024,22 +5178,23 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
   // 35. Load + mutate — `chart.mutate(fn, { preferRawPatch })` round-trip.
   //
-  // We first write the workbook to `tmp/charts-example.xlsx`, then load
+  // We first write the workbook to `tmp/excel-examples/charts-example.xlsx`, then load
   // it back and make a narrow, template-safe edit using the raw-patch
   // path (stays byte-preserving for the rest of the chart XML).
   // ---------------------------------------------------------------------------
 
-  await wb.xlsx.writeFile(XLSX_PATH);
+  await Workbook.writeFile(wb, XLSX_PATH);
 
-  const reread = new Workbook();
-  await reread.xlsx.readFile(XLSX_PATH);
-  const firstSheet = reread.getWorksheet("1-Classic Gallery");
+  const reread = Workbook.create();
+  await Workbook.readFile(reread, XLSX_PATH);
+  const firstSheet = Workbook.getWorksheet(reread, "1-Classic Gallery")!;
   if (!firstSheet) {
     throw new Error("Expected to read back the gallery worksheet.");
   }
-  const first = firstSheet.getCharts()[0];
-  if (first && first.chartModel) {
-    first.mutate(
+  const first = Chart.get(firstSheet)[0];
+  if (first && Chart.chartModel(first)) {
+    Chart.mutate(
+      first,
       model => {
         // Flip the first bar chart's title to something new. The mutate
         // call is tagged with `preferRawPatch`, so when the chart XML
@@ -5056,14 +5211,17 @@ async function main(): Promise<void> {
       { preferRawPatch: true }
     );
   }
-  await reread.xlsx.writeFile(XLSX_PATH);
+  await Workbook.writeFile(reread, XLSX_PATH);
 
   // ---------------------------------------------------------------------------
   // Done — summarise counts and paths.
   // ---------------------------------------------------------------------------
 
-  const chartCount = wb.worksheets.reduce((total, ws) => total + ws.getCharts().length, 0);
-  const chartsheetCount = wb.chartsheets.length;
+  const chartCount = Workbook.getWorksheets(wb).reduce(
+    (total, ws) => total + Chart.get(ws).length,
+    0
+  );
+  const chartsheetCount = Workbook.getChartsheets(wb).length;
 
   console.log("");
   console.log(`XLSX  : ${XLSX_PATH}`);
@@ -5071,7 +5229,7 @@ async function main(): Promise<void> {
   console.log(`SVGs  : ${OUT_DIR}/charts-example-*.svg`);
   console.log(`PNGs  : ${OUT_DIR}/charts-example-*.png`);
   console.log("");
-  console.log(`Worksheets with charts: ${wb.worksheets.length}`);
+  console.log(`Worksheets with charts: ${Workbook.getWorksheets(wb).length}`);
   console.log(`Charts embedded:       ${chartCount}`);
   console.log(`Chartsheets:           ${chartsheetCount}`);
   console.log(`Preset classic count:  ${EXCEL_CHART_PRESETS.length}`);

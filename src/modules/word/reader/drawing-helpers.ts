@@ -5,10 +5,9 @@
  * floating image, and drawing shape parsers).
  */
 
+import { findChildNs } from "@word/reader/parse-utils";
 import { findChild, findChildren } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
-
-import { findChildNs } from "./parse-utils";
 
 /** Parse `a:xfrm` element for rotation and flip properties. */
 export function parseXfrm(

@@ -9,25 +9,24 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  TokenType,
-  stripFunctionPrefix,
-  type Token,
-  type NumberToken,
-  type StringToken,
-  type BooleanToken,
-  type ErrorToken,
-  type CellRefToken,
-  type RangeToken,
-  type SheetRefToken,
-  type FunctionToken,
-  type OperatorToken,
-  type UnaryPrefixToken,
-  type NameToken,
-  type ColRangeToken,
-  type RowRangeToken,
-  type StructuredRefToken
+import type {
+  Token,
+  NumberToken,
+  StringToken,
+  BooleanToken,
+  ErrorToken,
+  CellRefToken,
+  RangeToken,
+  SheetRefToken,
+  FunctionToken,
+  OperatorToken,
+  UnaryPrefixToken,
+  NameToken,
+  ColRangeToken,
+  RowRangeToken,
+  StructuredRefToken
 } from "../token-types";
+import { TokenType, stripFunctionPrefix } from "../token-types";
 import { tokenize } from "../tokenizer";
 
 function typesOf(tokens: readonly Token[]): TokenType[] {

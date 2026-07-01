@@ -14,9 +14,9 @@
  * @see XMP Specification Part 1
  */
 
-import type { PdfDocument } from "./pdf-document";
-import type { PdfDictValue } from "./pdf-parser";
-import { dictGetRef, decodePdfStringBytes } from "./pdf-parser";
+import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue } from "@pdf/reader/pdf-parser";
+import { dictGetRef, decodePdfStringBytes } from "@pdf/reader/pdf-parser";
 
 // =============================================================================
 // Types

@@ -1,19 +1,25 @@
-import { Workbook } from "../../../index";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const filename = process.argv[2];
+import { Address, Cell, Row, Workbook, Worksheet } from "@excel/index";
 
-const workbook = new Workbook();
-workbook.xlsx
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+
+const filename = process.argv[2] ?? path.join(exampleDir, "data/table.xlsx");
+
+const workbook = Workbook.create();
+Workbook.getXlsxIo(workbook)
   .readFile(filename)
   .then(() => {
-    workbook.eachSheet(worksheet => {
+    Workbook.eachSheet(workbook, worksheet => {
       console.log(
-        `Sheet ${worksheet.id} - ${worksheet.name}, Dims=${JSON.stringify(worksheet.dimensions)}`
+        `Sheet ${worksheet.id} - ${Worksheet.getName(worksheet)}, Dims=${JSON.stringify(Worksheet.dimensions(worksheet))}`
       );
-      worksheet.eachRow(row => {
-        row.eachCell(cell => {
-          if (cell.font!.strike) {
-            console.log(`Strikethrough: ${cell.value}`);
+      Worksheet.eachRow(worksheet, row => {
+        Row.eachCell(worksheet, row.number, (_cell, colNumber) => {
+          const addr = `${Address.encodeCol(colNumber - 1)}${row.number}`;
+          if (Cell.getFont(worksheet, addr)?.strike) {
+            console.log(`Strikethrough: ${Cell.getValue(worksheet, addr)}`);
           }
         });
       });

@@ -1,58 +1,48 @@
 /**
- * Public entry for the excelts chart module.
+ * Public entry for the documonster chart module.
  *
- * Two complementary usage styles are supported:
+ * **Functional, zero-side-effect, fully tree-shakeable.** Import the chart
+ * builders, renderers, presets and parsers you need:
  *
- * 1. **Functional, zero-side-effect** — tree-shakeable access to
- *    chart builders, renderers, presets and parsers:
- *    ```ts
- *    import { buildChartModel, renderChartSvg } from "@cj-tech-master/excelts/chart";
- *    const model = buildChartModel(options);
- *    const svg   = renderChartSvg(model);
- *    ```
- *    Bundlers drop everything the consumer does not reference.
+ * ```ts
+ * import { buildChartModel, renderChartSvg } from "documonster/chart";
+ * const model = buildChartModel(options);
+ * const svg   = renderChartSvg(model);
+ * ```
  *
- * 2. **Support installation** — enables `worksheet.addChart()`,
- *    `workbook.xlsx.writeFile()` chart-cache population, and chart
- *    reconstruction during XLSX load:
- *    ```ts
- *    import { installChartSupport } from "@cj-tech-master/excelts/chart";
- *    installChartSupport();                    // once, at startup
- *    worksheet.addChart(options, "A1:D20");    // now works
- *    ```
- *
- * Chart support is **never installed implicitly** — consumers pay for
- * what they ask for. The package's root `sideEffects: false` contract
- * stays intact, so bundles that only use the functional API include
- * exactly the code paths reachable from the exports they reference.
- *
- * `installChartSupport` lives in a separate module (`./install.ts`) so
- * its host-registry wiring and the full chart builder/renderer pipeline
- * don't get pulled in by consumers who only import one or two
- * functional helpers.
+ * No install / registration step exists. The high-level chart APIs
+ * (`Chart.add`, `worksheet.addChart`, `Workbook.writeXlsx` chart serialisation,
+ * XLSX chart reconstruction on load) import the chart implementation directly
+ * and statically. A consumer that never references any chart API gets the
+ * entire chart implementation tree-shaken out by the bundler — the package's
+ * root `sideEffects: false` contract keeps this guarantee intact.
  */
 
-export { installChartSupport, uninstallChartSupport } from "./install";
-
-export { Chart, buildChartModel } from "./chart";
-export { buildComboChartModel } from "./chart-builder";
-export { fillChartCaches, fillChartExCaches, fillNumRef, fillStrRef } from "./cache-populator";
+export { buildChartModel } from "@excel/chart/chart-handle";
+export type { ChartHandle } from "@excel/core/worksheet-core";
+export { buildComboChartModel } from "@excel/chart/build/chart-builder";
+export {
+  fillChartCaches,
+  fillChartExCaches,
+  fillNumRef,
+  fillStrRef
+} from "@excel/chart/build/cache-populator";
 export {
   parseChartColors,
   buildChartColors,
   parseChartStyle,
   buildChartStyle
-} from "./chart-sidecar";
-export { buildChartExModel } from "./chart-ex-builder";
-export { parseChartEx } from "./chart-ex-parser";
+} from "@excel/chart/serialize/chart-sidecar";
+export { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
+export { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
 export {
   canRenderChartExAsVectorPdf,
   drawChartExPdf,
-  renderChartEx,
   renderChartExPng,
   renderChartExSvg,
   VECTOR_PDF_CHART_EX_LAYOUT_IDS
-} from "./chart-ex-renderer";
+} from "@excel/chart/render/chart-ex-renderer";
+export { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
 export {
   applyChartExPreset,
   applyChartPreset,
@@ -60,22 +50,22 @@ export {
   CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
   EXCEL_CHART_PRESETS
-} from "./chart-presets";
+} from "@excel/chart/model/chart-presets";
 export {
   chartExOptionsFromRows,
   chartExOptionsFromTable,
   chartOptionsFromRows,
   chartOptionsFromTable,
   seriesFromColumns
-} from "./chart-api";
+} from "@excel/chart/build/chart-api";
 export type {
   AddChartExFromRowsOptions,
   AddChartExFromTableOptions,
   AddChartFromRowsOptions,
   AddChartFromTableOptions,
   SeriesFromColumnsOptions
-} from "./chart-api";
-export type { ExcelChartExPreset, ExcelChartPreset } from "./chart-presets";
+} from "@excel/chart/build/chart-api";
+export type { ExcelChartExPreset, ExcelChartPreset } from "@excel/chart/model/chart-presets";
 export {
   applyAxisTransform,
   buildChartScene,
@@ -83,7 +73,7 @@ export {
   drawChartPdf,
   renderChartPng,
   renderChartSvg
-} from "./chart-renderer";
+} from "@excel/chart/render/chart-renderer";
 export type {
   ChartPdfDrawingSurface,
   ChartPdfPathOp,
@@ -98,9 +88,14 @@ export type {
   PdfColor,
   RegionMapDataOptions,
   RegionMapMatchRule
-} from "./chart-renderer";
-export { resolveTopologyObject } from "./topojson";
-export type { ResolvedRing, TopoGeometry, TopoGeometryCollection, TopologyLike } from "./topojson";
+} from "@excel/chart/render/chart-renderer";
+export { resolveTopologyObject } from "@excel/chart/render/topojson";
+export type {
+  ResolvedRing,
+  TopoGeometry,
+  TopoGeometryCollection,
+  TopologyLike
+} from "@excel/chart/render/topojson";
 export type {
   ChartExModel,
   ChartExSpace,
@@ -121,10 +116,10 @@ export type {
   AddChartExWaterfallOptions,
   AddChartExBoxWhiskerOptions,
   AddChartExSeriesOptions,
-  ChartExType
-} from "./chart-ex-types";
-export type { ChartExEntry } from "./chart";
-export type { ChartEntry, ChartAnchorModel } from "./chart";
+  ChartExType,
+  ChartExEntry
+} from "@excel/chart/model/chart-ex-types";
+export type { ChartEntry, ChartAnchorModel, ChartRelEntry } from "@excel/chart/model/types";
 export type {
   ChartModel,
   ChartType,
@@ -271,7 +266,7 @@ export type {
   PrintSettings,
   PivotFormat,
   // Transitively-referenced types that callers need when constructing
-  // public option shapes. They used to live behind `@excel/chart/types`
+  // public option shapes. They used to live behind `@excel/chart/model/types`
   // only, forcing consumers to either duplicate the interface or reach
   // into the internal module path.
   DataLabelsRange,
@@ -289,7 +284,7 @@ export type {
   ChartUnknownElement,
   ChartStyleElement,
   ChartRange
-} from "./types";
+} from "@excel/chart/model/types";
 export {
   parseSpPr,
   parseTxPr,
@@ -303,4 +298,4 @@ export {
   buildTxPr,
   setSpPrFill,
   setSpPrLine
-} from "./shape-properties";
+} from "@excel/chart/shared/shape-properties";

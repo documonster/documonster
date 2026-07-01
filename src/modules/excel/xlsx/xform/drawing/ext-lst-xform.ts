@@ -1,11 +1,12 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class ExtLstXform extends BaseXform {
   get tag(): string {
     return "a:extLst";
   }
 
-  render(xmlStream: any): void {
+  render(xmlStream: XmlSink): void {
     xmlStream.openNode(this.tag);
     xmlStream.openNode("a:ext", {
       uri: "{FF2B5EF4-FFF2-40B4-BE49-F238E27FC236}"
@@ -18,7 +19,7 @@ class ExtLstXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         return true;

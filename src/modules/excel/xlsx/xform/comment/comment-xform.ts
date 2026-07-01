@@ -1,9 +1,11 @@
+import type { Font } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { TextXform } from "@excel/xlsx/xform/strings/text-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface NoteText {
-  font?: any;
+  font?: Partial<Font>;
   text: string;
 }
 
@@ -11,15 +13,19 @@ interface CommentNote {
   texts: NoteText[];
 }
 
-interface CommentModel {
+export interface CommentModel {
   type: string;
   note: CommentNote;
   ref: string;
   authorId?: number;
+  /** Human author name, resolved against the comments-level author list. */
+  author?: string;
+  /** Decoded cell address, attached during streaming comment writes. */
+  refAddress?: { row: number; col: number };
 }
 
 class CommentXform extends BaseXform<CommentModel> {
-  declare public parser: any;
+  declare public parser?: BaseXform;
   declare private _richTextXform?: RichTextXform;
   declare private _textXform?: TextXform;
 
@@ -46,7 +52,7 @@ class CommentXform extends BaseXform<CommentModel> {
     return this._textXform;
   }
 
-  render(xmlStream: any, model?: CommentModel): void {
+  render(xmlStream: XmlSink, model?: CommentModel): void {
     const renderModel = model || this.model;
 
     xmlStream.openNode("comment", {
@@ -63,7 +69,7 @@ class CommentXform extends BaseXform<CommentModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -84,7 +90,7 @@ class CommentXform extends BaseXform<CommentModel> {
         this.parser.parseOpen(node);
         return true;
       case "t":
-        // Legacy comments (e.g. produced by openpyxl/LibreOffice) may store the
+        // Legacy comments (e.g. produced by other tools) may store the
         // body as a bare <t> directly under <text> with no <r> run wrapper.
         // This is valid for the CT_Rst type, so treat it like a run without font.
         this.parser = this.textXform;
@@ -109,7 +115,7 @@ class CommentXform extends BaseXform<CommentModel> {
           // <r> run: model is already a { font?, text } run.
           this.model!.note.texts.push(this.parser.model);
         } else {
-          // Bare <t> body (e.g. openpyxl/LibreOffice): wrap the plain string
+          // Bare <t> body (e.g. from other tools): wrap the plain string
           // as a single run without font, mirroring a <r><t> run.
           this.model!.note.texts.push({ text: this.parser.model });
         }

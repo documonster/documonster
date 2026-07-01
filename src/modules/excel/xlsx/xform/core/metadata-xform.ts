@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // Namespace URIs
@@ -60,7 +61,7 @@ class MetadataXform extends BaseXform {
    * Render xl/metadata.xml for the given model.
    * Only emits content when dynamicArrayCount > 0.
    */
-  render(xmlStream: any, model: MetadataModel): void {
+  render(xmlStream: XmlSink, model: MetadataModel): void {
     if (!model || model.dynamicArrayCount <= 0) {
       return;
     }
@@ -128,7 +129,7 @@ class MetadataXform extends BaseXform {
     this._currentRcType = undefined;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case "metadata":
         this.reset();

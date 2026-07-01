@@ -10,7 +10,7 @@ export const drawing11 = {
         index: 1,
         rId: "rId1",
         hyperlinks: {
-          tooltip: "excelts",
+          tooltip: "documonster",
           rId: "rId3"
         }
       }

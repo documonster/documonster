@@ -1,7 +1,7 @@
 /**
  * CSV Format Tests
  *
- * Tests for formatCsv function - basic formatting, quoting, headers, and round-trip.
+ * Tests for Csv.format function - basic formatting, quoting, headers, and round-trip.
  *
  * Coverage:
  * - Basic formatting (2D arrays, empty data, single rows)
@@ -13,7 +13,7 @@
  * - Round-trip parsing/formatting
  */
 
-import { formatCsv, parseCsv } from "@csv/index";
+import { Csv } from "@csv/index";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
@@ -26,41 +26,41 @@ describe("formatCsv - Basic Formatting", () => {
       ["a", "b", "c"],
       ["1", "2", "3"]
     ];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe("a,b,c\n1,2,3");
   });
 
   it("should use LF as row delimiter by default", () => {
     const data = [["a"], ["b"]];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe("a\nb");
   });
 
   it("should handle empty data", () => {
-    const result = formatCsv([]);
+    const result = Csv.format([]);
     expect(result).toBe("");
   });
 
   it("should handle single row", () => {
-    const result = formatCsv([["a", "b", "c"]]);
+    const result = Csv.format([["a", "b", "c"]]);
     expect(result).toBe("a,b,c");
   });
 
   it("should handle null and undefined values", () => {
     const data = [[null, undefined, "value"]];
-    const result = formatCsv(data as any);
+    const result = Csv.format(data as any);
     expect(result).toBe(",,value");
   });
 
   it("should convert numbers and booleans to strings", () => {
     const data = [[1, 2.5, true, false]];
-    const result = formatCsv(data as any);
+    const result = Csv.format(data as any);
     expect(result).toBe("1,2.5,true,false");
   });
 
   it("should format numbers with comma decimalSeparator", () => {
     const data = [[1, 2.5]];
-    const result = formatCsv(data as any, { delimiter: ";", decimalSeparator: "," });
+    const result = Csv.format(data as any, { delimiter: ";", decimalSeparator: "," });
     expect(result).toBe("1;2,5");
   });
 });
@@ -72,50 +72,50 @@ describe("formatCsv - Basic Formatting", () => {
 describe("formatCsv - Quoting", () => {
   it("should quote fields containing commas", () => {
     const data = [["hello, world", "test"]];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('"hello, world",test');
   });
 
   it("should quote fields containing double-quotes and escape them", () => {
     const data = [['He said "Hello"', "test"]];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('"He said ""Hello""",test');
   });
 
   it("should quote fields containing newlines", () => {
     const data = [["line1\nline2", "test"]];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('"line1\nline2",test');
   });
 
   it("should quote fields containing CRLF", () => {
     const data = [["line1\r\nline2", "test"]];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('"line1\r\nline2",test');
   });
 
   it("should quote fields containing only quotes", () => {
     const data = [['"']];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('""""');
   });
 
   it("should handle quoteColumns: true option", () => {
     const data = [["a", "b", "c"]];
-    const result = formatCsv(data, { quoteColumns: true });
+    const result = Csv.format(data, { quoteColumns: true });
     expect(result).toBe('"a","b","c"');
   });
 
   it("should not quote when quote is disabled (false)", () => {
     const data = [["hello, world", "test"]];
-    const result = formatCsv(data, { quote: false });
+    const result = Csv.format(data, { quote: false });
     // When quoting is disabled, commas are literal (may break parsing)
     expect(result).toBe("hello, world,test");
   });
 
   it("should not quote when quote is disabled (null)", () => {
     const data = [["hello, world", "test"]];
-    const result = formatCsv(data, { quote: null });
+    const result = Csv.format(data, { quote: null });
     expect(result).toBe("hello, world,test");
   });
 });
@@ -127,13 +127,13 @@ describe("formatCsv - Quoting", () => {
 describe("formatCsv - Custom Options", () => {
   it("should support custom delimiter", () => {
     const data = [["a", "b", "c"]];
-    const result = formatCsv(data, { delimiter: "\t" });
+    const result = Csv.format(data, { delimiter: "\t" });
     expect(result).toBe("a\tb\tc");
   });
 
   it("should support custom quote character", () => {
     const data = [["hello, world", "test"]];
-    const result = formatCsv(data, { quote: "'" });
+    const result = Csv.format(data, { quote: "'" });
     expect(result).toBe("'hello, world',test");
   });
 
@@ -142,13 +142,13 @@ describe("formatCsv - Custom Options", () => {
       ["a", "b"],
       ["1", "2"]
     ];
-    const result = formatCsv(data, { lineEnding: "\r\n" });
+    const result = Csv.format(data, { lineEnding: "\r\n" });
     expect(result).toBe("a,b\r\n1,2");
   });
 
   it("should add BOM when bom is true", () => {
     const data = [["a", "b"]];
-    const result = formatCsv(data, { bom: true });
+    const result = Csv.format(data, { bom: true });
     expect(result.charCodeAt(0)).toBe(0xfeff);
     expect(result).toBe("\uFEFFa,b");
   });
@@ -164,7 +164,7 @@ describe("formatCsv - Headers", () => {
       ["1", "2", "3"],
       ["4", "5", "6"]
     ];
-    const result = formatCsv(data, { headers: ["a", "b", "c"] });
+    const result = Csv.format(data, { headers: ["a", "b", "c"] });
     expect(result).toBe("a,b,c\n1,2,3\n4,5,6");
   });
 
@@ -173,7 +173,7 @@ describe("formatCsv - Headers", () => {
       { name: "Alice", age: "30" },
       { name: "Bob", age: "25" }
     ];
-    const result = formatCsv(data, { headers: true });
+    const result = Csv.format(data, { headers: true });
     expect(result).toBe("name,age\nAlice,30\nBob,25");
   });
 
@@ -182,13 +182,13 @@ describe("formatCsv - Headers", () => {
       { name: "Alice", age: "30", city: "NYC" },
       { name: "Bob", age: "25", city: "LA" }
     ];
-    const result = formatCsv(data, { headers: ["city", "name", "age"] });
+    const result = Csv.format(data, { headers: ["city", "name", "age"] });
     expect(result).toBe("city,name,age\nNYC,Alice,30\nLA,Bob,25");
   });
 
   it("should format empty data with writeHeaders: true", () => {
     const data: string[][] = [];
-    const result = formatCsv(data, {
+    const result = Csv.format(data, {
       headers: ["name", "age"],
       writeHeaders: true
     });
@@ -200,7 +200,7 @@ describe("formatCsv - Headers", () => {
       { name: "Alice", age: "30" },
       { name: "Bob", age: "25" }
     ];
-    const result = formatCsv(data, { headers: true, writeHeaders: false });
+    const result = Csv.format(data, { headers: true, writeHeaders: false });
     expect(result).toBe("Alice,30\nBob,25");
   });
 });
@@ -215,13 +215,13 @@ describe("formatCsv - Unicode", () => {
       ["名前", "年齢"],
       ["田中", "30"]
     ];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe("名前,年齢\n田中,30");
   });
 
   it("should quote Unicode fields containing delimiters", () => {
     const data = [["你好,世界", "测试"]];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('"你好,世界",测试');
   });
 });
@@ -242,7 +242,7 @@ describe("formatCsv - RowHashArray Support", () => {
         ["age", 25]
       ]
     ];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe("Alice,30\nBob,25");
   });
 
@@ -257,7 +257,7 @@ describe("formatCsv - RowHashArray Support", () => {
         ["age", 25]
       ]
     ];
-    const result = formatCsv(data, { headers: true });
+    const result = Csv.format(data, { headers: true });
     expect(result).toBe("name,age\nAlice,30\nBob,25");
   });
 
@@ -274,7 +274,7 @@ describe("formatCsv - RowHashArray Support", () => {
         ["city", "LA"]
       ]
     ];
-    const result = formatCsv(data, { headers: ["city", "age", "name"] });
+    const result = Csv.format(data, { headers: ["city", "age", "name"] });
     expect(result).toBe("city,age,name\nNYC,30,Alice\nLA,25,Bob");
   });
 
@@ -289,7 +289,7 @@ describe("formatCsv - RowHashArray Support", () => {
         ["city", "LA"]
       ]
     ];
-    const result = formatCsv(data, { headers: ["name", "age", "city"] });
+    const result = Csv.format(data, { headers: ["name", "age", "city"] });
     expect(result).toBe("name,age,city\nAlice,30,\nBob,,LA");
   });
 
@@ -300,7 +300,7 @@ describe("formatCsv - RowHashArray Support", () => {
         ["lastName", "Doe"]
       ]
     ];
-    const result = formatCsv(data, { headers: true });
+    const result = Csv.format(data, { headers: true });
     expect(result).toBe("firstName,lastName\nJohn,Doe");
   });
 
@@ -311,13 +311,13 @@ describe("formatCsv - RowHashArray Support", () => {
         ["note", 'He said "hi"']
       ]
     ];
-    const result = formatCsv(data);
+    const result = Csv.format(data);
     expect(result).toBe('"Hello, World","He said ""hi"""');
   });
 
   it("should format empty RowHashArray with writeHeaders: true", () => {
     const data: [string, any][][] = [];
-    const result = formatCsv(data, {
+    const result = Csv.format(data, {
       headers: ["name", "age"],
       writeHeaders: true
     });
@@ -331,7 +331,7 @@ describe("formatCsv - RowHashArray Support", () => {
         ["age", 30]
       ]
     ];
-    const result = formatCsv(data, { headers: true, writeHeaders: false });
+    const result = Csv.format(data, { headers: true, writeHeaders: false });
     expect(result).toBe("Alice,30");
   });
 });
@@ -346,29 +346,29 @@ describe("formatCsv - Round-trip Tests", () => {
       ["a", "b", "c"],
       ["1", "2", "3"]
     ];
-    const csv = formatCsv(original);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(original);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(original);
   });
 
   it("should round-trip data with commas", () => {
     const original = [["hello, world", "test"]];
-    const csv = formatCsv(original);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(original);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(original);
   });
 
   it("should round-trip data with quotes", () => {
     const original = [['He said "Hello"', "test"]];
-    const csv = formatCsv(original);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(original);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(original);
   });
 
   it("should round-trip data with newlines", () => {
     const original = [["line1\nline2", "test"]];
-    const csv = formatCsv(original);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(original);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(original);
   });
 
@@ -377,8 +377,8 @@ describe("formatCsv - Round-trip Tests", () => {
       ["名前", "年齢"],
       ["田中,太郎", "30"]
     ];
-    const csv = formatCsv(original);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(original);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(original);
   });
 
@@ -389,31 +389,31 @@ describe("formatCsv - Round-trip Tests", () => {
       ["Gadget", "Multi-line\ndescription", "29.99"],
       ["Thing", "", "9.99"]
     ];
-    const csv = formatCsv(original);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(original);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(original);
   });
 
   it("should round-trip very long fields", () => {
     const longString = "a".repeat(10000);
     const data = [[longString]];
-    const csv = formatCsv(data);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(data);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(data);
   });
 
   it("should round-trip many columns", () => {
     const cols = Array.from({ length: 100 }, (_, i) => `col${i}`);
     const data = [cols];
-    const csv = formatCsv(data);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(data);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(data);
   });
 
   it("should round-trip many rows", () => {
     const data = Array.from({ length: 1000 }, (_, i) => [`row${i}`, `value${i}`]);
-    const csv = formatCsv(data);
-    const parsed = parseCsv(csv);
+    const csv = Csv.format(data);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(data);
   });
 });
@@ -428,19 +428,19 @@ describe("formatCsv - RFC 4180 Compliance", () => {
       ["a", "b"],
       ["c", "d"]
     ];
-    const csv = formatCsv(data);
+    const csv = Csv.format(data);
     expect(csv).toBe("a,b\nc,d");
   });
 
   it("Rule 2: Optional header line", () => {
     const data = [{ col1: "val1", col2: "val2" }];
-    const withHeader = formatCsv(data, { headers: true });
+    const withHeader = Csv.format(data, { headers: true });
     expect(withHeader).toContain("col1,col2");
   });
 
   it("Rule 5: Fields with CRLF, comma, or quotes MUST be quoted", () => {
     const data = [["hello,world", 'say "hi"', "line1\r\nline2"]];
-    const csv = formatCsv(data);
+    const csv = Csv.format(data);
     expect(csv).toContain('"hello,world"');
     expect(csv).toContain('"say ""hi"""');
     expect(csv).toContain('"line1\r\nline2"');
@@ -448,17 +448,17 @@ describe("formatCsv - RFC 4180 Compliance", () => {
 
   it("Rule 6: Quote character is double-quote", () => {
     const data = [["test"]];
-    const csv = formatCsv(data, { quoteColumns: true });
+    const csv = Csv.format(data, { quoteColumns: true });
     expect(csv).toBe('"test"');
   });
 
   it("Rule 7: Quotes escaped by doubling", () => {
     const data = [['"quoted"']];
-    const csv = formatCsv(data);
+    const csv = Csv.format(data);
     expect(csv).toBe('"""quoted"""');
 
     // Verify round-trip
-    const parsed = parseCsv(csv);
+    const parsed = Csv.parse(csv);
     expect(parsed).toEqual(data);
   });
 });

@@ -1,17 +1,18 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag } from "@xml/types";
 
 /* 'virtual' methods used as a form of documentation */
 
 // base class for xforms that are composed of other xforms
 // offers some default implementations
 class CompositeXform<TModel = any> extends BaseXform<TModel> {
-  declare public parser?: any;
+  declare public parser?: BaseXform;
 
-  createNewModel(_node?: any): any {
-    return {};
+  createNewModel(_node?: ParseOpenTag): TModel {
+    return {} as TModel;
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // Typical pattern for composite xform
     this.parser = this.parser || this.map![node.name];
     if (this.parser) {
@@ -34,10 +35,10 @@ class CompositeXform<TModel = any> extends BaseXform<TModel> {
     }
   }
 
-  onParserClose(name: string, parser: any): void {
+  onParserClose(name: string, parser: BaseXform): void {
     // parseClose has seen a child parser close
     // now need to incorporate into this.model somehow
-    this.model![name] = parser.model;
+    (this.model as Record<string, unknown>)[name] = parser.model;
   }
 
   parseClose(name: string): boolean {

@@ -1,9 +1,9 @@
 /**
  * Example: Comments with subdirectory layout (Issue #148)
  *
- * Demonstrates that excelts can read comments from xlsx files that use
+ * Demonstrates that documonster can read comments from xlsx files that use
  * the subdirectory layout (xl/comments/comment1.xml) produced by tools
- * like openpyxl, in addition to the standard flat layout (xl/comments1.xml).
+ * used by some third-party tools, in addition to the standard flat layout (xl/comments1.xml).
  *
  * This example:
  * 1. Creates a workbook with comments (with authors) and writes it
@@ -14,10 +14,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { Workbook, Note } from "../../../index";
+import { Cell, Note, Workbook } from "@excel/index";
+
 import { ArchiveFile } from "../../archive/fs/archive-file";
 
-const tmpDir = path.resolve(import.meta.dirname, "../../../../tmp");
+const tmpDir = path.resolve(import.meta.dirname, "../../../../tmp/excel-examples");
 fs.mkdirSync(tmpDir, { recursive: true });
 
 const flatFile = path.join(tmpDir, "comments-flat.xlsx");
@@ -27,41 +28,43 @@ const subdirFile = path.join(tmpDir, "comments-subdir.xlsx");
 // Step 1: Create a workbook with comments (with different authors)
 // ---------------------------------------------------------------------------
 console.log("Step 1: Creating workbook with comments...");
-const wb = new Workbook();
-const ws = wb.addWorksheet("Sheet1");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-ws.getCell("A1").value = "Hello";
-ws.getCell("A1").comment = new Note({ texts: [{ text: "Comment by Alice" }] }, "Alice");
+Cell.setValue(ws, "A1", "Hello");
+Cell.setComment(ws, "A1", Note.create({ texts: [{ text: "Comment by Alice" }] }, "Alice"));
 
-ws.getCell("B2").value = "World";
-ws.getCell("B2").comment = new Note({ texts: [{ text: "Comment by Bob" }] }, "Bob");
+Cell.setValue(ws, "B2", "World");
+Cell.setComment(ws, "B2", Note.create({ texts: [{ text: "Comment by Bob" }] }, "Bob"));
 
-await wb.xlsx.writeFile(flatFile);
+await Workbook.writeFile(wb, flatFile);
 console.log(`  Written flat-layout file: ${flatFile}`);
 
 // ---------------------------------------------------------------------------
 // Step 2: Read back the flat-layout file and verify
 // ---------------------------------------------------------------------------
 console.log("\nStep 2: Reading flat-layout file...");
-const wb2 = new Workbook();
-await wb2.xlsx.readFile(flatFile);
-const ws2 = wb2.getWorksheet("Sheet1")!;
+const wb2 = Workbook.create();
+await Workbook.readFile(wb2, flatFile);
+const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-const a1 = ws2.getCell("A1");
-const b2 = ws2.getCell("B2");
-console.log(`  A1 note: ${JSON.stringify(a1.note)}, author: ${a1.comment?.author}`);
-console.log(`  B2 note: ${JSON.stringify(b2.note)}, author: ${b2.comment?.author}`);
-console.log(`  A1 has comment: ${a1.note != null ? "YES" : "MISSING"}`);
-console.log(`  B2 has comment: ${b2.note != null ? "YES" : "MISSING"}`);
 console.log(
-  `  A1 author correct: ${a1.comment?.author === "Alice" ? "YES" : `NO (got "${a1.comment?.author}")`}`
+  `  A1 note: ${JSON.stringify(Cell.getNote(ws2, "A1"))}, author: ${Cell.getComment(ws2, "A1")?.author}`
 );
 console.log(
-  `  B2 author correct: ${b2.comment?.author === "Bob" ? "YES" : `NO (got "${b2.comment?.author}")`}`
+  `  B2 note: ${JSON.stringify(Cell.getNote(ws2, "B2"))}, author: ${Cell.getComment(ws2, "B2")?.author}`
+);
+console.log(`  A1 has comment: ${Cell.getNote(ws2, "A1") != null ? "YES" : "MISSING"}`);
+console.log(`  B2 has comment: ${Cell.getNote(ws2, "B2") != null ? "YES" : "MISSING"}`);
+console.log(
+  `  A1 author correct: ${Cell.getComment(ws2, "A1")?.author === "Alice" ? "YES" : `NO (got "${Cell.getComment(ws2, "A1")?.author}")`}`
+);
+console.log(
+  `  B2 author correct: ${Cell.getComment(ws2, "B2")?.author === "Bob" ? "YES" : `NO (got "${Cell.getComment(ws2, "B2")?.author}")`}`
 );
 
 // ---------------------------------------------------------------------------
-// Step 3: Re-pack into subdirectory layout (simulating openpyxl output)
+// Step 3: Re-pack into subdirectory layout (simulating third-party output)
 // ---------------------------------------------------------------------------
 console.log("\nStep 3: Re-packing into subdirectory layout...");
 
@@ -115,35 +118,37 @@ console.log(`  Written subdirectory-layout file: ${subdirFile}`);
 // Step 4: Read the subdirectory-layout file and verify comments are parsed
 // ---------------------------------------------------------------------------
 console.log("\nStep 4: Reading subdirectory-layout file...");
-const wb3 = new Workbook();
-await wb3.xlsx.readFile(subdirFile);
-const ws3 = wb3.getWorksheet("Sheet1")!;
+const wb3 = Workbook.create();
+await Workbook.readFile(wb3, subdirFile);
+const ws3 = Workbook.getWorksheet(wb3, "Sheet1")!;
 
-const a1s = ws3.getCell("A1");
-const b2s = ws3.getCell("B2");
-console.log(`  A1 note: ${JSON.stringify(a1s.note)}, author: ${a1s.comment?.author}`);
-console.log(`  B2 note: ${JSON.stringify(b2s.note)}, author: ${b2s.comment?.author}`);
-console.log(`  A1 has comment: ${a1s.note != null ? "YES" : "MISSING"}`);
-console.log(`  B2 has comment: ${b2s.note != null ? "YES" : "MISSING"}`);
 console.log(
-  `  A1 author correct: ${a1s.comment?.author === "Alice" ? "YES" : `NO (got "${a1s.comment?.author}")`}`
+  `  A1 note: ${JSON.stringify(Cell.getNote(ws3, "A1"))}, author: ${Cell.getComment(ws3, "A1")?.author}`
 );
 console.log(
-  `  B2 author correct: ${b2s.comment?.author === "Bob" ? "YES" : `NO (got "${b2s.comment?.author}")`}`
+  `  B2 note: ${JSON.stringify(Cell.getNote(ws3, "B2"))}, author: ${Cell.getComment(ws3, "B2")?.author}`
+);
+console.log(`  A1 has comment: ${Cell.getNote(ws3, "A1") != null ? "YES" : "MISSING"}`);
+console.log(`  B2 has comment: ${Cell.getNote(ws3, "B2") != null ? "YES" : "MISSING"}`);
+console.log(
+  `  A1 author correct: ${Cell.getComment(ws3, "A1")?.author === "Alice" ? "YES" : `NO (got "${Cell.getComment(ws3, "A1")?.author}")`}`
+);
+console.log(
+  `  B2 author correct: ${Cell.getComment(ws3, "B2")?.author === "Bob" ? "YES" : `NO (got "${Cell.getComment(ws3, "B2")?.author}")`}`
 );
 
 // ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 const allPassed =
-  a1.note != null &&
-  b2.note != null &&
-  a1.comment?.author === "Alice" &&
-  b2.comment?.author === "Bob" &&
-  a1s.note != null &&
-  b2s.note != null &&
-  a1s.comment?.author === "Alice" &&
-  b2s.comment?.author === "Bob";
+  Cell.getNote(ws2, "A1") != null &&
+  Cell.getNote(ws2, "B2") != null &&
+  Cell.getComment(ws2, "A1")?.author === "Alice" &&
+  Cell.getComment(ws2, "B2")?.author === "Bob" &&
+  Cell.getNote(ws3, "A1") != null &&
+  Cell.getNote(ws3, "B2") != null &&
+  Cell.getComment(ws3, "A1")?.author === "Alice" &&
+  Cell.getComment(ws3, "B2")?.author === "Bob";
 
 console.log(
   `\n${allPassed ? "SUCCESS" : "FAILURE"}: Comments and authors ${allPassed ? "correctly round-tripped" : "NOT fully preserved"} across both layouts.`

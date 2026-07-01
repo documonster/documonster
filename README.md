@@ -1,14 +1,14 @@
-# ExcelTS
+# Documonster
 
-[![Build Status](https://github.com/cjnoname/excelts/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/cjnoname/excelts/actions/workflows/ci.yml) &nbsp; [中文](README_zh.md)
+[![Build Status](https://github.com/documonster/documonster/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/documonster/documonster/actions/workflows/ci.yml) &nbsp; [中文](README_zh.md)
 
 The TypeScript ecosystem is heavily fragmented when it comes to document and data processing. To work with spreadsheets, documents, PDFs, and the many data and archive formats around them, developers often need to pull in a different package for each task — and then yet another set of packages to make them work in the browser, plus separate streaming wrappers on top. These libraries vary in API style, quality, and maintenance status, creating a tax on every project that needs more than one of them.
 
-ExcelTS was built to fix this. One package, one consistent API, one codebase — working identically across Node.js, Bun, and browsers. Streaming is a first-class citizen in every module, not an afterthought bolted on through a third-party adapter. The goal is simple: install once, import what you need, and get the same reliable behavior everywhere — with maximum streaming performance out of the box.
+Documonster was built to fix this. One package, one consistent API, one codebase — working identically across Node.js, Bun, and browsers. Streaming is a first-class citizen in every module, not an afterthought bolted on through a third-party adapter. The goal is simple: install once, import what you need, and get the same reliable behavior everywhere — with maximum streaming performance out of the box.
 
 ## About This Project
 
-ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
+Documonster is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
 - **AI-Friendly** — Clean, consistent API designed for AI coding agents. Every module has comprehensive documentation and runnable examples for AI to learn from
 - **Zero Runtime Dependencies** — Pure TypeScript, no external packages
@@ -18,7 +18,7 @@ ExcelTS is a zero-dependency TypeScript toolkit for spreadsheets and documents:
 
 ## Modules
 
-ExcelTS is organized into nine standalone modules. Each module has its own documentation and runnable examples.
+Documonster is organized into nine standalone modules. Each module has its own documentation and runnable examples.
 
 ### Excel — XLSX/JSON Workbook Manager
 
@@ -86,11 +86,11 @@ Node.js-compatible Readable/Writable/Transform/Duplex that works identically in 
 ## Installation
 
 ```bash
-npm install @cj-tech-master/excelts
+npm install documonster
 # or
-pnpm add @cj-tech-master/excelts
+pnpm add documonster
 # or
-bun add @cj-tech-master/excelts
+bun add documonster
 ```
 
 Each module is available as a standalone subpath export. All subpaths support `browser`, `import` (ESM), and `require` (CJS) conditions.
@@ -98,7 +98,7 @@ Each module is available as a standalone subpath export. All subpaths support `b
 ## Quick Start
 
 ```typescript
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster";
 
 // Create
 const workbook = new Workbook();
@@ -113,20 +113,20 @@ await wb.xlsx.readFile("output.xlsx");
 wb.getWorksheet(1).eachRow((row, n) => console.log(n, row.values));
 
 // PDF — generate from data, no Workbook needed
-import { pdf } from "@cj-tech-master/excelts/pdf";
+import { pdf } from "documonster/pdf";
 const pdfBytes = await pdf([
   ["Product", "Revenue"],
   ["Widget", 1000]
 ]);
 
 // PDF — read text, images, and metadata from any PDF
-import { readPdf } from "@cj-tech-master/excelts/pdf";
+import { readPdf } from "documonster/pdf";
 const result = await readPdf(pdfBytes);
 console.log(result.text); // extracted text
 console.log(result.metadata); // title, author, etc.
 
 // PDF — build free-form PDFs with text, shapes, SVG paths
-import { PdfDocumentBuilder } from "@cj-tech-master/excelts/pdf";
+import { PdfDocumentBuilder } from "documonster/pdf";
 const doc = new PdfDocumentBuilder();
 const page = doc.addPage();
 page.drawText("Hello!", { x: 72, y: 770, fontSize: 24 });
@@ -134,70 +134,70 @@ page.drawSvgPath("M10 10 L90 10 L50 80 Z", { fill: { r: 1, g: 0, b: 0 } });
 page.addAnnotation({ type: "Highlight", rect: [72, 765, 150, 785] });
 
 // PDF — edit existing PDFs (overlay, merge, fill forms)
-import { PdfEditor } from "@cj-tech-master/excelts/pdf";
+import { PdfEditor } from "documonster/pdf";
 const editor = PdfEditor.load(existingPdf);
 editor.getPage(0).drawText("Stamp", { x: 200, y: 400, fontSize: 36 });
 editor.setFormField("name", "Jane");
 editor.copyPagesFrom(otherPdf);
 
 // CSV — parse and format
-import { parseCsv, formatCsv } from "@cj-tech-master/excelts/csv";
+import { parseCsv, formatCsv } from "documonster/csv";
 const rows = parseCsv("name,age\nAlice,30", { headers: true });
 const csv = formatCsv([{ name: "Bob", age: 25 }], { headers: true });
 
 // XML — parse, query, write
-import { parseXml, queryAll, XmlWriter } from "@cj-tech-master/excelts/xml";
+import { parseXml, queryAll, XmlWriter } from "documonster/xml";
 const titles = queryAll(parseXml(xmlString).root, "book/title");
 
 // ZIP — create and extract
-import { zip, unzip } from "@cj-tech-master/excelts/zip";
+import { zip, unzip } from "documonster/zip";
 const archive = await zip().add("hello.txt", "Hello!").bytes();
 
 // Markdown — parse and format tables
-import { parseMarkdown, formatMarkdown } from "@cj-tech-master/excelts/markdown";
+import { parseMarkdown, formatMarkdown } from "documonster/markdown";
 const table = parseMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
 
 // Word — create, read, and convert DOCX
-import { Document, toBuffer, readDocx } from "@cj-tech-master/excelts/word";
+import { Document, toBuffer, readDocx } from "documonster/word";
 const wdoc = Document.create();
 Document.addHeading(wdoc, "Report", 1);
-Document.addParagraph(wdoc, "Generated by ExcelTS.");
+Document.addParagraph(wdoc, "Generated by Documonster.");
 const docxBytes = await toBuffer(Document.build(wdoc));
 const parsedDocx = await readDocx(docxBytes); // round-trip read
 
 // Formula — opt-in calculation engine (kept out of the base bundle)
 //
 // Mode A: paired with Workbook — enables wb.calculateFormulas()
-import { installFormulaEngine } from "@cj-tech-master/excelts/formula";
+import { installFormulaEngine } from "documonster/formula";
 installFormulaEngine(); // once at startup
 sheet.getCell("A4").value = { formula: "SUM(A1:A3)" };
 workbook.calculateFormulas(); // now populates cell.result
 
 // Mode B: standalone — pure function, zero excel runtime, any WorkbookLike
-import { calculateFormulas } from "@cj-tech-master/excelts/formula";
+import { calculateFormulas } from "documonster/formula";
 calculateFormulas(anyWorkbookLikeObject);
 ```
 
 ## Browser Support
 
-ExcelTS has native browser support with **zero configuration** for modern bundlers.
+Documonster has native browser support with **zero configuration** for modern bundlers.
 
 ```typescript
 // Bundlers (Vite, Webpack, Rollup, esbuild) — just import
-import { Workbook } from "@cj-tech-master/excelts";
+import { Workbook } from "documonster";
 const buffer = await new Workbook().addWorksheet("S1").workbook.xlsx.writeBuffer();
 ```
 
 ```html
 <!-- Script tag (no bundler) -->
-<script src="https://unpkg.com/@cj-tech-master/excelts/dist/iife/excelts.iife.min.js"></script>
+<script src="https://unpkg.com/documonster/dist/iife/documonster.excel.iife.min.js"></script>
 ```
 
 > The IIFE bundle does not include the formula calculation engine. Use
-> ESM + `@cj-tech-master/excelts/formula` if you need
+> ESM + `documonster/formula` if you need
 > `Workbook.calculateFormulas()`.
 
-For older browsers without native `CompressionStream` API, ExcelTS automatically uses a built-in pure JavaScript DEFLATE implementation — no polyfills needed.
+For older browsers without native `CompressionStream` API, Documonster automatically uses a built-in pure JavaScript DEFLATE implementation — no polyfills needed.
 
 ## Requirements
 
@@ -214,10 +214,10 @@ For older browsers without native `CompressionStream` API, ExcelTS automatically
 
 ## Links
 
-- 🏠 [GitHub Repository](https://github.com/cjnoname/excelts)
-- 🐛 [Issue Tracker](https://github.com/cjnoname/excelts/issues)
+- 🏠 [GitHub Repository](https://github.com/documonster/documonster)
+- 🐛 [Issue Tracker](https://github.com/documonster/documonster/issues)
 - 📋 [Changelog](CHANGELOG.md)
 - 🔄 [Migration Guide](MIGRATION.md)
 - 🗺️ [Roadmap](ROADMAP.md)
-- 📄 [License (MIT)](LICENSE)
+- 📄 [License (Apache-2.0)](LICENSE)
 - 📦 [Third-Party Notices](THIRD_PARTY_NOTICES.md)

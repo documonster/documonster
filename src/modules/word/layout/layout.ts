@@ -20,7 +20,12 @@
  *   Half-point 24 = 12pt font; line height ~14.4pt = 288 twips (single-spaced)
  */
 
-import { isHyperlink, isRun } from "../core/text-utils";
+import { isHyperlink, isRun } from "@word/core/text-utils";
+import {
+  DEFAULT_PAGE_HEIGHT_TWIPS,
+  DEFAULT_PAGE_MARGIN_TWIPS,
+  DEFAULT_PAGE_WIDTH_TWIPS
+} from "@word/layout/layout-constants";
 import type {
   BodyContent,
   DocxDocument,
@@ -36,12 +41,7 @@ import type {
   SectionColumns,
   SectionProperties,
   Table
-} from "../types";
-import {
-  DEFAULT_PAGE_HEIGHT_TWIPS,
-  DEFAULT_PAGE_MARGIN_TWIPS,
-  DEFAULT_PAGE_WIDTH_TWIPS
-} from "./layout-constants";
+} from "@word/types";
 
 // =============================================================================
 // Public API Types

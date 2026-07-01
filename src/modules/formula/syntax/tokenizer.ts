@@ -7,7 +7,9 @@
  * numbers, strings, booleans, and error literals.
  */
 
-import { TokenType, type Token } from "./token-types";
+import { FormulaParseError } from "@formula/errors";
+import type { Token } from "@formula/syntax/token-types";
+import { TokenType } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Character Helpers
@@ -241,7 +243,7 @@ function parseStructuredRefBrackets(
 ): { specials: string[]; columns: string[]; end: number } {
   const len = formula.length;
   if (pos >= len || formula[pos] !== "[") {
-    throw new Error("Expected '[' at position " + pos);
+    throw new FormulaParseError("Expected '['", pos);
   }
 
   const specials: string[] = [];
@@ -536,7 +538,7 @@ export function tokenize(formula: string): Token[] {
         // Unterminated string literal — reject at tokenize time so we
         // never hand the parser a truncated value that could alias to a
         // different formula. Excel rejects this outright.
-        throw new Error(`Unterminated string literal at position ${i}`);
+        throw new FormulaParseError("Unterminated string literal", i);
       }
       tokens.push({ type: TokenType.String, value: str });
       continue;

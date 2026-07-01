@@ -1,3 +1,4 @@
+import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { AlignmentXform } from "@excel/xlsx/xform/style/alignment-xform";
 import { BorderXform } from "@excel/xlsx/xform/style/border-xform";
@@ -5,6 +6,7 @@ import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { ProtectionXform } from "@excel/xlsx/xform/style/protection-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 // <xf numFmtId="[numFmtId]" fontId="[fontId]" fillId="[fillId]" borderId="[xf.borderId]" xfId="[xfId]">
 //   Optional <alignment>
@@ -12,19 +14,19 @@ import { ProtectionXform } from "@excel/xlsx/xform/style/protection-xform";
 // </xf>
 
 interface DxfModel {
-  alignment?: any;
-  border?: any;
-  fill?: any;
-  font?: any;
+  alignment?: Partial<Alignment>;
+  border?: Partial<Borders>;
+  fill?: Fill;
+  font?: Partial<Font>;
   numFmt?: string;
   numFmtId?: number;
-  protection?: any;
+  protection?: Partial<Protection>;
 }
 
 // Style assists translation from style model to/from xlsx
 class DxfXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
 
   constructor() {
     super();
@@ -45,7 +47,7 @@ class DxfXform extends BaseXform {
 
   // how do we generate dxfid?
 
-  render(xmlStream: any, model: DxfModel): void {
+  render(xmlStream: XmlSink, model: DxfModel): void {
     xmlStream.openNode(this.tag);
 
     if (model.font) {
@@ -71,7 +73,7 @@ class DxfXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;

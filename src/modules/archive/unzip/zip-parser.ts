@@ -4,16 +4,16 @@
  * No dependency on Node.js stream module
  */
 
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import type { ZipStringEncoding } from "@archive/shared/text";
-import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
-import { parseZipArchiveFromBuffer } from "@archive/zip-spec/zip-parser-core";
-
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { FileTooLargeError } from "@archive/core/errors";
+import type { ZipStringEncoding } from "@archive/core/text";
 import {
   processEntryData,
   processEntryDataSync,
   readEntryCompressedData
-} from "./zip-extract-core";
+} from "@archive/unzip/zip-extract-core";
+import type { ZipEntryInfo } from "@archive/zip-spec/zip-entry-info";
+import { parseZipArchiveFromBuffer } from "@archive/zip-spec/zip-parser-core";
 
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -24,22 +24,16 @@ function assertEntryExtractableInMemory(entry: ZipEntryInfo): void {
     entry.uncompressedSize64 !== undefined &&
     entry.uncompressedSize64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new Error(
-      `File "${entry.path}" is too large to extract into memory (ZIP64 size > 2^53-1)`
-    );
+    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1");
   }
   if (entry.compressedSize64 !== undefined && entry.compressedSize64 > MAX_SAFE_INTEGER_BIGINT) {
-    throw new Error(
-      `File "${entry.path}" is too large to extract into memory (ZIP64 size > 2^53-1)`
-    );
+    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1");
   }
   if (
     entry.localHeaderOffset64 !== undefined &&
     entry.localHeaderOffset64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new Error(
-      `File "${entry.path}" has a ZIP64 offset > 2^53-1 and cannot be extracted by the in-memory parser`
-    );
+    throw new FileTooLargeError(entry.path, "ZIP64 offset > 2^53-1");
   }
 }
 

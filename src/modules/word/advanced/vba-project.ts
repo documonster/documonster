@@ -11,7 +11,7 @@
  * preserves the binary VBA project for round-trip fidelity.
  */
 
-import type { DocxDocument, OpaquePart } from "../types";
+import type { DocxDocument, OpaquePart } from "@word/types";
 
 // =============================================================================
 // Types

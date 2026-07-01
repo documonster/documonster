@@ -1,46 +1,48 @@
 import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
-import { collect, pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
+import { ByteQueue } from "@archive/core/byte-queue";
+import {
+  DEFAULT_ZIP_LEVEL,
+  DEFAULT_ZIP_TIMESTAMPS,
+  REPRODUCIBLE_ZIP_MOD_TIME
+} from "@archive/core/defaults";
+import { throwIfAborted, ArchiveError } from "@archive/core/errors";
+import type { ZipStringEncoding } from "@archive/core/text";
+import { encodeZipString } from "@archive/core/text";
+import type { ArchiveFormat } from "@archive/core/types";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveSource } from "@archive/io/archive-source";
 import {
   toAsyncIterable,
   toUint8Array,
   toUint8ArraySync,
   isSyncArchiveSource,
-  isInMemoryArchiveSource,
-  type ArchiveSource
+  isInMemoryArchiveSource
 } from "@archive/io/archive-source";
-import { ByteQueue } from "@archive/shared/byte-queue";
-import {
-  DEFAULT_ZIP_LEVEL,
-  DEFAULT_ZIP_TIMESTAMPS,
-  REPRODUCIBLE_ZIP_MOD_TIME
-} from "@archive/shared/defaults";
-import { throwIfAborted } from "@archive/shared/errors";
-import { encodeZipString, type ZipStringEncoding } from "@archive/shared/text";
-import type { ArchiveFormat } from "@archive/shared/types";
+import type { TarArchiveProgress } from "@archive/tar/tar-archive";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildDataDescriptor,
   FLAG_DATA_DESCRIPTOR,
   UINT16_MAX,
   UINT32_MAX,
-  writeLocalFileHeaderInto,
-  type Zip64Mode
+  writeLocalFileHeaderInto
 } from "@archive/zip-spec/zip-records";
+import type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 import { ZipDeflateFile } from "@archive/zip/stream";
+import type { ZipCentralDirectoryEntryInput } from "@archive/zip/writer-core";
 import {
   measureCentralDirectoryAndEocd,
-  writeCentralDirectoryAndEocdInto,
-  type ZipCentralDirectoryEntryInput
+  writeCentralDirectoryAndEocdInto
 } from "@archive/zip/writer-core";
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
 import { buildZipEntryMetadata } from "@archive/zip/zip-entry-metadata";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
+import { createZipOperation } from "@archive/zip/zip-output-pipeline";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { isNode } from "@utils/env";
-
-import type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
-import { createZipOperation } from "./zip-output-pipeline";
 
 /** Archive options */
 export interface ZipOptions {
@@ -133,7 +135,7 @@ export interface ZipEntryOptions {
   encoding?: ZipStringEncoding;
 }
 
-export type { ZipOperation, ZipProgress, ZipStreamOptions } from "./progress";
+export type { ZipOperation, ZipProgress, ZipStreamOptions } from "@archive/zip/progress";
 
 type ZipInput = {
   name: string;
@@ -194,10 +196,10 @@ export class ZipArchive {
 
   add(name: string, source: ArchiveSource, options?: ZipEntryOptions): this {
     if (this._sealed) {
-      throw new Error("Cannot add entries after output has started");
+      throw new ArchiveError("Cannot add entries after output has started");
     }
     if (!name) {
-      throw new Error("Entry name is required");
+      throw new ArchiveError("Entry name is required");
     }
     this._entries.push({ name, source, options });
     return this;
@@ -388,7 +390,10 @@ export class ZipArchive {
             }
             crcState = crc32Update(crcState, chunk);
             uncompressedSize += chunk.length;
-            await writer.write(chunk as unknown as BufferSource);
+            // `Uint8Array<ArrayBufferLike>` is a valid `BufferSource` at runtime;
+            // the cast only reconciles the lib's `ArrayBufferLike` backing-store
+            // generic with `BufferSource`'s `ArrayBuffer`.
+            await writer.write(chunk as BufferSource);
           }
           await writer.close();
           await readPromise;
@@ -495,7 +500,7 @@ export class ZipArchive {
       if (!hasBlobSource) {
         const entries = this._entries.map(entry => ({
           name: entry.name,
-          data: toUint8ArraySync(entry.source as any),
+          data: toUint8ArraySync(toSyncSource(entry.source)),
           level: entry.options?.level,
           modTime: entry.options?.modTime,
           comment: entry.options?.comment,
@@ -508,7 +513,7 @@ export class ZipArchive {
       const entries = await Promise.all(
         this._entries.map(async entry => ({
           name: entry.name,
-          data: await toUint8Array(entry.source as any),
+          data: await toUint8Array(toInMemorySource(entry.source)),
           level: entry.options?.level,
           modTime: entry.options?.modTime,
           comment: entry.options?.comment,
@@ -526,16 +531,12 @@ export class ZipArchive {
     this._sealed = true;
 
     const entries = this._entries.map(entry => {
-      if (
-        !(entry.source instanceof Uint8Array) &&
-        !(entry.source instanceof ArrayBuffer) &&
-        typeof entry.source !== "string"
-      ) {
-        throw new Error("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
+      if (!isSyncArchiveSource(entry.source)) {
+        throw new ArchiveError("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
       }
       return {
         name: entry.name,
-        data: toUint8ArraySync(entry.source as any),
+        data: toUint8ArraySync(entry.source),
         modTime: entry.options?.modTime,
         comment: entry.options?.comment,
         encoding: entry.options?.encoding ?? this._options.encoding
@@ -550,9 +551,41 @@ export class ZipArchive {
   }
 }
 
+/**
+ * Narrow an {@link ArchiveSource} to a synchronously-resolvable source.
+ *
+ * Only called on code paths that have already verified all sources are sync
+ * (no Blob/stream), so a failure here indicates an internal invariant break.
+ */
+function toSyncSource(source: ArchiveSource): Uint8Array | ArrayBuffer | string {
+  if (isSyncArchiveSource(source)) {
+    return source;
+  }
+  throw new ArchiveError("Expected a synchronous archive source (Uint8Array/ArrayBuffer/string)");
+}
+
+/**
+ * Narrow an {@link ArchiveSource} to an in-memory source (sync types or Blob).
+ */
+function toInMemorySource(source: ArchiveSource): Uint8Array | ArrayBuffer | string | Blob {
+  if (isInMemoryArchiveSource(source)) {
+    return source;
+  }
+  throw new ArchiveError(
+    "Expected an in-memory archive source (Uint8Array/ArrayBuffer/string/Blob)"
+  );
+}
+
 /** ZIP options with format: "tar" */
-export interface ZipOptionsTar extends ZipOptions {
+export interface ZipOptionsTar extends Omit<ZipOptions, "onProgress"> {
   format: "tar";
+
+  /**
+   * Default progress callback used by streaming operations.
+   *
+   * TAR archives emit {@link TarArchiveProgress} rather than {@link ZipProgress}.
+   */
+  onProgress?: (p: TarArchiveProgress) => void;
 }
 
 /** ZIP options with format: "zip" (or default) */

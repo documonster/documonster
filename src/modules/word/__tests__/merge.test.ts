@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { mergeDocuments } from "../index";
+import { Io } from "../index";
 import type { DocxDocument, Run } from "../types";
 
 // Helper to create a minimal document with paragraphs
@@ -15,9 +15,8 @@ function createDoc(texts: string[], options?: Partial<DocxDocument>): DocxDocume
   }));
   return {
     body,
-    contentTypes: [],
     ...options
-  } as unknown as DocxDocument;
+  };
 }
 
 // Extract all paragraph text from body
@@ -43,20 +42,20 @@ function extractTexts(doc: DocxDocument): string[] {
 
 describe("mergeDocuments", () => {
   it("returns empty document for empty array", () => {
-    const result = mergeDocuments([]);
+    const result = Io.merge([]);
     expect(result.body).toEqual([]);
   });
 
   it("returns the document itself for single-element array", () => {
     const doc = createDoc(["Hello"]);
-    const result = mergeDocuments([doc]);
+    const result = Io.merge([doc]);
     expect(result.body).toBe(doc.body);
   });
 
   it("merges two documents with section break between them", () => {
     const doc1 = createDoc(["First doc"]);
     const doc2 = createDoc(["Second doc"]);
-    const result = mergeDocuments([doc1, doc2]);
+    const result = Io.merge([doc1, doc2]);
 
     // Should have content from both documents
     const texts = extractTexts(result);
@@ -68,7 +67,7 @@ describe("mergeDocuments", () => {
     const doc1 = createDoc(["A"]);
     const doc2 = createDoc(["B"]);
     const doc3 = createDoc(["C"]);
-    const result = mergeDocuments([doc1, doc2, doc3]);
+    const result = Io.merge([doc1, doc2, doc3]);
 
     const texts = extractTexts(result);
     expect(texts).toContain("A");
@@ -79,7 +78,7 @@ describe("mergeDocuments", () => {
   it("uses 'continuous' section break when specified", () => {
     const doc1 = createDoc(["First"]);
     const doc2 = createDoc(["Second"]);
-    const result = mergeDocuments([doc1, doc2], { sectionBreak: "continuous" });
+    const result = Io.merge([doc1, doc2], { sectionBreak: "continuous" });
 
     // Verify the section break paragraph has correct section properties
     let hasContinuous = false;
@@ -96,7 +95,7 @@ describe("mergeDocuments", () => {
   it("uses 'nextPage' section break by default", () => {
     const doc1 = createDoc(["First"]);
     const doc2 = createDoc(["Second"]);
-    const result = mergeDocuments([doc1, doc2]);
+    const result = Io.merge([doc1, doc2]);
 
     let hasNextPage = false;
     for (const block of result.body) {
@@ -113,7 +112,7 @@ describe("mergeDocuments", () => {
     const style1 = { styleId: "Heading1", name: "Heading 1", type: "paragraph" };
     const doc1 = createDoc(["First"], { styles: [style1 as any] });
     const doc2 = createDoc(["Second"]);
-    const result = mergeDocuments([doc1, doc2]);
+    const result = Io.merge([doc1, doc2]);
 
     expect(result.styles).toBeDefined();
     expect(result.styles!.some((s: any) => s.styleId === "Heading1")).toBe(true);
@@ -123,7 +122,7 @@ describe("mergeDocuments", () => {
     const style = { styleId: "Normal", name: "Normal", type: "paragraph" };
     const doc1 = createDoc(["First"], { styles: [style as any] });
     const doc2 = createDoc(["Second"], { styles: [style as any] });
-    const result = mergeDocuments([doc1, doc2]);
+    const result = Io.merge([doc1, doc2]);
 
     const normalStyles = result.styles?.filter((s: any) => s.styleId === "Normal");
     expect(normalStyles?.length).toBe(1);
@@ -137,7 +136,7 @@ describe("mergeDocuments", () => {
     };
     const doc1 = createDoc(["First"], { images: [img1 as any] });
     const doc2 = createDoc(["Second"], { images: [img1 as any] });
-    const result = mergeDocuments([doc1, doc2]);
+    const result = Io.merge([doc1, doc2]);
 
     expect(result.images?.length).toBe(1);
   });
@@ -147,7 +146,7 @@ describe("mergeDocuments", () => {
     const img2 = { fileName: "image2.png", data: new Uint8Array([2]), mediaType: "image/png" };
     const doc1 = createDoc(["First"], { images: [img1 as any] });
     const doc2 = createDoc(["Second"], { images: [img2 as any] });
-    const result = mergeDocuments([doc1, doc2]);
+    const result = Io.merge([doc1, doc2]);
 
     expect(result.images?.length).toBe(2);
   });
@@ -186,7 +185,7 @@ describe("mergeDocuments", () => {
       numberingInstances: [{ numId: 1, abstractNumId: 0 }]
     } as unknown as DocxDocument;
 
-    const merged = mergeDocuments([doc1, doc2]);
+    const merged = Io.merge([doc1, doc2]);
 
     // We should now have two distinct numId values and two distinct abstractNumIds.
     expect(merged.numberingInstances?.length).toBe(2);
@@ -231,7 +230,7 @@ describe("mergeDocuments", () => {
       numberingInstances: [{ numId: 1, abstractNumId: 0 }]
     } as DocxDocument;
 
-    mergeDocuments([doc1WithList, doc2]);
+    Io.merge([doc1WithList, doc2]);
 
     // doc2's body paragraph numbering should NOT have been mutated.
     expect((doc2.body[0] as any).properties.numbering.numId).toBe(1);
@@ -272,7 +271,7 @@ describe("mergeDocuments", () => {
       images: [img2]
     } as unknown as DocxDocument;
 
-    const merged = mergeDocuments([doc1, doc2]);
+    const merged = Io.merge([doc1, doc2]);
     expect(merged.images!.length).toBe(2);
 
     // Find the rId of the new image (image2.png).
@@ -326,7 +325,7 @@ describe("mergeDocuments", () => {
       ]
     } as unknown as DocxDocument;
 
-    const merged = mergeDocuments([doc1, doc2]);
+    const merged = Io.merge([doc1, doc2]);
     // Both footnotes survived.
     expect(merged.footnotes!.length).toBe(2);
     // doc2's footnote got a fresh id (3), and doc2's body ref now points there.

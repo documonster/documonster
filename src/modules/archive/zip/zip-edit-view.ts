@@ -5,10 +5,11 @@
  * for both ZipEditor and ZipFile classes, reducing code duplication.
  */
 
+import { ArchiveError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
-import { normalizeZipPath, type ZipPathOptions } from "@archive/zip-spec/zip-path";
-
-import type { ZipEntryOptions } from "./index";
+import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { normalizeZipPath } from "@archive/zip-spec/zip-path";
+import type { ZipEntryOptions } from "@archive/zip/index";
 
 // =============================================================================
 // Types
@@ -88,7 +89,7 @@ export class ZipEditView<TInfo> {
    */
   private _normalize(name: string): string {
     if (!name) {
-      throw new Error("Entry name is required");
+      throw new ArchiveError("Entry name is required");
     }
     if (this._pathOptions === false) {
       return name;

@@ -13,6 +13,7 @@
  * - Options control which parts of the document are visited
  */
 
+import { isRun } from "@word/core/text-utils";
 import type {
   DocxDocument,
   BodyContent,
@@ -43,8 +44,7 @@ import type {
   CheckBox,
   DrawingShape,
   OpaqueDrawing
-} from "../types";
-import { isRun } from "./text-utils";
+} from "@word/types";
 
 // =============================================================================
 // Types

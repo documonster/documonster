@@ -1,6 +1,6 @@
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { createAbortError } from "@archive/shared/errors";
-import { isAsyncIterable, isReadableStream } from "@stream/internal/type-guards";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { createAbortError, ArchiveError } from "@archive/core/errors";
+import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
 import { stringToUint8Array as encodeUtf8, concatUint8Arrays } from "@utils/binary";
 
 export type ArchiveSource =
@@ -163,7 +163,7 @@ export async function collectUint8ArrayStream(
   options: { signal?: AbortSignal } = {}
 ): Promise<Uint8Array> {
   // Delegate to the general ArchiveSource collector so abort/cancellation semantics stay consistent.
-  return resolveArchiveSourceToBuffer(stream as unknown as ArchiveSource, options);
+  return resolveArchiveSourceToBuffer(stream, options);
 }
 
 export async function* toAsyncIterable(
@@ -174,7 +174,7 @@ export async function* toAsyncIterable(
 
   const checkAborted = (): void => {
     if (signal?.aborted) {
-      throw createAbortError((signal as any).reason);
+      throw createAbortError(signal?.reason);
     }
   };
 
@@ -206,9 +206,10 @@ export async function* toAsyncIterable(
   if (typeof Blob !== "undefined" && source instanceof Blob) {
     // Prefer streaming the Blob to avoid a full Blob->ArrayBuffer copy.
     // This reduces memory use and improves performance for both small and large inputs.
-    const maybeStream = (source as any).stream;
+    // `Blob.stream` may be missing on very old runtimes despite the type, so probe it.
+    const maybeStream: unknown = source.stream;
     if (typeof maybeStream === "function") {
-      const stream = (source as any).stream();
+      const stream = source.stream();
       yield* toAsyncIterable(stream, options);
       return;
     }
@@ -247,7 +248,7 @@ export async function* toAsyncIterable(
     try {
       while (true) {
         if (aborted) {
-          throw createAbortError((signal as any).reason);
+          throw createAbortError(signal?.reason);
         }
         checkAborted();
         const { done, value } = await reader.read();
@@ -258,7 +259,7 @@ export async function* toAsyncIterable(
         const chunk = normalizeChunk(value);
         if (chunk) {
           if (aborted) {
-            throw createAbortError((signal as any).reason);
+            throw createAbortError(signal?.reason);
           }
           checkAborted();
           if (onChunk) {
@@ -297,5 +298,5 @@ export async function* toAsyncIterable(
     return;
   }
 
-  throw new Error("Unsupported archive source");
+  throw new ArchiveError("Unsupported archive source");
 }

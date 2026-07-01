@@ -1,0 +1,24 @@
+/**
+ * `Pivot` namespace surface.
+ *
+ * `import { Pivot } from "documonster/excel"` → `Pivot.add(ws, model)`.
+ *
+ * Also re-exports the public pivot-table model types so consumers reference
+ * them through the namespace (`Pivot.Value`, `Pivot.Model`, …) instead of an
+ * internal module path.
+ */
+export { addPivotTable as add } from "@excel/core/worksheet";
+
+export type {
+  PivotTable as Handle,
+  PivotTableSource as Source,
+  PivotTableValue as Value,
+  PivotTableModel as Model,
+  PivotTableSubtotal as Subtotal,
+  PivotTableChartFormat as ChartFormat,
+  DataField,
+  CacheField,
+  SharedItemValue,
+  ParsedCacheDefinition,
+  RecordValue
+} from "@excel/core/pivot-table";

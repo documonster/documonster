@@ -44,9 +44,14 @@ const stubHandler: ProxyHandler<object> = {
   }
 };
 
-// Create stub classes using Proxy
-export const CsvWorkerPool = new Proxy(function () {} as any, stubHandler);
-export const CsvWorkerSession = new Proxy(function () {} as any, stubHandler);
+// Create stub classes using Proxy. The target is an empty function so the
+// Proxy is both callable and constructable; every meaningful access is
+// intercepted by `stubHandler` (which throws), so the target's own type is
+// irrelevant — cast through `unknown` rather than `any` to keep the escape
+// hatch explicit and local.
+const stubTarget = function (): void {};
+export const CsvWorkerPool = new Proxy(stubTarget, stubHandler) as unknown as object;
+export const CsvWorkerSession = new Proxy(stubTarget, stubHandler) as unknown as object;
 
 export function getDefaultWorkerPool(): typeof CsvWorkerPool {
   throwNotSupported();
@@ -84,4 +89,4 @@ export type {
   GroupResult,
   AggregateResult,
   QueryResult
-} from "./types";
+} from "@csv/worker/types";

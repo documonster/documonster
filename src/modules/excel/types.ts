@@ -1,5 +1,5 @@
 /**
- * Type definitions for ExcelTS
+ * Type definitions for Documonster
  * This file exports all public types used by the library
  */
 
@@ -33,6 +33,10 @@ export enum PaperSize {
 export interface Color {
   argb: string;
   theme: number;
+  /** Tint applied to a theme color, in `[-1, 1]`. Present on theme-based colors. */
+  tint?: number;
+  /** Legacy indexed-palette color (xlsx `indexed` attribute). */
+  indexed?: number;
 }
 
 // ============================================================================
@@ -214,27 +218,28 @@ export interface Margins {
 // ============================================================================
 export interface PageSetup {
   margins: Margins;
-  orientation: "portrait" | "landscape";
-  horizontalDpi: number;
-  verticalDpi: number;
+  orientation: string;
+  horizontalDpi?: number;
+  verticalDpi?: number;
   fitToPage: boolean;
   fitToWidth: number;
   fitToHeight: number;
   scale: number;
-  pageOrder: "downThenOver" | "overThenDown";
+  pageOrder: string;
   blackAndWhite: boolean;
   draft: boolean;
-  cellComments: "atEnd" | "asDisplayed" | "None";
-  errors: "dash" | "blank" | "NA" | "displayed";
-  paperSize: PaperSize;
+  cellComments: string;
+  errors: string;
+  paperSize?: number;
   showRowColHeaders: boolean;
   showGridLines: boolean;
-  firstPageNumber: number;
+  firstPageNumber?: number;
   horizontalCentered: boolean;
   verticalCentered: boolean;
-  printArea: string;
-  printTitlesRow: string;
-  printTitlesColumn: string;
+  rowBreaks?: RowBreak[];
+  printArea?: string;
+  printTitlesRow?: string;
+  printTitlesColumn?: string;
 }
 
 // ============================================================================
@@ -243,12 +248,12 @@ export interface PageSetup {
 export interface HeaderFooter {
   differentFirst: boolean;
   differentOddEven: boolean;
-  oddHeader: string;
-  oddFooter: string;
-  evenHeader: string;
-  evenFooter: string;
-  firstHeader: string;
-  firstFooter: string;
+  oddHeader: string | null;
+  oddFooter: string | null;
+  evenHeader: string | null;
+  evenFooter: string | null;
+  firstHeader: string | null;
+  firstFooter: string | null;
 }
 
 // ============================================================================
@@ -926,7 +931,13 @@ export type Address = {
 // ============================================================================
 // Row and Column Types
 // ============================================================================
-export type RowValues = CellValue[] | Record<string, any> | undefined | null;
+/**
+ * Row data: either positional cell values, or a key→value bag consumed by
+ * column keys. The keyed form intentionally allows arbitrary nested values
+ * (`unknown`) because column keys may be dotted paths (e.g. `address.city`)
+ * that `resolveColumnKeyValue` walks before the leaf is coerced to a cell value.
+ */
+export type RowValues = CellValue[] | Record<string, unknown> | undefined | null;
 
 // ============================================================================
 // Conditional Formatting Types

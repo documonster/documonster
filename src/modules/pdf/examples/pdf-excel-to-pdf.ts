@@ -14,7 +14,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { getWorksheets } from "@excel/core/workbook";
+import { columnSetNumFmt, getColumn } from "@excel/core/worksheet";
+import { Workbook, Worksheet } from "@excel/index";
+
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,13 +37,13 @@ const testDataDir = path.resolve(
 async function convertFile(
   xlsxPath: string,
   pdfName: string,
-  options?: Parameters<typeof excelToPdf>[1]
+  options?: Parameters<typeof Pdf.fromExcel>[1]
 ): Promise<void> {
-  const wb = new Workbook();
-  await wb.xlsx.readFile(xlsxPath);
-  const pdf = await excelToPdf(wb, options);
+  const wb = Workbook.create();
+  await Workbook.readFile(wb, xlsxPath);
+  const pdf = await Pdf.fromExcel(wb, options);
   fs.writeFileSync(path.join(outDir, pdfName), pdf);
-  const sheets = wb.worksheets.length;
+  const sheets = getWorksheets(wb).length;
   console.log(`  ${pdfName} — ${sheets} sheet(s), ${pdf.length} bytes`);
 }
 
@@ -147,34 +151,34 @@ await convertFile(
 
 console.log("10. Same file, multiple export variants:");
 
-const wb10 = new Workbook();
-await wb10.xlsx.readFile(path.join(excelDataDir, "test.xlsx"));
+const wb10 = Workbook.create();
+await Workbook.readFile(wb10, path.join(excelDataDir, "test.xlsx"));
 
 // Variant A: Landscape, no grid
-const pdfA = await excelToPdf(wb10, { orientation: "landscape" });
+const pdfA = await Pdf.fromExcel(wb10, { orientation: "landscape" });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-landscape.pdf"), pdfA);
 console.log("  excel-to-pdf-landscape.pdf — landscape, no grid");
 
 // Variant B: A5, fit to page — build a small workbook suited for A5
-const wb10b = new Workbook();
-const wsA5 = wb10b.addWorksheet("A5 Demo");
-wsA5.columns = [
+const wb10b = Workbook.create();
+const wsA5 = Workbook.addWorksheet(wb10b, "A5 Demo");
+Worksheet.setColumns(wsA5, [
   { header: "Item", key: "item", width: 15 },
   { header: "Qty", key: "qty", width: 8 },
   { header: "Price", key: "price", width: 10 }
-];
-wsA5.addRows([
+]);
+Worksheet.addRows(wsA5, [
   { item: "Apples", qty: 12, price: 3.5 },
   { item: "Bananas", qty: 6, price: 1.2 },
   { item: "Oranges", qty: 8, price: 2.8 }
 ]);
-wsA5.getColumn("price").numFmt = "$#,##0.00";
-const pdfB = await excelToPdf(wb10b, { pageSize: "A5", fitToPage: true, showGridLines: true });
+columnSetNumFmt(getColumn(wsA5, "price"), "$#,##0.00");
+const pdfB = await Pdf.fromExcel(wb10b, { pageSize: "A5", fitToPage: true, showGridLines: true });
 fs.writeFileSync(path.join(outDir, "excel-to-pdf-a5.pdf"), pdfB);
 console.log("  excel-to-pdf-a5.pdf — A5, fit to page");
 
 // Variant C: Encrypted
-const pdfC = await excelToPdf(wb10, {
+const pdfC = await Pdf.fromExcel(wb10, {
   showGridLines: true,
   encryption: { ownerPassword: "secret" }
 });
@@ -182,7 +186,7 @@ fs.writeFileSync(path.join(outDir, "excel-to-pdf-encrypted.pdf"), pdfC);
 console.log("  excel-to-pdf-encrypted.pdf — encrypted");
 
 // Variant D: Select first sheet only
-const pdfD = await excelToPdf(wb10, {
+const pdfD = await Pdf.fromExcel(wb10, {
   sheets: [1],
   showGridLines: true,
   showPageNumbers: true

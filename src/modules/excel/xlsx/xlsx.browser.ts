@@ -12,22 +12,74 @@
 import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
-// Chart serialisation / deserialisation goes through the chart-host-registry
-// slot so the chart module is only pulled into consumer bundles when they
-// explicitly `import "@cj-tech-master/excelts/chart"`. Type imports are
-// erased at runtime; runtime entry points route through `getChartSupport()`.
-import { getChartSupport } from "@excel/chart-host-registry";
-import type { ChartEntry, ChartExEntry } from "@excel/chart/chart";
+import type {
+  ChartExData,
+  ChartExEntry,
+  ChartExModel,
+  ChartExNumericDimension,
+  ChartExSeries,
+  ChartExStringDimension
+} from "@excel/chart/model/chart-ex-types";
+import type {
+  AxisBase,
+  Bevel,
+  ChartColor,
+  ChartEntry,
+  ChartFill,
+  ChartLayout,
+  ChartMarker,
+  ChartRichText,
+  ChartTextProperties,
+  DataLabelEntry,
+  DataPoint,
+  EffectList,
+  NumberCache,
+  NumberReference,
+  Scene3D,
+  SeriesBase,
+  Shadow,
+  ShapeProperties,
+  ShapeProperties3D,
+  StringCache,
+  StringReference,
+  Trendline,
+  TrendlineLabel
+} from "@excel/chart/model/types";
+import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
+import {
+  renderChartEx,
+  renderChartExLegendXml,
+  rewriteChartExDataRefsToDefinedNames
+} from "@excel/chart/serialize/chart-ex-serialize";
+// Chart serialisation / deserialisation imports the chart implementation
+// statically. The chart modules depend only on the `*-core` data layer, so
+// there is no import cycle, and a consumer that never reads/writes a workbook
+// containing charts gets this code tree-shaken out by the bundler.
+import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
+import { themeIndexToName } from "@excel/chart/shared/chart-utils";
+import { definedNamesAddHidden, definedNamesModel } from "@excel/core/defined-names";
+import type {
+  PivotTable,
+  PivotTableSubtotal,
+  ParsedCacheDefinition
+} from "@excel/core/pivot-table";
+import type { Workbook, ExternalLinkModel } from "@excel/core/workbook.browser";
+import {
+  _collectExternalLinksForWrite,
+  _recordAutoExternalLink,
+  getWorkbookModel,
+  setWorkbookModel
+} from "@excel/core/workbook.browser";
 import {
   ExcelStreamStateError,
   ExcelFileError,
   ImageError,
   ExcelNotSupportedError,
-  XmlParseError,
+  XlsxParseError,
   TableError,
   ChartOptionsError
 } from "@excel/errors";
-import type { PivotTable, PivotTableSubtotal, ParsedCacheDefinition } from "@excel/pivot-table";
+import type { ThreadedCommentPerson } from "@excel/types";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
 import {
@@ -108,16 +160,12 @@ import {
   worksheetRelsPath,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
-import { validateXlsxBuffer } from "@excel/utils/ooxml-validator";
 import { StreamBuf } from "@excel/utils/stream-buf";
-import type { Workbook, ExternalLinkModel } from "@excel/workbook.browser";
 import { RelType } from "@excel/xlsx/rel-type";
-import {
-  ExternalLinkXform,
-  type ParsedExternalLink
-} from "@excel/xlsx/xform/book/external-link-xform";
+import type { ParsedExternalLink } from "@excel/xlsx/xform/book/external-link-xform";
+import { ExternalLinkXform } from "@excel/xlsx/xform/book/external-link-xform";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
-import { CommentsXform } from "@excel/xlsx/xform/comment/comments-xform";
+import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import {
   parsePersonList,
   parseThreadedComments,
@@ -130,27 +178,19 @@ import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
-import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
-import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
-import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
-import { PivotCacheDefinitionXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform";
-import { PivotCacheRecordsXform } from "@excel/xlsx/xform/pivot-table/pivot-cache-records-xform";
-import {
-  PivotTableXform,
-  type ParsedPivotTableModel
-} from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
-import { ChartsheetXform } from "@excel/xlsx/xform/sheet/chartsheet-xform";
+import type { ParsedPivotTableModel } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { TableXform } from "@excel/xlsx/xform/table/table-xform";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
-import { PassThrough, type IEventEmitter } from "@stream";
+import type { IEventEmitter } from "@stream";
+import { PassThrough } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
 import { bufferToString, base64ToUint8Array } from "@utils/utils";
 import { uuidV4 } from "@utils/uuid";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import { XmlStreamWriter } from "@xml/stream-writer";
+import type { XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
 type StreamListener = Parameters<IEventEmitter["on"]>[1];
@@ -823,7 +863,7 @@ function extractLeadingComments(originalXml: string, openTagRegex: RegExp): stri
  */
 function renderChartWithLeadingComments(
   entry: ChartEntry,
-  xform: { render(xmlStream: any, model?: any): void }
+  xform: { render(xmlStream: XmlSink, model?: unknown): void }
 ): Uint8Array {
   const writer = new XmlWriter();
   xform.render(writer, entry.model);
@@ -880,7 +920,7 @@ function shouldPassthroughChartExEntry(
   return snapshotChartModel(entry.model) === entry.modelSnapshot;
 }
 
-function stripChartExRawXml(model: any): any {
+function stripChartExRawXml(model: ChartExModel): ChartExModel {
   return { ...model, rawXml: undefined };
 }
 
@@ -943,6 +983,10 @@ function shouldAutoValidate(explicit: boolean | undefined): boolean {
  */
 async function runWriteBufferSelfCheck(bytes: Uint8Array): Promise<void> {
   try {
+    // Dynamic import: the OOXML validator (~66 KB) is a development-only
+    // self-check that never runs in production (see `shouldAutoValidate`).
+    // Loading it lazily keeps it out of consumer bundles entirely.
+    const { validateXlsxBuffer } = await import("@excel/utils/ooxml-validator");
     const report = await validateXlsxBuffer(bytes, { maxProblems: 20 });
     if (report.ok) {
       return;
@@ -952,14 +996,14 @@ async function runWriteBufferSelfCheck(bytes: Uint8Array): Promise<void> {
       .join("\n");
     // eslint-disable-next-line no-console
     console.warn(
-      `[excelts] writeBuffer() produced xlsx with ${report.problems.length} OOXML issue(s):\n` +
+      `[documonster] writeBuffer() produced xlsx with ${report.problems.length} OOXML issue(s):\n` +
         `${summary}\n` +
         `Pass \`{ validate: false }\` to silence this self-check, or set NODE_ENV=production.`
     );
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn(
-      `[excelts] writeBuffer() self-check threw unexpectedly and was skipped: ${String(err)}`
+      `[documonster] writeBuffer() self-check threw unexpectedly and was skipped: ${String(err)}`
     );
   }
 }
@@ -1179,7 +1223,7 @@ function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | unde
   } catch {
     return undefined;
   }
-  const current = entry.model as any;
+  const current = entry.model;
   if (!sameJson(stripPatchableChartExFields(previous), stripPatchableChartExFields(current))) {
     return undefined;
   }
@@ -1261,7 +1305,7 @@ function buildChartExAxisRawPatchPlan(
 }
 
 function stripPatchableChartExFields(model: any): any {
-  const clone = JSON.parse(JSON.stringify(model));
+  const clone = structuredClone(model);
   clone.rawXml = undefined;
   // Vendor / extension metadata the parser recorded but the raw patcher
   // does not rewrite. Letting them differ in the diff keeps
@@ -1575,7 +1619,7 @@ function getChartRawPatchPlan(entry: ChartEntry): ChartRawPatchPlan | undefined 
   } catch {
     return undefined;
   }
-  const current = entry.model as any;
+  const current = entry.model;
   const prevChart = previous.chart;
   const curChart = current.chart;
   const plan: ChartRawPatchPlan = {
@@ -1618,7 +1662,7 @@ function getChartRawPatchPlan(entry: ChartEntry): ChartRawPatchPlan | undefined 
 }
 
 function stripPatchableChartFields(model: any): any {
-  const clone = JSON.parse(JSON.stringify(model));
+  const clone = structuredClone(model);
   // Top-level fields that tryPatchChartRawXml does not rewrite. Allowing
   // them to differ between `previous` and `current` means a caller can
   // load a template that carries c14/c15/c16 extension XML, edit a
@@ -1848,7 +1892,9 @@ function buildRawChartExTitleXml(text: string): string {
   return `<cx:title><cx:tx><cx:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(text)}</a:t></a:r></a:p></cx:rich></cx:tx><cx:overlay val="0"/></cx:title>`;
 }
 
-function buildRawChartExLegendXml(legend: any): string {
+function buildRawChartExLegendXml(
+  legend: NonNullable<ChartExModel["chartSpace"]["chart"]["legend"]>
+): string {
   // Delegate to the structured ChartEx writer so the raw-patch path
   // produces a byte-identical serialisation. Previously this function
   // hand-rolled a self-closing `<cx:legend pos="…" overlay="…"/>`,
@@ -1859,14 +1905,13 @@ function buildRawChartExLegendXml(legend: any): string {
   // the raw patcher inserts into an inline stream, so strip the
   // leading indent that `renderChartExLegendXml` prefixes each line
   // with. The result is semantically identical; just flattened.
-  return getChartSupport()
-    .renderChartExLegendXml(legend)
+  return renderChartExLegendXml(legend)
     .split("\n")
     .map(line => line.replace(/^\s*/, ""))
     .join("");
 }
 
-function buildRawChartExDataXml(chartData: any): string {
+function buildRawChartExDataXml(chartData: ChartExData | undefined): string {
   const parts = ["<cx:chartData>"];
   // `cx:externalData` is a child of `cx:chartSpace` per Chart2014's
   // `CT_ChartSpace`, NOT of `cx:chartData`. Emitted at the chartSpace
@@ -1885,7 +1930,7 @@ function buildRawChartExDataXml(chartData: any): string {
   return parts.join("");
 }
 
-function buildRawChartExStringDimensionXml(dim: any): string {
+function buildRawChartExStringDimensionXml(dim: ChartExStringDimension): string {
   const parts = [`<cx:strDim type="${escapeAttr(dim.type)}">`];
   if (dim.formula) {
     parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
@@ -1906,7 +1951,7 @@ function buildRawChartExStringDimensionXml(dim: any): string {
   return parts.join("");
 }
 
-function buildRawChartExNumericDimensionXml(dim: any): string {
+function buildRawChartExNumericDimensionXml(dim: ChartExNumericDimension): string {
   const parts = [`<cx:numDim type="${escapeAttr(dim.type)}">`];
   if (dim.formula) {
     parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
@@ -2415,7 +2460,7 @@ function patchRawPlotAreaLayout(raw: string, model: any): string | undefined {
   return raw.slice(0, range.start) + patched + raw.slice(range.end);
 }
 
-function buildRawLayoutXml(layout: any, namespace: "c" | "cx" = "c"): string {
+function buildRawLayoutXml(layout: ChartLayout | undefined, namespace: "c" | "cx" = "c"): string {
   if (!layout?.manualLayout) {
     return `<${namespace}:layout/>`;
   }
@@ -2503,7 +2548,7 @@ function preserveSeriesBlocks(
       break;
     }
     xml += block.slice(cursor, range.start);
-    const placeholder = `__EXCELTS_SER_${seriesBlocks.length}__`;
+    const placeholder = `__DOCUMONSTER_SER_${seriesBlocks.length}__`;
     seriesBlocks.push(transform(block.slice(range.start, range.end)));
     xml += placeholder;
     cursor = range.end;
@@ -2513,7 +2558,7 @@ function preserveSeriesBlocks(
 
 function restoreSeriesBlocks(block: string, seriesBlocks: string[]): string {
   return seriesBlocks.reduce(
-    (xml, seriesBlock, i) => xml.replace(`__EXCELTS_SER_${i}__`, seriesBlock),
+    (xml, seriesBlock, i) => xml.replace(`__DOCUMONSTER_SER_${i}__`, seriesBlock),
     block
   );
 }
@@ -2584,7 +2629,10 @@ function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boole
   return parts.join("");
 }
 
-function buildRawDataLabelEntryXml(entry: any, opts?: { suppressDLblPos?: boolean }): string {
+function buildRawDataLabelEntryXml(
+  entry: DataLabelEntry,
+  opts?: { suppressDLblPos?: boolean }
+): string {
   // ECMA-376 `CT_DLbl` (§21.2.2.47) is a `choice(delete | …)` — the
   // two branches are mutually exclusive. Emitting `delete` alongside
   // any of the display-flag children (layout / tx / numFmt /
@@ -3003,7 +3051,7 @@ function patchAxisTypeSpecificLeaves(
   return patched;
 }
 
-function buildRawScalingXml(scaling: any): string {
+function buildRawScalingXml(scaling: NonNullable<AxisBase["scaling"]> | undefined): string {
   if (!scaling) {
     return "";
   }
@@ -3038,7 +3086,9 @@ function buildRawScalingXml(scaling: any): string {
   return parts.join("");
 }
 
-function buildRawNumFmtXml(numFmt: any): string {
+function buildRawNumFmtXml(
+  numFmt: { formatCode?: string; sourceLinked?: boolean } | undefined
+): string {
   if (!numFmt?.formatCode) {
     return "";
   }
@@ -3049,7 +3099,7 @@ function buildRawNumFmtXml(numFmt: any): string {
 function patchGridlines(
   block: string,
   tag: string,
-  spPr: any,
+  spPr: ShapeProperties | undefined,
   beforeTags: string[],
   parentTag: string
 ): string {
@@ -3079,14 +3129,14 @@ function patchBooleanLeaf(
   return patchGenericChild(block, tag, xml, beforeTags, parentTag);
 }
 
-function buildRawSeriesTxXml(tx: any): string {
+function buildRawSeriesTxXml(tx: NonNullable<SeriesBase["tx"]>): string {
   if (tx.strRef?.formula) {
     return `<c:tx>${buildRawStrRefXml(tx.strRef)}</c:tx>`;
   }
   return `<c:tx><c:v>${escapeXml(String(tx.value ?? ""))}</c:v></c:tx>`;
 }
 
-function buildRawMarkerXml(marker: any): string {
+function buildRawMarkerXml(marker: ChartMarker | undefined): string {
   if (!marker) {
     return "";
   }
@@ -3107,14 +3157,14 @@ function buildRawMarkerXml(marker: any): string {
   return parts.join("");
 }
 
-function buildRawDataPointsXml(dataPoints: any): string {
+function buildRawDataPointsXml(dataPoints: DataPoint[] | undefined): string {
   if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
     return "";
   }
   return dataPoints.map(buildRawDataPointXml).join("");
 }
 
-function buildRawDataPointXml(point: any): string {
+function buildRawDataPointXml(point: DataPoint): string {
   const parts = ["<c:dPt>", `<c:idx val="${point.index ?? 0}"/>`];
   if (point.invertIfNegative !== undefined) {
     parts.push(`<c:invertIfNegative val="${point.invertIfNegative ? "1" : "0"}"/>`);
@@ -3138,14 +3188,14 @@ function buildRawDataPointXml(point: any): string {
   return parts.join("");
 }
 
-function buildRawTrendlinesXml(trendlines: any): string {
+function buildRawTrendlinesXml(trendlines: Trendline[] | undefined): string {
   if (!Array.isArray(trendlines) || trendlines.length === 0) {
     return "";
   }
   return trendlines.map(buildRawTrendlineXml).join("");
 }
 
-function buildRawTrendlineXml(trendline: any): string {
+function buildRawTrendlineXml(trendline: Trendline): string {
   const parts = ["<c:trendline>"];
   if (trendline.name) {
     parts.push(`<c:name>${escapeXml(String(trendline.name))}</c:name>`);
@@ -3175,7 +3225,7 @@ function buildRawTrendlineXml(trendline: any): string {
   return parts.join("");
 }
 
-function buildRawTrendlineLabelXml(label: any): string {
+function buildRawTrendlineLabelXml(label: TrendlineLabel): string {
   const parts = ["<c:trendlineLbl>"];
   if (label.layout) {
     parts.push(buildRawLayoutXml(label.layout));
@@ -3249,15 +3299,15 @@ function buildRawDataSourceXml(tag: string, source: any): string | undefined {
   return undefined;
 }
 
-function buildRawNumRefXml(ref: any): string {
+function buildRawNumRefXml(ref: NumberReference): string {
   return `<c:numRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawNumCacheXml(ref.cache)}</c:numRef>`;
 }
 
-function buildRawStrRefXml(ref: any): string {
+function buildRawStrRefXml(ref: StringReference): string {
   return `<c:strRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawStrCacheXml(ref.cache)}</c:strRef>`;
 }
 
-function buildRawNumCacheXml(cache: any): string {
+function buildRawNumCacheXml(cache: NumberCache | undefined): string {
   if (!cache) {
     return "";
   }
@@ -3277,7 +3327,7 @@ function buildRawNumCacheXml(cache: any): string {
   return parts.join("");
 }
 
-function buildRawStrCacheXml(cache: any): string {
+function buildRawStrCacheXml(cache: StringCache | undefined): string {
   if (!cache) {
     return "";
   }
@@ -3292,7 +3342,10 @@ function buildRawStrCacheXml(cache: any): string {
   return parts.join("");
 }
 
-function buildRawShapePropertiesXml(spPr: any, namespace: "c" | "cx"): string | undefined {
+function buildRawShapePropertiesXml(
+  spPr: ShapeProperties | undefined,
+  namespace: "c" | "cx"
+): string | undefined {
   if (!spPr) {
     return "";
   }
@@ -3369,7 +3422,10 @@ function buildRawShapePropertiesXml(spPr: any, namespace: "c" | "cx"): string | 
   return writer.toString();
 }
 
-function buildRawTextPropertiesXml(txPr: any, namespace: "c" | "cx"): string | undefined {
+function buildRawTextPropertiesXml(
+  txPr: ChartTextProperties | string | undefined,
+  namespace: "c" | "cx"
+): string | undefined {
   if (!txPr) {
     return "";
   }
@@ -3402,7 +3458,7 @@ function normalizeRawNamespace(rawXml: string, localName: string, namespace: "c"
     .replace(new RegExp(`</(?:c|cx):${localName}>$`), `</${namespace}:${localName}>`);
 }
 
-function writeRawRunProperties(writer: XmlWriter, props: any, tag: string): void {
+function writeRawRunProperties(writer: XmlWriter, props: ChartTextProperties, tag: string): void {
   const attrs: Record<string, string> = {};
   if (props.size !== undefined) {
     attrs.sz = String(props.size);
@@ -3466,7 +3522,7 @@ function writeRawRunProperties(writer: XmlWriter, props: any, tag: string): void
   writer.closeNode();
 }
 
-function writeRawColor(writer: XmlWriter, color: any): void {
+function writeRawColor(writer: XmlWriter, color: ChartColor): void {
   const modifiers = buildRawColorModifiersXml(color);
   const writeColorNode = (tag: string, val: string) => {
     if (!modifiers) {
@@ -3508,7 +3564,10 @@ function writeRawColor(writer: XmlWriter, color: any): void {
   }
 }
 
-function writeRawGradientFill(writer: XmlWriter, gradient: any): void {
+function writeRawGradientFill(
+  writer: XmlWriter,
+  gradient: NonNullable<ChartFill["gradient"]>
+): void {
   if (!Array.isArray(gradient.stops) || gradient.stops.length < 2) {
     return;
   }
@@ -3568,7 +3627,7 @@ function writeRawGradientFill(writer: XmlWriter, gradient: any): void {
   writer.closeNode();
 }
 
-function writeRawEffectList(writer: XmlWriter, effects: any): void {
+function writeRawEffectList(writer: XmlWriter, effects: EffectList): void {
   writer.openNode("a:effectLst");
   if (effects.blur) {
     const attrs: Record<string, string> = {};
@@ -3637,7 +3696,7 @@ function writeRawEffectList(writer: XmlWriter, effects: any): void {
   writer.closeNode();
 }
 
-function writeRawShadow(writer: XmlWriter, tag: string, shadow: any): void {
+function writeRawShadow(writer: XmlWriter, tag: string, shadow: Shadow): void {
   const attrs: Record<string, string> = {};
   for (const [key, value] of [
     ["blurRad", shadow.blurRadius],
@@ -3659,7 +3718,7 @@ function writeRawShadow(writer: XmlWriter, tag: string, shadow: any): void {
   writer.closeNode();
 }
 
-function writeRawScene3D(writer: XmlWriter, scene: any): void {
+function writeRawScene3D(writer: XmlWriter, scene: Scene3D): void {
   writer.openNode("a:scene3d");
   if (scene.camera) {
     const camera = scene.camera;
@@ -3700,7 +3759,7 @@ function writeRawScene3D(writer: XmlWriter, scene: any): void {
   writer.closeNode();
 }
 
-function writeRawSp3D(writer: XmlWriter, sp3d: any): void {
+function writeRawSp3D(writer: XmlWriter, sp3d: ShapeProperties3D): void {
   const attrs: Record<string, string> = {};
   if (sp3d.z !== undefined) {
     attrs.z = String(sp3d.z);
@@ -3744,7 +3803,7 @@ function writeRawSp3D(writer: XmlWriter, sp3d: any): void {
   writer.closeNode();
 }
 
-function writeRawBevel(writer: XmlWriter, tag: string, bevel: any): void {
+function writeRawBevel(writer: XmlWriter, tag: string, bevel: Bevel): void {
   const attrs: Record<string, string> = {};
   if (bevel.width !== undefined) {
     attrs.w = String(bevel.width);
@@ -3758,7 +3817,7 @@ function writeRawBevel(writer: XmlWriter, tag: string, bevel: any): void {
   writer.leafNode(tag, attrs);
 }
 
-function buildRawColorModifiersXml(color: any): string {
+function buildRawColorModifiersXml(color: ChartColor): string {
   // Each modifier must serialise as `<a:* val="N"/>` where `N` is a
   // valid `xsd:int`. Previously the raw patcher interpolated model
   // values directly, so `NaN` / `Infinity` / unrounded floats leaked
@@ -3922,7 +3981,7 @@ function patchRawChartExSeriesBlock(
   return patched;
 }
 
-function buildRawChartExSeriesTxXml(tx: any): string {
+function buildRawChartExSeriesTxXml(tx: NonNullable<ChartExSeries["tx"]> | undefined): string {
   if (!tx) {
     return "";
   }
@@ -3984,7 +4043,7 @@ function buildRawChartExSeriesTxXml(tx: any): string {
  * `preferRawPatch` callers who need the full set should stay on
  * structural rebuilds.
  */
-function buildRawChartExRichTextXml(rich: any): string {
+function buildRawChartExRichTextXml(rich: ChartRichText | undefined): string {
   if (!rich || !Array.isArray(rich.paragraphs)) {
     return "";
   }
@@ -4007,7 +4066,7 @@ function buildRawChartExRichTextXml(rich: any): string {
   return parts.join("");
 }
 
-function buildRawChartExRunPropertiesXml(props: any): string {
+function buildRawChartExRunPropertiesXml(props: ChartTextProperties | undefined): string {
   if (!props || typeof props !== "object") {
     return "";
   }
@@ -4038,7 +4097,7 @@ function buildRawChartExRunPropertiesXml(props: any): string {
       // `theme=0` which is not even a valid DrawingML scheme slot).
       // Route through the canonical helper shared with the
       // structural emitters so the mapping stays in one place.
-      colorChild = `<a:solidFill><a:schemeClr val="${escapeAttr(getChartSupport().themeIndexToName(color.theme))}"/></a:solidFill>`;
+      colorChild = `<a:solidFill><a:schemeClr val="${escapeAttr(themeIndexToName(color.theme))}"/></a:solidFill>`;
     }
   }
   if (attrs.length === 0 && !colorChild) {
@@ -4856,7 +4915,7 @@ function escapeAttr(value: string): string {
  * `loadFromFiles()` / etc. to return the Node `Workbook` (which exposes
  * `xlsx.readFile` / `xlsx.writeFile`). Without this, those methods are
  * inherited unchanged and surface the browser `Workbook` type to Node
- * consumers — see issue #160.
+ * consumers.
  *
  * The default type parameter keeps the public XLSX surface unchanged for
  * external callers (`new XLSX(workbook)` is still typed as `XLSX<Workbook>`).
@@ -4923,7 +4982,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
    * Shared by both Node.js write() and browser writeBuffer()
    */
   protected async writeToZip(zip: IZipWriter, options?: XlsxWriteOptions): Promise<void> {
-    const { model } = this.workbook;
+    const model = getWorkbookModel(this.workbook);
     this.prepareModel(model, options);
     this.prepareChartsheets(model);
     this.prepareChartExSidecars(model);
@@ -4958,7 +5017,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
 
   /**
    * Emit the raw slicer/timeline parts captured on load. Pure
-   * byte-copy — excelts does not modify these parts. The partner
+   * byte-copy — documonster does not modify these parts. The partner
    * Content-Types and rels are covered separately (content types in
    * `addContentTypes`, sheet/workbook rels by the corresponding
    * xforms consuming the existing `xl/_rels/*.rels` captured on
@@ -4987,11 +5046,11 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
    * stay byte-identical.
    */
   async addPersons(zip: IZipWriter, model: any): Promise<void> {
-    const persons = model.persons as Array<unknown> | undefined;
+    const persons = model.persons as ThreadedCommentPerson[] | undefined;
     if (!persons || persons.length === 0) {
       return;
     }
-    zip.append(renderPersonList(persons as any), { name: "xl/persons/person.xml" });
+    zip.append(renderPersonList(persons), { name: "xl/persons/person.xml" });
   }
 
   // ===========================================================================
@@ -5184,7 +5243,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   protected async collectStreamData(stream: IParseStream): Promise<Uint8Array> {
     const chunks: Uint8Array[] = [];
     await new Promise<void>((resolve, reject) => {
-      stream.on("data", (chunk: any) => {
+      stream.on("data", (chunk: string | Uint8Array | ArrayBuffer) => {
         if (typeof chunk === "string") {
           chunks.push(new TextEncoder().encode(chunk));
         } else if (chunk instanceof Uint8Array) {
@@ -5299,7 +5358,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
           return true;
         }
         // Raw-passthrough capture for slicers and timelines — two
-        // coordinated Office dashboard features excelts does not
+        // coordinated Office dashboard features documonster does not
         // structurally model but must not destroy on round-trip.
         // Each family has two part types (the control itself + its
         // cache); both are captured into maps on the workbook model
@@ -5374,8 +5433,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       }
     }
 
-    this.reconcile(model, options);
-    this.workbook.model = model;
+    await this.reconcile(model, options);
+    setWorkbookModel(this.workbook, model);
     return this.workbook;
   }
 
@@ -5484,37 +5543,41 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   // Reconcile - shared by all platforms
   // ===========================================================================
 
-  reconcile(model: any, options?: XlsxOptions): void {
+  async reconcile(model: any, options?: XlsxOptions): Promise<void> {
     const workbookXform = new WorkbookXform();
     const worksheetXform = new WorkSheetXform(options);
-    const drawingXform = new DrawingXform();
-    const tableXform = new TableXform();
 
     workbookXform.reconcile(model);
 
-    // reconcile drawings with their rels
-    const drawingOptions: any = {
-      media: model.media,
-      mediaIndex: model.mediaIndex
-    };
-    Object.keys(model.drawings).forEach(name => {
-      const drawing = model.drawings[name];
-      const drawingRel = model.drawingRels[name];
-      if (drawingRel) {
-        drawingOptions.rels = drawingRel.reduce((o: any, rel: any) => {
-          o[rel.Id] = rel;
-          return o;
-        }, {});
-        (drawing.anchors ?? []).forEach((anchor: any) => {
-          const hyperlinks = anchor.picture && anchor.picture.hyperlinks;
-          if (hyperlinks && drawingOptions.rels[hyperlinks.rId]) {
-            hyperlinks.hyperlink = drawingOptions.rels[hyperlinks.rId].Target;
-            delete hyperlinks.rId;
-          }
-        });
-        drawingXform.reconcile(drawing, drawingOptions);
-      }
-    });
+    // reconcile drawings with their rels — DrawingXform (~34 KB) is loaded
+    // lazily so workbooks without drawings never pull it into the bundle.
+    const drawingNames = Object.keys(model.drawings);
+    if (drawingNames.length > 0) {
+      const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
+      const drawingXform = new DrawingXform();
+      const drawingOptions: any = {
+        media: model.media,
+        mediaIndex: model.mediaIndex
+      };
+      drawingNames.forEach(name => {
+        const drawing = model.drawings[name];
+        const drawingRel = model.drawingRels[name];
+        if (drawingRel) {
+          drawingOptions.rels = drawingRel.reduce((o: any, rel: any) => {
+            o[rel.Id] = rel;
+            return o;
+          }, {});
+          (drawing.anchors ?? []).forEach((anchor: any) => {
+            const hyperlinks = anchor.picture && anchor.picture.hyperlinks;
+            if (hyperlinks && drawingOptions.rels[hyperlinks.rId]) {
+              hyperlinks.hyperlink = drawingOptions.rels[hyperlinks.rId].Target;
+              delete hyperlinks.rId;
+            }
+          });
+          drawingXform.reconcile(drawing, drawingOptions);
+        }
+      });
+    }
 
     // Reconcile chart references in drawing anchors
     Object.keys(model.drawings).forEach(name => {
@@ -5546,13 +5609,19 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       }
     });
 
-    // reconcile tables with the default styles
-    const tableOptions = {
-      styles: model.styles
-    };
-    Object.values(model.tables).forEach((table: any) => {
-      tableXform.reconcile(table, tableOptions);
-    });
+    // reconcile tables with the default styles — TableXform (~14 KB) loaded
+    // lazily so table-free workbooks don't pull it in.
+    const tables = Object.values(model.tables);
+    if (tables.length > 0) {
+      const { TableXform } = await import("@excel/xlsx/xform/table/table-xform");
+      const tableXform = new TableXform();
+      const tableOptions = {
+        styles: model.styles
+      };
+      tables.forEach((table: any) => {
+        tableXform.reconcile(table, tableOptions);
+      });
+    }
 
     // Reconcile pivot tables
     this._reconcilePivotTables(model);
@@ -5828,7 +5897,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
    */
   protected _normaliseExternalLinks(model: any): void {
     // Start from user-declared links, honouring their declaration order.
-    const links = this.workbook._collectExternalLinksForWrite();
+    const links = _collectExternalLinksForWrite(this.workbook);
 
     // Fast lookup: case-insensitive target → link object in `links`.
     const byTarget = new Map<string, ExternalLinkModel>();
@@ -5887,7 +5956,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       const key = ref.workbook.toLowerCase();
       let link = scratch.byTarget.get(key);
       if (!link) {
-        const index = scratch.workbook._recordAutoExternalLink(ref.workbook, ref.sheet);
+        const index = _recordAutoExternalLink(scratch.workbook, ref.workbook, ref.sheet);
         link = {
           index,
           target: ref.workbook,
@@ -5906,7 +5975,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
         // Keep the workbook cache's sheetNames in sync so subsequent
         // writes see the accumulated set.
         if (ref.sheet) {
-          scratch.workbook._recordAutoExternalLink(ref.workbook, ref.sheet);
+          _recordAutoExternalLink(scratch.workbook, ref.workbook, ref.sheet);
         }
       }
       return link.index;
@@ -6049,7 +6118,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     const xform = new WorkSheetXform(options);
     const worksheet = await xform.parseStream(stream);
     if (!worksheet) {
-      throw new XmlParseError(path, "Failed to parse worksheet");
+      throw new XlsxParseError(path, "Failed to parse worksheet");
     }
     worksheet.sheetNo = sheetNo;
     model.worksheetHash[path] = worksheet;
@@ -6057,6 +6126,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processChartsheetEntry(stream: IParseStream, model: any, sheetNo: number): Promise<void> {
+    const { ChartsheetXform } = await import("@excel/xlsx/xform/sheet/chartsheet-xform");
     const xform = new ChartsheetXform();
     const chartsheet = await xform.parseStream(stream);
     if (chartsheet) {
@@ -6066,6 +6136,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processCommentEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
+    const { CommentsXform } = await import("@excel/xlsx/xform/comment/comments-xform");
     const xform = new CommentsXform();
     const comments = await xform.parseStream(stream);
     // Key by absolute zip path so reconcile can match any rel target layout.
@@ -6073,6 +6144,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processTableEntry(stream: IParseStream, model: any, zipPath: string): Promise<void> {
+    const { TableXform } = await import("@excel/xlsx/xform/table/table-xform");
     const xform = new TableXform();
     const table = await xform.parseStream(stream);
     // Key by absolute zip path so reconcile can match any rel target layout.
@@ -6150,6 +6222,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     const data = rawData ?? (await this.collectStreamData(stream));
 
     // Parse the drawing for normal processing (images, etc.)
+    const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
     const xform = new DrawingXform();
     const xmlString = this.bufferToString(data);
     const drawing = await xform.parseStream(this.createTextStream(xmlString));
@@ -6193,6 +6266,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processVmlDrawingEntry(entry: any, model: any, zipPath: string): Promise<void> {
+    const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
     const xform = new VmlDrawingXform();
     const vmlDrawing = await xform.parseStream(entry);
     // Key by absolute zip path so reconcile can match any rel target layout.
@@ -6200,6 +6274,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processVmlDrawingHFEntry(entry: any, model: any, _name: string): Promise<void> {
+    const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
     const xform = new VmlDrawingXform();
     const vmlDrawing = await xform.parseStream(entry);
     // Store parsed header image info for reconciliation
@@ -6245,6 +6320,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async _processPivotTableEntry(stream: IParseStream, model: any, name: string): Promise<void> {
+    const { PivotTableXform } = await import("@excel/xlsx/xform/pivot-table/pivot-table-xform");
     const xform = new PivotTableXform();
     const pivotTable = await xform.parseStream(stream);
     if (pivotTable) {
@@ -6263,6 +6339,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     model: any,
     name: string
   ): Promise<void> {
+    const { PivotCacheDefinitionXform } =
+      await import("@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform");
     const xform = new PivotCacheDefinitionXform();
     const cacheDefinition = await xform.parseStream(stream);
     if (cacheDefinition) {
@@ -6275,6 +6353,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     model: any,
     name: string
   ): Promise<void> {
+    const { PivotCacheRecordsXform } =
+      await import("@excel/xlsx/xform/pivot-table/pivot-cache-records-xform");
     const xform = new PivotCacheRecordsXform();
     const cacheRecords = await xform.parseStream(stream);
     if (cacheRecords) {
@@ -6320,7 +6400,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     const data = rawData ?? (await this.collectStreamData(stream));
 
     // Parse into model for high-level API access
-    const xform = getChartSupport().createChartSpaceXform();
+    const xform = new ChartSpaceXform();
     const xmlString = this.bufferToString(data);
     const chart = await xform.parseStream(this.createTextStream(xmlString));
     if (chart) {
@@ -6394,8 +6474,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       }
     }
 
-    this.reconcile(model, options);
-    this.workbook.model = model;
+    await this.reconcile(model, options);
+    setWorkbookModel(this.workbook, model);
     return this.workbook;
   }
 
@@ -6579,7 +6659,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       const rawXml = this.bufferToString(data);
       model.chartExEntries[chartExNumber] = data;
       try {
-        const parsed = getChartSupport().parseChartEx(rawXml);
+        const parsed = parseChartEx(rawXml);
         model.chartExStructuredEntries[chartExNumber] = {
           chartExNumber,
           model: parsed,
@@ -6601,7 +6681,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     }
 
     // Raw-passthrough catch-all for Office 2010+ slicer/timeline
-    // dashboard controls and their associated rels. excelts does not
+    // dashboard controls and their associated rels. documonster does not
     // model these structurally yet; capturing the bytes here prevents
     // silent data loss on round-trip when a dashboard workbook comes
     // through. Same idea covers the two-level rels files produced by
@@ -6839,9 +6919,28 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   async addWorksheets(zip: IZipWriter, model: any): Promise<void> {
     const worksheetXform = new WorkSheetXform();
     const relationshipsXform = new RelationshipsXform();
-    const commentsXform = new CommentsXform();
-    const vmlDrawingXform = new VmlDrawingXform();
-    const ctrlPropXform = new CtrlPropXform();
+
+    // Lazily load the optional comment / VML / form-control xforms only when
+    // some worksheet actually needs them, so comment/control-free workbooks
+    // never pull these (~12 KB + VML) into the bundle.
+    const needsComments = model.worksheets.some((ws: any) => ws.comments.length > 0);
+    const needsVml = model.worksheets.some(
+      (ws: any) =>
+        ws.comments.length > 0 || (ws.formControls && ws.formControls.length > 0) || ws.headerImage
+    );
+    const needsCtrlProp = model.worksheets.some(
+      (ws: any) => ws.formControls && ws.formControls.length > 0
+    );
+
+    const commentsXform = needsComments
+      ? new (await import("@excel/xlsx/xform/comment/comments-xform")).CommentsXform()
+      : null;
+    const vmlDrawingXform = needsVml
+      ? new (await import("@excel/xlsx/xform/drawing/vml-drawing-xform")).VmlDrawingXform()
+      : null;
+    const ctrlPropXform = needsCtrlProp
+      ? new (await import("@excel/xlsx/xform/drawing/ctrl-prop-xform")).CtrlPropXform()
+      : null;
 
     for (const worksheet of model.worksheets) {
       const { fileIndex } = worksheet;
@@ -6864,7 +6963,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
 
       // Generate comments XML (separate from VML)
       if (worksheet.comments.length > 0) {
-        await this._renderToZip(zip, commentsPath(fileIndex), commentsXform, worksheet);
+        await this._renderToZip(zip, commentsPath(fileIndex), commentsXform!, worksheet);
       }
 
       // Office 365 threaded comments sit in their own part tree
@@ -6883,7 +6982,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       const hasFormControls = worksheet.formControls && worksheet.formControls.length > 0;
 
       if (hasComments || hasFormControls) {
-        await this._renderToZip(zip, vmlDrawingPath(fileIndex), vmlDrawingXform, {
+        await this._renderToZip(zip, vmlDrawingPath(fileIndex), vmlDrawingXform!, {
           comments: hasComments ? worksheet.comments : [],
           formControls: hasFormControls ? worksheet.formControls : []
         });
@@ -6902,7 +7001,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
         const imageRelTarget = `../media/${imageFileName}`;
 
         // Write the VML file for the header image
-        await this._renderToZip(zip, vmlDrawingHFPath(fileIndex), vmlDrawingXform, {
+        await this._renderToZip(zip, vmlDrawingHFPath(fileIndex), vmlDrawingXform!, {
           comments: [],
           formControls: [],
           headerImage: {
@@ -6925,13 +7024,18 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       // Generate ctrlProp files for form controls
       if (hasFormControls) {
         for (const control of worksheet.formControls) {
-          await this._renderToZip(zip, ctrlPropPath(control.ctrlPropId), ctrlPropXform, control);
+          await this._renderToZip(zip, ctrlPropPath(control.ctrlPropId), ctrlPropXform!, control);
         }
       }
     }
   }
 
   async addChartsheets(zip: IZipWriter, model: any): Promise<void> {
+    if (!model.chartsheets || model.chartsheets.length === 0) {
+      return;
+    }
+    const { ChartsheetXform } = await import("@excel/xlsx/xform/sheet/chartsheet-xform");
+    const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
     const chartsheetXform = new ChartsheetXform();
     const relsXform = new RelationshipsXform();
     const vmlDrawingXform = new VmlDrawingXform();
@@ -7012,20 +7116,34 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async addDrawings(zip: IZipWriter, model: any): Promise<void> {
-    const drawingXform = new DrawingXform();
+    // Skip entirely (and avoid loading DrawingXform ~34 KB) when no worksheet
+    // has a drawing. Chartsheets emit their drawing XML verbatim (without
+    // DrawingXform), so account for them separately.
+    const hasWorksheetDrawing = model.worksheets.some((ws: any) => ws.drawing);
+    const hasChartsheetDrawing = (model.chartsheets ?? []).some(
+      (cs: any) => cs.drawingName && (cs.chartNumber || cs.chartExNumber)
+    );
+    if (!hasWorksheetDrawing && !hasChartsheetDrawing) {
+      return;
+    }
     const relsXform = new RelationshipsXform();
 
-    for (const worksheet of model.worksheets) {
-      const { drawing } = worksheet;
-      if (drawing) {
-        const filteredAnchors = filterDrawingAnchors(drawing.anchors ?? []);
-        const drawingForWrite = drawing.anchors
-          ? { ...drawing, anchors: filteredAnchors }
-          : drawing;
-        drawingXform.prepare(drawingForWrite);
-        await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
+    if (hasWorksheetDrawing) {
+      const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
+      const drawingXform = new DrawingXform();
 
-        await this._renderToZip(zip, drawingRelsPath(drawing.name), relsXform, drawing.rels);
+      for (const worksheet of model.worksheets) {
+        const { drawing } = worksheet;
+        if (drawing) {
+          const filteredAnchors = filterDrawingAnchors(drawing.anchors ?? []);
+          const drawingForWrite = drawing.anchors
+            ? { ...drawing, anchors: filteredAnchors }
+            : drawing;
+          drawingXform.prepare(drawingForWrite);
+          await this._renderToZip(zip, drawingPath(drawing.name), drawingXform, drawingForWrite);
+
+          await this._renderToZip(zip, drawingRelsPath(drawing.name), relsXform, drawing.rels);
+        }
       }
     }
 
@@ -7099,10 +7217,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
           // original raw bytes back in front of `<c:chart>`. The SAX-
           // backed xform parser drops `comment` events so the
           // structured model has no memory of them.
-          const buffered = renderChartWithLeadingComments(
-            chartEntry,
-            getChartSupport().createChartSpaceXform()
-          );
+          const buffered = renderChartWithLeadingComments(chartEntry, new ChartSpaceXform());
           zip.append(buffered, { name: chartPath(n) });
         }
       }
@@ -7229,9 +7344,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
           if (requireRawPatch) {
             throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
           }
-          const renderedXml = getChartSupport().renderChartEx(
-            stripChartExRawXml(structuredEntry.model)
-          );
+          const renderedXml = renderChartEx(stripChartExRawXml(structuredEntry.model));
           // Splice preserved leading XML comments from original raw
           // bytes back in front of `<cx:chart>`. The chartEx parser
           // calls `parseXml(...)` without `{ comments: true }` so the
@@ -7269,7 +7382,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       // been cleared. Force structural rebuild to pick up the
       // mutated model (any stale `rawXml` from earlier mutations
       // would mask the rewrite).
-      const xml = getChartSupport().renderChartEx(entry.model, { forceStructural: true });
+      const xml = renderChartEx(entry.model, { forceStructural: true });
       zip.append(xml, { name: chartExPath(n) });
       this._appendChartExSidecars(zip, model, n, entry);
       const chartExRels = this._buildChartExRels(n, entry.rels, model, entry);
@@ -7286,14 +7399,14 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     entry?: ChartExEntry
   ): void {
     if (entry?.model.style) {
-      zip.append(new TextEncoder().encode(getChartSupport().buildChartStyle(entry.model.style)), {
+      zip.append(new TextEncoder().encode(buildChartStyle(entry.model.style)), {
         name: chartExStylePath(n)
       });
     } else if (model.chartExStyles?.[n]) {
       zip.append(model.chartExStyles[n], { name: chartExStylePath(n) });
     }
     if (entry?.model.colors) {
-      zip.append(new TextEncoder().encode(getChartSupport().buildChartColors(entry.model.colors)), {
+      zip.append(new TextEncoder().encode(buildChartColors(entry.model.colors)), {
         name: chartExColorsPath(n)
       });
     } else if (model.chartExColors?.[n]) {
@@ -7330,6 +7443,12 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   async addTables(zip: IZipWriter, model: any): Promise<void> {
+    // Skip (and avoid loading TableXform ~14 KB) when no worksheet has tables.
+    const hasTable = model.worksheets.some((ws: any) => ws.tables && ws.tables.length > 0);
+    if (!hasTable) {
+      return;
+    }
+    const { TableXform } = await import("@excel/xlsx/xform/table/table-xform");
     const tableXform = new TableXform();
 
     for (const worksheet of model.worksheets) {
@@ -7383,6 +7502,16 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     if (!model.pivotTables.length) {
       return;
     }
+
+    // Dynamic import: pivot serialisation (~44 KB across the three xforms) is
+    // only reachable when the workbook actually contains pivot tables, so it
+    // stays out of bundles whose consumers never use pivots.
+    const [{ PivotCacheRecordsXform }, { PivotCacheDefinitionXform }, { PivotTableXform }] =
+      await Promise.all([
+        import("@excel/xlsx/xform/pivot-table/pivot-cache-records-xform"),
+        import("@excel/xlsx/xform/pivot-table/pivot-cache-definition-xform"),
+        import("@excel/xlsx/xform/pivot-table/pivot-table-xform")
+      ]);
 
     const pivotCacheRecordsXform = new PivotCacheRecordsXform();
     const pivotCacheDefinitionXform = new PivotCacheDefinitionXform();
@@ -7476,8 +7605,8 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
   }
 
   prepareModel(model: any, options: any): void {
-    model.creator = model.creator ?? "ExcelTS";
-    model.lastModifiedBy = model.lastModifiedBy ?? "ExcelTS";
+    model.creator = model.creator ?? "Documonster";
+    model.lastModifiedBy = model.lastModifiedBy ?? "Documonster";
     model.created = model.created ?? new Date();
     model.modified = model.modified ?? new Date();
 
@@ -7489,7 +7618,7 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
 
     // Preserve default font from parsed styles if available
     const oldDefaultFont = model.defaultFont;
-    model.styles = model.useStyles ? new StylesXform(true) : new (StylesXform as any).Mock();
+    model.styles = model.useStyles ? new StylesXform(true) : new StylesXform.Mock();
     if (oldDefaultFont && model.styles.setDefaultFont) {
       model.styles.setDefaultFont(oldDefaultFont);
     }
@@ -7617,35 +7746,24 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       // `<definedNames>`. See `rewriteChartExDataRefsToDefinedNames`
       // for the full rationale.
       const chartExIndex = parseInt(n, 10);
-      if (
-        Number.isFinite(chartExIndex) &&
-        model.definedNamesInstance &&
-        typeof model.definedNamesInstance.addHidden === "function"
-      ) {
-        getChartSupport().rewriteChartExDataRefsToDefinedNames(
-          entry.model,
-          chartExIndex,
-          (name, ref) => {
-            model.definedNamesInstance.addHidden(ref, name);
-          }
-        );
+      if (Number.isFinite(chartExIndex) && model.definedNamesInstance) {
+        const dn = model.definedNamesInstance;
+        rewriteChartExDataRefsToDefinedNames(entry.model, chartExIndex, (name, ref) => {
+          definedNamesAddHidden(dn, ref, name);
+        });
         // Re-materialise the array snapshot so addWorkbook picks up the
         // new hidden `_xlchart.*` names. `definedNames` in the write
         // model is the serialised form (array); the rewrite added
-        // entries to the live `DefinedNames` instance on the workbook.
-        model.definedNames = model.definedNamesInstance.model;
+        // entries to the live defined-names record on the workbook.
+        model.definedNames = definedNamesModel(dn);
       }
       if (entry.model.style && !model.chartExStyles?.[n]) {
         model.chartExStyles ??= {};
-        model.chartExStyles[n] = new TextEncoder().encode(
-          getChartSupport().buildChartStyle(entry.model.style)
-        );
+        model.chartExStyles[n] = new TextEncoder().encode(buildChartStyle(entry.model.style));
       }
       if (entry.model.colors && !model.chartExColors?.[n]) {
         model.chartExColors ??= {};
-        model.chartExColors[n] = new TextEncoder().encode(
-          getChartSupport().buildChartColors(entry.model.colors)
-        );
+        model.chartExColors[n] = new TextEncoder().encode(buildChartColors(entry.model.colors));
       }
     }
   }

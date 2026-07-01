@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 function booleanToXml(model: boolean): string | undefined {
   return model ? "1" : undefined;
@@ -73,7 +74,7 @@ class PageSetupXform extends BaseXform {
     return value;
   }
 
-  render(xmlStream: any, model: PageSetupModel): void {
+  render(xmlStream: XmlSink, model: PageSetupModel): void {
     if (model) {
       const attributes = {
         paperSize: model.paperSize,
@@ -94,13 +95,13 @@ class PageSetupXform extends BaseXform {
         usePrinterDefaults: booleanToXml(model.usePrinterDefaults!),
         copies: model.copies
       };
-      if (Object.values(attributes).some((value: any) => value !== undefined)) {
+      if (Object.values(attributes).some((value: unknown) => value !== undefined)) {
         xmlStream.leafNode(this.tag, attributes);
       }
     }
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     switch (node.name) {
       case this.tag:
         this.model = {

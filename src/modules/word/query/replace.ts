@@ -23,9 +23,15 @@
  *   The returned count equals the number of matches actually replaced.
  */
 
-import { isHyperlink, isRun } from "../core/text-utils";
-import { walkDocument } from "../core/walker";
-import type { DocxDocument, Paragraph, ParagraphChild, Run, StructuredDocumentTag } from "../types";
+import { isHyperlink, isRun } from "@word/core/text-utils";
+import { walkDocument } from "@word/core/walker";
+import type {
+  DocxDocument,
+  Paragraph,
+  ParagraphChild,
+  Run,
+  StructuredDocumentTag
+} from "@word/types";
 
 // =============================================================================
 // Public API

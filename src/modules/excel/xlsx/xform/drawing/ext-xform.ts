@@ -1,16 +1,15 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { EMU_PER_PX } from "@utils/units";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-/** https://en.wikipedia.org/wiki/Office_Open_XML_file_formats#DrawingML */
-const EMU_PER_PIXEL_AT_96_DPI = 9525;
-
-interface ExtModel {
+export interface ExtModel {
   width: number;
   height: number;
 }
 
 class ExtXform extends BaseXform<ExtModel> {
   declare private tag: string;
-  declare public map: { [key: string]: any };
+  declare public map: Record<string, BaseXform>;
 
   constructor(options: { tag: string }) {
     super();
@@ -20,11 +19,11 @@ class ExtXform extends BaseXform<ExtModel> {
     this.model = { width: 0, height: 0 };
   }
 
-  render(xmlStream: any, model: ExtModel): void {
+  render(xmlStream: XmlSink, model: ExtModel): void {
     xmlStream.openNode(this.tag);
 
-    const width = Math.floor(model.width * EMU_PER_PIXEL_AT_96_DPI);
-    const height = Math.floor(model.height * EMU_PER_PIXEL_AT_96_DPI);
+    const width = Math.floor(model.width * EMU_PER_PX);
+    const height = Math.floor(model.height * EMU_PER_PX);
 
     xmlStream.addAttribute("cx", width);
     xmlStream.addAttribute("cy", height);
@@ -32,11 +31,11 @@ class ExtXform extends BaseXform<ExtModel> {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === this.tag) {
       this.model = {
-        width: parseInt(node.attributes.cx ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI,
-        height: parseInt(node.attributes.cy ?? "0", 10) / EMU_PER_PIXEL_AT_96_DPI
+        width: parseInt(node.attributes.cx ?? "0", 10) / EMU_PER_PX,
+        height: parseInt(node.attributes.cy ?? "0", 10) / EMU_PER_PX
       };
       return true;
     }

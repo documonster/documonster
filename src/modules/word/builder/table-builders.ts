@@ -4,6 +4,7 @@
  * Includes border, gridBorders, cell, row, table, simpleTable.
  */
 
+import { textParagraph } from "@word/builder/paragraph-builders";
 import type {
   Border,
   Table,
@@ -16,8 +17,7 @@ import type {
   TableWidth,
   Paragraph,
   Twips
-} from "../types";
-import { textParagraph } from "./paragraph-builders";
+} from "@word/types";
 
 // =============================================================================
 // Table Builders

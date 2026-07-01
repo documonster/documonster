@@ -1,26 +1,34 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Table, Workbook, Worksheet } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "table-with-totals.xlsx");
 
-const [, , filename] = process.argv;
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
 
 const now = Date.now();
 const today = now - (now % 86400000);
 
-const getRows = () => {
+function getRows() {
   const rows: (number | Date)[][] = [];
   for (let i = 0; i < 20; i++) {
     rows.push([new Date(today + 86400000 * i), Math.random() * 10]);
   }
   return rows;
-};
+}
 
-ws.columns = [{ key: "date", width: 16 }, { key: "number" }];
+Worksheet.setColumns(ws, [{ key: "date", width: 16 }, { key: "number" }]);
 
-ws.addTable({
+Table.add(ws, {
   name: "TestTable",
   ref: "A1",
   headerRow: true,
@@ -45,7 +53,7 @@ const stopwatch = new HrStopwatch();
 stopwatch.start();
 
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

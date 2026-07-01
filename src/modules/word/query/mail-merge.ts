@@ -8,9 +8,9 @@
  * Note: This API mutates the document in place for backward compatibility.
  */
 
-import { isHyperlink, isRun } from "../core/text-utils";
-import { walkDocument } from "../core/walker";
-import type { DocxDocument, Paragraph, ParagraphChild, RunContent } from "../types";
+import { isHyperlink, isRun } from "@word/core/text-utils";
+import { walkDocument } from "@word/core/walker";
+import type { DocxDocument, Paragraph, ParagraphChild, RunContent } from "@word/types";
 
 // =============================================================================
 // Constants

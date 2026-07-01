@@ -19,7 +19,7 @@
  * @see https://docs.microsoft.com/en-us/typography/opentype/spec/
  */
 
-import { PdfFontError } from "../errors";
+import { PdfFontError } from "@pdf/errors";
 
 // =============================================================================
 // Security Limits

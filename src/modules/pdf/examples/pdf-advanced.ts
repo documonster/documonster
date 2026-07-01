@@ -20,7 +20,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import {
+  rowAddPageBreak,
+  rowSetAlignment,
+  rowSetFill,
+  rowSetFont,
+  rowSetHidden
+} from "@excel/core/row";
+import { columnSetNumFmt, getColumn } from "@excel/core/worksheet";
+import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -32,29 +42,29 @@ fs.mkdirSync(outDir, { recursive: true });
 // 1. Pagination with repeat header rows
 // =============================================================================
 
-const wb1 = new Workbook();
-const ws1 = wb1.addWorksheet("Inventory");
-ws1.columns = [
+const wb1 = Workbook.create();
+const ws1 = Workbook.addWorksheet(wb1, "Inventory");
+Worksheet.setColumns(ws1, [
   { header: "ID", key: "id", width: 8 },
   { header: "Product Name", key: "name", width: 25 },
   { header: "Category", key: "category", width: 15 },
   { header: "Stock", key: "stock", width: 10 },
   { header: "Price", key: "price", width: 12 }
-];
+]);
 
 // Style the header row
-ws1.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-ws1.getRow(1).fill = {
+rowSetFont(Worksheet.getRow(ws1, 1), { bold: true, color: { argb: "FFFFFFFF" } });
+rowSetFill(Worksheet.getRow(ws1, 1), {
   type: "pattern",
   pattern: "solid",
   fgColor: { argb: "FF2F5496" }
-};
-ws1.getRow(1).alignment = { horizontal: "center" };
+});
+rowSetAlignment(Worksheet.getRow(ws1, 1), { horizontal: "center" });
 
 // Add 100 rows to force pagination
 const categories = ["Electronics", "Clothing", "Food", "Tools", "Books"];
 for (let i = 1; i <= 100; i++) {
-  ws1.addRow({
+  Worksheet.addRow(ws1, {
     id: i,
     name: `Product ${i}`,
     category: categories[i % categories.length],
@@ -64,12 +74,12 @@ for (let i = 1; i <= 100; i++) {
 }
 
 // Format the price column
-ws1.getColumn("price").numFmt = "$#,##0.00";
+columnSetNumFmt(getColumn(ws1, "price"), "$#,##0.00");
 
 // Repeat row 1 on every page
 ws1.pageSetup.printTitlesRow = "1:1";
 
-const pdf1 = await excelToPdf(wb1, {
+const pdf1 = await Pdf.fromExcel(wb1, {
   showGridLines: true,
   showPageNumbers: true,
   showSheetNames: true,
@@ -83,25 +93,25 @@ console.log("1. advanced-pagination.pdf — 100 rows, repeat headers, page numbe
 // 2. Manual row page breaks + print area
 // =============================================================================
 
-const wb2 = new Workbook();
-const ws2 = wb2.addWorksheet("Sections");
+const wb2 = Workbook.create();
+const ws2 = Workbook.addWorksheet(wb2, "Sections");
 for (let r = 1; r <= 30; r++) {
-  ws2.getCell(`A${r}`).value = `Section ${Math.ceil(r / 10)}`;
-  ws2.getCell(`B${r}`).value = `Row ${r} data`;
-  ws2.getCell(`C${r}`).value = r * 100;
+  Cell.setValue(ws2, `A${r}`, `Section ${Math.ceil(r / 10)}`);
+  Cell.setValue(ws2, `B${r}`, `Row ${r} data`);
+  Cell.setValue(ws2, `C${r}`, r * 100);
 }
-ws2.getColumn(1).width = 15;
-ws2.getColumn(2).width = 20;
-ws2.getColumn(3).width = 10;
+Column.setWidth(ws2, 1, 15);
+Column.setWidth(ws2, 2, 20);
+Column.setWidth(ws2, 3, 10);
 
 // Break after row 10 and row 20
-ws2.getRow(10).addPageBreak();
-ws2.getRow(20).addPageBreak();
+rowAddPageBreak(Worksheet.getRow(ws2, 10));
+rowAddPageBreak(Worksheet.getRow(ws2, 20));
 
 // Print area: only columns A-C, rows 1-30
 ws2.pageSetup.printArea = "A1:C30";
 
-const pdf2 = await excelToPdf(wb2, {
+const pdf2 = await Pdf.fromExcel(wb2, {
   showGridLines: true,
   showPageNumbers: true
 });
@@ -112,21 +122,21 @@ console.log("2. advanced-pagebreaks.pdf — manual page breaks + print area");
 // 3. Wide sheet with column pagination
 // =============================================================================
 
-const wb3 = new Workbook();
-const ws3 = wb3.addWorksheet("Wide Data");
+const wb3 = Workbook.create();
+const ws3 = Workbook.addWorksheet(wb3, "Wide Data");
 // 20 columns × 30 rows — will need horizontal page splits
 for (let c = 1; c <= 20; c++) {
-  ws3.getColumn(c).width = 12;
-  ws3.getCell(1, c).value = `Col ${c}`;
-  ws3.getCell(1, c).font = { bold: true };
+  Column.setWidth(ws3, c, 12);
+  Cell.setValue(ws3, 1, c, `Col ${c}`);
+  Cell.setStyle(ws3, 1, c, { font: { bold: true } });
 }
 for (let r = 2; r <= 30; r++) {
   for (let c = 1; c <= 20; c++) {
-    ws3.getCell(r, c).value = (r - 1) * c;
+    Cell.setValue(ws3, r, c, (r - 1) * c);
   }
 }
 
-const pdf3 = await excelToPdf(wb3, {
+const pdf3 = await Pdf.fromExcel(wb3, {
   fitToPage: false, // Don't shrink — let it paginate horizontally
   showGridLines: true,
   showPageNumbers: true,
@@ -139,18 +149,18 @@ console.log("3. advanced-wide.pdf — 20 columns, horizontal pagination");
 // 4. Hidden rows and columns
 // =============================================================================
 
-const wb4 = new Workbook();
-const ws4 = wb4.addWorksheet("Hidden");
+const wb4 = Workbook.create();
+const ws4 = Workbook.addWorksheet(wb4, "Hidden");
 for (let r = 1; r <= 10; r++) {
-  ws4.getCell(`A${r}`).value = `Visible A${r}`;
-  ws4.getCell(`B${r}`).value = `Hidden B${r}`;
-  ws4.getCell(`C${r}`).value = `Visible C${r}`;
+  Cell.setValue(ws4, `A${r}`, `Visible A${r}`);
+  Cell.setValue(ws4, `B${r}`, `Hidden B${r}`);
+  Cell.setValue(ws4, `C${r}`, `Visible C${r}`);
 }
-ws4.getColumn(2).hidden = true;
-ws4.getRow(3).hidden = true;
-ws4.getRow(7).hidden = true;
+Column.setHidden(ws4, 2, true);
+rowSetHidden(Worksheet.getRow(ws4, 3), true);
+rowSetHidden(Worksheet.getRow(ws4, 7), true);
 
-const pdf4 = await excelToPdf(wb4, { showGridLines: true });
+const pdf4 = await Pdf.fromExcel(wb4, { showGridLines: true });
 fs.writeFileSync(path.join(outDir, "advanced-hidden.pdf"), pdf4);
 console.log("4. advanced-hidden.pdf — hidden column B, hidden rows 3 and 7");
 
@@ -158,16 +168,16 @@ console.log("4. advanced-hidden.pdf — hidden column B, hidden rows 3 and 7");
 // 5. Encrypted PDF with permissions
 // =============================================================================
 
-const wb5 = new Workbook();
-const ws5 = wb5.addWorksheet("Confidential");
-ws5.getCell("A1").value = "This document is password-protected.";
-ws5.getCell("A1").font = { bold: true, size: 14, color: { argb: "FFCC0000" } };
-ws5.getCell("A3").value = "Owner password: owner123";
-ws5.getCell("A4").value = "User password: (none — opens without password)";
-ws5.getCell("A6").value = "Permissions: print=yes, copy=no, modify=no";
-ws5.getColumn(1).width = 50;
+const wb5 = Workbook.create();
+const ws5 = Workbook.addWorksheet(wb5, "Confidential");
+Cell.setValue(ws5, "A1", "This document is password-protected.");
+Cell.setStyle(ws5, "A1", { font: { bold: true, size: 14, color: { argb: "FFCC0000" } } });
+Cell.setValue(ws5, "A3", "Owner password: owner123");
+Cell.setValue(ws5, "A4", "User password: (none — opens without password)");
+Cell.setValue(ws5, "A6", "Permissions: print=yes, copy=no, modify=no");
+Column.setWidth(ws5, 1, 50);
 
-const pdf5 = await excelToPdf(wb5, {
+const pdf5 = await Pdf.fromExcel(wb5, {
   encryption: {
     ownerPassword: "owner123",
     // No userPassword — document opens without a password
@@ -188,13 +198,13 @@ console.log("5. advanced-encrypted.pdf — encrypted, print-only, no copy");
 // 6. Encrypted PDF with open password
 // =============================================================================
 
-const wb6 = new Workbook();
-const ws6 = wb6.addWorksheet("Locked");
-ws6.getCell("A1").value = "You need a password to open this PDF.";
-ws6.getCell("A2").value = 'User password: "hello"';
-ws6.getColumn(1).width = 40;
+const wb6 = Workbook.create();
+const ws6 = Workbook.addWorksheet(wb6, "Locked");
+Cell.setValue(ws6, "A1", "You need a password to open this PDF.");
+Cell.setValue(ws6, "A2", 'User password: "hello"');
+Column.setWidth(ws6, 1, 40);
 
-const pdf6 = await excelToPdf(wb6, {
+const pdf6 = await Pdf.fromExcel(wb6, {
   encryption: {
     ownerPassword: "admin",
     userPassword: "hello"
@@ -207,32 +217,32 @@ console.log('6. advanced-password.pdf — requires password "hello" to open');
 // 7. Multiple sheets with different page setups + bookmarks
 // =============================================================================
 
-const wb7 = new Workbook();
+const wb7 = Workbook.create();
 
-const wsPortrait = wb7.addWorksheet("Portrait A4");
-wsPortrait.getCell("A1").value = "Portrait A4 sheet";
-wsPortrait.getCell("A1").font = { bold: true, size: 16 };
+const wsPortrait = Workbook.addWorksheet(wb7, "Portrait A4");
+Cell.setValue(wsPortrait, "A1", "Portrait A4 sheet");
+Cell.setStyle(wsPortrait, "A1", { font: { bold: true, size: 16 } });
 wsPortrait.pageSetup.paperSize = 9; // A4
 wsPortrait.pageSetup.orientation = "portrait";
 
-const wsLandscape = wb7.addWorksheet("Landscape A4");
-wsLandscape.getCell("A1").value = "Landscape A4 sheet";
-wsLandscape.getCell("A1").font = { bold: true, size: 16 };
+const wsLandscape = Workbook.addWorksheet(wb7, "Landscape A4");
+Cell.setValue(wsLandscape, "A1", "Landscape A4 sheet");
+Cell.setStyle(wsLandscape, "A1", { font: { bold: true, size: 16 } });
 wsLandscape.pageSetup.paperSize = 9;
 wsLandscape.pageSetup.orientation = "landscape";
 
-const wsLetter = wb7.addWorksheet("Letter");
-wsLetter.getCell("A1").value = "US Letter sheet";
-wsLetter.getCell("A1").font = { bold: true, size: 16 };
+const wsLetter = Workbook.addWorksheet(wb7, "Letter");
+Cell.setValue(wsLetter, "A1", "US Letter sheet");
+Cell.setStyle(wsLetter, "A1", { font: { bold: true, size: 16 } });
 wsLetter.pageSetup.paperSize = 1; // Letter
 
-const wsSmall = wb7.addWorksheet("A5");
-wsSmall.getCell("A1").value = "A5 sheet";
-wsSmall.getCell("A1").font = { bold: true, size: 16 };
+const wsSmall = Workbook.addWorksheet(wb7, "A5");
+Cell.setValue(wsSmall, "A1", "A5 sheet");
+Cell.setStyle(wsSmall, "A1", { font: { bold: true, size: 16 } });
 wsSmall.pageSetup.paperSize = 11; // A5
 
 // Export — each sheet gets its own page setup; bookmarks are auto-generated
-const pdf7 = await excelToPdf(wb7, {
+const pdf7 = await Pdf.fromExcel(wb7, {
   showSheetNames: true,
   showPageNumbers: true
 });
@@ -243,36 +253,42 @@ console.log("7. advanced-multi-setup.pdf — per-sheet page sizes + bookmarks");
 // 8. Transparency / alpha fills
 // =============================================================================
 
-const wb8 = new Workbook();
-const ws8 = wb8.addWorksheet("Transparency");
-ws8.getColumn(1).width = 25;
-ws8.getColumn(2).width = 25;
+const wb8 = Workbook.create();
+const ws8 = Workbook.addWorksheet(wb8, "Transparency");
+Column.setWidth(ws8, 1, 25);
+Column.setWidth(ws8, 2, 25);
 
-ws8.getCell("A1").value = "Opaque red fill";
-ws8.getCell("A1").fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "FFFF0000" }
-};
+Cell.setValue(ws8, "A1", "Opaque red fill");
+Cell.setStyle(ws8, "A1", {
+  fill: {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFFF0000" }
+  }
+});
 
-ws8.getCell("A2").value = "Semi-transparent blue";
-ws8.getCell("A2").fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "800000FF" } // alpha=0x80 (~50%)
-};
+Cell.setValue(ws8, "A2", "Semi-transparent blue");
+Cell.setStyle(ws8, "A2", {
+  fill: {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "800000FF" } // alpha=0x80 (~50%)
+  }
+});
 
-ws8.getCell("A3").value = "Light transparent green";
-ws8.getCell("A3").fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "4000CC00" } // alpha=0x40 (~25%)
-};
+Cell.setValue(ws8, "A3", "Light transparent green");
+Cell.setStyle(ws8, "A3", {
+  fill: {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "4000CC00" } // alpha=0x40 (~25%)
+  }
+});
 
-ws8.getCell("A4").value = "Semi-transparent text";
-ws8.getCell("A4").font = { color: { argb: "80FF0000" }, size: 14, bold: true };
+Cell.setValue(ws8, "A4", "Semi-transparent text");
+Cell.setStyle(ws8, "A4", { font: { color: { argb: "80FF0000" }, size: 14, bold: true } });
 
-const pdf8 = await excelToPdf(wb8, { showGridLines: true });
+const pdf8 = await Pdf.fromExcel(wb8, { showGridLines: true });
 fs.writeFileSync(path.join(outDir, "advanced-transparency.pdf"), pdf8);
 console.log("8. advanced-transparency.pdf — alpha fills and text");
 
@@ -280,15 +296,15 @@ console.log("8. advanced-transparency.pdf — alpha fills and text");
 // 9. Custom grid line color
 // =============================================================================
 
-const wb9 = new Workbook();
-const ws9 = wb9.addWorksheet("GridColors");
+const wb9 = Workbook.create();
+const ws9 = Workbook.addWorksheet(wb9, "GridColors");
 for (let r = 1; r <= 5; r++) {
   for (let c = 1; c <= 5; c++) {
-    ws9.getCell(r, c).value = `${r},${c}`;
+    Cell.setValue(ws9, r, c, `${r},${c}`);
   }
 }
 
-const pdf9 = await excelToPdf(wb9, {
+const pdf9 = await Pdf.fromExcel(wb9, {
   showGridLines: true,
   gridLineColor: "FF3366CC" // blue grid lines
 });
@@ -299,10 +315,10 @@ console.log("9. advanced-grid-color.pdf — blue grid lines");
 // 10. Worksheet margins from pageSetup
 // =============================================================================
 
-const wb10 = new Workbook();
-const ws10 = wb10.addWorksheet("WS Margins");
-ws10.getCell("A1").value = "This sheet uses worksheet-level margins (0.5in all sides)";
-ws10.getColumn(1).width = 50;
+const wb10 = Workbook.create();
+const ws10 = Workbook.addWorksheet(wb10, "WS Margins");
+Cell.setValue(ws10, "A1", "This sheet uses worksheet-level margins (0.5in all sides)");
+Column.setWidth(ws10, 1, 50);
 ws10.pageSetup.margins = {
   left: 0.5,
   right: 0.5,
@@ -312,7 +328,7 @@ ws10.pageSetup.margins = {
   footer: 0.3
 };
 
-const pdf10 = await excelToPdf(wb10, { showPageNumbers: true });
+const pdf10 = await Pdf.fromExcel(wb10, { showPageNumbers: true });
 fs.writeFileSync(path.join(outDir, "advanced-ws-margins.pdf"), pdf10);
 console.log("10. advanced-ws-margins.pdf — worksheet pageSetup margins");
 

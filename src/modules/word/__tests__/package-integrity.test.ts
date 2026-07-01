@@ -13,7 +13,7 @@
 
 import { extractAll } from "@archive/unzip/extract";
 import { createZip } from "@archive/zip/zip-bytes";
-import { Document, packageDocx, readDocx, textParagraph } from "@word/index";
+import { Document, Build, Io } from "@word/index";
 import { describe, it, expect } from "vitest";
 
 // Minimal 1x1 PNG for image tests
@@ -51,7 +51,7 @@ describe("DOCX Package Integrity", () => {
   it("should produce a valid ZIP with PK magic bytes", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
 
     expect(bytes[0]).toBe(0x50); // P
     expect(bytes[1]).toBe(0x4b); // K
@@ -66,7 +66,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain [Content_Types].xml with required Default and Override entries", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const ct = decodeEntry(files, "[Content_Types].xml");
@@ -90,7 +90,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain _rels/.rels with officeDocument, core-properties, and extended-properties relationships", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const rels = decodeEntry(files, "_rels/.rels");
@@ -109,7 +109,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain word/_rels/document.xml.rels with styles, settings, fontTable, theme relationships", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const rels = decodeEntry(files, "word/_rels/document.xml.rels");
@@ -126,7 +126,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain word/document.xml with XML declaration and w:document root element", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello World");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const doc = decodeEntry(files, "word/document.xml");
@@ -142,7 +142,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain word/styles.xml", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("word/styles.xml")).toBe(true);
@@ -151,7 +151,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain word/settings.xml", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("word/settings.xml")).toBe(true);
@@ -160,7 +160,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain word/fontTable.xml", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("word/fontTable.xml")).toBe(true);
@@ -169,7 +169,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain word/theme/theme1.xml", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("word/theme/theme1.xml")).toBe(true);
@@ -178,7 +178,7 @@ describe("DOCX Package Integrity", () => {
   it("should contain docProps/core.xml and docProps/app.xml", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("docProps/core.xml")).toBe(true);
@@ -198,7 +198,7 @@ describe("DOCX Package Integrity", () => {
     const originalRId = doc.images![0].rId;
 
     // Package the document
-    await packageDocx(doc);
+    await Io.package(doc);
 
     // The rId on the original doc should remain unchanged
     expect(doc.images![0].rId).toBe(originalRId);
@@ -210,14 +210,14 @@ describe("DOCX Package Integrity", () => {
 
   it("should include header/footer parts and their rels when headers/footers are present", async () => {
     const h = Document.create();
-    Document.setHeader(h, "default", { children: [textParagraph("My Header")] });
-    Document.setFooter(h, "default", { children: [textParagraph("My Footer")] });
+    Document.setHeader(h, "default", { children: [Build.textParagraph("My Header")] });
+    Document.setFooter(h, "default", { children: [Build.textParagraph("My Footer")] });
     Document.setSectionProperties(h, {
       headers: [{ type: "default", rId: "" }],
       footers: [{ type: "default", rId: "" }]
     });
     Document.addParagraph(h, "Body");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     // header1.xml should exist
@@ -241,14 +241,14 @@ describe("DOCX Package Integrity", () => {
 
   it("should produce header/footer references whose rId resolves in document.xml.rels", async () => {
     const h = Document.create();
-    Document.setHeader(h, "default", { children: [textParagraph("My Header")] });
-    Document.setFooter(h, "default", { children: [textParagraph("My Footer")] });
+    Document.setHeader(h, "default", { children: [Build.textParagraph("My Header")] });
+    Document.setFooter(h, "default", { children: [Build.textParagraph("My Footer")] });
     Document.setSectionProperties(h, {
       headers: [{ type: "default", rId: "" }],
       footers: [{ type: "default", rId: "" }]
     });
     Document.addParagraph(h, "Body");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const documentXml = decodeEntry(files, "word/document.xml");
@@ -273,10 +273,10 @@ describe("DOCX Package Integrity", () => {
     // adding a HeaderFooterRef in sectionProperties. The packager should
     // synthesize references so the section actually picks them up.
     const h = Document.create();
-    Document.setHeader(h, "default", { children: [textParagraph("Auto Header")] });
-    Document.setFooter(h, "default", { children: [textParagraph("Auto Footer")] });
+    Document.setHeader(h, "default", { children: [Build.textParagraph("Auto Header")] });
+    Document.setFooter(h, "default", { children: [Build.textParagraph("Auto Footer")] });
     Document.addParagraph(h, "Body");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const documentXml = decodeEntry(files, "word/document.xml");
@@ -299,13 +299,13 @@ describe("DOCX Package Integrity", () => {
     // assigns fresh rIds for header/footer parts, so the section-property
     // references must be rewritten to match.
     const h1 = Document.create();
-    Document.setHeader(h1, "default", { children: [textParagraph("Round-trip Header")] });
-    Document.setFooter(h1, "default", { children: [textParagraph("Round-trip Footer")] });
+    Document.setHeader(h1, "default", { children: [Build.textParagraph("Round-trip Header")] });
+    Document.setFooter(h1, "default", { children: [Build.textParagraph("Round-trip Footer")] });
     Document.addParagraph(h1, "Body");
-    const firstBytes = await packageDocx(Document.build(h1));
-    const parsed = await readDocx(firstBytes);
+    const firstBytes = await Io.package(Document.build(h1));
+    const parsed = await Io.read(firstBytes);
 
-    const secondBytes = await packageDocx(parsed);
+    const secondBytes = await Io.package(parsed);
     const files = await extractDocx(secondBytes);
     const documentXml = decodeEntry(files, "word/document.xml");
     const documentRels = decodeEntry(files, "word/_rels/document.xml.rels");
@@ -327,7 +327,7 @@ describe("DOCX Package Integrity", () => {
     const h = Document.create();
     Document.addImage(h, MINI_PNG, "png", 914400, 914400);
     Document.addParagraph(h, "With image");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     // media/ directory should have image files
@@ -356,12 +356,12 @@ describe("DOCX Package Integrity", () => {
         }
       ]
     };
-    await expect(packageDocx(docWithConflict)).rejects.toThrow(/conflicts with a part/);
+    await expect(Io.package(docWithConflict)).rejects.toThrow(/conflicts with a part/);
   });
 
   it("should reject opaque parts that collide with header parts emitted in this run", async () => {
     const h = Document.create();
-    Document.setHeader(h, "default", { children: [textParagraph("Header")] });
+    Document.setHeader(h, "default", { children: [Build.textParagraph("Header")] });
     Document.addParagraph(h, "Body");
     const doc = Document.build(h);
     const docWithConflict = {
@@ -373,7 +373,7 @@ describe("DOCX Package Integrity", () => {
         }
       ]
     };
-    await expect(packageDocx(docWithConflict)).rejects.toThrow(/conflicts with a part/);
+    await expect(Io.package(docWithConflict)).rejects.toThrow(/conflicts with a part/);
   });
 
   // ===========================================================================
@@ -383,7 +383,7 @@ describe("DOCX Package Integrity", () => {
   it("should include word/numbering.xml and corresponding relationship when numbering is present", async () => {
     const h = Document.create();
     Document.addNumberedList(h, ["First", "Second", "Third"]);
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("word/numbering.xml")).toBe(true);
@@ -402,7 +402,7 @@ describe("DOCX Package Integrity", () => {
     Document.addFootnote(h, "A footnote");
     Document.addEndnote(h, "An endnote");
     Document.addParagraph(h, "Body text");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     // Parts exist
@@ -423,7 +423,7 @@ describe("DOCX Package Integrity", () => {
     const h = Document.create();
     Document.addComment(h, "Author", "This is a comment");
     Document.addParagraph(h, "Body text");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     expect(files.has("word/comments.xml")).toBe(true);
@@ -450,7 +450,7 @@ describe("DOCX Package Integrity", () => {
       body: [{ type: "paragraph", children: [{ content: [{ type: "text", text: "body" }] }] }],
       comments: [{ id: 1, author: "X", content: [commentPara] }]
     };
-    const bytes = await packageDocx(seedDoc);
+    const bytes = await Io.package(seedDoc);
     const files = await extractDocx(bytes);
 
     expect(files.has("word/_rels/comments.xml.rels")).toBe(true);
@@ -464,7 +464,7 @@ describe("DOCX Package Integrity", () => {
     expect(docRels).not.toContain("https://example.com/spec");
 
     // Round-trip: the comment paragraph reads back with the URL.
-    const parsed = await readDocx(bytes);
+    const parsed = await Io.read(bytes);
     const c = parsed.comments?.[0];
     expect(c).toBeDefined();
     const para = c!.content[0] as any;
@@ -490,8 +490,8 @@ describe("DOCX Package Integrity", () => {
     Document.addParagraph(h, "Third paragraph");
 
     const doc = Document.build(h);
-    const bytes = await packageDocx(doc);
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(doc);
+    const parsed = await Io.read(bytes);
 
     // Find the floating image index in body
     const floatingIdx = parsed.body.findIndex(b => b.type === "floatingImage");
@@ -537,7 +537,7 @@ describe("DOCX Package Integrity", () => {
     Document.addParagraph(h, "after image");
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const files = await extractDocx(bytes);
     const docXml = decodeEntry(files, "word/document.xml");
     const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
@@ -585,7 +585,7 @@ describe("DOCX Package Integrity", () => {
       ]
     };
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const files = await extractDocx(bytes);
     const docXml = decodeEntry(files, "word/document.xml");
     const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
@@ -632,7 +632,7 @@ describe("DOCX Package Integrity", () => {
     const originalImageRId = doc.images[0].rId;
     const originalContentRId = doc.body[0].children[0].content[0].rId;
 
-    await packageDocx(doc);
+    await Io.package(doc);
 
     expect(doc.images[0].rId).toBe(originalImageRId);
     expect(doc.body[0].children[0].content[0].rId).toBe(originalContentRId);
@@ -644,8 +644,8 @@ describe("DOCX Package Integrity", () => {
     Document.addParagraph(h, "Hello");
     const doc = Document.build(h);
 
-    const bytes1 = await packageDocx(doc);
-    const bytes2 = await packageDocx(doc);
+    const bytes1 = await Io.package(doc);
+    const bytes2 = await Io.package(doc);
 
     const f1 = await extractDocx(bytes1);
     const f2 = await extractDocx(bytes2);
@@ -674,7 +674,7 @@ describe("DOCX Package Integrity", () => {
     const floatingItem: any = doc.body.find(b => b.type === "floatingImage");
     const originalFiRId = floatingItem.rId;
 
-    await packageDocx(doc);
+    await Io.package(doc);
 
     // The caller's floating image must not have its rId rewritten on the model.
     expect(floatingItem.rId).toBe(originalFiRId);
@@ -687,7 +687,7 @@ describe("DOCX Package Integrity", () => {
     Document.addParagraph(h, "after");
     const doc = Document.build(h);
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const files = await extractDocx(bytes);
     const docXml = decodeEntry(files, "word/document.xml");
     const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
@@ -793,7 +793,7 @@ describe("DOCX Package Integrity", () => {
       { name: "word/media/image1.png", data: MINI_PNG }
     ]);
 
-    const parsed = await readDocx(zipBuffer);
+    const parsed = await Io.read(zipBuffer);
 
     // The image must still be reachable from at least one ImageDef.
     expect(parsed.images?.length).toBeGreaterThan(0);
@@ -801,7 +801,7 @@ describe("DOCX Package Integrity", () => {
     expect(img).toBeDefined();
 
     // Re-package and verify the header1.xml.rels still resolves rIdH1.
-    const repacked = await packageDocx(parsed);
+    const repacked = await Io.package(parsed);
     const files = await extractDocx(repacked);
 
     const headerRelsKey = [...files.keys()].find(k =>
@@ -875,7 +875,7 @@ describe("DOCX Package Integrity", () => {
       ]
     };
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const files = await extractDocx(bytes);
 
     const docXml = decodeEntry(files, "word/document.xml");
@@ -932,7 +932,7 @@ describe("DOCX Package Integrity", () => {
       ]
     };
 
-    const bytes = await packageDocx(doc);
+    const bytes = await Io.package(doc);
     const files = await extractDocx(bytes);
 
     // A synthesized raster fallback PNG must be present in the package.
@@ -970,11 +970,11 @@ describe("DOCX Package Integrity", () => {
         }
       ]
     };
-    const seedBytes = await packageDocx(seed);
+    const seedBytes = await Io.package(seed);
 
     // Read it back. Reader should leave the altChunk content on the body item
     // and NOT additionally retain it as an opaque part.
-    const parsed = await readDocx(seedBytes);
+    const parsed = await Io.read(seedBytes);
     const altItem = parsed.body.find(b => b.type === "altChunk") as any;
     expect(altItem).toBeDefined();
 
@@ -987,7 +987,7 @@ describe("DOCX Package Integrity", () => {
     // Re-packaging: the resulting ZIP must contain exactly ONE copy of
     // word/afchunk1.html. extractAll naturally dedups by name, so we instead
     // scan central directory entries.
-    const repacked = await packageDocx(parsed);
+    const repacked = await Io.package(parsed);
     // Quick way: count occurrences of the path in the file.
     const haystack = new TextDecoder("latin1").decode(repacked);
     const matches = haystack.match(/word\/afchunk1\.html/g) ?? [];
@@ -1022,7 +1022,7 @@ describe("DOCX Package Integrity", () => {
     };
     expect(bodyLink.rId).toBeUndefined();
     expect(footnoteLink.rId).toBeUndefined();
-    await packageDocx(doc);
+    await Io.package(doc);
     expect(bodyLink.rId).toBeUndefined();
     expect(footnoteLink.rId).toBeUndefined();
   });
@@ -1036,7 +1036,7 @@ describe("DOCX Package Integrity", () => {
     const doc: any = { body: [chunk] };
     expect(chunk.rId).toBeUndefined();
     expect(chunk.fileName).toBeUndefined();
-    await packageDocx(doc);
+    await Io.package(doc);
     expect(chunk.rId).toBeUndefined();
     expect(chunk.fileName).toBeUndefined();
   });
@@ -1057,7 +1057,7 @@ describe("DOCX Package Integrity", () => {
     };
     expect(headerDef.rId).toBeUndefined();
     expect(footerDef.rId).toBeUndefined();
-    await packageDocx(doc);
+    await Io.package(doc);
     expect(headerDef.rId).toBeUndefined();
     expect(footerDef.rId).toBeUndefined();
   });
@@ -1071,8 +1071,8 @@ describe("DOCX Package Integrity", () => {
     const doc: any = {
       body: [{ type: "paragraph", children: [link] }]
     };
-    const a = await packageDocx(doc);
-    const b = await packageDocx(doc);
+    const a = await Io.package(doc);
+    const b = await Io.package(doc);
     const fa = await extractDocx(a);
     const fb = await extractDocx(b);
     expect(decodeEntry(fa, "word/document.xml")).toBe(decodeEntry(fb, "word/document.xml"));
@@ -1088,9 +1088,9 @@ describe("DOCX Package Integrity", () => {
   it("rejects packages exceeding maxPackageSize", async () => {
     const h = Document.create();
     Document.addParagraph(h, "tiny");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     // Force a tiny limit so even this minimal DOCX trips it.
-    await expect(readDocx(bytes, { securityPolicy: { maxPackageSize: 100 } })).rejects.toThrow(
+    await expect(Io.read(bytes, { securityPolicy: { maxPackageSize: 100 } })).rejects.toThrow(
       /packageSize limit exceeded/
     );
   });
@@ -1098,8 +1098,8 @@ describe("DOCX Package Integrity", () => {
   it("rejects packages exceeding maxPartCount", async () => {
     const h = Document.create();
     Document.addParagraph(h, "tiny");
-    const bytes = await packageDocx(Document.build(h));
-    await expect(readDocx(bytes, { securityPolicy: { maxPartCount: 1 } })).rejects.toThrow(
+    const bytes = await Io.package(Document.build(h));
+    await expect(Io.read(bytes, { securityPolicy: { maxPartCount: 1 } })).rejects.toThrow(
       /partCount limit exceeded/
     );
   });
@@ -1107,9 +1107,9 @@ describe("DOCX Package Integrity", () => {
   it("accepts packages within the configured policy", async () => {
     const h = Document.create();
     Document.addParagraph(h, "ok");
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     // Generous limits — should succeed.
-    const parsed = await readDocx(bytes, {
+    const parsed = await Io.read(bytes, {
       securityPolicy: { maxPackageSize: 50_000_000, maxPartCount: 1000, maxPartSize: 5_000_000 }
     });
     expect(parsed.body.length).toBeGreaterThan(0);
@@ -1126,16 +1126,16 @@ describe("DOCX Package Integrity", () => {
     Document.addParagraph(h, "after");
 
     // First round-trip
-    const bytes1 = await packageDocx(Document.build(h));
-    const parsed1 = await readDocx(bytes1);
+    const bytes1 = await Io.package(Document.build(h));
+    const parsed1 = await Io.read(bytes1);
 
     // Second round-trip (re-package whatever the reader produced)
-    const bytes2 = await packageDocx(parsed1);
-    const parsed2 = await readDocx(bytes2);
+    const bytes2 = await Io.package(parsed1);
+    const parsed2 = await Io.read(bytes2);
 
     // Third round-trip
-    const bytes3 = await packageDocx(parsed2);
-    const parsed3 = await readDocx(bytes3);
+    const bytes3 = await Io.package(parsed2);
+    const parsed3 = await Io.read(bytes3);
 
     // Body composition (paragraph + floatingImage + paragraph + ...) must not
     // grow with each round-trip. We compare body length between rounds 2 and 3.
@@ -1156,7 +1156,7 @@ describe("DOCX Package Integrity", () => {
     // packager must rewrite them.
     const h = Document.create();
     Document.addImage(h, MINI_PNG, "png", 914400, 914400);
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
     const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
     const docXml = decodeEntry(files, "word/document.xml");
@@ -1192,7 +1192,7 @@ describe("DOCX Package Integrity", () => {
         }
       ]
     } as any);
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
     const docXml = decodeEntry(files, "word/document.xml");
     const relsXml = decodeEntry(files, "word/_rels/document.xml.rels");
@@ -1224,7 +1224,7 @@ describe("DOCX Package Integrity", () => {
     });
     const built = Document.build(h);
     expect(built.watermark).toBeDefined();
-    const bytes = await packageDocx(built);
+    const bytes = await Io.package(built);
     const files = await extractDocx(bytes);
     // Find the auto-generated watermark header part.
     const headerName = [...files.keys()].find(
@@ -1251,7 +1251,7 @@ describe("DOCX Package Integrity", () => {
     Document.removeContent(h, Document.getContentCount(h) - 1);
     Document.setWatermark(h, { type: "image", rId: imgInfo.rId, scale: 100 });
 
-    const bytes = await packageDocx(Document.build(h));
+    const bytes = await Io.package(Document.build(h));
     const files = await extractDocx(bytes);
 
     const headerRelsName = [...files.keys()].find(n =>

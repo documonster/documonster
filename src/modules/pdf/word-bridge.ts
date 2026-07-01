@@ -11,7 +11,7 @@
  *      ▼
  *   LayoutDocument (positioned PageContent variants)
  *      │
- *      │  renderLayoutDocumentToPdf()  ← ./render-layout-to-pdf
+ *      │  renderLayoutDocumentToPdf()  ← ./word-layout-to-pdf
  *      ▼
  *   PdfDocumentBuilder → bytes
  *
@@ -25,24 +25,27 @@
  *
  * @example
  * ```typescript
- * import { readDocx } from "excelts/word";
- * import { docxToPdf } from "excelts/pdf";
+ * import { readDocx } from "documonster/word";
+ * import { docxToPdf } from "documonster/pdf";
  *
  * const doc = await readDocx(docxBytes);
  * const pdfBytes = await docxToPdf(doc);
  * ```
  */
 
-import {
-  layoutDocumentFull,
-  type FullLayoutOptions,
-  type PageGeometryOverride
-} from "@word/layout/layout-full";
+import type { PdfPageBuilder } from "@pdf/builder/document-builder";
+import type { RenderLayoutOptions } from "@pdf/word-layout-to-pdf";
+import { renderLayoutDocumentToPdf } from "@pdf/word-layout-to-pdf";
+import { twipsToPt } from "@utils/units";
+import type { FullLayoutOptions, PageGeometryOverride } from "@word/layout/layout-full";
+import { layoutDocumentFull } from "@word/layout/layout-full";
 import type { LayoutChart } from "@word/layout/layout-model";
 import type { Chart, ChartContent, ChartExContent, DocxDocument } from "@word/types";
 
-import type { PdfPageBuilder } from "./builder/document-builder";
-import { renderLayoutDocumentToPdf, type RenderLayoutOptions } from "./render-layout-to-pdf";
+// Re-export the Word document type used in this bridge's public signature so
+// the `Pdf` surface can type its lazy `fromDocx` wrapper without importing
+// from `@word` directly — only bridge files may cross into `@word`.
+export type { DocxDocument } from "@word/types";
 
 /** Options for DOCX → PDF conversion. */
 export interface DocxToPdfOptions {
@@ -88,9 +91,7 @@ export interface DocxToPdfOptions {
    * to plug in the Excel chart renderer for publication-quality output:
    *
    * ```typescript
-   * import { installChartSupport } from "excelts/chart";
-   * import { createWordChartPdfRenderer } from "excelts/pdf";
-   * installChartSupport();
+   * import { createWordChartPdfRenderer } from "documonster/pdf";
    * const pdfBytes = await docxToPdf(doc, {
    *   chartRenderer: createWordChartPdfRenderer()
    * });
@@ -110,8 +111,7 @@ export interface DocxToPdfOptions {
    * Note: `chartEx` charts (sunburst / treemap / waterfall / funnel /
    * boxWhisker / …) never reach this `Chart`-typed callback because
    * there is no classic `Chart` instance to pass. They are rendered by
-   * the built-in layout-aware renderer instead (full vector output when
-   * `installChartSupport()` has been called).
+   * the built-in layout-aware renderer instead (full vector output).
    */
   readonly chartRenderer?: (
     chart: Chart,
@@ -150,7 +150,7 @@ export async function docxToPdf(
       ) => boolean | void)
     | undefined;
   try {
-    const mod = await import("./excel-bridge");
+    const mod = await import("@pdf/word-chart-bridge");
     if (typeof mod.createWordLayoutChartPdfRenderer === "function") {
       builtInLayoutRenderer = mod.createWordLayoutChartPdfRenderer();
     }
@@ -273,10 +273,6 @@ function mapToLayoutOptions(
     layoutOpts.pageGeometry = pageGeometry;
   }
   return layoutOpts;
-}
-
-function twipsToPt(twips: number): number {
-  return twips / 20;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };

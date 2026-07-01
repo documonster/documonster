@@ -1,16 +1,39 @@
-import { Workbook } from "../../../index";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const workbook = new Workbook();
-workbook.xlsx
-  .readFile("./out/template.xlsx")
+import { Workbook } from "@excel/index";
+
+/**
+ * Template Example — read an existing workbook and re-save it.
+ *
+ * Reads a bundled fixture, then writes a fresh copy with shared strings and
+ * styles enabled.
+ *
+ * Output:
+ *   tmp/excel-examples/template-out.xlsx
+ *
+ * Usage:
+ *   npx tsx src/modules/excel/examples/template.ts
+ */
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
+fs.mkdirSync(outDir, { recursive: true });
+
+const inputFile = path.join(exampleDir, "data/table.xlsx");
+const outputFile = path.join(outDir, "template-out.xlsx");
+
+const workbook = Workbook.create();
+Workbook.getXlsxIo(workbook)
+  .readFile(inputFile)
   .then(stream => {
     const options = {
       useSharedStrings: true,
       useStyles: true
     };
 
-    return stream.xlsx.writeFile("./out/template-out.xlsx", options).then(() => {
-      console.log("Done.");
+    return Workbook.writeFile(stream, outputFile, options).then(() => {
+      console.log(`Done. Wrote ${outputFile}`);
     });
   })
   .catch(error => {

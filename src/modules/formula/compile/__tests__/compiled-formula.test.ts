@@ -12,7 +12,8 @@
  * NOW/RAND across iterations.
  */
 
-import { Workbook } from "@excel/workbook";
+import { toWorkbookLike } from "@excel/core/formula-adapter";
+import { Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 import { buildWorkbookSnapshot } from "../../integration/workbook-adapter";
@@ -27,9 +28,9 @@ import {
 } from "../compiled-formula";
 
 function compile(source: string, currentSheet = "Sheet1") {
-  const wb = new Workbook();
-  wb.addWorksheet(currentSheet);
-  const snap = buildWorkbookSnapshot(wb);
+  const wb = Workbook.create();
+  Workbook.addWorksheet(wb, currentSheet);
+  const snap = buildWorkbookSnapshot(toWorkbookLike(wb));
   const ast = parse(tokenize(source));
   const bound = bind(ast, { snapshot: snap, currentSheet });
   return { ast, bound, snap };
@@ -92,10 +93,10 @@ describe("extractStaticDeps", () => {
   });
 
   it("cross-sheet reference preserves sheet name", () => {
-    const wb = new Workbook();
-    wb.addWorksheet("Data");
-    wb.addWorksheet("Report");
-    const snap = buildWorkbookSnapshot(wb);
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "Data");
+    Workbook.addWorksheet(wb, "Report");
+    const snap = buildWorkbookSnapshot(toWorkbookLike(wb));
     const ast = parse(tokenize("Data!A1*2"));
     const bound = bind(ast, { snapshot: snap, currentSheet: "Report" });
     const deps = extractStaticDeps(bound);

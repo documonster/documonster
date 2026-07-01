@@ -1,41 +1,37 @@
-import { pipeIterableToSink, type ArchiveSink } from "@archive/io/archive-sink";
 import {
-  isInMemoryArchiveSource,
-  toAsyncIterable,
-  toUint8Array,
-  type ArchiveSource
-} from "@archive/io/archive-source";
-import {
+  ArchiveError,
   createAbortError,
   createLinkedAbortController,
   throwIfAborted,
   toError,
   suppressUnhandledRejection
-} from "@archive/shared/errors";
-import { ProgressEmitter } from "@archive/shared/progress";
-import type { ZipStringEncoding } from "@archive/shared/text";
-import type { ArchiveFormat } from "@archive/shared/types";
-import {
-  createParse,
-  type ParseOptions,
-  type ZipEntry as ParseZipEntry
-} from "@archive/unzip/stream";
+} from "@archive/core/errors";
+import { ProgressEmitter } from "@archive/core/progress";
+import type { ZipStringEncoding } from "@archive/core/text";
+import type { ArchiveFormat } from "@archive/core/types";
+import type { ArchiveSink } from "@archive/io/archive-sink";
+import { pipeIterableToSink } from "@archive/io/archive-sink";
+import type { ArchiveSource } from "@archive/io/archive-source";
+import { isInMemoryArchiveSource, toAsyncIterable, toUint8Array } from "@archive/io/archive-source";
+import type { TarReaderProgress } from "@archive/tar/tar-archive";
+import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "@archive/unzip/progress";
+import type { ParseOptions, ZipEntry as ParseZipEntry } from "@archive/unzip/stream";
+import { createParse } from "@archive/unzip/stream";
 import {
   processEntryData,
   processEntryDataStream,
   readEntryCompressedData
 } from "@archive/unzip/zip-extract-core";
-import { ZipParser, type ZipEntryInfo, type ZipParseOptions } from "@archive/unzip/zip-parser";
+import type { ZipEntryInfo, ZipParseOptions } from "@archive/unzip/zip-parser";
+import { ZipParser } from "@archive/unzip/zip-parser";
 import type { ZipEntryEncryptionMethod, ZipEntryType } from "@archive/zip-spec/zip-entry-info";
 import { isSymlink } from "@archive/zip-spec/zip-entry-info";
 import { COMPRESSION_AES } from "@archive/zip-spec/zip-records";
-import { eventedReadableToAsyncIterableNoDestroy } from "@stream/internal/evented-readable-to-async-iterable";
-import { isWritableStream } from "@stream/internal/type-guards";
+import { eventedReadableToAsyncIterableNoDestroy } from "@stream/core/evented-readable-to-async-iterable";
+import { isWritableStream } from "@stream/core/type-guards";
 import { getTextDecoder } from "@utils/binary";
 
-import type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
-
-function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
+function attachAbortToParseEntry(entry: ParseZipEntry, signal: AbortSignal): void {
   let cleanedUp = false;
 
   const cleanup = () => {
@@ -49,9 +45,9 @@ function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   const onAbort = () => {
     cleanup();
     try {
-      entry.destroy?.(createAbortError((signal as any).reason));
+      entry.destroy(createAbortError(signal.reason));
     } catch {
-      entry.autodrain?.();
+      entry.autodrain();
     }
   };
 
@@ -61,9 +57,9 @@ function attachAbortToParseEntry(entry: any, signal: AbortSignal): void {
   }
 
   signal.addEventListener("abort", onAbort, { once: true });
-  entry.once?.("end", cleanup);
-  entry.once?.("close", cleanup);
-  entry.once?.("error", cleanup);
+  entry.once("end", cleanup);
+  entry.once("close", cleanup);
+  entry.once("error", cleanup);
 }
 
 /**
@@ -179,7 +175,7 @@ export interface UnzipOptions {
   progressIntervalMs?: number;
 }
 
-export type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "./progress";
+export type { UnzipOperation, UnzipProgress, UnzipStreamOptions } from "@archive/unzip/progress";
 
 export class UnzipEntry {
   readonly path: string;
@@ -245,7 +241,7 @@ export class UnzipEntry {
     // If this entry is backed by a streaming parser entry, ensure it is
     // interrupted on abort so consumers don't hang waiting for more chunks.
     if (this._parseEntry && this._signal) {
-      attachAbortToParseEntry(this._parseEntry as any, this._signal);
+      attachAbortToParseEntry(this._parseEntry, this._signal);
     }
   }
 
@@ -293,20 +289,84 @@ export class UnzipEntry {
 
   async *stream(): AsyncIterable<Uint8Array> {
     if (this._data && this._info) {
-      const data = await this.bytes();
-      if (data.length) {
-        yield data;
+      // Symlinks are tiny and their target is resolved by bytes() via
+      // _processExtractedBytes; keep the buffered path for them.
+      if (this._info.type === "symlink") {
+        const data = await this.bytes();
+        if (data.length) {
+          yield data;
+        }
+        return;
+      }
+
+      // True streaming for buffer-backed entries: inflate incrementally rather
+      // than materializing the whole uncompressed entry up-front. This keeps
+      // peak memory at O(inflate chunk) for large entries (e.g. a multi-MB
+      // `word/document.xml` / xlsx `sheetN.xml`), which is what makes
+      // SAX-driven streaming readers genuinely O(largest element) on an
+      // in-memory package instead of O(full uncompressed part).
+      //
+      // The compressed bytes are fed in fixed-size slices rather than as a
+      // single chunk. Feeding the whole entry in one `write()` lets the
+      // decompressor (notably the browser's async `DecompressionStream`,
+      // whose read loop runs ahead of the consumer) produce *all* output
+      // before the consumer pulls the first chunk — collapsing the stream
+      // back to O(full uncompressed part). Slicing the input interleaves
+      // production with consumption so output is delivered incrementally on
+      // every platform.
+      const compressedData = readEntryCompressedData(this._data, this._info);
+      const FEED_CHUNK = 65536;
+      const feed = (async function* () {
+        for (let off = 0; off < compressedData.length; off += FEED_CHUNK) {
+          yield compressedData.subarray(off, off + FEED_CHUNK);
+        }
+      })();
+      const outStream = processEntryDataStream(this._info, feed, {
+        password: this._password,
+        signal: this._signal
+      });
+
+      // Robustness: the browser's native streaming `DecompressionStream` can
+      // intermittently reject input that is in fact valid deflate (observed in
+      // Chromium under heavy concurrent stream creation). The non-streaming
+      // `processEntryData` path already recovers from this by falling back to
+      // the pure-JS inflater. Mirror that here: if the streaming inflate fails
+      // *before producing any output* we have not yielded anything yet, so we
+      // can safely re-decode the whole (already in-memory) entry via the
+      // buffered path and yield the result as a single chunk. Once output has
+      // started flowing we keep streaming; a mid-stream failure on valid data
+      // has not been observed and would indicate genuine corruption.
+      let producedOutput = false;
+      try {
+        for await (const chunk of outStream) {
+          producedOutput = true;
+          if (this._onBytesOut && chunk.length) {
+            this._onBytesOut(this.path, this.type, chunk.length);
+          }
+          yield chunk;
+        }
+      } catch (err) {
+        if (producedOutput) {
+          throw err;
+        }
+        // Fall back to the buffered decode (which itself falls back to pure-JS
+        // inflate on native failure). Throws if the data is genuinely corrupt.
+        const recovered = await this.bytes();
+        if (recovered.length) {
+          if (this._onBytesOut) {
+            this._onBytesOut(this.path, this.type, recovered.length);
+          }
+          yield recovered;
+        }
       }
       return;
     }
 
     if (this._parseEntry) {
+      // ParseZipEntry is always a Node PassThrough, so it satisfies the evented
+      // readable contract; adapt it to an AsyncIterable without destroying it.
       const iterable: AsyncIterable<Uint8Array> =
-        typeof (this._parseEntry as any)?.on === "function" &&
-        typeof (this._parseEntry as any)?.pause === "function" &&
-        typeof (this._parseEntry as any)?.resume === "function"
-          ? eventedReadableToAsyncIterableNoDestroy<Uint8Array>(this._parseEntry)
-          : (this._parseEntry as any as AsyncIterable<Uint8Array>);
+        eventedReadableToAsyncIterableNoDestroy<Uint8Array>(this._parseEntry);
 
       // Encrypted entries carry raw ciphertext in streaming mode (inflate is
       // skipped by readFileRecord). Pipe through processEntryDataStream which
@@ -366,8 +426,8 @@ export class UnzipEntry {
   async pipeTo(sink: ArchiveSink, options?: PipeToOptions): Promise<void> {
     // Prefer native Web Streams piping semantics when a WHATWG WritableStream is provided.
     // This supports standard options like `signal` / `preventClose` / `preventAbort`.
-    if (isWritableStream(sink) && typeof (this.readableStream() as any).pipeTo === "function") {
-      await this.readableStream().pipeTo(sink, options as any);
+    if (isWritableStream(sink) && typeof this.readableStream().pipeTo === "function") {
+      await this.readableStream().pipeTo(sink, options);
       return;
     }
 
@@ -472,7 +532,7 @@ export class ZipReader {
 
         // Buffer mode
         if (isInMemoryArchiveSource(this._source)) {
-          const bytes = await toUint8Array(this._source as any);
+          const bytes = await toUint8Array(this._source);
           throwIfAborted(signal);
           progress.update({ bytesIn: bytes.length });
           const parser = new ZipParser(bytes, {
@@ -507,7 +567,7 @@ export class ZipReader {
         suppressUnhandledRejection(parseDonePromise);
 
         const onAbort = () => {
-          const err = createAbortError((signal as any).reason);
+          const err = createAbortError(signal.reason);
           progress.update({ phase: "aborted" });
           try {
             parse.destroy(err);
@@ -528,7 +588,7 @@ export class ZipReader {
             })) {
               throwIfAborted(signal);
               await new Promise<void>((resolve, reject) => {
-                (parse as any).write(chunk, (err?: Error | null) => {
+                parse.write(chunk, (err?: Error | null) => {
                   if (err) {
                     reject(err);
                   } else {
@@ -551,10 +611,9 @@ export class ZipReader {
         // Avoid unhandled rejection warnings when the operation is aborted.
         suppressUnhandledRejection(feedPromise);
 
-        const parseIter: AsyncIterator<ParseZipEntry> =
-          typeof (parse as any)?.[Symbol.asyncIterator] === "function"
-            ? (parse as any as AsyncIterable<ParseZipEntry>)[Symbol.asyncIterator]()
-            : (parse as any as AsyncIterator<ParseZipEntry>);
+        const parseIter: AsyncIterator<ParseZipEntry> = (parse as AsyncIterable<ParseZipEntry>)[
+          Symbol.asyncIterator
+        ]();
 
         try {
           while (true) {
@@ -593,7 +652,7 @@ export class ZipReader {
         }
       } catch (e) {
         const err = toError(e);
-        if ((err as any).name === "AbortError") {
+        if (err.name === "AbortError") {
           progress.update({ phase: "aborted" });
         } else {
           progress.update({ phase: "error" });
@@ -634,7 +693,7 @@ export class ZipReader {
     }
 
     if (isInMemoryArchiveSource(this._source)) {
-      const bytes = await toUint8Array(this._source as any);
+      const bytes = await toUint8Array(this._source);
       this._bufferData = bytes;
       this._bufferParser = new ZipParser(bytes, {
         decodeStrings: this._options.decodeStrings,
@@ -643,7 +702,7 @@ export class ZipReader {
       return { parser: this._bufferParser, data: bytes };
     }
 
-    throw new Error("This ZIP source is streaming; random access is not available");
+    throw new ArchiveError("This ZIP source is streaming; random access is not available");
   }
 
   async get(path: string): Promise<UnzipEntry | null> {
@@ -669,8 +728,15 @@ export class ZipReader {
 }
 
 /** Unzip options with format: "tar" */
-export interface UnzipOptionsTar extends UnzipOptions {
+export interface UnzipOptionsTar extends Omit<UnzipOptions, "onProgress"> {
   format: "tar";
+
+  /**
+   * Default progress callback used by streaming operations.
+   *
+   * TAR archives emit {@link TarReaderProgress} rather than {@link UnzipProgress}.
+   */
+  onProgress?: (p: TarReaderProgress) => void;
 }
 
 /** Unzip options with format: "zip" (or default) */

@@ -18,7 +18,7 @@ import {
   getPriorityValue,
   hasWorkerSupport,
   createAbortError
-} from "./pool.base";
+} from "@archive/compression/worker-pool/pool.base";
 import type {
   WorkerPoolOptions,
   WorkerPoolStats,
@@ -28,8 +28,12 @@ import type {
   WorkerRequestMessage,
   WorkerResponseMessage,
   TaskPriority
-} from "./types";
-import { getWorkerBlobUrl, releaseWorkerBlobUrl } from "./worker-script";
+} from "@archive/compression/worker-pool/types";
+import {
+  getWorkerBlobUrl,
+  releaseWorkerBlobUrl
+} from "@archive/compression/worker-pool/worker-script";
+import { ArchiveError } from "@archive/core/errors";
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };
 export { hasWorkerSupport };
@@ -260,11 +264,11 @@ export class WorkerPool {
     options?: TaskOptions & { level?: number }
   ): Promise<TaskResult> {
     if (this._terminated) {
-      throw new Error("Worker pool has been terminated");
+      throw new ArchiveError("Worker pool has been terminated");
     }
 
     if (!hasWorkerSupport()) {
-      throw new Error("Web Workers are not supported in this environment");
+      throw new ArchiveError("Web Workers are not supported in this environment");
     }
 
     // Check if already aborted
@@ -767,10 +771,10 @@ export class WorkerPool {
     } = DEFAULT_STREAM_HANDLERS
   ): WorkerPoolStream {
     if (this._terminated) {
-      throw new Error("Worker pool has been terminated");
+      throw new ArchiveError("Worker pool has been terminated");
     }
     if (!hasWorkerSupport()) {
-      throw new Error("Web Workers are not supported in this environment");
+      throw new ArchiveError("Web Workers are not supported in this environment");
     }
 
     const taskId = this._nextTaskId++;
@@ -860,7 +864,7 @@ export class WorkerPool {
       const worker = sessionWorker ?? (await ensureWorker());
       const session = worker.streamSession;
       if (!session || session.ended) {
-        throw new Error("Streaming session is not active");
+        throw new ArchiveError("Streaming session is not active");
       }
 
       // Serialize writes to guarantee ordering and keep a single in-flight ack.

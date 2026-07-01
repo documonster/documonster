@@ -17,20 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  bold,
-  bookmarkStart,
-  bookmarkEnd,
-  pageBreak,
-  layoutDocument,
-  layoutDocumentFull,
-  renderPageToSvg,
-  renderDocumentToSvg,
-  renderPageFromLayout,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Layout } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -47,20 +34,28 @@ Document.addHeading(d, "Layout & SVG render demo", 1);
 Document.addParagraph(d, "Page 1 body — short.");
 
 // Page break, then a bookmark on page 2
-Document.addParagraphElement(d, paragraph([pageBreak()]));
+Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
 Document.addParagraphElement(
   d,
-  paragraph([bookmarkStart(0, "section-two"), bold("Section two"), bookmarkEnd(0)])
+  Build.paragraph([
+    Build.bookmarkStart(0, "section-two"),
+    Build.bold("Section two"),
+    Build.bookmarkEnd(0)
+  ])
 );
 for (let i = 0; i < 25; i++) {
   Document.addParagraph(d, `Page 2 paragraph ${i + 1} — Lorem ipsum dolor sit amet.`);
 }
 
 // Page break + bookmark on page 3
-Document.addParagraphElement(d, paragraph([pageBreak()]));
+Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
 Document.addParagraphElement(
   d,
-  paragraph([bookmarkStart(1, "appendix"), bold("Appendix"), bookmarkEnd(1)])
+  Build.paragraph([
+    Build.bookmarkStart(1, "appendix"),
+    Build.bold("Appendix"),
+    Build.bookmarkEnd(1)
+  ])
 );
 Document.addParagraph(d, "End of document.");
 
@@ -69,7 +64,7 @@ const docModel = Document.build(d);
 // ---------------------------------------------------------------------------
 // 1. layoutDocument — high-level page mapping
 // ---------------------------------------------------------------------------
-const layout = layoutDocument(docModel);
+const layout = Layout.document(docModel);
 console.log(
   `  layoutDocument: ${layout.pageCount} pages, ${layout.sectionPageCounts.length} section(s)`
 );
@@ -82,14 +77,14 @@ console.log(
 );
 
 // Save the source .docx so we can compare with the SVG visually
-const docxBuf = await toBuffer(docModel);
+const docxBuf = await Io.toBuffer(docModel);
 fs.writeFileSync(path.join(outDir, "00-source.docx"), docxBuf);
 
 // ---------------------------------------------------------------------------
 // 2. renderPageToSvg — one page at a time
 // ---------------------------------------------------------------------------
 for (let p = 1; p <= layout.pageCount; p++) {
-  const svg = renderPageToSvg(docModel, p);
+  const svg = Layout.renderPageToSvg(docModel, p);
   fs.writeFileSync(path.join(outDir, `page-${p}.svg`), svg);
   console.log(`  → page-${p}.svg (${svg.length} chars)`);
 }
@@ -97,17 +92,17 @@ for (let p = 1; p <= layout.pageCount; p++) {
 // ---------------------------------------------------------------------------
 // 3. renderDocumentToSvg — every page in one call
 // ---------------------------------------------------------------------------
-const allPages = renderDocumentToSvg(docModel);
+const allPages = Layout.renderDocumentToSvg(docModel);
 console.log(`  renderDocumentToSvg → ${allPages.length} page(s)`);
 
 // ---------------------------------------------------------------------------
 // 4. layoutDocumentFull → renderPageFromLayout (re-use the layout)
 // ---------------------------------------------------------------------------
-const fullLayout = layoutDocumentFull(docModel);
+const fullLayout = Layout.documentFull(docModel);
 console.log(
   `  layoutDocumentFull: ${fullLayout.pages.length} pages; first page geometry = ${JSON.stringify(fullLayout.pages[0]?.geometry)}, content blocks = ${fullLayout.pages[0]?.content.length ?? 0}`
 );
-const svgPage1 = renderPageFromLayout(fullLayout, 1);
+const svgPage1 = Layout.renderPageFromLayout(fullLayout, 1);
 fs.writeFileSync(path.join(outDir, "page-1-from-layout.svg"), svgPage1);
 console.log(`  → page-1-from-layout.svg (${svgPage1.length} chars)`);
 
@@ -115,7 +110,7 @@ console.log(`  → page-1-from-layout.svg (${svgPage1.length} chars)`);
 // 5. Edge: renderPageToSvg out-of-range page should throw
 // ---------------------------------------------------------------------------
 try {
-  renderPageToSvg(docModel, 999);
+  Layout.renderPageToSvg(docModel, 999);
   console.log("  ERROR: expected RangeError");
 } catch (err) {
   console.log(`  out-of-range → ${(err as Error).constructor.name}: ${(err as Error).message}`);

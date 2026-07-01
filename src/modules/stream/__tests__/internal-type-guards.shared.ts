@@ -10,7 +10,7 @@ import {
   isWritableStream,
   isAsyncIterable,
   isTransformStream
-} from "@stream/internal/type-guards";
+} from "@stream/core/type-guards";
 import { describe, it, expect } from "vitest";
 
 export function runInternalTypeGuardsTests(): void {

@@ -2,7 +2,7 @@
  * Browser Stream - PassThrough
  */
 
-import { Transform } from "./transform";
+import { Transform } from "@stream/browser/transform";
 
 // =============================================================================
 // PassThrough Stream

@@ -1,84 +1,69 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 
-declare const ExcelTS: {
-  Workbook: any;
-};
+declare const Documonster: any;
 
-describe("ExcelTS Browser Tests", () => {
+// The `Documonster.Excel` global is injected by the IIFE bundle loaded in the
+// browser-setup `beforeAll` (src/test/browser/setup.ts), which runs before
+// this file's `beforeAll`. Bind the namespaces lazily — destructuring at
+// module top-level would run at import time, before the global exists.
+let Workbook: any, Worksheet: any, Cell: any, Column: any, Image: any;
+beforeAll(() => {
+  ({ Workbook, Worksheet, Cell, Column, Image } = Documonster.Excel);
+});
+
+describe("Documonster.Excel Browser Tests", () => {
   it("should read and write xlsx via binary buffer", async () => {
-    const { Workbook } = ExcelTS;
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("blort");
+    const wb = Workbook.create();
+    Workbook.addWorksheet(wb, "blort");
 
-    ws.getCell("A1").value = "Hello, World!";
-    ws.getCell("A2").value = 7;
+    Cell.setValue(Workbook.getWorksheet(wb, "blort"), "A1", "Hello, World!");
+    Cell.setValue(Workbook.getWorksheet(wb, "blort"), "A2", 7);
 
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await Workbook.toBuffer(wb);
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
+    const wb2 = Workbook.create();
+    await Workbook.read(wb2, buffer);
 
-    const ws2 = wb2.getWorksheet("blort");
+    const ws2 = Workbook.getWorksheet(wb2, "blort")!;
     expect(ws2).toBeTruthy();
-    expect(ws2!.getCell("A1").value).toEqual("Hello, World!");
-    expect(ws2!.getCell("A2").value).toEqual(7);
+    expect(Cell.getValue(ws2!, "A1")).toEqual("Hello, World!");
+    expect(Cell.getValue(ws2!, "A2")).toEqual(7);
   });
 
   it("should read and write xlsx via base64 buffer", async () => {
-    const { Workbook } = ExcelTS;
     const options = {
       base64: true
     };
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("blort");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "blort");
 
-    ws.getCell("A1").value = "Hello, World!";
-    ws.getCell("A2").value = 7;
+    Cell.setValue(ws, "A1", "Hello, World!");
+    Cell.setValue(ws, "A2", 7);
 
-    const buffer = await wb.xlsx.writeBuffer(options);
+    const buffer = await Workbook.toBuffer(wb, options);
 
     // Convert Uint8Array to base64 string
     const base64String = btoa(String.fromCharCode(...buffer));
 
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(base64String, options);
+    const wb2 = Workbook.create();
+    await Workbook.read(wb2, base64String, options);
 
-    const ws2 = wb2.getWorksheet("blort");
+    const ws2 = Workbook.getWorksheet(wb2, "blort")!;
     expect(ws2).toBeTruthy();
-    expect(ws2!.getCell("A1").value).toEqual("Hello, World!");
-    expect(ws2!.getCell("A2").value).toEqual(7);
-  });
-
-  // CSV support is now available in browser using native RFC 4180 implementation
-  it("should write csv via buffer (browser)", async () => {
-    const { Workbook } = ExcelTS;
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("blort");
-
-    ws.getCell("A1").value = "Hello, World!";
-    ws.getCell("B1").value = "What time is it?";
-    ws.getCell("A2").value = 7;
-    ws.getCell("B2").value = "12pm";
-
-    const buffer = await wb.writeCsvBuffer();
-
-    // In browser, buffer is Uint8Array; use TextDecoder to convert to string
-    const content = new TextDecoder().decode(buffer);
-    // Uses \n as row delimiter, trailingNewline defaults to false
-    expect(content).toEqual('"Hello, World!",What time is it?\n7,12pm');
+    expect(Cell.getValue(ws2!, "A1")).toEqual("Hello, World!");
+    expect(Cell.getValue(ws2!, "A2")).toEqual(7);
   });
 
   // Test crypto polyfill - worksheet protection uses crypto.randomBytes and crypto.createHash
   it("should support worksheet protection with password (crypto polyfill)", async () => {
-    const { Workbook } = ExcelTS;
-    const wb = new Workbook();
-    const ws = wb.addWorksheet("protected");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "protected");
 
-    ws.getCell("A1").value = "Protected Data";
+    Cell.setValue(ws, "A1", "Protected Data");
 
     // This uses crypto.randomBytes() and crypto.createHash() internally
     // Use low spinCount for faster test execution (default is 100000 which is slow)
-    await ws.protect("password123", { sheet: true, spinCount: 1000 });
+    await Worksheet.protect(ws, "password123", { sheet: true, spinCount: 1000 });
 
     expect(ws.sheetProtection).toBeTruthy();
     expect(ws.sheetProtection.sheet).toBe(true);
@@ -88,150 +73,14 @@ describe("ExcelTS Browser Tests", () => {
     expect(ws.sheetProtection.spinCount).toBe(1000);
 
     // Verify we can write and read back the protected workbook
-    const buffer = await wb.xlsx.writeBuffer();
-    const wb2 = new Workbook();
-    await wb2.xlsx.load(buffer);
+    const buffer = await Workbook.toBuffer(wb);
+    const wb2 = Workbook.create();
+    await Workbook.read(wb2, buffer);
 
-    const ws2 = wb2.getWorksheet("protected");
+    const ws2 = Workbook.getWorksheet(wb2, "protected")!;
     expect(ws2).toBeTruthy();
     expect(ws2!.sheetProtection).toBeTruthy();
     expect(ws2!.sheetProtection.sheet).toBe(true);
-  });
-
-  // =========================================================================
-  // CSV Browser Tests
-  // =========================================================================
-
-  describe("CSV Operations", () => {
-    it("should load CSV from string", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const csvContent = "Name,Age,City\nAlice,30,New York\nBob,25,Los Angeles";
-
-      const ws = await wb.readCsv(csvContent);
-
-      expect(ws.getCell("A1").value).toBe("Name");
-      expect(ws.getCell("B1").value).toBe("Age");
-      expect(ws.getCell("C1").value).toBe("City");
-      expect(ws.getCell("A2").value).toBe("Alice");
-      // CSV numbers are auto-converted to numbers by the worksheet
-      expect(ws.getCell("B2").value).toBe(30);
-      expect(ws.getCell("C2").value).toBe("New York");
-      expect(ws.getCell("A3").value).toBe("Bob");
-    });
-
-    it("should load CSV from ArrayBuffer", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const csvContent = "Col1,Col2\nA,B\nC,D";
-      const buffer = new TextEncoder().encode(csvContent);
-
-      const ws = await wb.readCsv(buffer);
-
-      expect(ws.getCell("A1").value).toBe("Col1");
-      expect(ws.getCell("B2").value).toBe("B");
-    });
-
-    it("should handle quoted fields with commas", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const csvContent = 'Name,Address\n"Smith, John","123 Main St, Apt 4"';
-
-      const ws = await wb.readCsv(csvContent);
-
-      expect(ws.getCell("A2").value).toBe("Smith, John");
-      expect(ws.getCell("B2").value).toBe("123 Main St, Apt 4");
-    });
-
-    it("should handle quoted fields with newlines", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const csvContent = 'Description\n"Line 1\nLine 2\nLine 3"';
-
-      const ws = await wb.readCsv(csvContent);
-
-      expect(ws.getCell("A2").value).toBe("Line 1\nLine 2\nLine 3");
-    });
-
-    it("should handle escaped quotes", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const csvContent = 'Quote\n"He said ""Hello"""';
-
-      const ws = await wb.readCsv(csvContent);
-
-      expect(ws.getCell("A2").value).toBe('He said "Hello"');
-    });
-
-    it("should write CSV with proper quoting", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-
-      ws.getCell("A1").value = "Name";
-      ws.getCell("B1").value = "Quote";
-      ws.getCell("A2").value = "Smith, John";
-      ws.getCell("B2").value = 'He said "Hi"';
-
-      const content = wb.writeCsv();
-
-      expect(content).toContain('"Smith, John"');
-      expect(content).toContain('"He said ""Hi"""');
-    });
-
-    it("should write CSV to buffer", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("test");
-
-      ws.getCell("A1").value = "Test";
-      ws.getCell("B1").value = "Data";
-
-      const buffer = await wb.writeCsvBuffer();
-
-      expect(buffer).toBeInstanceOf(Uint8Array);
-      const content = new TextDecoder().decode(buffer);
-      expect(content).toBe("Test,Data");
-    });
-
-    it("should support tab delimiters", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("tab");
-
-      ws.getCell("A1").value = "Col1";
-      ws.getCell("B1").value = "Col2";
-      ws.getCell("A2").value = "A";
-      ws.getCell("B2").value = "B";
-
-      // Write with tab delimiter
-      const output = wb.writeCsv({
-        sheetName: ws.name,
-        delimiter: "\t"
-      });
-      expect(output).toBe("Col1\tCol2\nA\tB");
-    });
-
-    it("should round-trip CSV data", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const originalCsv = 'Name,Value\nTest,123\n"Quoted, Value",456';
-
-      const ws = await wb.readCsv(originalCsv);
-      const outputCsv = wb.writeCsv({ sheetName: ws.name });
-
-      // Load the output back and verify
-      const wb2 = new Workbook();
-      const ws2 = await wb2.readCsv(outputCsv);
-
-      expect(ws2.getCell("A1").value).toBe("Name");
-      expect(ws2.getCell("B1").value).toBe("Value");
-      expect(ws2.getCell("A2").value).toBe("Test");
-      // Numbers are auto-converted
-      expect(ws2.getCell("B2").value).toBe(123);
-      expect(ws2.getCell("A3").value).toBe("Quoted, Value");
-      expect(ws2.getCell("B3").value).toBe(456);
-    });
   });
 
   // =========================================================================
@@ -240,232 +89,222 @@ describe("ExcelTS Browser Tests", () => {
 
   describe("XLSX/ZIP Operations", () => {
     it("should handle multiple worksheets", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
+      const wb = Workbook.create();
 
-      const ws1 = wb.addWorksheet("Sheet1");
-      ws1.getCell("A1").value = "Sheet 1 Data";
+      const ws1 = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws1, "A1", "Sheet 1 Data");
 
-      const ws2 = wb.addWorksheet("Sheet2");
-      ws2.getCell("A1").value = "Sheet 2 Data";
+      const ws2 = Workbook.addWorksheet(wb, "Sheet2");
+      Cell.setValue(ws2, "A1", "Sheet 2 Data");
 
-      const ws3 = wb.addWorksheet("Sheet3");
-      ws3.getCell("A1").value = "Sheet 3 Data";
+      const ws3 = Workbook.addWorksheet(wb, "Sheet3");
+      Cell.setValue(ws3, "A1", "Sheet 3 Data");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      expect(wb2.worksheets.length).toBe(3);
-      expect(wb2.getWorksheet("Sheet1")!.getCell("A1").value).toBe("Sheet 1 Data");
-      expect(wb2.getWorksheet("Sheet2")!.getCell("A1").value).toBe("Sheet 2 Data");
-      expect(wb2.getWorksheet("Sheet3")!.getCell("A1").value).toBe("Sheet 3 Data");
+      expect(Workbook.getWorksheets(wb2).length).toBe(3);
+      expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet1")!, "A1")).toBe("Sheet 1 Data");
+      expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet2")!, "A1")).toBe("Sheet 2 Data");
+      expect(Cell.getValue(Workbook.getWorksheet(wb2, "Sheet3")!, "A1")).toBe("Sheet 3 Data");
     });
 
     it("should preserve cell styles", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("styled");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "styled");
 
-      ws.getCell("A1").value = "Bold";
-      ws.getCell("A1").font = { bold: true };
+      Cell.setValue(ws, "A1", "Bold");
+      Cell.setFont(ws, "A1", { bold: true });
 
-      ws.getCell("B1").value = "Red";
-      ws.getCell("B1").font = { color: { argb: "FFFF0000" } };
+      Cell.setValue(ws, "B1", "Red");
+      Cell.setFont(ws, "B1", { color: { argb: "FFFF0000" } });
 
-      ws.getCell("C1").value = "Big";
-      ws.getCell("C1").font = { size: 20 };
+      Cell.setValue(ws, "C1", "Big");
+      Cell.setFont(ws, "C1", { size: 20 });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("styled")!;
-      expect(ws2.getCell("A1").font?.bold).toBe(true);
-      expect(ws2.getCell("B1").font?.color?.argb).toBe("FFFF0000");
-      expect(ws2.getCell("C1").font?.size).toBe(20);
+      const ws2 = Workbook.getWorksheet(wb2, "styled")!;
+      expect(Cell.getFont(ws2, "A1")?.bold).toBe(true);
+      expect(Cell.getFont(ws2, "B1")?.color?.argb).toBe("FFFF0000");
+      expect(Cell.getFont(ws2, "C1")?.size).toBe(20);
     });
 
     it("should preserve cell number formats", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("formats");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "formats");
 
-      ws.getCell("A1").value = 1234.5678;
-      ws.getCell("A1").numFmt = "#,##0.00";
+      Cell.setValue(ws, "A1", 1234.5678);
+      Cell.setNumFmt(ws, "A1", "#,##0.00");
 
-      ws.getCell("B1").value = 0.75;
-      ws.getCell("B1").numFmt = "0%";
+      Cell.setValue(ws, "B1", 0.75);
+      Cell.setNumFmt(ws, "B1", "0%");
 
-      ws.getCell("C1").value = new Date(2024, 11, 25);
-      ws.getCell("C1").numFmt = "yyyy-mm-dd";
+      Cell.setValue(ws, "C1", new Date(2024, 11, 25));
+      Cell.setNumFmt(ws, "C1", "yyyy-mm-dd");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("formats")!;
-      expect(ws2.getCell("A1").numFmt).toBe("#,##0.00");
-      expect(ws2.getCell("B1").numFmt).toBe("0%");
-      expect(ws2.getCell("C1").numFmt).toBe("yyyy-mm-dd");
+      const ws2 = Workbook.getWorksheet(wb2, "formats")!;
+      expect(Cell.getNumFmt(ws2, "A1")).toBe("#,##0.00");
+      expect(Cell.getNumFmt(ws2, "B1")).toBe("0%");
+      expect(Cell.getNumFmt(ws2, "C1")).toBe("yyyy-mm-dd");
     });
 
     it("should preserve merged cells", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("merged");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "merged");
 
-      ws.getCell("A1").value = "Merged Header";
-      ws.mergeCells("A1:D1");
+      Cell.setValue(ws, "A1", "Merged Header");
+      Worksheet.merge(ws, "A1:D1");
 
-      ws.getCell("A2").value = "Another Merge";
-      ws.mergeCells("A2:B3");
+      Cell.setValue(ws, "A2", "Another Merge");
+      Worksheet.merge(ws, "A2:B3");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("merged")!;
+      const ws2 = Workbook.getWorksheet(wb2, "merged")!;
       // Check that merge info is preserved
-      expect(ws2.getCell("A1").value).toBe("Merged Header");
-      expect(ws2.getCell("A2").value).toBe("Another Merge");
+      expect(Cell.getValue(ws2, "A1")).toBe("Merged Header");
+      expect(Cell.getValue(ws2, "A2")).toBe("Another Merge");
       // B1, C1, D1 should be merge slaves
-      expect(ws2.getCell("B1").isMerged).toBe(true);
-      expect(ws2.getCell("C1").isMerged).toBe(true);
+      expect(Cell.isMerged(ws2, "B1")).toBe(true);
+      expect(Cell.isMerged(ws2, "C1")).toBe(true);
     });
 
     it("should preserve formulas", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("formulas");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "formulas");
 
-      ws.getCell("A1").value = 10;
-      ws.getCell("A2").value = 20;
-      ws.getCell("A3").value = { formula: "SUM(A1:A2)", result: 30 };
-      ws.getCell("B1").value = { formula: "A1*2", result: 20 };
+      Cell.setValue(ws, "A1", 10);
+      Cell.setValue(ws, "A2", 20);
+      Cell.setValue(ws, "A3", { formula: "SUM(A1:A2)", result: 30 });
+      Cell.setValue(ws, "B1", { formula: "A1*2", result: 20 });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("formulas")!;
-      expect(ws2.getCell("A3").formula).toBe("SUM(A1:A2)");
-      expect(ws2.getCell("A3").result).toBe(30);
-      expect(ws2.getCell("B1").formula).toBe("A1*2");
+      const ws2 = Workbook.getWorksheet(wb2, "formulas")!;
+      expect(Cell.getFormula(ws2, "A3")).toBe("SUM(A1:A2)");
+      expect(Cell.getResult(ws2, "A3")).toBe(30);
+      expect(Cell.getFormula(ws2, "B1")).toBe("A1*2");
     });
 
     it("should handle large data sets", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("large");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "large");
 
       // Create 1000 rows x 10 columns
       const rows = 1000;
       const cols = 10;
       for (let r = 1; r <= rows; r++) {
         for (let c = 1; c <= cols; c++) {
-          ws.getCell(r, c).value = `R${r}C${c}`;
+          Cell.setValue(ws, r, c, `R${r}C${c}`);
         }
       }
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("large")!;
-      expect(ws2.getCell(1, 1).value).toBe("R1C1");
-      expect(ws2.getCell(500, 5).value).toBe("R500C5");
-      expect(ws2.getCell(1000, 10).value).toBe("R1000C10");
+      const ws2 = Workbook.getWorksheet(wb2, "large")!;
+      expect(Cell.getValue(ws2, 1, 1)).toBe("R1C1");
+      expect(Cell.getValue(ws2, 500, 5)).toBe("R500C5");
+      expect(Cell.getValue(ws2, 1000, 10)).toBe("R1000C10");
     });
 
     it("should preserve hyperlinks", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("links");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "links");
 
-      ws.getCell("A1").value = {
+      Cell.setValue(ws, "A1", {
         text: "Google",
         hyperlink: "https://www.google.com"
-      };
-      ws.getCell("A2").value = {
+      });
+      Cell.setValue(ws, "A2", {
         text: "Email",
         hyperlink: "mailto:test@example.com"
-      };
+      });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("links")!;
-      expect(ws2.getCell("A1").text).toBe("Google");
-      expect(ws2.getCell("A1").hyperlink).toBe("https://www.google.com");
-      expect(ws2.getCell("A2").hyperlink).toBe("mailto:test@example.com");
+      const ws2 = Workbook.getWorksheet(wb2, "links")!;
+      expect(Cell.getText(ws2, "A1")).toBe("Google");
+      expect(Cell.getHyperlink(ws2, "A1")).toBe("https://www.google.com");
+      expect(Cell.getHyperlink(ws2, "A2")).toBe("mailto:test@example.com");
     });
 
     it("should preserve column widths and row heights", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("dimensions");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "dimensions");
 
-      ws.getColumn("A").width = 25;
-      ws.getColumn("B").width = 50;
-      ws.getRow(1).height = 30;
-      ws.getRow(2).height = 40;
+      Column.setWidth(ws, "A", 25);
+      Column.setWidth(ws, "B", 50);
+      Worksheet.getRow(ws, 1).height = 30;
+      Worksheet.getRow(ws, 2).height = 40;
 
-      ws.getCell("A1").value = "Wide column";
-      ws.getCell("B1").value = "Wider column";
+      Cell.setValue(ws, "A1", "Wide column");
+      Cell.setValue(ws, "B1", "Wider column");
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("dimensions")!;
-      expect(ws2.getColumn("A").width).toBe(25);
-      expect(ws2.getColumn("B").width).toBe(50);
-      expect(ws2.getRow(1).height).toBe(30);
-      expect(ws2.getRow(2).height).toBe(40);
+      const ws2 = Workbook.getWorksheet(wb2, "dimensions")!;
+      expect(Column.getWidth(ws2, "A")).toBe(25);
+      expect(Column.getWidth(ws2, "B")).toBe(50);
+      expect(Worksheet.getRow(ws2, 1).height).toBe(30);
+      expect(Worksheet.getRow(ws2, 2).height).toBe(40);
     });
 
     it("should preserve data validation", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("validation");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "validation");
 
-      ws.getCell("A1").value = "Yes";
-      ws.getCell("A1").dataValidation = {
+      Cell.setValue(ws, "A1", "Yes");
+      Cell.setValidation(ws, "A1", {
         type: "list",
         allowBlank: true,
         formulae: ['"Yes,No,Maybe"']
-      };
+      });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("validation")!;
-      expect(ws2.getCell("A1").dataValidation).toBeTruthy();
-      expect(ws2.getCell("A1").dataValidation?.type).toBe("list");
+      const ws2 = Workbook.getWorksheet(wb2, "validation")!;
+      expect(Cell.getValidation(ws2, "A1")).toBeTruthy();
+      expect(Cell.getValidation(ws2, "A1")?.type).toBe("list");
     });
 
     it("should handle workbook with defined names", async () => {
-      const { Workbook } = ExcelTS;
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("names");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "names");
 
-      ws.getCell("A1").value = 100;
-      ws.getCell("A1").name = "MyValue";
+      Cell.setValue(ws, "A1", 100);
+      Cell.setName(ws, "A1", "MyValue");
 
-      ws.getCell("B1").value = { formula: "MyValue * 2", result: 200 };
+      Cell.setValue(ws, "B1", { formula: "MyValue * 2", result: 200 });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const buffer = await Workbook.toBuffer(wb);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
       // Check that the value and formula are preserved
-      const ws2 = wb2.getWorksheet("names")!;
-      expect(ws2.getCell("A1").value).toBe(100);
-      expect(ws2.getCell("B1").formula).toBe("MyValue * 2");
-      expect(ws2.getCell("B1").result).toBe(200);
+      const ws2 = Workbook.getWorksheet(wb2, "names")!;
+      expect(Cell.getValue(ws2, "A1")).toBe(100);
+      expect(Cell.getFormula(ws2, "B1")).toBe("MyValue * 2");
+      expect(Cell.getResult(ws2, "B1")).toBe(200);
     });
   });
 
@@ -483,30 +322,29 @@ describe("ExcelTS Browser Tests", () => {
       globalThis.DecompressionStream = undefined as any;
 
       try {
-        const { Workbook } = ExcelTS;
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("fallback-test");
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "fallback-test");
 
         // Add various data types
-        ws.getCell("A1").value = "Hello, World!";
-        ws.getCell("A2").value = 12345;
-        ws.getCell("A3").value = new Date("2024-01-01");
-        ws.getCell("A4").value = { formula: "A2*2", result: 24690 };
+        Cell.setValue(ws, "A1", "Hello, World!");
+        Cell.setValue(ws, "A2", 12345);
+        Cell.setValue(ws, "A3", new Date("2024-01-01"));
+        Cell.setValue(ws, "A4", { formula: "A2*2", result: 24690 });
 
         // Write using JS fallback compression
-        const buffer = await wb.xlsx.writeBuffer();
+        const buffer = await Workbook.toBuffer(wb);
         expect(buffer).toBeTruthy();
         expect(buffer.byteLength).toBeGreaterThan(0);
 
         // Read using JS fallback decompression
-        const wb2 = new Workbook();
-        await wb2.xlsx.load(buffer);
+        const wb2 = Workbook.create();
+        await Workbook.read(wb2, buffer);
 
-        const ws2 = wb2.getWorksheet("fallback-test");
+        const ws2 = Workbook.getWorksheet(wb2, "fallback-test")!;
         expect(ws2).toBeTruthy();
-        expect(ws2!.getCell("A1").value).toBe("Hello, World!");
-        expect(ws2!.getCell("A2").value).toBe(12345);
-        expect(ws2!.getCell("A4").formula).toBe("A2*2");
+        expect(Cell.getValue(ws2!, "A1")).toBe("Hello, World!");
+        expect(Cell.getValue(ws2!, "A2")).toBe(12345);
+        expect(Cell.getFormula(ws2!, "A4")).toBe("A2*2");
       } finally {
         // Restore original APIs
         globalThis.CompressionStream = originalCompressionStream;
@@ -522,27 +360,26 @@ describe("ExcelTS Browser Tests", () => {
       globalThis.DecompressionStream = undefined as any;
 
       try {
-        const { Workbook } = ExcelTS;
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("large-data");
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "large-data");
 
         // Create a larger dataset (500 rows)
         for (let i = 1; i <= 500; i++) {
-          ws.getCell(`A${i}`).value = `Row ${i}`;
-          ws.getCell(`B${i}`).value = i * 100;
-          ws.getCell(`C${i}`).value = `Data ${i} with some repeated text`.repeat(3);
+          Cell.setValue(ws, `A${i}`, `Row ${i}`);
+          Cell.setValue(ws, `B${i}`, i * 100);
+          Cell.setValue(ws, `C${i}`, `Data ${i} with some repeated text`.repeat(3));
         }
 
-        const buffer = await wb.xlsx.writeBuffer();
+        const buffer = await Workbook.toBuffer(wb);
         expect(buffer.byteLength).toBeGreaterThan(0);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.load(buffer);
+        const wb2 = Workbook.create();
+        await Workbook.read(wb2, buffer);
 
-        const ws2 = wb2.getWorksheet("large-data")!;
-        expect(ws2.getCell("A1").value).toBe("Row 1");
-        expect(ws2.getCell("B500").value).toBe(50000);
-        expect(ws2.getCell("A500").value).toBe("Row 500");
+        const ws2 = Workbook.getWorksheet(wb2, "large-data")!;
+        expect(Cell.getValue(ws2, "A1")).toBe("Row 1");
+        expect(Cell.getValue(ws2, "B500")).toBe(50000);
+        expect(Cell.getValue(ws2, "A500")).toBe("Row 500");
       } finally {
         globalThis.CompressionStream = originalCompressionStream;
         globalThis.DecompressionStream = originalDecompressionStream;
@@ -557,29 +394,28 @@ describe("ExcelTS Browser Tests", () => {
       globalThis.DecompressionStream = undefined as any;
 
       try {
-        const { Workbook } = ExcelTS;
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("styled");
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "styled");
 
-        ws.getCell("A1").value = "Bold Text";
-        ws.getCell("A1").font = { bold: true, size: 14 };
-        ws.getCell("A1").fill = {
+        Cell.setValue(ws, "A1", "Bold Text");
+        Cell.setFont(ws, "A1", { bold: true, size: 14 });
+        Cell.setFill(ws, "A1", {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFFF0000" }
-        };
+        });
 
-        ws.getCell("B1").value = 1234.56;
-        ws.getCell("B1").numFmt = "$#,##0.00";
+        Cell.setValue(ws, "B1", 1234.56);
+        Cell.setNumFmt(ws, "B1", "$#,##0.00");
 
-        const buffer = await wb.xlsx.writeBuffer();
+        const buffer = await Workbook.toBuffer(wb);
 
-        const wb2 = new Workbook();
-        await wb2.xlsx.load(buffer);
+        const wb2 = Workbook.create();
+        await Workbook.read(wb2, buffer);
 
-        const ws2 = wb2.getWorksheet("styled")!;
-        expect(ws2.getCell("A1").font?.bold).toBe(true);
-        expect(ws2.getCell("B1").numFmt).toBe("$#,##0.00");
+        const ws2 = Workbook.getWorksheet(wb2, "styled")!;
+        expect(Cell.getFont(ws2, "A1")?.bold).toBe(true);
+        expect(Cell.getNumFmt(ws2, "B1")).toBe("$#,##0.00");
       } finally {
         globalThis.CompressionStream = originalCompressionStream;
         globalThis.DecompressionStream = originalDecompressionStream;
@@ -587,15 +423,13 @@ describe("ExcelTS Browser Tests", () => {
     });
 
     it("should read file created with native compression using fallback decompression", async () => {
-      const { Workbook } = ExcelTS;
-
       // First, create a file with native compression (if available)
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("native-created");
-      ws.getCell("A1").value = "Created with native compression";
-      ws.getCell("A2").value = 42;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "native-created");
+      Cell.setValue(ws, "A1", "Created with native compression");
+      Cell.setValue(ws, "A2", 42);
 
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       // Now disable native APIs and try to read
       const originalCompressionStream = globalThis.CompressionStream;
@@ -605,12 +439,12 @@ describe("ExcelTS Browser Tests", () => {
       globalThis.DecompressionStream = undefined as any;
 
       try {
-        const wb2 = new Workbook();
-        await wb2.xlsx.load(buffer);
+        const wb2 = Workbook.create();
+        await Workbook.read(wb2, buffer);
 
-        const ws2 = wb2.getWorksheet("native-created")!;
-        expect(ws2.getCell("A1").value).toBe("Created with native compression");
-        expect(ws2.getCell("A2").value).toBe(42);
+        const ws2 = Workbook.getWorksheet(wb2, "native-created")!;
+        expect(Cell.getValue(ws2, "A1")).toBe("Created with native compression");
+        expect(Cell.getValue(ws2, "A2")).toBe(42);
       } finally {
         globalThis.CompressionStream = originalCompressionStream;
         globalThis.DecompressionStream = originalDecompressionStream;
@@ -618,8 +452,6 @@ describe("ExcelTS Browser Tests", () => {
     });
 
     it("should create file with fallback that native compression can read", async () => {
-      const { Workbook } = ExcelTS;
-
       // Disable native APIs
       const originalCompressionStream = globalThis.CompressionStream;
       const originalDecompressionStream = globalThis.DecompressionStream;
@@ -629,12 +461,12 @@ describe("ExcelTS Browser Tests", () => {
 
       let buffer: ArrayBuffer;
       try {
-        const wb = new Workbook();
-        const ws = wb.addWorksheet("fallback-created");
-        ws.getCell("A1").value = "Created with JS fallback";
-        ws.getCell("A2").value = 123;
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "fallback-created");
+        Cell.setValue(ws, "A1", "Created with JS fallback");
+        Cell.setValue(ws, "A2", 123);
 
-        buffer = await wb.xlsx.writeBuffer();
+        buffer = await Workbook.toBuffer(wb);
       } finally {
         // Restore native APIs
         globalThis.CompressionStream = originalCompressionStream;
@@ -642,24 +474,22 @@ describe("ExcelTS Browser Tests", () => {
       }
 
       // Now read with native compression restored
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
-      const ws2 = wb2.getWorksheet("fallback-created")!;
-      expect(ws2.getCell("A1").value).toBe("Created with JS fallback");
-      expect(ws2.getCell("A2").value).toBe(123);
+      const ws2 = Workbook.getWorksheet(wb2, "fallback-created")!;
+      expect(Cell.getValue(ws2, "A1")).toBe("Created with JS fallback");
+      expect(Cell.getValue(ws2, "A2")).toBe(123);
     });
 
     // Regression test: loading files with drawings via loadFromFiles path
     // Previously, _processDrawingEntry would fail because it tried to collect
     // data from an already-consumed text stream instead of using the provided rawData
     it("should load files with embedded images via buffer (loadFromFiles path)", async () => {
-      const { Workbook } = ExcelTS;
-
       // Create a workbook with an embedded image
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("with-image");
-      ws.getCell("A1").value = "Image Test";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "with-image");
+      Cell.setValue(ws, "A1", "Image Test");
 
       // Add a simple 1x1 PNG image (smallest valid PNG)
       // This is a 1x1 red pixel PNG
@@ -736,29 +566,29 @@ describe("ExcelTS Browser Tests", () => {
         0x82
       ]);
 
-      const imageId = wb.addImage({
+      const imageId = Image.add(wb, {
         buffer: pngData,
         extension: "png"
       });
-      ws.addImage(imageId, "B2:D6");
+      Image.place(ws, imageId, "B2:D6");
 
       // Write to buffer
-      const buffer = await wb.xlsx.writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       // Load via xlsx.load() which uses loadFromFiles internally
-      const wb2 = new Workbook();
-      await wb2.xlsx.load(buffer);
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, buffer);
 
       // Verify data
-      const ws2 = wb2.getWorksheet("with-image");
+      const ws2 = Workbook.getWorksheet(wb2, "with-image")!;
       expect(ws2).toBeTruthy();
-      expect(ws2!.getCell("A1").value).toBe("Image Test");
+      expect(Cell.getValue(ws2!, "A1")).toBe("Image Test");
 
       // Verify image was loaded
-      const images = ws2!.getImages();
+      const images = Image.list(ws2!);
       expect(images.length).toBe(1);
-      expect(images[0].range.tl.col).toBe(1); // B column = 1
-      expect(images[0].range.tl.row).toBe(1); // Row 2 = 1 (0-indexed)
+      expect(images[0].range.tl.nativeCol).toBe(1); // B column = 1
+      expect(images[0].range.tl.nativeRow).toBe(1); // Row 2 = 1 (0-indexed)
     });
   });
 });

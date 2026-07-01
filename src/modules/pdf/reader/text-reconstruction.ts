@@ -18,7 +18,7 @@
  * @see PDF Reference 1.7, Chapter 5 - Text
  */
 
-import type { TextFragment } from "./content-interpreter";
+import type { TextFragment } from "@pdf/reader/content-interpreter";
 
 // =============================================================================
 // Public API

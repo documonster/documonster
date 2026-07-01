@@ -9,15 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { utf8Decoder, utf8Encoder } from "../core/internal-utils";
 import { htmlToDocxBody } from "../html";
-import {
-  Document,
-  createDocxStream,
-  editDocxIncremental,
-  packageDocx,
-  readDocx,
-  textParagraph,
-  toBuffer
-} from "../index";
+import { Document, Build, Io, Streaming } from "../index";
 import type { BodyContent, DocxDocument, Paragraph, Run } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -26,7 +18,7 @@ import type { BodyContent, DocxDocument, Paragraph, Run } from "../types";
 
 async function buildSimpleDoc(): Promise<DocxDocument> {
   const doc = Document.create();
-  Document.addContent(doc, textParagraph("Hello"));
+  Document.addContent(doc, Build.textParagraph("Hello"));
   return Document.build(doc);
 }
 
@@ -73,21 +65,21 @@ async function replacePart(
 
 describe("Bug-2: tolerant non-critical part parsing", () => {
   it("readDocx still returns the body even when settings.xml is corrupt", async () => {
-    const original = await packageDocx(await buildSimpleDoc());
+    const original = await Io.package(await buildSimpleDoc());
     const broken = await replacePart(
       original,
       "word/settings.xml",
       utf8Encoder.encode("<not-valid-xml")
     );
-    const doc = await readDocx(broken);
+    const doc = await Io.read(broken);
     expect(doc.body.length).toBeGreaterThan(0);
     expect(doc.settings).toBeUndefined();
   });
 
   it("readDocx still returns the body even when styles.xml is corrupt", async () => {
-    const original = await packageDocx(await buildSimpleDoc());
+    const original = await Io.package(await buildSimpleDoc());
     const broken = await replacePart(original, "word/styles.xml", utf8Encoder.encode("<<<"));
-    const doc = await readDocx(broken);
+    const doc = await Io.read(broken);
     expect(doc.body.length).toBeGreaterThan(0);
   });
 });
@@ -104,7 +96,7 @@ describe("Bug-14: encryption version detection", () => {
     // CFB; we just confirm the path: detection happens via OLE magic in
     // isEncryptedDocx, so a plain ZIP returns false and decryptDocx
     // throws DocxParseError or DocxDecryptionError.
-    const notEncrypted = await packageDocx(await buildSimpleDoc());
+    const notEncrypted = await Io.package(await buildSimpleDoc());
     await expect(decryptDocx(notEncrypted, "x")).rejects.toThrow();
   });
 });
@@ -116,17 +108,17 @@ describe("Bug-14: encryption version detection", () => {
 describe("Bug-10: incremental-edit path normalization", () => {
   it("replaceBody preserves the original sectPr instead of the empty fallback", async () => {
     const docModel = await buildSimpleDoc();
-    const buffer = await packageDocx(docModel);
+    const buffer = await Io.package(docModel);
     // Record the original sectPr snippet (very loose — we just verify
     // that something with `<w:sectPr` survives a body replacement).
     const original = await entriesOf(buffer);
     const docXml = utf8Decoder.decode(original.get("word/document.xml")!);
     expect(docXml).toContain("<w:sectPr");
 
-    const newBuf = await editDocxIncremental(buffer, [
+    const newBuf = await Io.editDocxIncremental(buffer, [
       {
         type: "replaceBody",
-        body: [textParagraph("Replaced")]
+        body: [Build.textParagraph("Replaced")]
       }
     ]);
 
@@ -137,15 +129,15 @@ describe("Bug-10: incremental-edit path normalization", () => {
   });
 
   it("normalizes leading slashes on edit paths so callers can pass either form", async () => {
-    const buffer = await packageDocx(await buildSimpleDoc());
-    const after = await editDocxIncremental(buffer, [
+    const buffer = await Io.package(await buildSimpleDoc());
+    const after = await Io.editDocxIncremental(buffer, [
       {
         type: "replacePartText",
         path: "/word/document.xml",
         text: `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>OK</w:t></w:r></w:p></w:body></w:document>`
       }
     ]);
-    const out = await readDocx(after);
+    const out = await Io.read(after);
     expect(out.body.length).toBe(1);
   });
 });
@@ -219,9 +211,9 @@ describe("Bug-15: bookmark/comment id handling", () => {
       `</w:p>` +
       `</w:body>` +
       `</w:document>`;
-    const buffer = await packageDocx(await buildSimpleDoc());
+    const buffer = await Io.package(await buildSimpleDoc());
     const buf = await replacePart(buffer, "word/document.xml", utf8Encoder.encode(docXml));
-    const out = await readDocx(buf);
+    const out = await Io.read(buf);
     const para = out.body[0] as Paragraph;
     for (const child of para.children) {
       const t = (child as { type?: string }).type;
@@ -259,9 +251,9 @@ describe("Bug-1: cross-paragraph fields", () => {
       `<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>` +
       `</w:body>` +
       `</w:document>`;
-    const buffer = await packageDocx(await buildSimpleDoc());
+    const buffer = await Io.package(await buildSimpleDoc());
     const buf = await replacePart(buffer, "word/document.xml", utf8Encoder.encode(docXml));
-    const out = await readDocx(buf);
+    const out = await Io.read(buf);
     // The terminal paragraph should now hold a Run whose content is a
     // single FieldContent carrying the assembled instruction and the
     // concatenated cached chunks. Earlier the whole field was lost.
@@ -323,7 +315,7 @@ describe("Bug-7: track-change wrappers register their relationships", () => {
     } as Paragraph);
 
     const built = Document.build(doc);
-    const bytes = await toBuffer(built);
+    const bytes = await Io.toBuffer(built);
     const entries = await entriesOf(bytes);
     const rels = utf8Decoder.decode(entries.get("word/_rels/document.xml.rels")!);
     expect(rels).toContain("https://example.com");
@@ -354,7 +346,10 @@ describe("Med-3: markdown import paragraph + table boundary", () => {
 
 describe("Med-9: hyphenation minLeft boundary", () => {
   it("emits break points at indices >= minLeft (not strictly greater)", async () => {
-    const { createHyphenator, hyphenateWord, ENGLISH_US_PATTERNS } = await import("../index");
+    const __wmod = await import("../index");
+    const createHyphenator = __wmod.Font.createHyphenator;
+    const hyphenateWord = __wmod.Font.hyphenateWord;
+    const ENGLISH_US_PATTERNS = __wmod.Font.ENGLISH_US_PATTERNS;
     const hyphen = createHyphenator(ENGLISH_US_PATTERNS, { minLeft: 2, minRight: 2 });
     // Direct break-point inspection: the fix ensures the iteration starts
     // at minLeft, not minLeft + 1. We can't expose computeHyphenPoints
@@ -373,7 +368,7 @@ describe("Med-9: hyphenation minLeft boundary", () => {
 
 describe("Bug-6: streaming-writer parity with packager", () => {
   it("registers a hyperlink rId in document.xml.rels", async () => {
-    const stream = createDocxStream();
+    const stream = Streaming.createDocxStream();
     stream.add({
       type: "paragraph",
       children: [
@@ -400,7 +395,7 @@ describe("Bug-6: streaming-writer parity with packager", () => {
       0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
       0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
     ]);
-    const stream = createDocxStream({
+    const stream = Streaming.createDocxStream({
       images: [{ rId: "rId99", fileName: "tiny.png", mediaType: "png", data: png }]
     });
     stream.add({
@@ -439,13 +434,13 @@ describe("T-14: malformed ZIP buffer", () => {
     const garbage = new Uint8Array([
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
     ]);
-    await expect(readDocx(garbage)).rejects.toThrow();
+    await expect(Io.read(garbage)).rejects.toThrow();
   });
 
   it("rejects a truncated-but-ZIP-magic buffer cleanly", async () => {
     // Just the ZIP local header magic, no content.
     const trunc = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
-    await expect(readDocx(trunc)).rejects.toThrow();
+    await expect(Io.read(trunc)).rejects.toThrow();
   });
 });
 
@@ -488,7 +483,7 @@ describe("Med-8: footnote separator detection", () => {
     const xml = new XmlWriter();
     renderFootnotes(xml, [
       // A "normal" footnote with id=0 (legal but unusual).
-      { id: 0, type: "normal", content: [textParagraph("note text")] }
+      { id: 0, type: "normal", content: [Build.textParagraph("note text")] }
     ]);
     const out = xml.xml;
     // Default separators must still appear because no entry of type

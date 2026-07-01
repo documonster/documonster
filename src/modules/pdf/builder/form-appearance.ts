@@ -9,8 +9,8 @@
  * @see PDF Reference 1.7, §12.7.4 — Field Appearance
  */
 
-import { pdfNumber } from "../core/pdf-object";
-import { PdfContentStream } from "../core/pdf-stream";
+import { pdfNumber } from "@pdf/core/pdf-object";
+import { PdfContentStream } from "@pdf/core/pdf-stream";
 
 // =============================================================================
 // Types

@@ -2,13 +2,20 @@
  * Math / Aggregate Functions — Native RuntimeValue implementation.
  */
 
+import {
+  argToNumber,
+  flattenAll,
+  flattenNumbers,
+  firstError,
+  forEachNumber
+} from "@formula/functions/_shared";
 import type {
   RuntimeValue,
   NumberValue,
   ArrayValue,
   ErrorValue,
   ScalarValue
-} from "../runtime/values";
+} from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -20,14 +27,11 @@ import {
   topLeft,
   isError,
   isArray
-} from "../runtime/values";
-import { argToNumber, flattenAll, flattenNumbers, firstError, forEachNumber } from "./_shared";
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Native Function Type
 // ============================================================================
-
-export type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 
 // ============================================================================
 // Internal Helpers
@@ -91,22 +95,22 @@ function roundHalfAwayFromZero(n: number): number {
 // Trigonometric Functions
 // ============================================================================
 
-export const fnSIN: NativeFn = args => {
+export function fnSIN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.sin(n.value));
-};
+}
 
-export const fnCOS: NativeFn = args => {
+export function fnCOS(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.cos(n.value));
-};
+}
 
-export const fnTAN: NativeFn = args => {
+export function fnTAN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.tan(n.value));
-};
+}
 
-export const fnASIN: NativeFn = args => {
+export function fnASIN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -115,9 +119,9 @@ export const fnASIN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.asin(n.value));
-};
+}
 
-export const fnACOS: NativeFn = args => {
+export function fnACOS(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -126,14 +130,14 @@ export const fnACOS: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.acos(n.value));
-};
+}
 
-export const fnATAN: NativeFn = args => {
+export function fnATAN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.atan(n.value));
-};
+}
 
-export const fnATAN2: NativeFn = args => {
+export function fnATAN2(args: RuntimeValue[]): RuntimeValue {
   const x = argToNumber(args[0]);
   if (isError(x)) {
     return x;
@@ -146,9 +150,9 @@ export const fnATAN2: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.atan2(y.value, x.value));
-};
+}
 
-export const fnSINH: NativeFn = args => {
+export function fnSINH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -157,28 +161,28 @@ export const fnSINH: NativeFn = args => {
   // than a silent Infinity (which would poison downstream arithmetic).
   const r = Math.sinh(n.value);
   return isFinite(r) ? rvNumber(r) : ERRORS.NUM;
-};
+}
 
-export const fnCOSH: NativeFn = args => {
+export function fnCOSH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
   const r = Math.cosh(n.value);
   return isFinite(r) ? rvNumber(r) : ERRORS.NUM;
-};
+}
 
-export const fnTANH: NativeFn = args => {
+export function fnTANH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.tanh(n.value));
-};
+}
 
-export const fnASINH: NativeFn = args => {
+export function fnASINH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.asinh(n.value));
-};
+}
 
-export const fnACOSH: NativeFn = args => {
+export function fnACOSH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -187,9 +191,9 @@ export const fnACOSH: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.acosh(n.value));
-};
+}
 
-export const fnATANH: NativeFn = args => {
+export function fnATANH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -198,7 +202,7 @@ export const fnATANH: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.atanh(n.value));
-};
+}
 
 /**
  * Secondary trigonometric family (SEC / CSC / COT and hyperbolic /
@@ -207,25 +211,25 @@ export const fnATANH: NativeFn = args => {
  * explicit guards at the discontinuities (π/2 for SEC, multiples of π
  * for CSC / COT, zero for the H variants).
  */
-export const fnSEC: NativeFn = args => {
+export function fnSEC(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
   const c = Math.cos(n.value);
   return c === 0 ? ERRORS.DIV0 : rvNumber(1 / c);
-};
+}
 
-export const fnCSC: NativeFn = args => {
+export function fnCSC(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
   const s = Math.sin(n.value);
   return s === 0 ? ERRORS.DIV0 : rvNumber(1 / s);
-};
+}
 
-export const fnCOT: NativeFn = args => {
+export function fnCOT(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -235,9 +239,9 @@ export const fnCOT: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.cos(n.value) / s);
-};
+}
 
-export const fnSECH: NativeFn = args => {
+export function fnSECH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -247,9 +251,9 @@ export const fnSECH: NativeFn = args => {
   // limit) rather than dividing and producing NaN.
   const c = Math.cosh(n.value);
   return Number.isFinite(c) ? rvNumber(1 / c) : rvNumber(0);
-};
+}
 
-export const fnCSCH: NativeFn = args => {
+export function fnCSCH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -262,9 +266,9 @@ export const fnCSCH: NativeFn = args => {
     return rvNumber(0);
   }
   return rvNumber(1 / s);
-};
+}
 
-export const fnCOTH: NativeFn = args => {
+export function fnCOTH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -273,9 +277,9 @@ export const fnCOTH: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(1 / Math.tanh(n.value));
-};
+}
 
-export const fnACOT: NativeFn = args => {
+export function fnACOT(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -283,9 +287,9 @@ export const fnACOT: NativeFn = args => {
   // Excel's ACOT returns values in (0, π), not (-π/2, π/2) like
   // Math.atan. Map: ACOT(x) = π/2 − atan(x).
   return rvNumber(Math.PI / 2 - Math.atan(n.value));
-};
+}
 
-export const fnACOTH: NativeFn = args => {
+export function fnACOTH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -295,13 +299,13 @@ export const fnACOTH: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(0.5 * Math.log((n.value + 1) / (n.value - 1)));
-};
+}
 
 // ============================================================================
 // Math / Aggregate Functions
 // ============================================================================
 
-export const fnSUM: NativeFn = args => {
+export function fnSUM(args: RuntimeValue[]): RuntimeValue {
   let sum = 0;
   const err = forEachNumber(args, n => {
     sum += n;
@@ -313,9 +317,9 @@ export const fnSUM: NativeFn = args => {
   // any formula that aggregates it (AVERAGE, STDEV, etc.) and those
   // downstream callers would then fan #NUM! out across the graph.
   return Number.isFinite(sum) ? rvNumber(sum) : ERRORS.NUM;
-};
+}
 
-export const fnAVERAGE: NativeFn = args => {
+export function fnAVERAGE(args: RuntimeValue[]): RuntimeValue {
   let sum = 0;
   let count = 0;
   const err = forEachNumber(args, n => {
@@ -330,9 +334,9 @@ export const fnAVERAGE: NativeFn = args => {
   }
   const avg = sum / count;
   return Number.isFinite(avg) ? rvNumber(avg) : ERRORS.NUM;
-};
+}
 
-export const fnMIN: NativeFn = args => {
+export function fnMIN(args: RuntimeValue[]): RuntimeValue {
   let min = Infinity;
   let seen = false;
   const err = forEachNumber(args, n => {
@@ -345,9 +349,9 @@ export const fnMIN: NativeFn = args => {
     return err;
   }
   return seen ? rvNumber(min) : rvNumber(0);
-};
+}
 
-export const fnMAX: NativeFn = args => {
+export function fnMAX(args: RuntimeValue[]): RuntimeValue {
   let max = -Infinity;
   let seen = false;
   const err = forEachNumber(args, n => {
@@ -360,9 +364,9 @@ export const fnMAX: NativeFn = args => {
     return err;
   }
   return seen ? rvNumber(max) : rvNumber(0);
-};
+}
 
-export const fnCOUNT: NativeFn = args => {
+export function fnCOUNT(args: RuntimeValue[]): RuntimeValue {
   // Excel's rules — intentionally asymmetric:
   //   - Number cell / scalar → counted (direct + inside array).
   //   - Numeric-string DIRECT scalar (`COUNT("5")`) → counted. Inside
@@ -399,9 +403,9 @@ export const fnCOUNT: NativeFn = args => {
     }
   }
   return rvNumber(count);
-};
+}
 
-export const fnCOUNTA: NativeFn = args => {
+export function fnCOUNTA(args: RuntimeValue[]): RuntimeValue {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
@@ -415,9 +419,9 @@ export const fnCOUNTA: NativeFn = args => {
     }
   }
   return rvNumber(count);
-};
+}
 
-export const fnCOUNTBLANK: NativeFn = args => {
+export function fnCOUNTBLANK(args: RuntimeValue[]): RuntimeValue {
   let count = 0;
   const all = flattenAll(args);
   for (const v of all) {
@@ -431,9 +435,9 @@ export const fnCOUNTBLANK: NativeFn = args => {
     }
   }
   return rvNumber(count);
-};
+}
 
-export const fnPRODUCT: NativeFn = args => {
+export function fnPRODUCT(args: RuntimeValue[]): RuntimeValue {
   let product = 1;
   let seen = false;
   const err = forEachNumber(args, n => {
@@ -449,9 +453,9 @@ export const fnPRODUCT: NativeFn = args => {
   // Excel surfaces an overflow as #NUM! rather than letting Infinity
   // propagate into subsequent arithmetic.
   return isFinite(product) ? rvNumber(product) : ERRORS.NUM;
-};
+}
 
-export const fnSUMPRODUCT: NativeFn = args => {
+export function fnSUMPRODUCT(args: RuntimeValue[]): RuntimeValue {
   if (args.length === 0) {
     return ERRORS.VALUE;
   }
@@ -519,18 +523,18 @@ export const fnSUMPRODUCT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(sum);
-};
+}
 
 // ============================================================================
 // Math Functions
 // ============================================================================
 
-export const fnABS: NativeFn = args => {
+export function fnABS(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.abs(n.value));
-};
+}
 
-export const fnCEILING: NativeFn = args => {
+export function fnCEILING(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -550,7 +554,7 @@ export const fnCEILING: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.ceil(num.value / sig) * sig);
-};
+}
 
 /**
  * CEILING.MATH(number, [significance], [mode]) — rounds away from zero
@@ -561,7 +565,7 @@ export const fnCEILING: NativeFn = args => {
  * are valid (Excel does NOT require same sign), and there is an extra
  * `mode` switch that flips the rounding direction for negatives.
  */
-export const fnCEILING_MATH: NativeFn = args => {
+export function fnCEILING_MATH(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -594,13 +598,13 @@ export const fnCEILING_MATH: NativeFn = args => {
   }
   // Default: round toward zero for negatives.
   return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
-};
+}
 
 /**
  * CEILING.PRECISE / ISO.CEILING — always rounds toward +∞ (irrespective
  * of sign), using the absolute value of significance.
  */
-export const fnCEILING_PRECISE: NativeFn = args => {
+export function fnCEILING_PRECISE(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -615,9 +619,9 @@ export const fnCEILING_PRECISE: NativeFn = args => {
     return rvNumber(0);
   }
   return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
-};
+}
 
-export const fnFLOOR: NativeFn = args => {
+export function fnFLOOR(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -634,7 +638,7 @@ export const fnFLOOR: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.floor(num.value / sig) * sig);
-};
+}
 
 /**
  * FLOOR.MATH(number, [significance], [mode]) — rounds toward zero by
@@ -642,7 +646,7 @@ export const fnFLOOR: NativeFn = args => {
  * negative. Uses `|significance|` so negative significance never
  * produces #NUM!.
  */
-export const fnFLOOR_MATH: NativeFn = args => {
+export function fnFLOOR_MATH(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -671,12 +675,12 @@ export const fnFLOOR_MATH: NativeFn = args => {
     return rvNumber(Math.ceil(num.value / sigAbs) * sigAbs);
   }
   return rvNumber(Math.floor(num.value / sigAbs) * sigAbs);
-};
+}
 
 /**
  * FLOOR.PRECISE — always rounds toward −∞ using `|significance|`.
  */
-export const fnFLOOR_PRECISE: NativeFn = args => {
+export function fnFLOOR_PRECISE(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -691,14 +695,14 @@ export const fnFLOOR_PRECISE: NativeFn = args => {
     return rvNumber(0);
   }
   return rvNumber(Math.floor(num.value / sigAbs) * sigAbs);
-};
+}
 
-export const fnINT: NativeFn = args => {
+export function fnINT(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber(Math.floor(n.value));
-};
+}
 
-export const fnMOD: NativeFn = args => {
+export function fnMOD(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -711,9 +715,9 @@ export const fnMOD: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(num.value - div.value * Math.floor(num.value / div.value));
-};
+}
 
-export const fnPOWER: NativeFn = args => {
+export function fnPOWER(args: RuntimeValue[]): RuntimeValue {
   const base = argToNumber(args[0]);
   if (isError(base)) {
     return base;
@@ -739,9 +743,9 @@ export const fnPOWER: NativeFn = args => {
     return ERRORS.NUM;
   }
   return !isFinite(result) ? ERRORS.NUM : rvNumber(result);
-};
+}
 
-export const fnROUND: NativeFn = args => {
+export function fnROUND(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -751,9 +755,9 @@ export const fnROUND: NativeFn = args => {
     return digitsRV;
   }
   return rvNumber(applyRounding(num.value, digitsRV.value, roundHalfAwayFromZero));
-};
+}
 
-export const fnROUNDDOWN: NativeFn = args => {
+export function fnROUNDDOWN(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -763,9 +767,9 @@ export const fnROUNDDOWN: NativeFn = args => {
     return digitsRV;
   }
   return rvNumber(applyRounding(num.value, digitsRV.value, Math.trunc));
-};
+}
 
-export const fnROUNDUP: NativeFn = args => {
+export function fnROUNDUP(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -780,9 +784,9 @@ export const fnROUNDUP: NativeFn = args => {
   const sign = num.value >= 0 ? 1 : -1;
   const rounded = applyRounding(Math.abs(num.value), digitsRV.value, Math.ceil);
   return rvNumber(sign * rounded);
-};
+}
 
-export const fnSQRT: NativeFn = args => {
+export function fnSQRT(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -791,13 +795,13 @@ export const fnSQRT: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.sqrt(n.value));
-};
+}
 
 /**
  * SQRTPI(number) — returns the square root of (number × π). Useful in
  * statistical formulas and Gauss integrals.
  */
-export const fnSQRTPI: NativeFn = args => {
+export function fnSQRTPI(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -806,9 +810,9 @@ export const fnSQRTPI: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.sqrt(n.value * Math.PI));
-};
+}
 
-export const fnLN: NativeFn = args => {
+export function fnLN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -817,9 +821,9 @@ export const fnLN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.log(n.value));
-};
+}
 
-export const fnLOG: NativeFn = args => {
+export function fnLOG(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -840,9 +844,9 @@ export const fnLOG: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.log(n.value) / Math.log(baseRV.value));
-};
+}
 
-export const fnLOG10: NativeFn = args => {
+export function fnLOG10(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -851,9 +855,9 @@ export const fnLOG10: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.log10(n.value));
-};
+}
 
-export const fnEXP: NativeFn = args => {
+export function fnEXP(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -862,13 +866,17 @@ export const fnEXP: NativeFn = args => {
   // regime rather than letting the non-finite result propagate.
   const r = Math.exp(n.value);
   return isFinite(r) ? rvNumber(r) : ERRORS.NUM;
-};
+}
 
-export const fnPI: NativeFn = () => rvNumber(Math.PI);
+export function fnPI(_args: RuntimeValue[]): RuntimeValue {
+  return rvNumber(Math.PI);
+}
 
-export const fnRAND: NativeFn = () => rvNumber(Math.random());
+export function fnRAND(_args: RuntimeValue[]): RuntimeValue {
+  return rvNumber(Math.random());
+}
 
-export const fnRANDBETWEEN: NativeFn = args => {
+export function fnRANDBETWEEN(args: RuntimeValue[]): RuntimeValue {
   const bottom = argToNumber(args[0]);
   if (isError(bottom)) {
     return bottom;
@@ -885,9 +893,9 @@ export const fnRANDBETWEEN: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(Math.floor(Math.random() * (hi - lo + 1)) + lo);
-};
+}
 
-export const fnSIGN: NativeFn = args => {
+export function fnSIGN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -897,13 +905,13 @@ export const fnSIGN: NativeFn = args => {
   // input is 0, not distinguishing signed zero). The `|| 0` collapses
   // both ±0 into `+0` while leaving ±1 untouched.
   return rvNumber(Math.sign(n.value) || 0);
-};
+}
 
 // ============================================================================
 // Additional Math Functions
 // ============================================================================
 
-export const fnTRUNC: NativeFn = args => {
+export function fnTRUNC(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -913,9 +921,9 @@ export const fnTRUNC: NativeFn = args => {
     return digitsRV;
   }
   return rvNumber(applyRounding(num.value, digitsRV.value, Math.trunc));
-};
+}
 
-export const fnSUMSQ: NativeFn = args => {
+export function fnSUMSQ(args: RuntimeValue[]): RuntimeValue {
   let sum = 0;
   const err = forEachNumber(args, n => {
     sum += n * n;
@@ -924,9 +932,9 @@ export const fnSUMSQ: NativeFn = args => {
     return err;
   }
   return isFinite(sum) ? rvNumber(sum) : ERRORS.NUM;
-};
+}
 
-export const fnGCD: NativeFn = args => {
+export function fnGCD(args: RuntimeValue[]): RuntimeValue {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -962,9 +970,9 @@ export const fnGCD: NativeFn = args => {
     }
   }
   return rvNumber(result);
-};
+}
 
-export const fnLCM: NativeFn = args => {
+export function fnLCM(args: RuntimeValue[]): RuntimeValue {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -1004,13 +1012,13 @@ export const fnLCM: NativeFn = args => {
     }
   }
   return rvNumber(result);
-};
+}
 
 // ============================================================================
 // More Math Functions
 // ============================================================================
 
-export const fnEVEN: NativeFn = args => {
+export function fnEVEN(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -1019,9 +1027,9 @@ export const fnEVEN: NativeFn = args => {
   const abs = Math.abs(n.value);
   const ceil = Math.ceil(abs);
   return rvNumber(sign * (ceil % 2 === 0 ? ceil : ceil + 1));
-};
+}
 
-export const fnODD: NativeFn = args => {
+export function fnODD(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -1033,9 +1041,9 @@ export const fnODD: NativeFn = args => {
   const abs = Math.abs(n.value);
   const ceil = Math.ceil(abs);
   return rvNumber(sign * (ceil % 2 === 1 ? ceil : ceil + 1));
-};
+}
 
-export const fnMROUND: NativeFn = args => {
+export function fnMROUND(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -1051,9 +1059,9 @@ export const fnMROUND: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(roundHalfAwayFromZero(num.value / multiple.value) * multiple.value);
-};
+}
 
-export const fnQUOTIENT: NativeFn = args => {
+export function fnQUOTIENT(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -1066,9 +1074,9 @@ export const fnQUOTIENT: NativeFn = args => {
     return ERRORS.DIV0;
   }
   return rvNumber(Math.trunc(num.value / den.value));
-};
+}
 
-export const fnBASE: NativeFn = args => {
+export function fnBASE(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -1098,9 +1106,9 @@ export const fnBASE: NativeFn = args => {
   }
   const result = Math.floor(num.value).toString(Math.floor(radix.value)).toUpperCase();
   return rvString(minLen > 0 ? result.padStart(minLen, "0") : result);
-};
+}
 
-export const fnDECIMAL: NativeFn = args => {
+export function fnDECIMAL(args: RuntimeValue[]): RuntimeValue {
   const e = topLeft(args[0]);
   if (e.kind === RVKind.Error) {
     return e;
@@ -1139,9 +1147,9 @@ export const fnDECIMAL: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(result);
-};
+}
 
-export const fnROMAN: NativeFn = args => {
+export function fnROMAN(args: RuntimeValue[]): RuntimeValue {
   const num = argToNumber(args[0]);
   if (isError(num)) {
     return num;
@@ -1224,9 +1232,9 @@ export const fnROMAN: NativeFn = args => {
     }
   }
   return rvString(result);
-};
+}
 
-export const fnARABIC: NativeFn = args => {
+export function fnARABIC(args: RuntimeValue[]): RuntimeValue {
   const s = topLeft(args[0]);
   if (s.kind === RVKind.Error) {
     return s;
@@ -1250,17 +1258,17 @@ export const fnARABIC: NativeFn = args => {
     }
   }
   return rvNumber(result);
-};
+}
 
-export const fnDEGREES: NativeFn = args => {
+export function fnDEGREES(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber((n.value * 180) / Math.PI);
-};
+}
 
-export const fnRADIANS: NativeFn = args => {
+export function fnRADIANS(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   return isError(n) ? n : rvNumber((n.value * Math.PI) / 180);
-};
+}
 
 /**
  * Shared driver for SUMX2MY2 / SUMX2PY2 / SUMXMY2. Walks two arrays in
@@ -1305,13 +1313,19 @@ function sumPairedArrays(
   return rvNumber(sum);
 }
 
-export const fnSUMX2MY2: NativeFn = args => sumPairedArrays(args, (x, y) => x * x - y * y);
+export function fnSUMX2MY2(args: RuntimeValue[]): RuntimeValue {
+  return sumPairedArrays(args, (x, y) => x * x - y * y);
+}
 
-export const fnSUMX2PY2: NativeFn = args => sumPairedArrays(args, (x, y) => x * x + y * y);
+export function fnSUMX2PY2(args: RuntimeValue[]): RuntimeValue {
+  return sumPairedArrays(args, (x, y) => x * x + y * y);
+}
 
-export const fnSUMXMY2: NativeFn = args => sumPairedArrays(args, (x, y) => (x - y) ** 2);
+export function fnSUMXMY2(args: RuntimeValue[]): RuntimeValue {
+  return sumPairedArrays(args, (x, y) => (x - y) ** 2);
+}
 
-export const fnMULTINOMIAL: NativeFn = args => {
+export function fnMULTINOMIAL(args: RuntimeValue[]): RuntimeValue {
   const nums = flattenNumbers(args);
   const err = firstError(nums);
   if (err) {
@@ -1344,9 +1358,9 @@ export const fnMULTINOMIAL: NativeFn = args => {
   // Round to the nearest integer — the log-exp round-trip introduces sub-ulp
   // noise that would otherwise leave us with things like `20.0000000001`.
   return rvNumber(Math.round(result));
-};
+}
 
-export const fnFACT: NativeFn = args => {
+export function fnFACT(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -1363,9 +1377,9 @@ export const fnFACT: NativeFn = args => {
     result *= i;
   }
   return rvNumber(result);
-};
+}
 
-export const fnFACTDOUBLE: NativeFn = args => {
+export function fnFACTDOUBLE(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -1385,9 +1399,9 @@ export const fnFACTDOUBLE: NativeFn = args => {
     }
   }
   return rvNumber(result);
-};
+}
 
-export const fnCOMBIN: NativeFn = args => {
+export function fnCOMBIN(args: RuntimeValue[]): RuntimeValue {
   const nRV = argToNumber(args[0]);
   if (isError(nRV)) {
     return nRV;
@@ -1419,9 +1433,9 @@ export const fnCOMBIN: NativeFn = args => {
   // result is fundamentally approximate, so rounding only makes sense
   // below 2^53.
   return rvNumber(result < 9.007199254740992e15 ? Math.round(result) : result);
-};
+}
 
-export const fnCOMBINA: NativeFn = args => {
+export function fnCOMBINA(args: RuntimeValue[]): RuntimeValue {
   const nRV = argToNumber(args[0]);
   if (isError(nRV)) {
     return nRV;
@@ -1436,9 +1450,9 @@ export const fnCOMBINA: NativeFn = args => {
     return rvNumber(1);
   }
   return fnCOMBIN([rvNumber(nRV.value + kRV.value - 1), kRV]);
-};
+}
 
-export const fnPERMUT: NativeFn = args => {
+export function fnPERMUT(args: RuntimeValue[]): RuntimeValue {
   const nRV = argToNumber(args[0]);
   if (isError(nRV)) {
     return nRV;
@@ -1463,7 +1477,7 @@ export const fnPERMUT: NativeFn = args => {
     }
   }
   return rvNumber(result);
-};
+}
 
 // ============================================================================
 // Matrix functions: MMULT, MDETERM, MINVERSE, MUNIT
@@ -1499,7 +1513,7 @@ function asNumericMatrix(v: RuntimeValue): number[][] | ErrorValue {
  * MMULT(array1, array2) — matrix product. Dimensions must be
  * (m×k) × (k×n) = (m×n); mismatched sizes return #VALUE!.
  */
-export const fnMMULT: NativeFn = args => {
+export function fnMMULT(args: RuntimeValue[]): RuntimeValue {
   const a = asNumericMatrix(args[0]);
   if ("kind" in a) {
     return a;
@@ -1528,14 +1542,14 @@ export const fnMMULT: NativeFn = args => {
     rows.push(row);
   }
   return rvArray(rows);
-};
+}
 
 /**
  * MDETERM(array) — determinant of a square matrix via Gaussian
  * elimination with partial pivoting. Non-square or non-numeric input
  * returns #VALUE!.
  */
-export const fnMDETERM: NativeFn = args => {
+export function fnMDETERM(args: RuntimeValue[]): RuntimeValue {
   const mat = asNumericMatrix(args[0]);
   if ("kind" in mat) {
     return mat;
@@ -1573,14 +1587,14 @@ export const fnMDETERM: NativeFn = args => {
     }
   }
   return rvNumber(det);
-};
+}
 
 /**
  * MINVERSE(array) — inverse of a square matrix via Gauss-Jordan
  * elimination. Singular matrices return #NUM!; non-square return
  * #VALUE!.
  */
-export const fnMINVERSE: NativeFn = args => {
+export function fnMINVERSE(args: RuntimeValue[]): RuntimeValue {
   const mat = asNumericMatrix(args[0]);
   if ("kind" in mat) {
     return mat;
@@ -1642,12 +1656,12 @@ export const fnMINVERSE: NativeFn = args => {
     rows.push(row);
   }
   return rvArray(rows);
-};
+}
 
 /**
  * MUNIT(dimension) — n×n identity matrix.
  */
-export const fnMUNIT: NativeFn = args => {
+export function fnMUNIT(args: RuntimeValue[]): RuntimeValue {
   const nV = toNumberRV(topLeft(args[0]));
   if (isError(nV)) {
     return nV;
@@ -1665,7 +1679,7 @@ export const fnMUNIT: NativeFn = args => {
     rows.push(row);
   }
   return rvArray(rows);
-};
+}
 
 // ============================================================================
 // SERIESSUM
@@ -1675,7 +1689,7 @@ export const fnMUNIT: NativeFn = args => {
  * SERIESSUM(x, n, m, coefficients) — returns the sum of a power series
  *   x^n * coef[0] + x^(n+m) * coef[1] + x^(n+2m) * coef[2] + …
  */
-export const fnSERIESSUM: NativeFn = args => {
+export function fnSERIESSUM(args: RuntimeValue[]): RuntimeValue {
   const xV = toNumberRV(topLeft(args[0]));
   if (isError(xV)) {
     return xV;
@@ -1707,4 +1721,4 @@ export const fnSERIESSUM: NativeFn = args => {
     return ERRORS.NUM;
   }
   return rvNumber(total);
-};
+}

@@ -19,19 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  paragraph,
-  text,
-  hyperlink,
-  hyperlinkField,
-  pageBreak,
-  bookmarkStart,
-  bookmarkEnd,
-  refField,
-  pageRefField,
-  toBuffer
-} from "../index";
+import { Document, Build, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -50,22 +38,22 @@ Document.addHeading(doc, "Word — Hyperlinks & Bookmarks", 1);
 Document.addHeading(doc, "1. External link", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Visit "),
-    hyperlink("the project site", {
+  Build.paragraph([
+    Build.text("Visit "),
+    Build.hyperlink("the project site", {
       url: "https://example.com",
       tooltip: "Open example.com in your browser"
     }),
-    text(" for details.")
+    Build.text(" for details.")
   ])
 );
 
 // External link via the HYPERLINK field form (alternative representation)
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("(field form) "),
-    hyperlinkField("https://example.com/docs", {
+  Build.paragraph([
+    Build.text("(field form) "),
+    Build.hyperlinkField("https://example.com/docs", {
       displayText: "documentation",
       newWindow: true,
       tooltip: "Open in a new window"
@@ -76,9 +64,9 @@ Document.addParagraphElement(
 // Email link
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Contact: "),
-    hyperlink("support@example.com", { url: "mailto:support@example.com" })
+  Build.paragraph([
+    Build.text("Contact: "),
+    Build.hyperlink("support@example.com", { url: "mailto:support@example.com" })
   ])
 );
 
@@ -88,9 +76,9 @@ Document.addParagraphElement(
 // contrast to the blue unvisited links above.
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("This link is styled as visited (purple): "),
-    hyperlink("visited", { url: "https://example.com/visited", history: true })
+  Build.paragraph([
+    Build.text("This link is styled as visited (purple): "),
+    Build.hyperlink("visited", { url: "https://example.com/visited", history: true })
   ])
 );
 
@@ -111,49 +99,61 @@ const detailsId = Document.nextBookmarkId(doc);
 // match what Word writes after F9 (and thus give a correctly-styled link
 // even before update) we wrap the field in an explicit <w:hyperlink>
 // element, which is the runtime form Word produces internally for \h.
-const wrapAsLink = (anchor: string, run: ReturnType<typeof refField>) => ({
-  type: "hyperlink" as const,
-  anchor,
-  children: [run]
-});
+function wrapAsLink(anchor: string, run: ReturnType<typeof Build.refField>) {
+  return {
+    type: "hyperlink" as const,
+    anchor,
+    children: [run]
+  };
+}
 
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Jump to: "),
-    hyperlink("Introduction", { anchor: "intro" }),
-    text(" · "),
-    hyperlink("Details", { anchor: "details" }),
-    text(" · "),
-    text("see also: "),
-    wrapAsLink("intro", refField("intro", { hyperlink: true, cachedValue: "Introduction" })),
-    text(" (page "),
-    wrapAsLink("intro", pageRefField("intro", { hyperlink: true, cachedValue: "1" })),
-    text(").")
+  Build.paragraph([
+    Build.text("Jump to: "),
+    Build.hyperlink("Introduction", { anchor: "intro" }),
+    Build.text(" · "),
+    Build.hyperlink("Details", { anchor: "details" }),
+    Build.text(" · "),
+    Build.text("see also: "),
+    wrapAsLink("intro", Build.refField("intro", { hyperlink: true, cachedValue: "Introduction" })),
+    Build.text(" (page "),
+    wrapAsLink("intro", Build.pageRefField("intro", { hyperlink: true, cachedValue: "1" })),
+    Build.text(").")
   ])
 );
 
 // Force a page break so PAGEREF resolves to something different at runtime
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // "Introduction" — wrapped in a bookmark range
 Document.addParagraphElement(
   doc,
-  paragraph([bookmarkStart(introId, "intro"), text("Introduction"), bookmarkEnd(introId)], {
-    style: "Heading2"
-  })
+  Build.paragraph(
+    [Build.bookmarkStart(introId, "intro"), Build.text("Introduction"), Build.bookmarkEnd(introId)],
+    {
+      style: "Heading2"
+    }
+  )
 );
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(40));
 
 // Force another page break
-Document.addParagraphElement(doc, paragraph([pageBreak()]));
+Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
 
 // "Details" — bookmark wrapping a heading
 Document.addParagraphElement(
   doc,
-  paragraph([bookmarkStart(detailsId, "details"), text("Details"), bookmarkEnd(detailsId)], {
-    style: "Heading2"
-  })
+  Build.paragraph(
+    [
+      Build.bookmarkStart(detailsId, "details"),
+      Build.text("Details"),
+      Build.bookmarkEnd(detailsId)
+    ],
+    {
+      style: "Heading2"
+    }
+  )
 );
 Document.addParagraph(doc, "Sed ut perspiciatis… ".repeat(40));
 
@@ -163,18 +163,18 @@ Document.addParagraph(doc, "Sed ut perspiciatis… ".repeat(40));
 Document.addHeading(doc, "3. Rich-formatted link content", 2);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("A "),
-    hyperlink("bold red link", {
+  Build.paragraph([
+    Build.text("A "),
+    Build.hyperlink("bold red link", {
       url: "https://example.com",
       properties: { bold: true, color: "C00000", underline: "single" }
     }),
-    text(" and an "),
-    hyperlink("italic underlined link", {
+    Build.text(" and an "),
+    Build.hyperlink("italic underlined link", {
       url: "https://example.com",
       properties: { italic: true, underline: "double" }
     }),
-    text(".")
+    Build.text(".")
   ])
 );
 
@@ -183,9 +183,9 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("With target frame _blank: "),
-    hyperlink("open in new tab", {
+  Build.paragraph([
+    Build.text("With target frame _blank: "),
+    Build.hyperlink("open in new tab", {
       url: "https://example.com",
       tgtFrame: "_blank",
       tooltip: "_blank target"
@@ -201,20 +201,23 @@ Document.addHeading(doc, "Edge cases", 2);
 // Hyperlink with neither url nor anchor — degraded to plain text by writers
 Document.addParagraphElement(
   doc,
-  paragraph([text("Broken link (no url/anchor): "), hyperlink("plain text", {})])
+  Build.paragraph([Build.text("Broken link (no url/anchor): "), Build.hyperlink("plain text", {})])
 );
 
 // Empty link text
-Document.addParagraphElement(doc, paragraph([hyperlink("", { url: "https://example.com" })]));
+Document.addParagraphElement(
+  doc,
+  Build.paragraph([Build.hyperlink("", { url: "https://example.com" })])
+);
 
 // Bookmark with empty name — written but flagged at validation time
 const emptyBookmarkId = Document.nextBookmarkId(doc);
 Document.addParagraphElement(
   doc,
-  paragraph([
-    bookmarkStart(emptyBookmarkId, ""),
-    text("(bookmark with empty name)"),
-    bookmarkEnd(emptyBookmarkId)
+  Build.paragraph([
+    Build.bookmarkStart(emptyBookmarkId, ""),
+    Build.text("(bookmark with empty name)"),
+    Build.bookmarkEnd(emptyBookmarkId)
   ])
 );
 
@@ -222,12 +225,12 @@ Document.addParagraphElement(
 const rangeId = Document.nextBookmarkId(doc);
 Document.addParagraphElement(
   doc,
-  paragraph([bookmarkStart(rangeId, "multi"), text("First paragraph in range.")])
+  Build.paragraph([Build.bookmarkStart(rangeId, "multi"), Build.text("First paragraph in range.")])
 );
 Document.addParagraph(doc, "Second paragraph in range.");
 Document.addParagraphElement(
   doc,
-  paragraph([text("Last paragraph; bookmark ends here. "), bookmarkEnd(rangeId)])
+  Build.paragraph([Build.text("Last paragraph; bookmark ends here. "), Build.bookmarkEnd(rangeId)])
 );
 // REF \h fields are how Word usually represents a clickable cross-reference
 // to a bookmark, but Word does not paint the cached value with hyperlink
@@ -237,12 +240,12 @@ Document.addParagraphElement(
 // already cover the field-level form.)
 Document.addParagraphElement(
   doc,
-  paragraph([
-    text("Reference into the multi-paragraph bookmark: "),
-    hyperlink("[multi paragraph block]", { anchor: "multi" })
+  Build.paragraph([
+    Build.text("Reference into the multi-paragraph bookmark: "),
+    Build.hyperlink("[multi paragraph block]", { anchor: "multi" })
   ])
 );
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "08-hyperlinks-bookmarks.docx"), buf);
 console.log(`  → 08-hyperlinks-bookmarks.docx (${buf.length} bytes)`);

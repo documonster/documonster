@@ -1,15 +1,16 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
 interface FloatXformOptions {
   tag: string;
   attr?: string;
-  attrs?: any;
+  attrs?: XmlAttributes;
 }
 
 class FloatXform extends BaseXform {
   declare private tag: string;
   declare private attr?: string;
-  declare private attrs?: any;
+  declare private attrs?: XmlAttributes;
   declare private text: string[];
 
   constructor(options: FloatXformOptions) {
@@ -21,7 +22,7 @@ class FloatXform extends BaseXform {
     this.text = [];
   }
 
-  render(xmlStream: any, model?: number): void {
+  render(xmlStream: XmlSink, model?: number): void {
     if (model !== undefined) {
       xmlStream.openNode(this.tag);
       if (this.attrs) {
@@ -36,7 +37,7 @@ class FloatXform extends BaseXform {
     }
   }
 
-  parseOpen(node: any): void {
+  parseOpen(node: ParseOpenTag): void {
     if (node.name === this.tag) {
       if (this.attr) {
         this.model = parseFloat(node.attributes[this.attr]);

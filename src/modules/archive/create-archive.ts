@@ -1,10 +1,6 @@
 import { TarArchive } from "@archive/tar/tar-archive";
-import {
-  ZipArchive,
-  type ZipOptions,
-  type ZipOptionsTar,
-  type ZipOptionsZip
-} from "@archive/zip/zip-archive";
+import type { ZipOptionsTar, ZipOptionsZip } from "@archive/zip/zip-archive";
+import { ZipArchive } from "@archive/zip/zip-archive";
 
 /**
  * Create a new archive
@@ -27,12 +23,12 @@ import {
  */
 export function zip(options: ZipOptionsTar): TarArchive;
 export function zip(options?: ZipOptionsZip): ZipArchive;
-export function zip(options: ZipOptions = {}): ZipArchive | TarArchive {
+export function zip(options: ZipOptionsTar | ZipOptionsZip = {}): ZipArchive | TarArchive {
   if (options.format === "tar") {
     return new TarArchive({
       modTime: options.modTime,
       signal: options.signal,
-      onProgress: options.onProgress as any,
+      onProgress: options.onProgress,
       progressIntervalMs: options.progressIntervalMs
     });
   }

@@ -16,9 +16,9 @@
  *   correctly through `excelToDate()`.
  */
 
-import { dateToExcel, excelToDate } from "@utils/utils.base";
-
-import type { RuntimeValue, ErrorValue } from "../runtime/values";
+import { isDate1904 } from "@formula/functions/_date-context";
+import { argToNumber, checkError } from "@formula/functions/_shared";
+import type { RuntimeValue, ErrorValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -30,15 +30,12 @@ import {
   topLeft,
   rvNumber,
   rvBoolean
-} from "../runtime/values";
-import { isDate1904 } from "./_date-context";
-import { argToNumber, checkError } from "./_shared";
+} from "@formula/runtime/values";
+import { dateToExcel, excelToDate } from "@utils/utils.base";
 
 // ============================================================================
 // Type alias for native function signature
 // ============================================================================
-
-type NativeFn = (args: RuntimeValue[]) => RuntimeValue;
 
 // ============================================================================
 // Helpers
@@ -93,10 +90,10 @@ function collectHolidays(arg: RuntimeValue): Set<number> | ErrorValue {
  * local-time fields from `new Date()`. The resulting y/m/d components are
  * then packed into a UTC serial so downstream date arithmetic is consistent.
  */
-export const fnTODAY: NativeFn = () => {
+export function fnTODAY(_args: RuntimeValue[]): RuntimeValue {
   const now = new Date();
   return rvNumber(fromDate(new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))));
-};
+}
 
 /**
  * NOW — current date and time.
@@ -107,36 +104,36 @@ export const fnTODAY: NativeFn = () => {
  * would require tz metadata we do not have. We therefore keep the current
  * UTC-ms based conversion, matching historical behaviour.
  */
-export const fnNOW: NativeFn = () => {
+export function fnNOW(_args: RuntimeValue[]): RuntimeValue {
   const now = new Date();
   return rvNumber(fromDate(now));
-};
+}
 
-export const fnYEAR: NativeFn = args => {
+export function fnYEAR(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
   return rvNumber(toDate(n.value).getUTCFullYear());
-};
+}
 
-export const fnMONTH: NativeFn = args => {
+export function fnMONTH(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
   return rvNumber(toDate(n.value).getUTCMonth() + 1);
-};
+}
 
-export const fnDAY: NativeFn = args => {
+export function fnDAY(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
   }
   return rvNumber(toDate(n.value).getUTCDate());
-};
+}
 
-export const fnDATE: NativeFn = args => {
+export function fnDATE(args: RuntimeValue[]): RuntimeValue {
   const year = argToNumber(args[0]);
   if (isError(year)) {
     return year;
@@ -183,9 +180,9 @@ export const fnDATE: NativeFn = args => {
     d.setUTCFullYear(y);
   }
   return rvNumber(fromDate(d));
-};
+}
 
-export const fnTIME: NativeFn = args => {
+export function fnTIME(args: RuntimeValue[]): RuntimeValue {
   const hour = argToNumber(args[0]);
   if (isError(hour)) {
     return hour;
@@ -208,9 +205,9 @@ export const fnTIME: NativeFn = args => {
   const total = (hour.value * 3600 + minute.value * 60 + second.value) / 86400;
   // total could still be >= 1 if e.g. hour=25; wrap into [0, 1).
   return rvNumber(total - Math.floor(total));
-};
+}
 
-export const fnHOUR: NativeFn = args => {
+export function fnHOUR(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -220,9 +217,9 @@ export const fnHOUR: NativeFn = args => {
   }
   const totalSeconds = Math.round((n.value % 1) * 86400);
   return rvNumber(Math.floor(totalSeconds / 3600) % 24);
-};
+}
 
-export const fnMINUTE: NativeFn = args => {
+export function fnMINUTE(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -232,9 +229,9 @@ export const fnMINUTE: NativeFn = args => {
   }
   const totalSeconds = Math.round((n.value % 1) * 86400);
   return rvNumber(Math.floor(totalSeconds / 60) % 60);
-};
+}
 
-export const fnSECOND: NativeFn = args => {
+export function fnSECOND(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -244,9 +241,9 @@ export const fnSECOND: NativeFn = args => {
   }
   const totalSeconds = Math.round((n.value % 1) * 86400);
   return rvNumber(totalSeconds % 60);
-};
+}
 
-export const fnWEEKDAY: NativeFn = args => {
+export function fnWEEKDAY(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -279,9 +276,9 @@ export const fnWEEKDAY: NativeFn = args => {
     default:
       return ERRORS.NUM;
   }
-};
+}
 
-export const fnEOMONTH: NativeFn = args => {
+export function fnEOMONTH(args: RuntimeValue[]): RuntimeValue {
   const startDate = argToNumber(args[0]);
   if (isError(startDate)) {
     return startDate;
@@ -299,9 +296,9 @@ export const fnEOMONTH: NativeFn = args => {
   const d = toDate(startDate.value);
   const result = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + m + 1, 0));
   return rvNumber(fromDate(result));
-};
+}
 
-export const fnEDATE: NativeFn = args => {
+export function fnEDATE(args: RuntimeValue[]): RuntimeValue {
   const startDate = argToNumber(args[0]);
   if (isError(startDate)) {
     return startDate;
@@ -328,9 +325,9 @@ export const fnEDATE: NativeFn = args => {
     Date.UTC(firstOfTarget.getUTCFullYear(), firstOfTarget.getUTCMonth(), clampedDay)
   );
   return rvNumber(fromDate(result));
-};
+}
 
-export const fnDATEDIF: NativeFn = args => {
+export function fnDATEDIF(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -397,9 +394,9 @@ export const fnDATEDIF: NativeFn = args => {
     default:
       return ERRORS.NUM;
   }
-};
+}
 
-export const fnDAYS: NativeFn = args => {
+export function fnDAYS(args: RuntimeValue[]): RuntimeValue {
   const end = argToNumber(args[0]);
   if (isError(end)) {
     return end;
@@ -409,9 +406,9 @@ export const fnDAYS: NativeFn = args => {
     return start;
   }
   return rvNumber(Math.floor(end.value) - Math.floor(start.value));
-};
+}
 
-export const fnISOWEEKNUM: NativeFn = args => {
+export function fnISOWEEKNUM(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -426,9 +423,9 @@ export const fnISOWEEKNUM: NativeFn = args => {
         ((temp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getUTCDay() + 6) % 7)) / 7
       )
   );
-};
+}
 
-export const fnWEEKNUM: NativeFn = args => {
+export function fnWEEKNUM(args: RuntimeValue[]): RuntimeValue {
   const n = argToNumber(args[0]);
   if (isError(n)) {
     return n;
@@ -486,7 +483,7 @@ export const fnWEEKNUM: NativeFn = args => {
   const jan1Day = jan1.getUTCDay();
   const dayOfYear = Math.floor((d.getTime() - jan1.getTime()) / 86400000);
   return rvNumber(Math.floor((dayOfYear + ((jan1Day - startDay + 7) % 7)) / 7) + 1);
-};
+}
 
 function networkdaysHelper(startN: number, endN: number, holidays: Set<number>): number {
   const s = Math.floor(Math.min(startN, endN));
@@ -531,7 +528,7 @@ function networkdaysHelper(startN: number, endN: number, holidays: Set<number>):
   return weekdays * sign;
 }
 
-export const fnNETWORKDAYS: NativeFn = args => {
+export function fnNETWORKDAYS(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -545,9 +542,9 @@ export const fnNETWORKDAYS: NativeFn = args => {
     return rvNumber(networkdaysHelper(startN.value, endN.value, holidays));
   }
   return holidays;
-};
+}
 
-export const fnWORKDAY: NativeFn = args => {
+export function fnWORKDAY(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -576,9 +573,9 @@ export const fnWORKDAY: NativeFn = args => {
     }
   }
   return rvNumber(current);
-};
+}
 
-export const fnYEARFRAC: NativeFn = args => {
+export function fnYEARFRAC(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -679,9 +676,9 @@ export const fnYEARFRAC: NativeFn = args => {
     default:
       return ERRORS.NUM;
   }
-};
+}
 
-export const fnDATEVALUE: NativeFn = args => {
+export function fnDATEVALUE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -700,9 +697,9 @@ export const fnDATEVALUE: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvNumber(fromDate(new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d))));
-};
+}
 
-export const fnTIMEVALUE: NativeFn = args => {
+export function fnTIMEVALUE(args: RuntimeValue[]): RuntimeValue {
   const err = checkError(args[0]);
   if (err) {
     return err;
@@ -713,7 +710,7 @@ export const fnTIMEVALUE: NativeFn = args => {
     return ERRORS.VALUE;
   }
   return rvNumber(parsed);
-};
+}
 
 // ============================================================================
 // Date / Time parsing (deterministic, independent of host locale)
@@ -861,7 +858,7 @@ function parseTimeOnly(raw: string): number | null {
 // More Date/Time Functions
 // ============================================================================
 
-export const fnDAYS360: NativeFn = args => {
+export function fnDAYS360(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -899,7 +896,7 @@ export const fnDAYS360: NativeFn = args => {
     }
   }
   return rvNumber((y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1));
-};
+}
 
 /** Map weekend-type code to the set of day-of-week indices (0=Sun..6=Sat) that are weekends. */
 function getWeekendDays(weekendType: number): Set<number> {
@@ -937,7 +934,7 @@ function getWeekendDays(weekendType: number): Set<number> {
   }
 }
 
-export const fnNETWORKDAYS_INTL: NativeFn = args => {
+export function fnNETWORKDAYS_INTL(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -969,9 +966,9 @@ export const fnNETWORKDAYS_INTL: NativeFn = args => {
     }
   }
   return rvNumber(count * sign);
-};
+}
 
-export const fnWORKDAY_INTL: NativeFn = args => {
+export function fnWORKDAY_INTL(args: RuntimeValue[]): RuntimeValue {
   const startN = argToNumber(args[0]);
   if (isError(startN)) {
     return startN;
@@ -1006,4 +1003,4 @@ export const fnWORKDAY_INTL: NativeFn = args => {
     }
   }
   return rvNumber(current);
-};
+}

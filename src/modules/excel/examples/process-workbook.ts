@@ -1,11 +1,21 @@
-import { Workbook } from "../../../index";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const [, , inputFile, outputFile] = process.argv;
+import { Cell, Workbook, Worksheet } from "@excel/index";
 
-const wb = new Workbook();
+const exampleDir = path.dirname(fileURLToPath(import.meta.url));
+const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
+
+fs.mkdirSync(outDir, { recursive: true });
+
+const inputFile = process.argv[2] ?? path.join(exampleDir, "data/test.xlsx");
+const outputFile = process.argv[3] ?? path.join(outDir, "process-workbook-out.xlsx");
+
+const wb = Workbook.create();
 
 let passed = true;
-const assert = function (value, failMessage, passMessage) {
+function assert(value, failMessage, passMessage) {
   if (!value) {
     if (failMessage) {
       console.error(failMessage);
@@ -14,27 +24,27 @@ const assert = function (value, failMessage, passMessage) {
   } else if (passMessage) {
     console.log(passMessage);
   }
-};
+}
 
 // assuming file created by testBookOut
-wb.xlsx
+Workbook.getXlsxIo(wb)
   .readFile(inputFile)
   .then(() => {
     console.log("Loaded", inputFile);
 
-    wb.eachSheet(sheet => {
-      console.log(sheet.name);
+    Workbook.eachSheet(wb, sheet => {
+      console.log(Worksheet.getName(sheet));
     });
 
-    const ws = wb.getWorksheet("Sheet1");
+    const ws = Workbook.getWorksheets(wb)[0]!;
 
     assert(ws, "Expected to find a worksheet called sheet1", "");
 
-    ws!.getCell("B1").value = new Date();
-    ws!.getCell("B1").numFmt = "hh:mm:ss";
+    Cell.setValue(ws!, "B1", new Date());
+    Cell.setStyle(ws!, "B1", { numFmt: "hh:mm:ss" });
 
-    ws!.addRow([1, "hello"]);
-    return wb.xlsx.writeFile(outputFile);
+    Worksheet.addRow(ws!, [1, "hello"]);
+    return Workbook.writeFile(wb, outputFile);
   })
   .then(() => {
     assert(passed, "Something went wrong", "All tests passed!");

@@ -1,10 +1,11 @@
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
+import { rangeCreate, rangeExpandToAddress, rangeRange } from "@excel/core/range";
 import { InvalidValueTypeError, ExcelError } from "@excel/errors";
-import { Range } from "@excel/range";
 import type { RichText } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RichTextXform } from "@excel/xlsx/xform/strings/rich-text-xform";
 import { dateToExcel, isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
+import type { XmlAttributes } from "@xml/types";
 
 function getValueType(v) {
   if (v === null || v === undefined) {
@@ -57,8 +58,7 @@ function getEffectiveCellType(cell) {
  *  - `richText`: preserved if the source was a rich-text payload, else undefined
  *
  * This keeps the CellHyperlinkValue.text: string public contract intact while
- * also letting the Hyperlink value class retain the formatted runs
- * (see https://github.com/cjnoname/excelts/issues/142).
+ * also letting the Hyperlink value class retain the formatted runs.
  */
 function extractHyperlinkDisplay(raw: unknown): { text: string; richText?: RichText[] } {
   if (raw === null || raw === undefined) {
@@ -199,9 +199,9 @@ class CellXform extends BaseXform {
           if (master.si === undefined) {
             master.shareType = "shared";
             master.si = options.siFormulae++;
-            master.range = new Range(master.address, model.address);
+            master.range = rangeCreate(master.address, model.address);
           } else if (master.range) {
-            master.range.expandToAddress(model.address);
+            rangeExpandToAddress(master.range, model.address);
           }
           model.si = master.si;
         }
@@ -213,12 +213,12 @@ class CellXform extends BaseXform {
   }
 
   renderFormula(xmlStream, model) {
-    let attrs: Record<string, any> | null = null;
+    let attrs: XmlAttributes | null = null;
     switch (model.shareType) {
       case "shared":
         attrs = {
           t: "shared",
-          ref: model.ref || model.range.range,
+          ref: model.ref || rangeRange(model.range),
           si: model.si
         };
         break;
@@ -656,7 +656,7 @@ class CellXform extends BaseXform {
       // CellHyperlinkValue.text is typed as string; if the shared-string
       // resolution produced a rich-text payload ({ richText: [...] }) we must
       // flatten it for `text` AND preserve the runs on `richText` so formatted
-      // display survives round-trip. (See issue #142.)
+      // display survives round-trip.
       let source: unknown;
       if (model.type === Enums.ValueType.Formula) {
         // Formula + hyperlink: surface as a Hyperlink cell whose display is

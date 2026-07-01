@@ -1,16 +1,24 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
+import { Table, Workbook, Worksheet } from "@excel/index";
 
-import { Workbook } from "../../../index";
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "table.xlsx");
 
-const [, , filename] = process.argv;
-
-const wb = new Workbook();
-const ws = wb.addWorksheet("Foo");
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Foo");
 
 const now = new Date();
 const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDay());
 
-ws.columns = [{ key: "date", width: 32 }, { key: "number" }, { key: "word" }];
+Worksheet.setColumns(ws, [{ key: "date", width: 32 }, { key: "number" }, { key: "word" }]);
 
 const words = [
   "Twas",
@@ -28,7 +36,7 @@ const words = [
   "wabe"
 ];
 
-ws.addTable({
+Table.add(ws, {
   name: "TestTable",
   ref: "A1",
   headerRow: true,
@@ -61,7 +69,7 @@ ws.addTable({
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 try {
-  await wb.xlsx.writeFile(filename);
+  await Workbook.writeFile(wb, filename);
   const micros = stopwatch.microseconds;
   console.log("Done.");
   console.log("Time taken:", micros);

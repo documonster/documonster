@@ -5,23 +5,22 @@
  * Used by both the inline table parser and the styles parser.
  */
 
-import type { XmlElement } from "@xml/types";
-
-import { type Mutable } from "../core/internal-utils";
+import type { Mutable } from "@word/core/internal-utils";
+import { attrInt, attrVal, findChildNs, safeParseInt } from "@word/reader/parse-utils";
+import {
+  parseBorder,
+  parseRevisionInfo,
+  parseShading,
+  parseTableWidth
+} from "@word/reader/properties-parsers";
 import type {
   TableBorders,
   TableCellMargins,
   TableFloat,
   TableLook,
   TableProperties
-} from "../types";
-import { attrInt, attrVal, findChildNs, safeParseInt } from "./parse-utils";
-import {
-  parseBorder,
-  parseRevisionInfo,
-  parseShading,
-  parseTableWidth
-} from "./properties-parsers";
+} from "@word/types";
+import type { XmlElement } from "@xml/types";
 
 function parseTableBorders(el: XmlElement): TableBorders {
   const borders: Mutable<TableBorders> = {};

@@ -21,7 +21,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Workbook, excelToPdf } from "../../../index";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
+
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -29,7 +31,7 @@ const outDir = path.resolve(
 );
 fs.mkdirSync(outDir, { recursive: true });
 
-const wb = new Workbook();
+const wb = Workbook.create();
 
 // =============================================================================
 // Sheet 1: Rich text overflow in single (non-merged) cells
@@ -38,54 +40,54 @@ const wb = new Workbook();
 // just like plain text does.
 // =============================================================================
 
-const ws1 = wb.addWorksheet("RichText-Overflow");
-ws1.columns = [
+const ws1 = Workbook.addWorksheet(wb, "RichText-Overflow");
+Worksheet.setColumns(ws1, [
   { header: "Description", width: 18 },
   { header: "Narrow Single Cell", width: 12 },
   { header: "C (empty)", width: 12 },
   { header: "D (empty)", width: 12 },
   { header: "Wide Merged Cell", width: 12 }
-];
+]);
 
 // Row 2: Rich text exceeds narrow cell width → overflows into C2, D2
-ws1.getCell("A2").value = "8pt + 16pt (no wrap)";
-ws1.getCell("B2").value = {
+Cell.setValue(ws1, "A2", "8pt + 16pt (no wrap)");
+Cell.setValue(ws1, "B2", {
   richText: [
     { text: "Small(8)", font: { size: 8 } },
     { text: " BIG(16)", font: { size: 16 } }
   ]
-};
+});
 // C2, D2 empty — rich text overflows into them
 // Merged cell for comparison (wider, so text fits without overflow)
-ws1.mergeCells("E2:G2");
-ws1.getCell("E2").value = {
+Worksheet.merge(ws1, "E2:G2");
+Cell.setValue(ws1, "E2", {
   richText: [
     { text: "Small(8)", font: { size: 8 } },
     { text: " BIG(16)", font: { size: 16 } }
   ]
-};
+});
 
 // Row 3: Three sizes, narrow cell
-ws1.getCell("A3").value = "7 + 8 + 14 (no wrap)";
-ws1.getCell("B3").value = {
+Cell.setValue(ws1, "A3", "7 + 8 + 14 (no wrap)");
+Cell.setValue(ws1, "B3", {
   richText: [
     { text: "Tiny", font: { size: 7 } },
     { text: " Mid", font: { size: 8 } },
     { text: " BIG", font: { size: 14 } }
   ]
-};
-ws1.mergeCells("E3:G3");
-ws1.getCell("E3").value = {
+});
+Worksheet.merge(ws1, "E3:G3");
+Cell.setValue(ws1, "E3", {
   richText: [
     { text: "Tiny", font: { size: 7 } },
     { text: " Mid", font: { size: 8 } },
     { text: " BIG", font: { size: 14 } }
   ]
-};
+});
 
 // Row 4: Plain text comparison — overflow works correctly
-ws1.getCell("A4").value = "Plain text overflow";
-ws1.getCell("B4").value = "This plain text overflows into C4 and D4 correctly";
+Cell.setValue(ws1, "A4", "Plain text overflow");
+Cell.setValue(ws1, "B4", "This plain text overflows into C4 and D4 correctly");
 
 // =============================================================================
 // Sheet 2: Overflow region hides gridlines and borders
@@ -94,35 +96,42 @@ ws1.getCell("B4").value = "This plain text overflows into C4 and D4 correctly";
 // gridlines and borders in the overflow area are hidden — matching Excel.
 // =============================================================================
 
-const ws2 = wb.addWorksheet("Overflow-Erase");
-ws2.columns = [
+const ws2 = Workbook.addWorksheet(wb, "Overflow-Erase");
+Worksheet.setColumns(ws2, [
   { header: "A", width: 12 },
   { header: "B", width: 8 },
   { header: "C", width: 8 },
   { header: "D", width: 8 },
   { header: "E", width: 8 },
   { header: "F", width: 8 }
-];
+]);
 
 // Long text overflows → gridlines visible in overflow region
-ws2.getCell("A2").value =
-  "This very long text overflows across several columns. In Excel the gridlines disappear under the text. In PDF they remain visible.";
+Cell.setValue(
+  ws2,
+  "A2",
+  "This very long text overflows across several columns. In Excel the gridlines disappear under the text. In PDF they remain visible."
+);
 
 // Same but with explicit borders on some cells
-ws2.getCell("A4").value = "Bordered cell with overflow:";
-ws2.getCell("A4").border = {
-  top: { style: "thin" },
-  bottom: { style: "thin" },
-  left: { style: "thin" },
-  right: { style: "thin" }
-};
+Cell.setValue(ws2, "A4", "Bordered cell with overflow:");
+Cell.setStyle(ws2, "A4", {
+  border: {
+    top: { style: "thin" },
+    bottom: { style: "thin" },
+    left: { style: "thin" },
+    right: { style: "thin" }
+  }
+});
 // B4 has border but is empty → border drawn even though text from A4 covers it visually in Excel
-ws2.getCell("B4").border = {
-  top: { style: "thin" },
-  bottom: { style: "thin" },
-  left: { style: "thin" },
-  right: { style: "thin" }
-};
+Cell.setStyle(ws2, "B4", {
+  border: {
+    top: { style: "thin" },
+    bottom: { style: "thin" },
+    left: { style: "thin" },
+    right: { style: "thin" }
+  }
+});
 
 // =============================================================================
 // Sheet 3: Per-run font size measurement for wrapped rich text
@@ -132,30 +141,30 @@ ws2.getCell("B4").border = {
 // correct character density per line regardless of size differences.
 // =============================================================================
 
-const ws3 = wb.addWorksheet("PerRun-WrapSize");
-ws3.columns = [
+const ws3 = Workbook.addWorksheet(wb, "PerRun-WrapSize");
+Worksheet.setColumns(ws3, [
   { header: "Case", width: 25 },
   { header: "Wrapped Rich Text", width: 25 },
   { header: "Expected Layout", width: 40 }
-];
+]);
 
-// Case from issue: 8pt vs 7pt — only 1pt difference but looks huge
-ws3.getRow(2).height = 30;
-ws3.getCell("A2").value = "8pt vs 7pt (wrap)";
-ws3.getCell("B2").value = {
+// 8pt vs 7pt — only 1pt difference but looks huge
+Row.setHeight(ws3, 2, 30);
+Cell.setValue(ws3, "A2", "8pt vs 7pt (wrap)");
+Cell.setValue(ws3, "B2", {
   richText: [
     { text: "1TEXT-XD", font: { size: 8 } },
     { text: "(ex.2)(ex=1)", font: { size: 7 } }
   ]
-};
-ws3.getCell("B2").alignment = { wrapText: true };
-ws3.getCell("C2").value = "Both runs should be nearly same visual size (8:7 ratio)";
-ws3.getCell("C2").alignment = { wrapText: true };
+});
+Cell.setStyle(ws3, "B2", { alignment: { wrapText: true } });
+Cell.setValue(ws3, "C2", "Both runs should be nearly same visual size (8:7 ratio)");
+Cell.setStyle(ws3, "C2", { alignment: { wrapText: true } });
 
 // Extreme case: 16pt header + 7pt body
-ws3.getRow(3).height = 60;
-ws3.getCell("A3").value = "16pt + 7pt body (wrap)";
-ws3.getCell("B3").value = {
+Row.setHeight(ws3, 3, 60);
+Cell.setValue(ws3, "A3", "16pt + 7pt body (wrap)");
+Cell.setValue(ws3, "B3", {
   richText: [
     { text: "TITLE ", font: { size: 16 } },
     {
@@ -163,19 +172,25 @@ ws3.getCell("B3").value = {
       font: { size: 7 }
     }
   ]
-};
-ws3.getCell("B3").alignment = { wrapText: true };
-ws3.getCell("C3").value =
-  "Body text wraps as if it were 16pt wide → only ~4 chars/line instead of ~8. Actual render at 7pt leaves huge gaps.";
-ws3.getCell("C3").alignment = { wrapText: true };
+});
+Cell.setStyle(ws3, "B3", { alignment: { wrapText: true } });
+Cell.setValue(
+  ws3,
+  "C3",
+  "Body text wraps as if it were 16pt wide → only ~4 chars/line instead of ~8. Actual render at 7pt leaves huge gaps."
+);
+Cell.setStyle(ws3, "C3", { alignment: { wrapText: true } });
 
 // Reference: same text at uniform 7pt (correct wrap behavior)
-ws3.getRow(4).height = 60;
-ws3.getCell("A4").value = "All 7pt (reference)";
-ws3.getCell("B4").value =
-  "The body text is 7pt and should wrap normally at its own size, fitting many more characters per line than it currently does.";
-ws3.getCell("B4").font = { size: 7 };
-ws3.getCell("B4").alignment = { wrapText: true };
+Row.setHeight(ws3, 4, 60);
+Cell.setValue(ws3, "A4", "All 7pt (reference)");
+Cell.setValue(
+  ws3,
+  "B4",
+  "The body text is 7pt and should wrap normally at its own size, fitting many more characters per line than it currently does."
+);
+Cell.setStyle(ws3, "B4", { font: { size: 7 } });
+Cell.setStyle(ws3, "B4", { alignment: { wrapText: true } });
 
 // =============================================================================
 // Sheet 4: Alignment with mixed-size rich text
@@ -185,57 +200,57 @@ ws3.getCell("B4").alignment = { wrapText: true };
 // within the cell, with line height based on the largest run's font size.
 // =============================================================================
 
-const ws4 = wb.addWorksheet("Alignment");
-ws4.columns = [
+const ws4 = Workbook.addWorksheet(wb, "Alignment");
+Worksheet.setColumns(ws4, [
   { header: "Vertical Align", width: 15 },
   { header: "Mixed Rich Text", width: 40 },
   { header: "Plain (reference)", width: 40 }
-];
+]);
 
 // Middle alignment — Y position depends on totalTextHeight which uses maxFontSize lineHeight
-ws4.getRow(2).height = 40;
-ws4.getCell("A2").value = "Middle";
-ws4.getCell("B2").value = {
+Row.setHeight(ws4, 2, 40);
+Cell.setValue(ws4, "A2", "Middle");
+Cell.setValue(ws4, "B2", {
   richText: [
     { text: "BIG(16)", font: { size: 16 } },
     { text: " tiny(7)", font: { size: 7 } }
   ]
-};
-ws4.getCell("B2").alignment = { horizontal: "left", vertical: "middle" };
-ws4.getCell("C2").value = "Reference: 11pt middle";
-ws4.getCell("C2").alignment = { horizontal: "left", vertical: "middle" };
+});
+Cell.setStyle(ws4, "B2", { alignment: { horizontal: "left", vertical: "middle" } });
+Cell.setValue(ws4, "C2", "Reference: 11pt middle");
+Cell.setStyle(ws4, "C2", { alignment: { horizontal: "left", vertical: "middle" } });
 
 // Bottom alignment
-ws4.getRow(3).height = 40;
-ws4.getCell("A3").value = "Bottom";
-ws4.getCell("B3").value = {
+Row.setHeight(ws4, 3, 40);
+Cell.setValue(ws4, "A3", "Bottom");
+Cell.setValue(ws4, "B3", {
   richText: [
     { text: "BIG(16)", font: { size: 16 } },
     { text: " tiny(7)", font: { size: 7 } }
   ]
-};
-ws4.getCell("B3").alignment = { horizontal: "left", vertical: "bottom" };
-ws4.getCell("C3").value = "Reference: 11pt bottom";
-ws4.getCell("C3").alignment = { horizontal: "left", vertical: "bottom" };
+});
+Cell.setStyle(ws4, "B3", { alignment: { horizontal: "left", vertical: "bottom" } });
+Cell.setValue(ws4, "C3", "Reference: 11pt bottom");
+Cell.setStyle(ws4, "C3", { alignment: { horizontal: "left", vertical: "bottom" } });
 
 // Center horizontal with mixed sizes
-ws4.getRow(4).height = 30;
-ws4.getCell("A4").value = "H-Center";
-ws4.getCell("B4").value = {
+Row.setHeight(ws4, 4, 30);
+Cell.setValue(ws4, "A4", "H-Center");
+Cell.setValue(ws4, "B4", {
   richText: [
     { text: "Big(14)", font: { size: 14 } },
     { text: " Small(8)", font: { size: 8 } }
   ]
-};
-ws4.getCell("B4").alignment = { horizontal: "center", vertical: "middle" };
-ws4.getCell("C4").value = "Reference: center";
-ws4.getCell("C4").alignment = { horizontal: "center", vertical: "middle" };
+});
+Cell.setStyle(ws4, "B4", { alignment: { horizontal: "center", vertical: "middle" } });
+Cell.setValue(ws4, "C4", "Reference: center");
+Cell.setStyle(ws4, "C4", { alignment: { horizontal: "center", vertical: "middle" } });
 
 // =============================================================================
 // Export
 // =============================================================================
 
-const pdf = await excelToPdf(wb, {
+const pdf = await Pdf.fromExcel(wb, {
   showGridLines: true,
   showSheetNames: true,
   showPageNumbers: true,
@@ -248,5 +263,5 @@ console.log(`${filename} generated — ${pdf.length} bytes`);
 console.log(`Output: ${path.join(outDir, filename)}`);
 
 // Also export as xlsx for comparison in Excel
-await wb.xlsx.writeFile(path.join(outDir, "rich-text-overflow.xlsx"));
+await Workbook.writeFile(wb, path.join(outDir, "rich-text-overflow.xlsx"));
 console.log("rich-text-overflow.xlsx generated for comparison in Excel");

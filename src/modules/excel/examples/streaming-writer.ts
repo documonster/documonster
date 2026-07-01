@@ -1,11 +1,20 @@
-import { WorkbookWriter } from "../../../index";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const filename = process.argv[2];
+import { Stream } from "@excel/index";
+
+const outDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../tmp/excel-examples"
+);
+fs.mkdirSync(outDir, { recursive: true });
+const filename = process.argv[2] ?? path.join(outDir, "streaming-writer.xlsx");
 const styles = {
   filename,
   useStyles: true
 };
-const wb = new WorkbookWriter(styles);
+const wb = new Stream.WorkbookWriter(styles);
 const ws = wb.addWorksheet("blort");
 
 const style = {
@@ -18,17 +27,22 @@ ws.columns = [
   { header: "C1", width: 30 }
 ];
 
-ws.getRow(2).font = { name: "Broadway", color: { argb: "FFFF0000" }, outline: true, size: 20 };
+Stream.setRowFont(ws.getRow(2), {
+  name: "Broadway",
+  color: { argb: "FFFF0000" },
+  outline: true,
+  size: 20
+});
 
-ws.getCell("A2").value = "A2";
-ws.getCell("B2").value = "B2";
-ws.getCell("C2").value = "C2";
-ws.getCell("A3").value = "A3";
-ws.getCell("B3").value = "B3";
-ws.getCell("C3").value = "C3";
+Stream.setCellValue(ws.getCell("A2"), "A2");
+Stream.setCellValue(ws.getCell("B2"), "B2");
+Stream.setCellValue(ws.getCell("C2"), "C2");
+Stream.setCellValue(ws.getCell("A3"), "A3");
+Stream.setCellValue(ws.getCell("B3"), "B3");
+Stream.setCellValue(ws.getCell("C3"), "C3");
 
 wb.commit().then(() => {
   console.log("Done");
   // var wb2 = new Workbook();
-  // return wb2.xlsx.readFile('./wb.test2.xlsx');
+  // return Workbook.readFile(wb2, './wb.test2.xlsx');
 });

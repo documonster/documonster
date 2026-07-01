@@ -1,18 +1,33 @@
 import { MaxItemsExceededError } from "@excel/errors";
+import type { Style } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CellXform } from "@excel/xlsx/xform/sheet/cell-xform";
 import { parseBoolean } from "@utils/utils";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface RowXformOptions {
   maxItems?: number;
+}
+
+/**
+ * Write/parse options threaded through the sheet xform tree. The style
+ * manager is carried loosely (the stream writer types it as `object`); row
+ * xform narrows it to the style-manager surface at the call site.
+ */
+interface StyleManagerLike {
+  addStyleModel(model: Partial<Style>): number;
+  getStyleModel(id: number): Style | null;
+}
+interface RowXformPrepareOptions {
+  styles: object;
 }
 
 interface RowModel {
   number: number;
   min?: number;
   max?: number;
-  cells: any[];
+  cells: unknown[];
   styleId?: number;
   hidden?: boolean;
   bestFit?: boolean;
@@ -20,14 +35,14 @@ interface RowModel {
   customHeight?: boolean;
   outlineLevel?: number;
   collapsed?: boolean;
-  style?: any;
+  style?: Partial<Style>;
   dyDescent?: number;
 }
 
 class RowXform extends BaseXform<RowModel> {
   declare private maxItems?: number;
-  declare public map: { [key: string]: any };
-  declare public parser: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
   declare private numRowsSeen: number;
   declare private lastCellCol: number;
 
@@ -50,18 +65,19 @@ class RowXform extends BaseXform<RowModel> {
     this.lastCellCol = 0;
   }
 
-  prepare(model: RowModel, options: any): void {
-    const styleId = options.styles.addStyleModel(model.style);
+  prepare(model: RowModel, options: RowXformPrepareOptions): void {
+    const styles = options.styles as StyleManagerLike;
+    const styleId = styles.addStyleModel(model.style ?? {});
     if (styleId) {
       model.styleId = styleId;
     }
-    const cellXform = this.map.c;
-    model.cells.forEach((cellModel: any) => {
+    const cellXform = this.map.c as CellXform;
+    model.cells.forEach(cellModel => {
       cellXform.prepare(cellModel, options);
     });
   }
 
-  render(xmlStream: any, model?: RowModel, options?: any): void {
+  render(xmlStream: XmlSink, model?: RowModel, _options?: unknown): void {
     if (!model) {
       return;
     }
@@ -98,15 +114,17 @@ class RowXform extends BaseXform<RowModel> {
       xmlStream.addAttribute("collapsed", "1");
     }
 
-    const cellXform = this.map.c;
-    model.cells.forEach((cellModel: any) => {
-      cellXform.render(xmlStream, cellModel, options);
+    const cellXform = this.map.c as CellXform;
+    model.cells.forEach(cellModel => {
+      // CellXform.render takes (xmlStream, model); the row's `options` is not
+      // consumed by it (it was silently ignored under the previous any typing).
+      cellXform.render(xmlStream, cellModel);
     });
 
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -196,14 +214,16 @@ class RowXform extends BaseXform<RowModel> {
     return false;
   }
 
-  reconcile(model: RowModel, options: any): void {
-    model.style = model.styleId !== undefined ? options.styles.getStyleModel(model.styleId) : {};
+  reconcile(model: RowModel, options: RowXformPrepareOptions): void {
+    const styles = options.styles as StyleManagerLike;
+    model.style =
+      model.styleId !== undefined ? (styles.getStyleModel(model.styleId) ?? undefined) : {};
     if (model.styleId !== undefined) {
       model.styleId = undefined;
     }
 
-    const cellXform = this.map.c;
-    model.cells.forEach((cellModel: any) => {
+    const cellXform = this.map.c as CellXform;
+    model.cells.forEach(cellModel => {
       cellXform.reconcile(cellModel, options);
     });
   }

@@ -8,6 +8,8 @@
  * a new document without mutating the input.
  */
 
+import { isRun } from "@word/core/text-utils";
+import type { WalkPath } from "@word/core/walker";
 import type {
   BodyContent,
   DocxDocument,
@@ -22,9 +24,7 @@ import type {
   Table,
   TableRow,
   TableCell
-} from "../types";
-import { isRun } from "./text-utils";
-import type { WalkPath } from "./walker";
+} from "@word/types";
 
 // =============================================================================
 // Types

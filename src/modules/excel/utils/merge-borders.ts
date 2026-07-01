@@ -1,10 +1,7 @@
+import type { Border, BorderDiagonal, Borders, Color, Style } from "@excel/types";
 import { copyStyle } from "@excel/utils/copy-style";
 
-interface StyleObject {
-  [key: string]: any;
-}
-
-type BorderEdge = { style?: string; color?: Record<string, any> } | undefined;
+type BorderEdge = Partial<Border> | undefined;
 
 /**
  * Borders collected from the perimeter of a merge range.
@@ -19,8 +16,8 @@ export interface CollectedBorders {
   leftEdges: BorderEdge[];
   /** right edge border for each row (index = row - top) */
   rightEdges: BorderEdge[];
-  diagonal?: any;
-  color?: any;
+  diagonal?: Partial<BorderDiagonal>;
+  color?: Partial<Color>;
 }
 
 /**
@@ -35,9 +32,12 @@ export function collectMergeBorders(
   left: number,
   bottom: number,
   right: number,
-  findCell: (r: number, c: number) => { style: StyleObject } | undefined
+  findCell: (r: number, c: number) => { style: Partial<Style> } | undefined
 ): CollectedBorders | undefined {
-  const masterBorder: StyleObject | undefined = findCell(top, left)?.style?.border;
+  const masterBorder: (Partial<Borders> & { color?: Partial<Color> }) | undefined = findCell(
+    top,
+    left
+  )?.style?.border;
 
   const width = right - left + 1;
   const height = bottom - top + 1;
@@ -107,7 +107,7 @@ export function applyMergeBorders(
   bottom: number,
   right: number,
   collected: CollectedBorders,
-  getCell: (r: number, c: number) => { style: StyleObject }
+  getCell: (r: number, c: number) => { style: Partial<Style> }
 ): void {
   const { topEdges, bottomEdges, leftEdges, rightEdges, diagonal, color } = collected;
   const masterStyle = getCell(top, left).style;
@@ -115,9 +115,11 @@ export function applyMergeBorders(
   for (let i = top; i <= bottom; i++) {
     for (let j = left; j <= right; j++) {
       const cell = getCell(i, j);
-      const style = copyStyle(masterStyle) || {};
+      const style: Partial<Style> = copyStyle(masterStyle) || {};
 
-      const newBorder: Record<string, any> = {};
+      // `Borders` has per-edge color, but the merge logic also carries a
+      // single perimeter color applied alongside the chosen edges.
+      const newBorder: Partial<Borders> & { color?: Partial<Color> } = {};
       let hasBorder = false;
 
       if (i === top && topEdges[j - left]) {
@@ -143,14 +145,15 @@ export function applyMergeBorders(
 
       if (hasBorder) {
         if (color) {
+          // The perimeter color applies to whichever edges were set above.
           newBorder.color = color;
         }
-        (style as any).border = newBorder;
+        style.border = newBorder;
       } else {
-        delete (style as any).border;
+        delete style.border;
       }
 
-      cell.style = style as any;
+      cell.style = style;
     }
   }
 }

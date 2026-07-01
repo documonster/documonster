@@ -154,12 +154,6 @@ export function encodeOoxmlAttr(text: string): string {
 }
 
 // =============================================================================
-// XML utilities — delegated to @xml/encode
-// =============================================================================
-
-export { xmlEncode, xmlDecode } from "@xml/encode";
-
-// =============================================================================
 // Parsing utilities
 // =============================================================================
 
@@ -352,11 +346,14 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
     }
   }
 
-  // Browser: chunked String.fromCharCode.apply to avoid stack overflow and reduce string concatenation
+  // Browser: chunked String.fromCharCode to avoid stack overflow and reduce string concatenation
   const CHUNK_SIZE = 0x8000; // 32KB chunks
   const chunks: string[] = [];
   for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK_SIZE) as any));
+    // Spread the chunk (a Uint8Array is an iterable of numbers) so the call is
+    // type-checked against `fromCharCode(...codes: number[])` without an `any`
+    // cast; chunk size stays within the engine's argument-count limit.
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE)));
   }
   return btoa(chunks.join(""));
 }

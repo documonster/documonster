@@ -1,7 +1,7 @@
-// Type-only regression test for https://github.com/cjnoname/excelts/issues/160
+// Type-only regression test for the Node-vs-browser workbook type contract.
 //
 // This file is typechecked by `pnpm type` (tsgo) but is NOT executed by Vitest.
-// It pins down the type contract that issue #160 was about: under the Node
+// It pins down the type contract: under the Node
 // entry, `Workbook.xlsx` must be the Node `XLSX` (with `readFile`/`writeFile`)
 // and any method that returns the workbook (`load`, `read`, `loadFromFiles`,
 // etc.) must return the *Node* `Workbook` so that chaining off the result
@@ -15,8 +15,9 @@
 // The fix makes `XLSX` generic over its workbook type so the Node subclass
 // extends `XLSX<NodeWorkbook>` and the inherited methods narrow naturally.
 
-import type { Workbook as NodeWorkbook } from "@excel/workbook";
-import type { Workbook as BrowserWorkbook } from "@excel/workbook.browser";
+import type { Workbook as NodeWorkbook } from "@excel/core/workbook";
+import { getXlsxIo } from "@excel/core/workbook";
+import type { Workbook as BrowserWorkbook } from "@excel/core/workbook.browser";
 import type { XLSX as NodeXlsx } from "@excel/xlsx/xlsx";
 import type { XLSX as BrowserXlsx } from "@excel/xlsx/xlsx.browser";
 
@@ -62,7 +63,7 @@ async function _issue160Screenshot(ab: ArrayBuffer): Promise<NodeWorkbook> {
   // We cannot `new Workbook()` here without circular imports, but the type of
   // `wb.xlsx.load(...)` is exactly what the user sees in their IDE.
   const loaded = await nodeXlsx.load(ab);
-  await loaded.xlsx.writeFile("out.xlsx");
+  await getXlsxIo(loaded).writeFile("out.xlsx");
   return loaded;
 }
 void _issue160Screenshot;

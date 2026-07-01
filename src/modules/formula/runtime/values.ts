@@ -17,8 +17,8 @@
  * 5. **Lambda is a value** — `LambdaValue` is part of the value union.
  */
 
-import type { BoundExpr } from "../compile/bound-ast";
-import type { ErrorCode } from "../integration/workbook-snapshot";
+import type { BoundExpr } from "@formula/compile/bound-ast";
+import type { ErrorCode } from "@formula/integration/workbook-snapshot";
 
 // ============================================================================
 // Value Tag Enum

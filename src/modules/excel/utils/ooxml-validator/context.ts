@@ -10,10 +10,13 @@
  */
 
 import type { ExtractedFile } from "@archive/unzip/extract";
+import type { Reporter } from "@excel/utils/ooxml-validator/reporter";
+import {
+  attrByLocalName,
+  findChildrenLocal,
+  tryParseXml
+} from "@excel/utils/ooxml-validator/xml-utils";
 import type { XmlDocument, XmlElement } from "@xml/types";
-
-import type { Reporter } from "./reporter";
-import { attrByLocalName, findChildrenLocal, tryParseXml } from "./xml-utils";
 
 const textDecoder = new TextDecoder();
 

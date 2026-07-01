@@ -57,7 +57,7 @@
  */
 
 // Main unified class
-export { ArchiveFile } from "./archive-file";
+export { ArchiveFile } from "@archive/fs/archive-file";
 
 // Types
 export type {
@@ -100,7 +100,7 @@ export type {
   TransformFunction,
   TransformEntryData,
   TransformResult
-} from "./types";
+} from "@archive/fs/types";
 
 // Re-export ArchiveSink for pipeTo() usage
 export type { ArchiveSink } from "@archive/io/archive-sink";

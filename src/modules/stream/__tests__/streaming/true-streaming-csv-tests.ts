@@ -7,7 +7,7 @@
  * Both test runners (node and browser) simply call `runTrueStreamingCsvTests()`.
  */
 
-import { CsvParserStream, CsvFormatterStream } from "@csv/index";
+import { Csv } from "@csv/index";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
@@ -23,7 +23,7 @@ export function runTrueStreamingCsvTests() {
     describe("CsvParserStream", () => {
       it("should parse CSV data correctly", async () => {
         const rows: string[][] = [];
-        const parser = new CsvParserStream();
+        const parser = new Csv.ParserStream();
 
         parser.on("data", (row: string[]) => {
           rows.push(row);
@@ -42,7 +42,7 @@ export function runTrueStreamingCsvTests() {
       });
 
       it("should stream data progressively - TRUE STREAMING", async () => {
-        const parser = new CsvParserStream();
+        const parser = new Csv.ParserStream();
         const rowTimestamps: number[] = [];
         const startTime = Date.now();
 
@@ -82,7 +82,7 @@ export function runTrueStreamingCsvTests() {
 
       it("should handle partial rows across multiple writes", async () => {
         const rows: string[][] = [];
-        const parser = new CsvParserStream();
+        const parser = new Csv.ParserStream();
 
         parser.on("data", (row: string[]) => {
           rows.push(row);
@@ -103,7 +103,7 @@ export function runTrueStreamingCsvTests() {
       });
 
       it("should handle large CSV streaming without memory issues", async () => {
-        const parser = new CsvParserStream();
+        const parser = new Csv.ParserStream();
         let rowCount = 0;
         let firstRowTime = 0;
         let lastRowTime = 0;
@@ -148,7 +148,7 @@ export function runTrueStreamingCsvTests() {
     describe("CsvFormatterStream", () => {
       it("should format rows to CSV correctly", async () => {
         const chunks: string[] = [];
-        const formatter = new CsvFormatterStream();
+        const formatter = new Csv.FormatterStream();
 
         formatter.on("data", (chunk: Uint8Array | string) => {
           const str = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -177,7 +177,7 @@ export function runTrueStreamingCsvTests() {
       it("should stream output progressively - TRUE STREAMING", async () => {
         const chunkTimes: number[] = [];
         const startTime = Date.now();
-        const formatter = new CsvFormatterStream();
+        const formatter = new Csv.FormatterStream();
 
         formatter.on("data", () => {
           chunkTimes.push(Date.now() - startTime);
@@ -207,7 +207,7 @@ export function runTrueStreamingCsvTests() {
 
       it("should properly escape special characters", async () => {
         const chunks: string[] = [];
-        const formatter = new CsvFormatterStream();
+        const formatter = new Csv.FormatterStream();
 
         formatter.on("data", (chunk: Uint8Array | string) => {
           const str = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);

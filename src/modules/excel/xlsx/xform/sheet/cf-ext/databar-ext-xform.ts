@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfvoExtXform } from "@excel/xlsx/xform/sheet/cf-ext/cfvo-ext-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import type { ParseOpenTag } from "@xml/types";
 
 class DatabarExtXform extends CompositeXform {
   cfvoXform: CfvoExtXform;
@@ -69,7 +70,7 @@ class DatabarExtXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel({ attributes }) {
+  createNewModel({ attributes }: ParseOpenTag) {
     return {
       cfvo: [],
       minLength: BaseXform.toIntValue(attributes.minLength, 0),

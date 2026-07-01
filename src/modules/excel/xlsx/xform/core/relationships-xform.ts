@@ -1,11 +1,13 @@
-import { XmlParseError } from "@excel/errors";
+import { XlsxParseError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RelationshipXform } from "@excel/xlsx/xform/core/relationship-xform";
+import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 class RelationshipsXform extends BaseXform {
-  declare public parser: any;
-  declare private _values?: any[];
+  declare public parser?: BaseXform;
+  declare private _values?: RelationshipModel[];
 
   constructor() {
     super();
@@ -15,7 +17,7 @@ class RelationshipsXform extends BaseXform {
     };
   }
 
-  render(xmlStream: any, model?: any[]): void {
+  render(xmlStream: XmlSink, model?: RelationshipModel[]): void {
     const renderModel = model || this._values;
     xmlStream.openXml(StdDocAttributes);
     xmlStream.openNode("Relationships", RelationshipsXform.RELATIONSHIPS_ATTRIBUTES);
@@ -27,7 +29,7 @@ class RelationshipsXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -42,7 +44,7 @@ class RelationshipsXform extends BaseXform {
           this.parser.parseOpen(node);
           return true;
         }
-        throw new XmlParseError(
+        throw new XlsxParseError(
           "Relationships",
           `Unexpected xml node in parseOpen: ${JSON.stringify(node)}`
         );
@@ -67,7 +69,7 @@ class RelationshipsXform extends BaseXform {
       case "Relationships":
         return false;
       default:
-        throw new XmlParseError("Relationships", `Unexpected xml node in parseClose: ${name}`);
+        throw new XlsxParseError("Relationships", `Unexpected xml node in parseClose: ${name}`);
     }
   }
 

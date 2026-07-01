@@ -5,13 +5,13 @@ export {
   type ZipEditOptions,
   type ZipEditUrlOptions,
   type ZipEditWarning
-} from "./zip-editor";
+} from "@archive/zip/zip-editor";
 export {
   ZipEditPlan,
   type ZipEditOp,
   type SerializedZipEditOp,
   type SerializedZipEditPlan
-} from "./zip-edit-plan";
+} from "@archive/zip/zip-edit-plan";
 
 export {
   ZipArchive,
@@ -22,4 +22,4 @@ export {
   type ZipOperation,
   type ZipProgress,
   type ZipStreamOptions
-} from "./zip-archive";
+} from "@archive/zip/zip-archive";

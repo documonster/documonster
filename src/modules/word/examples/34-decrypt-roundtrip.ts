@@ -16,15 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { isEncryptedDocx, decryptDocx } from "../crypto";
-import {
-  Document,
-  toBuffer,
-  readDocx,
-  encryptDocx,
-  isDocxError,
-  DocxDecryptionError,
-  replaceText
-} from "../index";
+import { Document, DocxDecryptionError, isDocxError, Io, Query, Security } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -39,10 +31,10 @@ const d = Document.create();
 Document.useDefaultStyles(d);
 Document.addHeading(d, "Sensitive document", 1);
 Document.addParagraph(d, "Replace SECRET with the actual value when authorised.");
-const plainBytes = await toBuffer(Document.build(d));
+const plainBytes = await Io.toBuffer(Document.build(d));
 
 const password = "letmein-2026";
-const encryptedBytes = await encryptDocx(plainBytes, password, {
+const encryptedBytes = await Security.encrypt(plainBytes, password, {
   keyBits: 256,
   hashAlgorithm: "SHA512",
   spinCount: 50_000 // smaller spin count for example speed
@@ -60,14 +52,14 @@ console.log(`  isEncryptedDocx(encrypted): ${isEncryptedDocx(encryptedBytes)}`);
 // ---------------------------------------------------------------------------
 // 3. readDocx with password — transparent decryption
 // ---------------------------------------------------------------------------
-const docModel = await readDocx(encryptedBytes, { password });
+const docModel = await Io.read(encryptedBytes, { password });
 console.log(`  readDocx({password}) → body length: ${docModel.body.length}`);
 
 // ---------------------------------------------------------------------------
 // 4. Wrong password → DocxDecryptionError
 // ---------------------------------------------------------------------------
 try {
-  await readDocx(encryptedBytes, { password: "definitely-not-the-password" });
+  await Io.read(encryptedBytes, { password: "definitely-not-the-password" });
   console.log("  ERROR: expected wrong-password to throw");
 } catch (err) {
   if (err instanceof DocxDecryptionError) {
@@ -84,17 +76,17 @@ try {
 // ---------------------------------------------------------------------------
 const zipBytes = await decryptDocx(encryptedBytes, password);
 console.log(`  decryptDocx() → ${zipBytes.length} bytes of plain ZIP`);
-const fromZip = await readDocx(zipBytes);
+const fromZip = await Io.read(zipBytes);
 console.log(`  re-read decrypted bytes → body length: ${fromZip.body.length}`);
 
 // ---------------------------------------------------------------------------
 // 6. Edit-in-place round trip: decrypt → modify → re-encrypt
 // ---------------------------------------------------------------------------
-const editable = await readDocx(encryptedBytes, { password });
-const replacements = replaceText(editable, "SECRET", "approved value 42");
+const editable = await Io.read(encryptedBytes, { password });
+const replacements = Query.replaceText(editable, "SECRET", "approved value 42");
 console.log(`  replaceText replaced ${replacements} occurrence(s)`);
-const editedBytes = await toBuffer(editable);
-const reEncrypted = await encryptDocx(editedBytes, password, {
+const editedBytes = await Io.toBuffer(editable);
+const reEncrypted = await Security.encrypt(editedBytes, password, {
   keyBits: 256,
   hashAlgorithm: "SHA512",
   spinCount: 50_000
@@ -103,6 +95,6 @@ fs.writeFileSync(path.join(outDir, "03-edited-encrypted.docx"), reEncrypted);
 console.log(`  → 03-edited-encrypted.docx (${reEncrypted.length} bytes)`);
 
 // Verify the edit took effect after another decrypt cycle
-const verify = await readDocx(reEncrypted, { password });
+const verify = await Io.read(reEncrypted, { password });
 const flat = JSON.stringify(verify.body);
 console.log(`  edit visible after re-decrypt: ${flat.includes("approved value 42")}`);

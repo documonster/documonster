@@ -14,21 +14,17 @@
  *   6. = <> < > <= >=  (comparison)
  */
 
-import {
-  NodeType,
-  type AstNode,
-  type CellRefNode,
-  type RangeRefNode,
-  type FunctionCallNode,
-  type ArrayNode
-} from "./ast";
-import {
-  TokenType,
-  type Token,
-  type CellRefToken,
-  type RangeToken,
-  type FunctionToken
-} from "./token-types";
+import { FormulaParseError } from "@formula/errors";
+import type {
+  AstNode,
+  CellRefNode,
+  RangeRefNode,
+  FunctionCallNode,
+  ArrayNode
+} from "@formula/syntax/ast";
+import { NodeType } from "@formula/syntax/ast";
+import type { Token, CellRefToken, RangeToken, FunctionToken } from "@formula/syntax/token-types";
+import { TokenType } from "@formula/syntax/token-types";
 
 // ============================================================================
 // Operator Precedence
@@ -117,7 +113,7 @@ class Parser {
 
   private enter(): void {
     if (++this.depth > this.MAX_DEPTH) {
-      throw new Error(`Formula nested too deep (> ${this.MAX_DEPTH} levels)`);
+      throw new FormulaParseError(`Formula nested too deep (> ${this.MAX_DEPTH} levels)`, this.pos);
     }
   }
 
@@ -136,7 +132,7 @@ class Parser {
   expect(type: TokenType): Token {
     const t = this.next();
     if (!t || t.type !== type) {
-      throw new Error(`Expected token type ${type}, got ${t?.type ?? "EOF"}`);
+      throw new FormulaParseError(`Expected token type ${type}, got ${t?.type ?? "EOF"}`, this.pos);
     }
     return t;
   }
@@ -149,7 +145,7 @@ class Parser {
     // produce an AST that drops the trailing tokens.
     if (this.pos !== this.tokens.length) {
       const t = this.tokens[this.pos];
-      throw new Error(`Unexpected trailing token at position ${this.pos} (type ${t.type})`);
+      throw new FormulaParseError(`Unexpected trailing token (type ${t.type})`, this.pos);
     }
     return node;
   }
@@ -243,7 +239,10 @@ class Parser {
         const sheet = this.pendingSheet;
         this.pendingSheet = undefined;
         this.pendingEndSheet = undefined;
-        throw new Error(`Sheet reference '${sheet}' not followed by a cell or range`);
+        throw new FormulaParseError(
+          `Sheet reference '${sheet}' not followed by a cell or range`,
+          this.pos
+        );
       }
       return result;
     } finally {
@@ -254,7 +253,7 @@ class Parser {
   private parsePrefixInner(): AstNode {
     const t = this.peek();
     if (!t) {
-      throw new Error("Unexpected end of formula");
+      throw new FormulaParseError("Unexpected end of formula", this.pos);
     }
 
     // SheetRef: consume and set pending sheet for next cell/range
@@ -409,7 +408,7 @@ class Parser {
       };
     }
 
-    throw new Error(`Unexpected token: ${t.type}`);
+    throw new FormulaParseError(`Unexpected token: ${t.type}`, this.pos);
   }
 
   private parseCellRefFromToken(t: CellRefToken): CellRefNode {

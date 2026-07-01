@@ -8,7 +8,7 @@
  *
  * @example
  * ```ts
- * import { searchByFormat, type FormatCriteria } from "excelts/word";
+ * import { searchByFormat, type FormatCriteria } from "documonster/word";
  *
  * // Find all bold red text
  * const results = searchByFormat(doc, { bold: true, color: "FF0000" });
@@ -21,10 +21,10 @@
  * ```
  */
 
-import { extractRunText } from "../core/text-utils";
-import { walkDocument } from "../core/walker";
-import type { DocxVisitor, WalkPath } from "../core/walker";
-import type { DocxDocument, Hyperlink, Paragraph, Run, RunProperties } from "../types";
+import { extractRunText } from "@word/core/text-utils";
+import { walkDocument } from "@word/core/walker";
+import type { DocxVisitor, WalkPath } from "@word/core/walker";
+import type { DocxDocument, Hyperlink, Paragraph, Run, RunProperties } from "@word/types";
 
 // =============================================================================
 // Public API

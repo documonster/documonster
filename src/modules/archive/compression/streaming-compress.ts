@@ -5,6 +5,7 @@
  * Each write() immediately produces compressed output without waiting for end().
  */
 
+import type { Gunzip, Inflate } from "zlib";
 import {
   createDeflateRaw,
   createInflateRaw,
@@ -13,13 +14,12 @@ import {
   createDeflate,
   createInflate,
   deflateRawSync,
-  constants,
-  type Gunzip,
-  type Inflate
+  constants
 } from "zlib";
 
-import { DEFAULT_COMPRESS_LEVEL } from "@archive/shared/defaults";
-import { Transform, type TransformCallback } from "@stream";
+import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import type { TransformCallback } from "@stream";
+import { Transform } from "@stream";
 
 export type {
   DeflateStream,
@@ -55,7 +55,7 @@ type ZlibFlushable = {
  * readable side; if a consumer is slow, our `push()` returns false but
  * the inner zlib stream keeps emitting 'data' until its OWN HWM stops it.
  * In the worst case, the zlib internal queue + our readable queue both
- * fill to HWM (≈64 KiB total). For excelts's actual use (one zlib stream
+ * fill to HWM (≈64 KiB total). For documonster's actual use (one zlib stream
  * per ZIP entry, consumer is the zip framer which keeps up), this is fine.
  */
 class TrueStreamingZlib<T extends ZlibFlushable> extends Transform {

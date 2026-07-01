@@ -7,8 +7,8 @@
 import { Readable, Transform, Duplex, PassThrough } from "stream";
 import type { TransformCallback as NodeTransformCallback } from "stream";
 
-import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { BufferedStream, createStringChunk, createByteChunk } from "@stream/buffered-stream";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { PullStream } from "@stream/pull-stream";
 import type {
   ReadableStreamOptions,
@@ -25,7 +25,7 @@ import type {
 } from "@stream/types";
 
 // Re-export shared stream classes
-export { PullStream, BufferedStream, StringChunk, ByteChunk };
+export { PullStream, BufferedStream, createStringChunk, createByteChunk };
 
 /** Create a pull stream */
 export function createPullStream(options?: PullStreamOptions): PullStream {
@@ -37,7 +37,7 @@ export function createBufferedStream(options?: BufferedStreamOptions): BufferedS
   return new BufferedStream(options);
 }
 
-import { Writable } from "./writable";
+import { Writable } from "@stream/node/writable";
 
 // =============================================================================
 // Stream Creation Functions
@@ -193,6 +193,9 @@ export function createDuplex<_TRead = Uint8Array, TWrite = Uint8Array>(
     writable?: unknown;
     allowHalfOpen?: boolean;
     objectMode?: boolean;
+    // The hook `this` types are intentionally `any`: the Node and browser
+    // `createDuplex` signatures must stay identical for the stream API parity
+    // typecheck, and each platform's hooks bind to a different Duplex class.
     read?: (this: any, size: number) => void;
     write?: (
       this: any,
@@ -209,22 +212,24 @@ export function createDuplex<_TRead = Uint8Array, TWrite = Uint8Array>(
   return new Duplex({
     highWaterMark: options?.highWaterMark ?? defaultHWM,
     objectMode: options?.objectMode,
-    allowHalfOpen: (options as any)?.allowHalfOpen,
+    allowHalfOpen: options?.allowHalfOpen,
     readableHighWaterMark: options?.readableHighWaterMark,
     writableHighWaterMark: options?.writableHighWaterMark,
     readableObjectMode: options?.readableObjectMode,
     writableObjectMode: options?.writableObjectMode,
     read: options?.read,
-    write: options?.write as any,
-    final: options?.final as any,
-    destroy: options?.destroy as any
+    write: options?.write,
+    final: options?.final,
+    destroy: options?.destroy
   });
 }
 
 /**
  * Create a passthrough stream
  */
-export function createPassThrough<_T = any>(options?: TransformStreamOptions): IPassThrough<_T> {
+export function createPassThrough<_T = unknown>(
+  options?: TransformStreamOptions
+): IPassThrough<_T> {
   return new PassThrough(withDefaultHWM(options));
 }
 
@@ -267,9 +272,9 @@ export function createReadableFromPromise<T>(
 }
 
 // Reusable empty read function
-const emptyRead = function (this: Readable): void {
+function emptyRead(this: Readable): void {
   this.push(null);
-};
+}
 
 /**
  * Create a readable stream that emits nothing and immediately ends
@@ -284,18 +289,18 @@ export function createEmptyReadable<_T = Uint8Array>(
 }
 
 // Reusable null write function
-const nullWrite = (
+function nullWrite(
   _chunk: unknown,
   _encoding: string,
   callback: (error?: Error | null) => void
-): void => {
+): void {
   callback();
-};
+}
 
 /**
  * Create a writable stream that discards all data (like /dev/null)
  */
-export function createNullWritable<_T = any>(options?: WritableStreamOptions): IWritable<_T> {
+export function createNullWritable<_T = unknown>(options?: WritableStreamOptions): IWritable<_T> {
   return new Writable({
     ...withDefaultHWM(options),
     write: nullWrite

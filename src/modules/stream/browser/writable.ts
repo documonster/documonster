@@ -2,17 +2,16 @@
  * Browser Stream - Writable
  */
 
-import { stringToEncodedBytes } from "@stream/common/binary-chunk";
-import { parseEndArgs } from "@stream/common/end-args";
-import { getDefaultHighWaterMark } from "@stream/common/utils";
+import { deferTask, inDeferredContext } from "@stream/browser/microtask-context";
+import { Readable } from "@stream/browser/readable";
+import { stringToEncodedBytes } from "@stream/core/binary-chunk";
+import { parseEndArgs } from "@stream/core/end-args";
+import { getDefaultHighWaterMark } from "@stream/core/utils";
 import { StreamStateError } from "@stream/errors";
 import type { WritableStreamOptions, WritableLike } from "@stream/types";
 import { decodeBytesToString } from "@utils/binary";
 import { createAbortError } from "@utils/errors";
 import { EventEmitter } from "@utils/event-emitter";
-
-import { deferTask, inDeferredContext } from "./microtask-context";
-import { Readable } from "./readable";
 
 /**
  * Shared toString implementation for Uint8Array chunks converted from strings.
@@ -69,7 +68,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
    * Our browser Duplex composes a Writable, so we use Symbol.hasInstance
    * to check for key Writable-like methods/properties.
    */
-  static [Symbol.hasInstance](instance: any): boolean {
+  static [Symbol.hasInstance](instance: unknown): boolean {
     if (instance == null || typeof instance !== "object") {
       return false;
     }
@@ -78,11 +77,12 @@ export class Writable<T = Uint8Array> extends EventEmitter {
       return true;
     }
     // Duck-type: must have key Writable methods and the stream brand
+    const o = instance as Record<string, unknown>;
     return (
-      instance.__excelts_stream === true &&
-      typeof instance.write === "function" &&
-      typeof instance.end === "function" &&
-      typeof instance.on === "function" &&
+      o.__documonster_stream === true &&
+      typeof o.write === "function" &&
+      typeof o.end === "function" &&
+      typeof o.on === "function" &&
       "writableFinished" in instance
     );
   }
@@ -153,9 +153,19 @@ export class Writable<T = Uint8Array> extends EventEmitter {
     | null = null;
   private _decodeStrings: boolean;
 
+  /**
+   * Optional lifecycle hooks a subclass may define (Node.js convention). The
+   * base class does not implement them as own methods; they only exist when a
+   * subclass (or a constructor option) provides them, which the guards before
+   * each call site verify.
+   * @internal
+   */
+  _write?(chunk: T, encoding: string, callback: (error?: Error | null) => void): void;
+  /** @internal */
+  _construct?(callback: (error?: Error | null) => void): void;
+
   constructor(options?: WritableOptions<T>) {
     super();
-    (this as any).__excelts_stream = true;
     this._objectMode = options?.objectMode ?? false;
     this._highWaterMark = options?.highWaterMark ?? getDefaultHighWaterMark(this._objectMode);
     this._autoDestroy = options?.autoDestroy ?? true;
@@ -229,9 +239,9 @@ export class Writable<T = Uint8Array> extends EventEmitter {
           this._stream = new WritableStream<T>({
             write: async chunk => {
               // Subclass _write path (no user-provided _writeFunc)
-              if ((this as any)._write) {
+              if (this._write) {
                 await new Promise<void>((resolve, reject) => {
-                  (this as any)._write(chunk, "utf8", (err?: Error | null) => {
+                  this._write!(chunk, "utf8", (err?: Error | null) => {
                     if (err) {
                       reject(err);
                     } else {
@@ -299,7 +309,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
     }
     this._constructed = false;
     deferTask(() => {
-      const fn = this._constructFunc ?? (this as any)._construct.bind(this);
+      const fn = this._constructFunc ?? this._construct!.bind(this);
       fn(err => {
         if (err) {
           this.destroy(err);
@@ -343,10 +353,16 @@ export class Writable<T = Uint8Array> extends EventEmitter {
   private _getSubclassWrite():
     | ((chunk: T, encoding: string, callback: (error?: Error | null) => void) => void)
     | null {
-    let proto = Object.getPrototypeOf(this);
+    let proto: object = Object.getPrototypeOf(this);
     while (proto && proto !== Writable.prototype && proto !== Object.prototype) {
       if (Object.prototype.hasOwnProperty.call(proto, "_write")) {
-        return (proto._write as (...args: any[]) => any).bind(this);
+        return (
+          (proto as Record<string, unknown>)._write as (
+            chunk: T,
+            encoding: string,
+            callback: (error?: Error | null) => void
+          ) => void
+        ).bind(this);
       }
       proto = Object.getPrototypeOf(proto);
     }
@@ -360,10 +376,14 @@ export class Writable<T = Uint8Array> extends EventEmitter {
    * prototype and have it called during the end() sequence.
    */
   private _getSubclassFinal(): ((callback: (error?: Error | null) => void) => void) | null {
-    let proto = Object.getPrototypeOf(this);
+    let proto: object = Object.getPrototypeOf(this);
     while (proto && proto !== Writable.prototype && proto !== Object.prototype) {
       if (Object.prototype.hasOwnProperty.call(proto, "_final")) {
-        return (proto._final as (...args: any[]) => any).bind(this);
+        return (
+          (proto as Record<string, unknown>)._final as (
+            callback: (error?: Error | null) => void
+          ) => void
+        ).bind(this);
       }
       proto = Object.getPrototypeOf(proto);
     }
@@ -402,13 +422,13 @@ export class Writable<T = Uint8Array> extends EventEmitter {
    */
   private _setupAbortSignal(signal: AbortSignal): void {
     if (signal.aborted) {
-      this.destroy(createAbortError((signal as any).reason));
+      this.destroy(createAbortError(signal.reason));
       return;
     }
 
     const onAbort = (): void => {
       cleanup();
-      this.destroy(createAbortError((signal as any).reason));
+      this.destroy(createAbortError(signal.reason));
     };
 
     const onDone = (): void => {
@@ -968,7 +988,9 @@ export class Writable<T = Uint8Array> extends EventEmitter {
     // We also override toString() so that it behaves like Node.js Buffer.toString(),
     // which returns a UTF-8 decoded string by default (not comma-separated byte values).
     const encoded = stringToEncodedBytes(chunk, encoding);
-    (encoded as any).toString = encodedBytesToString;
+    (encoded as { toString: (enc?: string) => string }).toString = encodedBytesToString;
+    // Boundary: decodeStrings materializes string chunks into bytes; the encoded
+    // Uint8Array is the runtime chunk for element type T.
     return { chunk: encoded as unknown as T, encoding: "buffer" };
   }
 
@@ -990,10 +1012,15 @@ export class Writable<T = Uint8Array> extends EventEmitter {
         cb: endCb
       } = parseEndArgs<T>(chunkOrCallback, encodingOrCallback, callback);
 
+      // Node invokes the end() callback with an error in some paths (write-after-
+      // end / already-finished). `parseEndArgs` types it `() => void`, so view it
+      // through an error-accepting signature for those Node-parity invocations.
+      const errCb = endCb as ((error?: Error | null) => void) | undefined;
+
       // If a chunk was provided, this is a write-after-end error (Node.js behavior).
       if (chunk !== undefined) {
         this.write(chunk, encoding ?? this._defaultEncoding, err => {
-          (endCb as any)?.(err ?? null);
+          errCb?.(err ?? null);
         });
         return this;
       }
@@ -1005,11 +1032,11 @@ export class Writable<T = Uint8Array> extends EventEmitter {
           code: string;
         };
         err.code = "ERR_STREAM_ALREADY_FINISHED";
-        deferTask(() => (endCb as any)(err));
+        deferTask(() => errCb!(err));
       } else {
         // Otherwise, a redundant end() is a no-op; if a callback was provided,
         // Node.js calls it with no error.
-        deferTask(() => (endCb as any)?.(null));
+        deferTask(() => errCb?.(null));
       }
       return this;
     }
@@ -1283,6 +1310,7 @@ export class Writable<T = Uint8Array> extends EventEmitter {
       this._stream = new WritableStream<T>({
         write: chunk =>
           new Promise<void>((resolve, reject) => {
+            // Boundary: Node passes undefined as the encoding in objectMode.
             const enc = this._objectMode ? (undefined as unknown as string) : this._defaultEncoding;
             this._writeFunc!(chunk, enc, err => {
               if (err) {
@@ -1430,11 +1458,14 @@ export class Writable<T = Uint8Array> extends EventEmitter {
    * ALL stream classes (Readable, Writable, Duplex, Transform, PassThrough).
    * Delegates to Readable.isDisturbed, checking internal _readable for Duplex/Transform.
    */
-  static isDisturbed(stream: any): boolean {
-    if (stream && stream._readable instanceof Readable) {
-      return Readable.isDisturbed(stream._readable);
+  static isDisturbed(stream: unknown): boolean {
+    if (stream && typeof stream === "object") {
+      const inner = (stream as { _readable?: unknown })._readable;
+      if (inner instanceof Readable) {
+        return Readable.isDisturbed(inner);
+      }
     }
-    return Readable.isDisturbed(stream);
+    return Readable.isDisturbed(stream as Readable<unknown>);
   }
 
   /**
@@ -1453,14 +1484,14 @@ export class Writable<T = Uint8Array> extends EventEmitter {
 }
 
 // Node.js: Writable.prototype._writev === null (not undefined).
-(Writable.prototype as any)._writev = null;
+Writable.prototype._writev = null;
 
 // Node.js: Writable.prototype._write throws ERR_METHOD_NOT_IMPLEMENTED.
 // This must exist on the prototype so that subclasses can call super._write()
 // and so that `_getSubclassWrite()` can detect overrides correctly.
 // Node.js throws synchronously (does NOT call the callback).
-(Writable.prototype as any)._write = function _write(
-  _chunk: any,
+Writable.prototype._write = function _write(
+  _chunk: unknown,
   _encoding: string,
   _callback: (error?: Error | null) => void
 ): void {
@@ -1485,7 +1516,7 @@ export function toWritable<T = Uint8Array>(
   }
 
   // Web WritableStream
-  if ((stream as any)?.getWriter) {
+  if ((stream as { getWriter?: unknown }).getWriter) {
     return new Writable<T>({ stream: stream as WritableStream<T> });
   }
 

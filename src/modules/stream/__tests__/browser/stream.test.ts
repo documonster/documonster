@@ -13,8 +13,8 @@ import {
   Duplex,
   PassThrough,
   BufferedStream,
-  StringChunk,
-  ByteChunk,
+  createStringChunk,
+  createByteChunk,
   ChunkedBuilder,
   TransactionalChunkedBuilder,
   PullStream,
@@ -54,7 +54,8 @@ import {
   promises,
   promisify
 } from "@stream";
-import { runStreamTests, type StreamModuleImports } from "@stream/__tests__/stream.shared";
+import type { StreamModuleImports } from "@stream/__tests__/stream.shared";
+import { runStreamTests } from "@stream/__tests__/stream.shared";
 import {
   stringToUint8Array,
   uint8ArrayToString,
@@ -78,8 +79,8 @@ describe("Stream Module - Shared Tests (Browser)", () => {
     PassThrough,
     BufferedStream,
     PullStream,
-    StringChunk,
-    ByteChunk,
+    createStringChunk,
+    createByteChunk,
     ChunkedBuilder,
     TransactionalChunkedBuilder,
     createReadable,

@@ -2,12 +2,11 @@
  * Browser Stream - Collector
  */
 
-import { toBinaryChunk } from "@stream/common/binary-chunk";
+import { Writable } from "@stream/browser/writable";
+import { toBinaryChunk } from "@stream/core/binary-chunk";
 import { StreamTypeError } from "@stream/errors";
 import type { ICollector, WritableStreamOptions } from "@stream/types";
 import { concatUint8Arrays, chunksToString } from "@utils/binary";
-
-import { Writable } from "./writable";
 
 // =============================================================================
 // Collector Stream
@@ -17,22 +16,23 @@ import { Writable } from "./writable";
  * A writable stream that collects all chunks
  */
 export class Collector<T = Uint8Array> extends Writable<T> {
-  public chunks: T[] = [];
+  public chunks: T[];
 
   constructor(options?: WritableStreamOptions) {
+    // The write handler collects into a closed-over array; it is exposed as
+    // `this.chunks` after construction. Using the `write` option (rather than a
+    // subclass `_write` method) keeps the synchronous direct-write path so
+    // chunks are collected before the caller's next synchronous statement.
+    const chunks: T[] = [];
     super({
       ...options,
       objectMode: options?.objectMode ?? true,
-      write(
-        this: Writable<T>,
-        chunk: T,
-        _encoding: string,
-        callback: (error?: Error | null) => void
-      ) {
-        (this as unknown as Collector<T>).chunks.push(chunk);
+      write(chunk: T, _encoding: string, callback: (error?: Error | null) => void) {
+        chunks.push(chunk);
         callback();
       }
     });
+    this.chunks = chunks;
   }
 
   /**

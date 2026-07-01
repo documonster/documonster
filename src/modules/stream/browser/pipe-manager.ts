@@ -6,10 +6,9 @@
  * so Readable doesn't need to know anything about piping internals.
  */
 
+import { removeEmitterListener } from "@stream/browser/helpers";
 import { StreamTypeError } from "@stream/errors";
 import type { WritableLike } from "@stream/types";
-
-import { removeEmitterListener } from "./helpers";
 
 // =============================================================================
 // Types
@@ -17,11 +16,11 @@ import { removeEmitterListener } from "./helpers";
 
 /** Minimal subset of Readable that PipeManager needs to drive. */
 export interface PipeSource {
-  on(event: string | symbol, listener: (...args: any[]) => void): any;
-  once(event: string | symbol, listener: (...args: any[]) => void): any;
-  off(event: string | symbol, listener: (...args: any[]) => void): any;
-  pause(): any;
-  resume(): any;
+  on(event: string | symbol, listener: (...args: any[]) => void): unknown;
+  once(event: string | symbol, listener: (...args: any[]) => void): unknown;
+  off(event: string | symbol, listener: (...args: any[]) => void): unknown;
+  pause(): unknown;
+  resume(): unknown;
 }
 
 interface PipeListeners<T> {
@@ -30,6 +29,10 @@ interface PipeListeners<T> {
   drain?: () => void;
   destClose?: () => void;
   destFinish?: () => void;
+  // Boundary: the duck-typed event surface of the pipe destination. `pipe`
+  // accepts any writable-like object (possibly from a different bundled copy of
+  // the stream classes), so its emitter methods are accessed dynamically rather
+  // than through a nominal type.
   eventTarget: any;
 }
 
@@ -66,6 +69,9 @@ export class PipeManager<T> {
     // causing `instanceof Transform/Writable/Duplex` to fail even when the object
     // is a valid destination.
     const dest = destination;
+    // Boundary: treat the destination as a duck-typed emitter. It may be any
+    // writable-like object (see the note above on avoiding `instanceof`), so
+    // its on/once/off/emit are probed and called dynamically.
     const eventTarget: any = dest;
 
     const hasWrite = typeof dest?.write === "function";

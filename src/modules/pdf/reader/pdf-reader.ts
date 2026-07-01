@@ -18,7 +18,7 @@
  *
  * @example Text extraction:
  * ```typescript
- * import { readPdf } from "excelts/pdf";
+ * import { readPdf } from "documonster/pdf";
  *
  * const pdf = await readPdf(pdfBytes);
  * console.log(pdf.text);           // All text from all pages
@@ -48,28 +48,27 @@
  * ```
  */
 
+import { PdfStructureError } from "@pdf/errors";
+import { extractAnnotationsFromPage } from "@pdf/reader/annotation-extractor";
+import type { PdfAnnotation } from "@pdf/reader/annotation-extractor";
+import { extractBookmarks } from "@pdf/reader/bookmark-extractor";
+import type { PdfBookmark } from "@pdf/reader/bookmark-extractor";
+import { extractTextFromPage } from "@pdf/reader/content-interpreter";
+import type { TextFragment } from "@pdf/reader/content-interpreter";
+import { extractFormFields } from "@pdf/reader/form-extractor";
+import type { PdfFormField } from "@pdf/reader/form-extractor";
+import { extractImagesFromPage } from "@pdf/reader/image-extractor";
+import type { ExtractedImage } from "@pdf/reader/image-extractor";
+import { extractMetadata } from "@pdf/reader/metadata-reader";
+import type { PdfMetadata } from "@pdf/reader/metadata-reader";
+import { initDecryption, isEncrypted } from "@pdf/reader/pdf-decrypt";
+import { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfDictValue } from "@pdf/reader/pdf-parser";
+import { extractTables } from "@pdf/reader/table-extractor";
+import type { PdfTable } from "@pdf/reader/table-extractor";
+import { reconstructText, reconstructTextLines } from "@pdf/reader/text-reconstruction";
+import type { TextLine } from "@pdf/reader/text-reconstruction";
 import { yieldToEventLoop } from "@utils/utils.base";
-
-import { PdfStructureError } from "../errors";
-import { extractAnnotationsFromPage } from "./annotation-extractor";
-import type { PdfAnnotation } from "./annotation-extractor";
-import { extractBookmarks } from "./bookmark-extractor";
-import type { PdfBookmark } from "./bookmark-extractor";
-import { extractTextFromPage } from "./content-interpreter";
-import type { TextFragment } from "./content-interpreter";
-import { extractFormFields } from "./form-extractor";
-import type { PdfFormField } from "./form-extractor";
-import { extractImagesFromPage } from "./image-extractor";
-import type { ExtractedImage } from "./image-extractor";
-import { extractMetadata } from "./metadata-reader";
-import type { PdfMetadata } from "./metadata-reader";
-import { initDecryption, isEncrypted } from "./pdf-decrypt";
-import { PdfDocument } from "./pdf-document";
-import type { PdfDictValue } from "./pdf-parser";
-import { extractTables } from "./table-extractor";
-import type { PdfTable } from "./table-extractor";
-import { reconstructText, reconstructTextLines } from "./text-reconstruction";
-import type { TextLine } from "./text-reconstruction";
 
 // =============================================================================
 // Types

@@ -1,14 +1,37 @@
 import { inferExternalImageExtension } from "@excel/utils/drawing-utils";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag } from "@xml/types";
+
+/** The picture fields the anchor reconciler reads off `model.picture`. */
+interface ReconcilePicture {
+  rId?: string;
+  external?: boolean;
+  svgRId?: string;
+  alphaModFix?: number;
+}
+
+/** A media entry resolved from the package. Extensible (sourced from varied
+ * relationship/media records), so kept structurally open rather than over-typed. */
+type MediaEntry = Record<string, unknown>;
+
+/** The reconcile context threaded from the drawing reader. */
+interface ReconcileOptions {
+  rels: Record<string, { Target?: string; TargetMode?: string } | undefined>;
+  media: MediaEntry[];
+  mediaIndex: Record<string, number>;
+}
 
 abstract class BaseCellAnchorXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public parser: any;
-  declare public model: any;
+  declare public map: Record<string, BaseXform>;
+  declare public parser?: BaseXform;
+  declare public model: { range: { editAs?: string } & Record<string, unknown> } & Record<
+    string,
+    unknown
+  >;
 
   abstract get tag(): string;
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -38,7 +61,10 @@ abstract class BaseCellAnchorXform extends BaseXform {
     }
   }
 
-  reconcilePicture(model: any, options: any): any {
+  reconcilePicture(
+    model: ReconcilePicture | undefined,
+    options: ReconcileOptions
+  ): MediaEntry | undefined {
     if (model && model.rId) {
       const rel = options.rels[model.rId];
       if (!rel) {
@@ -53,7 +79,7 @@ abstract class BaseCellAnchorXform extends BaseXform {
         return this.reconcileExternalPicture(rel.Target, options);
       }
 
-      const match = rel.Target.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
+      const match = rel.Target?.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
       if (match) {
         const name = match[1];
         const mediaId = options.mediaIndex[name];
@@ -68,7 +94,7 @@ abstract class BaseCellAnchorXform extends BaseXform {
         // companion alongside the raster fallback.
         if (model.svgRId) {
           const svgRel = options.rels[model.svgRId];
-          const svgMatch = svgRel && svgRel.Target.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
+          const svgMatch = svgRel && svgRel.Target?.match(/.*\/media\/(.+[.][a-zA-Z]{3,4})/);
           if (svgMatch) {
             const svgMediaId = options.mediaIndex[svgMatch[1]];
             if (svgMediaId !== undefined) {
@@ -92,7 +118,10 @@ abstract class BaseCellAnchorXform extends BaseXform {
    * synthesized entry is appended to `options.media` and indexed by its link
    * so repeated references to the same external image share one entry.
    */
-  private reconcileExternalPicture(link: string, options: any): any {
+  private reconcileExternalPicture(
+    link: string | undefined,
+    options: ReconcileOptions
+  ): MediaEntry | undefined {
     if (!link) {
       return undefined;
     }
@@ -100,7 +129,7 @@ abstract class BaseCellAnchorXform extends BaseXform {
     let mediaId = options.mediaIndex[indexKey];
     if (mediaId === undefined) {
       mediaId = options.media.length;
-      const medium = {
+      const medium: MediaEntry = {
         type: "image",
         extension: inferExternalImageExtension(link),
         link,

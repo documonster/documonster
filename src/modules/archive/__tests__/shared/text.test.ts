@@ -3,6 +3,7 @@
  */
 
 import { crc32 } from "@archive/compression/crc32";
+import type { ZipStringCodec } from "@archive/core/text";
 import {
   decodeCp437,
   encodeCp437,
@@ -10,9 +11,8 @@ import {
   encodeZipString,
   encodeZipStringWithCodec,
   decodeZipString,
-  toArrayBuffer,
-  type ZipStringCodec
-} from "@archive/shared/text";
+  toArrayBuffer
+} from "@archive/core/text";
 import { describe, it, expect } from "vitest";
 
 describe("text", () => {

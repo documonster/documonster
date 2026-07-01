@@ -2,7 +2,13 @@
  * Browser Stream - Factory functions
  */
 
-import { BufferedStream, StringChunk, ByteChunk } from "@stream/buffered-stream";
+import { createCollector } from "@stream/browser/collector";
+import { Duplex } from "@stream/browser/duplex";
+import { PassThrough } from "@stream/browser/passthrough";
+import { Readable, pumpAsyncIterableToReadable } from "@stream/browser/readable";
+import { Transform } from "@stream/browser/transform";
+import { Writable } from "@stream/browser/writable";
+import { BufferedStream, createStringChunk, createByteChunk } from "@stream/buffered-stream";
 import { PullStream } from "@stream/pull-stream";
 import type {
   ReadableStreamOptions,
@@ -18,15 +24,8 @@ import type {
   IPassThrough
 } from "@stream/types";
 
-import { createCollector } from "./collector";
-import { Duplex } from "./duplex";
-import { PassThrough } from "./passthrough";
-import { Readable, pumpAsyncIterableToReadable } from "./readable";
-import { Transform } from "./transform";
-import { Writable } from "./writable";
-
 // Re-export shared stream classes
-export { PullStream, BufferedStream, StringChunk, ByteChunk };
+export { PullStream, BufferedStream, createStringChunk, createByteChunk };
 
 /** Create a pull stream */
 export function createPullStream(options?: PullStreamOptions): PullStream {
@@ -191,7 +190,7 @@ export { createCollector };
 /**
  * Create a passthrough stream
  */
-export function createPassThrough<T = any>(options?: TransformStreamOptions): IPassThrough<T> {
+export function createPassThrough<T = unknown>(options?: TransformStreamOptions): IPassThrough<T> {
   return new PassThrough(options);
 }
 
@@ -265,7 +264,9 @@ export function createReadableFromPromise<T>(
   return readable;
 }
 
-// Reusable read callback for createEmptyReadable (pull-based, matches Node behavior)
+// Reusable read callback for createEmptyReadable (pull-based, matches Node behavior).
+// Boundary: this single shared hook is reused across every Readable<T>
+// instantiation, so its `this` is left open (Readable is invariant in T).
 function emptyRead(this: Readable<any>): void {
   this.push(null);
 }
@@ -281,18 +282,18 @@ export function createEmptyReadable<T = Uint8Array>(options?: ReadableStreamOpti
 }
 
 // Reusable null write handler
-const nullWrite = (
-  _chunk: any,
+function nullWrite(
+  _chunk: unknown,
   _encoding: string,
   callback: (error?: Error | null) => void
-): void => {
+): void {
   callback();
-};
+}
 
 /**
  * Create a writable stream that discards all data (like /dev/null)
  */
-export function createNullWritable<T = any>(options?: WritableStreamOptions): IWritable<T> {
+export function createNullWritable<T = unknown>(options?: WritableStreamOptions): IWritable<T> {
   return new Writable<T>({
     ...options,
     write: nullWrite

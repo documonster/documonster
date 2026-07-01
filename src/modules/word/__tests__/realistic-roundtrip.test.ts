@@ -17,22 +17,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-  Document,
-  packageDocx,
-  readDocx,
-  text,
-  bold,
-  italic,
-  paragraph,
-  hyperlink,
-  commentRangeStart,
-  commentRangeEnd,
-  commentReference,
-  simpleTable,
-  pageBreak,
-  validateDocument
-} from "../index";
+import { Document, Build, Io, Validation } from "../index";
 import type { Hyperlink, Paragraph, Run, Table } from "../types";
 
 // Minimal 1x1 PNG.
@@ -50,25 +35,25 @@ describe("Realistic round-trip — typical office document", () => {
     Document.addParagraph(h, "This document was generated for the Q4 review.");
     Document.setHeader(h, "default", {
       children: [
-        paragraph([
-          text("See "),
-          hyperlink("policy", { url: "https://example.com/policy" }),
-          text(" for details.")
+        Build.paragraph([
+          Build.text("See "),
+          Build.hyperlink("policy", { url: "https://example.com/policy" }),
+          Build.text(" for details.")
         ])
       ]
     });
     Document.setFooter(h, "default", {
       children: [
-        paragraph([
-          text("Contact "),
-          hyperlink("the author", { url: "mailto:author@example.com" }),
-          text(" with questions.")
+        Build.paragraph([
+          Build.text("Contact "),
+          Build.hyperlink("the author", { url: "mailto:author@example.com" }),
+          Build.text(" with questions.")
         ])
       ]
     });
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     expect(parsed.headers).toBeDefined();
     expect(parsed.footers).toBeDefined();
@@ -125,11 +110,14 @@ describe("Realistic round-trip — typical office document", () => {
     const fnId = Document.addFootnote(h, "This is a clarifying footnote.");
     Document.addParagraphElement(
       h,
-      paragraph([text("Important point"), { content: [{ type: "footnoteRef", id: fnId }] }])
+      Build.paragraph([
+        Build.text("Important point"),
+        { content: [{ type: "footnoteRef", id: fnId }] }
+      ])
     );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     expect(parsed.footnotes).toBeDefined();
     const ids = parsed.footnotes!.map(f => f.id);
@@ -154,7 +142,7 @@ describe("Realistic round-trip — typical office document", () => {
     expect(foundRef).toBe(true);
 
     // And the document validates with no dangling-reference errors.
-    const result = validateDocument(parsed);
+    const result = Validation.document(parsed);
     const dangling = result.issues.filter(
       i => i.rule === "ref-footnote-missing" || i.rule === "ref-endnote-missing"
     );
@@ -166,20 +154,20 @@ describe("Realistic round-trip — typical office document", () => {
     const cId = Document.addComment(h, "Reviewer", "Please clarify this sentence.");
     Document.addParagraphElement(
       h,
-      paragraph([
-        text("The "),
-        commentRangeStart(cId),
-        bold("important"),
-        text(" "),
-        italic("clause"),
-        commentRangeEnd(cId),
-        text(" follows."),
-        commentReference(cId)
+      Build.paragraph([
+        Build.text("The "),
+        Build.commentRangeStart(cId),
+        Build.bold("important"),
+        Build.text(" "),
+        Build.italic("clause"),
+        Build.commentRangeEnd(cId),
+        Build.text(" follows."),
+        Build.commentReference(cId)
       ])
     );
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     expect(parsed.comments).toBeDefined();
     expect(parsed.comments!.map(c => c.id)).toContain(cId);
@@ -211,7 +199,7 @@ describe("Realistic round-trip — typical office document", () => {
     expect(ends).toBe(1);
     expect(refs).toBe(1);
 
-    const result = validateDocument(parsed);
+    const result = Validation.document(parsed);
     const dangling = result.issues.filter(
       i => i.rule === "ref-comment-missing" || i.rule === "ref-comment-range-missing"
     );
@@ -228,8 +216,8 @@ describe("Realistic round-trip — typical office document", () => {
 
     expect(rId1).not.toBe(rId2);
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     // Two images preserved.
     expect(parsed.images?.length).toBe(2);
@@ -255,7 +243,7 @@ describe("Realistic round-trip — typical office document", () => {
     expect(seenRIds[0]).not.toBe(seenRIds[1]);
 
     // Validation: every image rId is resolvable.
-    const result = validateDocument(parsed);
+    const result = Validation.document(parsed);
     const dangling = result.issues.filter(i => i.rule === "rel-image-missing");
     expect(dangling).toEqual([]);
   });
@@ -269,7 +257,7 @@ describe("Realistic round-trip — typical office document", () => {
 
     Document.addTableElement(
       h,
-      simpleTable([
+      Build.simpleTable([
         ["Region", "Q3", "Q4"],
         ["NA", "120", "150"],
         ["EU", "90", "110"]
@@ -278,23 +266,23 @@ describe("Realistic round-trip — typical office document", () => {
 
     Document.addParagraphElement(
       h,
-      paragraph([
-        commentRangeStart(cId),
-        text("Totals computed manually"),
+      Build.paragraph([
+        Build.commentRangeStart(cId),
+        Build.text("Totals computed manually"),
         { content: [{ type: "footnoteRef", id: fnId }] },
-        commentRangeEnd(cId),
-        text("."),
-        commentReference(cId)
+        Build.commentRangeEnd(cId),
+        Build.text("."),
+        Build.commentReference(cId)
       ])
     );
 
-    Document.addParagraphElement(h, paragraph([pageBreak(), text("Next page.")]));
+    Document.addParagraphElement(h, Build.paragraph([Build.pageBreak(), Build.text("Next page.")]));
 
     Document.addHeading(h, "Conclusion", 2);
     Document.addParagraph(h, "All targets met.");
 
-    const bytes = await packageDocx(Document.build(h));
-    const parsed = await readDocx(bytes);
+    const bytes = await Io.package(Document.build(h));
+    const parsed = await Io.read(bytes);
 
     // Headings preserved.
     const headings = parsed.body.filter(
@@ -319,7 +307,7 @@ describe("Realistic round-trip — typical office document", () => {
     expect(parsed.comments!.some(c => c.id === cId)).toBe(true);
 
     // Validation closure passes.
-    const result = validateDocument(parsed);
+    const result = Validation.document(parsed);
     const fatal = result.issues.filter(i => i.severity === "error");
     expect(fatal).toEqual([]);
   });
@@ -330,7 +318,7 @@ describe("Realistic round-trip — typical office document", () => {
     const { rId } = Document.addImage(h, MINI_PNG, "png", 914400, 914400);
     Document.addParagraphElement(
       h,
-      paragraph([text("Has "), hyperlink("link", { url: "https://example.com" })])
+      Build.paragraph([Build.text("Has "), Build.hyperlink("link", { url: "https://example.com" })])
     );
 
     const built = Document.build(h);
@@ -339,16 +327,16 @@ describe("Realistic round-trip — typical office document", () => {
     const altChunkCountBefore = built.body.filter(b => b.type === "altChunk").length;
     const imageRIdBefore = built.images?.[0]?.rId;
 
-    const first = await packageDocx(built);
-    const second = await packageDocx(built);
+    const first = await Io.package(built);
+    const second = await Io.package(built);
 
     // Input model unchanged after two packagings.
     expect(built.body.filter(b => b.type === "altChunk").length).toBe(altChunkCountBefore);
     expect(built.images?.[0]?.rId).toBe(imageRIdBefore);
 
     // Both packagings round-trip and find the image.
-    const parsedA = await readDocx(first);
-    const parsedB = await readDocx(second);
+    const parsedA = await Io.read(first);
+    const parsedB = await Io.read(second);
     expect(parsedA.images?.length).toBe(1);
     expect(parsedB.images?.length).toBe(1);
 
@@ -365,10 +353,13 @@ describe("validateDocument — reference-closure rules", () => {
     Document.addFootnote(h, "unrelated");
     Document.addParagraphElement(
       h,
-      paragraph([text("Bad footnote: "), { content: [{ type: "footnoteRef", id: 9999 }] }])
+      Build.paragraph([
+        Build.text("Bad footnote: "),
+        { content: [{ type: "footnoteRef", id: 9999 }] }
+      ])
     );
 
-    const result = validateDocument(Document.build(h));
+    const result = Validation.document(Document.build(h));
     const issue = result.issues.find(i => i.rule === "ref-footnote-missing");
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe("error");
@@ -378,8 +369,11 @@ describe("validateDocument — reference-closure rules", () => {
     const h = Document.create();
     Document.addComment(h, "Bob", "exists");
     // Reference an id that does NOT exist.
-    Document.addParagraphElement(h, paragraph([text("Bad: "), commentReference(9999)]));
-    const result = validateDocument(Document.build(h));
+    Document.addParagraphElement(
+      h,
+      Build.paragraph([Build.text("Bad: "), Build.commentReference(9999)])
+    );
+    const result = Validation.document(Document.build(h));
     const issue = result.issues.find(i => i.rule === "ref-comment-missing");
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe("error");
@@ -391,16 +385,16 @@ describe("validateDocument — reference-closure rules", () => {
     const cId = Document.addComment(h, "Alice", "good");
     Document.addParagraphElement(
       h,
-      paragraph([
-        commentRangeStart(cId),
-        text("Body"),
+      Build.paragraph([
+        Build.commentRangeStart(cId),
+        Build.text("Body"),
         { content: [{ type: "footnoteRef", id: fnId }] },
-        commentRangeEnd(cId),
-        commentReference(cId)
+        Build.commentRangeEnd(cId),
+        Build.commentReference(cId)
       ])
     );
 
-    const result = validateDocument(Document.build(h));
+    const result = Validation.document(Document.build(h));
     const dangling = result.issues.filter(
       i =>
         i.rule === "ref-footnote-missing" ||

@@ -1,7 +1,8 @@
 import { findSignatureFromEnd } from "@archive/__tests__/zip/zip-test-utils";
 import { ZipParser } from "@archive/unzip/zip-parser";
 import { CENTRAL_DIR_HEADER_SIG } from "@archive/zip-spec/zip-records";
-import { createZip, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
 // Helper to convert object to ZipEntry array

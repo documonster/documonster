@@ -4,7 +4,7 @@
  * Comprehensive tests for the CSV Web Worker implementation.
  */
 
-import { parseCsv, formatCsv } from "@csv/index";
+import { Csv } from "@csv/index";
 import {
   CsvWorkerPool,
   CsvWorkerSession,
@@ -16,15 +16,15 @@ import {
 } from "@csv/worker/index.browser";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-type ParseOptions = Parameters<typeof parseCsv>[1];
-type FormatOptions = Parameters<typeof formatCsv>[1];
+type ParseOptions = Parameters<typeof Csv.parse>[1];
+type FormatOptions = Parameters<typeof Csv.format>[1];
 
-function formatExpected(data: Parameters<typeof formatCsv>[0], options?: FormatOptions): string {
-  return formatCsv(data, { ...(options ?? {}), trailingNewline: false } as FormatOptions);
+function formatExpected(data: Parameters<typeof Csv.format>[0], options?: FormatOptions): string {
+  return Csv.format(data, { ...(options ?? {}), trailingNewline: false } as FormatOptions);
 }
 
-function parseExpected(input: string, options?: ParseOptions): ReturnType<typeof parseCsv> {
-  return parseCsv(input, options ?? {});
+function parseExpected(input: string, options?: ParseOptions): ReturnType<typeof Csv.parse> {
+  return Csv.parse(input, options ?? {});
 }
 
 describe("CSV Worker Pool - Browser", () => {
@@ -72,12 +72,12 @@ describe("CSV Worker Pool - Browser", () => {
 
       it("should parse with headers option", async () => {
         const result = await pool.parse("name,age\nAlice,30\nBob,25", { headers: true });
-        expect(result.data).toEqual(parseCsv("name,age\nAlice,30\nBob,25", { headers: true }));
+        expect(result.data).toEqual(Csv.parse("name,age\nAlice,30\nBob,25", { headers: true }));
       });
 
       it("should expose renamedHeaders meta and avoid header collisions", async () => {
         const result = await pool.parse("A,A,A_1\n1,2,3", { headers: true });
-        expect(result.data).toEqual(parseCsv("A,A,A_1\n1,2,3", { headers: true }));
+        expect(result.data).toEqual(Csv.parse("A,A,A_1\n1,2,3", { headers: true }));
       });
 
       it("should parse with custom delimiter", async () => {
@@ -141,22 +141,22 @@ describe("CSV Worker Pool - Browser", () => {
 
     describe("format", () => {
       it("should format simple data", async () => {
-        const data: unknown[][] = [
+        const data: Parameters<typeof Csv.format>[0] = [
           ["a", "b", "c"],
           [1, 2, 3]
         ];
         const result = await pool.format(data);
-        expect(result.data).toBe(formatExpected(data as Parameters<typeof formatCsv>[0]));
+        expect(result.data).toBe(formatExpected(data as Parameters<typeof Csv.format>[0]));
       });
 
       it("should format with custom delimiter", async () => {
-        const data: unknown[][] = [
+        const data: Parameters<typeof Csv.format>[0] = [
           ["a", "b"],
           [1, 2]
         ];
         const options = { delimiter: ";" };
         const result = await pool.format(data, options);
-        expect(result.data).toBe(formatExpected(data as Parameters<typeof formatCsv>[0], options));
+        expect(result.data).toBe(formatExpected(data as Parameters<typeof Csv.format>[0], options));
       });
 
       it("should quote fields with special characters", async () => {
@@ -770,18 +770,18 @@ describe("CSV Worker Pool - Browser", () => {
 
       it("should support options", async () => {
         const result = await parseWithPool("name,age\nAlice,30", { headers: true });
-        expect(result.data).toEqual(parseCsv("name,age\nAlice,30", { headers: true }));
+        expect(result.data).toEqual(Csv.parse("name,age\nAlice,30", { headers: true }));
       });
     });
 
     describe("formatWithPool", () => {
       it("should format data", async () => {
-        const data: unknown[][] = [
+        const data: Parameters<typeof Csv.format>[0] = [
           ["a", "b"],
           [1, 2]
         ];
         const result = await formatWithPool(data);
-        expect(result.data).toBe(formatExpected(data as Parameters<typeof formatCsv>[0]));
+        expect(result.data).toBe(formatExpected(data as Parameters<typeof Csv.format>[0]));
       });
     });
 

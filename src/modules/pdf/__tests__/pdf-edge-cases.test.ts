@@ -1,11 +1,14 @@
-import { Workbook } from "@excel/workbook";
+import { cellSetAlignment, cellSetValue } from "@excel/core/cell";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { getCell } from "@excel/core/worksheet";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { pdf as standalonePdf } from "@pdf/pdf";
 import { readPdf } from "@pdf/reader/pdf-reader";
 /**
  * Integration tests for PDF rendering edge cases.
  *
- * These tests verify the fixes from PR #131 and related style improvements:
+ * These tests verify the fixes for various rendering edge cases and style improvements:
  * type-based alignment, merge border propagation, text overflow, double borders,
  * zero-value number formats, fitToPage, row heights, error cells, and newline handling.
  */
@@ -38,11 +41,11 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Type-based default alignment", () => {
     it("should right-align numbers and left-align text by default", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getCell("A1").value = "Text";
-      ws.getCell("A2").value = 42;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Cell.setValue(ws, "A1", "Text");
+      Cell.setValue(ws, "A2", 42);
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       const fragments = await getFragments(pdfBytes);
@@ -56,11 +59,11 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should center-align booleans by default", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getCell("A1").value = "Left";
-      ws.getCell("A2").value = true;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Cell.setValue(ws, "A1", "Left");
+      Cell.setValue(ws, "A2", true);
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       const fragments = await getFragments(pdfBytes);
@@ -74,12 +77,12 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should align formula cells by result type", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getColumn(2).width = 20;
-      ws.getCell("A1").value = { formula: "1+1", result: 2 };
-      ws.getCell("B1").value = { formula: 'CONCAT("a","b")', result: "ab" };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Column.setWidth(ws, 2, 20);
+      Cell.setValue(ws, "A1", { formula: "1+1", result: 2 });
+      Cell.setValue(ws, "B1", { formula: 'CONCAT("a","b")', result: "ab" });
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       const fragments = await getFragments(pdfBytes);
@@ -117,16 +120,22 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Merged cell border propagation", () => {
     it("should preserve borders set on boundary cells after merge", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.mergeCells("A1:C3");
-      ws.getCell("A1").value = "Merged";
-      ws.getCell("A1").border = {
-        top: { style: "thick", color: { argb: "FFFF0000" } },
-        left: { style: "thick", color: { argb: "FF00FF00" } }
-      };
-      ws.getCell("C1").border = { right: { style: "thick", color: { argb: "FF0000FF" } } };
-      ws.getCell("A3").border = { bottom: { style: "thick", color: { argb: "FFFF00FF" } } };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Worksheet.merge(ws, "A1:C3");
+      Cell.setValue(ws, "A1", "Merged");
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thick", color: { argb: "FFFF0000" } },
+          left: { style: "thick", color: { argb: "FF00FF00" } }
+        }
+      });
+      Cell.setStyle(ws, "C1", {
+        border: { right: { style: "thick", color: { argb: "FF0000FF" } } }
+      });
+      Cell.setStyle(ws, "A3", {
+        border: { bottom: { style: "thick", color: { argb: "FFFF00FF" } } }
+      });
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       expectValidPdf(pdfBytes);
@@ -135,20 +144,24 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should render bordered empty cells", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = "Data";
-      ws.getCell("B1").border = {
-        top: { style: "thick" },
-        right: { style: "thick" },
-        bottom: { style: "thick" },
-        left: { style: "thick" }
-      };
-      ws.getCell("C1").fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FFFFFF00" }
-      };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", "Data");
+      Cell.setStyle(ws, "B1", {
+        border: {
+          top: { style: "thick" },
+          right: { style: "thick" },
+          bottom: { style: "thick" },
+          left: { style: "thick" }
+        }
+      });
+      Cell.setStyle(ws, "C1", {
+        fill: {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFFFF00" }
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       expectValidPdf(pdfBytes);
@@ -164,12 +177,12 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Text overflow into adjacent cells", () => {
     it("should overflow text into empty neighbors", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
-      ws.getColumn(2).width = 10;
-      ws.getColumn(3).width = 10;
-      ws.getCell("A1").value = "This is a very long text that overflows";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
+      Column.setWidth(ws, 2, 10);
+      Column.setWidth(ws, 3, 10);
+      Cell.setValue(ws, "A1", "This is a very long text that overflows");
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       expectValidPdf(pdfBytes);
@@ -178,12 +191,12 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should stop overflow at cells with content", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
-      ws.getColumn(2).width = 10;
-      ws.getCell("A1").value = "Long text that should not fully display";
-      ws.getCell("B1").value = "Blocker";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
+      Column.setWidth(ws, 2, 10);
+      Cell.setValue(ws, "A1", "Long text that should not fully display");
+      Cell.setValue(ws, "B1", "Blocker");
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       expectValidPdf(pdfBytes);
@@ -198,15 +211,17 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Double border rendering", () => {
     it("should render double borders without crashing", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = "Double";
-      ws.getCell("A1").border = {
-        top: { style: "double" },
-        bottom: { style: "double" },
-        left: { style: "double" },
-        right: { style: "double" }
-      };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", "Double");
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "double" },
+          bottom: { style: "double" },
+          left: { style: "double" },
+          right: { style: "double" }
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -221,11 +236,11 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Zero-value number formats", () => {
     it('should format accounting zero as dash with spaces: "-"??', async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getCell("A1").value = 0;
-      ws.getCell("A1").numFmt = '#,##0.00;-#,##0.00;"-"??';
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Cell.setValue(ws, "A1", 0);
+      Cell.setStyle(ws, "A1", { numFmt: '#,##0.00;-#,##0.00;"-"??' });
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -233,11 +248,11 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should produce empty string for #.## with zero", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = 0;
-      ws.getCell("A1").numFmt = "#.##";
-      ws.getCell("A2").value = "marker";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", 0);
+      Cell.setStyle(ws, "A1", { numFmt: "#.##" });
+      Cell.setValue(ws, "A2", "marker");
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -246,11 +261,11 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should pad with spaces for ?? placeholders", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getCell("A1").value = 0;
-      ws.getCell("A1").numFmt = "??0.00";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Cell.setValue(ws, "A1", 0);
+      Cell.setStyle(ws, "A1", { numFmt: "??0.00" });
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -264,11 +279,11 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("fitToPage scaling", () => {
     it("should fit 20 columns onto a single page", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
       for (let c = 1; c <= 20; c++) {
-        ws.getColumn(c).width = 12;
-        ws.getCell(1, c).value = `Col ${c}`;
+        Column.setWidth(ws, c, 12);
+        Cell.setValue(ws, 1, c, `Col ${c}`);
       }
 
       const pdfBytes = await excelToPdf(wb, { fitToPage: true });
@@ -287,14 +302,14 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Row height handling", () => {
     it("should respect custom row height", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 30;
-      ws.getCell("A1").value = "Normal";
-      const r2 = ws.getRow(2);
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 30);
+      Cell.setValue(ws, "A1", "Normal");
+      const r2 = Worksheet.getRow(ws, 2);
       r2.height = 50;
-      ws.getCell("A2").value = "Tall";
-      ws.getCell("A3").value = "Normal again";
+      Cell.setValue(ws, "A2", "Tall");
+      Cell.setValue(ws, "A3", "Normal again");
 
       const pdfBytes = await excelToPdf(wb, { showGridLines: true });
       expectValidPdf(pdfBytes);
@@ -310,10 +325,10 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Explicit newline handling", () => {
     it("should split non-wrapped text on explicit newlines", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getCell("A1").value = "Line1\nLine2\nLine3";
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Cell.setValue(ws, "A1", "Line1\nLine2\nLine3");
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -323,11 +338,11 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should handle wrapped text with newlines", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getCell("A1").value = "Wrap\nwith\nnewlines";
-      ws.getCell("A1").alignment = { wrapText: true };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Cell.setValue(ws, "A1", "Wrap\nwith\nnewlines");
+      Cell.setStyle(ws, "A1", { alignment: { wrapText: true } });
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -342,9 +357,9 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Error values and special types", () => {
     it("should render error cell values", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = { error: "#DIV/0!" } as any;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", { error: "#DIV/0!" } as any);
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -353,16 +368,16 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should render rich text with mixed formatting", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 40;
-      ws.getCell("A1").value = {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 40);
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "Bold ", font: { bold: true } },
           { text: "Normal ", font: { size: 11 } },
           { text: "Red", font: { color: { argb: "FFFF0000" } } }
         ]
-      };
+      });
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -372,10 +387,10 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should handle hyperlink cells", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getCell("A1").value = { text: "Click me", hyperlink: "https://example.com" };
-      ws.getCell("A1").font = { color: { argb: "FF0563C1" }, underline: true };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Cell.setValue(ws, "A1", { text: "Click me", hyperlink: "https://example.com" });
+      Cell.setStyle(ws, "A1", { font: { color: { argb: "FF0563C1" }, underline: true } });
 
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
@@ -389,11 +404,11 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("Vertical stacked text", () => {
     it("should render vertical stacked text (rotation 255)", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getRow(1).height = 80;
-      ws.getCell("A1").value = "Vertical";
-      ws.getCell("A1").alignment = { textRotation: 255 };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Row.setHeight(ws, 1, 80);
+      Cell.setValue(ws, "A1", "Vertical");
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: 255 } });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -404,22 +419,26 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should respect horizontal alignment for vertical stacked text", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getColumn(2).width = 20;
-      ws.getRow(1).height = 100;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Column.setWidth(ws, 2, 20);
+      Row.setHeight(ws, 1, 100);
 
-      ws.getCell("A1").value = "Hi";
-      ws.getCell("A1").alignment = {
-        textRotation: "vertical" as any,
-        horizontal: "left"
-      };
-      ws.getCell("B1").value = "Hi";
-      ws.getCell("B1").alignment = {
-        textRotation: "vertical" as any,
-        horizontal: "right"
-      };
+      Cell.setValue(ws, "A1", "Hi");
+      Cell.setStyle(ws, "A1", {
+        alignment: {
+          textRotation: "vertical" as any,
+          horizontal: "left"
+        }
+      });
+      Cell.setValue(ws, "B1", "Hi");
+      Cell.setStyle(ws, "B1", {
+        alignment: {
+          textRotation: "vertical" as any,
+          horizontal: "right"
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -431,28 +450,34 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should respect vertical alignment for vertical stacked text", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 10;
-      ws.getColumn(2).width = 10;
-      ws.getColumn(3).width = 10;
-      ws.getRow(1).height = 120;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 10);
+      Column.setWidth(ws, 2, 10);
+      Column.setWidth(ws, 3, 10);
+      Row.setHeight(ws, 1, 120);
 
-      ws.getCell("A1").value = "A";
-      ws.getCell("A1").alignment = {
-        textRotation: "vertical" as any,
-        vertical: "top"
-      };
-      ws.getCell("B1").value = "B";
-      ws.getCell("B1").alignment = {
-        textRotation: "vertical" as any,
-        vertical: "middle"
-      };
-      ws.getCell("C1").value = "C";
-      ws.getCell("C1").alignment = {
-        textRotation: "vertical" as any,
-        vertical: "bottom"
-      };
+      Cell.setValue(ws, "A1", "A");
+      Cell.setStyle(ws, "A1", {
+        alignment: {
+          textRotation: "vertical" as any,
+          vertical: "top"
+        }
+      });
+      Cell.setValue(ws, "B1", "B");
+      Cell.setStyle(ws, "B1", {
+        alignment: {
+          textRotation: "vertical" as any,
+          vertical: "middle"
+        }
+      });
+      Cell.setValue(ws, "C1", "C");
+      Cell.setStyle(ws, "C1", {
+        alignment: {
+          textRotation: "vertical" as any,
+          vertical: "bottom"
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -476,19 +501,25 @@ describe("PDF Rendering Edge Cases", () => {
   describe("Rotated text alignment", () => {
     // --- 90° vertical alignment ---
     it("should position 90° text according to vertical alignment (top > middle > bottom)", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 12;
-      ws.getColumn(2).width = 12;
-      ws.getColumn(3).width = 12;
-      ws.getRow(1).height = 80;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 12);
+      Column.setWidth(ws, 2, 12);
+      Column.setWidth(ws, 3, 12);
+      Row.setHeight(ws, 1, 80);
 
-      ws.getCell("A1").value = "Top";
-      ws.getCell("A1").alignment = { textRotation: 90, horizontal: "center", vertical: "top" };
-      ws.getCell("B1").value = "Mid";
-      ws.getCell("B1").alignment = { textRotation: 90, horizontal: "center", vertical: "middle" };
-      ws.getCell("C1").value = "Bot";
-      ws.getCell("C1").alignment = { textRotation: 90, horizontal: "center", vertical: "bottom" };
+      Cell.setValue(ws, "A1", "Top");
+      Cell.setStyle(ws, "A1", {
+        alignment: { textRotation: 90, horizontal: "center", vertical: "top" }
+      });
+      Cell.setValue(ws, "B1", "Mid");
+      Cell.setStyle(ws, "B1", {
+        alignment: { textRotation: 90, horizontal: "center", vertical: "middle" }
+      });
+      Cell.setValue(ws, "C1", "Bot");
+      Cell.setStyle(ws, "C1", {
+        alignment: { textRotation: 90, horizontal: "center", vertical: "bottom" }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -506,16 +537,16 @@ describe("PDF Rendering Edge Cases", () => {
 
     // --- 90° horizontal alignment ---
     it("should position 90° text left/right with horizontal alignment", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getColumn(2).width = 20;
-      ws.getRow(1).height = 80;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Column.setWidth(ws, 2, 20);
+      Row.setHeight(ws, 1, 80);
 
-      ws.getCell("A1").value = "Left";
-      ws.getCell("A1").alignment = { textRotation: 90, horizontal: "left" };
-      ws.getCell("B1").value = "Right";
-      ws.getCell("B1").alignment = { textRotation: 90, horizontal: "right" };
+      Cell.setValue(ws, "A1", "Left");
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: 90, horizontal: "left" } });
+      Cell.setValue(ws, "B1", "Right");
+      Cell.setStyle(ws, "B1", { alignment: { textRotation: 90, horizontal: "right" } });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -528,26 +559,30 @@ describe("PDF Rendering Edge Cases", () => {
       expect(rightFrag!.x).toBeGreaterThan(leftFrag!.x);
     });
 
-    // --- 90° combined: left+bottom vs right+top (issue #133 core scenario) ---
-    it("should handle 90° combined h/v alignment (issue #133)", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getColumn(2).width = 20;
-      ws.getRow(1).height = 100;
+    // --- 90° combined: left+bottom vs right+top (core scenario) ---
+    it("should handle 90° combined h/v alignment", async () => {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Column.setWidth(ws, 2, 20);
+      Row.setHeight(ws, 1, 100);
 
-      ws.getCell("A1").value = "LB";
-      ws.getCell("A1").alignment = {
-        textRotation: 90,
-        horizontal: "left",
-        vertical: "bottom"
-      };
-      ws.getCell("B1").value = "RT";
-      ws.getCell("B1").alignment = {
-        textRotation: 90,
-        horizontal: "right",
-        vertical: "top"
-      };
+      Cell.setValue(ws, "A1", "LB");
+      Cell.setStyle(ws, "A1", {
+        alignment: {
+          textRotation: 90,
+          horizontal: "left",
+          vertical: "bottom"
+        }
+      });
+      Cell.setValue(ws, "B1", "RT");
+      Cell.setStyle(ws, "B1", {
+        alignment: {
+          textRotation: 90,
+          horizontal: "right",
+          vertical: "top"
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -563,19 +598,19 @@ describe("PDF Rendering Edge Cases", () => {
 
     // --- -90° alignment ---
     it("should render -90° rotated text with alignment", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 12;
-      ws.getColumn(2).width = 12;
-      ws.getColumn(3).width = 12;
-      ws.getRow(1).height = 80;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 12);
+      Column.setWidth(ws, 2, 12);
+      Column.setWidth(ws, 3, 12);
+      Row.setHeight(ws, 1, 80);
 
-      ws.getCell("A1").value = "Top";
-      ws.getCell("A1").alignment = { textRotation: -90, vertical: "top" };
-      ws.getCell("B1").value = "Mid";
-      ws.getCell("B1").alignment = { textRotation: -90, vertical: "middle" };
-      ws.getCell("C1").value = "Bot";
-      ws.getCell("C1").alignment = { textRotation: -90, vertical: "bottom" };
+      Cell.setValue(ws, "A1", "Top");
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: -90, vertical: "top" } });
+      Cell.setValue(ws, "B1", "Mid");
+      Cell.setStyle(ws, "B1", { alignment: { textRotation: -90, vertical: "middle" } });
+      Cell.setValue(ws, "C1", "Bot");
+      Cell.setStyle(ws, "C1", { alignment: { textRotation: -90, vertical: "bottom" } });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -592,16 +627,16 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should position -90° text left/right with horizontal alignment", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
-      ws.getColumn(2).width = 20;
-      ws.getRow(1).height = 80;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
+      Column.setWidth(ws, 2, 20);
+      Row.setHeight(ws, 1, 80);
 
-      ws.getCell("A1").value = "Left";
-      ws.getCell("A1").alignment = { textRotation: -90, horizontal: "left" };
-      ws.getCell("B1").value = "Right";
-      ws.getCell("B1").alignment = { textRotation: -90, horizontal: "right" };
+      Cell.setValue(ws, "A1", "Left");
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: -90, horizontal: "left" } });
+      Cell.setValue(ws, "B1", "Right");
+      Cell.setStyle(ws, "B1", { alignment: { textRotation: -90, horizontal: "right" } });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -615,24 +650,28 @@ describe("PDF Rendering Edge Cases", () => {
 
     // --- General angle (45°) alignment ---
     it("should render 45° text with top-left vs bottom-right alignment", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 15;
-      ws.getColumn(2).width = 15;
-      ws.getRow(1).height = 60;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 15);
+      Column.setWidth(ws, 2, 15);
+      Row.setHeight(ws, 1, 60);
 
-      ws.getCell("A1").value = "TL";
-      ws.getCell("A1").alignment = {
-        textRotation: 45,
-        horizontal: "left",
-        vertical: "top"
-      };
-      ws.getCell("B1").value = "BR";
-      ws.getCell("B1").alignment = {
-        textRotation: 45,
-        horizontal: "right",
-        vertical: "bottom"
-      };
+      Cell.setValue(ws, "A1", "TL");
+      Cell.setStyle(ws, "A1", {
+        alignment: {
+          textRotation: 45,
+          horizontal: "left",
+          vertical: "top"
+        }
+      });
+      Cell.setValue(ws, "B1", "BR");
+      Cell.setStyle(ws, "B1", {
+        alignment: {
+          textRotation: 45,
+          horizontal: "right",
+          vertical: "bottom"
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -647,17 +686,19 @@ describe("PDF Rendering Edge Cases", () => {
 
     // --- 45° slanted borders ---
     it("should render slanted borders for general rotation angles", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getRow(1).height = 60;
-      ws.getCell("A1").value = "Slant";
-      ws.getCell("A1").alignment = { textRotation: 45 };
-      ws.getCell("A1").border = {
-        top: { style: "thin" },
-        bottom: { style: "thin" },
-        left: { style: "thin" },
-        right: { style: "thin" }
-      };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Row.setHeight(ws, 1, 60);
+      Cell.setValue(ws, "A1", "Slant");
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: 45 } });
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" }
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -667,17 +708,19 @@ describe("PDF Rendering Edge Cases", () => {
 
     // --- 45° negative angle ---
     it("should render -45° text with slanted borders", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getRow(1).height = 60;
-      ws.getCell("A1").value = "Neg";
-      ws.getCell("A1").alignment = { textRotation: -45 };
-      ws.getCell("A1").border = {
-        top: { style: "thin" },
-        bottom: { style: "thin" },
-        left: { style: "thin" },
-        right: { style: "thin" }
-      };
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Row.setHeight(ws, 1, 60);
+      Cell.setValue(ws, "A1", "Neg");
+      Cell.setStyle(ws, "A1", { alignment: { textRotation: -45 } });
+      Cell.setStyle(ws, "A1", {
+        border: {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" }
+        }
+      });
 
       const pdfBytes = await excelToPdf(wb);
       expectValidPdf(pdfBytes);
@@ -685,16 +728,16 @@ describe("PDF Rendering Edge Cases", () => {
       expect(text).toContain("Neg");
     });
 
-    // --- All 6 combos from issue #133 reproduced ---
-    it("should match Excel alignment for all 6 rotation combos from issue #133", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
+    // --- All 6 combos reproduced ---
+    it("should match Excel alignment for all 6 rotation combos", async () => {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
       for (let c = 1; c <= 6; c++) {
-        ws.getColumn(c).width = 12;
+        Column.setWidth(ws, c, 12);
       }
-      ws.getRow(1).height = 110;
+      Row.setHeight(ws, 1, 110);
 
-      // The exact combos from the issue's PDF-Test-2.xlsx Row 8
+      // The exact combos from the PDF-Test-2.xlsx Row 8
       const combos: Array<{ value: string; h: string; v?: string }> = [
         { value: "Col1", h: "center", v: "top" },
         { value: "Col2", h: "center", v: "middle" },
@@ -705,14 +748,14 @@ describe("PDF Rendering Edge Cases", () => {
       ];
 
       for (let i = 0; i < combos.length; i++) {
-        const cell = ws.getCell(1, i + 1);
-        cell.value = combos[i].value;
-        cell.alignment = {
+        const cell = getCell(ws, 1, i + 1);
+        cellSetValue(cell, combos[i].value);
+        cellSetAlignment(cell, {
           textRotation: 90,
           horizontal: combos[i].h as any,
           vertical: combos[i].v as any,
           wrapText: true
-        };
+        });
       }
 
       const pdfBytes = await excelToPdf(wb);
@@ -745,15 +788,15 @@ describe("PDF Rendering Edge Cases", () => {
 
   describe("formula recalculation on export", () => {
     it("should recalculate formulas before rendering so stale results are updated", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
 
       // A1 has source data, B1 has formula referencing A1 with a stale cached result
-      ws.getCell("A1").value = 100;
-      ws.getCell("B1").value = { formula: "A1*2", result: 0 };
+      Cell.setValue(ws, "A1", 100);
+      Cell.setValue(ws, "B1", { formula: "A1*2", result: 0 });
 
-      const pdfBytes = await excelToPdf(wb);
+      const pdfBytes = await excelToPdf(wb, { recalculate: calculateFormulas });
       expectValidPdf(pdfBytes);
 
       const text = await extractText(pdfBytes);
@@ -762,15 +805,15 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should render formula results that had no cached value", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
 
-      ws.getCell("A1").value = 7;
-      ws.getCell("A2").value = 3;
-      ws.getCell("A3").value = { formula: "A1+A2", result: 0 };
+      Cell.setValue(ws, "A1", 7);
+      Cell.setValue(ws, "A2", 3);
+      Cell.setValue(ws, "A3", { formula: "A1+A2", result: 0 });
 
-      const pdfBytes = await excelToPdf(wb);
+      const pdfBytes = await excelToPdf(wb, { recalculate: calculateFormulas });
       expectValidPdf(pdfBytes);
 
       const text = await extractText(pdfBytes);
@@ -778,17 +821,17 @@ describe("PDF Rendering Edge Cases", () => {
     });
 
     it("should reflect the latest cell values, not the original cached results", async () => {
-      const wb = new Workbook();
-      const ws = wb.addWorksheet("Sheet1");
-      ws.getColumn(1).width = 20;
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      Column.setWidth(ws, 1, 20);
 
-      ws.getCell("A1").value = 5;
-      ws.getCell("B1").value = { formula: "A1*3", result: 999 };
+      Cell.setValue(ws, "A1", 5);
+      Cell.setValue(ws, "B1", { formula: "A1*3", result: 999 });
 
       // Modify A1 after setting up the formula — the cached result (999) is now stale
-      ws.getCell("A1").value = 10;
+      Cell.setValue(ws, "A1", 10);
 
-      const pdfBytes = await excelToPdf(wb);
+      const pdfBytes = await excelToPdf(wb, { recalculate: calculateFormulas });
       expectValidPdf(pdfBytes);
 
       const text = await extractText(pdfBytes);

@@ -2,7 +2,13 @@
  * Lookup / Reference Functions — Native RuntimeValue Implementation
  */
 
-import type { RuntimeValue, ScalarValue, ArrayValue } from "../runtime/values";
+import {
+  excelWildcardToRegex,
+  getCell,
+  hasUnescapedWildcard,
+  unescapeExcelWildcard
+} from "@formula/functions/_shared";
+import type { RuntimeValue, ScalarValue, ArrayValue } from "@formula/runtime/values";
 import {
   RVKind,
   ERRORS,
@@ -18,13 +24,7 @@ import {
   compareScalarsSameKind,
   isError,
   isArray
-} from "../runtime/values";
-import {
-  excelWildcardToRegex,
-  getCell,
-  hasUnescapedWildcard,
-  unescapeExcelWildcard
-} from "./_shared";
+} from "@formula/runtime/values";
 
 // ============================================================================
 // Helpers

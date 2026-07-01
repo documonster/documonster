@@ -19,7 +19,8 @@
  * stability, and error-routing gaps.
  */
 
-import { Workbook } from "@excel/workbook";
+import { calculateFormulas } from "@excel/core/formula-adapter";
+import { Cell, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 const KNOWN_ERRORS = new Set([
@@ -213,11 +214,11 @@ function genAtom(rng: Rng): string {
 
 /** Evaluate through a fresh Workbook. Returns the cell result verbatim. */
 function run(formula: string): unknown {
-  const wb = new Workbook();
-  const ws = wb.addWorksheet("S");
-  ws.getCell("A1").value = { formula, result: 0 };
-  wb.calculateFormulas();
-  return ws.getCell("A1").result;
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "S");
+  Cell.setValue(ws, "A1", { formula, result: 0 });
+  calculateFormulas(wb);
+  return Cell.getResult(ws, "A1");
 }
 
 /** Verify the result is a legal FormulaResult shape. */

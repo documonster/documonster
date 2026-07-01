@@ -34,12 +34,12 @@
 - **流式写入器** — `createDocxStream()` 处理大文档
 - **校验** — 结构检查，带严重级别标记
 - **OOXML Strict** — 读取时透明归一化为 Transitional
-- **浏览器支持** — 同一个 `@cj-tech-master/excelts/word` 导入在 Node.js 和浏览器中均可用
+- **浏览器支持** — 同一个 `documonster/word` 导入在 Node.js 和浏览器中均可用
 
 ## 快速开始
 
 ```typescript
-import { Document, toBuffer, readDocx } from "@cj-tech-master/excelts/word";
+import { Document, toBuffer, readDocx } from "documonster/word";
 
 // 创建文档
 const doc = Document.create();
@@ -63,7 +63,7 @@ console.log(parsed.body.length, "elements");
 ### 文档构建器
 
 ```typescript
-import { Document, paragraph, text, bold, italic, heading } from "@cj-tech-master/excelts/word";
+import { Document, paragraph, text, bold, italic, heading } from "documonster/word";
 
 const doc = Document.create();
 
@@ -107,7 +107,7 @@ const bytes = await toBuffer(model);
 ### 读取文档
 
 ```typescript
-import { readDocx, extractText, searchText } from "@cj-tech-master/excelts/word";
+import { readDocx, extractText, searchText } from "documonster/word";
 
 const doc = await readDocx(fileBuffer);
 
@@ -121,7 +121,7 @@ const results = searchText(doc, /pattern/g);
 ### 修改文档
 
 ```typescript
-import { readDocx, replaceText, toBuffer } from "@cj-tech-master/excelts/word";
+import { readDocx, replaceText, toBuffer } from "documonster/word";
 
 const doc = await readDocx(buffer);
 const modified = replaceText(doc, "OLD_TEXT", "NEW_TEXT");
@@ -133,7 +133,7 @@ const output = await toBuffer(modified);
 ### 模板引擎
 
 ```typescript
-import { fillTemplate } from "@cj-tech-master/excelts/word";
+import { fillTemplate } from "documonster/word";
 
 const filled = fillTemplate(doc, {
   name: "John",
@@ -151,7 +151,7 @@ import {
   fillFormFields,
   formTextField,
   formCheckboxField
-} from "@cj-tech-master/excelts/word";
+} from "documonster/word";
 
 // 提取表单数据
 const fields = extractFormFields(doc);
@@ -171,7 +171,7 @@ const filled = fillFormFields(
 ### 数据绑定（OpenDoPE）
 
 ```typescript
-import { resolveDataBindings } from "@cj-tech-master/excelts/word";
+import { resolveDataBindings } from "documonster/word";
 
 // 根据 CustomXML 部件解析 SDT 数据绑定
 const resolved = resolveDataBindings(doc);
@@ -186,7 +186,7 @@ const resolved2 = resolveDataBindings(
 ### 带特效的绘图形状
 
 ```typescript
-import { createShape, createRect, createEllipse } from "@cj-tech-master/excelts/word";
+import { createShape, createRect, createEllipse } from "documonster/word";
 
 const shape = createShape({
   shapeType: "roundRect",
@@ -221,7 +221,7 @@ const shape = createShape({
 ### 字体嵌入与子集化
 
 ```typescript
-import { embedFont, addEmbeddedFonts, subsetFont } from "@cj-tech-master/excelts/word";
+import { embedFont, addEmbeddedFonts, subsetFont } from "documonster/word";
 
 // 嵌入并自动子集化（只嵌入文档中用到的字形）
 const result = embedFont({
@@ -238,7 +238,7 @@ const docWithFonts = addEmbeddedFonts(doc, [result]);
 ### 修订追踪
 
 ```typescript
-import { acceptAllRevisions, rejectAllRevisions } from "@cj-tech-master/excelts/word";
+import { acceptAllRevisions, rejectAllRevisions } from "documonster/word";
 
 const accepted = acceptAllRevisions(doc);
 const rejected = rejectAllRevisions(doc);
@@ -247,7 +247,7 @@ const rejected = rejectAllRevisions(doc);
 ### 文档比对
 
 ```typescript
-import { diffDocuments } from "@cj-tech-master/excelts/word";
+import { diffDocuments } from "documonster/word";
 
 const diff = diffDocuments(docA, docB);
 // → { changes: [{ type: "added"|"removed"|"modified", ... }] }
@@ -256,7 +256,7 @@ const diff = diffDocuments(docA, docB);
 ### 文档合并
 
 ```typescript
-import { mergeDocuments } from "@cj-tech-master/excelts/word";
+import { mergeDocuments } from "documonster/word";
 
 const merged = mergeDocuments([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```
@@ -264,7 +264,7 @@ const merged = mergeDocuments([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ### 流式写入器
 
 ```typescript
-import { createDocxStream } from "@cj-tech-master/excelts/word";
+import { createDocxStream } from "documonster/word";
 
 const stream = createDocxStream();
 stream.addParagraph("Title", { style: "Heading1" });
@@ -277,11 +277,7 @@ const buffer = await stream.finalize();
 ### 文档保护
 
 ```typescript
-import {
-  protectDocument,
-  isDocumentProtected,
-  verifyProtectionPassword
-} from "@cj-tech-master/excelts/word";
+import { protectDocument, isDocumentProtected, verifyProtectionPassword } from "documonster/word";
 
 const protected = protectDocument(doc, { type: "readOnly", password: "secret" });
 const isProtected = isDocumentProtected(protected); // true
@@ -291,7 +287,7 @@ const valid = verifyProtectionPassword(protected, "secret"); // true
 ### 校验
 
 ```typescript
-import { validateDocument } from "@cj-tech-master/excelts/word";
+import { validateDocument } from "documonster/word";
 
 const result = validateDocument(doc);
 if (!result.valid) {
@@ -305,28 +301,28 @@ if (!result.valid) {
 // DOCX → Markdown（GFM：标题、粗体/斜体/删除线、行内代码、
 // 代码块、引用块、有序/无序列表、带对齐的表格、
 // 链接、图片、脚注）
-import { renderToMarkdown } from "@cj-tech-master/excelts/word/markdown";
+import { renderToMarkdown } from "documonster/word/markdown";
 const md = renderToMarkdown(doc);
 const mdSetext = renderToMarkdown(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX（完整文档或正文片段）
-import { markdownToDocx, markdownToDocxBody } from "@cj-tech-master/excelts/word/markdown";
+import { markdownToDocx, markdownToDocxBody } from "documonster/word/markdown";
 const doc = markdownToDocx("# Title\n\nHello **world**");
 const bodyItems = markdownToDocxBody("- a\n- b");
 
 // DOCX → HTML
-import { renderToHtml } from "@cj-tech-master/excelts/word/html";
+import { renderToHtml } from "documonster/word/html";
 const html = renderToHtml(doc);
 
 // HTML → DOCX 正文内容
-import { htmlToDocxBody } from "@cj-tech-master/excelts/word/html";
+import { htmlToDocxBody } from "documonster/word/html";
 const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
 ```
 
 ### Flat OPC 格式
 
 ```typescript
-import { parseFlatOpc, toFlatOpc, isFlatOpc } from "@cj-tech-master/excelts/word";
+import { parseFlatOpc, toFlatOpc, isFlatOpc } from "documonster/word";
 
 // DOCX 的单一 XML 表示形式
 const flatXml = toFlatOpc(doc);
@@ -335,7 +331,7 @@ const doc = parseFlatOpc(flatXmlString);
 
 ### 加密与签名
 
-底层加密工具位于 `@cj-tech-master/excelts/word/crypto` 子路径，因此不会被打进
+底层加密工具位于 `documonster/word/crypto` 子路径，因此不会被打进
 只读写普通 DOCX 的 bundle。
 
 ```typescript
@@ -345,7 +341,7 @@ import {
   encryptDocx,
   extractSignatures,
   hasDigitalSignatures
-} from "@cj-tech-master/excelts/word/crypto";
+} from "documonster/word/crypto";
 
 // 解密受密码保护的 DOCX（Agile Encryption）
 if (isEncryptedDocx(bytes)) {
@@ -366,8 +362,8 @@ const signatures = extractSignatures(opaqueParts);
 以及可选标题页的 Word 表格。隐藏的工作表会被跳过；行/列数量可以设上限。
 
 ```typescript
-import { excelToDocx, extractTablesToExcel } from "@cj-tech-master/excelts/word/excel";
-import { packageDocx } from "@cj-tech-master/excelts/word";
+import { excelToDocx, extractTablesToExcel } from "documonster/word/excel";
+import { packageDocx } from "documonster/word";
 
 // Workbook → DocxDocument（所有可见工作表，保留格式）
 const doc = excelToDocx(workbook);
@@ -397,8 +393,8 @@ const extracted = extractTablesToExcel(doc);
 与 SVG 路径完全一致。
 
 ```typescript
-import { readDocx } from "@cj-tech-master/excelts/word";
-import { docxToPdf } from "@cj-tech-master/excelts/pdf";
+import { readDocx } from "documonster/word";
+import { docxToPdf } from "documonster/pdf";
 
 const doc = await readDocx(docxBytes);
 const pdfBytes = await docxToPdf(doc);
@@ -426,8 +422,8 @@ const pdf2 = await docxToPdf(doc, {
 （不抛错、不留空白页）。要提供你自己的经典图表渲染器：
 
 ```typescript
-import { installChartSupport } from "@cj-tech-master/excelts/chart";
-import { docxToPdf, createWordChartPdfRenderer } from "@cj-tech-master/excelts/pdf";
+import { installChartSupport } from "documonster/chart";
+import { docxToPdf, createWordChartPdfRenderer } from "documonster/pdf";
 
 installChartSupport();
 const pdf = await docxToPdf(doc, {
@@ -446,39 +442,16 @@ const pdf = await docxToPdf(doc, {
 
 ## 兼容性
 
-| 特性             | 支持情况                                         |
-| ---------------- | ------------------------------------------------ |
-| .docx（读取）    | ✅ 广泛（常见元素结构化；未知部件保留）          |
-| .docx（写入）    | ✅ 广泛（常见元素；未知部件以不透明形式写出）    |
-| .dotx（模板）    | ✅                                               |
-| .docm（宏）      | ✅ 往返（保留 VBA，不执行/不编辑）               |
-| .dotm（宏模板）  | ✅ 往返                                          |
-| Flat OPC（.xml） | ✅                                               |
-| ISO 29500 Strict | ✅ 自动归一化                                    |
-| 加密的 .docx     | ✅ 用密码解密（Agile Encryption）                |
-| 数字签名         | 🔍 检测与元数据提取（不签名/不验证）             |
-| 浏览器           | ✅（同一个 `@cj-tech-master/excelts/word` 导入） |
-| Node.js 22+      | ✅                                               |
-
-## 从 `docx`（npm）迁移
-
-| docx（npm）                         | excelts/word                                             |
-| ----------------------------------- | -------------------------------------------------------- |
-| `new Document()`                    | `Document.create()`                                      |
-| `new Paragraph({ text })`           | `textParagraph(text)`                                    |
-| `new TextRun({ bold: true, text })` | `bold(text)`                                             |
-| `new Table({ rows })`               | `table(rows)`                                            |
-| `Packer.toBuffer(doc)`              | `toBuffer(doc)`                                          |
-| ❌ 无读取功能                       | `readDocx(buffer)`                                       |
-| ❌ 无修改功能                       | `replaceText(doc, old, new)`                             |
-| ❌ 无模板功能                       | `fillTemplate(doc, data)`                                |
-| ❌ 无表单功能                       | `extractFormFields(doc)` / `fillFormFields(doc, values)` |
-
-## 从 `mammoth.js` 迁移
-
-| mammoth.js                         | excelts/word                                         |
-| ---------------------------------- | ---------------------------------------------------- |
-| `mammoth.convertToHtml(input)`     | `readDocx(buf)` → `renderToHtml(doc)`                |
-| `mammoth.convertToMarkdown(input)` | `readDocx(buf)` → `renderToMarkdown(doc)`            |
-| 样式映射                           | `parseStyleMap(rules)` / `matchStyleMap(style, map)` |
-| ❌ 无写入功能                      | 完整读/写/修改                                       |
+| 特性             | 支持情况                                      |
+| ---------------- | --------------------------------------------- |
+| .docx（读取）    | ✅ 广泛（常见元素结构化；未知部件保留）       |
+| .docx（写入）    | ✅ 广泛（常见元素；未知部件以不透明形式写出） |
+| .dotx（模板）    | ✅                                            |
+| .docm（宏）      | ✅ 往返（保留 VBA，不执行/不编辑）            |
+| .dotm（宏模板）  | ✅ 往返                                       |
+| Flat OPC（.xml） | ✅                                            |
+| ISO 29500 Strict | ✅ 自动归一化                                 |
+| 加密的 .docx     | ✅ 用密码解密（Agile Encryption）             |
+| 数字签名         | 🔍 检测与元数据提取（不签名/不验证）          |
+| 浏览器           | ✅（同一个 `documonster/word` 导入）          |
+| Node.js 22+      | ✅                                            |

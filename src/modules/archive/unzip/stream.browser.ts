@@ -8,30 +8,55 @@
 
 import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
 import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
-import { ByteQueue } from "@archive/shared/byte-queue";
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { toError } from "@archive/shared/errors";
-import {
-  DATA_DESCRIPTOR_SIGNATURE_BYTES,
-  type CrxHeader,
-  type EntryProps,
-  type EntryVars,
-  type ParseDriverState,
-  type ParseOptions
+import { ByteQueue } from "@archive/core/byte-queue";
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { toError } from "@archive/core/errors";
+import type {
+  CrxHeader,
+  EntryProps,
+  EntryVars,
+  ParseDriverState,
+  ParseOptions
 } from "@archive/unzip/parser-core";
+import { DATA_DESCRIPTOR_SIGNATURE_BYTES } from "@archive/unzip/parser-core";
 import { PatternScanner } from "@archive/unzip/pattern-scanner";
+import type {
+  PullStreamPublicApi,
+  InflateFactory,
+  ParseEmitter,
+  ParseIO,
+  ZipEntry
+} from "@archive/unzip/stream.base";
 import {
   runParseLoop,
-  type PullStreamPublicApi,
-  type InflateFactory,
-  type ParseEmitter,
-  type ParseIO,
-  type ZipEntry,
   DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK,
   streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";
 import { Duplex, PassThrough } from "@stream";
 import { concatUint8Arrays } from "@utils/binary";
+
+// =============================================================================
+// Worker protocol
+// =============================================================================
+
+/**
+ * Messages posted back from the inline inflate worker to the main thread.
+ * Discriminated by the `t` tag.
+ */
+type InflateWorkerMessage =
+  | { t: "data"; chunk: Uint8Array }
+  | { t: "end" }
+  | { t: "aborted" }
+  | { t: "ack"; id: number }
+  | { t: "error"; message?: string };
+
+/**
+ * Async iterator returned by the custom entry-queue iterator. Mirrors the shape
+ * Node's `Duplex[Symbol.asyncIterator]` expects, including `[Symbol.asyncDispose]`.
+ */
+interface DisposableEntryIterator extends AsyncIterator<ZipEntry, undefined>, AsyncDisposable {
+  [Symbol.asyncIterator](): DisposableEntryIterator;
+}
 
 // =============================================================================
 // Browser InflateRaw using DecompressionStream
@@ -372,13 +397,13 @@ class WorkerInflateRaw extends Duplex {
     this.worker = new Worker(url);
 
     this.worker.onmessage = (ev: MessageEvent) => {
-      const msg: any = ev.data;
+      const msg = ev.data as InflateWorkerMessage | null | undefined;
       if (!msg || typeof msg.t !== "string") {
         return;
       }
 
       if (msg.t === "data") {
-        const chunk = msg.chunk as Uint8Array;
+        const chunk = msg.chunk;
         this.push(chunk);
         return;
       }
@@ -395,7 +420,7 @@ class WorkerInflateRaw extends Duplex {
       }
 
       if (msg.t === "ack") {
-        const id = msg.id as number;
+        const id = msg.id;
         const cb = this._pendingAcks.get(id);
         if (cb) {
           this._pendingAcks.delete(id);
@@ -629,7 +654,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     // ---------------------------------------------------------------
     private _entryQueue: ZipEntry[] = [];
     private _entryWaiter: {
-      resolve: (result: IteratorResult<ZipEntry>) => void;
+      resolve: (result: IteratorResult<ZipEntry, undefined>) => void;
       reject: (err: unknown) => void;
     } | null = null;
     private _entriesDone = false;
@@ -681,7 +706,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           this.emit("entry", entry);
         },
         pushEntry: (entry: ZipEntry) => {
-          this.push(entry as any);
+          this.push(entry);
           this._enqueueEntry(entry);
         },
         // Browser version historically only pushed entries when forceStream=true.
@@ -1174,7 +1199,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         if (err) {
           waiter.reject(err);
         } else {
-          waiter.resolve({ value: undefined as any, done: true });
+          waiter.resolve({ value: undefined, done: true });
         }
       }
     }
@@ -1183,9 +1208,9 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     // Custom async iterator
     // ---------------------------------------------------------------
 
-    override [Symbol.asyncIterator](): any {
-      const iterator = {
-        next: (): Promise<IteratorResult<ZipEntry>> => {
+    override [Symbol.asyncIterator](): DisposableEntryIterator {
+      const iterator: DisposableEntryIterator = {
+        next: (): Promise<IteratorResult<ZipEntry, undefined>> => {
           if (this._entryQueue.length > 0) {
             return Promise.resolve({ value: this._entryQueue.shift()!, done: false });
           }
@@ -1194,19 +1219,23 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
             if (this._parserError) {
               return Promise.reject(this._parserError);
             }
-            return Promise.resolve({ value: undefined as any, done: true });
+            return Promise.resolve({ value: undefined, done: true });
           }
 
-          return new Promise<IteratorResult<ZipEntry>>((resolve, reject) => {
+          return new Promise<IteratorResult<ZipEntry, undefined>>((resolve, reject) => {
             this._entryWaiter = { resolve, reject };
           });
         },
 
-        return: (): Promise<IteratorResult<ZipEntry>> => {
+        return: (): Promise<IteratorResult<ZipEntry, undefined>> => {
           this._entriesDone = true;
           this._entryQueue.length = 0;
           this._entryWaiter = null;
-          return Promise.resolve({ value: undefined as any, done: true });
+          return Promise.resolve({ value: undefined, done: true });
+        },
+
+        async [Symbol.asyncDispose](): Promise<void> {
+          await iterator.return?.();
         },
 
         [Symbol.asyncIterator]() {

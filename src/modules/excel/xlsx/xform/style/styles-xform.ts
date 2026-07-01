@@ -1,5 +1,6 @@
-import { Enums } from "@excel/enums";
+import { Enums } from "@excel/core/enums";
 import { ExcelNotSupportedError } from "@excel/errors";
+import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
@@ -9,41 +10,86 @@ import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { StyleXform } from "@excel/xlsx/xform/style/style-xform";
+import type { SaxTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // custom numfmt ids start here
 const NUMFMT_BASE = 164;
 
+/**
+ * The style-manager model. Each collection is dual-mode: in the write/manager
+ * role it holds pre-rendered XML fragments (`_addFont` etc. push `toXml(...)`);
+ * in the parse/read role (and the mock) the same arrays hold model objects.
+ * The unions capture both; the few mode-specific access points cast locally.
+ */
 interface StylesModel {
-  styles?: any[];
-  numFmts?: any[];
-  fonts?: any[];
-  borders?: any[];
-  fills?: any[];
-  dxfs?: any[];
+  styles?: (string | StyleRef)[];
+  numFmts?: (string | { id: number; formatCode: string })[];
+  fonts?: (string | Partial<Font>)[];
+  borders?: (string | Partial<Borders>)[];
+  fills?: (string | Fill)[];
+  dxfs?: DxfStyle[];
 }
+
+/** xf-level boolean attributes (pivotButton + apply* flags). */
+interface XfFlags {
+  pivotButton?: boolean;
+  applyNumberFormat?: boolean;
+  applyFont?: boolean;
+  applyFill?: boolean;
+  applyBorder?: boolean;
+  applyAlignment?: boolean;
+  applyProtection?: boolean;
+}
+
+/** Internal xf reference: a cell style expressed as indices into the collections. */
+interface StyleRef extends XfFlags {
+  numFmtId?: number;
+  fontId?: number;
+  fillId?: number;
+  borderId?: number;
+  xfId?: number;
+  alignment?: Partial<Alignment>;
+  protection?: Partial<Protection>;
+  checkbox?: boolean;
+  xfComplementIndex?: number;
+}
+
+/**
+ * A built style model: the public {@link Style} plus the xf-level flags that the
+ * read path preserves for round-tripping. `font`/`border`/`fill` are optional
+ * here because they are filled in incrementally while building from a StyleRef.
+ */
+type StyleModelEntry = Partial<Style> & XfFlags;
+
+/** A differential-formatting style: a cell style plus a registered numFmtId. */
+type DxfStyle = Partial<Style> & { numFmtId?: number };
 
 interface StyleIndex {
   style?: { [key: string]: number };
-  numFmt?: { [key: string]: number };
+  // Dual-mode: in the write/manager role this maps formatCode→id
+  // (`{ [code: string]: number }`); in the parse/read role it is rebuilt as the
+  // inverse id→formatCode (`Record<string, string>`). The few mode-specific
+  // access points narrow with a single local cast.
+  numFmt?: { [key: string]: number } | Record<string, string>;
   numFmtNextId?: number;
   font?: { [key: string]: number };
   border?: { [key: string]: number };
   fill?: { [key: string]: number };
-  model?: any[];
+  model?: StyleModelEntry[];
 }
 
 // =============================================================================
 // StylesXform is used to generate and parse the styles.xml file
 // it manages the collections of fonts, number formats, alignments, etc
 class StylesXform extends BaseXform {
-  declare public map: { [key: string]: any };
-  declare public model: any;
+  declare public map: Record<string, BaseXform>;
+  declare public model: StylesModel;
   declare private index?: StyleIndex;
-  declare private weakMap?: WeakMap<any, number>;
+  declare private weakMap?: WeakMap<object, number>;
   declare private _hasCheckboxes?: boolean;
-  declare public defaultFont?: any;
-  declare public parser: any;
+  declare public defaultFont?: Partial<Font>;
+  declare public parser?: BaseXform;
   static Mock: typeof StylesXform;
 
   constructor(initialise?: boolean) {
@@ -131,11 +177,11 @@ class StylesXform extends BaseXform {
    * Set the default font to use when no font is explicitly specified.
    * This preserves the original file's default font during round-trip.
    */
-  setDefaultFont(font: any): void {
+  setDefaultFont(font: Partial<Font> | undefined): void {
     this.defaultFont = font;
   }
 
-  render(xmlStream: any, model?: StylesModel): void {
+  render(xmlStream: XmlSink, model?: StylesModel): void {
     const renderModel = model || this.model;
     //
     //   <fonts count="2" x14ac:knownFonts="1">
@@ -147,8 +193,8 @@ class StylesXform extends BaseXform {
       // model has been built by style manager role (contains xml)
       if (renderModel.numFmts && renderModel.numFmts.length) {
         xmlStream.openNode("numFmts", { count: renderModel.numFmts.length });
-        renderModel.numFmts.forEach((numFmtXml: string) => {
-          xmlStream.writeRaw(numFmtXml);
+        renderModel.numFmts.forEach(numFmtXml => {
+          xmlStream.writeRaw(numFmtXml as string);
         });
         xmlStream.closeNode();
       }
@@ -166,20 +212,20 @@ class StylesXform extends BaseXform {
         );
       }
       xmlStream.openNode("fonts", { count: renderModel.fonts!.length, "x14ac:knownFonts": 1 });
-      renderModel.fonts!.forEach((fontXml: string) => {
-        xmlStream.writeRaw(fontXml);
+      renderModel.fonts!.forEach(fontXml => {
+        xmlStream.writeRaw(fontXml as string);
       });
       xmlStream.closeNode();
 
       xmlStream.openNode("fills", { count: renderModel.fills!.length });
-      renderModel.fills!.forEach((fillXml: string) => {
-        xmlStream.writeRaw(fillXml);
+      renderModel.fills!.forEach(fillXml => {
+        xmlStream.writeRaw(fillXml as string);
       });
       xmlStream.closeNode();
 
       xmlStream.openNode("borders", { count: renderModel.borders!.length });
-      renderModel.borders!.forEach((borderXml: string) => {
-        xmlStream.writeRaw(borderXml);
+      renderModel.borders!.forEach(borderXml => {
+        xmlStream.writeRaw(borderXml as string);
       });
       xmlStream.closeNode();
 
@@ -188,8 +234,8 @@ class StylesXform extends BaseXform {
       ]);
 
       xmlStream.openNode("cellXfs", { count: renderModel.styles!.length });
-      renderModel.styles!.forEach((styleXml: string) => {
-        xmlStream.writeRaw(styleXml);
+      renderModel.styles!.forEach(styleXml => {
+        xmlStream.writeRaw(styleXml as string);
       });
       xmlStream.closeNode();
     } else {
@@ -214,7 +260,7 @@ class StylesXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: SaxTag): boolean {
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
@@ -248,9 +294,10 @@ class StylesXform extends BaseXform {
     switch (name) {
       case "styleSheet": {
         this.model = {};
-        const add = (propName: string, xform: any): void => {
-          if (xform.model && xform.model.length) {
-            this.model[propName] = xform.model;
+        const add = (propName: keyof StylesModel, xform: BaseXform): void => {
+          const xformModel = xform.model as unknown[] | undefined;
+          if (xformModel && xformModel.length) {
+            (this.model as Record<string, unknown>)[propName] = xformModel;
           }
         };
         add("numFmts", this.map.numFmts);
@@ -261,8 +308,9 @@ class StylesXform extends BaseXform {
         add("dxfs", this.map.dxfs);
 
         // preserve the default (first) font from the original file
-        if (this.map.fonts.model && this.map.fonts.model.length > 0) {
-          this.defaultFont = this.map.fonts.model[0];
+        const fontsModel = this.map.fonts.model as Partial<Font>[] | undefined;
+        if (fontsModel && fontsModel.length > 0) {
+          this.defaultFont = fontsModel[0];
         }
 
         // index numFmts
@@ -271,8 +319,8 @@ class StylesXform extends BaseXform {
           numFmt: {}
         };
         if (this.model.numFmts) {
-          const numFmtIndex: any = this.index.numFmt;
-          this.model.numFmts.forEach((numFmt: any) => {
+          const numFmtIndex = this.index.numFmt as Record<number, string>;
+          (this.model.numFmts as { id: number; formatCode: string }[]).forEach(numFmt => {
             numFmtIndex[numFmt.id] = numFmt.formatCode;
           });
         }
@@ -288,13 +336,13 @@ class StylesXform extends BaseXform {
   // add a cell's style model to the collection
   // each style property is processed and cross-referenced, etc.
   // the styleId is returned. Note: cellType is used when numFmt not defined
-  addStyleModel(model: any, cellType?: number): number {
+  addStyleModel(model: Partial<Style>, cellType?: number): number {
     if (!model) {
       return 0;
     }
 
     // if we have no default font, add it here now
-    if (!this.model.fonts.length) {
+    if (!this.model.fonts!.length) {
       // default (zero) font - use preserved font or fallback to Calibri
       this._addFont(
         this.defaultFont || {
@@ -317,10 +365,12 @@ class StylesXform extends BaseXform {
       return this.weakMap.get(model)!;
     }
 
-    const style: any = {};
+    const style: StyleRef = {};
 
     if (model.numFmt) {
-      style.numFmtId = this._addNumFmtStr(model.numFmt);
+      style.numFmtId = this._addNumFmtStr(
+        typeof model.numFmt === "string" ? model.numFmt : model.numFmt.formatCode
+      );
     } else {
       switch (type) {
         case Enums.ValueType.Number:
@@ -389,34 +439,39 @@ class StylesXform extends BaseXform {
 
   // given a styleId (i.e. s="n"), get the cell's style model
   // objects are shared where possible.
-  getStyleModel(id: number): any {
-    // if the style doesn't exist return null
-    const style = this.model.styles[id];
+  getStyleModel(id: number): Style | null {
+    // In the parse/read role the `styles` collection holds StyleRef objects
+    // (not the rendered strings of the write role).
+    const style = this.model.styles![id] as StyleRef | undefined;
     if (!style) {
       return null;
     }
 
     // have we built this model before?
-    let model = this.index!.model![id];
-    if (model) {
-      return model;
+    const existing = this.index!.model![id];
+    if (existing) {
+      return existing as Style;
     }
 
     // build a new model
-    model = this.index!.model![id] = {};
+    const model: StyleModelEntry = (this.index!.model![id] = {});
 
     // -------------------------------------------------------
     // number format
     if (style.numFmtId) {
       const numFmt =
-        (this.index!.numFmt as any)[style.numFmtId] ||
+        (this.index!.numFmt as Record<string, string>)[style.numFmtId] ||
         NumFmtXform.getDefaultFmtCode(style.numFmtId);
       if (numFmt) {
         model.numFmt = numFmt;
       }
     }
 
-    function addStyle(name: string, group: any[], styleId: number): void {
+    function addStyle<K extends "font" | "border" | "fill">(
+      name: K,
+      group: NonNullable<Style[K]>[],
+      styleId?: number
+    ): void {
       if (styleId || styleId === 0) {
         const part = group[styleId];
         if (part) {
@@ -425,9 +480,9 @@ class StylesXform extends BaseXform {
       }
     }
 
-    addStyle("font", this.model.fonts, style.fontId);
-    addStyle("border", this.model.borders, style.borderId);
-    addStyle("fill", this.model.fills, style.fillId);
+    addStyle("font", this.model.fonts as NonNullable<Style["font"]>[], style.fontId);
+    addStyle("border", this.model.borders as NonNullable<Style["border"]>[], style.borderId);
+    addStyle("fill", this.model.fills as NonNullable<Style["fill"]>[], style.fillId);
 
     // -------------------------------------------------------
     // alignment
@@ -443,7 +498,7 @@ class StylesXform extends BaseXform {
 
     // -------------------------------------------------------
     // xf-level attributes (pivotButton, apply* flags)
-    const xfFlags = [
+    const xfFlags: (keyof XfFlags)[] = [
       "pivotButton",
       "applyNumberFormat",
       "applyFont",
@@ -451,28 +506,30 @@ class StylesXform extends BaseXform {
       "applyBorder",
       "applyAlignment",
       "applyProtection"
-    ] as const;
+    ];
     for (const flag of xfFlags) {
       if (style[flag]) {
         model[flag] = true;
       }
     }
 
-    return model;
+    return model as Style;
   }
 
-  addDxfStyle(style: any): number {
+  addDxfStyle(style: DxfStyle): number {
     if (style.numFmt) {
       // register numFmtId to use it during dxf-xform rendering
-      style.numFmtId = this._addNumFmtStr(style.numFmt);
+      style.numFmtId = this._addNumFmtStr(
+        typeof style.numFmt === "string" ? style.numFmt : style.numFmt.formatCode
+      );
     }
 
-    this.model.dxfs.push(style);
-    return this.model.dxfs.length - 1;
+    this.model.dxfs!.push(style);
+    return this.model.dxfs!.length - 1;
   }
 
-  getDxfStyle(id: number): any {
-    return this.model.dxfs[id];
+  getDxfStyle(id: number): DxfStyle | undefined {
+    return this.model.dxfs![id];
   }
 
   // Check if workbook uses checkbox feature
@@ -482,12 +539,12 @@ class StylesXform extends BaseXform {
 
   // =========================================================================
   // Private Interface
-  _addStyle(style: any): number {
+  _addStyle(style: StyleRef): number {
     const xml = this.map.style.toXml(style);
     let index = this.index!.style![xml];
     if (index === undefined) {
-      index = this.index!.style![xml] = this.model.styles.length;
-      this.model.styles.push(xml);
+      index = this.index!.style![xml] = this.model.styles!.length;
+      this.model.styles!.push(xml);
     }
     return index;
   }
@@ -502,49 +559,50 @@ class StylesXform extends BaseXform {
     }
 
     // check if already in
-    index = (this.index!.numFmt as any)[formatCode];
+    const numFmtIndex = this.index!.numFmt as Record<string, number>;
+    index = numFmtIndex[formatCode];
     if (index !== undefined) {
       return index;
     }
 
-    index = (this.index!.numFmt as any)[formatCode] = NUMFMT_BASE + this.model.numFmts.length;
+    index = numFmtIndex[formatCode] = NUMFMT_BASE + this.model.numFmts!.length;
     const xml = this.map.numFmt.toXml({ id: index, formatCode });
-    this.model.numFmts.push(xml);
+    this.model.numFmts!.push(xml);
     return index!;
   }
 
   // =========================================================================
   // Fonts
-  _addFont(font: any): number {
+  _addFont(font: Partial<Font>): number {
     const xml = this.map.font.toXml(font);
     let index = this.index!.font![xml];
     if (index === undefined) {
-      index = this.index!.font![xml] = this.model.fonts.length;
-      this.model.fonts.push(xml);
+      index = this.index!.font![xml] = this.model.fonts!.length;
+      this.model.fonts!.push(xml);
     }
     return index;
   }
 
   // =========================================================================
   // Borders
-  _addBorder(border: any): number {
+  _addBorder(border: Partial<Borders>): number {
     const xml = this.map.border.toXml(border);
     let index = this.index!.border![xml];
     if (index === undefined) {
-      index = this.index!.border![xml] = this.model.borders.length;
-      this.model.borders.push(xml);
+      index = this.index!.border![xml] = this.model.borders!.length;
+      this.model.borders!.push(xml);
     }
     return index;
   }
 
   // =========================================================================
   // Fills
-  _addFill(fill: any): number {
+  _addFill(fill: Fill): number {
     const xml = this.map.fill.toXml(fill);
     let index = this.index!.fill![xml];
     if (index === undefined) {
-      index = this.index!.fill![xml] = this.model.fills.length;
-      this.model.fills.push(xml);
+      index = this.index!.fill![xml] = this.model.fills!.length;
+      this.model.fills!.push(xml);
     }
     return index;
   }
@@ -620,7 +678,7 @@ class StylesXformMock extends StylesXform {
   // Style Manager Interface
 
   // override normal behaviour - consume and dispose
-  parseStream(stream: any): Promise<void> {
+  parseStream(stream: { autodrain(): void }): Promise<void> {
     stream.autodrain();
     return Promise.resolve();
   }
@@ -628,7 +686,7 @@ class StylesXformMock extends StylesXform {
   // add a cell's style model to the collection
   // each style property is processed and cross-referenced, etc.
   // the styleId is returned. Note: cellType is used when numFmt not defined
-  addStyleModel(model: any, cellType?: number): number {
+  addStyleModel(model: Partial<Style>, cellType?: number): number {
     switch (cellType) {
       case Enums.ValueType.Checkbox:
         // Checkbox rendering relies on style extensions (extLst) and workbook-level parts.
@@ -653,16 +711,16 @@ class StylesXformMock extends StylesXform {
       const dateStyle = {
         numFmtId: NumFmtXform.getDefaultFmtId("mm-dd-yy")
       };
-      this._dateStyleId = this.model.styles.length;
-      this.model.styles.push(dateStyle);
+      this._dateStyleId = this.model.styles!.length;
+      this.model.styles!.push(dateStyle);
     }
     return this._dateStyleId!;
   }
 
   // given a styleId (i.e. s="n"), get the cell's style model
   // objects are shared where possible.
-  getStyleModel(/* id */): any {
-    return {};
+  getStyleModel(/* id */): Style | null {
+    return {} as Style;
   }
 }
 

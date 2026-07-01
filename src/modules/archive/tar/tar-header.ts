@@ -4,9 +4,9 @@
  * Functions for encoding and decoding TAR headers.
  */
 
-import { EMPTY_UINT8ARRAY } from "@archive/shared/bytes";
-import { textEncoder, textDecoder } from "@utils/binary";
-
+import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ArchiveError } from "@archive/core/errors";
+import type { TarType } from "@archive/tar/tar-constants";
 import {
   TAR_BLOCK_SIZE,
   TAR_HEADER,
@@ -18,10 +18,10 @@ import {
   DEFAULT_TAR_UID,
   DEFAULT_TAR_GID,
   DEFAULT_TAR_UNAME,
-  DEFAULT_TAR_GNAME,
-  type TarType
-} from "./tar-constants";
-import type { TarEntryInfo } from "./tar-entry-info";
+  DEFAULT_TAR_GNAME
+} from "@archive/tar/tar-constants";
+import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
+import { textEncoder, textDecoder } from "@utils/binary";
 
 /**
  * Encode a string to a fixed-size field (null-terminated if space allows)
@@ -337,7 +337,7 @@ export function decodeHeader(header: Uint8Array): TarEntryInfo | null {
 
   // Validate checksum
   if (!validateChecksum(header)) {
-    throw new Error("Invalid TAR header checksum");
+    throw new ArchiveError("Invalid TAR header checksum");
   }
 
   // Decode basic fields

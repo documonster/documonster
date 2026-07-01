@@ -2,7 +2,7 @@
  * Tests for archive byte utilities.
  */
 
-import { EMPTY_UINT8ARRAY, indexOfUint8ArrayPattern } from "@archive/shared/bytes";
+import { EMPTY_UINT8ARRAY, indexOfUint8ArrayPattern } from "@archive/core/bytes";
 import { describe, it, expect } from "vitest";
 
 describe("bytes", () => {

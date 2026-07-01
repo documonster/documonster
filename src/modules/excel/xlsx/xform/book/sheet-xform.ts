@@ -1,5 +1,6 @@
 import type { WorksheetState } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const VALID_STATES: Set<string> = new Set(["visible", "hidden", "veryHidden"]);
 
@@ -19,7 +20,7 @@ function parseSheetId(raw: string | undefined): number | undefined {
   // doesn't parse to one — empty string, alphabetic, zero, negative,
   // overflowing — must not propagate as `NaN`/`0`/`-1` because those
   // would later seed pseudo keys like `_worksheets["NaN"]` (the same
-  // family of bug as issue #166's `_worksheets["undefined"]`).
+  // family of bug as `_worksheets["undefined"]`).
   return Number.isInteger(id) && id > 0 ? id : undefined;
 }
 
@@ -40,7 +41,7 @@ class WorksheetXform extends BaseXform {
   // declares no relationships binding at all.
   relationshipsPrefixes: readonly string[] = ["r"];
 
-  render(xmlStream: any, model: SheetModel): void {
+  render(xmlStream: XmlSink, model: SheetModel): void {
     xmlStream.leafNode("sheet", {
       name: model.name,
       sheetId: model.id,
@@ -50,7 +51,7 @@ class WorksheetXform extends BaseXform {
     });
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     if (node.name === "sheet") {
       this.model = {
         name: node.attributes.name,
@@ -71,7 +72,7 @@ class WorksheetXform extends BaseXform {
    * (the workbook reconciler) will treat such a `<sheet>` as a
    * half-broken declaration that can't be bound to a worksheet part.
    */
-  private _extractRelId(node: any): string | undefined {
+  private _extractRelId(node: ParseOpenTag): string | undefined {
     const attrs = node.attributes ?? {};
     for (const prefix of this.relationshipsPrefixes) {
       const value = attrs[`${prefix}:id`];

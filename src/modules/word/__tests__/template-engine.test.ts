@@ -10,7 +10,8 @@
 
 import { describe, it, expect } from "vitest";
 
-import { fillTemplate, TemplateError } from "../template/template-engine";
+import { TemplateError } from "../errors";
+import { fillTemplate } from "../template/template-engine";
 import type { DocxDocument, Paragraph, Run } from "../types";
 
 function paraWithText(text: string): Paragraph {
@@ -31,9 +32,8 @@ function readPara(p: Paragraph): string {
 
 function makeDoc(text: string): DocxDocument {
   return {
-    body: [paraWithText(text)],
-    contentTypes: []
-  } as unknown as DocxDocument;
+    body: [paraWithText(text)]
+  };
 }
 
 describe("template engine — inline directives", () => {
@@ -59,9 +59,8 @@ describe("template engine — inline directives", () => {
     // Previously this triggered "Unclosed {{#if show}}" because
     // hasBlockDirective() matched `text.includes(...)`.
     const doc: DocxDocument = {
-      body: [paraWithText("Pre {{#if show}}X{{/if}} Post"), paraWithText("After")],
-      contentTypes: []
-    } as unknown as DocxDocument;
+      body: [paraWithText("Pre {{#if show}}X{{/if}} Post"), paraWithText("After")]
+    };
     const result = fillTemplate(doc, { show: true });
     expect(readPara(result.body[0] as Paragraph)).toBe("Pre X Post");
     expect(readPara(result.body[1] as Paragraph)).toBe("After");
@@ -87,9 +86,8 @@ describe("template engine — block directive whole-paragraph rule", () => {
         paraWithText("- {{.}}"),
         paraWithText("{{/each}}"),
         paraWithText("done")
-      ],
-      contentTypes: []
-    } as unknown as DocxDocument;
+      ]
+    };
     const result = fillTemplate(doc, { xs: [1, 2] });
     const texts = (result.body as Paragraph[]).map(readPara);
     // intro + 2 iterations of "- {value}" + done

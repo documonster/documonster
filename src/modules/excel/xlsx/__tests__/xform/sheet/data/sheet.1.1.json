@@ -93,8 +93,8 @@
         {
           "address": "B6",
           "type": 5,
-          "hyperlink": "https://www.npmjs.com/package/excelts",
-          "text": "excelts",
+          "hyperlink": "https://www.npmjs.com/package/documonster",
+          "text": "documonster",
           "ssId": 7,
           "styleId": 2,
           "style": {
@@ -116,13 +116,13 @@
     {
       "address": "B6",
       "rId": "rId1",
-      "target": "https://www.npmjs.com/package/excelts"
+      "target": "https://www.npmjs.com/package/documonster"
     }
   ],
   "rels": [
     {
       "Id": "rId1",
-      "Target": "https://www.npmjs.com/package/excelts",
+      "Target": "https://www.npmjs.com/package/documonster",
       "TargetMode": "External",
       "Type": "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
     }
@@ -132,14 +132,14 @@
   "rowBreaks": [],
   "tables": [],
   "headerFooter": {
-    "oddHeader": "&C&KCCCCCC&\"Aril\"2 excelts",
-    "oddFooter": "&Lexcelts&C&F&RPage &P",
-    "firstHeader": "Hello Excelts",
+    "oddHeader": "&C&KCCCCCC&\"Aril\"2 documonster",
+    "oddFooter": "&Ldocumonster&C&F&RPage &P",
+    "firstHeader": "Hello Documonster",
     "firstFooter": "Hello World",
     "differentFirst": true,
     "differentOddEven": true,
-    "evenHeader": "&C&KCCCCCC&\"Aril\"3 excelts evenHeader",
-    "evenFooter": "&Lexcelts&C&F&RPage &P evenHeader"
+    "evenHeader": "&C&KCCCCCC&\"Aril\"3 documonster evenHeader",
+    "evenFooter": "&Ldocumonster&C&F&RPage &P evenHeader"
   },
   "conditionalFormattings": []
 }

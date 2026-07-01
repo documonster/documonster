@@ -1,8 +1,16 @@
+import type { Color, Cvfo } from "@excel/types";
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfvoXform } from "@excel/xlsx/xform/sheet/cf/cfvo-xform";
 import { ColorXform } from "@excel/xlsx/xform/style/color-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
-class ColorScaleXform extends CompositeXform {
+interface ColorScaleModel {
+  cfvo: Cvfo[];
+  color: Partial<Color>[];
+}
+
+class ColorScaleXform extends CompositeXform<ColorScaleModel> {
   cfvoXform: CfvoXform;
   colorXform: ColorXform;
 
@@ -19,28 +27,35 @@ class ColorScaleXform extends CompositeXform {
     return "colorScale";
   }
 
-  render(xmlStream: any, model: any): void {
+  render(xmlStream: XmlSink, model: ColorScaleModel): void {
     xmlStream.openNode(this.tag);
 
-    model.cfvo.forEach((cfvo: any) => {
+    model.cfvo.forEach(cfvo => {
       this.cfvoXform.render(xmlStream, cfvo);
     });
-    model.color.forEach((color: any) => {
+    model.color.forEach(color => {
       this.colorXform.render(xmlStream, color);
     });
 
     xmlStream.closeNode();
   }
 
-  createNewModel(node: any): any {
+  createNewModel(_node?: ParseOpenTag): ColorScaleModel {
     return {
       cfvo: [],
       color: []
     };
   }
 
-  onParserClose(name: string, parser: any): void {
-    this.model[name].push(parser.model);
+  onParserClose(name: string, _parser: BaseXform): void {
+    // Append the just-closed child's model. `cfvoXform`/`colorXform` carry
+    // precise model types (Cvfo / Partial<Color>), so no cast is needed; the
+    // child always has a model by the time its close event fires.
+    if (name === "color") {
+      this.model!.color.push(this.colorXform.model!);
+    } else {
+      this.model!.cfvo.push(this.cfvoXform.model!);
+    }
   }
 }
 

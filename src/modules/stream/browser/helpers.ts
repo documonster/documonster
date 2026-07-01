@@ -8,24 +8,24 @@ import type { EventEmitterLike } from "@stream/types";
 // Shared event listener helpers
 // =============================================================================
 
-export const removeEmitterListener = (
+export function removeEmitterListener(
   emitter: EventEmitterLike,
   event: string,
   listener: (...args: any[]) => void
-): void => {
+): void {
   if (typeof emitter.off === "function") {
     emitter.off(event, listener);
   } else if (typeof emitter.removeListener === "function") {
     emitter.removeListener(event, listener);
   }
-};
+}
 
-export const addEmitterListener = (
+export function addEmitterListener(
   emitter: EventEmitterLike,
   event: string,
   listener: (...args: any[]) => void,
   options?: { once?: boolean }
-): (() => void) => {
+): () => void {
   if (options?.once) {
     if (typeof emitter.once === "function") {
       emitter.once(event, listener);
@@ -36,13 +36,13 @@ export const addEmitterListener = (
     emitter.on(event, listener);
   }
   return () => removeEmitterListener(emitter, event, listener);
-};
+}
 
-export const createListenerRegistry = (): {
+export function createListenerRegistry(): {
   add: (emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void) => void;
   once: (emitter: EventEmitterLike, event: string, listener: (...args: any[]) => void) => void;
   cleanup: () => void;
-} => {
+} {
   const listeners: Array<() => void> = [];
 
   return {
@@ -59,4 +59,4 @@ export const createListenerRegistry = (): {
       listeners.length = 0;
     }
   };
-};
+}

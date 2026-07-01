@@ -22,32 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Document,
-  mathRun,
-  mathFraction,
-  mathSqrt,
-  mathRoot,
-  mathSum,
-  mathIntegral,
-  mathProduct,
-  mathSuperScript,
-  mathSubScript,
-  mathSubSuperScript,
-  mathPreSubSuperScript,
-  mathNary,
-  mathFunction,
-  mathLimit,
-  mathDelimiter,
-  mathMatrix,
-  mathAccent,
-  mathBar,
-  mathBorderBox,
-  mathBox,
-  mathGroupChar,
-  mathEquationArray,
-  toBuffer
-} from "../index";
+import { Document, Build, Io } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -65,42 +40,55 @@ Document.addHeading(doc, "Word — Math equations (OMML)", 1);
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "1. Inline & display equations", 2);
 Document.addParagraph(doc, "Mass–energy equivalence:");
-Document.addMath(doc, [mathSuperScript([mathRun("E = mc")], [mathRun("2")])]);
+Document.addMath(doc, [Build.mathSuperScript([Build.mathRun("E = mc")], [Build.mathRun("2")])]);
 
 // ---------------------------------------------------------------------------
 // 2. Fractions
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "2. Fractions", 2);
 Document.addMath(doc, [
-  mathRun("y = "),
-  mathFraction(
-    [mathRun("a"), mathRun(" + "), mathSuperScript([mathRun("x")], [mathRun("2")])],
-    [mathRun("b"), mathRun(" - "), mathRun("c")]
+  Build.mathRun("y = "),
+  Build.mathFraction(
+    [
+      Build.mathRun("a"),
+      Build.mathRun(" + "),
+      Build.mathSuperScript([Build.mathRun("x")], [Build.mathRun("2")])
+    ],
+    [Build.mathRun("b"), Build.mathRun(" - "), Build.mathRun("c")]
   )
 ]);
 // Linear fraction
-Document.addMath(doc, [mathRun("linear: "), mathFraction([mathRun("a")], [mathRun("b")], "lin")]);
+Document.addMath(doc, [
+  Build.mathRun("linear: "),
+  Build.mathFraction([Build.mathRun("a")], [Build.mathRun("b")], "lin")
+]);
 // No-bar (stack)
-Document.addMath(doc, [mathRun("stack: "), mathFraction([mathRun("a")], [mathRun("b")], "noBar")]);
+Document.addMath(doc, [
+  Build.mathRun("stack: "),
+  Build.mathFraction([Build.mathRun("a")], [Build.mathRun("b")], "noBar")
+]);
 
 // ---------------------------------------------------------------------------
 // 3. Roots
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "3. Roots", 2);
 Document.addMath(doc, [
-  mathRun("x = "),
-  mathFraction(
+  Build.mathRun("x = "),
+  Build.mathFraction(
     [
-      mathRun("-b ± "),
-      mathSqrt([mathSuperScript([mathRun("b")], [mathRun("2")]), mathRun(" - 4ac")])
+      Build.mathRun("-b ± "),
+      Build.mathSqrt([
+        Build.mathSuperScript([Build.mathRun("b")], [Build.mathRun("2")]),
+        Build.mathRun(" - 4ac")
+      ])
     ],
-    [mathRun("2a")]
+    [Build.mathRun("2a")]
   )
 ]);
 Document.addMath(doc, [
-  mathRun("∛8 = "),
-  mathRoot([mathRun("3")], [mathRun("8")]),
-  mathRun(" = 2")
+  Build.mathRun("∛8 = "),
+  Build.mathRoot([Build.mathRun("3")], [Build.mathRun("8")]),
+  Build.mathRun(" = 2")
 ]);
 
 // ---------------------------------------------------------------------------
@@ -108,13 +96,13 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "4. Subscript / Superscript", 2);
 Document.addMath(doc, [
-  mathSubScript([mathRun("a")], [mathRun("ij")]),
-  mathRun(" · "),
-  mathSuperScript([mathRun("b")], [mathRun("k")]),
-  mathRun(" · "),
-  mathSubSuperScript([mathRun("c")], [mathRun("p")], [mathRun("q")]),
-  mathRun(" · "),
-  mathPreSubSuperScript([mathRun("X")], [mathRun("a")], [mathRun("b")])
+  Build.mathSubScript([Build.mathRun("a")], [Build.mathRun("ij")]),
+  Build.mathRun(" · "),
+  Build.mathSuperScript([Build.mathRun("b")], [Build.mathRun("k")]),
+  Build.mathRun(" · "),
+  Build.mathSubSuperScript([Build.mathRun("c")], [Build.mathRun("p")], [Build.mathRun("q")]),
+  Build.mathRun(" · "),
+  Build.mathPreSubSuperScript([Build.mathRun("X")], [Build.mathRun("a")], [Build.mathRun("b")])
 ]);
 
 // ---------------------------------------------------------------------------
@@ -122,31 +110,39 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "5. Sums, integrals, products", 2);
 Document.addMath(doc, [
-  mathSum([mathSuperScript([mathRun("k")], [mathRun("2")])], [mathRun("k=1")], [mathRun("n")]),
-  mathRun(" = "),
-  mathFraction([mathRun("n(n+1)(2n+1)")], [mathRun("6")])
+  Build.mathSum(
+    [Build.mathSuperScript([Build.mathRun("k")], [Build.mathRun("2")])],
+    [Build.mathRun("k=1")],
+    [Build.mathRun("n")]
+  ),
+  Build.mathRun(" = "),
+  Build.mathFraction([Build.mathRun("n(n+1)(2n+1)")], [Build.mathRun("6")])
 ]);
 Document.addMath(doc, [
-  mathIntegral([mathSuperScript([mathRun("e")], [mathRun("-x")])], [mathRun("0")], [mathRun("∞")]),
-  mathRun(" dx = 1")
+  Build.mathIntegral(
+    [Build.mathSuperScript([Build.mathRun("e")], [Build.mathRun("-x")])],
+    [Build.mathRun("0")],
+    [Build.mathRun("∞")]
+  ),
+  Build.mathRun(" dx = 1")
 ]);
 Document.addMath(doc, [
-  mathProduct([mathRun("k")], [mathRun("k=1")], [mathRun("n")]),
-  mathRun(" = n!")
+  Build.mathProduct([Build.mathRun("k")], [Build.mathRun("k=1")], [Build.mathRun("n")]),
+  Build.mathRun(" = n!")
 ]);
 // Custom nary — contour integral ∮
-Document.addMath(doc, [mathNary("\u222E", [mathRun("F · dr")])]);
+Document.addMath(doc, [Build.mathNary("\u222E", [Build.mathRun("F · dr")])]);
 
 // ---------------------------------------------------------------------------
 // 6. Functions, limits
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "6. Functions & limits", 2);
-Document.addMath(doc, [mathFunction([mathRun("sin")], [mathRun("(2x + π)")])]);
+Document.addMath(doc, [Build.mathFunction([Build.mathRun("sin")], [Build.mathRun("(2x + π)")])]);
 Document.addMath(doc, [
-  mathLimit([mathRun("lim")], [mathRun("x → 0")]),
-  mathRun(" "),
-  mathFraction([mathRun("sin x")], [mathRun("x")]),
-  mathRun(" = 1")
+  Build.mathLimit([Build.mathRun("lim")], [Build.mathRun("x → 0")]),
+  Build.mathRun(" "),
+  Build.mathFraction([Build.mathRun("sin x")], [Build.mathRun("x")]),
+  Build.mathRun(" = 1")
 ]);
 
 // ---------------------------------------------------------------------------
@@ -154,20 +150,26 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "7. Delimiters", 2);
 Document.addMath(doc, [
-  mathDelimiter([[mathRun("a"), mathRun(", "), mathRun("b")]], { beginChar: "(", endChar: ")" })
+  Build.mathDelimiter([[Build.mathRun("a"), Build.mathRun(", "), Build.mathRun("b")]], {
+    beginChar: "(",
+    endChar: ")"
+  })
 ]);
 Document.addMath(doc, [
-  mathDelimiter([[mathRun("a")], [mathRun("b")], [mathRun("c")]], {
+  Build.mathDelimiter([[Build.mathRun("a")], [Build.mathRun("b")], [Build.mathRun("c")]], {
     beginChar: "{",
     endChar: "}",
     separatorChar: "|"
   })
 ]);
 Document.addMath(doc, [
-  mathDelimiter([[mathRun("v"), mathSubScript([mathRun("")], [mathRun("max")])]], {
-    beginChar: "[",
-    endChar: "]"
-  })
+  Build.mathDelimiter(
+    [[Build.mathRun("v"), Build.mathSubScript([Build.mathRun("")], [Build.mathRun("max")])]],
+    {
+      beginChar: "[",
+      endChar: "]"
+    }
+  )
 ]);
 
 // ---------------------------------------------------------------------------
@@ -175,12 +177,12 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "8. Matrices", 2);
 Document.addMath(doc, [
-  mathDelimiter(
+  Build.mathDelimiter(
     [
       [
-        mathMatrix([
-          [[mathRun("a")], [mathRun("b")]],
-          [[mathRun("c")], [mathRun("d")]]
+        Build.mathMatrix([
+          [[Build.mathRun("a")], [Build.mathRun("b")]],
+          [[Build.mathRun("c")], [Build.mathRun("d")]]
         ])
       ]
     ],
@@ -188,13 +190,13 @@ Document.addMath(doc, [
   )
 ]);
 Document.addMath(doc, [
-  mathDelimiter(
+  Build.mathDelimiter(
     [
       [
-        mathMatrix([
-          [[mathRun("1")], [mathRun("2")], [mathRun("3")]],
-          [[mathRun("4")], [mathRun("5")], [mathRun("6")]],
-          [[mathRun("7")], [mathRun("8")], [mathRun("9")]]
+        Build.mathMatrix([
+          [[Build.mathRun("1")], [Build.mathRun("2")], [Build.mathRun("3")]],
+          [[Build.mathRun("4")], [Build.mathRun("5")], [Build.mathRun("6")]],
+          [[Build.mathRun("7")], [Build.mathRun("8")], [Build.mathRun("9")]]
         ])
       ]
     ],
@@ -207,23 +209,23 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "9. Accents & decorations", 2);
 Document.addMath(doc, [
-  mathAccent([mathRun("v")], "→"),
-  mathRun(" + "),
-  mathAccent([mathRun("u")], "^"),
-  mathRun(" + "),
-  mathBar([mathRun("z")], "top"),
-  mathRun(" + "),
-  mathBar([mathRun("w")], "bottom")
+  Build.mathAccent([Build.mathRun("v")], "→"),
+  Build.mathRun(" + "),
+  Build.mathAccent([Build.mathRun("u")], "^"),
+  Build.mathRun(" + "),
+  Build.mathBar([Build.mathRun("z")], "top"),
+  Build.mathRun(" + "),
+  Build.mathBar([Build.mathRun("w")], "bottom")
 ]);
 Document.addMath(doc, [
-  mathGroupChar([mathRun("x + y + z")], { char: "\u23DE", position: "top" }),
-  mathRun(" — "),
-  mathGroupChar([mathRun("a · b")], { char: "\u23DF", position: "bottom" })
+  Build.mathGroupChar([Build.mathRun("x + y + z")], { char: "\u23DE", position: "top" }),
+  Build.mathRun(" — "),
+  Build.mathGroupChar([Build.mathRun("a · b")], { char: "\u23DF", position: "bottom" })
 ]);
 Document.addMath(doc, [
-  mathBorderBox([mathRun("answer = 42")], { strikeTlBr: false }),
-  mathRun(" "),
-  mathBox([mathRun("just a box")])
+  Build.mathBorderBox([Build.mathRun("answer = 42")], { strikeTlBr: false }),
+  Build.mathRun(" "),
+  Build.mathBox([Build.mathRun("just a box")])
 ]);
 
 // ---------------------------------------------------------------------------
@@ -231,10 +233,10 @@ Document.addMath(doc, [
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "10. Equation array", 2);
 Document.addMath(doc, [
-  mathEquationArray([
-    [mathRun("x = a + b")],
-    [mathRun("  = a + (c - d)")],
-    [mathRun("  = (a + c) - d")]
+  Build.mathEquationArray([
+    [Build.mathRun("x = a + b")],
+    [Build.mathRun("  = a + (c - d)")],
+    [Build.mathRun("  = (a + c) - d")]
   ])
 ]);
 
@@ -245,16 +247,21 @@ Document.addHeading(doc, "Edge cases", 2);
 Document.addMath(doc, []); // empty math block
 Document.addMath(doc, [
   // very deep nesting: a fraction inside a sum inside an integral
-  mathIntegral(
+  Build.mathIntegral(
     [
-      mathSum(
-        [mathFraction([mathSuperScript([mathRun("k")], [mathRun("2")])], [mathRun("k!")])],
-        [mathRun("k=0")],
-        [mathRun("∞")]
+      Build.mathSum(
+        [
+          Build.mathFraction(
+            [Build.mathSuperScript([Build.mathRun("k")], [Build.mathRun("2")])],
+            [Build.mathRun("k!")]
+          )
+        ],
+        [Build.mathRun("k=0")],
+        [Build.mathRun("∞")]
       )
     ],
-    [mathRun("0")],
-    [mathRun("1")]
+    [Build.mathRun("0")],
+    [Build.mathRun("1")]
   )
 ]);
 
@@ -262,6 +269,6 @@ Document.addMath(doc, [
 // adjacent to text paragraphs (Word treats mathBlock as its own paragraph).
 Document.addParagraph(doc, "End of math examples.");
 
-const buf = await toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(Document.build(doc));
 fs.writeFileSync(path.join(outDir, "12-math.docx"), buf);
 console.log(`  → 12-math.docx (${buf.length} bytes)`);

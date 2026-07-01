@@ -8,15 +8,15 @@
  */
 
 import { zip } from "@archive/create-archive";
-import { XmlWriter } from "@xml/writer";
-
-import { ContentType, RelType, PartPath, STD_DOC_ATTRIBUTES } from "../constants";
-import { type Mutable, sanitizeMediaFileName, sanitizeUrl } from "../core/internal-utils";
-import { getFileExt, getPartRelsPath } from "../core/opc-paths";
-import { isRun } from "../core/text-utils";
-import { walkBlocks } from "../core/walker";
-import { DocxWriteError } from "../errors";
-import { resolveSecurityPolicy, type WordSecurityPolicy } from "../security/policy";
+import { ContentType, RelType, PartPath, STD_DOC_ATTRIBUTES } from "@word/constants";
+import type { Mutable } from "@word/core/internal-utils";
+import { sanitizeMediaFileName, sanitizeUrl } from "@word/core/internal-utils";
+import { getFileExt, getPartRelsPath } from "@word/core/opc-paths";
+import { isRun } from "@word/core/text-utils";
+import { walkBlocks } from "@word/core/walker";
+import { DocxWriteError } from "@word/errors";
+import type { WordSecurityPolicy } from "@word/security/policy";
+import { resolveSecurityPolicy } from "@word/security/policy";
 import type {
   DocxDocument,
   BodyContent,
@@ -36,21 +36,25 @@ import type {
   EmbeddedFont,
   ImageDef,
   SectionProperties
-} from "../types";
-import { renderChartPart } from "./chart-writer";
-import { renderComments, renderCommentsExtended } from "./comment-writer";
+} from "@word/types";
+import { renderChartPart } from "@word/writer/chart-writer";
+import { renderComments, renderCommentsExtended } from "@word/writer/comment-writer";
 import {
   createContentTypes,
   addContentTypeDefault,
   addContentTypeOverride,
   addImageContentTypeDefaults,
   renderContentTypes
-} from "./content-types";
-import { renderDocument } from "./document-writer";
-import { renderFootnotes, renderEndnotes } from "./footnote-writer";
-import { renderGlossaryDocument } from "./glossary-writer";
-import { renderHeader, renderFooter, renderWatermarkHeader } from "./header-footer-writer";
-import { renderNumbering } from "./numbering-writer";
+} from "@word/writer/content-types";
+import { renderDocument } from "@word/writer/document-writer";
+import { renderFootnotes, renderEndnotes } from "@word/writer/footnote-writer";
+import { renderGlossaryDocument } from "@word/writer/glossary-writer";
+import {
+  renderHeader,
+  renderFooter,
+  renderWatermarkHeader
+} from "@word/writer/header-footer-writer";
+import { renderNumbering } from "@word/writer/numbering-writer";
 import {
   renderSettings,
   renderFontTable,
@@ -60,24 +64,25 @@ import {
   renderWebSettings,
   renderPeople,
   renderTheme
-} from "./parts-writer";
+} from "@word/writer/parts-writer";
 import {
   collectChartsFromHeaderFooter,
   collectHyperlinksFromHeaderFooter,
   collectImageRidsFromContent,
   scanChildrenForHyperlinks,
   scanChildrenForImages
-} from "./reference-scanners";
+} from "@word/writer/reference-scanners";
 import {
   createRelationships,
   addRelationship,
   addRelationshipWithId,
   getRelationshipCount,
   renderRelationships
-} from "./relationships";
-import type { RelationshipsState } from "./relationships";
-import { createIdGenerators, createRenderContext } from "./render-context";
-import { renderStyles } from "./styles-writer";
+} from "@word/writer/relationships";
+import type { RelationshipsState } from "@word/writer/relationships";
+import { createIdGenerators, createRenderContext } from "@word/writer/render-context";
+import { renderStyles } from "@word/writer/styles-writer";
+import { XmlWriter } from "@xml/writer";
 
 /** Render XML to string using XmlWriter. */
 function renderXml(renderFn: (xml: XmlWriter) => void): string {
@@ -230,15 +235,12 @@ export interface PackageDocxOptions {
  */
 export async function packageDocx(
   doc: DocxDocument,
-  optionsOrCompressionLevel?: PackageDocxOptions | number
+  options?: PackageDocxOptions
 ): Promise<Uint8Array> {
-  const options: PackageDocxOptions =
-    typeof optionsOrCompressionLevel === "number"
-      ? { compressionLevel: optionsOrCompressionLevel }
-      : (optionsOrCompressionLevel ?? {});
+  const opts: PackageDocxOptions = options ?? {};
   // Create a working copy so we never mutate the caller's doc
   const workDoc = shallowCopyDocForPackaging(doc);
-  return _packageDocxInner(workDoc, options);
+  return _packageDocxInner(workDoc, opts);
 }
 
 /**
@@ -1976,7 +1978,7 @@ async function _packageDocxInner(
       addContentTypeOverride(contentTypes, `/${xlsxPath}`, ContentType.Xlsx);
 
       // Generate and add xlsx asynchronously via Excel module (dynamic import)
-      const promise = import("../bridge/excel-bridge").then(
+      const promise = import("@word/bridge/excel-bridge").then(
         async ({ generateChartEmbeddedXlsx }) => {
           const xlsxData = await generateChartEmbeddedXlsx(chartContent.chart.series);
           archive.add(xlsxPath, xlsxData);

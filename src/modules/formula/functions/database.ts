@@ -2,10 +2,10 @@
  * Database Functions — Native RuntimeValue Implementation
  */
 
-import type { RuntimeValue, ScalarValue } from "../runtime/values";
-import { RVKind, ERRORS, rvNumber, toStringRV, topLeft } from "../runtime/values";
-import { asArray, getCell } from "./_shared";
-import { buildCriteriaPredicateRV } from "./conditional";
+import { asArray, getCell } from "@formula/functions/_shared";
+import { buildCriteriaPredicateRV } from "@formula/functions/conditional";
+import type { RuntimeValue, ScalarValue } from "@formula/runtime/values";
+import { RVKind, ERRORS, rvNumber, toStringRV, topLeft } from "@formula/runtime/values";
 
 /**
  * Collect the field-column values from every database row that satisfies the

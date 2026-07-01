@@ -135,9 +135,9 @@ describe("isDateFmt", () => {
   });
 
   // =========================================================================
-  // The core bug fix: multi-section formats with text fallback (issue #79)
+  // The core bug fix: multi-section formats with text fallback
   // =========================================================================
-  describe("multi-section formats with text fallback (issue #79)", () => {
+  describe("multi-section formats with text fallback", () => {
     it('returns true for "mm/dd/yyyy;@" (date + text fallback)', () => {
       expect(isDateFmt("mm/dd/yyyy;@")).toBe(true);
     });

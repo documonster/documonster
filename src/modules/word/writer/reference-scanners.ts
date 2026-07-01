@@ -8,7 +8,7 @@
  * own relationships.
  */
 
-import { walkBlocks } from "../core/walker";
+import { walkBlocks } from "@word/core/walker";
 import type {
   BodyContent,
   ChartContent,
@@ -17,7 +17,7 @@ import type {
   Paragraph,
   ParagraphChild,
   Run
-} from "../types";
+} from "@word/types";
 
 /** Scan a Run for image rIds. */
 function scanRunForImages(run: Run, out: Set<string>): void {

@@ -1,7 +1,8 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 class AppHeadingPairsXform extends BaseXform {
-  render(xmlStream: any, model: any[]): void {
+  render(xmlStream: XmlSink, model: unknown[]): void {
     xmlStream.openNode("HeadingPairs");
     xmlStream.openNode("vt:vector", { size: 2, baseType: "variant" });
 
@@ -17,7 +18,7 @@ class AppHeadingPairsXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(node: any): boolean {
+  parseOpen(node: ParseOpenTag): boolean {
     // no parsing
     return node.name === "HeadingPairs";
   }

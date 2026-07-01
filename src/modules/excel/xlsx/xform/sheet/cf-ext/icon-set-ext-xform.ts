@@ -2,6 +2,7 @@ import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { CfIconExtXform } from "@excel/xlsx/xform/sheet/cf-ext/cf-icon-ext-xform";
 import { CfvoExtXform } from "@excel/xlsx/xform/sheet/cf-ext/cfvo-ext-xform";
+import type { ParseOpenTag } from "@xml/types";
 
 class IconSetExtXform extends CompositeXform {
   cfvoXform: CfvoExtXform;
@@ -42,7 +43,7 @@ class IconSetExtXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel({ attributes }) {
+  createNewModel({ attributes }: ParseOpenTag) {
     return {
       cfvo: [],
       iconSet: BaseXform.toStringValue(attributes.iconSet, "3TrafficLights"),

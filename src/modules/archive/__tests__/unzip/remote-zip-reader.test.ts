@@ -1,6 +1,7 @@
-import { BufferReader } from "@archive/io/random-access";
+import { createBufferReader } from "@archive/io/random-access";
 import { RemoteZipReader, Crc32MismatchError } from "@archive/unzip/remote-zip-reader";
-import { createZip, type ZipEntry } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { createZip } from "@archive/zip/zip-bytes";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, it, expect, vi } from "vitest";
 
@@ -23,7 +24,7 @@ describe("RemoteZipReader", () => {
       };
 
       const zipData = await createZip(toEntries(testFiles));
-      const bufferReader = new BufferReader(zipData);
+      const bufferReader = createBufferReader(zipData);
       const reader = await RemoteZipReader.fromReader(bufferReader);
 
       const entries = reader.getEntries();
@@ -39,7 +40,7 @@ describe("RemoteZipReader", () => {
 
     it("should handle empty ZIP files", async () => {
       const zipData = await createZip([]);
-      const bufferReader = new BufferReader(zipData);
+      const bufferReader = createBufferReader(zipData);
       const reader = await RemoteZipReader.fromReader(bufferReader);
 
       const entries = reader.getEntries();
@@ -56,7 +57,7 @@ describe("RemoteZipReader", () => {
       };
 
       const zipData = await createZip(toEntries(testFiles));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const files = reader.listFiles();
       expect(files.sort()).toEqual(["a.txt", "b.txt", "dir/c.txt"].sort());
@@ -66,7 +67,7 @@ describe("RemoteZipReader", () => {
 
     it("should check if entry exists", async () => {
       const zipData = await createZip(toEntries({ "exists.txt": "data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       expect(reader.hasEntry("exists.txt")).toBe(true);
       expect(reader.hasEntry("not-exists.txt")).toBe(false);
@@ -76,7 +77,7 @@ describe("RemoteZipReader", () => {
 
     it("should get entry by path", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "content" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const entry = reader.getEntry("test.txt");
       expect(entry).toBeDefined();
@@ -92,7 +93,7 @@ describe("RemoteZipReader", () => {
       const zipData = await createZip(toEntries({ "a.txt": "A" }), {
         comment: "Test archive comment"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       expect(reader.getZipComment()).toBe("Test archive comment");
 
@@ -104,7 +105,7 @@ describe("RemoteZipReader", () => {
     it("should extract text file content correctly", async () => {
       const originalContent = "Hello, World!";
       const zipData = await createZip(toEntries({ "test.txt": originalContent }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const extractedData = await reader.extract("test.txt");
       expect(extractedData).not.toBeNull();
@@ -117,7 +118,7 @@ describe("RemoteZipReader", () => {
     it("should extract binary content correctly", async () => {
       const binaryData = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0xfd]);
       const zipData = await createZip(toEntries({ "binary.bin": binaryData }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const extractedData = await reader.extract("binary.bin");
       expect(extractedData).not.toBeNull();
@@ -128,7 +129,7 @@ describe("RemoteZipReader", () => {
 
     it("should return null for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "exists.txt": "data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.extract("not-exists.txt");
       expect(result).toBeNull();
@@ -141,7 +142,7 @@ describe("RemoteZipReader", () => {
         { name: "folder/", data: new Uint8Array(0) },
         { name: "folder/file.txt", data: new TextEncoder().encode("content") }
       ]);
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const dirData = await reader.extract("folder/");
       expect(dirData).toEqual(new Uint8Array(0));
@@ -155,7 +156,7 @@ describe("RemoteZipReader", () => {
       const zipData = await createZip(toEntries({ "compressed.txt": content }), {
         level: 6 // Default compression
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       // Just verify extraction works
       const extractedData = await reader.extract("compressed.txt");
@@ -169,7 +170,7 @@ describe("RemoteZipReader", () => {
       const zipData = await createZip(toEntries({ "stored.txt": content }), {
         level: 0 // Store (no compression)
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const entry = reader.getEntry("stored.txt");
       // Compression method 0 = STORE
@@ -186,7 +187,7 @@ describe("RemoteZipReader", () => {
     it("should extract entry directly", async () => {
       const content = "Direct extraction test";
       const zipData = await createZip(toEntries({ "direct.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const entry = reader.getEntry("direct.txt");
       expect(entry).toBeDefined();
@@ -209,7 +210,7 @@ describe("RemoteZipReader", () => {
         { name: "folder/", data: new Uint8Array(0) },
         ...toEntries(testFiles)
       ]);
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.extractAll();
 
@@ -231,7 +232,7 @@ describe("RemoteZipReader", () => {
         "c.txt": "Content C"
       };
       const zipData = await createZip(toEntries(testFiles));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.extractMultiple(["a.txt", "c.txt"]);
 
@@ -245,7 +246,7 @@ describe("RemoteZipReader", () => {
 
     it("should skip non-existent entries", async () => {
       const zipData = await createZip(toEntries({ "exists.txt": "data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.extractMultiple(["exists.txt", "missing.txt"]);
 
@@ -264,7 +265,7 @@ describe("RemoteZipReader", () => {
         "b.txt": "B"
       };
       const zipData = await createZip(toEntries(testFiles));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const visited: string[] = [];
       await reader.forEach(async (entry, getData) => {
@@ -285,7 +286,7 @@ describe("RemoteZipReader", () => {
         "c.txt": "C"
       };
       const zipData = await createZip(toEntries(testFiles));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const visited: string[] = [];
       await reader.forEach(async entry => {
@@ -302,7 +303,7 @@ describe("RemoteZipReader", () => {
 
     it("should lazily load data only when getData is called", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       let dataRequested = false;
       await reader.forEach(async (entry, getData) => {
@@ -323,7 +324,7 @@ describe("RemoteZipReader", () => {
         { name: "folder/sub/", data: new Uint8Array(0) },
         ...toEntries({ "a.txt": "A", "b.txt": "B", "folder/c.txt": "C" })
       ]);
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       expect(reader.getFileCount()).toBe(3);
       expect(reader.getDirectoryCount()).toBe(2);
@@ -340,7 +341,7 @@ describe("RemoteZipReader", () => {
           "c.txt": "C"
         })
       );
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const txtFiles = reader.filterEntries(e => e.path.endsWith(".txt"));
       expect(txtFiles.length).toBe(2);
@@ -359,7 +360,7 @@ describe("RemoteZipReader", () => {
           "data/sub/c.txt": "D"
         })
       );
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       // Match all .txt files in root
       expect(reader.findEntries("*.txt").map(e => e.path)).toEqual(["file.txt"]);
@@ -390,7 +391,7 @@ describe("RemoteZipReader", () => {
         "b.txt": "B"
       };
       const zipData = await createZip(toEntries(testFiles));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const stats = reader.getStats();
       expect(stats.totalSize).toBe(zipData.length);
@@ -408,7 +409,7 @@ describe("RemoteZipReader", () => {
       const zipData = await createZip(toEntries({ "test.txt": "ZIP64 content" }), {
         zip64: true
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const entries = reader.getEntries();
       expect(entries.length).toBe(1);
@@ -428,7 +429,7 @@ describe("RemoteZipReader", () => {
         password: "password123",
         encryptionMethod: "zipcrypto"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       expect(reader.hasEncryptedEntries()).toBe(true);
 
@@ -446,7 +447,7 @@ describe("RemoteZipReader", () => {
         password,
         encryptionMethod: "zipcrypto"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const data = await reader.extract("secret.txt", password);
       expect(new TextDecoder().decode(data!)).toBe(content);
@@ -462,7 +463,7 @@ describe("RemoteZipReader", () => {
         password,
         encryptionMethod: "zipcrypto"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData), {
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData), {
         password
       });
 
@@ -477,7 +478,7 @@ describe("RemoteZipReader", () => {
         password: "password",
         encryptionMethod: "zipcrypto"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       await expect(reader.extract("secret.txt")).rejects.toThrow(/encrypted/i);
 
@@ -489,7 +490,7 @@ describe("RemoteZipReader", () => {
     it("should throw for invalid ZIP data", async () => {
       const invalidData = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
 
-      await expect(RemoteZipReader.fromReader(new BufferReader(invalidData))).rejects.toThrow(
+      await expect(RemoteZipReader.fromReader(createBufferReader(invalidData))).rejects.toThrow(
         /End of Central Directory not found/i
       );
     });
@@ -499,7 +500,7 @@ describe("RemoteZipReader", () => {
       const validZip = await createZip(toEntries({ "test.txt": "content" }));
       const truncated = validZip.slice(0, 10);
 
-      await expect(RemoteZipReader.fromReader(new BufferReader(truncated))).rejects.toThrow();
+      await expect(RemoteZipReader.fromReader(createBufferReader(truncated))).rejects.toThrow();
     });
   });
 
@@ -654,7 +655,7 @@ describe("RemoteZipReader.open", () => {
     it("should validate CRC32 when checkCrc32 is enabled", async () => {
       const content = "Hello, World!";
       const zipData = await createZip(toEntries({ "test.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       // Should not throw with valid CRC32
       const data = await reader.extract("test.txt", { checkCrc32: true });
@@ -666,7 +667,7 @@ describe("RemoteZipReader.open", () => {
     it("should verify CRC32 using verifyCrc32 method", async () => {
       const content = "Test content for CRC verification";
       const zipData = await createZip(toEntries({ "verify.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.verifyCrc32("verify.txt");
       expect(result).toBe(true);
@@ -680,7 +681,7 @@ describe("RemoteZipReader.open", () => {
     it("should enable CRC32 validation via constructor option", async () => {
       const content = "Constructor CRC test";
       const zipData = await createZip(toEntries({ "test.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData), {
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData), {
         checkCrc32: true
       });
 
@@ -696,7 +697,7 @@ describe("RemoteZipReader.open", () => {
     it("should call onprogress during extraction", async () => {
       const content = "A".repeat(1000);
       const zipData = await createZip(toEntries({ "large.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const progressCalls: Array<{ current: number; total: number }> = [];
       await reader.extract("large.txt", {
@@ -720,7 +721,7 @@ describe("RemoteZipReader.open", () => {
         "file3.txt": "Content 3"
       };
       const zipData = await createZip(toEntries(files));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const progressCalls: Array<{ current: number; total: number }> = [];
       await reader.extractMultiple(["file1.txt", "file2.txt", "file3.txt"], {
@@ -743,7 +744,7 @@ describe("RemoteZipReader.open", () => {
         "c.txt": "CCC"
       };
       const zipData = await createZip(toEntries(files));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const results: Array<{ path: string; data: string }> = [];
       for await (const { entry, getData } of reader.entriesGenerator()) {
@@ -766,7 +767,7 @@ describe("RemoteZipReader.open", () => {
         "c.txt": "CCC"
       };
       const zipData = await createZip(toEntries(files));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       let foundTarget: string | null = null;
       for await (const { entry, getData } of reader.entriesGenerator()) {
@@ -789,7 +790,7 @@ describe("RemoteZipReader.open", () => {
         password,
         encryptionMethod: "zipcrypto"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const isValid = await reader.checkPassword("encrypted.txt", password);
       expect(isValid).toBe(true);
@@ -808,7 +809,7 @@ describe("RemoteZipReader.open", () => {
 
     it("should return null for non-encrypted entries", async () => {
       const zipData = await createZip(toEntries({ "plain.txt": "Plain data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.checkPassword("plain.txt", "anypassword");
       expect(result).toBeNull();
@@ -818,7 +819,7 @@ describe("RemoteZipReader.open", () => {
 
     it("should return null for non-existent entries", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.checkPassword("missing.txt", "password");
       expect(result).toBeNull();
@@ -834,7 +835,7 @@ describe("RemoteZipReader.open", () => {
         level: 0,
         smartStore: false
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const chunks: Uint8Array[] = [];
       const writable = new WritableStream<Uint8Array>({
@@ -866,7 +867,7 @@ describe("RemoteZipReader.open", () => {
         encryptionMethod: "zipcrypto"
       });
 
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const chunks: Uint8Array[] = [];
       const writable = new WritableStream<Uint8Array>({
@@ -889,7 +890,7 @@ describe("RemoteZipReader.open", () => {
 
     it("should return false for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "data" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const writable = new WritableStream<Uint8Array>();
       const success = await reader.extractToStream("missing.txt", writable);
@@ -916,7 +917,7 @@ describe("RemoteZipReader.open", () => {
   describe("verifyCrc32", () => {
     it("should return true for valid CRC32", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "Hello, World!" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.verifyCrc32("test.txt");
       expect(result).toBe(true);
@@ -926,7 +927,7 @@ describe("RemoteZipReader.open", () => {
 
     it("should return null for non-existent entry", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "content" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const result = await reader.verifyCrc32("missing.txt");
       expect(result).toBeNull();
@@ -939,7 +940,7 @@ describe("RemoteZipReader.open", () => {
         password: "password123",
         encryptionMethod: "aes-256"
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       // Check entry is actually AES encrypted
       const entry = reader.getEntry("secret.txt");
@@ -959,7 +960,7 @@ describe("RemoteZipReader.open", () => {
     it("should call onprogress callback", async () => {
       const content = "Test content for progress";
       const zipData = await createZip(toEntries({ "test.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const progressCalls: Array<{ current: number; total: number }> = [];
       await reader.extract("test.txt", {
@@ -979,7 +980,7 @@ describe("RemoteZipReader.open", () => {
     it("should verify CRC32 when checkCrc32 option is true", async () => {
       const content = "Content with CRC check";
       const zipData = await createZip(toEntries({ "test.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       // Should not throw - CRC is valid
       const data = await reader.extract("test.txt", { checkCrc32: true });
@@ -992,7 +993,7 @@ describe("RemoteZipReader.open", () => {
   describe("close", () => {
     it("should be callable multiple times without error", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "content" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       await expect(reader.close()).resolves.toBeUndefined();
       await expect(reader.close()).resolves.toBeUndefined();
@@ -1002,7 +1003,7 @@ describe("RemoteZipReader.open", () => {
   describe("constructor password", () => {
     it("should use constructor checkCrc32 option as default", async () => {
       const zipData = await createZip(toEntries({ "test.txt": "Content" }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData), {
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData), {
         checkCrc32: true
       });
 
@@ -1021,7 +1022,7 @@ describe("RemoteZipReader.open", () => {
         "b.txt": "Content B"
       };
       const zipData = await createZip(toEntries(files));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const progressCalls: Array<{ current: number; total: number }> = [];
       const results = await reader.extractMultiple(["a.txt", "b.txt"], {
@@ -1044,7 +1045,7 @@ describe("RemoteZipReader.open", () => {
         "b.txt": "B"
       };
       const zipData = await createZip(toEntries(files));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const results: string[] = [];
       await reader.forEach(async (entry, data) => {
@@ -1065,7 +1066,7 @@ describe("RemoteZipReader.open", () => {
         { name: "folder/", data: new Uint8Array(0) },
         { name: "folder/file.txt", data: new TextEncoder().encode("content") }
       ]);
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const entries = reader.getEntries();
       expect(entries.length).toBe(2);
@@ -1090,7 +1091,7 @@ describe("RemoteZipReader.open", () => {
       const zipData = await createZip(toEntries({ "compressed.txt": content }), {
         level: 6 // Force DEFLATE compression
       });
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const data = await reader.extract("compressed.txt");
       expect(new TextDecoder().decode(data!)).toBe(content);
@@ -1104,7 +1105,7 @@ describe("RemoteZipReader.open", () => {
       // Create a larger content to ensure multiple progress calls
       const content = "X".repeat(10000);
       const zipData = await createZip(toEntries({ "large.txt": content }));
-      const reader = await RemoteZipReader.fromReader(new BufferReader(zipData));
+      const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
       const progressCalls: Array<{ current: number; total: number }> = [];
       await reader.extract("large.txt", {

@@ -19,12 +19,13 @@
  * `xlsx.readFile` / `xlsx.writeFile`) instead of the browser base class.
  * Without the generic, the inherited methods would be typed against the
  * browser `Workbook` and Node consumers chaining off the returned value
- * would lose access to the Node-only file APIs — issue #160.
+ * would lose access to the Node-only file APIs.
  */
 
-import { Parse, type ZipEntry } from "@archive/unzip/stream";
+import type { ZipEntry } from "@archive/unzip/stream";
+import { Parse } from "@archive/unzip/stream";
+import type { Workbook } from "@excel/core/workbook";
 import { ExcelFileError } from "@excel/errors";
-import type { Workbook } from "@excel/workbook";
 import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
 import { XLSX as XLSXBase } from "@excel/xlsx/xlsx.browser";
 import { Writable, pipeline } from "@stream";

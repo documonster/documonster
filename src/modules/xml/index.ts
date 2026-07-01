@@ -51,39 +51,17 @@ export type {
   // Conversion options
   ToPlainObjectOptions,
   ParseXmlToObjectOptions
-} from "./types";
+} from "@xml/types";
 
 // =============================================================================
-// Encoding / Decoding
+// `Xml` domain namespace — encode/decode, writers, parsers, query
+// (tree-shaken via `export * as`)
 // =============================================================================
 
-export {
-  xmlEncode,
-  xmlDecode,
-  xmlEncodeAttr,
-  validateXmlName,
-  encodeCData,
-  validateCommentText
-} from "./encode";
-
-// =============================================================================
-// Writers
-// =============================================================================
-
-export { XmlWriter, StdDocAttributes } from "./writer";
-export { XmlStreamWriter } from "./stream-writer";
-
-// =============================================================================
-// Parsers
-// =============================================================================
-
-export { SaxParser, parseSax, saxStream } from "./sax";
-export { parseXml, findChild, findChildren, textContent, attr, walk, toPlainObject } from "./dom";
-export { parseXmlToObject } from "./to-object";
-export { query, queryAll } from "./query";
+export * as Xml from "@xml/surface/xml";
 
 // =============================================================================
 // Errors
 // =============================================================================
 
-export { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "./errors";
+export { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "@xml/errors";

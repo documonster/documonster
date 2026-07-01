@@ -2,7 +2,7 @@
  * Cell address encoding/decoding utilities (0-indexed)
  *
  * These functions use 0-indexed coordinates (column A = 0, row 1 = 0),
- * matching the convention used by SheetJS and most spreadsheet APIs.
+ * matching the convention used by most spreadsheet APIs.
  *
  * @module
  */

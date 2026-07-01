@@ -1,4 +1,4 @@
-import { Range } from "@excel/range";
+import { rangeCreate, rangeTl } from "@excel/core/range";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { CompositeXform } from "@excel/xlsx/xform/composite-xform";
 import { ColorScaleXform } from "@excel/xlsx/xform/sheet/cf/color-scale-xform";
@@ -6,6 +6,7 @@ import { DatabarXform } from "@excel/xlsx/xform/sheet/cf/databar-xform";
 import { ExtLstRefXform } from "@excel/xlsx/xform/sheet/cf/ext-lst-ref-xform";
 import { FormulaXform } from "@excel/xlsx/xform/sheet/cf/formula-xform";
 import { IconSetXform } from "@excel/xlsx/xform/sheet/cf/icon-set-xform";
+import type { ParseOpenTag } from "@xml/types";
 
 const extIcons = {
   "3Triangles": true,
@@ -13,13 +14,13 @@ const extIcons = {
   "5Boxes": true
 };
 
-const getTextFormula = model => {
+function getTextFormula(model) {
   if (model.formulae && model.formulae[0]) {
     return model.formulae[0];
   }
 
-  const range = new Range(model.ref);
-  const { tl } = range;
+  const range = rangeCreate(model.ref);
+  const tl = rangeTl(range);
   switch (model.operator) {
     case "containsText":
       return `NOT(ISERROR(SEARCH("${model.text}",${tl})))`;
@@ -34,15 +35,15 @@ const getTextFormula = model => {
     default:
       return undefined;
   }
-};
+}
 
-const getTimePeriodFormula = model => {
+function getTimePeriodFormula(model) {
   if (model.formulae && model.formulae[0]) {
     return model.formulae[0];
   }
 
-  const range = new Range(model.ref);
-  const { tl } = range;
+  const range = rangeCreate(model.ref);
+  const tl = rangeTl(range);
   switch (model.timePeriod) {
     case "thisWeek":
       return `AND(TODAY()-ROUNDDOWN(${tl},0)<=WEEKDAY(TODAY())-1,ROUNDDOWN(${tl},0)-TODAY()<=7-WEEKDAY(TODAY()))`;
@@ -67,9 +68,9 @@ const getTimePeriodFormula = model => {
     default:
       return undefined;
   }
-};
+}
 
-const opType = attributes => {
+function opType(attributes) {
   const { type, operator } = attributes;
   switch (type) {
     case "containsText":
@@ -85,7 +86,7 @@ const opType = attributes => {
     default:
       return { type, operator };
   }
-};
+}
 
 class CfRuleXform extends CompositeXform {
   databarXform: DatabarXform;
@@ -270,7 +271,7 @@ class CfRuleXform extends CompositeXform {
     xmlStream.closeNode();
   }
 
-  createNewModel({ attributes }) {
+  createNewModel({ attributes }: ParseOpenTag) {
     return {
       ...opType(attributes),
       dxfId: BaseXform.toIntValue(attributes.dxfId),

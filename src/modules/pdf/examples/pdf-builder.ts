@@ -23,11 +23,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PdfDocumentBuilder, PdfEditor, readPdf, parseSvgPath } from "../index";
+import { Pdf } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../tmp/pdf-builder-examples"
+  "../../../../tmp/pdf-examples"
 );
 fs.mkdirSync(outDir, { recursive: true });
 
@@ -36,14 +36,14 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
-  doc.setMetadata({ title: "Builder Basics", author: "excelts" });
+  const doc = new Pdf.Builder();
+  doc.setMetadata({ title: "Builder Basics", author: "documonster" });
 
   const page = doc.addPage({ width: 595, height: 842 }); // A4
 
   // Title
   page.drawText("PDF Document Builder", { x: 72, y: 770, fontSize: 24, bold: true });
-  page.drawText("Built from scratch with excelts", {
+  page.drawText("Built from scratch with documonster", {
     x: 72,
     y: 745,
     fontSize: 12,
@@ -124,7 +124,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
 
   page.drawText("SVG Path Rendering", { x: 72, y: 770, fontSize: 20, bold: true });
@@ -156,7 +156,7 @@ fs.mkdirSync(outDir, { recursive: true });
   page.drawText("Cubic Bezier", { x: 390, y: 480, fontSize: 10 });
 
   // parseSvgPath — programmatic access
-  const starPath = parseSvgPath(
+  const starPath = Pdf.parseSvgPath(
     "M 400 350 L 410 310 L 440 310 L 415 290 L 425 250 L 400 270 L 375 250 L 385 290 L 360 310 L 390 310 Z"
   );
   page.drawPath(starPath, { fill: { r: 0.8, g: 0.6, b: 0 } });
@@ -171,7 +171,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
 
   page.drawText("Annotation Examples", { x: 72, y: 770, fontSize: 20, bold: true });
@@ -256,7 +256,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
 
   page.drawText("Form Field Creation", { x: 72, y: 770, fontSize: 20, bold: true });
@@ -342,7 +342,7 @@ fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "04-form-fields.pdf"), bytes);
 
   // Verify form fields are readable
-  const result = await readPdf(bytes);
+  const result = await Pdf.read(bytes);
   console.log(
     `4. 04-form-fields.pdf — ${result.formFields.length} form fields created:`,
     result.formFields.map(f => `${f.name}(${f.type})`).join(", ")
@@ -354,7 +354,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   doc.setMetadata({ title: "Report with TOC" });
 
   // Page 1: TOC placeholder (will be generated)
@@ -395,7 +395,7 @@ fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "05-bookmarks-toc.pdf"), bytes);
 
   // Verify bookmarks are readable
-  await readPdf(bytes, { extractBookmarks: true } as never);
+  await Pdf.read(bytes, { extractBookmarks: true } as never);
   console.log(`5. 05-bookmarks-toc.pdf — ${chapters.length} chapters with bookmarks + TOC`);
 }
 
@@ -404,10 +404,10 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   doc.setMetadata({
     title: "PDF/A Compliant Document",
-    author: "excelts",
+    author: "documonster",
     subject: "Archive-safe document"
   });
   doc.setPdfACompliance();
@@ -436,7 +436,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
   page.drawText("This PDF is encrypted with AES-256", { x: 72, y: 770, fontSize: 16 });
   page.drawText("Owner password: admin, User password: reader", {
@@ -456,7 +456,7 @@ fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "06b-encrypted.pdf"), bytes);
 
   // Verify it's encrypted and readable with password
-  const result = await readPdf(bytes, { password: "reader" });
+  const result = await Pdf.read(bytes, { password: "reader" });
   console.log(
     `6b. 06b-encrypted.pdf — encrypted: ${result.metadata.encrypted}, text: "${result.text.slice(0, 40)}..."`
   );
@@ -499,14 +499,14 @@ fs.mkdirSync(outDir, { recursive: true });
 
 {
   // First create a base PDF
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
   page.drawText("Original Document", { x: 72, y: 770, fontSize: 20 });
   page.drawText("This is the original content.", { x: 72, y: 740, fontSize: 12 });
   const basePdf = await doc.build();
 
   // Now edit it
-  const editor = PdfEditor.load(basePdf);
+  const editor = Pdf.Editor.load(basePdf);
   const editPage = editor.getPage(0);
 
   // Add overlay text
@@ -558,7 +558,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 {
   // Create a 4-page source PDF
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   for (let i = 1; i <= 4; i++) {
     const page = doc.addPage();
     page.drawText(`Page ${i}`, { x: 250, y: 420, fontSize: 36, bold: true });
@@ -567,17 +567,17 @@ fs.mkdirSync(outDir, { recursive: true });
 
   // Remove page 2
   {
-    const editor = PdfEditor.load(sourcePdf);
+    const editor = Pdf.Editor.load(sourcePdf);
     editor.removePage(1); // 0-indexed
     const result = await editor.save();
-    const read = await readPdf(result);
+    const read = await Pdf.read(result);
     fs.writeFileSync(path.join(outDir, "08a-removed-page2.pdf"), result);
     console.log(`8a. 08a-removed-page2.pdf — ${read.metadata.pageCount} pages (removed page 2)`);
   }
 
   // Rotate page 1 by 90 degrees
   {
-    const editor = PdfEditor.load(sourcePdf);
+    const editor = Pdf.Editor.load(sourcePdf);
     editor.rotatePage(0, 90);
     const result = await editor.save();
     fs.writeFileSync(path.join(outDir, "08b-rotated.pdf"), result);
@@ -586,7 +586,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
   // Split into individual pages
   {
-    const editor = PdfEditor.load(sourcePdf);
+    const editor = Pdf.Editor.load(sourcePdf);
     const pages = await editor.splitPages();
     for (let i = 0; i < pages.length; i++) {
       fs.writeFileSync(path.join(outDir, `08c-split-page${i + 1}.pdf`), pages[i]);
@@ -596,11 +596,11 @@ fs.mkdirSync(outDir, { recursive: true });
 
   // Add a new blank page
   {
-    const editor = PdfEditor.load(sourcePdf);
+    const editor = Pdf.Editor.load(sourcePdf);
     const newPage = editor.addPage();
     newPage.drawText("New Page Added by Editor", { x: 72, y: 770, fontSize: 18 });
     const result = await editor.save();
-    const read = await readPdf(result);
+    const read = await Pdf.read(result);
     fs.writeFileSync(path.join(outDir, "08d-added-page.pdf"), result);
     console.log(`8d. 08d-added-page.pdf — ${read.metadata.pageCount} pages (1 new)`);
   }
@@ -612,7 +612,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 {
   // Create a PDF with form fields
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
   page.drawText("Application Form", { x: 72, y: 770, fontSize: 20, bold: true });
   page.drawText("Name:", { x: 72, y: 720, fontSize: 12 });
@@ -622,13 +622,13 @@ fs.mkdirSync(outDir, { recursive: true });
   const formPdf = await doc.build();
 
   // Now fill the form
-  const editor = PdfEditor.load(formPdf);
+  const editor = Pdf.Editor.load(formPdf);
   editor.setFormField("applicantName", "Jane Smith");
   editor.setFormField("accepted", "Yes");
   const filled = await editor.save();
   fs.writeFileSync(path.join(outDir, "09-form-filled.pdf"), filled);
 
-  const result = await readPdf(filled);
+  const result = await Pdf.read(filled);
   const nameField = result.formFields.find(f => f.name === "applicantName");
   console.log(`9. 09-form-filled.pdf — filled: name="${nameField?.value}"`);
 }
@@ -638,14 +638,14 @@ fs.mkdirSync(outDir, { recursive: true });
 // =============================================================================
 
 {
-  const doc = new PdfDocumentBuilder();
+  const doc = new Pdf.Builder();
   const page = doc.addPage();
   page.drawText("Original content for incremental update", { x: 72, y: 770, fontSize: 14 });
   page.addFormField({ type: "text", name: "note", rect: [72, 720, 300, 745] });
   const original = await doc.build();
 
   // Incremental save — only appends changes, preserves original bytes
-  const editor = PdfEditor.load(original);
+  const editor = Pdf.Editor.load(original);
   editor.setFormField("note", "Updated via incremental save");
   const updated = await editor.saveIncremental();
 
@@ -663,13 +663,13 @@ fs.mkdirSync(outDir, { recursive: true });
 
 {
   // Source A
-  const docA = new PdfDocumentBuilder();
+  const docA = new Pdf.Builder();
   const pageA = docA.addPage();
   pageA.drawText("Document A — Page 1", { x: 72, y: 770, fontSize: 20 });
   const pdfA = await docA.build();
 
   // Source B
-  const docB = new PdfDocumentBuilder();
+  const docB = new Pdf.Builder();
   const pageB1 = docB.addPage();
   pageB1.drawText("Document B — Page 1", { x: 72, y: 770, fontSize: 20 });
   const pageB2 = docB.addPage();
@@ -677,11 +677,11 @@ fs.mkdirSync(outDir, { recursive: true });
   const pdfB = await docB.build();
 
   // Merge: A's page + B's pages into one PDF
-  const editor = PdfEditor.load(pdfA);
+  const editor = Pdf.Editor.load(pdfA);
   editor.copyPagesFrom(pdfB);
   const merged = await editor.save();
 
-  const result = await readPdf(merged);
+  const result = await Pdf.read(merged);
   fs.writeFileSync(path.join(outDir, "11-merged.pdf"), merged);
   console.log(`11. 11-merged.pdf — merged ${result.metadata.pageCount} pages from 2 PDFs`);
 }
