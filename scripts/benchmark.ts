@@ -1,4 +1,6 @@
-import { WorkbookReader } from "../dist/esm/index.js";
+import { Stream } from "../dist/esm/modules/excel/index.js";
+
+const { WorkbookReader } = Stream;
 
 const runs = 3;
 
