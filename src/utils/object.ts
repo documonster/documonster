@@ -7,6 +7,16 @@
  */
 
 /**
+ * True for object keys that must never be assigned from untrusted input, to
+ * avoid prototype pollution: `__proto__`, `constructor`, `prototype`. Use this
+ * to guard every dynamic `obj[key] = value` where `key` derives from external
+ * data (parsed files, worker messages, user config).
+ */
+export function isForbiddenKey(key: string): boolean {
+  return key === "__proto__" || key === "constructor" || key === "prototype";
+}
+
+/**
  * Deep structural equality for plain JSON-like values (primitives, arrays,
  * plain objects). Reference-equal short-circuits first.
  *
