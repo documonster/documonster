@@ -1,6 +1,6 @@
 {
   "name": "documonster",
-  "version": "11.0.0",
+  "version": "0.0.1",
   "description": "Zero-dependency TypeScript toolkit — Excel (XLSX), PDF, CSV, Markdown, XML, ZIP/TAR, and streaming.",
   "keywords": [
     "archive",
