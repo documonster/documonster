@@ -155,7 +155,7 @@ jobs:
 
   chart-oracle:
     # Opt-in real-file validation: install LibreOffice on Linux and run
-    # the `chart-oracle.integration.test.ts` suite with the env flags
+    # the `chart-oracle.integration.node.test.ts` suite with the env flags
     # that enable real binary round-trips. The test file skips every
     # `it` when the flags are unset, so the rest of the matrix (which
     # doesn't install LibreOffice) keeps working unchanged.
@@ -190,7 +190,7 @@ jobs:
         run: pnpm i --frozen-lockfile
 
       - name: Run chart-oracle tests
-        run: pnpm exec vitest run src/modules/excel/__tests__/chart-oracle.integration.test.ts src/modules/excel/__tests__/workbook-chart-roundtrip.integration.test.ts
+        run: pnpm exec vitest run src/modules/excel/chart/__tests__/chart-oracle.integration.node.test.ts src/modules/excel/chart/__tests__/workbook-chart-roundtrip.integration.node.test.ts
         env:
           CI: true
           LIBREOFFICE_BIN: soffice
