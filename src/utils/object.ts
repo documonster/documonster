@@ -179,7 +179,9 @@ export function deepMerge<T = Record<string, unknown>>(...args: unknown[]): T {
       const keys = Object.keys(obj);
       for (let j = 0, jLen = keys.length; j < jLen; j++) {
         const key = keys[j];
-        if (isForbiddenKey(key)) {
+        // Guard inline (not via a helper) so static analysis recognizes the
+        // prototype-pollution sanitizer at the assignment sink below.
+        if (key === "__proto__" || key === "constructor" || key === "prototype") {
           continue;
         }
         const val = obj[key];
