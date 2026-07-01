@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.2](https://github.com/documonster/documonster/compare/v0.0.1...v0.0.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* Inline prototype-pollution guards at merge/clone sinks ([7ba699c](https://github.com/documonster/documonster/commit/7ba699cb2aec4c7f604a7cc7471e775680e0d4a8))
+
+
+### Code Refactoring
+
+* Consolidate prototype-pollution key guards into shared helpers ([a39af0c](https://github.com/documonster/documonster/commit/a39af0caadad3980b0bcc54a13bce8d3ded9d7a7))
+
 ## [0.0.1](https://github.com/documonster/documonster/compare/v0.0.1...v0.0.1) (2026-07-01)
 
 
