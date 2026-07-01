@@ -143,8 +143,6 @@ function main() {
     const edits: Edit[] = [];
     const fileNs = new Set<string>();
 
-    const callText = (node: ts.CallExpression): string => node.getText(sf);
-
     const visit = (n: ts.Node) => {
       // new Workbook(...) -> Workbook.create(...)
       if (

@@ -336,28 +336,42 @@ export class UnzipEntry {
       // buffered path and yield the result as a single chunk. Once output has
       // started flowing we keep streaming; a mid-stream failure on valid data
       // has not been observed and would indicate genuine corruption.
-      let producedOutput = false;
+      //
+      // The first pull is handled separately from the rest so the two error
+      // regimes are structurally distinct: a throw from the first `next()`
+      // means "before any output" (recover); any throw once we are streaming
+      // propagates unchanged. `iterator.return()` in `finally` reproduces the
+      // automatic cleanup `for await` performs on early break/return/throw,
+      // so the underlying decompress stream is always torn down.
+      const iterator = outStream[Symbol.asyncIterator]();
       try {
-        for await (const chunk of outStream) {
-          producedOutput = true;
+        let first: IteratorResult<Uint8Array>;
+        try {
+          first = await iterator.next();
+        } catch {
+          // Fall back to the buffered decode (which itself falls back to
+          // pure-JS inflate on native failure). Throws if genuinely corrupt.
+          const recovered = await this.bytes();
+          if (recovered.length) {
+            if (this._onBytesOut) {
+              this._onBytesOut(this.path, this.type, recovered.length);
+            }
+            yield recovered;
+          }
+          return;
+        }
+        // Streaming succeeded past the first pull: yield the first chunk and
+        // the remainder. Any failure from here on is genuine mid-stream
+        // corruption and propagates to the caller.
+        for (let step = first; !step.done; step = await iterator.next()) {
+          const chunk = step.value;
           if (this._onBytesOut && chunk.length) {
             this._onBytesOut(this.path, this.type, chunk.length);
           }
           yield chunk;
         }
-      } catch (err) {
-        if (producedOutput) {
-          throw err;
-        }
-        // Fall back to the buffered decode (which itself falls back to pure-JS
-        // inflate on native failure). Throws if the data is genuinely corrupt.
-        const recovered = await this.bytes();
-        if (recovered.length) {
-          if (this._onBytesOut) {
-            this._onBytesOut(this.path, this.type, recovered.length);
-          }
-          yield recovered;
-        }
+      } finally {
+        await iterator.return?.();
       }
       return;
     }

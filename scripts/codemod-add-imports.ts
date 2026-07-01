@@ -72,7 +72,6 @@ function main() {
 
     // Collect: locally declared names, already-imported names, used identifiers.
     const declared = new Set<string>();
-    const importedFrom = new Map<string, ts.ImportDeclaration>(); // module -> import
     const alreadyImported = new Set<string>();
     let existingTargetImport: ts.ImportDeclaration | undefined;
 

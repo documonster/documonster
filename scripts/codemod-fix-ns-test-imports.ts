@@ -92,7 +92,6 @@ function main() {
 
     // Remove a stale `import { Workbook } from "...index"` (root or relative).
     // We collect existing imports of namespace names to avoid double-import.
-    const alreadyImported = new Set<string>();
     const importEdits: { start: number; end: number; repl: string }[] = [];
     let anchorEnd = 0;
     for (const stmt of sf.statements) {

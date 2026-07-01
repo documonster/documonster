@@ -98,23 +98,6 @@ const CLASS_CONFIG: Record<string, ClassConfig> = {
   }
 };
 
-function listSourceFiles(): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === "node_modules" || entry.name === "dist") continue;
-        walk(full);
-      } else if (/\.ts$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
-        out.push(full);
-      }
-    }
-  };
-  walk(path.join(ROOT, "src"));
-  return out;
-}
-
 function main() {
   const className = process.argv[2];
   const write = process.argv.includes("--write");
