@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/documonster/documonster/compare/v0.0.2...v0.0.3) (2026-07-01)
+
+
+### Code Refactoring
+
+* **tests:** Update memory usage assertions in WorkbookWriter tests ([a928835](https://github.com/documonster/documonster/commit/a928835e68cafcb9ce436a694a761dc1f0a30ea5))
+
 ## [0.0.2](https://github.com/documonster/documonster/compare/v0.0.1...v0.0.2) (2026-07-01)
 
 
