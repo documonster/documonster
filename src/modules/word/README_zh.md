@@ -39,7 +39,7 @@
 ## 快速开始
 
 ```typescript
-import { Document, toBuffer, readDocx } from "documonster/word";
+import { Document, Io } from "documonster/word";
 
 // 创建文档
 const doc = Document.create();
@@ -50,11 +50,11 @@ Document.addTable(doc, [
   ["1", "2"]
 ]);
 
-const buffer = await toBuffer(Document.build(doc));
+const buffer = await Io.toBuffer(Document.build(doc));
 // 写入文件、作为响应返回等
 
 // 读取文档
-const parsed = await readDocx(buffer);
+const parsed = await Io.read(buffer);
 console.log(parsed.body.length, "elements");
 ```
 
@@ -63,13 +63,16 @@ console.log(parsed.body.length, "elements");
 ### 文档构建器
 
 ```typescript
-import { Document, paragraph, text, bold, italic, heading } from "documonster/word";
+import { Document, Build, Io } from "documonster/word";
 
 const doc = Document.create();
 
 // 文本
 Document.addParagraph(doc, "Simple text");
-Document.addParagraphElement(doc, paragraph([text("Normal "), bold("bold "), italic("italic")]));
+Document.addParagraphElement(
+  doc,
+  Build.paragraph([Build.text("Normal "), Build.bold("bold "), Build.italic("italic")])
+);
 Document.addHeading(doc, "Title", 1);
 
 // 表格
@@ -97,35 +100,35 @@ Document.setSectionProperties(doc, {
 });
 
 // 页眉/页脚
-Document.setHeader(doc, "default", { children: [textParagraph("Page Header")] });
+Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
 
 // 构建与导出
 const model = Document.build(doc);
-const bytes = await toBuffer(model);
+const bytes = await Io.toBuffer(model);
 ```
 
 ### 读取文档
 
 ```typescript
-import { readDocx, extractText, searchText } from "documonster/word";
+import { Io, Query } from "documonster/word";
 
-const doc = await readDocx(fileBuffer);
+const doc = await Io.read(fileBuffer);
 
 // 提取文本内容
-const text = extractText(doc);
+const text = Query.extractText(doc);
 
 // 搜索
-const results = searchText(doc, /pattern/g);
+const results = Query.searchText(doc, /pattern/g);
 ```
 
 ### 修改文档
 
 ```typescript
-import { readDocx, replaceText, toBuffer } from "documonster/word";
+import { Io, Query } from "documonster/word";
 
-const doc = await readDocx(buffer);
-const modified = replaceText(doc, "OLD_TEXT", "NEW_TEXT");
-const output = await toBuffer(modified);
+const doc = await Io.read(buffer);
+const modified = Query.replaceText(doc, "OLD_TEXT", "NEW_TEXT");
+const output = await Io.toBuffer(modified);
 ```
 
 ## 高级功能
@@ -133,9 +136,9 @@ const output = await toBuffer(modified);
 ### 模板引擎
 
 ```typescript
-import { fillTemplate } from "documonster/word";
+import { Template } from "documonster/word";
 
-const filled = fillTemplate(doc, {
+const filled = Template.fillTemplate(doc, {
   name: "John",
   showDetails: true,
   items: ["A", "B", "C"]
@@ -146,19 +149,14 @@ const filled = fillTemplate(doc, {
 ### 表单字段
 
 ```typescript
-import {
-  extractFormFields,
-  fillFormFields,
-  formTextField,
-  formCheckboxField
-} from "documonster/word";
+import { Query, Build } from "documonster/word";
 
 // 提取表单数据
-const fields = extractFormFields(doc);
+const fields = Query.extractFormFields(doc);
 // → [{ name: "FullName", type: "text", value: "..." }, ...]
 
 // 填充表单数据
-const filled = fillFormFields(
+const filled = Query.fillFormFields(
   doc,
   new Map([
     ["FullName", "Jane Doe"],
@@ -171,13 +169,13 @@ const filled = fillFormFields(
 ### 数据绑定（OpenDoPE）
 
 ```typescript
-import { resolveDataBindings } from "documonster/word";
+import { Query } from "documonster/word";
 
 // 根据 CustomXML 部件解析 SDT 数据绑定
-const resolved = resolveDataBindings(doc);
+const resolved = Query.resolveDataBindings(doc);
 
 // 或使用覆盖数据
-const resolved2 = resolveDataBindings(
+const resolved2 = Query.resolveDataBindings(
   doc,
   new Map([["{GUID}", "<root><field>value</field></root>"]])
 );
@@ -186,9 +184,9 @@ const resolved2 = resolveDataBindings(
 ### 带特效的绘图形状
 
 ```typescript
-import { createShape, createRect, createEllipse } from "documonster/word";
+import { Build } from "documonster/word";
 
-const shape = createShape({
+const shape = Build.createShape({
   shapeType: "roundRect",
   width: 3000000, // EMU
   height: 2000000,
@@ -221,10 +219,10 @@ const shape = createShape({
 ### 字体嵌入与子集化
 
 ```typescript
-import { embedFont, addEmbeddedFonts, subsetFont } from "documonster/word";
+import { Font } from "documonster/word";
 
 // 嵌入并自动子集化（只嵌入文档中用到的字形）
-const result = embedFont({
+const result = Font.embed({
   name: "CustomFont",
   data: fontFileBytes,
   style: "regular",
@@ -232,44 +230,44 @@ const result = embedFont({
 });
 
 // 添加到文档
-const docWithFonts = addEmbeddedFonts(doc, [result]);
+const docWithFonts = Font.addEmbedded(doc, [result]);
 ```
 
 ### 修订追踪
 
 ```typescript
-import { acceptAllRevisions, rejectAllRevisions } from "documonster/word";
+import { Query } from "documonster/word";
 
-const accepted = acceptAllRevisions(doc);
-const rejected = rejectAllRevisions(doc);
+const accepted = Query.acceptAllRevisions(doc);
+const rejected = Query.rejectAllRevisions(doc);
 ```
 
 ### 文档比对
 
 ```typescript
-import { diffDocuments } from "documonster/word";
+import { Diff } from "documonster/word";
 
-const diff = diffDocuments(docA, docB);
+const diff = Diff.documents(docA, docB);
 // → { changes: [{ type: "added"|"removed"|"modified", ... }] }
 ```
 
 ### 文档合并
 
 ```typescript
-import { mergeDocuments } from "documonster/word";
+import { Io } from "documonster/word";
 
-const merged = mergeDocuments([doc1, doc2, doc3], { sectionBreak: "nextPage" });
+const merged = Io.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```
 
 ### 流式写入器
 
 ```typescript
-import { createDocxStream } from "documonster/word";
+import { Streaming } from "documonster/word";
 
-const stream = createDocxStream();
-stream.addParagraph("Title", { style: "Heading1" });
+const stream = Streaming.createDocxStream();
+stream.addText("Title", { style: "Heading1" });
 for (const item of largeDataset) {
-  stream.addParagraph(item.text);
+  stream.addText(item.text);
 }
 const buffer = await stream.finalize();
 ```
@@ -277,19 +275,19 @@ const buffer = await stream.finalize();
 ### 文档保护
 
 ```typescript
-import { protectDocument, isDocumentProtected, verifyProtectionPassword } from "documonster/word";
+import { Security } from "documonster/word";
 
-const protected = protectDocument(doc, { type: "readOnly", password: "secret" });
-const isProtected = isDocumentProtected(protected); // true
-const valid = verifyProtectionPassword(protected, "secret"); // true
+const protectedDoc = Security.protect(doc, { type: "readOnly", password: "secret" });
+const isProtected = Security.isProtected(protectedDoc); // true
+const valid = Security.verifyPassword(protectedDoc, "secret"); // true
 ```
 
 ### 校验
 
 ```typescript
-import { validateDocument } from "documonster/word";
+import { Validation } from "documonster/word";
 
-const result = validateDocument(doc);
+const result = Validation.document(doc);
 if (!result.valid) {
   console.log(result.issues); // [{ severity, message, path }]
 }
@@ -322,11 +320,11 @@ const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
 ### Flat OPC 格式
 
 ```typescript
-import { parseFlatOpc, toFlatOpc, isFlatOpc } from "documonster/word";
+import { Convert } from "documonster/word";
 
 // DOCX 的单一 XML 表示形式
-const flatXml = toFlatOpc(doc);
-const doc = parseFlatOpc(flatXmlString);
+const flatXml = Convert.toFlatOpc(doc);
+const doc = Convert.parseFlatOpc(flatXmlString);
 ```
 
 ### 加密与签名
@@ -363,11 +361,11 @@ const signatures = extractSignatures(opaqueParts);
 
 ```typescript
 import { excelToDocx, extractTablesToExcel } from "documonster/word/excel";
-import { packageDocx } from "documonster/word";
+import { Io } from "documonster/word";
 
 // Workbook → DocxDocument（所有可见工作表，保留格式）
 const doc = excelToDocx(workbook);
-const docxBytes = await packageDocx(doc);
+const docxBytes = await Io.package(doc);
 
 // 带选项：标题页、只取部分工作表、限制行列数
 const doc2 = excelToDocx(workbook, {
@@ -384,7 +382,7 @@ const extracted = extractTablesToExcel(doc);
 
 嵌入在 Word 文档中的图表也会桥接到 Excel 图表引擎
 （27 个图表系列，经典图表与现代 ChartEx）。PDF 渲染侧参见
-`createWordChartPdfRenderer`。
+`Pdf.wordChartRenderer`。
 
 ### Word → PDF
 
@@ -393,15 +391,15 @@ const extracted = extractTablesToExcel(doc);
 与 SVG 路径完全一致。
 
 ```typescript
-import { readDocx } from "documonster/word";
-import { docxToPdf } from "documonster/pdf";
+import { Io } from "documonster/word";
+import { Pdf } from "documonster/pdf";
 
-const doc = await readDocx(docxBytes);
-const pdfBytes = await docxToPdf(doc);
+const doc = await Io.read(docxBytes);
+const pdfBytes = await Pdf.fromDocx(doc);
 
 // 覆盖页面几何（单位：磅）。省略的字段会回退到
 // 文档的 section properties，再回退到引擎默认值（US Letter，1 英寸）。
-const pdf2 = await docxToPdf(doc, {
+const pdf2 = await Pdf.fromDocx(doc, {
   pageWidth: 595, // A4 宽度
   pageHeight: 842, // A4 高度
   marginTop: 72,
@@ -415,19 +413,17 @@ const pdf2 = await docxToPdf(doc, {
 });
 ```
 
-**图表。** 调用过 `installChartSupport()` 后，经典图表
+**图表。** 调用过 `Pdf.wordChartRenderer` 后，经典图表
 （`<c:chart>`）和现代 ChartEx（`<cx:chartSpace>` —— 旭日图、矩形树图、
 瀑布图、漏斗图、箱线图、直方图、帕累托图、地图）都会自动渲染为
 完整矢量 PDF。若未安装图表支持，图表会降级为带标题的占位框
 （不抛错、不留空白页）。要提供你自己的经典图表渲染器：
 
 ```typescript
-import { installChartSupport } from "documonster/chart";
-import { docxToPdf, createWordChartPdfRenderer } from "documonster/pdf";
+import { Pdf } from "documonster/pdf";
 
-installChartSupport();
-const pdf = await docxToPdf(doc, {
-  chartRenderer: createWordChartPdfRenderer()
+const pdf = await Pdf.fromDocx(doc, {
+  chartRenderer: await Pdf.wordChartRenderer()
 });
 ```
 

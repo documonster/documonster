@@ -5,15 +5,15 @@
 A zero-dependency, cross-platform XML toolkit for reading and writing XML. Supports both streaming and buffered modes.
 
 ```typescript
-import { XmlWriter, SaxParser, parseXml, query } from "documonster/xml";
+import { Xml } from "documonster/xml";
 ```
 
 ## Features
 
 - **Zero Dependencies** — Pure TypeScript, no native addons
 - **Cross-Platform** — Same API in Node.js and browsers
-- **Dual-Mode Writing** — Buffered (`XmlWriter`) and streaming (`XmlStreamWriter`)
-- **Dual-Mode Reading** — SAX streaming (`SaxParser`) and DOM tree (`parseXml`)
+- **Dual-Mode Writing** — Buffered (`Xml.Writer`) and streaming (`Xml.StreamWriter`)
+- **Dual-Mode Reading** — SAX streaming (`Xml.SaxParser`) and DOM tree (`Xml.parse`)
 - **Shared Interface** — `XmlSink` lets rendering code target both write modes transparently
 - **XML Encoding** — Fast entity encode/decode with special character handling
 - **Namespace Support** — Full XML Namespaces with prefix resolution, reserved namespace enforcement, and unbound prefix detection
@@ -27,10 +27,10 @@ import { XmlWriter, SaxParser, parseXml, query } from "documonster/xml";
 ### Writing XML (Buffered)
 
 ```typescript
-import { XmlWriter, StdDocAttributes } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const w = new XmlWriter();
-w.openXml(StdDocAttributes);
+const w = new Xml.Writer();
+w.openXml(Xml.StdDocAttributes);
 w.openNode("root", { version: "1.0" });
 w.leafNode("item", { id: "1" }, "hello");
 w.leafNode("item", { id: "2" }, "world");
@@ -44,11 +44,11 @@ console.log(w.xml);
 ### Writing XML (Streaming)
 
 ```typescript
-import { XmlStreamWriter } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
 const chunks: string[] = [];
 const target = { write: (chunk: string) => chunks.push(chunk) };
-const sw = new XmlStreamWriter(target);
+const sw = new Xml.StreamWriter(target);
 
 sw.openXml();
 sw.openNode("root");
@@ -60,9 +60,9 @@ sw.closeNode();
 ### Reading XML (SAX — Streaming)
 
 ```typescript
-import { SaxParser } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const parser = new SaxParser();
+const parser = new Xml.SaxParser();
 parser.on("opentag", tag => console.log("open:", tag.name, tag.attributes));
 parser.on("text", text => console.log("text:", text));
 parser.on("closetag", tag => console.log("close:", tag.name));
@@ -73,12 +73,12 @@ parser.close();
 ### Reading XML (DOM — Buffered)
 
 ```typescript
-import { parseXml, findChild, textContent, attr } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const doc = parseXml('<root><item id="1">hello</item></root>');
-const item = findChild(doc.root, "item");
-console.log(attr(item!, "id")); // "1"
-console.log(textContent(item!)); // "hello"
+const doc = Xml.parse('<root><item id="1">hello</item></root>');
+const item = Xml.findChild(doc.root, "item");
+console.log(Xml.attr(item!, "id")); // "1"
+console.log(Xml.textContent(item!)); // "hello"
 ```
 
 ### XML to Plain Object
@@ -88,22 +88,22 @@ Convert XML into plain JavaScript objects.
 Two entry points for different scenarios:
 
 ```typescript
-import { parseXml, toPlainObject, parseXmlToObject } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
 // Option 1: already have a DOM tree
-const doc = parseXml('<root attr="1"><item>a</item><item>b</item></root>');
-const obj = toPlainObject(doc.root);
+const doc = Xml.parse('<root attr="1"><item>a</item><item>b</item></root>');
+const obj = Xml.toPlainObject(doc.root);
 // { root: { "@_attr": "1", item: ["a", "b"] } }
 
 // Option 2: XML string → plain object directly (faster, single SAX pass)
-const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root>');
+const obj2 = Xml.parseToObject('<root attr="1"><item>a</item><item>b</item></root>');
 // same output, ~1.6x faster on medium/large XML
 ```
 
 **When to use which:**
 
-- `toPlainObject(element)` — when you already have an `XmlElement` from `parseXml()`
-- `parseXmlToObject(xml)` — when you only need the plain object (skips DOM allocation)
+- `Xml.toPlainObject(element)` — when you already have an `XmlElement` from `Xml.parse()`
+- `Xml.parseToObject(xml)` — when you only need the plain object (skips DOM allocation)
 
 **Default conversion rules:**
 
@@ -113,28 +113,28 @@ const obj2 = parseXmlToObject('<root attr="1"><item>a</item><item>b</item></root
 - Empty elements become `""`
 - Whitespace-only indentation text is discarded by default
 
-**Limitations:** plain-object conversion is intentionally lossy — it does not preserve element ordering, comments, or processing instructions. If you need exact XML structure, use `parseXml()` and work with the DOM tree directly.
+**Limitations:** plain-object conversion is intentionally lossy — it does not preserve element ordering, comments, or processing instructions. If you need exact XML structure, use `Xml.parse()` and work with the DOM tree directly.
 
 ### Query Engine
 
 ```typescript
-import { parseXml, query, queryAll } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-const doc = parseXml("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
-const first = query(doc.root, "a/b"); // first <b> element
-const all = queryAll(doc.root, "a/b"); // all <b> elements
-const indexed = queryAll(doc.root, "a/b[0]"); // first <b> under each <a>
-const filtered = query(doc.root, "a/b[@id='x']"); // <b> with id="x"
-const deep = queryAll(doc.root, "a//b"); // <b> at any depth under <a>
+const doc = Xml.parse("<root><a><b>1</b><b>2</b></a><a><b>3</b></a></root>");
+const first = Xml.query(doc.root, "a/b"); // first <b> element
+const all = Xml.queryAll(doc.root, "a/b"); // all <b> elements
+const indexed = Xml.queryAll(doc.root, "a/b[0]"); // first <b> under each <a>
+const filtered = Xml.query(doc.root, "a/b[@id='x']"); // <b> with id="x"
+const deep = Xml.queryAll(doc.root, "a//b"); // <b> at any depth under <a>
 ```
 
 ### Encoding/Decoding
 
 ```typescript
-import { xmlEncode, xmlDecode } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
-xmlEncode('<tag attr="val">'); // "&lt;tag attr=&quot;val&quot;&gt;"
-xmlDecode("&lt;hello&gt;"); // "<hello>"
+Xml.encode('<tag attr="val">'); // "&lt;tag attr=&quot;val&quot;&gt;"
+Xml.decode("&lt;hello&gt;"); // "<hello>"
 ```
 
 ---
@@ -145,12 +145,12 @@ xmlDecode("&lt;hello&gt;"); // "<hello>"
 src/modules/xml/
 ├── types.ts              # Core types (XmlNode, XmlSink, SaxTag, etc.)
 ├── errors.ts             # XmlError, XmlParseError, XmlWriteError
-├── encode.ts             # xmlEncode, xmlDecode, validateXmlName, encodeCData, etc.
-├── writer.ts             # XmlWriter (buffered, with rollback support)
-├── stream-writer.ts      # XmlStreamWriter (streaming, writes to WritableTarget)
-├── sax.ts                # SaxParser (event-driven) + parseSax (async generator)
-├── dom.ts                # parseXml + DOM query helpers + toPlainObject
-├── to-object.ts          # parseXmlToObject (SAX-direct, single-pass)
+├── encode.ts             # Xml.encode, Xml.decode, Xml.validateXmlName, Xml.encodeCData, etc.
+├── writer.ts             # Xml.Writer (buffered, with rollback support)
+├── stream-writer.ts      # Xml.StreamWriter (streaming, writes to WritableTarget)
+├── sax.ts                # Xml.SaxParser (event-driven) + Xml.parseSax (async generator)
+├── dom.ts                # Xml.parse + DOM query helpers + Xml.toPlainObject
+├── to-object.ts          # Xml.parseToObject (SAX-direct, single-pass)
 ├── to-object-shared.ts   # Shared conversion logic (internal)
 ├── query.ts              # Simplified path query engine
 ├── index.ts              # Public API barrel
@@ -161,11 +161,11 @@ src/modules/xml/
 
 ```
 XmlSink (interface)
-├── XmlWriter        — Builds XML as a string in memory
+├── Xml.Writer        — Builds XML as a string in memory
 │                      Supports rollback/transactions (save/commit/rollback)
 │                      Best for: small-medium XML, speculative writes
 │
-└── XmlStreamWriter  — Writes directly to a WritableTarget
+└── Xml.StreamWriter  — Writes directly to a WritableTarget
                        O(1) memory — never holds full document
                        Best for: large XML (worksheets with 100K+ rows)
 ```
@@ -173,22 +173,22 @@ XmlSink (interface)
 ### Read Path
 
 ```
-SaxParser            — Event-driven streaming parser
+Xml.SaxParser        — Event-driven streaming parser
 │                      Feed chunks via write(), events fire synchronously
 │                      Best for: large XML, when you only need specific elements
 │
-├── parseXml         — Builds a DOM tree (XmlDocument/XmlElement)
-│   │                  Built on top of SaxParser — no duplicate parsing logic
+├── Xml.parse        — Builds a DOM tree (XmlDocument/XmlElement)
+│   │                  Built on top of Xml.SaxParser — no duplicate parsing logic
 │   │                  Best for: small-medium XML, when you need tree traversal
 │   │
-│   └── toPlainObject — Converts XmlElement DOM to plain JS object
+│   └── Xml.toPlainObject — Converts XmlElement DOM to plain JS object
 │                       Best for: when you already have a DOM tree
 │
-├── parseXmlToObject — SAX-direct to plain JS object (single pass, no DOM)
-│                      ~1.6x faster than parseXml + toPlainObject
+├── Xml.parseToObject — SAX-direct to plain JS object (single pass, no DOM)
+│                      ~1.6x faster than Xml.parse + Xml.toPlainObject
 │                      Best for: XML string → plain object → JSON.stringify
 │
-└── parseSax         — Async generator wrapping SaxParser for stream iteration
+└── Xml.parseSax     — Async generator wrapping Xml.SaxParser for stream iteration
                        Best for: async pipelines (e.g. reading from zip streams)
 ```
 
@@ -196,7 +196,7 @@ SaxParser            — Event-driven streaming parser
 
 ## API Reference
 
-### XmlWriter
+### Xml.Writer
 
 | Method                          | Description                             |
 | ------------------------------- | --------------------------------------- |
@@ -220,15 +220,15 @@ SaxParser            — Event-driven streaming parser
 | `currentElement`                | Name of innermost open element          |
 | `cursor`                        | Monotonic position counter              |
 
-### XmlStreamWriter
+### Xml.StreamWriter
 
-Same methods as `XmlWriter` (both implement `XmlSink`), except:
+Same methods as `Xml.Writer` (both implement `XmlSink`), except:
 
 - No `toString()` / `xml` — content is already written to target
 - No `save()` / `commit()` / `rollback()` — streaming is irreversible
 - No `cursor` — not applicable for streaming
 
-### SaxParser
+### Xml.SaxParser
 
 | Method / Property    | Description                                       |
 | -------------------- | ------------------------------------------------- |
@@ -253,19 +253,19 @@ Same methods as `XmlWriter` (both implement `XmlSink`), except:
 | `invalidCharHandling` | `"error"` | How to handle invalid XML characters (see below)  |
 | `fileName`            | —         | File name for error messages                      |
 
-### parseSax (Async Generator)
+### Xml.parseSax (Async Generator)
 
 ```typescript
-async function* parseSax(
+Xml.parseSax(
   iterable: AsyncIterable<string | Uint8Array | ArrayBuffer>,
   options?: SaxOptions
 ): AsyncGenerator<SaxEventAny[]>
 ```
 
-### parseXml
+### Xml.parse
 
 ```typescript
-function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
+Xml.parse(xml: string, options?: XmlParseOptions): XmlDocument;
 ```
 
 **Options:**
@@ -292,18 +292,18 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument;
 
 ### DOM Helpers
 
-| Function                 | Description                 |
-| ------------------------ | --------------------------- |
-| `findChild(el, name)`    | First child element by name |
-| `findChildren(el, name)` | All child elements by name  |
-| `textContent(node)`      | Recursive text content      |
-| `attr(el, name)`         | Get attribute value         |
-| `walk(el, visitor)`      | Depth-first traversal       |
+| Function                     | Description                 |
+| ---------------------------- | --------------------------- |
+| `Xml.findChild(el, name)`    | First child element by name |
+| `Xml.findChildren(el, name)` | All child elements by name  |
+| `Xml.textContent(node)`      | Recursive text content      |
+| `Xml.attr(el, name)`         | Get attribute value         |
+| `Xml.walk(el, visitor)`      | Depth-first traversal       |
 
-### toPlainObject
+### Xml.toPlainObject
 
 ```typescript
-function toPlainObject(
+Xml.toPlainObject(
   element: XmlElement,
   options?: ToPlainObjectOptions
 ): Record<string, unknown>;
@@ -311,13 +311,13 @@ function toPlainObject(
 
 Convert an `XmlElement` DOM tree into a plain JavaScript object.
 
-### parseXmlToObject
+### Xml.parseToObject
 
 ```typescript
-function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
+Xml.parseToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
 ```
 
-Parse an XML string directly into a plain JavaScript object in a single SAX pass. ~1.6x faster than `parseXml()` + `toPlainObject()` on medium/large XML.
+Parse an XML string directly into a plain JavaScript object in a single SAX pass. ~1.6x faster than `Xml.parse()` + `Xml.toPlainObject()` on medium/large XML.
 
 **Conversion options** (shared by both functions):
 
@@ -331,7 +331,7 @@ Parse an XML string directly into a plain JavaScript object in a single SAX pass
 | `preserveCData`        | `true`    | Include CDATA values in text (relevant with `cdataAsNodes`) |
 | `ignoreWhitespaceText` | `true`    | Discard whitespace-only text in elements that have children |
 
-**Parser options** (`parseXmlToObject` only):
+**Parser options** (`Xml.parseToObject` only):
 
 | Option                | Default   | Description                                       |
 | --------------------- | --------- | ------------------------------------------------- |
@@ -343,7 +343,7 @@ Parse an XML string directly into a plain JavaScript object in a single SAX pass
 ### Query Engine
 
 ```typescript
-import { query, queryAll } from "documonster/xml";
+import { Xml } from "documonster/xml";
 ```
 
 | Syntax         | Description                                     |
@@ -354,21 +354,21 @@ import { query, queryAll } from "documonster/xml";
 | `a//c`         | Recursive descent: `c` at any depth under `a`   |
 | `a/b[0]`       | Index: first matching `b` under each parent `a` |
 
-- `query(element, path)` — First match or `undefined`
-- `queryAll(element, path)` — All matches (may be empty)
+- `Xml.query(element, path)` — First match or `undefined`
+- `Xml.queryAll(element, path)` — All matches (may be empty)
 
 Index filters use **per-parent semantics**: `a/b[0]` returns the first `b` under _each_ `a`, not the globally first `b`.
 
 ### Encoding Utilities
 
-| Function                    | Description                                                   |
-| --------------------------- | ------------------------------------------------------------- |
-| `xmlEncode(text)`           | Encode text for XML content (`<`, `>`, `&`, `"`, `'`)         |
-| `xmlDecode(text)`           | Decode XML entities back to text                              |
-| `xmlEncodeAttr(value)`      | Encode an attribute value (adds `\t\n\r` → `&#x9;&#xA;&#xD;`) |
-| `validateXmlName(name)`     | Validate an XML element/attribute name                        |
-| `validateCommentText(text)` | Validate text for XML comment content                         |
-| `encodeCData(text)`         | Encode text for a CDATA section (splits `]]>`)                |
+| Function                        | Description                                                   |
+| ------------------------------- | ------------------------------------------------------------- |
+| `Xml.encode(text)`              | Encode text for XML content (`<`, `>`, `&`, `"`, `'`)         |
+| `Xml.decode(text)`              | Decode XML entities back to text                              |
+| `Xml.encodeAttr(value)`         | Encode an attribute value (adds `\t\n\r` → `&#x9;&#xA;&#xD;`) |
+| `Xml.validateXmlName(name)`     | Validate an XML element/attribute name                        |
+| `Xml.validateCommentText(text)` | Validate text for XML comment content                         |
+| `Xml.encodeCData(text)`         | Encode text for a CDATA section (splits `]]>`)                |
 
 ### Error Types
 
@@ -403,8 +403,8 @@ Note: Unprefixed attributes do **not** inherit the default namespace, per XML Na
 - **Entity expansion limits** — Prevents XML bomb attacks (configurable via `maxEntityExpansions`)
 - **Nesting depth limits** — Prevents stack overflow from deeply nested XML (configurable via `maxDepth`)
 - **Duplicate attribute rejection** — XML 1.0 §3.1 WFC: Unique Att Spec (reports error, recovers with last-value-wins)
-- **Name injection prevention** — Writers validate element and attribute names via `validateXmlName()`
-- **Comment/CDATA safety** — `validateCommentText()` rejects `--`, `encodeCData()` splits `]]>`
+- **Name injection prevention** — Writers validate element and attribute names via `Xml.validateXmlName()`
+- **Comment/CDATA safety** — `Xml.validateCommentText()` rejects `--`, `Xml.encodeCData()` splits `]]>`
 - **BOM handling** — UTF-8 BOM at start of input is silently stripped
 - **Prototype pollution prevention** — DOM attribute maps use null-prototype objects with dangerous key filtering
 - **Invalid character handling** — Writers strip invalid XML 1.0 characters; parser behavior is configurable via `invalidCharHandling`
@@ -426,22 +426,22 @@ The `invalidCharHandling` option controls how the parser responds:
 ### Examples
 
 ```typescript
-import { SaxParser, parseXml } from "documonster/xml";
+import { Xml } from "documonster/xml";
 
 // Default: strict mode — throws on 0x7F
-parseXml("<root>hello\x7fworld</root>");
+Xml.parse("<root>hello\x7fworld</root>");
 // => XmlParseError: invalid XML character: 0x7f
 
 // Skip mode — invalid chars are removed
-const doc = parseXml("<root>hello\x7fworld</root>", { invalidCharHandling: "skip" });
+const doc = Xml.parse("<root>hello\x7fworld</root>", { invalidCharHandling: "skip" });
 // doc.root text content: "helloworld"
 
 // Replace mode — invalid chars become U+FFFD
-const doc2 = parseXml("<root>hello\x7fworld</root>", { invalidCharHandling: "replace" });
+const doc2 = Xml.parse("<root>hello\x7fworld</root>", { invalidCharHandling: "replace" });
 // doc.root text content: "hello\uFFFDworld"
 
 // SAX parser with skip mode
-const parser = new SaxParser({ invalidCharHandling: "skip" });
+const parser = new Xml.SaxParser({ invalidCharHandling: "skip" });
 parser.on("text", text => console.log(text)); // "helloworld"
 parser.write("<root>hello\x7fworld</root>");
 parser.close();
@@ -453,4 +453,4 @@ parser.close();
 - **`"skip"`** — Use when reading untrusted/dirty XML (e.g., third-party XLSX files) where you want to silently discard bad characters. This is what the Excel XLSX reader uses internally.
 - **`"replace"`** — Use when you want to preserve the _position_ of invalid characters (e.g., for diagnostics or data forensics) without crashing the parser.
 
-> **Note:** The XML _writers_ (`XmlWriter`, `XmlStreamWriter`) always strip invalid characters via `xmlEncode()` — this option only affects the _parser_.
+> **Note:** The XML _writers_ (`Xml.Writer`, `Xml.StreamWriter`) always strip invalid characters via `Xml.encode()` — this option only affects the _parser_.

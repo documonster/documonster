@@ -64,7 +64,10 @@ console.log(collector.chunks); // [2, 4, 6, 8, 10]
 Browser-compatible EventEmitter with Node.js-like API.
 
 ```typescript
-import { EventEmitter } from "documonster/stream";
+// NOTE: EventEmitter is not exported by documonster/stream. The stream classes
+// (Readable/Writable/Transform/Duplex) already provide the on/once/off/emit API.
+// If you need a standalone emitter, import it from Node.js:
+import { EventEmitter } from "node:events";
 
 const emitter = new EventEmitter();
 
@@ -337,7 +340,7 @@ const text = binaryCollector.toString(); // Decode as UTF-8 string
 A transform stream with pull-based reading and pattern matching. Useful for parsing protocols and file formats.
 
 ```typescript
-import { createPullStream, stringToUint8Array, uint8ArrayToString } from "documonster/stream";
+import { createPullStream } from "documonster/stream";
 
 const pull = createPullStream();
 
@@ -796,24 +799,15 @@ isErrored(stream); // true if error occurred
 ## Binary Utilities
 
 ```typescript
-import {
-  stringToUint8Array,
-  uint8ArrayToString,
-  uint8ArrayEquals,
-  uint8ArrayIndexOf,
-  concatUint8Arrays
-} from "documonster/stream";
+// NOTE: These binary helpers are NOT exported from documonster/stream.
+// stringToUint8Array / uint8ArrayToString / concatUint8Arrays are available
+// from documonster/archive; uint8ArrayEquals / uint8ArrayIndexOf are not part
+// of any public subpath entry.
+import { stringToUint8Array, uint8ArrayToString, concatUint8Arrays } from "documonster/archive";
 
 // String <-> Uint8Array conversion (UTF-8)
 const bytes = stringToUint8Array("Hello, 世界!");
 const text = uint8ArrayToString(bytes);
-
-// Compare arrays for equality
-const isEqual = uint8ArrayEquals(arr1, arr2); // true/false
-
-// Find pattern in array (like indexOf)
-const index = uint8ArrayIndexOf(haystack, needle); // index or -1
-const indexFrom = uint8ArrayIndexOf(haystack, needle, startOffset);
 
 // Concatenate multiple arrays efficiently
 const combined = concatUint8Arrays([arr1, arr2, arr3]);
@@ -823,26 +817,21 @@ const combined = concatUint8Arrays([arr1, arr2, arr3]);
 
 ## Promise Utilities
 
-### once
+### onceEvent
 
 Wait for a single event from an emitter.
 
 ```typescript
-import { once } from "documonster/stream";
+import { onceEvent } from "documonster/stream";
 
-// Wait for data event
-const [data] = await once(emitter, "data");
-console.log("Received:", data);
+// Wait for a single event (resolves to void when the event fires)
+await onceEvent(emitter, "data");
+console.log("data event fired");
 
-// With timeout using AbortSignal
-const controller = new AbortController();
-setTimeout(() => controller.abort(), 5000);
-
-try {
-  const [data] = await once(emitter, "data", { signal: controller.signal });
-} catch (err) {
-  console.log("Timed out or aborted");
-}
+// NOTE: onceEvent takes only (emitter, event) and returns Promise<void>.
+// It does not accept an AbortSignal and does not resolve with event arguments.
+// For Node's argument-returning `once` with { signal }, import from node:events:
+//   import { once } from "node:events";
 ```
 
 ---
@@ -1136,7 +1125,6 @@ const data = collector.toUint8Array();
 
 | Class                         | Description                             |
 | ----------------------------- | --------------------------------------- |
-| `EventEmitter`                | Browser-compatible event emitter        |
 | `Readable`                    | Readable stream class                   |
 | `Writable`                    | Writable stream class                   |
 | `Transform`                   | Transform stream class                  |
@@ -1147,8 +1135,8 @@ const data = collector.toUint8Array();
 | `BufferedStream`              | Stream with internal buffering          |
 | `ChunkedBuilder`              | Efficient string builder                |
 | `TransactionalChunkedBuilder` | Builder with snapshot/rollback          |
-| `StringChunk`                 | String data chunk wrapper               |
-| `BufferChunk`                 | Binary data chunk wrapper               |
+| `createStringChunk()`         | String data chunk factory               |
+| `createByteChunk()`           | Binary data chunk factory               |
 
 ### Factory Functions
 
@@ -1172,28 +1160,28 @@ const data = collector.toUint8Array();
 
 ### Utility Functions
 
-| Function               | Description                       |
-| ---------------------- | --------------------------------- |
-| `pipeline()`           | Pipe streams with error handling  |
-| `finished()`           | Wait for stream to finish         |
-| `compose()`            | Compose multiple transforms       |
-| `finishedAll()`        | Wait for multiple streams         |
-| `addAbortSignal()`     | Add abort signal to stream        |
-| `once()`               | Wait for single event             |
-| `promisify()`          | Convert callback to promise       |
-| `streamToUint8Array()` | Collect stream to Uint8Array      |
-| `streamToString()`     | Collect stream to string          |
-| `drainStream()`        | Consume stream without collecting |
-| `copyStream()`         | Copy source to destination        |
+| Function               | Description                               |
+| ---------------------- | ----------------------------------------- |
+| `pipeline()`           | Pipe streams with error handling          |
+| `finished()`           | Wait for stream to finish                 |
+| `compose()`            | Compose multiple transforms               |
+| `finishedAll()`        | Wait for multiple streams                 |
+| `addAbortSignal()`     | Add abort signal to stream                |
+| `onceEvent()`          | Wait for a single event; resolves to void |
+| `promisify()`          | Convert callback to promise               |
+| `streamToUint8Array()` | Collect stream to Uint8Array              |
+| `streamToString()`     | Collect stream to string                  |
+| `drainStream()`        | Consume stream without collecting         |
+| `copyStream()`         | Copy source to destination                |
 
 ### Binary Utilities
+
+These helpers are re-exported from `documonster/archive` (not `documonster/stream`).
 
 | Function               | Description             |
 | ---------------------- | ----------------------- |
 | `stringToUint8Array()` | Convert string to bytes |
 | `uint8ArrayToString()` | Convert bytes to string |
-| `uint8ArrayEquals()`   | Compare two arrays      |
-| `uint8ArrayIndexOf()`  | Find pattern in array   |
 | `concatUint8Arrays()`  | Concatenate arrays      |
 
 ### Type Guards

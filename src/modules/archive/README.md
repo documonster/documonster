@@ -5,7 +5,7 @@
 A zero-dependency, cross-platform archive toolkit for creating, reading, and editing ZIP and TAR archives.
 
 ```typescript
-import { zip, unzip, ZipArchive, ZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 ```
 
 ## Features
@@ -29,16 +29,16 @@ import { zip, unzip, ZipArchive, ZipReader } from "documonster/zip";
 ### Creating a ZIP
 
 ```typescript
-import { zip, ZipArchive } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // Convenience function
-const archive = zip();
+const archive = Archive.zip();
 archive.add("hello.txt", "Hello, World!");
 archive.add("data.json", JSON.stringify({ key: "value" }));
 const bytes = await archive.bytes();
 
 // With options
-const archive = zip({ level: 9, comment: "My archive" });
+const archive = Archive.zip({ level: 9, comment: "My archive" });
 archive.add("file.txt", content, { modTime: new Date() });
 archive.addDirectory("empty-dir/");
 archive.addSymlink("link.txt", "hello.txt");
@@ -48,9 +48,9 @@ const bytes = await archive.bytes();
 ### Reading a ZIP
 
 ```typescript
-import { unzip, ZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = unzip(zipBytes);
+const reader = Archive.unzip(zipBytes);
 for await (const entry of reader.entries()) {
   console.log(entry.path, entry.type);
   if (entry.type === "file") {
@@ -66,9 +66,9 @@ const data = await reader.bytes("hello.txt");
 ### Editing a ZIP
 
 ```typescript
-import { editZip } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const editor = await editZip(existingZipBytes, { preserve: "best-effort" });
+const editor = await Archive.editZip(existingZipBytes, { preserve: "best-effort" });
 editor.delete("old.txt");
 editor.rename("a.txt", "renamed.txt");
 editor.set("new.txt", "new content");
@@ -84,10 +84,10 @@ const output = await editor.bytes();
 Factory function that creates a new `ZipArchive` or `TarArchive`.
 
 ```typescript
-import { zip } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const archive = zip(); // ZipArchive
-const tarArchive = zip({ format: "tar" }); // TarArchive
+const archive = Archive.zip(); // ZipArchive
+const tarArchive = Archive.zip({ format: "tar" }); // TarArchive
 ```
 
 ### `ZipArchive`
@@ -95,9 +95,9 @@ const tarArchive = zip({ format: "tar" }); // TarArchive
 Streaming ZIP archive builder with chainable API.
 
 ```typescript
-import { ZipArchive } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const archive = new ZipArchive({ level: 6, reproducible: true });
+const archive = new Archive.ZipArchive({ level: 6, reproducible: true });
 
 // Add entries (chainable)
 archive
@@ -150,11 +150,11 @@ for await (const chunk of op.iterable) { ... }
 Open an archive for reading.
 
 ```typescript
-import { unzip } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = unzip(zipBytes);
-const reader = unzip(zipBytes, { password: "secret" });
-const reader = unzip(tarBytes, { format: "tar" });
+const reader = Archive.unzip(zipBytes);
+const reader = Archive.unzip(zipBytes, { password: "secret" });
+const reader = Archive.unzip(tarBytes, { format: "tar" });
 ```
 
 ### `ZipReader`
@@ -162,9 +162,9 @@ const reader = unzip(tarBytes, { format: "tar" });
 Streaming ZIP reader with random-access support.
 
 ```typescript
-import { ZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = new ZipReader(zipBytes);
+const reader = new Archive.ZipReader(zipBytes);
 
 // Streaming iteration
 for await (const entry of reader.entries()) {
@@ -222,17 +222,17 @@ entry.discard();                  // Skip without reading
 Filesystem-like editing of existing ZIP archives. Unchanged entries are passed through efficiently (raw compressed bytes preserved).
 
 ```typescript
-import { editZip, editZipUrl, ZipEditor } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // From bytes
-const editor = await editZip(zipBytes, {
+const editor = await Archive.editZip(zipBytes, {
   reproducible: true,
   preserve: "best-effort",
   onWarning: w => console.warn(w.code, w.entry, w.message)
 });
 
 // From URL (HTTP Range requests)
-const editor = await editZipUrl("https://example.com/archive.zip");
+const editor = await Archive.editZipUrl("https://example.com/archive.zip");
 
 // Operations
 editor.has("file.txt");               // Check existence
@@ -243,9 +243,9 @@ editor.rename("a.txt", "b.txt");      // Rename entry
 editor.setComment("Updated archive"); // Set archive comment
 
 // Reusable edit plans
-import { ZipEditPlan } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const plan = new ZipEditPlan();
+const plan = new Archive.ZipEditPlan();
 plan.set("config.json", newConfig);
 plan.delete("temp/");
 editor.apply(plan);
@@ -263,9 +263,9 @@ for await (const chunk of editor.stream()) { ... }
 Read ZIP files from HTTP servers using Range requests -- download only the entries you need.
 
 ```typescript
-import { RemoteZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
-const reader = await RemoteZipReader.open("https://example.com/large.zip");
+const reader = await Archive.RemoteZipReader.open("https://example.com/large.zip");
 
 // Metadata (no content downloaded yet)
 const entries = reader.getEntries();
@@ -287,7 +287,7 @@ const results = await reader.extractMultiple(["a.txt", "b.txt"]);
 await reader.extractToStream("large-file.bin", writableStream);
 
 // Password-protected archives
-const reader = await RemoteZipReader.open(url);
+const reader = await Archive.RemoteZipReader.open(url);
 const isValid = await reader.checkPassword("secret.txt", "mypassword");
 const data = await reader.extract("secret.txt", { password: "mypassword" });
 
@@ -323,7 +323,7 @@ import {
   decompressAuto,
   decompressAutoSync,
   detectCompressionFormat
-} from "documonster/zip";
+} from "documonster/archive";
 
 // DEFLATE-RAW (used by ZIP files)
 const compressed = await compress(data, { level: 9 });
@@ -354,7 +354,7 @@ import {
   createZlibStream,
   createUnzlibStream,
   hasDeflateRaw
-} from "documonster/zip";
+} from "documonster/archive";
 
 // DEFLATE-RAW streaming
 const deflater = createDeflateStream({ level: 6 });
@@ -375,7 +375,7 @@ hasDeflateRaw(); // true in Node.js, depends on CompressionStream in browser
 ### CRC32
 
 ```typescript
-import { crc32, crc32Update, crc32Finalize } from "documonster/zip";
+import { crc32, crc32Update, crc32Finalize } from "documonster/archive";
 
 // One-shot
 const checksum = crc32(data);
@@ -396,16 +396,16 @@ Unified API compatible with the ZIP interface.
 ### Creating TAR archives
 
 ```typescript
-import { tar, TarArchive } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // Convenience function
-const tarBytes = await tar(
+const tarBytes = await Archive.tar(
   new Map([["file.txt", "content"], ["data.bin", uint8Array]]),
   { modTime: new Date() }
 );
 
 // Builder API (same as ZipArchive)
-const archive = new TarArchive();
+const archive = new Archive.TarArchive();
 archive
   .add("file.txt", "content", { mode: 0o755 })
   .addDirectory("dir/")
@@ -418,13 +418,13 @@ for await (const chunk of archive.stream()) { ... }
 ### Reading TAR archives
 
 ```typescript
-import { unzip, TarReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // Via unified API
-const reader = unzip(tarBytes, { format: "tar" });
+const reader = Archive.unzip(tarBytes, { format: "tar" });
 
 // Direct
-const reader = new TarReader(tarBytes);
+const reader = new Archive.TarReader(tarBytes);
 for await (const entry of reader.entries()) {
   console.log(entry.path, entry.isDirectory);
   const data = await entry.bytes();
@@ -438,7 +438,7 @@ const paths = await reader.list();
 ### TAR + GZIP (Node.js only)
 
 ```typescript
-import { targz, TarGzArchive, parseTarGz, untargz } from "documonster/zip";
+import { targz, TarGzArchive, parseTarGz, untargz } from "documonster/archive";
 
 // Create .tar.gz
 const tgzBytes = await targz(
@@ -469,7 +469,7 @@ const files = await untargz(tgzBytes);
 High-level `ArchiveFile` class with disk I/O, glob patterns, directory traversal, and extraction.
 
 ```typescript
-import { ArchiveFile } from "documonster/zip";
+import { ArchiveFile } from "documonster/archive";
 
 // Create from scratch
 const af = new ArchiveFile();
@@ -515,16 +515,16 @@ await tar.writeToFile("archive.tar");
 ZIP Traditional (legacy) and AES-256 encryption support.
 
 ```typescript
-import { ZipArchive, unzip, RemoteZipReader } from "documonster/zip";
+import { Archive } from "documonster/archive";
 
 // Encrypted entries (handled automatically during read)
-const reader = unzip(encryptedZip, { password: "secret" });
+const reader = Archive.unzip(encryptedZip, { password: "secret" });
 for await (const entry of reader.entries()) {
   const data = await entry.bytes(); // Automatically decrypted
 }
 
 // Remote encrypted ZIP
-const remote = await RemoteZipReader.open(url);
+const remote = await Archive.RemoteZipReader.open(url);
 const data = await remote.extract("secret.txt", { password: "mypassword" });
 
 // Check password without full extraction
@@ -550,7 +550,7 @@ import {
   RangeNotSupportedError,
   HttpRangeError,
   AbortError
-} from "documonster/zip";
+} from "documonster/archive";
 ```
 
 ---
@@ -559,29 +559,29 @@ import {
 
 ### High-Level Functions
 
-| Function                     | Description                       |
-| ---------------------------- | --------------------------------- |
-| `zip(options?)`              | Create a new archive (ZIP or TAR) |
-| `unzip(source, options?)`    | Open an archive for reading       |
-| `editZip(source, options?)`  | Open a ZIP for editing            |
-| `editZipUrl(url, options?)`  | Open a remote ZIP for editing     |
-| `tar(entries, options?)`     | Create TAR from entries (async)   |
-| `tarSync(entries, options?)` | Create TAR from entries (sync)    |
-| `targz(entries, options?)`   | Create .tar.gz (Node.js only)     |
+| Function                             | Description                       |
+| ------------------------------------ | --------------------------------- |
+| `Archive.zip(options?)`              | Create a new archive (ZIP or TAR) |
+| `Archive.unzip(source, options?)`    | Open an archive for reading       |
+| `Archive.editZip(source, options?)`  | Open a ZIP for editing            |
+| `Archive.editZipUrl(url, options?)`  | Open a remote ZIP for editing     |
+| `Archive.tar(entries, options?)`     | Create TAR from entries (async)   |
+| `Archive.tarSync(entries, options?)` | Create TAR from entries (sync)    |
+| `targz(entries, options?)`           | Create .tar.gz (Node.js only)     |
 
 ### Classes
 
-| Class             | Description                       |
-| ----------------- | --------------------------------- |
-| `ZipArchive`      | Streaming ZIP builder             |
-| `ZipReader`       | Streaming ZIP reader              |
-| `UnzipEntry`      | Single archive entry              |
-| `ZipEditor`       | Edit existing ZIP archives        |
-| `TarArchive`      | Streaming TAR builder             |
-| `TarReader`       | Streaming TAR reader              |
-| `TarGzArchive`    | TAR + GZIP builder (Node.js)      |
-| `RemoteZipReader` | HTTP Range-based ZIP reader       |
-| `ArchiveFile`     | File system integration (Node.js) |
+| Class                     | Description                       |
+| ------------------------- | --------------------------------- |
+| `Archive.ZipArchive`      | Streaming ZIP builder             |
+| `Archive.ZipReader`       | Streaming ZIP reader              |
+| `Archive.UnzipEntry`      | Single archive entry              |
+| `Archive.ZipEditor`       | Edit existing ZIP archives        |
+| `Archive.TarArchive`      | Streaming TAR builder             |
+| `Archive.TarReader`       | Streaming TAR reader              |
+| `TarGzArchive`            | TAR + GZIP builder (Node.js)      |
+| `Archive.RemoteZipReader` | HTTP Range-based ZIP reader       |
+| `ArchiveFile`             | File system integration (Node.js) |
 
 ### Compression
 

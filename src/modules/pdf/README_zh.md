@@ -603,7 +603,7 @@ interface PdfMetadata {
 
 ### 页面尺寸
 
-通过 `PageSizes` 可访问的内置页面尺寸:
+通过 `Pdf.PageSizes` 可访问的内置页面尺寸:
 
 | 名称        | 尺寸(pt)         | 毫米      |
 | ----------- | ---------------- | --------- |
@@ -945,7 +945,6 @@ page.drawSvgPath(d, { fill?, stroke?, lineWidth? });
 page.drawImage({ x, y, width, height, data, format });
 page.addAnnotation({ type, rect, ...options });
 page.addFormField({ type, name, rect, ...options });
-page.addLink({ rect, destPageIndex });
 
 doc.addBookmark(title, pageIndex, parent?);
 doc.generateTableOfContents({ title?, fontSize?, indent? });
@@ -964,7 +963,7 @@ const editor = Pdf.Editor.load(pdfBytes, { password? });
 
 // 页面访问
 const page = editor.getPage(index);    // 返回 PdfEditorPage
-const count = editor.getPageCount();
+const count = editor.pageCount;         // getter,而非方法
 
 // PdfEditorPage 方法(与 PdfPageBuilder 相同的绘图 API):
 page.drawText(text, options);
