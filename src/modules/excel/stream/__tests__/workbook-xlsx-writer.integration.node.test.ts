@@ -18,11 +18,20 @@ import {
 import { Cell, Column, Workbook, Worksheet } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import { makeTestDataPath, testFilePath } from "@test/utils";
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 
 const streamTestDataPath = makeTestDataPath(import.meta.url, "./data");
 
-const TEST_XLSX_FILE_NAME = testFilePath("wb-xlsx-writer.test");
+// Each test writes to its OWN output file. Sharing a single path across the
+// suite is racy under some runtimes (notably bun on macOS), where a streaming
+// WorkbookWriter's file `close` can resolve before the bytes are visible to a
+// subsequent test's `readFile`, yielding a truncated read ("invalid signature:
+// 0x0"). A per-test filename fully isolates the file lifecycle.
+let testFileCounter = 0;
+let TEST_XLSX_FILE_NAME = testFilePath("wb-xlsx-writer.test");
+beforeEach(() => {
+  TEST_XLSX_FILE_NAME = testFilePath(`wb-xlsx-writer.test.${testFileCounter++}`);
+});
 const IMAGE_FILENAME = streamTestDataPath("image.png");
 const fsReadFileAsync = promisify(fs.readFile);
 
