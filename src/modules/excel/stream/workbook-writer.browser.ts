@@ -11,6 +11,7 @@
 import { Zip, ZipDeflate } from "@archive/zip/stream";
 import type { DefinedNamesData } from "@excel/core/defined-names";
 import { createDefinedNames, definedNamesModel } from "@excel/core/defined-names";
+import { validateCellStyleName } from "@excel/core/workbook-core";
 import { ExcelNotSupportedError, ImageError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import type { WorkbookWriterLike } from "@excel/stream/worksheet-writer";
@@ -25,7 +26,8 @@ import type {
   PageSetup,
   WorksheetView,
   AutoFilter,
-  HeaderFooter
+  HeaderFooter,
+  NamedStyle
 } from "@excel/types";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import type { DrawingAnchor, DrawingRel } from "@excel/utils/drawing-utils";
@@ -486,6 +488,20 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
   set defaultFont(font: Partial<Font> | undefined) {
     if (this.styles.setDefaultFont) {
       this.styles.setDefaultFont(font);
+    }
+  }
+
+  /**
+   * Define a workbook-level named cell style (e.g. "Heading 1") that streamed
+   * cells can reference via their `styleName`. Must be called before any
+   * worksheet rows referencing it are committed. No-op when styles are
+   * disabled (`useStyles: false`). Rejects an empty name or the reserved
+   * "Normal" style, matching `Workbook.defineCellStyle`.
+   */
+  defineCellStyle(name: string, style: NamedStyle): void {
+    validateCellStyleName(name);
+    if (this.styles.registerNamedStyles) {
+      this.styles.registerNamedStyles(new Map([[name, { ...style, name }]]));
     }
   }
 

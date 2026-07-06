@@ -32,6 +32,11 @@ export {
   registerPerson,
   registerFunction,
   unregisterFunction,
+  defineCellStyle,
+  getCellStyle,
+  listCellStyles,
+  removeCellStyle,
+  useBuiltinCellStyle,
   getWorkbookModel as getModel,
   setWorkbookModel as setModel
 } from "@excel/core/workbook.browser";

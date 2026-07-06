@@ -200,6 +200,10 @@ function mergeStyle(
   colStyle: Partial<Style>,
   style: Partial<Style>
 ): Partial<Style> {
+  const styleName = (rowStyle && rowStyle.styleName) || (colStyle && colStyle.styleName);
+  if (styleName) {
+    style.styleName = styleName;
+  }
   const numFmt = (rowStyle && rowStyle.numFmt) || (colStyle && colStyle.numFmt);
   if (numFmt) {
     style.numFmt = numFmt;
@@ -334,6 +338,9 @@ export function cellGetStyle(c: CellData): Partial<Style> {
 export function cellSetStyle(c: CellData, style: Partial<Style>): void {
   if (style.numFmt !== undefined) {
     c.style.numFmt = style.numFmt;
+  }
+  if (style.styleName !== undefined) {
+    c.style.styleName = style.styleName;
   }
   if (style.font !== undefined) {
     c.style.font = style.font;

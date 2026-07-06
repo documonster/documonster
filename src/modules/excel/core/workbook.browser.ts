@@ -39,7 +39,7 @@ import {
 } from "@excel/core/defined-names";
 import { withPivotChartSource } from "@excel/core/pivot-chart";
 import type { PivotTable } from "@excel/core/pivot-table";
-import type { WorkbookData } from "@excel/core/workbook-core";
+import type { WorkbookData, NamedStyleEntry } from "@excel/core/workbook-core";
 import {
   addChartEntry,
   addChartExStructuredEntry,
@@ -148,6 +148,8 @@ export interface WorkbookModel {
   calcProperties: Partial<CalculationProperties>;
   /** Default font preserved from the original file for round-trip fidelity */
   defaultFont?: Partial<Font>;
+  /** Workbook-level named cell styles (OOXML cellStyles), in definition order. */
+  cellStyles?: NamedStyleEntry[];
   /** Chart entries indexed by 1-based chart number */
   chartEntries?: Record<number, ChartEntry>;
   /** Chart rels indexed by chart number — preserved for round-trip */
@@ -1064,6 +1066,7 @@ export function getWorkbookModel(wb: WorkbookData): WorkbookModel {
     pivotTables: wb.pivotTables,
     calcProperties: wb.calcProperties,
     defaultFont: wb._defaultFont,
+    cellStyles: wb._cellStyles ? [...wb._cellStyles.values()] : undefined,
     externalLinks: wb.externalLinks,
     chartEntries: wb._chartEntries,
     chartRels: wb._chartRels,
@@ -1143,6 +1146,10 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
 
   // Preserve default font for round-trip fidelity
   wb._defaultFont = value.defaultFont;
+  // Restore named cell styles for round-trip fidelity
+  wb._cellStyles = value.cellStyles
+    ? new Map(value.cellStyles.map(cs => [cs.name, cs]))
+    : undefined;
   // Restore chart entries
   wb._chartEntries = value.chartEntries || {};
   wb._chartRels = value.chartRels || {};
@@ -1260,6 +1267,7 @@ export function createStreamReader(
 // canonical import path.
 export {
   type WorkbookData,
+  type NamedStyleEntry,
   getDefinedNames,
   getChartEntry,
   addChartEntry,
@@ -1278,5 +1286,10 @@ export {
   getWorksheet,
   getWorksheets,
   copyChartSidecars,
-  copyChartExSidecars
+  copyChartExSidecars,
+  defineCellStyle,
+  getCellStyle,
+  listCellStyles,
+  removeCellStyle,
+  useBuiltinCellStyle
 } from "@excel/core/workbook-core";

@@ -63,7 +63,7 @@ import type {
   PivotTableSubtotal,
   ParsedCacheDefinition
 } from "@excel/core/pivot-table";
-import type { Workbook, ExternalLinkModel } from "@excel/core/workbook.browser";
+import type { Workbook, ExternalLinkModel, NamedStyleEntry } from "@excel/core/workbook.browser";
 import {
   _collectExternalLinksForWrite,
   _recordAutoExternalLink,
@@ -5729,6 +5729,13 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     delete model.sheetDefs;
     // Preserve default font before deleting styles
     model.defaultFont = model.styles?.defaultFont;
+    // Preserve named cell styles (OOXML cellStyles) for round-trip fidelity
+    if (model.styles?.getNamedStyles) {
+      const namedStyles = model.styles.getNamedStyles();
+      if (namedStyles && namedStyles.length) {
+        model.cellStyles = namedStyles;
+      }
+    }
     delete model.styles;
     delete model.mediaIndex;
     delete model.drawings;
@@ -7621,6 +7628,14 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
     model.styles = model.useStyles ? new StylesXform(true) : new StylesXform.Mock();
     if (oldDefaultFont && model.styles.setDefaultFont) {
       model.styles.setDefaultFont(oldDefaultFont);
+    }
+    // Register workbook-level named cell styles so cells referencing them by
+    // name resolve to the correct cellStyleXfs index during style building.
+    if (model.cellStyles && model.styles.registerNamedStyles) {
+      const namedStyleMap = new Map(
+        (model.cellStyles as NamedStyleEntry[]).map(cs => [cs.name, cs])
+      );
+      model.styles.registerNamedStyles(namedStyleMap);
     }
 
     const workbookXform = new WorkbookXform();

@@ -189,16 +189,56 @@ interface StyleBase {
 // Input style - used when setting styles (accepts string for numFmt)
 export interface StyleInput extends StyleBase {
   numFmt: string;
+  /** Name of a workbook-level named cell style (e.g. "Heading 1") to apply. */
+  styleName?: string;
 }
 
 // Output style - returned when reading styles (numFmt is an object with id)
 export interface StyleOutput extends StyleBase {
   numFmt: NumFmt;
+  /** Name of the workbook-level named cell style this cell references, if any. */
+  styleName?: string;
 }
 
 // Combined style type for backwards compatibility
 export interface Style extends StyleBase {
   numFmt: string | NumFmt;
+  /** Name of the workbook-level named cell style this cell references, if any. */
+  styleName?: string;
+}
+
+// ============================================================================
+// Named Cell Style Types
+// ============================================================================
+
+/**
+ * A workbook-level named cell style (OOXML `cellStyle`), e.g. "Heading 1".
+ * Named styles are defined once on the workbook and referenced by cells via
+ * {@link Style.styleName}. They surface in the Excel "Cell Styles" gallery and
+ * are used by accessibility software to identify document structure.
+ *
+ * All visual facets are optional; a named style may set only the properties it
+ * needs (e.g. just a font). `numFmt` accepts a format-code string like
+ * {@link StyleInput}.
+ */
+export interface NamedStyle {
+  font?: Partial<Font>;
+  alignment?: Partial<Alignment>;
+  protection?: Partial<Protection>;
+  border?: Partial<Borders>;
+  fill?: Fill;
+  numFmt?: string;
+  /**
+   * Built-in style id (OOXML `builtinId`). Set only by the built-in presets
+   * (Heading 1 = 16, Title = 15, …); omit for fully custom styles.
+   */
+  builtinId?: number;
+  /** Hidden from the Excel "Cell Styles" gallery. Preserved for round-trip. */
+  hidden?: boolean;
+  /** Marks a customised built-in style. Preserved for round-trip. */
+  customBuiltin?: boolean;
+  /** Outline level (RowLevel_/ColLevel_ styles). Preserved for round-trip. */
+  iLevel?: number;
 }
 
 // ============================================================================

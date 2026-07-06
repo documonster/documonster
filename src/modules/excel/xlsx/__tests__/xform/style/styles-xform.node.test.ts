@@ -52,6 +52,10 @@ const expectations = [
       // style/color data. This is correct — cells referencing borderId 0 should
       // not get a truthy border property.
       model.borders[0] = undefined;
+      // The parser now preserves the named-style collections for round-trip
+      // fidelity: the implicit "Normal" cellStyle and its base cellStyleXf.
+      model.cellStyleXfs = [{ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0 }];
+      model.cellStyles = [{ name: "Normal", xfId: 0, builtinId: 0 }];
       return model;
     },
     tests: ["render", "renderIn", "parse"]

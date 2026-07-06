@@ -61,8 +61,10 @@ import {
 } from "@excel/core/cell";
 import type { ValueType } from "@excel/core/enums";
 import type { NoteData } from "@excel/core/note";
-import { getCell } from "@excel/core/worksheet-core";
+import { getCellStyle } from "@excel/core/workbook-core";
+import { getCell, getSheetWorkbook } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
+import { ExcelError } from "@excel/errors";
 import type {
   Alignment,
   Borders,
@@ -148,6 +150,34 @@ export function setStyle(
     return;
   }
   cellSetStyle(getCell(ws, addr), styleOrCol as Partial<Style>);
+}
+
+/**
+ * Apply a workbook-level named cell style (e.g. "Heading 1") to the cell at
+ * the "A1" address. The style must first be defined with
+ * `Workbook.defineCellStyle`; applying an unknown name throws. To set a raw
+ * `styleName` without this check, use `Cell.setStyle(ws, addr, { styleName })`.
+ */
+export function applyCellStyle(ws: Sheet, addr: string, name: string): void;
+/** Apply a named cell style to the cell at 1-based (row, col). */
+export function applyCellStyle(ws: Sheet, row: number, col: number, name: string): void;
+export function applyCellStyle(
+  ws: Sheet,
+  addr: Addr,
+  nameOrCol: string | number,
+  name?: string
+): void {
+  const styleName = (arguments.length >= 4 ? name : nameOrCol) as string;
+  if (!getCellStyle(getSheetWorkbook(ws), styleName)) {
+    throw new ExcelError(
+      `Named cell style "${styleName}" is not defined. Define it first with Workbook.defineCellStyle().`
+    );
+  }
+  if (arguments.length >= 4) {
+    cellSetStyle(getCell(ws, addr, nameOrCol as number), { styleName });
+    return;
+  }
+  cellSetStyle(getCell(ws, addr), { styleName });
 }
 
 // --- merge ---

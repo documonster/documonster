@@ -20,6 +20,8 @@ import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
  * No file below this one imports the heavy `workbook.browser`.
  */
 import type { ChartEntry } from "@excel/chart/model/types";
+import type { BuiltinCellStyle } from "@excel/core/builtin-cell-styles";
+import { BUILTIN_CELL_STYLES } from "@excel/core/builtin-cell-styles";
 import type { DefinedNamesData } from "@excel/core/defined-names";
 import type { PivotTable } from "@excel/core/pivot-table";
 import type {
@@ -33,6 +35,7 @@ import { ImageError, WorksheetNameError } from "@excel/errors";
 import type {
   Font,
   ImageData,
+  NamedStyle,
   WorkbookProperties,
   CalculationProperties,
   WorkbookView,
@@ -42,6 +45,13 @@ import { RelType } from "@excel/xlsx/rel-type";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { XLSX } from "@excel/xlsx/xlsx.browser";
+
+/**
+ * A named cell style stored on the workbook: a {@link NamedStyle} plus its name.
+ */
+export interface NamedStyleEntry extends NamedStyle {
+  name: string;
+}
 
 export interface WorkbookData {
   category: string;
@@ -70,6 +80,13 @@ export interface WorkbookData {
   _definedNames: DefinedNamesData;
   _themes?: unknown;
   _defaultFont?: Partial<Font>;
+  /**
+   * Workbook-level named cell styles (OOXML `cellStyle`), keyed by style name.
+   * The key is the style name verbatim (case-sensitive, per OOXML). Populated
+   * by {@link defineCellStyle} and on read from an existing workbook's
+   * `cellStyles`/`cellStyleXfs`.
+   */
+  _cellStyles?: Map<string, NamedStyleEntry>;
   _writerExternalLinkCache: Map<string, ExternalLinkModel>;
   _tableNames: Set<string>;
   _chartEntries: Record<number, ChartEntry>;
@@ -97,6 +114,63 @@ export interface WorkbookData {
       volatile?: boolean;
     }
   >;
+}
+
+/**
+ * Validate a named cell style name. Shared by the standard workbook API and the
+ * streaming writer so both reject the same inputs. Throws on an empty name or
+ * the reserved built-in "Normal" style (builtinId 0), which is always emitted
+ * implicitly as `cellStyleXfs[0]`.
+ */
+export function validateCellStyleName(name: string): void {
+  if (typeof name !== "string" || name === "") {
+    throw new WorksheetNameError("Named cell style name must be a non-empty string.");
+  }
+  if (name === "Normal") {
+    throw new WorksheetNameError('The built-in "Normal" cell style cannot be redefined.');
+  }
+}
+
+/**
+ * Define (or replace) a workbook-level named cell style such as "Heading 1".
+ * Cells reference it via `Style.styleName` (e.g. `Cell.applyCellStyle`).
+ *
+ * The reserved built-in "Normal" style (builtinId 0) cannot be redefined; it is
+ * always emitted implicitly as `cellStyleXfs[0]`.
+ */
+export function defineCellStyle(wb: WorkbookData, name: string, style: NamedStyle): void {
+  validateCellStyleName(name);
+  if (!wb._cellStyles) {
+    wb._cellStyles = new Map();
+  }
+  wb._cellStyles.set(name, { ...style, name });
+}
+
+/** Get a workbook-level named cell style by name, or `undefined` if absent. */
+export function getCellStyle(wb: WorkbookData, name: string): NamedStyleEntry | undefined {
+  return wb._cellStyles?.get(name);
+}
+
+/** List all workbook-level named cell styles in definition order. */
+export function listCellStyles(wb: WorkbookData): NamedStyleEntry[] {
+  return wb._cellStyles ? [...wb._cellStyles.values()] : [];
+}
+
+/** Remove a named cell style. Returns `true` if it existed. */
+export function removeCellStyle(wb: WorkbookData, name: string): boolean {
+  return wb._cellStyles ? wb._cellStyles.delete(name) : false;
+}
+
+/**
+ * Define one of the built-in Excel cell-style presets (e.g. "Heading1") on the
+ * workbook and return its OOXML style name (e.g. "Heading 1") for use with
+ * `Cell.applyCellStyle`. Built-in presets carry the correct `builtinId`, which
+ * accessibility software relies on to recognise the style's semantic role.
+ */
+export function useBuiltinCellStyle(wb: WorkbookData, id: BuiltinCellStyle): string {
+  const { name, ...style } = BUILTIN_CELL_STYLES[id];
+  defineCellStyle(wb, name, style);
+  return name;
 }
 
 export function removeWorksheetEx(wb: WorkbookData, worksheet: Worksheet): void {

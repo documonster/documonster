@@ -1,10 +1,13 @@
 import { Enums } from "@excel/core/enums";
+import type { NamedStyleEntry } from "@excel/core/workbook-core";
 import { ExcelNotSupportedError } from "@excel/errors";
 import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { BorderXform } from "@excel/xlsx/xform/style/border-xform";
+import type { CellStyleModel } from "@excel/xlsx/xform/style/cell-style-xform";
+import { CellStyleXform } from "@excel/xlsx/xform/style/cell-style-xform";
 import { DxfXform } from "@excel/xlsx/xform/style/dxf-xform";
 import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
@@ -29,6 +32,14 @@ interface StylesModel {
   borders?: (string | Partial<Borders>)[];
   fills?: (string | Fill)[];
   dxfs?: DxfStyle[];
+  /**
+   * Named-style base xf pool (OOXML `cellStyleXfs`). Index 0 is always the
+   * built-in "Normal" style. Dual-mode like `styles`: rendered XML strings in
+   * the write/manager role, StyleRef objects in the parse/read role.
+   */
+  cellStyleXfs?: (string | StyleRef)[];
+  /** Named-style name→xfId map (OOXML `cellStyles`). */
+  cellStyles?: CellStyleModel[];
 }
 
 /** xf-level boolean attributes (pivotButton + apply* flags). */
@@ -90,6 +101,8 @@ class StylesXform extends BaseXform {
   declare private _hasCheckboxes?: boolean;
   declare public defaultFont?: Partial<Font>;
   declare public parser?: BaseXform;
+  /** name → cellStyleXfs index, populated by {@link registerNamedStyles}. */
+  declare private _namedStyleIds?: Map<string, number>;
   static Mock: typeof StylesXform;
 
   constructor(initialise?: boolean) {
@@ -123,8 +136,14 @@ class StylesXform extends BaseXform {
       fill: new FillXform(),
       border: new BorderXform(),
       style: new StyleXform({ xfId: true }),
+      // cellStyleXfs xf elements carry no xfId attribute
+      cellStyleXf: new StyleXform(),
 
-      cellStyles: StylesXform.STATIC_XFORMS.cellStyles,
+      cellStyles: new ListXform({
+        tag: "cellStyles",
+        count: true,
+        childXform: new CellStyleXform()
+      }),
       tableStyles: StylesXform.STATIC_XFORMS.tableStyles,
       extLst: StylesXform.STATIC_XFORMS.extLst
     };
@@ -154,7 +173,9 @@ class StylesXform extends BaseXform {
       fonts: [],
       borders: [],
       fills: [],
-      dxfs: []
+      dxfs: [],
+      cellStyleXfs: [],
+      cellStyles: []
     };
 
     this.initIndex();
@@ -169,6 +190,13 @@ class StylesXform extends BaseXform {
     this._addFill({ type: "pattern", pattern: "none" });
     this._addFill({ type: "pattern", pattern: "gray125" });
 
+    // Named cell styles: cellStyleXfs[0] and the "Normal" cellStyle are always
+    // present, matching Excel's implicit base style.
+    this._namedStyleIds = new Map();
+    this._addCellStyleXf({ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0 });
+    this.model.cellStyles!.push({ name: "Normal", xfId: 0, builtinId: 0 });
+    this._namedStyleIds.set("Normal", 0);
+
     this.weakMap = new WeakMap();
     this._hasCheckboxes = false;
   }
@@ -179,6 +207,132 @@ class StylesXform extends BaseXform {
    */
   setDefaultFont(font: Partial<Font> | undefined): void {
     this.defaultFont = font;
+  }
+
+  /**
+   * Register workbook-level named cell styles into the cellStyleXfs/cellStyles
+   * collections. Must be called (in the manager role) before cells are added so
+   * that {@link addStyleModel} can resolve `styleName` → xfId. The built-in
+   * "Normal" style is already seeded by {@link init}; entries named "Normal"
+   * are ignored.
+   */
+  registerNamedStyles(namedStyles: Map<string, NamedStyleEntry>): void {
+    // Only the manager role (init()) maintains the named-style collections.
+    if (!this.model.cellStyles || !this.model.cellStyleXfs) {
+      return;
+    }
+    if (!this._namedStyleIds) {
+      this._namedStyleIds = new Map();
+    }
+    // Ensure the default font exists at index 0 before registering styles that
+    // themselves omit a font (so they correctly inherit fontId 0).
+    this._ensureDefaultFont();
+
+    for (const [name, style] of namedStyles) {
+      if (name === "Normal") {
+        continue;
+      }
+      const ref = this._buildStyleRef(style);
+      const xfId = this._addCellStyleXf(ref);
+      const cellStyle: CellStyleModel = {
+        name,
+        xfId,
+        ...(style.builtinId !== undefined ? { builtinId: style.builtinId } : {}),
+        ...(style.iLevel !== undefined ? { iLevel: style.iLevel } : {}),
+        ...(style.hidden ? { hidden: true } : {}),
+        ...(style.customBuiltin ? { customBuiltin: true } : {})
+      };
+      // Replace an existing entry of the same name (e.g. a streaming writer
+      // redefining a style) rather than emitting a duplicate <cellStyle>.
+      const existingIndex = this._namedStyleIds.has(name)
+        ? this.model.cellStyles!.findIndex(cs => cs.name === name)
+        : -1;
+      if (existingIndex >= 0) {
+        this.model.cellStyles![existingIndex] = cellStyle;
+      } else {
+        this.model.cellStyles!.push(cellStyle);
+      }
+      this._namedStyleIds.set(name, xfId);
+    }
+  }
+
+  /** Ensure fontId 0 (the default font) exists in the fonts collection. */
+  private _ensureDefaultFont(): void {
+    if (!this.model.fonts!.length) {
+      this._addFont(
+        this.defaultFont || {
+          size: 11,
+          color: { theme: 1 },
+          name: "Calibri",
+          family: 2,
+          scheme: "minor"
+        }
+      );
+    }
+  }
+
+  /**
+   * Build a StyleRef (indices into the font/fill/border/numFmt collections plus
+   * alignment/protection) from a style-like model. Only the facets present on
+   * the model are registered; absent facets stay at index 0 so they inherit.
+   */
+  private _buildStyleRef(model: Partial<Style>): StyleRef {
+    const ref: StyleRef = {};
+    if (model.numFmt) {
+      ref.numFmtId = this._addNumFmtStr(
+        typeof model.numFmt === "string" ? model.numFmt : model.numFmt.formatCode
+      );
+    }
+    if (model.font) {
+      ref.fontId = this._addFont(model.font);
+    }
+    if (model.border) {
+      ref.borderId = this._addBorder(model.border);
+    }
+    if (model.fill) {
+      ref.fillId = this._addFill(model.fill);
+    }
+    if (model.alignment) {
+      ref.alignment = model.alignment;
+    }
+    if (model.protection) {
+      ref.protection = model.protection;
+    }
+    return ref;
+  }
+
+  /**
+   * Render `<cellStyleXfs>`. In the manager role the collection holds rendered
+   * XML strings; in the plain-JSON/read role it holds StyleRef objects. Falls
+   * back to the implicit single "Normal" xf when no named styles are present.
+   */
+  private _renderCellStyleXfs(xmlStream: XmlSink, renderModel: StylesModel): void {
+    const xfs = renderModel.cellStyleXfs;
+    if (!xfs || !xfs.length) {
+      this.map.cellStyleXfs.render(xmlStream, [{ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0 }]);
+      return;
+    }
+    if (typeof xfs[0] === "string") {
+      xmlStream.openNode("cellStyleXfs", { count: xfs.length });
+      xfs.forEach(xfXml => {
+        xmlStream.writeRaw(xfXml as string);
+      });
+      xmlStream.closeNode();
+    } else {
+      this.map.cellStyleXfs.render(xmlStream, xfs as StyleRef[]);
+    }
+  }
+
+  /**
+   * Render `<cellStyles>`. Falls back to the implicit single "Normal" entry
+   * when no named styles are present, preserving legacy output.
+   */
+  private _renderCellStyles(xmlStream: XmlSink, renderModel: StylesModel): void {
+    const cellStyles =
+      renderModel.cellStyles && renderModel.cellStyles.length
+        ? renderModel.cellStyles
+        : [{ name: "Normal", xfId: 0, builtinId: 0 }];
+    this.map.cellStyles.render(xmlStream, cellStyles);
   }
 
   render(xmlStream: XmlSink, model?: StylesModel): void {
@@ -229,9 +383,7 @@ class StylesXform extends BaseXform {
       });
       xmlStream.closeNode();
 
-      this.map.cellStyleXfs.render(xmlStream, [
-        { numFmtId: 0, fontId: 0, fillId: 0, borderId: 0, xfId: 0 }
-      ]);
+      this._renderCellStyleXfs(xmlStream, renderModel);
 
       xmlStream.openNode("cellXfs", { count: renderModel.styles!.length });
       renderModel.styles!.forEach(styleXml => {
@@ -244,13 +396,11 @@ class StylesXform extends BaseXform {
       this.map.fonts.render(xmlStream, renderModel.fonts);
       this.map.fills.render(xmlStream, renderModel.fills);
       this.map.borders.render(xmlStream, renderModel.borders);
-      this.map.cellStyleXfs.render(xmlStream, [
-        { numFmtId: 0, fontId: 0, fillId: 0, borderId: 0, xfId: 0 }
-      ]);
+      this._renderCellStyleXfs(xmlStream, renderModel);
       this.map.cellXfs.render(xmlStream, renderModel.styles);
     }
 
-    StylesXform.STATIC_XFORMS.cellStyles.render(xmlStream);
+    this._renderCellStyles(xmlStream, renderModel);
 
     this.map.dxfs.render(xmlStream, renderModel.dxfs);
 
@@ -306,6 +456,8 @@ class StylesXform extends BaseXform {
         add("borders", this.map.borders);
         add("styles", this.map.cellXfs);
         add("dxfs", this.map.dxfs);
+        add("cellStyleXfs", this.map.cellStyleXfs);
+        add("cellStyles", this.map.cellStyles);
 
         // preserve the default (first) font from the original file
         const fontsModel = this.map.fonts.model as Partial<Font>[] | undefined;
@@ -342,18 +494,7 @@ class StylesXform extends BaseXform {
     }
 
     // if we have no default font, add it here now
-    if (!this.model.fonts!.length) {
-      // default (zero) font - use preserved font or fallback to Calibri
-      this._addFont(
-        this.defaultFont || {
-          size: 11,
-          color: { theme: 1 },
-          name: "Calibri",
-          family: 2,
-          scheme: "minor"
-        }
-      );
-    }
+    this._ensureDefaultFont();
 
     const type = cellType || Enums.ValueType.Number;
 
@@ -418,6 +559,13 @@ class StylesXform extends BaseXform {
       if (model[flag]) {
         style[flag] = true;
       }
+    }
+
+    // Named cell style reference: point this xf at the named style's base xf.
+    // Facets the cell sets explicitly (above) override; unset facets stay at
+    // index 0 and are inherited from the referenced cellStyleXf by Excel.
+    if (model.styleName && this._namedStyleIds && this._namedStyleIds.has(model.styleName)) {
+      style.xfId = this._namedStyleIds.get(model.styleName);
     }
 
     if (type === Enums.ValueType.Checkbox) {
@@ -513,7 +661,88 @@ class StylesXform extends BaseXform {
       }
     }
 
+    // -------------------------------------------------------
+    // named cell style reference (xfId → cellStyles[name])
+    if (style.xfId) {
+      const cellStyles = this.model.cellStyles;
+      if (cellStyles) {
+        const named = cellStyles.find(cs => cs.xfId === style.xfId);
+        if (named) {
+          model.styleName = named.name;
+        }
+      }
+    }
+
     return model as Style;
+  }
+
+  /**
+   * Reconstruct the workbook's named cell styles from the parsed
+   * `cellStyles` + `cellStyleXfs` collections (read role). The built-in
+   * "Normal" style (builtinId 0) is excluded — it is always implicit.
+   */
+  getNamedStyles(): NamedStyleEntry[] {
+    const cellStyles = this.model.cellStyles;
+    const cellStyleXfs = this.model.cellStyleXfs as StyleRef[] | undefined;
+    if (!cellStyles || !cellStyleXfs) {
+      return [];
+    }
+    const result: NamedStyleEntry[] = [];
+    for (const cs of cellStyles) {
+      if (cs.builtinId === 0 || cs.name === "Normal") {
+        continue;
+      }
+      const ref = cellStyleXfs[cs.xfId];
+      const entry: NamedStyleEntry = { name: cs.name };
+      if (cs.builtinId !== undefined) {
+        entry.builtinId = cs.builtinId;
+      }
+      if (cs.iLevel !== undefined) {
+        entry.iLevel = cs.iLevel;
+      }
+      if (cs.hidden) {
+        entry.hidden = true;
+      }
+      if (cs.customBuiltin) {
+        entry.customBuiltin = true;
+      }
+      if (ref) {
+        if (ref.numFmtId) {
+          const numFmt =
+            (this.index?.numFmt as Record<string, string> | undefined)?.[ref.numFmtId] ||
+            NumFmtXform.getDefaultFmtCode(ref.numFmtId);
+          if (numFmt) {
+            entry.numFmt = numFmt;
+          }
+        }
+        if (ref.fontId) {
+          const font = (this.model.fonts as Partial<Font>[] | undefined)?.[ref.fontId];
+          if (font) {
+            entry.font = font;
+          }
+        }
+        if (ref.borderId) {
+          const border = (this.model.borders as Partial<Borders>[] | undefined)?.[ref.borderId];
+          if (border) {
+            entry.border = border;
+          }
+        }
+        if (ref.fillId) {
+          const fill = (this.model.fills as Fill[] | undefined)?.[ref.fillId];
+          if (fill) {
+            entry.fill = fill;
+          }
+        }
+        if (ref.alignment) {
+          entry.alignment = ref.alignment;
+        }
+        if (ref.protection) {
+          entry.protection = ref.protection;
+        }
+      }
+      result.push(entry);
+    }
+    return result;
   }
 
   addDxfStyle(style: DxfStyle): number {
@@ -546,6 +775,19 @@ class StylesXform extends BaseXform {
       index = this.index!.style![xml] = this.model.styles!.length;
       this.model.styles!.push(xml);
     }
+    return index;
+  }
+
+  // =========================================================================
+  // Cell Style Xfs (named-style base xf pool)
+  _addCellStyleXf(style: StyleRef): number {
+    // cellStyleXfs xf elements never carry an xfId attribute. Unlike cellXfs,
+    // these are NOT de-duplicated by content: each named cell style owns its
+    // own xf so that distinct style names with identical formatting keep a
+    // 1:1 cellStyle→cellStyleXf mapping and never collapse onto one another.
+    const xml = this.map.cellStyleXf.toXml(style);
+    const index = this.model.cellStyleXfs!.length;
+    this.model.cellStyleXfs!.push(xml);
     return index;
   }
 
@@ -617,11 +859,6 @@ class StylesXform extends BaseXform {
   };
 
   static STATIC_XFORMS = {
-    cellStyles: new StaticXform({
-      tag: "cellStyles",
-      $: { count: 1 },
-      c: [{ tag: "cellStyle", $: { name: "Normal", xfId: 0, builtinId: 0 } }]
-    }),
     dxfs: new StaticXform({ tag: "dxfs", $: { count: 0 } }),
     tableStyles: new StaticXform({
       tag: "tableStyles",

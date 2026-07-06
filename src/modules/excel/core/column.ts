@@ -152,7 +152,10 @@ export function columnIsDefault(c: ColumnData): boolean {
     return false;
   }
   const s = c.style;
-  if (s && (s.font || s.numFmt || s.alignment || s.border || s.fill || s.protection)) {
+  if (
+    s &&
+    (s.font || s.numFmt || s.alignment || s.border || s.fill || s.protection || s.styleName)
+  ) {
     return false;
   }
   return true;
