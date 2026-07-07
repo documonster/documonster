@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0](https://github.com/documonster/documonster/compare/v0.0.3...v0.1.0) (2026-07-06)
+
+
+### Features
+
+* **excel:** Support named cell styles (Heading 1, Title, …) ([0ee5723](https://github.com/documonster/documonster/commit/0ee57235229bf22501e68e424bb4ccd3465e05b9))
+
 ## [0.0.3](https://github.com/documonster/documonster/compare/v0.0.2...v0.0.3) (2026-07-01)
 
 
