@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/documonster/documonster/compare/v0.1.0...v0.1.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **excel:** Export named-cell-style API from the browser Workbook surface ([ce05e83](https://github.com/documonster/documonster/commit/ce05e836c2578a0c0bd79a8cd21b3cbd09e43e0a))
+
 ## [0.1.0](https://github.com/documonster/documonster/compare/v0.0.3...v0.1.0) (2026-07-06)
 
 
