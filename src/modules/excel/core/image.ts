@@ -64,6 +64,11 @@ interface ImageModel {
   imageId: string;
   hyperlinks?: ImageHyperlinks;
   range: ImageRangeModel;
+  /** See `xfrmOffX` on {@link ModelInput}. */
+  xfrmOffX?: number;
+  xfrmOffY?: number;
+  xfrmExtCx?: number;
+  xfrmExtCy?: number;
 }
 
 type Model = BackgroundModel | ImageModel | WatermarkModel | HeaderImageModel;
@@ -88,6 +93,17 @@ interface ModelInput {
   headerWidth?: number;
   headerHeight?: number;
   applyTo?: "all" | "odd" | "even" | "first";
+  /**
+   * Absolute position/size from the original `<xdr:spPr><a:xfrm>`, EMU. For
+   * `editAs="oneCell"` this is what Excel actually renders the picture
+   * from - `tl`/`br` are just a cache. Round-trip-only for now (no public
+   * setter): dropping it on a plain re-save rendered the picture at (0,0)
+   * with zero size.
+   */
+  xfrmOffX?: number;
+  xfrmOffY?: number;
+  xfrmExtCx?: number;
+  xfrmExtCy?: number;
 }
 
 /**
@@ -109,6 +125,11 @@ export interface ImageData {
   headerHeight?: number;
   /** Header watermark applyTo setting. */
   applyTo?: "all" | "odd" | "even" | "first";
+  /** See `xfrmOffX` on {@link ModelInput}. */
+  xfrmOffX?: number;
+  xfrmOffY?: number;
+  xfrmExtCx?: number;
+  xfrmExtCy?: number;
 }
 
 /** Create an image record, optionally hydrating it from a model input. */
@@ -169,7 +190,11 @@ export function imageModel(img: ImageData): Model {
           br: range.br ? anchorModel(range.br) : undefined,
           ext: range.ext,
           editAs: range.editAs
-        }
+        },
+        xfrmOffX: img.xfrmOffX,
+        xfrmOffY: img.xfrmOffY,
+        xfrmExtCx: img.xfrmExtCx,
+        xfrmExtCy: img.xfrmExtCy
       };
     }
     default:
@@ -180,7 +205,20 @@ export function imageModel(img: ImageData): Model {
 /** Hydrate an image record from a model input (mutates in place). */
 export function applyImageModel(
   img: ImageData,
-  { type, imageId, range, hyperlinks, opacity, headerWidth, headerHeight, applyTo }: ModelInput
+  {
+    type,
+    imageId,
+    range,
+    hyperlinks,
+    opacity,
+    headerWidth,
+    headerHeight,
+    applyTo,
+    xfrmOffX,
+    xfrmOffY,
+    xfrmExtCx,
+    xfrmExtCy
+  }: ModelInput
 ): void {
   img.type = type;
   img.imageId = imageId;
@@ -188,6 +226,10 @@ export function applyImageModel(
   img.headerWidth = headerWidth;
   img.headerHeight = headerHeight;
   img.applyTo = applyTo;
+  img.xfrmOffX = xfrmOffX;
+  img.xfrmOffY = xfrmOffY;
+  img.xfrmExtCx = xfrmExtCx;
+  img.xfrmExtCy = xfrmExtCy;
 
   if (type === "image") {
     if (typeof range === "string") {
@@ -240,6 +282,10 @@ export function imageClone(img: ImageData, worksheet?: Worksheet): ImageData {
   cloned.headerWidth = img.headerWidth;
   cloned.headerHeight = img.headerHeight;
   cloned.applyTo = img.applyTo;
+  cloned.xfrmOffX = img.xfrmOffX;
+  cloned.xfrmOffY = img.xfrmOffY;
+  cloned.xfrmExtCx = img.xfrmExtCx;
+  cloned.xfrmExtCy = img.xfrmExtCy;
 
   if (img.range) {
     cloned.range = {

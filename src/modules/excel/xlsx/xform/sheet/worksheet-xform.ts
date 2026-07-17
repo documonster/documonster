@@ -50,6 +50,33 @@ import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
 import { emuToPx } from "@utils/units";
 import { StdDocAttributes } from "@xml/writer";
 
+/**
+ * Recursively collects every attribute value shaped like a relationship id
+ * (`rId1`, `rId42`, ...) out of a captured `EchoNode` tree - a `<xdr:grpSp>`
+ * group can reference relationships via several attribute names depending
+ * on the child (`r:embed` on a blip, `r:id` on an `hlinkClick`, etc.), so
+ * this matches by value rather than trying to enumerate every attribute
+ * name OOXML drawingml might use.
+ */
+function collectRelIds(
+  node: { attrs?: Record<string, unknown>; children?: unknown[] } | undefined,
+  into: Set<string>
+): void {
+  if (!node) {
+    return;
+  }
+  if (node.attrs) {
+    for (const value of Object.values(node.attrs)) {
+      if (typeof value === "string" && /^rId\d+$/.test(value)) {
+        into.add(value);
+      }
+    }
+  }
+  for (const child of node.children ?? []) {
+    collectRelIds(child as typeof node, into);
+  }
+}
+
 function mergeRule<T extends object>(rule: T, extRule: T): void {
   (Object.keys(extRule) as (keyof T)[]).forEach(key => {
     const value = rule[key];
@@ -209,7 +236,22 @@ class WorkSheetXform extends BaseXform {
     const rels: RelationshipModel[] = (model.rels = []);
 
     function nextRid(r: readonly unknown[]) {
-      return `rId${r.length + 1}`;
+      // Scan for the highest existing numeric suffix rather than trusting
+      // array length. Length-based numbering collides as soon as a rels
+      // list isn't a clean, gap-free rId1..rIdN sequence in that exact
+      // order - true for anything this codebase wrote itself, not
+      // guaranteed for a list preserved/merged from an externally-authored
+      // file (e.g. keeping a grpSp anchor's original rel entries in place
+      // instead of renumbering them).
+      let max = 0;
+      for (const rel of r) {
+        const id = (rel as { Id?: string } | undefined)?.Id;
+        const m = id ? /^rId(\d+)$/.exec(id) : null;
+        if (m) {
+          max = Math.max(max, Number(m[1]));
+        }
+      }
+      return `rId${max + 1}`;
     }
 
     model.hyperlinks.forEach(hyperlink => {
@@ -274,7 +316,10 @@ class WorkSheetXform extends BaseXform {
 
     // Handle pre-loaded drawing (from file read) that may contain charts or other non-image content.
     // Chart anchors (with chartNumber from reconcile) are preserved and get fresh rels.
-    // Non-chart anchors are discarded — images are rebuilt from model.media below.
+    // Group anchors (`<xdr:grpSp>`, captured verbatim by GenericEchoXform - no
+    // programmatic API touches these, so they're always kept as-is) are also
+    // preserved. Image anchors are discarded here and rebuilt from model.media
+    // below, since that's the path Image.place()/etc. actually mutate.
     if (model.drawing && model.drawing.anchors) {
       const drawing = model.drawing;
       drawing.rId = nextRid(rels);
@@ -282,14 +327,33 @@ class WorkSheetXform extends BaseXform {
         drawing.name = `drawing${++options.drawingsCount}`;
       }
 
-      // Separate chart anchors from non-chart anchors. `a` is a drawing-anchor
-      // model element (a prepare()-model substructure shared with the drawing
-      // xform); kept `any` until that model is typed.
+      // Separate chart/group anchors (preserved) from image anchors (rebuilt
+      // below from model.media). `a` is a drawing-anchor model element (a
+      // prepare()-model substructure shared with the drawing xform); kept
+      // `any` until that model is typed.
       const chartAnchors = drawing.anchors.filter((a: any) => a.chartNumber || a.chartExNumber);
+      const groupAnchors = drawing.anchors.filter(
+        (a: any) => a.group && !a.chartNumber && !a.chartExNumber
+      );
 
-      // Reset anchors — chart anchors will be re-added, image anchors rebuilt below
-      drawing.anchors = [];
-      drawing.rels = [];
+      // Reset anchors - chart anchors re-added below (renumbered), group
+      // anchors preserved verbatim, image anchors rebuilt from model.media.
+      // A group anchor's captured XML references its original rIds directly
+      // (blip r:embed, hlinkClick r:id, ...) with no remapping, so keep ONLY
+      // the rel entries a preserved group actually points at - not the whole
+      // original `drawing.rels` array. Keeping everything left stale,
+      // never-referenced-again rels sitting in the array, which shifted
+      // `nextRid`'s numbering for freshly-built chart/image rels and broke
+      // tests asserting exact rId values after a plain round-trip or a
+      // chart removal.
+      const referencedRelIds = new Set<string>();
+      for (const anchor of groupAnchors) {
+        collectRelIds(anchor.group, referencedRelIds);
+      }
+      const preservedRels = (drawing.rels ?? []).filter((rel: any) => referencedRelIds.has(rel.Id));
+
+      drawing.anchors = [...groupAnchors];
+      drawing.rels = preservedRels;
 
       // Re-add chart anchors and build their rels
       for (const anchor of chartAnchors) {
@@ -1218,7 +1282,17 @@ class WorkSheetXform extends BaseXform {
                     type: "image",
                     imageId: anchor.medium.index,
                     range: anchor.range,
-                    hyperlinks: anchor.picture.hyperlinks
+                    hyperlinks: anchor.picture.hyperlinks,
+                    // Carried through so a plain re-save (which rebuilds the
+                    // anchor from this model.media entry rather than reusing
+                    // the parsed anchor - see the drawing-preservation block
+                    // above) doesn't zero out the picture's absolute
+                    // position/size. Without this, `editAs="oneCell"`
+                    // pictures rendered invisible (0x0) on every write.
+                    xfrmOffX: anchor.picture.xfrmOffX,
+                    xfrmOffY: anchor.picture.xfrmOffY,
+                    xfrmExtCx: anchor.picture.xfrmExtCx,
+                    xfrmExtCy: anchor.picture.xfrmExtCy
                   });
                 }
               }

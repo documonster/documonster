@@ -41,6 +41,18 @@ export interface DrawingAnchor {
      * the SVG media via this id.
      */
     svgRId?: string;
+    /**
+     * Absolute position/size from the original `<xdr:spPr><a:xfrm>`, EMU.
+     * For a `twoCellAnchor editAs="oneCell"` picture this is what Excel
+     * actually renders from - the anchor's cell range is just a cache.
+     * Passed through when reconstructing an anchor from a loaded
+     * `model.media` entry so a plain re-save doesn't zero out the
+     * picture's size (see `xfrmOffX` on {@link ImageMedium}).
+     */
+    xfrmOffX?: number;
+    xfrmOffY?: number;
+    xfrmExtCx?: number;
+    xfrmExtCy?: number;
   };
   range: DrawingRange;
 }
@@ -63,6 +75,11 @@ interface ImageMedium {
   hyperlinks?: { hyperlink?: string; tooltip?: string };
   /** Opacity 0-1 for watermark overlay mode. */
   opacity?: number;
+  /** See `xfrmOffX` on {@link DrawingAnchor}'s `picture` - passed through as-is. */
+  xfrmOffX?: number;
+  xfrmOffY?: number;
+  xfrmExtCx?: number;
+  xfrmExtCy?: number;
 }
 
 /**
@@ -216,7 +233,15 @@ export function buildDrawingAnchorsAndRels(
     const anchor: DrawingAnchor = {
       picture: {
         rId: rIdImage,
-        ...(isExternal ? { external: true } : {})
+        ...(isExternal ? { external: true } : {}),
+        ...(medium.xfrmOffX !== undefined
+          ? {
+              xfrmOffX: medium.xfrmOffX,
+              xfrmOffY: medium.xfrmOffY,
+              xfrmExtCx: medium.xfrmExtCx,
+              xfrmExtCy: medium.xfrmExtCy
+            }
+          : {})
       },
       range: medium.range
     };
@@ -282,6 +307,7 @@ export function filterDrawingAnchors<
     picture?: unknown;
     graphicFrame?: unknown;
     shape?: unknown;
+    group?: unknown;
   } | null
 >(anchors: T[]): T[] {
   return anchors.filter(a => {
@@ -298,18 +324,22 @@ export function filterDrawingAnchors<
     // ext: { cx, cy } }` on write — the drawing XML came out empty
     // and the chart disappeared from the saved file.
     if (range?.pos !== undefined) {
-      return !!a.picture || !!a.graphicFrame || !!a.shape;
+      return !!a.picture || !!a.graphicFrame || !!a.shape || !!a.group;
     }
     // Form controls have range.br and shape properties
     if (range?.br && a.shape) {
       return true;
     }
-    // One-cell anchors need a valid picture, graphicFrame (charts) or shape.
-    if (!range?.br && !a.picture && !a.graphicFrame && !a.shape) {
+    // One-cell anchors need a valid picture, graphicFrame (charts), shape,
+    // or group (`<xdr:grpSp>`, captured verbatim by GenericEchoXform).
+    // `group` was missing here until it existed at all as a model kind -
+    // every group-shape anchor was silently dropped as "invalid" the
+    // moment parsing stopped misattributing it to `picture`.
+    if (!range?.br && !a.picture && !a.graphicFrame && !a.shape && !a.group) {
       return false;
     }
-    // Two-cell anchors need either picture, shape, or graphicFrame (charts)
-    if (range?.br && !a.picture && !a.shape && !a.graphicFrame) {
+    // Two-cell anchors need picture, shape, graphicFrame (charts), or group.
+    if (range?.br && !a.picture && !a.shape && !a.graphicFrame && !a.group) {
       return false;
     }
     return true;
