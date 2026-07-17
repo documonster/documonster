@@ -389,7 +389,18 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
     ...sourceModel,
     id: newWs.id,
     name: getSheetName(newWs),
-    charts: remappedCharts
+    charts: remappedCharts,
+    // getSheetModel()/setSheetModel() pass tables, pivot tables, conditional
+    // formattings, and form controls through by reference rather than value
+    // (unlike `charts` above, which is rebuilt as fresh objects). Two sheets
+    // then share the same TableModel etc. instances, so renaming the copy's
+    // table (Table.setName) mutated the source table too, and structured
+    // clone here is the fix - not the chart-style renumbering above, since
+    // these have no cross-sheet identity to remap, just plain data to copy.
+    tables: structuredClone(sourceModel.tables ?? []),
+    pivotTables: structuredClone(sourceModel.pivotTables ?? []),
+    conditionalFormattings: structuredClone(sourceModel.conditionalFormattings ?? []),
+    formControls: structuredClone(sourceModel.formControls ?? [])
   });
 
   // Copy the actual chart parts + sidecars into the target workbook

@@ -240,11 +240,19 @@ class CfRuleXform extends CompositeXform {
   }
 
   renderText(xmlStream, model) {
+    // Per ECMA-376, only the real "containsText" rule type carries an
+    // `operator` attribute (always "containsText" itself). The other four
+    // variants this model collapses into (containsBlanks, notContainsBlanks,
+    // containsErrors, notContainsErrors - see opType() above) never have one;
+    // emitting it unconditionally produced e.g. `type="containsBlanks"
+    // operator="containsBlanks"`, which isn't a valid operator enum value
+    // and made strict readers (openpyxl) reject the whole worksheet.
+    const xmlType = model.operator;
     xmlStream.openNode(this.tag, {
-      type: model.operator,
+      type: xmlType,
       dxfId: model.dxfId,
       priority: model.priority,
-      operator: BaseXform.toStringAttribute(model.operator, "containsText")
+      operator: xmlType === "containsText" ? "containsText" : undefined
     });
 
     const formula = getTextFormula(model);

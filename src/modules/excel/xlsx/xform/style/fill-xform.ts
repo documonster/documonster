@@ -110,7 +110,12 @@ class PatternFillXform extends BaseXform {
 
   render(xmlStream: XmlSink, model: PatternFillModel): void {
     xmlStream.openNode("patternFill");
-    xmlStream.addAttribute("patternType", model.pattern);
+    // ECMA-376 defaults patternType to "none" when the attribute is omitted
+    // (Excel itself writes bare `<patternFill/>` for "no fill"). Guard here too
+    // in case some other caller builds a PatternFillModel without `pattern` -
+    // silently emitting patternType="undefined" produces a stylesheet Excel
+    // and every strict OOXML reader (openpyxl included) refuses to open.
+    xmlStream.addAttribute("patternType", model.pattern ?? "none");
     if (model.fgColor) {
       this.map.fgColor.render(xmlStream, model.fgColor);
     }
@@ -129,7 +134,8 @@ class PatternFillXform extends BaseXform {
       case "patternFill":
         this.model = {
           type: "pattern",
-          pattern: node.attributes.patternType
+          // Attribute is optional per ECMA-376; absent means "none".
+          pattern: node.attributes.patternType ?? "none"
         };
         return true;
       default:
