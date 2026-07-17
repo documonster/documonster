@@ -63,3 +63,31 @@ export async function buildSheetProtection<T extends { spinCount?: number }>(
 
   return protection;
 }
+
+/**
+ * Verify a candidate password against a hash previously produced by
+ * {@link buildSheetProtection} (i.e. `ws.sheetProtection` after `protect()`).
+ * Recomputes the hash with the stored algorithm/salt/spin count and compares.
+ *
+ * Returns `false` (rather than throwing) when the stored protection has no
+ * hash at all - "protected with no password" - since there is nothing to
+ * verify a candidate against.
+ */
+export async function verifySheetPassword(
+  protection:
+    | Pick<SheetProtectionHash, "hashValue" | "saltValue" | "algorithmName" | "spinCount">
+    | null
+    | undefined,
+  password: string
+): Promise<boolean> {
+  if (!protection?.hashValue || !protection.saltValue || !protection.algorithmName) {
+    return false;
+  }
+  const candidateHash = await Encryptor.convertPasswordToHash(
+    password,
+    protection.algorithmName,
+    protection.saltValue,
+    protection.spinCount ?? 100000
+  );
+  return candidateHash === protection.hashValue;
+}

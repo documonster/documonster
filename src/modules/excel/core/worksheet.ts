@@ -142,7 +142,7 @@ import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
 import { isExternalImage } from "@excel/utils/drawing-utils";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
-import { buildSheetProtection } from "@excel/utils/sheet-protection";
+import { buildSheetProtection, verifySheetPassword } from "@excel/utils/sheet-protection";
 import {
   calculateAutoFitWidth,
   getMaxDigitWidth,
@@ -1457,6 +1457,15 @@ export async function protect(
 
 export function unprotect(ws: WorksheetData): void {
   ws.sheetProtection = null;
+}
+
+/**
+ * Verify a candidate password against the sheet's stored protection hash
+ * (set via `protect()`). Returns `false` if the sheet isn't protected, or
+ * was protected with no password to check against.
+ */
+export async function verifyPassword(ws: WorksheetData, password: string): Promise<boolean> {
+  return verifySheetPassword(ws.sheetProtection, password);
 }
 
 export function addTable(ws: WorksheetData, model: TableProperties): TableData {
