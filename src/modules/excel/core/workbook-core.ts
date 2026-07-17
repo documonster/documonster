@@ -105,6 +105,13 @@ export interface WorkbookData {
   _timelineParts: Record<string, Uint8Array>;
   _timelineCacheParts: Record<string, Uint8Array>;
   _xlsx?: XLSX;
+  /**
+   * Override ContentType for /xl/workbook.xml, captured from the source
+   * file's [Content_Types].xml on read (templates/macro-enabled workbooks
+   * use a different value than a plain .xlsx). Undefined for a freshly
+   * created workbook, in which case the writer defaults to the plain type.
+   */
+  workbookContentType?: string;
   userFunctions?: Map<
     string,
     {

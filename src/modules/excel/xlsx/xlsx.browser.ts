@@ -5305,6 +5305,26 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       case OOXML_PATHS.xlWorkbookRels:
         model.workbookRels = await this.parseRels(stream);
         return true;
+      case OOXML_PATHS.contentTypes: {
+        // Templates (.xltx/.xltm) and macro-enabled workbooks (.xlsm) declare
+        // a different Override ContentType for /xl/workbook.xml than a plain
+        // .xlsx. Capture the original value so the writer can round-trip it
+        // instead of always emitting the plain-workbook type — losing this
+        // caused Excel to flat-out refuse files whose extension (preserved
+        // elsewhere) no longer matched the content-type declared here.
+        const data = await this.collectStreamData(stream);
+        const raw = new TextDecoder().decode(data);
+        const overrideTag = raw
+          .match(/<Override\b[^>]*>/g)
+          ?.find(tag => tag.includes('PartName="/xl/workbook.xml"'));
+        const contentType = overrideTag
+          ? /ContentType="([^"]+)"/.exec(overrideTag)?.[1]
+          : undefined;
+        if (contentType) {
+          model.workbookContentType = contentType;
+        }
+        return true;
+      }
       case OOXML_PATHS.docPropsApp: {
         const appXform = new AppXform();
         const appProperties = await appXform.parseStream(stream);

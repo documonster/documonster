@@ -1176,4 +1176,65 @@ describe("XLSX", () => {
       expect(cellVal.isDynamicArray).toBeUndefined();
     });
   });
+
+  // ===========================================================================
+  // Workbook content-type round-trip (.xltx/.xltm)
+  // ===========================================================================
+
+  describe("workbook content-type round-trip", () => {
+    it("preserves the template Override for /xl/workbook.xml through read/write", async () => {
+      // Build a plain workbook, then rewrite [Content_Types].xml to declare
+      // it as a template — simulating a real .xltx source file, since
+      // documonster itself has no API to create templates directly.
+      const cleanBuffer = await buildMinimalXlsx();
+
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(cleanBuffer);
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+
+      const ctEntry = entries.get("[Content_Types].xml")!;
+      const templateXml = decoder
+        .decode(ctEntry.data)
+        .replace(
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"/>'
+        );
+      expect(templateXml).not.toBe(decoder.decode(ctEntry.data));
+      ctEntry.data = encoder.encode(templateXml);
+
+      const archive = new ZipArchive({ level: 0, reproducible: true });
+      for (const [name, entry] of entries) {
+        archive.add(name, entry.data);
+      }
+      const templateBuffer = await archive.bytes();
+
+      // Round-trip through documonster.
+      const wb = Workbook.create();
+      await Workbook.read(wb, templateBuffer);
+      const out = await Workbook.toBuffer(wb);
+
+      const outEntries = await extractAll(out);
+      const outContentTypes = decoder.decode(outEntries.get("[Content_Types].xml")!.data);
+
+      expect(outContentTypes).toContain(
+        'PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"'
+      );
+      expect(outContentTypes).not.toContain(
+        'PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"'
+      );
+    });
+
+    it("defaults to the plain-workbook content type for a freshly created workbook", async () => {
+      const buffer = await buildMinimalXlsx();
+      const { extractAll } = await import("@archive/unzip/extract");
+      const entries = await extractAll(buffer);
+      const decoder = new TextDecoder();
+      const contentTypes = decoder.decode(entries.get("[Content_Types].xml")!.data);
+
+      expect(contentTypes).toContain(
+        'PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"'
+      );
+    });
+  });
 });

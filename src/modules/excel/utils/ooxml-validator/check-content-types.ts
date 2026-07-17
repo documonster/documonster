@@ -24,8 +24,21 @@ import {
 // Well-known content types
 // -----------------------------------------------------------------------------
 
+// /xl/workbook.xml's Override legitimately varies by workbook kind — a
+// plain .xlsx, a template (.xltx), and their macro-enabled counterparts
+// (.xlsm/.xltm) each declare a different value here, and Excel uses it
+// (together with the extension) to decide how to open the file. Any of
+// these four is valid; the check below treats the set as the expectation
+// rather than a single fixed string.
+const WORKBOOK_CONTENT_TYPES = [
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
+  "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+  "application/vnd.ms-excel.template.macroEnabled.main+xml"
+] as const;
+
 const CT = {
-  workbook: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+  workbook: WORKBOOK_CONTENT_TYPES[0],
   styles: "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
   sharedStrings: "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml",
   theme: "application/vnd.openxmlformats-officedocument.theme+xml",
@@ -57,7 +70,6 @@ const CT = {
  * readability.
  */
 const EXACT_PART_CONTENT_TYPE: Record<string, string> = {
-  "xl/workbook.xml": CT.workbook,
   "xl/styles.xml": CT.styles,
   "xl/sharedStrings.xml": CT.sharedStrings,
   "xl/calcChain.xml": CT.calcChain,
@@ -221,11 +233,23 @@ export function checkContentTypes(ctx: ValidationContext): void {
       continue;
     }
 
+    const actual = overrideType ?? defaultType;
+
+    if (path === "xl/workbook.xml") {
+      if (!WORKBOOK_CONTENT_TYPES.includes(actual as (typeof WORKBOOK_CONTENT_TYPES)[number])) {
+        ctx.reporter.error(
+          "content-types-wrong-for-part",
+          `Unexpected content type for /xl/workbook.xml: got "${actual}", expected one of ${WORKBOOK_CONTENT_TYPES.map(t => `"${t}"`).join(", ")}`,
+          "[Content_Types].xml"
+        );
+      }
+      continue;
+    }
+
     const expected = expectedContentType(path);
     if (!expected) {
       continue;
     }
-    const actual = overrideType ?? defaultType;
     if (actual !== expected.contentType) {
       ctx.reporter.error(
         "content-types-wrong-for-part",

@@ -30,6 +30,13 @@ import { StdDocAttributes } from "@xml/writer";
  * renderer actually reads.
  */
 interface ContentTypesModel {
+  /**
+   * Override ContentType for /xl/workbook.xml, captured from the source
+   * file's [Content_Types].xml on read. Templates and macro-enabled
+   * workbooks use a different value than a plain .xlsx; when absent (a
+   * freshly created workbook) this defaults to the plain-workbook type.
+   */
+  workbookContentType?: string;
   media?: { type?: string; extension: string }[];
   worksheets: { fileIndex: number }[];
   chartsheets?: { sheetNo: number }[];
@@ -101,7 +108,9 @@ class ContentTypesXform extends BaseXform {
 
     xmlStream.leafNode("Override", {
       PartName: toContentTypesPartName(OOXML_PATHS.xlWorkbook),
-      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+      ContentType:
+        model.workbookContentType ??
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
     });
 
     model.worksheets.forEach(worksheet => {

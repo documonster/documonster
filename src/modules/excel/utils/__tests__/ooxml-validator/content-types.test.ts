@@ -109,6 +109,38 @@ describe("ooxml-validator / content-types", () => {
     ).toBe(true);
   });
 
+  it("accepts the template content type for /xl/workbook.xml (.xltx)", async () => {
+    const parts = baseParts();
+    parts["[Content_Types].xml"] = contentTypesWith([
+      {
+        partName: "/xl/workbook.xml",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
+      },
+      {
+        partName: "/xl/styles.xml",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"
+      },
+      {
+        partName: "/xl/sharedStrings.xml",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"
+      },
+      {
+        partName: "/xl/theme/theme1.xml",
+        contentType: "application/vnd.openxmlformats-officedocument.theme+xml"
+      },
+      {
+        partName: "/xl/worksheets/sheet1.xml",
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+      }
+    ]);
+    const report = await validateXlsxBuffer(buildPackage(parts));
+    expect(
+      report.problems.some(
+        p => p.kind === "content-types-wrong-for-part" && p.message.includes("xl/workbook.xml")
+      )
+    ).toBe(false);
+  });
+
   it("flags duplicate Override PartName", async () => {
     const parts = baseParts();
     parts["[Content_Types].xml"] = contentTypesWith([

@@ -140,6 +140,13 @@ export interface WorkbookModel {
   language?: string;
   revision?: number;
   contentStatus?: string;
+  /**
+   * Override ContentType for /xl/workbook.xml, captured from the source
+   * file's [Content_Types].xml on read (templates/macro-enabled workbooks
+   * use a different value than a plain .xlsx). Undefined for a freshly
+   * created workbook, in which case the writer defaults to the plain type.
+   */
+  workbookContentType?: string;
   themes?: unknown;
   media: WorkbookMedia[];
   pivotTables: PivotTable[];
@@ -1072,6 +1079,7 @@ export function getWorkbookModel(wb: WorkbookData): WorkbookModel {
     language: wb.language,
     revision: wb.revision,
     contentStatus: wb.contentStatus,
+    workbookContentType: wb.workbookContentType,
     themes: wb._themes,
     media: wb.media,
     pivotTables: wb.pivotTables,
@@ -1117,6 +1125,7 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
   wb.language = value.language;
   wb.revision = value.revision;
   wb.contentStatus = value.contentStatus;
+  wb.workbookContentType = value.workbookContentType;
 
   wb.properties = value.properties;
   wb.protection = value.protection;
