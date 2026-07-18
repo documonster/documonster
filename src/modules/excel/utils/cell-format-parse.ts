@@ -25,16 +25,7 @@ const MONTHS_LONG = [
 ];
 const MONTHS_SHORT = MONTHS_LONG.map(m => m.slice(0, 3));
 
-type TokenRole =
-  | "year2"
-  | "year4"
-  | "monthNum"
-  | "monthName"
-  | "day"
-  | "hour"
-  | "minute"
-  | "second"
-  | "ampm";
+type TokenRole = "year2" | "year4" | "month" | "day" | "hour" | "minute" | "second" | "ampm";
 
 interface Token {
   role: TokenRole;
@@ -81,7 +72,7 @@ export function extractTokenOrder(fmt: string): Token[] {
     } else if (raw === "yy") {
       tokens.push({ role: "year2" });
     } else if (raw === "mmmm" || raw === "mmm") {
-      tokens.push({ role: "monthName" });
+      tokens.push({ role: "month" });
     } else if (raw === "dd" || raw === "d") {
       tokens.push({ role: "day" });
     } else if (raw === "hh" || raw === "h") {
@@ -94,7 +85,7 @@ export function extractTokenOrder(fmt: string): Token[] {
       // Ambiguous — resolved to month vs minute in a second pass below,
       // once every token's rough position is known.
       pending.push({ index: tokens.length });
-      tokens.push({ role: "monthNum" }); // placeholder, may flip to "minute"
+      tokens.push({ role: "month" }); // placeholder, may flip to "minute"
     }
   }
 
@@ -192,12 +183,25 @@ function parseByTokens(tokens: Token[], input: string): ParsedDateTime | undefin
       continue;
     }
 
-    if (role === "monthName") {
-      const idx = monthIndexFromName(part);
-      if (idx === undefined) {
-        return undefined;
+    if (role === "month") {
+      // The format's own month token (mmm vs mm) only controls how the
+      // value later *displays* - Excel's manual-entry recognizer accepts
+      // either a name or a number regardless, and stores whichever was
+      // typed as a plain numeric month. Match that: try numeric first,
+      // fall back to a name lookup.
+      if (/^\d+$/.test(part)) {
+        const num = Number(part);
+        if (num < 1 || num > 12) {
+          return undefined;
+        }
+        result.month = num;
+      } else {
+        const idx = monthIndexFromName(part);
+        if (idx === undefined) {
+          return undefined;
+        }
+        result.month = idx + 1;
       }
-      result.month = idx + 1;
       continue;
     }
 
@@ -211,14 +215,11 @@ function parseByTokens(tokens: Token[], input: string): ParsedDateTime | undefin
         result.year = num;
         break;
       case "year2":
-        // Same 1900/2000 pivot convention spreadsheet software commonly uses.
-        result.year = num <= 49 ? 2000 + num : 1900 + num;
-        break;
-      case "monthNum":
-        if (num < 1 || num > 12) {
-          return undefined;
-        }
-        result.month = num;
+        // The format's yy token only controls display width - typing a
+        // full 4-digit year into a 2-digit-year cell is still valid input
+        // (Excel just displays it truncated to 2 digits). Only apply the
+        // 1900/2000 pivot to an actual 1-2 digit year.
+        result.year = part.length >= 4 ? num : num <= 49 ? 2000 + num : 1900 + num;
         break;
       case "day":
         if (num < 1 || num > 31) {
@@ -258,12 +259,7 @@ function parseByTokens(tokens: Token[], input: string): ParsedDateTime | undefin
 /** True if `fmt` renders as a pure time-of-day (no date component). */
 export function isPureTimeFormat(tokens: Token[]): boolean {
   const hasDate = tokens.some(
-    t =>
-      t.role === "day" ||
-      t.role === "monthNum" ||
-      t.role === "monthName" ||
-      t.role === "year2" ||
-      t.role === "year4"
+    t => t.role === "day" || t.role === "month" || t.role === "year2" || t.role === "year4"
   );
   const hasTime = tokens.some(t => t.role === "hour" || t.role === "minute" || t.role === "second");
   return hasTime && !hasDate;
@@ -272,12 +268,7 @@ export function isPureTimeFormat(tokens: Token[]): boolean {
 /** True if `fmt` has at least a date component (may also carry time). */
 export function isDateFormat(tokens: Token[]): boolean {
   return tokens.some(
-    t =>
-      t.role === "day" ||
-      t.role === "monthNum" ||
-      t.role === "monthName" ||
-      t.role === "year2" ||
-      t.role === "year4"
+    t => t.role === "day" || t.role === "month" || t.role === "year2" || t.role === "year4"
   );
 }
 

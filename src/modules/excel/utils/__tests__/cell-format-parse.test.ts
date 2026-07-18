@@ -32,6 +32,18 @@ describe("cell-format-parse", () => {
       expect(parseValueByFormat("mmmm d, yyyy", "July 9, 2026")).toEqual(utcDate(2026, 7, 9));
     });
 
+    it("accepts a numeric month for a named-month format (d-mmm-yy displays as 2-Jul-26, but a numeric month is still a valid date)", () => {
+      // The format's month TOKEN (mmm vs mm) only controls how the value
+      // later displays - it must not gate whether a numeric month is
+      // accepted, mirroring what Excel itself does on manual entry.
+      expect(parseValueByFormat("d-mmm-yy", "02.07.2026")).toEqual(utcDate(2026, 7, 2));
+      expect(parseValueByFormat("d-mmm-yy", "2-7-2026")).toEqual(utcDate(2026, 7, 2));
+    });
+
+    it("accepts a month name for a numeric-month format", () => {
+      expect(parseValueByFormat("dd/mm/yyyy", "09/Jul/2026")).toEqual(utcDate(2026, 7, 9));
+    });
+
     it("parses a 2-digit year with 1900/2000 pivot", () => {
       expect(parseValueByFormat("dd/mm/yy", "09/07/26")).toEqual(utcDate(2026, 7, 9));
       expect(parseValueByFormat("dd/mm/yy", "09/07/85")).toEqual(utcDate(1985, 7, 9));
