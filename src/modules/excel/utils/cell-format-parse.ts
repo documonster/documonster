@@ -142,27 +142,46 @@ export interface ParsedDateTime {
   second?: number;
 }
 
+/** Trailing time tokens may be omitted from the input (Excel itself treats
+ * "09:00" as valid for an `h:mm:ss` cell, defaulting seconds to 0) — but a
+ * missing date component (day/month/year) is never safe to guess, so only
+ * these roles may be dropped off the end. */
+const OMITTABLE_TRAILING_ROLES: ReadonlySet<TokenRole> = new Set([
+  "hour",
+  "minute",
+  "second",
+  "ampm"
+]);
+
 /**
  * Parse `input` against the token order derived from `fmt`. Returns
- * `undefined` if the input doesn't have a part for every token, or any
- * part fails to parse/validate — callers should leave the original value
- * untouched in that case rather than guess further.
+ * `undefined` if the input has more parts than the format has tokens, is
+ * missing anything but trailing time tokens, or any part fails to
+ * parse/validate — callers should leave the original value untouched in
+ * that case rather than guess further.
  */
 function parseByTokens(tokens: Token[], input: string): ParsedDateTime | undefined {
   if (tokens.length === 0) {
     return undefined;
   }
   const parts = splitInputParts(input);
-  if (parts.length !== tokens.length) {
+  if (parts.length > tokens.length) {
     return undefined;
   }
+  if (parts.length < tokens.length) {
+    const missing = tokens.slice(parts.length);
+    if (!missing.every(t => OMITTABLE_TRAILING_ROLES.has(t.role))) {
+      return undefined;
+    }
+  }
+  const usedTokens = tokens.slice(0, parts.length);
 
   const result: ParsedDateTime = {};
   let ampm: "am" | "pm" | undefined;
 
-  for (let i = 0; i < tokens.length; i++) {
+  for (let i = 0; i < usedTokens.length; i++) {
     const part = parts[i];
-    const role = tokens[i].role;
+    const role = usedTokens[i].role;
 
     if (role === "ampm") {
       const lower = part.toLowerCase();

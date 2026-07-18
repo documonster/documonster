@@ -73,6 +73,19 @@ describe("cell-format-parse", () => {
     it("rejects out-of-range minutes", () => {
       expect(parseValueByFormat("h:mm", "09:75")).toBeUndefined();
     });
+
+    it("defaults omitted trailing seconds to 0 for an h:mm:ss cell, matching Excel's own manual-entry behavior", () => {
+      expect(parseValueByFormat("h:mm:ss", "09:00")).toBeCloseTo(9 / 24);
+      expect(parseValueByFormat("hh:mm:ss", "23:30")).toBeCloseTo(23.5 / 24);
+    });
+
+    it("defaults an omitted trailing AM/PM to 24h interpretation", () => {
+      expect(parseValueByFormat("h:mm AM/PM", "14:00")).toBeCloseTo(14 / 24);
+    });
+
+    it("still rejects input with more parts than the format has tokens", () => {
+      expect(parseValueByFormat("h:mm", "09:00:00")).toBeUndefined();
+    });
   });
 
   describe("parseValueByFormat — non-date/time formats", () => {
