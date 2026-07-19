@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/documonster/documonster/compare/v0.1.1...v0.1.2) (2026-07-19)
+
+
+### Bug Fixes
+
+* **excel:** Invalid XML on write, importSheet aliasing, picture/group corruption, template content-types ([5d83cbd](https://github.com/documonster/documonster/commit/5d83cbd002ac381c78092bd06a6d90b38c5a22db))
+
 ## [0.1.1](https://github.com/documonster/documonster/compare/v0.1.0...v0.1.1) (2026-07-08)
 
 
