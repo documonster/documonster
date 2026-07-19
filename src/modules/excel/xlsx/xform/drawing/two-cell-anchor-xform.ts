@@ -1,6 +1,8 @@
 import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import type { PositionModel } from "@excel/xlsx/xform/drawing/cell-position-xform";
+import { GenericEchoXform } from "@excel/xlsx/xform/drawing/generic-echo-xform";
+import type { EchoNode } from "@excel/xlsx/xform/drawing/generic-echo-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
@@ -21,6 +23,16 @@ interface TwoCellModel {
   shape?: ShapeRenderModel;
   /** Graphic frame model (for charts and other embedded objects) */
   graphicFrame?: GraphicFrameModel;
+  /**
+   * A `<xdr:grpSp>` grouped shape, captured verbatim (see
+   * {@link GenericEchoXform}). Without an explicit map entry for "xdr:grpSp",
+   * the anchor's dispatch loop fell through to its generic per-tag lookup for
+   * every descendant of the unrecognized group wrapper — so an `<xdr:pic>`
+   * nested inside a group was matched directly and promoted to `model.picture`,
+   * silently replacing the whole group with one of its own children at the
+   * wrong geometry, id and hyperlink.
+   */
+  group?: EchoNode;
   /** Wrap the anchor in mc:AlternateContent for modern drawing clients */
   alternateContent?: { requires: string };
   medium?: unknown;
@@ -50,6 +62,7 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       "xdr:sp": new SpXform(),
       "xdr:userShape": new ShapeXform(),
       "xdr:graphicFrame": new GraphicFrameXform(),
+      "xdr:grpSp": new GenericEchoXform("xdr:grpSp"),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -152,6 +165,8 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       this.map["xdr:pic"].render(xmlStream, model.picture);
     } else if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
+    } else if (model.group) {
+      this.map["xdr:grpSp"].render(xmlStream, model.group);
     } else if (model.shape) {
       // A user-visible shape routes to the dedicated ShapeXform; the legacy
       // form-control shape (no `kind`) stays on the SpXform path.
@@ -397,8 +412,24 @@ class TwoCellAnchorXform extends BaseCellAnchorXform {
       case this.tag:
         this.model.range.tl = this.map["xdr:from"].model;
         this.model.range.br = this.map["xdr:to"].model;
-        this.model.picture = this.map["xdr:pic"].model;
-        this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
+        // Only pull a child model in if THIS anchor actually parsed that tag,
+        // and reset the child xform immediately afterwards. These child xform
+        // instances are shared across every anchor in the drawing, so leaving
+        // a stale `.model` behind made the next anchor of a different kind
+        // (e.g. a grpSp-only anchor following a picture anchor) silently
+        // inherit the previous anchor's picture/graphicFrame/group.
+        if (this.map["xdr:pic"].model) {
+          this.model.picture = this.map["xdr:pic"].model;
+          this.map["xdr:pic"].reset();
+        }
+        if (this.map["xdr:graphicFrame"].model) {
+          this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
+          this.map["xdr:graphicFrame"].reset();
+        }
+        if (this.map["xdr:grpSp"].model) {
+          this.model.group = this.map["xdr:grpSp"].model as EchoNode;
+          this.map["xdr:grpSp"].reset();
+        }
         return false;
       default:
         // could be some unrecognised tags

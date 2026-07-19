@@ -140,6 +140,13 @@ export interface WorkbookModel {
   language?: string;
   revision?: number;
   contentStatus?: string;
+  /**
+   * Override ContentType for `/xl/workbook.xml`, captured from the source
+   * file's `[Content_Types].xml` on read (templates and macro-enabled
+   * workbooks declare a different value than a plain .xlsx). Undefined for a
+   * freshly created workbook, in which case the writer emits the plain type.
+   */
+  workbookContentType?: string;
   themes?: unknown;
   media: WorkbookMedia[];
   pivotTables: PivotTable[];
@@ -359,6 +366,48 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
   const sourceWorkbook = getSheetWorkbook(source);
   const differentWorkbook = sourceWorkbook !== wb;
   const sourceCharts = sourceModel.charts ?? [];
+
+  // Worksheet media entries store workbook-level image indexes. A plain model
+  // clone is sufficient within one workbook, but across workbooks those indexes
+  // point into the SOURCE media registry. Re-register every referenced medium
+  // (and an optional SVG companion) in the destination and rewrite the sheet
+  // model's imageId; otherwise the writer either drops the image (missing id) or
+  // silently renders an unrelated destination image that happens to share it.
+  const importedMedia = structuredClone(sourceModel.media ?? []);
+  if (differentWorkbook) {
+    const mediaMap = new Map<number, number>();
+    const copyMedium = (sourceId: number): number | undefined => {
+      const existing = mediaMap.get(sourceId);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const sourceMedium = sourceWorkbook.media[sourceId];
+      if (!sourceMedium) {
+        return undefined;
+      }
+      const cloned = structuredClone(sourceMedium);
+      const targetId = wb.media.length;
+      // Reserve before following svgMediaId so a malformed self-reference
+      // cannot recurse forever.
+      mediaMap.set(sourceId, targetId);
+      wb.media.push(cloned);
+      if (sourceMedium.svgMediaId !== undefined) {
+        cloned.svgMediaId = copyMedium(sourceMedium.svgMediaId);
+      }
+      return targetId;
+    };
+
+    for (const medium of importedMedia) {
+      const sourceId = Number(medium.imageId);
+      if (!Number.isInteger(sourceId) || sourceId < 0) {
+        continue;
+      }
+      const targetId = copyMedium(sourceId);
+      if (targetId !== undefined) {
+        medium.imageId = String(targetId);
+      }
+    }
+  }
   // `nextChartNumber()` / `nextChartExNumber()` compute `max(existing) + 1`
   // from the entry maps — they do NOT reserve a slot. Calling them in
   // a tight loop without an intervening `addChartEntry` therefore
@@ -385,11 +434,63 @@ export function importSheet(wb: WorkbookData, source: Worksheet, name?: string):
       ? (chartExMap.get(anchor.chartExNumber) ?? anchor.chartExNumber)
       : anchor.chartExNumber
   }));
+
+  // Deep-clone the loaded drawing container and give it a FRESH identity.
+  //
+  // `getSheetModel`/`setSheetModel` pass `drawing` through by reference, so
+  // without this the imported sheet shared the source's `WorksheetModel.drawing`
+  // — including its `name` (e.g. "drawing1"). Both sheets then registered a
+  // `[Content_Types].xml` Override for the SAME `/xl/drawings/drawingN.xml`
+  // part, which is invalid per OPC (duplicate PartName) and trips the built-in
+  // validator (issue #189).
+  //
+  // The writer rebuilds each drawing part's XML from `drawing.anchors` /
+  // `drawing.rels` and auto-allocates a fresh, collision-free name for any
+  // drawing whose `name` is empty (its allocator is seeded past every name a
+  // round-tripped sheet already claims — see WorkSheetXform prepare/prepareModel).
+  // So the correct fix is a value copy with the name cleared — not a byte copy
+  // of the original part. Chart anchors embedded in the drawing are renumbered
+  // with the same `chartMap`/`chartExMap` as the top-level `charts` array so
+  // both stay consistent.
+  const remapDrawing = (drawing: unknown): unknown => {
+    if (!drawing || typeof drawing !== "object") {
+      return drawing;
+    }
+    const cloned = structuredClone(drawing) as {
+      name?: string;
+      anchors?: Array<{ chartNumber?: number; chartExNumber?: number }>;
+    };
+    // Clear the name so the writer allocates a fresh, unique one.
+    cloned.name = undefined;
+    for (const anchor of cloned.anchors ?? []) {
+      if (anchor.chartNumber) {
+        anchor.chartNumber = chartMap.get(anchor.chartNumber) ?? anchor.chartNumber;
+      }
+      if (anchor.chartExNumber) {
+        anchor.chartExNumber = chartExMap.get(anchor.chartExNumber) ?? anchor.chartExNumber;
+      }
+    }
+    return cloned;
+  };
+
   setSheetModel(newWs, {
     ...sourceModel,
     id: newWs.id,
     name: getSheetName(newWs),
-    charts: remappedCharts
+    media: importedMedia,
+    charts: remappedCharts,
+    drawing: remapDrawing(sourceModel.drawing),
+    // getSheetModel()/setSheetModel() pass these through by reference (unlike
+    // `charts`, which is rebuilt above), so two sheets would otherwise share
+    // the same TableModel / PivotTable / rule / form-control instances —
+    // mutating one sheet's copy silently mutated the source. Structured-clone
+    // at the import boundary gives the imported sheet independent data. These
+    // carry no cross-sheet identity to remap (unlike charts/drawings), so a
+    // plain deep copy is the whole fix.
+    tables: structuredClone(sourceModel.tables ?? []),
+    pivotTables: structuredClone(sourceModel.pivotTables ?? []),
+    conditionalFormattings: structuredClone(sourceModel.conditionalFormattings ?? []),
+    formControls: structuredClone(sourceModel.formControls ?? [])
   });
 
   // Copy the actual chart parts + sidecars into the target workbook
@@ -1061,6 +1162,7 @@ export function getWorkbookModel(wb: WorkbookData): WorkbookModel {
     language: wb.language,
     revision: wb.revision,
     contentStatus: wb.contentStatus,
+    workbookContentType: wb.workbookContentType,
     themes: wb._themes,
     media: wb.media,
     pivotTables: wb.pivotTables,
@@ -1106,6 +1208,7 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
   wb.language = value.language;
   wb.revision = value.revision;
   wb.contentStatus = value.contentStatus;
+  wb.workbookContentType = value.workbookContentType;
 
   wb.properties = value.properties;
   wb.protection = value.protection;

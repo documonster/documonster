@@ -21,8 +21,16 @@ import {
   worksheetPath
 } from "@excel/utils/ooxml-paths";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import type { XmlSink } from "@xml/types";
+import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
+
+/**
+ * Canonical Override ContentType for `/xl/workbook.xml` in a plain `.xlsx`.
+ * Used both as the render-time default and, alongside its template /
+ * macro-enabled siblings, to recognise the workbook part on parse.
+ */
+const PLAIN_WORKBOOK_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
 
 /**
  * The (write-only) model the content-types manifest is rendered from: the set
@@ -30,6 +38,15 @@ import { StdDocAttributes } from "@xml/writer";
  * renderer actually reads.
  */
 interface ContentTypesModel {
+  /**
+   * Override ContentType for `/xl/workbook.xml`, captured from the source
+   * file's `[Content_Types].xml` on read. Templates (.xltx) and macro-enabled
+   * workbooks (.xlsm/.xltm) declare a different value here than a plain .xlsx,
+   * and Excel uses it (with the file extension) to decide how to open the
+   * file. When absent — a freshly created workbook — the writer falls back to
+   * the plain-workbook type below.
+   */
+  workbookContentType?: string;
   media?: { type?: string; extension: string }[];
   worksheets: { fileIndex: number }[];
   chartsheets?: { sheetNo: number }[];
@@ -64,9 +81,9 @@ interface ContentTypesModel {
   hasPersons?: boolean;
 }
 
-// used for rendering the [Content_Types].xml file
-// not used for parsing
-class ContentTypesXform extends BaseXform {
+// used for rendering the [Content_Types].xml file; on parse it captures only
+// the workbook part's Override ContentType (see parseOpen).
+class ContentTypesXform extends BaseXform<{ workbookContentType?: string }> {
   render(xmlStream: XmlSink, model: ContentTypesModel): void {
     xmlStream.openXml(StdDocAttributes);
 
@@ -101,7 +118,7 @@ class ContentTypesXform extends BaseXform {
 
     xmlStream.leafNode("Override", {
       PartName: toContentTypesPartName(OOXML_PATHS.xlWorkbook),
-      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+      ContentType: model.workbookContentType ?? PLAIN_WORKBOOK_CONTENT_TYPE
     });
 
     model.worksheets.forEach(worksheet => {
@@ -412,14 +429,30 @@ class ContentTypesXform extends BaseXform {
     xmlStream.closeNode();
   }
 
-  parseOpen(): boolean {
-    return false;
+  parseOpen(node: ParseOpenTag): boolean {
+    // Read side: capture only the Override for `/xl/workbook.xml`, whose
+    // ContentType varies by workbook kind (plain / template / macro-enabled)
+    // and must be round-tripped so Excel doesn't see a content-type ⁄
+    // extension mismatch. Every other part is regenerated on write.
+    const localName = node.name.includes(":")
+      ? node.name.slice(node.name.indexOf(":") + 1)
+      : node.name;
+    if (localName === "Override") {
+      const partName = node.attributes.PartName;
+      const contentType = node.attributes.ContentType;
+      if (partName === toContentTypesPartName(OOXML_PATHS.xlWorkbook) && contentType) {
+        this.model = { ...(this.model ?? {}), workbookContentType: contentType };
+      }
+    }
+    return true;
   }
 
   parseText(): void {}
 
-  parseClose(): boolean {
-    return false;
+  parseClose(name: string): boolean {
+    // Keep consuming until the manifest's root `<Types>` closes.
+    const localName = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
+    return localName !== "Types";
   }
 
   static PROPERTY_ATTRIBUTES = {

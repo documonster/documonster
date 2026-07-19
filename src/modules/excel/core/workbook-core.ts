@@ -69,6 +69,12 @@ export interface WorkbookData {
   language?: string;
   revision?: number;
   contentStatus?: string;
+  /**
+   * Override ContentType for `/xl/workbook.xml` captured from the source file's
+   * `[Content_Types].xml` (templates / macro-enabled workbooks differ from a
+   * plain .xlsx). Undefined for a freshly created workbook.
+   */
+  workbookContentType?: string;
   properties: Partial<WorkbookProperties>;
   calcProperties: Partial<CalculationProperties>;
   views: WorkbookView[];

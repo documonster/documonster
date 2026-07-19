@@ -41,6 +41,15 @@ export interface DrawingAnchor {
      * the SVG media via this id.
      */
     svgRId?: string;
+    /**
+     * Absolute position/size from the picture's `<xdr:spPr><a:xfrm>`, in EMU,
+     * carried through from the source file so a round-trip preserves it.
+     */
+    xfrmOffX?: number;
+    xfrmOffY?: number;
+    xfrmExtCx?: number;
+    xfrmExtCy?: number;
+    rawSpPr?: unknown;
   };
   range: DrawingRange;
 }
@@ -63,6 +72,12 @@ interface ImageMedium {
   hyperlinks?: { hyperlink?: string; tooltip?: string };
   /** Opacity 0-1 for watermark overlay mode. */
   opacity?: number;
+  /** Absolute geometry from the source `<xdr:spPr><a:xfrm>` (EMU), if any. */
+  xfrmOffX?: number;
+  xfrmOffY?: number;
+  xfrmExtCx?: number;
+  xfrmExtCy?: number;
+  rawSpPr?: unknown;
 }
 
 /**
@@ -221,6 +236,26 @@ export function buildDrawingAnchorsAndRels(
       range: medium.range
     };
 
+    // Carry the source picture's absolute geometry through the rebuild so a
+    // plain round-trip doesn't zero an `editAs="oneCell"` picture's position
+    // and size. Only set keys that are actually present to avoid littering the
+    // anchor (and its rendered `<a:xfrm>`) with undefined values.
+    if (medium.xfrmOffX !== undefined) {
+      anchor.picture.xfrmOffX = medium.xfrmOffX;
+    }
+    if (medium.xfrmOffY !== undefined) {
+      anchor.picture.xfrmOffY = medium.xfrmOffY;
+    }
+    if (medium.xfrmExtCx !== undefined) {
+      anchor.picture.xfrmExtCx = medium.xfrmExtCx;
+    }
+    if (medium.xfrmExtCy !== undefined) {
+      anchor.picture.xfrmExtCy = medium.xfrmExtCy;
+    }
+    if (medium.rawSpPr !== undefined) {
+      anchor.picture.rawSpPr = structuredClone(medium.rawSpPr);
+    }
+
     // SVG companion: allocate (and dedupe) a rel for the vector media, then
     // record its rId so the blip serializer emits the asvg:svgBlip extension.
     if (bookImage.svgMediaId !== undefined) {
@@ -282,6 +317,7 @@ export function filterDrawingAnchors<
     picture?: unknown;
     graphicFrame?: unknown;
     shape?: unknown;
+    group?: unknown;
   } | null
 >(anchors: T[]): T[] {
   return anchors.filter(a => {
@@ -298,10 +334,16 @@ export function filterDrawingAnchors<
     // ext: { cx, cy } }` on write — the drawing XML came out empty
     // and the chart disappeared from the saved file.
     if (range?.pos !== undefined) {
-      return !!a.picture || !!a.graphicFrame || !!a.shape;
+      return !!a.picture || !!a.graphicFrame || !!a.shape || !!a.group;
     }
     // Form controls have range.br and shape properties
     if (range?.br && a.shape) {
+      return true;
+    }
+    // Grouped shapes (`<xdr:grpSp>`, captured verbatim by GenericEchoXform)
+    // carry neither picture/shape/graphicFrame — they are a valid anchor
+    // payload in their own right and must survive the write filter.
+    if (a.group) {
       return true;
     }
     // One-cell anchors need a valid picture, graphicFrame (charts) or shape.

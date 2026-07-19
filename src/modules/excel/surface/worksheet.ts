@@ -19,6 +19,7 @@ export {
   fillFormula,
   protect,
   unprotect,
+  verifyPassword,
   destroy,
   autoFitColumn,
   autoFitColumns,

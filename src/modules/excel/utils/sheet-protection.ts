@@ -1,5 +1,5 @@
 import { Encryptor } from "@excel/utils/encryptor";
-import { uint8ArrayToBase64 } from "@utils/utils";
+import { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils";
 
 // =============================================================================
 // Sheet Protection Helper
@@ -42,7 +42,7 @@ export async function buildSheetProtection<T extends { spinCount?: number }>(
       : 100000;
   }
 
-  if (password) {
+  if (password !== undefined) {
     protection.algorithmName = "SHA-512";
     protection.saltValue = uint8ArrayToBase64(Encryptor.randomBytes(16));
     protection.spinCount = options && "spinCount" in options ? options.spinCount : 100000;
@@ -62,4 +62,46 @@ export async function buildSheetProtection<T extends { spinCount?: number }>(
   }
 
   return protection;
+}
+
+/**
+ * Verify a candidate password against a hash previously produced by
+ * {@link buildSheetProtection} (i.e. `ws.sheetProtection` after `protect()`).
+ * Recomputes the hash with the stored algorithm / salt / spin count and
+ * compares — `protect()` stores only the hash, so this is the only way to
+ * check a candidate without reimplementing the whole hashing scheme.
+ *
+ * Returns `false` (rather than throwing) when the stored protection carries no
+ * hash — "protected with no password" — since there is nothing to verify
+ * against.
+ */
+export async function verifySheetPassword(
+  protection:
+    | Pick<SheetProtectionHash, "hashValue" | "saltValue" | "algorithmName" | "spinCount">
+    | null
+    | undefined,
+  password: string
+): Promise<boolean> {
+  if (!protection?.hashValue || !protection.saltValue || !protection.algorithmName) {
+    return false;
+  }
+  const candidateHash = await Encryptor.convertPasswordToHash(
+    password,
+    protection.algorithmName,
+    protection.saltValue,
+    protection.spinCount ?? 100000
+  );
+  const candidate = base64ToUint8Array(candidateHash);
+  const expected = base64ToUint8Array(protection.hashValue);
+  // Portable constant-work comparison: always inspect every byte of the
+  // longest input instead of returning at the first mismatch. JavaScript
+  // engines cannot promise strict CPU-level constant time, but this avoids the
+  // straightforward prefix timing leak of `candidateHash === hashValue` and
+  // works in both Node.js and browsers without a runtime dependency.
+  let difference = candidate.length ^ expected.length;
+  const length = Math.max(candidate.length, expected.length);
+  for (let i = 0; i < length; i++) {
+    difference |= (candidate[i] ?? 0) ^ (expected[i] ?? 0);
+  }
+  return difference === 0;
 }

@@ -5305,6 +5305,20 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       case OOXML_PATHS.xlWorkbookRels:
         model.workbookRels = await this.parseRels(stream);
         return true;
+      case OOXML_PATHS.contentTypes: {
+        // Capture the Override ContentType for /xl/workbook.xml. Templates
+        // (.xltx/.xltm) and macro-enabled workbooks (.xlsm) declare a
+        // different value than a plain .xlsx; losing it makes Excel refuse
+        // the file because the declared content-type no longer matches the
+        // (preserved) extension. Parsed structurally via ContentTypesXform
+        // rather than by hand so attribute order/quoting variance is a
+        // non-issue.
+        const parsed = await new ContentTypesXform().parseStream(stream);
+        if (parsed?.workbookContentType) {
+          model.workbookContentType = parsed.workbookContentType;
+        }
+        return true;
+      }
       case OOXML_PATHS.docPropsApp: {
         const appXform = new AppXform();
         const appProperties = await appXform.parseStream(stream);
@@ -7663,6 +7677,28 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
       drawingsCount: 0,
       media: model.media
     };
+    // Seed the drawing-name allocator past any drawing name a worksheet already
+    // carries verbatim from load (`drawingN`). WorkSheetXform.prepare() only
+    // auto-names a drawing when its `name` is empty, using `drawing${++count}`.
+    // If one sheet keeps a round-tripped "drawing1" while another needs a fresh
+    // name, a count starting at 0 would hand out "drawing1" again — a duplicate
+    // `/xl/drawings/drawing1.xml` Override (invalid per OPC). Starting the count
+    // above the highest existing numeric drawing name avoids the collision
+    // regardless of how the mix arose (e.g. Workbook.importSheet).
+    let maxExistingDrawingNo = 0;
+    for (const ws of model.worksheets as any[]) {
+      const m = /^drawing(\d+)$/.exec(ws?.drawing?.name ?? "");
+      if (m) {
+        maxExistingDrawingNo = Math.max(maxExistingDrawingNo, Number(m[1]));
+      }
+    }
+    for (const cs of model.chartsheets ?? []) {
+      const m = /^drawing(\d+)$/.exec(cs?.drawingName ?? "");
+      if (m) {
+        maxExistingDrawingNo = Math.max(maxExistingDrawingNo, Number(m[1]));
+      }
+    }
+    worksheetOptions.drawingsCount = maxExistingDrawingNo;
     worksheetOptions.drawings = model.drawings = [];
     worksheetOptions.commentRefs = model.commentRefs = [];
     worksheetOptions.formControlRefs = model.formControlRefs = [];

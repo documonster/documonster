@@ -22,6 +22,7 @@ describe("documonster/excel namespace surface", () => {
       "DataValidation",
       "DefinedNames",
       "Form",
+      "Format",
       "Image",
       "Note",
       "Pivot",
@@ -34,7 +35,7 @@ describe("documonster/excel namespace surface", () => {
       "Workbook",
       "Worksheet"
     ];
-    // Object exports (namespaces) — must be exactly these 20.
+    // Object exports (namespaces) — must be exactly these 21.
     const namespaceKeys = Object.keys(Excel)
       .filter(k => typeof (Excel as Record<string, unknown>)[k] === "object")
       .sort();
@@ -107,6 +108,13 @@ describe("documonster/excel namespace surface", () => {
     expect(typeof Excel.Stream.WorkbookReader).toBe("function"); // class
     expect(typeof Excel.Stream.setCellValue).toBe("function");
     expect(typeof Excel.Stream.commitRow).toBe("function");
+  });
+
+  it("Format namespace parses a value against a target cell's own numFmt", () => {
+    expect(typeof Excel.Format.parseValueByFormat).toBe("function");
+    expect(Excel.Format.parseValueByFormat("dd/mm/yyyy", "09/07/2026")).toEqual(
+      new Date(Date.UTC(2026, 6, 9))
+    );
   });
 
   it("Address namespace exposes stateless encode/decode utilities (0-indexed)", () => {

@@ -50,6 +50,33 @@ import { TablePartXform } from "@excel/xlsx/xform/sheet/table-part-xform";
 import { emuToPx } from "@utils/units";
 import { StdDocAttributes } from "@xml/writer";
 
+/**
+ * Recursively collect every attribute value shaped like a relationship id
+ * (`rId1`, `rId42`, …) out of a captured `EchoNode`-style tree. A preserved
+ * `<xdr:grpSp>` group can reference relationships via several attribute names
+ * depending on the child element (`r:embed` on a blip, `r:id` on an
+ * `hlinkClick`, etc.), so this matches by value shape rather than trying to
+ * enumerate every attribute name DrawingML might use.
+ */
+function collectRelIds(
+  node: { attrs?: Record<string, unknown>; children?: unknown[] } | undefined,
+  into: Set<string>
+): void {
+  if (!node) {
+    return;
+  }
+  if (node.attrs) {
+    for (const value of Object.values(node.attrs)) {
+      if (typeof value === "string" && /^rId\d+$/.test(value)) {
+        into.add(value);
+      }
+    }
+  }
+  for (const child of node.children ?? []) {
+    collectRelIds(child as typeof node, into);
+  }
+}
+
 function mergeRule<T extends object>(rule: T, extRule: T): void {
   (Object.keys(extRule) as (keyof T)[]).forEach(key => {
     const value = rule[key];
@@ -209,7 +236,22 @@ class WorkSheetXform extends BaseXform {
     const rels: RelationshipModel[] = (model.rels = []);
 
     function nextRid(r: readonly unknown[]) {
-      return `rId${r.length + 1}`;
+      // Derive the next id from the highest existing numeric suffix, not the
+      // array length. Length-based numbering only works while a rels list is a
+      // clean, gap-free rId1..rIdN sequence — true for lists this codebase
+      // builds from empty, but NOT once we preserve a subset of externally
+      // authored rels (e.g. keeping a `<xdr:grpSp>` group's original rel
+      // entries in place instead of renumbering them). There, length-based ids
+      // could collide with an id still in use.
+      let max = 0;
+      for (const rel of r) {
+        const id = (rel as { Id?: string } | undefined)?.Id;
+        const m = id ? /^rId(\d+)$/.exec(id) : null;
+        if (m) {
+          max = Math.max(max, Number(m[1]));
+        }
+      }
+      return `rId${max + 1}`;
     }
 
     model.hyperlinks.forEach(hyperlink => {
@@ -274,7 +316,10 @@ class WorkSheetXform extends BaseXform {
 
     // Handle pre-loaded drawing (from file read) that may contain charts or other non-image content.
     // Chart anchors (with chartNumber from reconcile) are preserved and get fresh rels.
-    // Non-chart anchors are discarded — images are rebuilt from model.media below.
+    // Group anchors (`<xdr:grpSp>`, captured verbatim by GenericEchoXform — no
+    // programmatic API mutates these) are preserved as-is. Image anchors are
+    // discarded here and rebuilt from model.media below, since that is the path
+    // Image.place()/etc. actually mutate.
     if (model.drawing && model.drawing.anchors) {
       const drawing = model.drawing;
       drawing.rId = nextRid(rels);
@@ -282,14 +327,32 @@ class WorkSheetXform extends BaseXform {
         drawing.name = `drawing${++options.drawingsCount}`;
       }
 
-      // Separate chart anchors from non-chart anchors. `a` is a drawing-anchor
-      // model element (a prepare()-model substructure shared with the drawing
-      // xform); kept `any` until that model is typed.
+      // Separate chart anchors (preserved + renumbered) and group anchors
+      // (preserved verbatim) from image anchors (rebuilt from model.media
+      // below). `a` is a drawing-anchor model element (a prepare()-model
+      // substructure shared with the drawing xform); kept `any` until that
+      // model is typed.
       const chartAnchors = drawing.anchors.filter((a: any) => a.chartNumber || a.chartExNumber);
+      const groupAnchors = drawing.anchors.filter(
+        (a: any) => a.group && !a.chartNumber && !a.chartExNumber
+      );
 
-      // Reset anchors — chart anchors will be re-added, image anchors rebuilt below
-      drawing.anchors = [];
-      drawing.rels = [];
+      // A group anchor's captured XML references its original rIds directly
+      // (blip r:embed, hlinkClick r:id, …) with no remapping, so keep ONLY the
+      // rel entries a preserved group actually points at — not the whole
+      // original `drawing.rels`. Keeping everything would leave stale,
+      // never-referenced rels in the array, shifting `nextRid`'s numbering for
+      // freshly built chart/image rels.
+      const referencedRelIds = new Set<string>();
+      for (const anchor of groupAnchors) {
+        collectRelIds((anchor as any).group, referencedRelIds);
+      }
+      const preservedRels = (drawing.rels ?? []).filter((rel: any) => referencedRelIds.has(rel.Id));
+
+      // Reset anchors — chart anchors re-added (renumbered) below, group
+      // anchors preserved verbatim, image anchors rebuilt from model.media.
+      drawing.anchors = [...groupAnchors];
+      drawing.rels = preservedRels;
 
       // Re-add chart anchors and build their rels
       for (const anchor of chartAnchors) {
@@ -1218,7 +1281,17 @@ class WorkSheetXform extends BaseXform {
                     type: "image",
                     imageId: anchor.medium.index,
                     range: anchor.range,
-                    hyperlinks: anchor.picture.hyperlinks
+                    hyperlinks: anchor.picture.hyperlinks,
+                    // Carry the picture's absolute geometry through so a plain
+                    // re-save (which discards the parsed anchor and rebuilds it
+                    // from this media entry — see the drawing-reset block in
+                    // prepare()) doesn't zero out an `editAs="oneCell"`
+                    // picture's position/size, rendering it invisible.
+                    xfrmOffX: anchor.picture.xfrmOffX,
+                    xfrmOffY: anchor.picture.xfrmOffY,
+                    xfrmExtCx: anchor.picture.xfrmExtCx,
+                    xfrmExtCy: anchor.picture.xfrmExtCy,
+                    rawSpPr: anchor.picture.rawSpPr
                   });
                 }
               }

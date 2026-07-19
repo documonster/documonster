@@ -1,8 +1,7 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { BlipFillXform } from "@excel/xlsx/xform/drawing/blip-fill-xform";
 import { NvPicPrXform } from "@excel/xlsx/xform/drawing/nv-pic-pr-xform";
-import { spPrJSON } from "@excel/xlsx/xform/drawing/sp-pr";
-import { StaticXform } from "@excel/xlsx/xform/static-xform";
+import { PicSpPrXform } from "@excel/xlsx/xform/drawing/pic-sp-pr-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 export interface PicModel {
@@ -14,6 +13,19 @@ export interface PicModel {
   external?: boolean;
   /** Relationship id of an SVG companion (asvg:svgBlip extension). */
   svgRId?: string;
+  /**
+   * Absolute position/size from `<xdr:spPr><a:xfrm>`, in EMU. For a
+   * `twoCellAnchor editAs="oneCell"` picture this is what Excel actually
+   * renders from — the anchor's `<xdr:to>` is only a cache. Preserved as
+   * opaque round-trip data (no public mutation API yet); dropping it made
+   * such pictures render at (0,0) with zero size after a plain re-save.
+   */
+  xfrmOffX?: number;
+  xfrmOffY?: number;
+  xfrmExtCx?: number;
+  xfrmExtCy?: number;
+  /** Full loaded shape-properties subtree, preserved for lossless round-trip. */
+  rawSpPr?: unknown;
   [key: string]: unknown;
 }
 
@@ -27,7 +39,7 @@ class PicXform extends BaseXform<PicModel> {
     this.map = {
       "xdr:nvPicPr": new NvPicPrXform(),
       "xdr:blipFill": new BlipFillXform(),
-      "xdr:spPr": new StaticXform(spPrJSON)
+      "xdr:spPr": new PicSpPrXform()
     };
   }
 

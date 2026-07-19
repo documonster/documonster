@@ -11,7 +11,11 @@ export const drawing14 = {
         hyperlinks: {
           tooltip: "documonster",
           rId: "rId3"
-        }
+        },
+        xfrmOffX: 0,
+        xfrmOffY: 0,
+        xfrmExtCx: 0,
+        xfrmExtCy: 0
       }
     },
     {
@@ -26,7 +30,11 @@ export const drawing14 = {
         editAs: "oneCell"
       },
       picture: {
-        rId: "rId2"
+        rId: "rId2",
+        xfrmOffX: 0,
+        xfrmOffY: 0,
+        xfrmExtCx: 0,
+        xfrmExtCy: 0
       }
     }
   ]

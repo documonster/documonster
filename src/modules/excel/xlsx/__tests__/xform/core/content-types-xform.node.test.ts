@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
-import { describe } from "vitest";
+import { describe, expect, it } from "vitest";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -96,4 +96,18 @@ const expectations = [
 
 describe("ContentTypesXform", () => {
   testXformHelper(expectations);
+
+  it("parses a workbook Override when the manifest uses a namespace prefix", async () => {
+    async function* xml() {
+      yield `<?xml version="1.0"?>
+        <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+          <ct:Override PartName="/xl/workbook.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"/>
+        </ct:Types>`;
+    }
+    const model = await new ContentTypesXform().parseStream(xml());
+    expect(model?.workbookContentType).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
+    );
+  });
 });
