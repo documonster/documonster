@@ -131,13 +131,13 @@ Markdown.parseAll(input: string, options?: MarkdownParseOptions): MarkdownParseR
 
 **解析选项(`MarkdownParseOptions`):**
 
-| 选项            | 类型      | 默认值  | 描述                       |
+| 选项 | 类型 | 默认值 | 描述 |
 | --------------- | --------- | ------- | -------------------------- | ------------- |
-| `trim`          | `boolean` | `true`  | 去除单元格值的首尾空白     |
-| `unescape`      | `boolean` | `true`  | 反转义 `\|` → `            | `以及`\\`→`\` |
-| `skipEmptyRows` | `boolean` | `true`  | 跳过所有单元格均为空的行   |
-| `maxRows`       | `number`  | —       | 最大解析数据行数(不含表头) |
-| `convertBr`     | `boolean` | `false` | 将 `<br>` 标签转换为换行符 |
+| `trim` | `boolean` | `true` | 去除单元格值的首尾空白 |
+| `unescape` | `boolean` | `true` | 反转义 `\|` → `           |`以及`\\`→`\` |
+| `skipEmptyRows` | `boolean` | `true` | 跳过所有单元格均为空的行 |
+| `maxRows` | `number` | — | 最大解析数据行数(不含表头) |
+| `convertBr` | `boolean` | `false` | 将 `<br>` 标签转换为换行符 |
 
 **结果(`MarkdownParseResult`):**
 
@@ -163,14 +163,14 @@ Markdown.format(headers: string[], rows: unknown[][], options?: MarkdownFormatOp
 
 **格式化选项(`MarkdownFormatOptions`):**
 
-| 选项              | 类型                                 | 默认值   | 描述                       |
+| 选项 | 类型 | 默认值 | 描述 |
 | ----------------- | ------------------------------------ | -------- | -------------------------- | ------ |
-| `columns`         | `(string \| MarkdownColumnConfig)[]` | —        | 每列的表头与对齐配置       |
-| `alignment`       | `MarkdownAlignment`                  | `"left"` | 所有列的默认对齐方式       |
-| `padding`         | `boolean`                            | `true`   | 用填充将各列对齐到相等宽度 |
-| `trailingNewline` | `boolean`                            | `true`   | 在输出中包含末尾换行符     |
-| `escapeContent`   | `boolean`                            | `true`   | 转义单元格内容中的 `       | `与`\` |
-| `stringify`       | `(value: unknown) => string`         | 内置     | 自定义值到字符串的转换器   |
+| `columns` | `(string \| MarkdownColumnConfig)[]` | — | 每列的表头与对齐配置 |
+| `alignment` | `MarkdownAlignment` | `"left"` | 所有列的默认对齐方式 |
+| `padding` | `boolean` | `true` | 用填充将各列对齐到相等宽度 |
+| `trailingNewline` | `boolean` | `true` | 在输出中包含末尾换行符 |
+| `escapeContent` | `boolean` | `true` | 转义单元格内容中的 `      |`与`\` |
+| `stringify` | `(value: unknown) => string` | 内置 | 自定义值到字符串的转换器 |
 
 **列配置(`MarkdownColumnConfig`):**
 

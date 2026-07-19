@@ -131,13 +131,13 @@ Returns an empty array if no tables are found.
 
 **Parse Options (`MarkdownParseOptions`):**
 
-| Option          | Type      | Default | Description                                  |
+| Option | Type | Default | Description |
 | --------------- | --------- | ------- | -------------------------------------------- | ------------ |
-| `trim`          | `boolean` | `true`  | Trim whitespace from cell values             |
-| `unescape`      | `boolean` | `true`  | Unescape `\|` → `                            | `and`\\`→`\` |
-| `skipEmptyRows` | `boolean` | `true`  | Skip rows where all cells are empty          |
-| `maxRows`       | `number`  | —       | Maximum data rows to parse (excludes header) |
-| `convertBr`     | `boolean` | `false` | Convert `<br>` tags to newline characters    |
+| `trim` | `boolean` | `true` | Trim whitespace from cell values |
+| `unescape` | `boolean` | `true` | Unescape `\|` → `                           |`and`\\`→`\` |
+| `skipEmptyRows` | `boolean` | `true` | Skip rows where all cells are empty |
+| `maxRows` | `number` | — | Maximum data rows to parse (excludes header) |
+| `convertBr` | `boolean` | `false` | Convert `<br>` tags to newline characters |
 
 **Result (`MarkdownParseResult`):**
 
@@ -163,14 +163,14 @@ Markdown.format(headers: string[], rows: unknown[][], options?: MarkdownFormatOp
 
 **Format Options (`MarkdownFormatOptions`):**
 
-| Option            | Type                                 | Default  | Description                               |
+| Option | Type | Default | Description |
 | ----------------- | ------------------------------------ | -------- | ----------------------------------------- | ----------------------- |
-| `columns`         | `(string \| MarkdownColumnConfig)[]` | —        | Per-column header and alignment config    |
-| `alignment`       | `MarkdownAlignment`                  | `"left"` | Default alignment for all columns         |
-| `padding`         | `boolean`                            | `true`   | Align columns to equal width with padding |
-| `trailingNewline` | `boolean`                            | `true`   | Include trailing newline in output        |
-| `escapeContent`   | `boolean`                            | `true`   | Escape `                                  | `and`\` in cell content |
-| `stringify`       | `(value: unknown) => string`         | built-in | Custom value-to-string converter          |
+| `columns` | `(string \| MarkdownColumnConfig)[]` | — | Per-column header and alignment config |
+| `alignment` | `MarkdownAlignment` | `"left"` | Default alignment for all columns |
+| `padding` | `boolean` | `true` | Align columns to equal width with padding |
+| `trailingNewline` | `boolean` | `true` | Include trailing newline in output |
+| `escapeContent` | `boolean` | `true` | Escape `                                 |`and`\` in cell content |
+| `stringify` | `(value: unknown) => string` | built-in | Custom value-to-string converter |
 
 **Column Config (`MarkdownColumnConfig`):**
 

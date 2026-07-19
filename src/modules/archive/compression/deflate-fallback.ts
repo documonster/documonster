@@ -984,7 +984,7 @@ function emitDynamicBlock(out: BitWriter, symbols: LZ77Symbol[], isFinal: boolea
   const clSymbols: Array<{ sym: number; extra: number; extraBits: number }> = [];
   const clFreqs = new Uint32Array(19);
 
-  for (let i = 0; i < combined.length; ) {
+  for (let i = 0; i < combined.length;) {
     const val = combined[i];
 
     if (val === 0) {
@@ -1206,7 +1206,7 @@ function lz77Compress(
 
   let pos = start;
 
-  for (; pos < end; ) {
+  for (; pos < end;) {
     let bestLen = 0;
     let bestDist = 0;
 

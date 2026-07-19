@@ -712,7 +712,7 @@ export class RemoteZipReader {
     const MAX_HEADER_BATCH_BYTES = 64 * 1024;
     const MAX_HEADER_GAP_BYTES = 4 * 1024;
 
-    for (let i = 0; i < entriesToExtract.length; ) {
+    for (let i = 0; i < entriesToExtract.length;) {
       const firstOffset = entriesToExtract[i].entry.localHeaderOffset;
       const batchStart = firstOffset;
       let batchEnd = batchStart + LOCAL_HEADER_FIXED_SIZE;
@@ -773,7 +773,7 @@ export class RemoteZipReader {
     const password = opts.password ?? this.options.password;
     const shouldCheckCrc = opts.checkCrc32 ?? this.options.checkCrc32 ?? false;
 
-    for (let i = 0; i < entriesToExtract.length; ) {
+    for (let i = 0; i < entriesToExtract.length;) {
       // Skip directories (no data to read)
       if (entriesToExtract[i].entry.type === "directory") {
         opts.onprogress?.(processedSize, totalSize);

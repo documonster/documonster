@@ -282,7 +282,7 @@ export function adler32(data: Uint8Array): number {
   // 255 * 5552 = 1,415,760 < 2^31 - 1
   const chunkSize = 5552;
 
-  for (let i = 0; i < data.length; ) {
+  for (let i = 0; i < data.length;) {
     const end = Math.min(i + chunkSize, data.length);
     while (i < end) {
       a += data[i++];

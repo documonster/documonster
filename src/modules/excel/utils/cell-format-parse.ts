@@ -145,7 +145,7 @@ export function compileFormat(fmt: string): Segment[] {
     segments.push({ kind: "field", role });
   };
 
-  for (let i = 0; i < section.length; ) {
+  for (let i = 0; i < section.length;) {
     const ch = section[i];
 
     // Quoted literal span.
