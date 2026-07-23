@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/documonster/documonster/compare/v0.1.2...v0.2.0) (2026-07-23)
+
+
+### Features
+
+* **excel:** Apply data validation to a whole column or range via DataValidation.add ([004fc57](https://github.com/documonster/documonster/commit/004fc57bffa880b791dfb1d9ef20dd9eabd28ba0)), closes [#191](https://github.com/documonster/documonster/issues/191)
+
 ## [0.1.2](https://github.com/documonster/documonster/compare/v0.1.1...v0.1.2) (2026-07-19)
 
 
