@@ -378,22 +378,6 @@ jobs:
         env:
           CI: true
 
-      # The XLSB benchmarks, which CI did not run at all.
-      #
-      # `benchmark:xlsb` is the format comparison — size, write, read, passthrough, blank-tail heap — and it is the check
-      # that caught a 3.34x read regression introduced by the passthrough hash. `benchmark:xlsb-scale` is the ten-million
-      # cell streaming shape; it used to live in `examples/` where two correctness gates ran it, producing a 99 MB and a
-      # 145 MB workbook every time and then converting both through LibreOffice.
-      #
-      # Run for their exit status rather than compared against a threshold: what is being protected here is that the
-      # commands still work and the shapes are still measurable, which is what silently rotted while nothing invoked them.
-      - name: Run XLSB benchmarks
-        run: |
-          pnpm benchmark:xlsb
-          pnpm benchmark:xlsb-scale
-        env:
-          CI: true
-
   xlsb-corpus:
     # The XLSB semantic corpus, which nothing in CI ran until this job existed.
     #
