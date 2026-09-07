@@ -18,7 +18,6 @@ import { readWorkbookWithDiagnostics } from "@excel/core/workbook-io-types";
 import type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
 import type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 import { createXlsxByteStream } from "@excel/core/xlsx-stream";
-import { commitXlsbRead, parseXlsbPackage } from "@excel/xlsb/read/package";
 import type { XlsxReadOptions, IParseStream } from "@excel/xlsx/xlsx.browser";
 import { XLSX } from "@excel/xlsx/xlsx.browser";
 
@@ -92,9 +91,7 @@ export async function readWithDiagnostics(
   return readWorkbookWithDiagnostics(wb, data, options, {
     read,
     normalizeBytes,
-    resolveReadFormat,
-    parseXlsbPackage,
-    commitXlsbRead
+    resolveReadFormat
   });
 }
 

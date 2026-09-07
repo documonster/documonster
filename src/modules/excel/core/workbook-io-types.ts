@@ -153,6 +153,10 @@ export interface WorkbookReadReport {
  * `read` is injected rather than imported: it is the one genuinely platform-specific piece, since Node accepts a file
  * path and a `Buffer` where a browser does not. Everything else — the format resolution, the XLSB branch, the empty
  * report an XLSX read yields — is identical and now exists once.
+ *
+ * `parseXlsbPackage` and `commitXlsbRead` used to be injected too, and should not have been: both variants passed the
+ * same pair, so the injection only spread a static import of the binary reader across both of them. They are loaded
+ * where they are used now.
  */
 export async function readWorkbookWithDiagnostics(
   wb: WorkbookData,
@@ -169,23 +173,23 @@ export async function readWorkbookWithDiagnostics(
       base64?: boolean
     ) => Uint8Array | undefined;
     readonly resolveReadFormat: (bytes: Uint8Array, format?: WorkbookFormat) => WorkbookFormat;
-    readonly parseXlsbPackage: (
-      bytes: Uint8Array,
-      source: string,
-      options: { blankCells?: "keep" | "collapse"; formulas?: "preserve" | "cached" | "error" }
-    ) => Promise<{ readonly diagnostics: Omit<WorkbookReadReport, "workbook"> }>;
-    readonly commitXlsbRead: (wb: WorkbookData, parsed: never) => void;
   }
 ): Promise<WorkbookReadReport> {
   const bytes = platform.normalizeBytes(data, options?.base64);
   if (bytes !== undefined && platform.resolveReadFormat(bytes, options?.format) === "xlsb") {
+    // Loaded here rather than injected by the caller, and on demand rather than statically. The two
+    // platform variants passed in the *same* two functions — they are not platform-specific — and a
+    // static import of them in either made the whole binary reader eager for every `Workbook.read`
+    // consumer, XLSX-only ones included, and defeated the streaming reader's own `await import()` of
+    // the same modules. This branch is the only place they are used, and it is already async.
+    const { commitXlsbRead, parseXlsbPackage } = await import("@excel/xlsb/read/package");
     // `blankCells` reaches here too: `readWithDiagnostics` is the same read with the report handed back instead of
     // thrown, so a caller inspecting a large formatted sheet needs the same policy the plain read offers.
-    const parsed = await platform.parseXlsbPackage(bytes, "<buffer>", {
+    const parsed = await parseXlsbPackage(bytes, "<buffer>", {
       ...(options?.blankCells === undefined ? {} : { blankCells: options.blankCells }),
       ...(options?.formulas === undefined ? {} : { formulas: options.formulas })
     });
-    platform.commitXlsbRead(wb, parsed as never);
+    commitXlsbRead(wb, parsed);
     wb.sourceFilePath = undefined;
     return { workbook: wb, ...parsed.diagnostics };
   }

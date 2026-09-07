@@ -5,6 +5,7 @@
  * plus the public Patch and Template APIs that combine read/patch/write.
  */
 
+import { unzip } from "@archive/read-archive";
 import { readFileBytes, writeFileBytes } from "@utils/fs";
 import { bytesToBase64 } from "@word/core/internal-utils";
 import type { PatchOperation } from "@word/patcher";
@@ -205,7 +206,10 @@ export async function toFlatOpcFromDoc(
   // Use level 0 (store-only) since we're immediately decompressing
   const zipBytes = await packageDocx(doc, { compressionLevel: compressionLevel ?? 0 });
 
-  const { unzip } = await import("@archive/read-archive");
+  // Statically imported: this file already imports `readDocx`, which imports `unzip` statically —
+  // as do the ODT converter, the streaming reader and the incremental editor. A lone `await
+  // import()` of a module four siblings pull eagerly saves nothing and only makes rolldown report
+  // the pair as `INEFFECTIVE_DYNAMIC_IMPORT`.
   const reader = unzip(zipBytes);
   const entries = new Map<string, Uint8Array>();
   for await (const entry of reader.entries()) {

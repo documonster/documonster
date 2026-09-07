@@ -63,7 +63,7 @@ import {
 } from "@excel/core/cell";
 import { ValueType } from "@excel/core/enums";
 import { rowCellCount } from "@excel/core/row";
-import { addWorksheet, getWorksheets } from "@excel/core/workbook";
+import { addWorksheet, createWorkbook, getWorksheets } from "@excel/core/workbook";
 // Use the browser base class so the public `excelToDocx(workbook)` signature
 // is callable from both the Node entry (where `Workbook` is the Node subclass
 // — trivially assignable to the base) and the browser entry (where `Workbook`
@@ -752,7 +752,10 @@ export function renderWordChartSvg(chart: Chart): string {
 export async function generateChartEmbeddedXlsx(
   series: readonly { name: string; categories: readonly string[]; values: readonly number[] }[]
 ): Promise<Uint8Array> {
-  const { createWorkbook } = await import("@excel/core/workbook");
+  // `createWorkbook` comes from the static import at the top with `addWorksheet`, which the next
+  // line calls. It was an `await import()` of the very same module, which bought nothing — the
+  // module was already static in this file, so rolldown reported the pair as
+  // `INEFFECTIVE_DYNAMIC_IMPORT` — and cost a round trip through the module registry per call.
   const wb = createWorkbook();
   const ws = addWorksheet(wb, "Sheet1");
 

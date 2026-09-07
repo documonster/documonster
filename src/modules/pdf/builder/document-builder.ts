@@ -2152,6 +2152,9 @@ export class PdfDocumentBuilder {
     // 2. Build the PDF bytes
     // 3. Call signPdf() to fill in the real signature
     if (snapshot.signatureOptions) {
+      // Kept dynamic on purpose — see the note on `PdfEditor.sign`. rolldown reports it as
+      // ineffective because the public surface re-exports the same module statically, but this
+      // builder is eager for every `Pdf.create` consumer and the signing stack must not be.
       const { buildSignatureDictPlaceholder, signPdf } =
         await import("@pdf/core/digital-signature");
 

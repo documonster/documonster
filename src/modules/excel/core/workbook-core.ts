@@ -11,13 +11,18 @@ import type { ChartExEntry } from "@excel/chart/model/chart-ex-types";
  * create worksheets. Keeping the registries here — above worksheet, below the
  * heavy workbook module — yields a clean one-directional graph:
  *
- *     workbook.browser.ts  (addWorksheet / importSheet / chartsheet / model / IO)
+ *     workbook.browser.ts  (addWorksheet / importSheet / chartsheet / IO)
+ *        ↓
+ *     workbook-model.ts  (WorkbookModel + getWorkbookModel — also reached by both writers)
  *        ↓
  *     workbook-core.ts  (WorkbookData + registry accessors)
  *        ↓
  *     worksheet.ts / worksheet-core.ts / cell / row / column
  *
- * No file below this one imports the heavy `workbook.browser`.
+ * No file below this one imports the heavy `workbook.browser`. This one used to name three of its
+ * types, which contradicted the sentence above; they live in `workbook-model.ts` now, and the only
+ * edge back up is `workbook-model.ts`'s type-level reach for `WorkbookData` — erased at compile
+ * time, so the emitted graph stays one-directional.
  */
 import type { ChartEntry } from "@excel/chart/model/types";
 import type { BuiltinCellStyle } from "@excel/core/builtin-cell-styles";
@@ -29,7 +34,7 @@ import type {
   WorkbookMedia,
   WorkbookProtectionModel,
   ExternalLinkModel
-} from "@excel/core/workbook.browser";
+} from "@excel/core/workbook-model";
 import type { Worksheet } from "@excel/core/worksheet";
 import { getSheetName } from "@excel/core/worksheet-core";
 import { ImageError, WorksheetNameError } from "@excel/errors";
@@ -46,8 +51,23 @@ import { RelType } from "@excel/xlsx/rel-type";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import type { XLSX } from "@excel/xlsx/xlsx.browser";
-import type { FormulaFunction as WorkbookFunctionDescriptor } from "@formula/integration/calculate-formulas";
-export type { WorkbookFunctionDescriptor };
+/**
+ * A user function as the workbook *stores* it.
+ *
+ * Deliberately not the engine's `FormulaFunction`, whose `invoke` must return a `RuntimeValue`:
+ * building one means calling `rvNumber` / `rvString` / `BLANK`, and that made
+ * `core/workbook.browser.ts` — the module every `Workbook` member goes through — import the
+ * formula runtime eagerly, so a consumer who merely created a workbook carried it. The conversion
+ * belongs to the engine boundary and lives in `core/formula-adapter.ts`, which is opt-in through
+ * `documonster/excel/formula`; the registry keeps the caller's own function until then.
+ */
+export interface WorkbookFunctionDescriptor {
+  readonly minArity: number;
+  readonly maxArity: number;
+  readonly volatile?: boolean;
+  /** The caller's function, unconverted — see the note above. */
+  readonly invoke: (args: never[]) => unknown;
+}
 
 /**
  * A named cell style stored on the workbook: a {@link NamedStyle} plus its name.

@@ -1492,6 +1492,13 @@ export class PdfEditor {
    * ```
    */
   async sign(options: PdfSignatureOptions): Promise<Uint8Array> {
+    // **Load-bearing, despite rolldown calling it `INEFFECTIVE_DYNAMIC_IMPORT`.** That warning is
+    // about the module not moving into a chunk of its own, which it cannot: `surface/pdf.ts`
+    // statically re-exports `sign`, `verifySignature`, `buildSignatureDictPlaceholder` and
+    // `asn1Parse` as public members. What this import still buys is the thing that matters — it
+    // keeps the CMS/ASN.1 machinery out of a consumer who only calls `Pdf.create`, because *this*
+    // module is eager for them and the signature module is not. Making it static to silence the
+    // warning would hand every `Pdf.create` bundle the whole signing stack.
     const { buildSignatureDictPlaceholder, signPdf } = await import("@pdf/core/digital-signature");
 
     const { dictString } = buildSignatureDictPlaceholder({

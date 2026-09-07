@@ -20,7 +20,7 @@ pnpm exec oxfmt --check
 # packages/*. Build only the ESM/types target, not the full browser/CJS matrix.
 if [ ! -d "dist/types" ]; then
   echo "[pre-commit]   building core ESM/types for workspace-package lint…"
-  pnpm -s build:esm
+  pnpm --silent build:esm
 fi
 
 echo "[pre-commit] 2/4 running lint + type in parallel…"
@@ -32,9 +32,9 @@ echo "[pre-commit] 2/4 running lint + type in parallel…"
 # needed), so it costs nothing and catches a satellite package reaching into
 # the core's internals before it can land.
 pnpm exec concurrently --raw --kill-others-on-fail \
-  "pnpm -s lint" \
-  "pnpm -s type" \
-  "pnpm -s verify:packages"
+  "pnpm --silent lint" \
+  "pnpm --silent type" \
+  "pnpm --silent verify:packages"
 
 # Satellite packages resolve `documonster` through its published exports map,
 # so type-checking them requires dist/types to exist. Run it when it does —
@@ -42,7 +42,7 @@ pnpm exec concurrently --raw --kill-others-on-fail \
 # CI, while requiring it unconditionally would break the hook on a fresh clone.
 if [ -d "dist/types" ]; then
   echo "[pre-commit] 2b/4 type-checking workspace packages…"
-  pnpm -s type:packages
+  pnpm --silent type:packages
 else
   echo "[pre-commit] 2b/4 skipping type:packages — no dist/types (run 'pnpm build:esm' to enable)"
 fi

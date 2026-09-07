@@ -13,6 +13,7 @@ import type { DefinedNamesData } from "@excel/core/defined-names";
 import { createDefinedNames, definedNamesModel } from "@excel/core/defined-names";
 import { validateCellStyleName } from "@excel/core/workbook-core";
 import type { WorkbookFormat } from "@excel/core/workbook-format";
+import { getWorkbookModel } from "@excel/core/workbook-model";
 import { ExcelNotSupportedError, ImageError } from "@excel/errors";
 import { WorksheetWriter } from "@excel/stream/worksheet-writer";
 import type { WorkbookWriterLike } from "@excel/stream/worksheet-writer";
@@ -817,7 +818,6 @@ export abstract class WorkbookWriterBase<TWorksheetWriter extends WorksheetWrite
       // `Workbook.toBuffer`, which is why a streamed package and a buffered one differ in one record rather than
       // in a hundred small ways.
       const { writeXlsbPackage } = await import("@excel/xlsb/write/package");
-      const { getWorkbookModel } = await import("@excel/core/workbook.browser");
       const written = await writeXlsbPackage(getWorkbookModel(this as never), {
         sink: this.packageSink(),
         streamed: {

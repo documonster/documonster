@@ -114,8 +114,6 @@ import {
 import { AppXform } from "@excel/xlsx/xform/core/app-xform";
 import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
-import { CtrlPropXform } from "@excel/xlsx/xform/drawing/ctrl-prop-xform";
-import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import {
   CHARTSHEET_DRAWING_EMU,
@@ -1363,6 +1361,7 @@ export async function writeXlsbPackage(
       const vmlPath = `xl/drawings/vmlDrawing${index}_hf.vml`;
       const vmlWriter = new XmlWriter();
       const imageRels: { Id: string; Type: string; Target: string }[] = [];
+      const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
       new VmlDrawingXform().render(vmlWriter, {
         comments: [],
         formControls: [],
@@ -1406,6 +1405,12 @@ export async function writeXlsbPackage(
     ) {
       const vmlPath = `xl/drawings/vmlDrawing${sheetIndex}.vml`;
       const vmlWriter = new XmlWriter();
+      // Loaded on demand, like the five other reaches for this xform (`xlsx.browser.ts` ×4 and the XLSB
+      // reader). A static import here made all of them ineffective — a statically imported module is
+      // hoisted into the main chunk, so `await import()` of it elsewhere buys nothing and rolldown says
+      // `INEFFECTIVE_DYNAMIC_IMPORT` — and charged every XLSB writer 13 kB of VML transformers for a
+      // part most workbooks have no reason to contain.
+      const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
       new VmlDrawingXform().render(vmlWriter, {
         comments: (part.comments ?? []).map(comment => {
           const cell = decodeCell(comment.ref);
@@ -1446,8 +1451,11 @@ export async function writeXlsbPackage(
     }
 
     // One `ctrlProp` part per control, each with its own relationship. Rendered by the XLSX writer's own
-    // xform — a control's properties are XML in both containers.
+    // xform — a control's properties are XML in both containers. Loaded on demand for the same reason as
+    // the VML xform above: `xlsx.browser.ts` reaches for it with `await import()`, and a static import
+    // here would make that ineffective for every consumer.
     for (const entry of controls) {
+      const { CtrlPropXform } = await import("@excel/xlsx/xform/drawing/ctrl-prop-xform");
       const writer = new XmlWriter();
       new CtrlPropXform().render(writer, entry.control as never);
       addPart(`xl/ctrlProps/ctrlProp${entry.ctrlPropId}.xml`, writer.xml);

@@ -805,6 +805,11 @@ export abstract class WorkbookReaderBase<
 
   /** The style table, for the number formats that turn a serial into a date. */
   protected async _parseXlsbStyles(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
+    // Load-bearing, despite rolldown reporting `INEFFECTIVE_DYNAMIC_IMPORT`: the streaming *writer*
+    // imports this module statically (its `StreamedXlsbWorksheet` is built in a synchronous
+    // constructor, so it has no choice), which is why the module cannot move into a chunk of its
+    // own. It is still absent from a reader-only bundle — measured on
+    // `console.log(Stream.WorkbookReader)` — and that is the consumer this protects.
     const { readStyles } = await import("@excel/xlsb/styles");
     const table = readStyles(await collectXlsbBytes(iterateStream(entry)), XLSB_PATHS.styles);
     this._xlsbNumberFormats = (

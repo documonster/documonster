@@ -15,7 +15,6 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import { ZipParser } from "@archive/unzip/zip-parser";
 import { cellGetValue, cellSetNote } from "@excel/core/cell";
 import { dataValidationAdd } from "@excel/core/data-validations";
 // The public cell surface, on purpose: setting a value through it is what keeps dimensions,
@@ -60,6 +59,7 @@ import {
 } from "@excel/utils/ooxml-validator/xml-utils";
 import { iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { readCommentsPart } from "@excel/xlsb/comments";
+import { XLSB_WORKBOOK_PART as WORKBOOK_PART } from "@excel/xlsb/detect";
 import { modelHash } from "@excel/xlsb/model-hash";
 import {
   readSharedStrings,
@@ -119,8 +119,6 @@ export interface XlsbReadDiagnostics {
    */
   readonly lost: readonly string[];
 }
-
-const WORKBOOK_PART = "xl/workbook.bin";
 
 /**
  * Read XLSB bytes into `workbook`, replacing its contents and returning what was lost.
@@ -1416,29 +1414,6 @@ function findPart(
     }
   }
   return undefined;
-}
-
-/**
- * Whether these bytes are an XLSB package.
- *
- * Looks for `xl/workbook.bin` in the ZIP *central directory* only. That is the one reliable
- * test — XLSB and XLSX are both OPC ZIP packages with the same outer shape, and which workbook
- * part is present is the distinguishing feature — and reading the directory costs O(entries)
- * rather than the O(bytes) that decompressing the package would. An earlier version used
- * `extractAll`, which inflates every part to answer a question about one file name.
- *
- * Returns false rather than throwing for input that is not a ZIP at all, so the caller falls
- * through to the XLSX loader and lets *it* produce the error: a message from a loader that
- * tried to read the file says more than one from a sniffer that declined to.
- */
-export function isXlsbPackage(bytes: Uint8Array): boolean {
-  try {
-    return new ZipParser(bytes)
-      .getEntries()
-      .some(entry => entry.path.toLowerCase() === WORKBOOK_PART);
-  } catch {
-    return false;
-  }
 }
 
 /**

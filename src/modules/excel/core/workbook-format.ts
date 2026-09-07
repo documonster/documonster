@@ -19,14 +19,28 @@
  *    than buffering it, which is a real advantage for a large XLSX; sniffing would mean
  *    reading the tail first and giving that up. `.xlsb` selects the binary reader, everything
  *    else keeps the streaming path, and an explicit `format` overrides both.
+ *
+ * ## The XLSB reader and writer are loaded on demand
+ *
+ * Only the *detection* is unconditional, and it lives in `xlsb/detect.ts` for that reason: it is
+ * a ZIP central-directory scan and nothing more. Everything that acts on the answer —
+ * `parseXlsbPackage`, `commitXlsbRead`, `writeXlsbPackage` — is reached through `await import()`,
+ * which the functions below can do because they are all async already.
+ *
+ * This paragraph used to be a single sentence at the bottom of the file asserting the same thing
+ * while the imports at the top were static, and the difference was measurable: `Workbook.read`
+ * eagerly bundled the whole binary reader and `Workbook.toBuffer` the whole binary writer, in both
+ * cases to decide they were not needed. It also made the streaming paths' own `await import()` of
+ * those two modules ineffective — a module that is statically imported anywhere in the graph is
+ * hoisted into the main chunk, so nobody's dynamic import of it can move it out.
  */
 
 import { refuseUnsupported } from "@excel/core/unsupported";
 import type { WorkbookData } from "@excel/core/workbook-core";
+import { getWorkbookModel } from "@excel/core/workbook-model";
 import { ExcelFileError } from "@excel/errors";
+import { isXlsbPackage } from "@excel/xlsb/detect";
 import { modelHash, sameHash } from "@excel/xlsb/model-hash";
-import { commitXlsbRead, isXlsbPackage, parseXlsbPackage } from "@excel/xlsb/read/package";
-import { writeXlsbPackage } from "@excel/xlsb/write/package";
 import { base64ToUint8Array } from "@utils/utils";
 
 /** Package formats the canonical IO functions can read and write. */
@@ -144,6 +158,7 @@ export async function readXlsbInto(
     readonly formulas?: "preserve" | "cached" | "error";
   } = {}
 ): Promise<WorkbookData> {
+  const { commitXlsbRead, parseXlsbPackage } = await import("@excel/xlsb/read/package");
   const parsed = await parseXlsbPackage(bytes, source, {
     ...(options.blankCells === undefined ? {} : { blankCells: options.blankCells }),
     ...(options.formulas === undefined ? {} : { formulas: options.formulas })
@@ -182,7 +197,6 @@ export async function writeXlsbBytes(
   workbook: WorkbookData,
   options: { readonly unsupported?: "error" | "ignore" } = {}
 ): Promise<Uint8Array> {
-  const { getWorkbookModel } = await import("@excel/core/workbook.browser");
   const model = getWorkbookModel(workbook);
   // **An unchanged package comes back exactly as it arrived.**
   //
@@ -199,6 +213,8 @@ export async function writeXlsbBytes(
   if (source !== undefined && sameHash(source.hash, modelHash(model))) {
     return source.bytes;
   }
+  // Loaded only now, so an unchanged package — which returns above — never pays for the writer.
+  const { writeXlsbPackage } = await import("@excel/xlsb/write/package");
   const written = await writeXlsbPackage(model);
   refuseUnsupported(written.unsupported, options);
   return written.bytes;
@@ -223,8 +239,7 @@ export async function writeXlsbToStream(
   stream: unknown,
   options: { readonly unsupported?: "error" | "ignore" } = {}
 ): Promise<void> {
-  const [{ getWorkbookModel }, { streamXlsbPackage }, { createXlsbZipWriter }] = await Promise.all([
-    import("@excel/core/workbook.browser"),
+  const [{ streamXlsbPackage }, { createXlsbZipWriter }] = await Promise.all([
     import("@excel/core/xlsb-stream"),
     import("@excel/core/xlsb-zip")
   ]);

@@ -69,10 +69,13 @@ interface Scenario {
   /** Bundlers to skip for this scenario (known tool limitations). */
   excludeBundlers?: string[];
   /**
-   * When true, bundle with code-splitting and assert only against the ENTRY
-   * chunk. Use for namespaces with lazy `import()` boundaries (e.g. `Pdf`'s
-   * cross-module converters): the heavy dependency must live in a separate
-   * on-demand chunk, not the entry a consumer pays for upfront.
+   * When true, rolldown and rspack bundle with code-splitting and the assertion is made against
+   * the **eagerly loaded** part of the output — the entry chunk plus the chunks it statically
+   * imports (see {@link readEntryAndStaticChunks}). Use for namespaces with lazy `import()`
+   * boundaries (e.g. `Pdf`'s cross-module converters): the heavy dependency must live in an
+   * on-demand chunk, not in what a consumer pays for upfront.
+   *
+   * esbuild ignores this and always bundles to a single file — see {@link runEsbuild}.
    */
   lazySplit?: boolean;
   /**
@@ -197,7 +200,47 @@ function chartNs(platform?: "browser" | "node"): Scenario {
     // `archive/png` is the encoder, which moved out of `excel/utils/` once it had to be
     // published for `documonster/draw` consumers. Listed as precisely as the compression
     // directory it sits beside: the ZIP/TAR containers stay asserted absent.
-    allowModules: ["modules/archive/compression/", "modules/archive/png."],
+    // `archive/core/defaults` is where `compression/compress` reads DEFAULT_DEFLATE_LEVEL from, so it
+    // travels with the primitives. Named as precisely as they are.
+    allowModules: [
+      "modules/archive/compression/",
+      "modules/archive/core/defaults.",
+      "modules/archive/png."
+    ],
+    platform,
+    lazySplit: true
+  };
+}
+
+/**
+ * The `Stream` namespace: XLSX/XLSB streaming, so zip + xml + the stream primitives.
+ *
+ * It also reaches the formula **tokenizer and parser**, and unlike the leaks this file exists to
+ * catch, that one has nowhere to go. An XLSB formula is stored as `Ptg` tokens rather than as
+ * text, so encoding one means parsing it into an AST first (`xlsb/write/cells.ts`,
+ * `xlsb/conditional-format.ts`, `xlsb/data-validation.ts`, `xlsb/sparkline.ts`) — and the code
+ * that does it is reached from a *synchronous* constructor: `WorkbookWriter.addWorksheet` and
+ * `WorksheetWriter.addRow` are both sync by design, and the `StreamedXlsbWorksheet` the row
+ * encoder lives on is built in `WorksheetWriter`'s constructor. There is no `await` to put an
+ * `import()` behind without making the public streaming API asynchronous.
+ *
+ * So the *engine* is what must stay out, not the syntax — which is why this allows
+ * `formula/syntax/` precisely rather than widening `mustNotInclude` to let the whole tree
+ * through, exactly as {@link chartNs} does for `archive/`. `formula/errors` comes with the
+ * parser: it is what a malformed formula throws.
+ *
+ * This was asserted for both platforms and passed on node only because rolldown put those
+ * modules in a sibling chunk the entry chunk statically imports rather than in the entry chunk
+ * itself — see {@link readEntryAndStaticChunks}, which is what made the two agree.
+ */
+function streamNs(platform?: "browser" | "node"): Scenario {
+  const tag = platform === "browser" ? "browser " : "";
+  return {
+    name: `${tag}/excel: Stream (allows archive+xml+stream, formula/syntax for XLSB Ptg)`,
+    importFrom: `${PKG_NAME}/excel`,
+    imports: ["Stream"],
+    mustNotInclude: exclude("excel", ["modules/archive/", "modules/xml/", "modules/stream/"]),
+    allowModules: ["modules/formula/syntax/", "modules/formula/errors."],
     platform,
     lazySplit: true
   };
@@ -224,8 +267,7 @@ const scenarios: Scenario[] = [
   ns("excel", "Range", []),
   ns("excel", "Row", []),
   ns("excel", "Sparkline", []),
-  // xlsx streaming = zip + xml writer/sax + stream primitives
-  ns("excel", "Stream", ["modules/archive/", "modules/xml/", "modules/stream/"]),
+  streamNs(), // zip + xml writer/sax + stream primitives; the formula parser for XLSB Ptg
   ns("excel", "Table", []),
   ns("excel", "Watermark", []),
   // save xlsx = zip + xml + stream; defined-names pull the formula syntax probe
@@ -247,7 +289,9 @@ const scenarios: Scenario[] = [
   ns("word", "Document", []),
   ns("word", "Font", []),
   ns("word", "Glossary", []),
-  ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"]), // docx read/write
+  // esbuild is excluded here and on `Pdf` below: both namespaces keep another module tree behind
+  // `import()` (word's excel bridge, pdf's excel/word converters), and a single-file bundle inlines it.
+  ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], undefined, ["esbuild"]), // docx read/write
   ns("word", "Layout", ["modules/xml/"]), // xml/encode
   ns("word", "Ole", ["modules/xml/"]), // xml/encode
   ns("word", "Query", ["modules/xml/"]), // parses docx content (dom/sax)
@@ -278,7 +322,7 @@ const scenarios: Scenario[] = [
     mustNotInclude: FORMULA_ENGINE_MODULES,
     lazySplit: true
   },
-  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"]), // zlib + PDF metadata XML
+  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"], undefined, ["esbuild"]), // zlib + PDF metadata XML
 
   // ===========================================================================
   // /excel member-level — chart CREATE path must NOT pull the SVG/PNG renderers
@@ -295,8 +339,7 @@ const scenarios: Scenario[] = [
     imports: ["Chart"],
     useExpr: "console.log(Chart.add)",
     mustNotInclude: ["chart/chart-renderer.js", "chart/chart-ex-renderer.js"],
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
   {
     name: "/excel: Workbook.create (no renderers)",
@@ -304,8 +347,7 @@ const scenarios: Scenario[] = [
     imports: ["Workbook"],
     useExpr: "console.log(Workbook.create())",
     mustNotInclude: ["chart/chart-renderer.js", "chart/chart-ex-renderer.js"],
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
 
   // ===========================================================================
@@ -325,8 +367,7 @@ const scenarios: Scenario[] = [
     imports: ["Workbook"],
     useExpr: "console.log(Workbook.create())",
     mustNotInclude: FORMULA_ENGINE_MODULES,
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
   {
     name: "/excel: Workbook.toBuffer (no formula engine)",
@@ -334,8 +375,7 @@ const scenarios: Scenario[] = [
     imports: ["Workbook"],
     useExpr: "console.log(Workbook.toBuffer)",
     mustNotInclude: FORMULA_ENGINE_MODULES,
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
   {
     name: "browser /excel: Workbook.create (no formula engine)",
@@ -344,8 +384,7 @@ const scenarios: Scenario[] = [
     useExpr: "console.log(Workbook.create())",
     mustNotInclude: FORMULA_ENGINE_MODULES,
     platform: "browser",
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
 
   // The recalculation subpath itself: pulls excel + the engine (that is the
@@ -369,6 +408,9 @@ const scenarios: Scenario[] = [
   // tables (~700 KB of math/arrow/dingbat vector glyphs). They are loaded
   // lazily via dynamic import() inside FontManager, only when a document
   // actually contains non-WinAnsi characters. A plain-text PDF never pays.
+  //
+  // esbuild is excluded because the contract *is* the `import()` boundary and a single-file bundle
+  // inlines it; see `runEsbuild`.
   // ===========================================================================
   {
     name: "/pdf: Pdf.create (no Type3 glyph tables)",
@@ -405,8 +447,7 @@ const scenarios: Scenario[] = [
     imports: ["Formula"],
     useExpr: "console.log(Formula.tokenize)",
     mustNotInclude: ["modules/formula/runtime/", "modules/formula/functions/"],
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
   {
     name: "/formula: Formula.parse (no evaluator/functions)",
@@ -414,8 +455,7 @@ const scenarios: Scenario[] = [
     imports: ["Formula"],
     useExpr: "console.log(Formula.parse)",
     mustNotInclude: ["modules/formula/runtime/", "modules/formula/functions/"],
-    lazySplit: true,
-    excludeBundlers: ["esbuild"]
+    lazySplit: true
   },
 
   // ===========================================================================
@@ -436,7 +476,7 @@ const scenarios: Scenario[] = [
   ns("excel", "Range", [], "browser"),
   ns("excel", "Row", [], "browser"),
   ns("excel", "Sparkline", [], "browser"),
-  ns("excel", "Stream", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  streamNs("browser"),
   ns("excel", "Table", [], "browser"),
   ns("excel", "Watermark", [], "browser"),
   ns(
@@ -453,7 +493,7 @@ const scenarios: Scenario[] = [
   ns("word", "Document", [], "browser"),
   ns("word", "Font", [], "browser"),
   ns("word", "Glossary", [], "browser"),
-  ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
+  ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser", ["esbuild"]),
   ns("word", "Layout", ["modules/xml/"], "browser"),
   ns("word", "Ole", ["modules/xml/"], "browser"),
   ns("word", "Query", ["modules/xml/"], "browser"),
@@ -479,7 +519,7 @@ const scenarios: Scenario[] = [
     platform: "browser",
     lazySplit: true
   },
-  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"], "browser"),
+  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"], "browser", ["esbuild"]),
 
   // ===========================================================================
   // Layer 1/2 modules with intentionally flat exports (not namespaced).
@@ -683,16 +723,54 @@ function extractContributingFromBundle(bundleText: string): ModuleEntry[] {
   return [...seen].map(([p, bytes]) => ({ path: p, bytes }));
 }
 
-/** Read every emitted JS/MJS file in a directory and concatenate. */
-function readEmittedBundle(dir: string, onlyFile?: string): string {
-  if (onlyFile) {
-    const fp = path.join(dir, onlyFile);
-    return fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : "";
-  }
+/** Read one emitted chunk. */
+function readChunk(dir: string, file: string): string {
+  const fp = path.join(dir, file);
+  return fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : "";
+}
+
+/** A relative sibling-chunk specifier in a `from "./chunk-XYZ.js"` clause. */
+const STATIC_SIBLING_IMPORT_RE =
+  /(?:^|[\s;}])(?:import|export)\b[^;]*?\bfrom\s*["'](\.\/[^"']+)["']/gm;
+
+/**
+ * Read the entry chunk **plus every chunk it statically imports**, transitively.
+ *
+ * A code-splitting build does not put everything the entry needs *into* the entry: modules
+ * shared with an `import()`ed chunk are hoisted into a sibling chunk, which the entry then
+ * imports with a plain `import` — so it is fetched and evaluated with the entry, and is part
+ * of what the consumer eagerly pays for. Reading `out.mjs` alone therefore under-reports, and
+ * not hypothetically: the node `/excel: Stream` scenario passed while its entry chunk's first
+ * line read `import { …, yt as tokenize } from "./dom-CH31PZiL.js"`. The browser build of the
+ * same entry put those modules in the entry chunk and failed, which is how the gap surfaced —
+ * one bundler's chunk-assignment choice decided whether a real dependency was visible.
+ *
+ * Chunks reached only through `import()` are deliberately *not* followed: that a heavy
+ * dependency lives behind an on-demand boundary is the property `lazySplit` exists to assert.
+ *
+ * Used for rolldown and rspack, the two target bundlers. **Not** for esbuild, whose splitter
+ * hoists shared modules into a chunk the entry imports even where its own non-split build drops
+ * them — measured on `Cell`: 22 modules and no formula tree without `splitting`, the tokenizer
+ * reachable through a shared chunk with it. Reading those would report the chunker's coarseness
+ * as a source defect, which is the same reason the member-level scenarios below already carry
+ * `excludeBundlers: ["esbuild"]`.
+ */
+function readEntryAndStaticChunks(dir: string, entryFile: string): string {
+  const seen = new Set<string>();
+  const queue = [entryFile];
   let text = "";
-  for (const name of fs.readdirSync(dir)) {
-    if (name.endsWith(".mjs") || name.endsWith(".js")) {
-      text += fs.readFileSync(path.join(dir, name), "utf-8") + "\n";
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    const chunk = readChunk(dir, name);
+    text += chunk + "\n";
+    STATIC_SIBLING_IMPORT_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = STATIC_SIBLING_IMPORT_RE.exec(chunk)) !== null) {
+      queue.push(m[1].slice(2));
     }
   }
   return text;
@@ -766,46 +844,27 @@ function writeEntry(bundler: string, scenario: Scenario): { entryFile: string; s
 // Bundler runners
 // =============================================================================
 
+/**
+ * esbuild: **one bundle, no splitting**, and the whole of it is the assertion.
+ *
+ * It used to mirror rolldown's `lazySplit` and read only the entry chunk, which measured almost
+ * nothing: esbuild's splitter hoists shared modules into shared chunks and leaves the entry a
+ * re-export shell, so 48 of 103 scenarios contributed one module or none — one of them tripped the
+ * `NO_MODULE_MARKERS` guard with a 0.6 kB entry containing zero markers, which is what exposed it.
+ * Reading its shared chunks instead swings the other way: with `splitting` on, esbuild treats every
+ * export of a shared chunk as used, and reported the formula tree for a `Cell` bundle that its own
+ * *non-split* build drops entirely (22 modules, no formula, no xml).
+ *
+ * Without splitting it tree-shakes precisely, and the whole file is by definition what the consumer
+ * pays for — which is the property being asserted. The one thing it then cannot express is "this
+ * dependency is behind an `import()`", because with nowhere to put a chunk esbuild inlines the
+ * target; the handful of scenarios whose contract is exactly that carry
+ * `excludeBundlers: ["esbuild"]` with a reason. rolldown and rspack hold that line.
+ */
 function runEsbuild(scenario: Scenario): ScenarioResult {
   const { entryFile, slug } = writeEntry("esbuild", scenario);
 
   try {
-    if (scenario.lazySplit) {
-      // Code-split build: the ENTRY chunk must be free of the excluded modules;
-      // lazy `import()` targets land in separate on-demand chunks.
-      const outDir = path.join(TMP_DIR, `esbuild-${slug}-split`);
-      const result = buildSync({
-        entryPoints: [entryFile],
-        bundle: true,
-        format: "esm",
-        platform: scenario.platform === "browser" ? "browser" : "node",
-        outdir: outDir,
-        metafile: true,
-        treeShaking: true,
-        splitting: true,
-        minify: false,
-        write: true,
-        external: ["node:*"]
-      });
-      const meta = result.metafile!;
-      const entryOut = Object.entries(meta.outputs).find(([, o]) =>
-        (o.entryPoint ?? "").includes(path.basename(entryFile))
-      );
-      if (!entryOut) {
-        return makeError(scenario.name, "esbuild", "entry chunk not found");
-      }
-      const [entryKey] = entryOut;
-      const bundleText = readEmittedBundle(outDir, path.basename(entryKey));
-      const contributing = extractContributingFromBundle(bundleText);
-      return makeResult(
-        scenario,
-        "esbuild",
-        fs.statSync(entryKey).size,
-        contributing,
-        contributing.length
-      );
-    }
-
     const outFile = path.join(TMP_DIR, `esbuild-${slug}.out.mjs`);
     buildSync({
       entryPoints: [entryFile],
@@ -850,12 +909,13 @@ async function runRolldown(scenario: Scenario): Promise<ScenarioResult> {
       output: { dir: outDir, format: "esm", entryFileNames: "out.mjs", minify: false }
     });
 
-    // Only inspect the ENTRY chunk (out.mjs). Lazy `import()` targets are
-    // emitted as separate on-demand chunks, so a dynamic cross-module boundary
-    // must NOT appear in the entry a consumer pays for upfront.
+    // Inspect the entry chunk and the chunks it *statically* imports — everything the consumer
+    // loads before their first line runs. Lazy `import()` targets are emitted as separate
+    // on-demand chunks and are not followed, so a dynamic cross-module boundary must not appear
+    // here. See {@link readEntryAndStaticChunks}.
     const outFile = path.join(outDir, "out.mjs");
     const bundleSize = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-    const bundleText = readEmittedBundle(outDir, "out.mjs");
+    const bundleText = readEntryAndStaticChunks(outDir, "out.mjs");
     const contributing = extractContributingFromBundle(bundleText);
 
     return makeResult(scenario, "rolldown", bundleSize, contributing, contributing.length);
@@ -914,15 +974,15 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
         return;
       }
 
-      // The emitted entry chunk is `out.mjs`. Lazy `import()` targets are
-      // emitted as separate `*.chunk.mjs` files (rspack splits async deps), so
-      // reading only `out.mjs` reflects what the consumer eagerly pays for.
-      // Module-path markers in the un-minified output are the ground truth for
-      // what survived DCE (stats.modules lists graph members, which over-counts
-      // modules rspack later eliminated from the bundle).
+      // The emitted entry chunk is `out.mjs`, plus whatever it statically imports (see
+      // {@link readEntryAndStaticChunks}). Lazy `import()` targets are emitted as separate
+      // `*.chunk.mjs` files (rspack splits async deps) and are not followed, so what is measured
+      // is what the consumer eagerly pays for. Module-path markers in the un-minified output are
+      // the ground truth for what survived DCE (stats.modules lists graph members, which
+      // over-counts modules rspack later eliminated from the bundle).
       const outFile = path.join(outDir, "out.mjs");
       const bundleSize = fs.existsSync(outFile) ? fs.statSync(outFile).size : 0;
-      const bundleText = readEmittedBundle(outDir, "out.mjs");
+      const bundleText = readEntryAndStaticChunks(outDir, "out.mjs");
       const contributing = extractContributingFromBundle(bundleText);
 
       close().then(() =>
