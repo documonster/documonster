@@ -54,6 +54,8 @@ import {
   acute,
   ascii,
   breve,
+  ligature,
+  shiftPaths,
   asSubscript,
   asSuperscript,
   caron,
@@ -409,30 +411,6 @@ const SCRIPTS: Record<number, StrokeShape> = {
 /** The breve at the width this block's letters take. */
 function breveMark(x: number, y: number): Path[] {
   return breve(x, y, 0.16);
-}
-
-/**
- * Two letters set as one glyph, for `Ĳ` `ĳ` `Œ` `œ`.
- *
- * `overlap` is how far the right letter is pulled back over the left, and it is per
- * pair rather than a constant because the two kinds of pair differ: `I` and `J` merely
- * tuck together, while the `O` and `E` of `Œ` share a stem. A single overlap gave `Œ`
- * an advance of 1097 units and ink out to 1015 — past the em, and past the box `d1`
- * declares, so a viewer honouring it would have clipped the `E`.
- */
-function ligature(left: string, right: string, overlap: number): StrokeShape {
-  const a = ascii(left);
-  const b = ascii(right);
-  const gap = a.w - overlap;
-  return {
-    w: gap + b.w,
-    d: [...a.d, ...b.d.map(path => path.map(([x, y]) => [x + gap, y] as const))]
-  };
-}
-
-/** A letter's paths moved right, for the apostrophe in `ŉ`. */
-function shiftPaths(source: StrokeShape, dx: number): Path[] {
-  return source.d.map(path => path.map(([x, y]) => [x + dx, y] as const));
 }
 
 // =============================================================================

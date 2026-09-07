@@ -39,7 +39,7 @@ const UNITS_PER_EM = 1000;
  * viewer that honours it. The bounds below sit clear of both, and
  * `type3-letterforms.test.ts` asserts every glyph fits inside them.
  */
-export const GLYPH_BBOX = [0, -300, 1000, 1000] as const;
+export const GLYPH_BBOX = [0, -350, 1300, 1250] as const;
 
 /** Maximum glyphs per Type3 font (single-byte encoding limit). */
 const MAX_GLYPHS_PER_FONT = 256;

@@ -6,7 +6,10 @@ import { GLYPH_BBOX } from "../font/type3-font";
 import { lookupGlyph, NOTDEF_GLYPH, type GlyphPen } from "../font/type3-glyphs";
 import { CYRILLIC, CYRILLIC_CODE_POINTS } from "../font/type3-glyphs-cyrillic";
 import { GREEK, GREEK_CODE_POINTS } from "../font/type3-glyphs-greek";
+import { GREEK_POLYTONIC_CODE_POINTS } from "../font/type3-glyphs-greek-poly";
+import { LATIN_B_CODE_POINTS } from "../font/type3-glyphs-latin-b";
 import { LATIN_EXTENDED_CODE_POINTS } from "../font/type3-glyphs-latin-ext";
+import { VIETNAMESE_CODE_POINTS } from "../font/type3-glyphs-vietnamese";
 import { isType3Drawable } from "../font/type3-repertoire";
 
 /**
@@ -103,15 +106,79 @@ function widestInkGap(glyph: { draw: (p: GlyphPen) => void }): number {
   return gap;
 }
 
-const ALL = [...GREEK_CODE_POINTS, ...CYRILLIC_CODE_POINTS, ...LATIN_EXTENDED_CODE_POINTS];
+const ALL = [
+  ...GREEK_CODE_POINTS,
+  ...GREEK_POLYTONIC_CODE_POINTS,
+  ...CYRILLIC_CODE_POINTS,
+  ...LATIN_EXTENDED_CODE_POINTS,
+  ...LATIN_B_CODE_POINTS,
+  ...VIETNAMESE_CODE_POINTS
+];
 
 describe("Type3 letterforms", () => {
   it("covers the scripts a Latin document reaches for", () => {
     // The exact figures are asserted so a table cannot lose a letter unnoticed.
     expect(GREEK_CODE_POINTS.length).toBe(72);
+    expect(GREEK_POLYTONIC_CODE_POINTS.length).toBe(233);
     expect(CYRILLIC_CODE_POINTS.length).toBe(96);
     expect(LATIN_EXTENDED_CODE_POINTS.length).toBe(181);
-    expect(new Set(ALL).size).toBe(349);
+    expect(LATIN_B_CODE_POINTS.length).toBe(200);
+    expect(VIETNAMESE_CODE_POINTS.length).toBe(94);
+    expect(new Set(ALL).size).toBe(876);
+  });
+
+  it("matches Unicode on which cells of a ragged block exist", () => {
+    // Polytonic Greek leaves 23 cells empty — a vowel with no circumflex, a breathing with
+    // no capital — and Latin Extended-B is dense. Asserted against the runtime's own
+    // Unicode tables rather than against a list transcribed from the code charts, because
+    // the first version of the generator derived each uppercase row from the last assigned
+    // lowercase cell and put every capital of the `ε` and `ο` rows two code points early.
+    const unassigned = (cp: number) => /\p{gc=Cn}/u.test(String.fromCodePoint(cp));
+    for (const [lo, hi] of [
+      [0x1f00, 0x1fff],
+      [0x0180, 0x024f],
+      [0x1ea0, 0x1ef9]
+    ]) {
+      for (let cp = lo; cp <= hi; cp++) {
+        const drawn = lookupGlyph(cp) !== undefined;
+        if (unassigned(cp)) {
+          expect(drawn, `U+${cp.toString(16)} is unassigned but drawn`).toBe(false);
+        } else {
+          expect(drawn, `U+${cp.toString(16)} is assigned but missing`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("composes a breathing and an accent onto one Greek vowel", () => {
+    // The reason polytonic Greek was wrongly excluded. `ἄ` carries two marks and an
+    // optional iota below, and a precomposed glyph can hold all three: more ink than the
+    // one-mark form, and ink below the baseline once the iota is there.
+    const plain = trace(lookupGlyph(0x03b1)!).points.length; // α
+    const breathed = trace(lookupGlyph(0x1f00)!).points.length; // ἀ
+    const both = trace(lookupGlyph(0x1f04)!).points.length; // ἄ
+    expect(breathed).toBeGreaterThan(plain);
+    expect(both).toBeGreaterThan(breathed);
+
+    const withIota = trace(lookupGlyph(0x1f84)!).points; // ᾄ
+    expect(withIota.length).toBeGreaterThan(both);
+    expect(Math.min(...withIota.map(([, y]) => y))).toBeLessThan(0);
+  });
+
+  it("stacks a Vietnamese tone over the mark already on the vowel", () => {
+    // `ế` is `e`, a circumflex, and an acute above it — three pieces of ink at three
+    // heights. The claim this table corrects is that it could not be drawn at all.
+    const bands = (cp: number) => {
+      const ys = trace(lookupGlyph(cp)!).points.map(([, y]) => y);
+      return { lo: Math.min(...ys), hi: Math.max(...ys) };
+    };
+    // `ê` itself is WinAnsi, so a standard-14 face draws it and it is correctly absent here.
+    expect(lookupGlyph(0x00ea)).toBeUndefined();
+
+    const stacked = bands(0x1ebf); // ế
+    const oneMark = bands(0x1ec7); // ệ — circumflex above, dot below
+    expect(stacked.hi).toBeGreaterThan(oneMark.hi);
+    expect(oneMark.lo).toBeLessThan(0);
   });
 
   it("writes the languages that were boxes before", () => {
@@ -277,7 +344,9 @@ describe("Type3 letterforms", () => {
       const glyph = lookupGlyph(cp)!;
       const { points } = trace(glyph);
       expect(glyph.width, `U+${cp.toString(16)} advance`).toBeGreaterThan(0);
-      expect(glyph.width).toBeLessThanOrEqual(1000);
+      // Not one em: a digraph is two letters in one glyph, and `Ǆ` is legitimately 1.17 em
+      // wide. The box is the constraint that matters.
+      expect(glyph.width).toBeLessThanOrEqual(urx);
       for (const [x, y] of points) {
         expect(x, `U+${cp.toString(16)} x`).toBeGreaterThanOrEqual(llx);
         expect(x, `U+${cp.toString(16)} x`).toBeLessThanOrEqual(urx);
@@ -367,11 +436,20 @@ describe("Type3 letterforms", () => {
     }
   });
 
-  it("leaves the scripts it cannot shape alone", () => {
-    // Polytonic Greek, the Cyrillic Supplement and Devanagari are absent on purpose:
-    // glyphs without shaping would render confidently wrong, which is worse than a box
-    // a caller can see and fix by supplying a font.
-    for (const cp of [0x1f00, 0x0460, 0x0500, 0x0905]) {
+  it("leaves alone the scripts a glyph table cannot make correct", () => {
+    // What remains absent, and why it is not the same reason polytonic Greek was. These
+    // need *runtime* mark positioning or contextual shaping — an Indic conjunct, an Arabic
+    // medial form — so a precomposed table cannot express them and drawing the isolated
+    // letters would be confidently wrong. A box a caller can see and fix with a font is
+    // the better failure.
+    for (const cp of [
+      0x0460, // Ѡ — Cyrillic historic
+      0x0500, // Ԁ — Cyrillic Supplement
+      0x0905, // अ — Devanagari
+      0x0627, // ا — Arabic
+      0x0e01, // ก — Thai
+      0x0250 // ɐ — IPA Extensions
+    ]) {
       expect(lookupGlyph(cp), `U+${cp.toString(16)}`).toBeUndefined();
     }
   });

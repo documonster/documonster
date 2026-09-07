@@ -490,7 +490,13 @@ function withDiaeresisAndTonos(base: StrokeShape): StrokeShape {
   );
 }
 
-const SHAPES: Record<number, StrokeShape> = {
+/**
+ * The monotonic shapes, before conversion.
+ *
+ * Exported because polytonic Greek composes from them: a breathing over `α` has to be the
+ * *same* `α`, or the two blocks would drift into two alphabets.
+ */
+export const GREEK_SHAPES: Record<number, StrokeShape> = {
   // Marks and accented capitals.
   0x384: TONOS,
   0x385: DIALYTIKA_TONOS,
@@ -572,8 +578,8 @@ const SHAPES: Record<number, StrokeShape> = {
 
 /** Greek, as Type3 glyphs. */
 export const GREEK: Record<number, GlyphDef> = Object.fromEntries(
-  Object.entries(SHAPES).map(([cp, form]) => [Number(cp), toGlyphDef(form)])
+  Object.entries(GREEK_SHAPES).map(([cp, form]) => [Number(cp), toGlyphDef(form)])
 );
 
 /** The code points this table defines, for the repertoire to state without importing it. */
-export const GREEK_CODE_POINTS: readonly number[] = Object.keys(SHAPES).map(Number);
+export const GREEK_CODE_POINTS: readonly number[] = Object.keys(GREEK_SHAPES).map(Number);

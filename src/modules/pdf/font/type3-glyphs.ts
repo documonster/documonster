@@ -2577,6 +2577,8 @@ import {
   FINAL_FILL
 } from "@pdf/font/type3-glyphs-fill";
 import { GREEK } from "@pdf/font/type3-glyphs-greek";
+import { GREEK_POLYTONIC } from "@pdf/font/type3-glyphs-greek-poly";
+import { LATIN_B } from "@pdf/font/type3-glyphs-latin-b";
 import { LATIN_EXTENDED } from "@pdf/font/type3-glyphs-latin-ext";
 import {
   SPACES,
@@ -2592,13 +2594,17 @@ import {
   CURRENCY_REMAINING,
   ARROWS_REMAINING
 } from "@pdf/font/type3-glyphs-quality";
+import { VIETNAMESE } from "@pdf/font/type3-glyphs-vietnamese";
 
 const ALL_TABLES: Array<Record<number, GlyphDef>> = [
   // Letterforms. Listed first so a symbol table can never shadow a letter; nothing
   // overlaps today and this keeps that true by construction rather than by review.
   GREEK,
+  GREEK_POLYTONIC,
   CYRILLIC,
   LATIN_EXTENDED,
+  LATIN_B,
+  VIETNAMESE,
   GEO,
   ARR,
   MATH,

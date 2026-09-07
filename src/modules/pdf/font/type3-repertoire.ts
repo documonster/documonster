@@ -64,10 +64,9 @@ const TYPE3_LETTER_RANGES: ReadonlyArray<readonly [number, number]> = [
   // and Welsh. The seven WinAnsi members (`Œœ Šš Žž Ÿ`) are drawn by a standard-14
   // face and never reach Type3, but they are defined so this range needs no holes.
   [0x0100, 0x017f],
-  // Romanian's comma-below pair, which lives in Latin Extended-B. Included so the one
-  // language in the region is not left rendering with the wrong diacritic; the rest of
-  // that block is novel shapes rather than compositions and is absent.
-  [0x0218, 0x021b],
+  // Latin Extended-B, whole: the pinyin tone letters, the African hooked consonants, the
+  // Serbo-Croatian digraphs, Romanian's comma-below pair and the Vietnamese horns.
+  [0x0180, 0x024f],
   // Spacing diacritics: the marks as standalone characters.
   [0x02c7, 0x02c7],
   [0x02d8, 0x02dd],
@@ -82,7 +81,27 @@ const TYPE3_LETTER_RANGES: ReadonlyArray<readonly [number, number]> = [
   // code points only: U+2072, U+2073 and U+208F are unassigned.
   [0x2070, 0x2071],
   [0x2074, 0x208e],
-  [0x2090, 0x209c]
+  [0x2090, 0x209c],
+  // Vietnamese's tone-marked vowels. Its horned vowels are in Extended-B above.
+  [0x1ea0, 0x1ef9],
+  // Polytonic Greek. Stated as the runs Unicode assigns, because the block is ragged: it
+  // leaves 23 cells empty where a vowel takes no circumflex or a breathing no capital.
+  [0x1f00, 0x1f15],
+  [0x1f18, 0x1f1d],
+  [0x1f20, 0x1f45],
+  [0x1f48, 0x1f4d],
+  [0x1f50, 0x1f57],
+  [0x1f59, 0x1f59],
+  [0x1f5b, 0x1f5b],
+  [0x1f5d, 0x1f5d],
+  [0x1f5f, 0x1f7d],
+  [0x1f80, 0x1fb4],
+  [0x1fb6, 0x1fc4],
+  [0x1fc6, 0x1fd3],
+  [0x1fd6, 0x1fdb],
+  [0x1fdd, 0x1fef],
+  [0x1ff2, 0x1ff4],
+  [0x1ff6, 0x1ffe]
 ];
 
 function inRanges(codePoint: number, ranges: ReadonlyArray<readonly [number, number]>): boolean {

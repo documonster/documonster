@@ -252,6 +252,39 @@ function rotate180(source: StrokeShape): StrokeShape {
   };
 }
 
+/** The ink extent of a shape, for a mark that has to attach to the letter itself. */
+function bounds(source: StrokeShape): {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+} {
+  const points = source.d.flat();
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys)
+  };
+}
+
+/**
+ * Reflect a shape about its own vertical centre.
+ *
+ * What makes the turned and reversed letters of Latin Extended-B reuse rather than
+ * redraw: `Ɔ` is a reversed `C`, `Ƨ` a reversed `S`, `ᴎ` a reversed `N`.
+ */
+function mirrorX(source: StrokeShape): StrokeShape {
+  const { minX, maxX } = bounds(source);
+  const axis = minX + maxX;
+  return {
+    w: source.w,
+    d: source.d.map(path => path.map(([x, y]) => [axis - x, y] as const))
+  };
+}
+
 /** Shift a shape, for a mark that sits over a narrow or a wide letter. */
 function shift(source: StrokeShape, dx: number, dy = 0): StrokeShape {
   return {
@@ -490,6 +523,83 @@ function withApostrophe(base: StrokeShape): StrokeShape {
 }
 
 /**
+ * Hook above — the Vietnamese `dấu hỏi`, as on `ả` `ể` `ủ`. Standing on `y`.
+ *
+ * A question mark without its dot: down the left, then a bowl to the right.
+ */
+function hookAbove(x: number, y: number): Path[] {
+  return [
+    [
+      [x + 0.02, y - 0.1],
+      [x + 0.07, y - 0.11],
+      [x + 0.1, y - 0.08],
+      [x + 0.08, y - 0.04],
+      [x + 0.05, y - 0.02],
+      [x + 0.05, y]
+    ]
+  ];
+}
+
+/** Dot below — the Vietnamese `dấu nặng`, as on `ạ` `ệ` `ụ`. Hanging from `y`. */
+function dotBelow(x: number, y: number): Path[] {
+  return [
+    [
+      [x + 0.07, y + 0.04],
+      [x + 0.08, y + 0.04]
+    ]
+  ];
+}
+
+/**
+ * The horn of `ơ` `ư` `Ơ` `Ư`, attached to the letter's own top right.
+ *
+ * Not a floating mark: Vietnamese draws it touching the bowl, so it is placed from the
+ * base's ink rather than from its advance — an `o` and a `u` present a different corner.
+ */
+function withHorn(base: StrokeShape): StrokeShape {
+  const { maxX, minY } = bounds(base);
+  return merge(
+    base,
+    shape(base.w + 0.05, [
+      [maxX - 0.01, minY + 0.04],
+      [maxX + 0.04, minY],
+      [maxX + 0.06, minY - 0.05]
+    ])
+  );
+}
+
+/**
+ * Stack a second mark over the first — Vietnamese `ế`, polytonic Greek `ᾅ`.
+ *
+ * This is why those scripts were wrongly excluded. The renderer does no *runtime* mark
+ * positioning, so a decomposed `e` + U+0302 + U+0301 cannot be drawn correctly. But a
+ * precomposed code point is one glyph whose outline this file authors in full, and
+ * nothing stops that outline carrying two marks. The clearance between them is tighter
+ * than between a mark and a letter: both are thin strokes, and real type sets them close.
+ */
+const STACK_CLEARANCE = 0.09;
+
+/** Heights of the marks that can be stacked under another, in stroke-font units. */
+const MARK_HEIGHT: ReadonlyMap<(x: number, y: number) => Path[], number> = new Map([
+  [acute, 0.1],
+  [grave, 0.1],
+  [circumflex, 0.09],
+  [caron, 0.09],
+  [tilde, 0.06],
+  [breveWide, 0.07],
+  [hookAbove, 0.11],
+  [macron, 0.0],
+  [dotAbove, 0.0],
+  [diaeresis, 0.01],
+  [ring, 0.1]
+]);
+
+/** The breve at a fixed width, so it can be stacked like the other marks. */
+function breveWide(x: number, y: number): Path[] {
+  return breve(x, y, 0.16);
+}
+
+/**
  * Hang a mark under a letter, on the baseline.
  *
  * Attached to the *stem*, not to the centre of the advance: a cedilla belongs under the
@@ -505,18 +615,109 @@ function withMarkUnder(
 }
 
 /**
+ * Put two marks over a letter, the second above the first.
+ *
+ * The lower mark's height decides where the upper one stands, which is why
+ * {@link MARK_HEIGHT} exists: guessing a single offset would either overlap a tall lower
+ * mark or float above a flat one.
+ */
+function withMarkStack(
+  base: StrokeShape,
+  lower: (x: number, y: number) => Path[],
+  upper: (x: number, y: number) => Path[],
+  small = true
+): StrokeShape {
+  const top = small ? X_TOP : CAP_TOP;
+  const x = base.w * 0.5 - 0.03;
+  const lowerBottom = top - MARK_CLEARANCE;
+  const lowerHeight = MARK_HEIGHT.get(lower);
+  if (lowerHeight === undefined) {
+    throw new Error("type3 letterforms: stacking needs the lower mark's height");
+  }
+  return merge(
+    base,
+    shape(base.w, ...lower(x, lowerBottom)),
+    shape(base.w, ...upper(x, lowerBottom - lowerHeight - STACK_CLEARANCE))
+  );
+}
+
+/**
+ * Shift a shape right until none of its ink sits left of the origin, widening the advance
+ * to match.
+ *
+ * A bar or a hook legitimately reaches past the letter on both sides, and on a narrow
+ * letter that puts ink at a negative x — outside the box `d1` publishes, so a viewer
+ * honouring it clips the left of `Ɨ` and `Ƭ`. Shifting is what a type designer would do:
+ * the mark keeps its relation to the letter and the glyph gains a left sidebearing.
+ */
+function keepInside(source: StrokeShape): StrokeShape {
+  const { minX } = bounds(source);
+  const margin = 0.02;
+  if (minX >= margin) {
+    return source;
+  }
+  const dx = margin - minX;
+  return { w: source.w + dx, d: shiftPaths(source, dx) };
+}
+
+/**
+ * Put a hook on the top of a letter's stem — `Ɓ` `Ƈ` `Ɗ` `Ƙ` of Latin Extended-B.
+ *
+ * Curving left from the stem's top, which is the shape the block uses throughout.
+ */
+function withTopHook(base: StrokeShape): StrokeShape {
+  const { minX, minY } = bounds(base);
+  return keepInside(
+    merge(
+      base,
+      shape(base.w, [
+        [minX, minY + 0.02],
+        [minX - 0.05, minY - 0.02],
+        [minX - 0.09, minY + 0.01]
+      ])
+    )
+  );
+}
+
+/**
+ * Two letters set as one glyph — `Ĳ` `Œ`, and the digraphs `Ǆ` `ǈ` `ǋ` `Ǳ`.
+ *
+ * `overlap` is how far the right letter is pulled back over the left, and it is per pair
+ * rather than a constant because the kinds of pair differ: `I` and `J` merely tuck
+ * together, while the `O` and `E` of `Œ` share a stem. A single overlap gave `Œ` an
+ * advance of 1097 units and ink out to 1015 — past the em, and past the box `d1` declares,
+ * so a viewer honouring it would have clipped the `E`.
+ */
+function ligature(left: string, right: string, overlap: number): StrokeShape {
+  const a = ascii(left);
+  const b = ascii(right);
+  const gap = a.w - overlap;
+  return {
+    w: gap + b.w,
+    d: [...a.d, ...b.d.map(path => path.map(([x, y]) => [x + gap, y] as const))]
+  };
+}
+
+/** A shape's paths moved right, for setting one letter beside another. */
+function shiftPaths(source: StrokeShape, dx: number): Path[] {
+  return source.d.map(path => path.map(([x, y]) => [x + dx, y] as const));
+}
+
+/**
  * Draw a bar through a letter — `ł` `đ` `ħ` `ŧ` `Ł` `Đ`.
  *
  * The bar is placed by the caller rather than derived, because where it crosses is
  * part of the letter: `Ł` takes it low on the stem, `Đ` across the bowl.
  */
 function withBar(base: StrokeShape, x1: number, y1: number, x2: number, y2: number): StrokeShape {
-  return merge(
-    base,
-    shape(base.w, [
-      [x1, y1],
-      [x2, y2]
-    ])
+  return keepInside(
+    merge(
+      base,
+      shape(base.w, [
+        [x1, y1],
+        [x2, y2]
+      ])
+    )
   );
 }
 
@@ -526,6 +727,8 @@ export {
   ascii,
   shape,
   merge,
+  bounds,
+  mirrorX,
   scaleTo,
   asSmall,
   asSuperscript,
@@ -547,6 +750,15 @@ export {
   cedilla,
   commaBelow,
   ogonek,
+  hookAbove,
+  dotBelow,
+  breveWide,
+  withHorn,
+  withMarkStack,
+  withTopHook,
+  keepInside,
+  ligature,
+  shiftPaths,
   withMarkOver,
   withMarkOverSmall,
   withMarkUnder,
