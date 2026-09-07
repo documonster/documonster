@@ -245,11 +245,17 @@ async function convert(soffice: string, file: string): Promise<Outcome> {
     // "exited 0 but produced no output". A gate whose failure message describes the gate is worse than no gate.
     const produced = join(work, `${basename(file).replace(/\.xls[bx]$/, "")}.csv`);
     try {
-      const size = (await stat(produced)).size;
-      const text = await readFile(produced, "utf8");
-      return size === 0
+      // Read once and let the read answer both questions. A `stat` in front of a `readFile` asks the file system the
+      // same thing twice and races between the two answers, and the byte count wanted here is the length of what
+      // came back.
+      const csv = await readFile(produced);
+      return csv.byteLength === 0
         ? { file, ok: false, detail: "converted to an empty file" }
-        : { file, ok: true, detail: `${size} B, ${text.split("\n").length - 1} line(s)` };
+        : {
+            file,
+            ok: true,
+            detail: `${csv.byteLength} B, ${csv.toString("utf8").split("\n").length - 1} line(s)`
+          };
     } catch {
       return { file, ok: false, detail: "exited 0 but produced no output" };
     }

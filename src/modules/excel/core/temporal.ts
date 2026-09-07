@@ -140,7 +140,7 @@ const REQUIRED_FIELDS: Readonly<Record<TemporalKind, readonly string[]>> = {
  * what it was before this module existed.
  */
 function tagOf(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null) {
+  if (value === null || typeof value !== "object") {
     return undefined;
   }
   try {

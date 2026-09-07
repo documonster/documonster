@@ -44,8 +44,13 @@ const xlsxPath = `${prefix}.xlsx`;
 const xlsbPath = `${prefix}.xlsb`;
 await Workbook.writeFile(wb, xlsxPath);
 await Workbook.writeFile(wb, xlsbPath);
-console.log(`wrote ${xlsxPath} (${fs.statSync(xlsxPath).size} bytes)`);
-console.log(`wrote ${xlsbPath} (${fs.statSync(xlsbPath).size} bytes)`);
+// Read each file back once, and use those bytes for both the size report here and the
+// format-detection section below. A `statSync` in front of a `readFileSync` asks the file system the
+// same question twice and races between the two answers; the length of what was read is the size.
+const xlsxBytes = fs.readFileSync(xlsxPath);
+const xlsbBytes = fs.readFileSync(xlsbPath);
+console.log(`wrote ${xlsxPath} (${xlsxBytes.byteLength} bytes)`);
+console.log(`wrote ${xlsbPath} (${xlsbBytes.byteLength} bytes)`);
 
 // ---------------------------------------------------------------------------
 // xlsx → xlsb, and back again.
@@ -74,8 +79,8 @@ console.log(`  C2 number format: ${JSON.stringify(Cell.getStyle(read, "C2")?.num
 
 // The format is detected from the content, so the same call reads either container.
 for (const [label, bytes] of [
-  ["xlsx bytes", fs.readFileSync(xlsxPath)],
-  ["xlsb bytes", fs.readFileSync(xlsbPath)]
+  ["xlsx bytes", xlsxBytes],
+  ["xlsb bytes", xlsbBytes]
 ] as const) {
   const detected = Workbook.create();
   await Workbook.read(detected, bytes);
@@ -89,7 +94,7 @@ for (const [label, bytes] of [
 // what a reader that trusted the caller over the bytes would do.
 try {
   const wrong = Workbook.create();
-  await Workbook.read(wrong, fs.readFileSync(xlsbPath), { format: "xlsx" });
+  await Workbook.read(wrong, xlsbBytes, { format: "xlsx" });
   console.log("unexpected: xlsb read as xlsx without complaint");
 } catch (error) {
   console.log(`refused to read xlsb as xlsx: ${(error as Error).message.slice(0, 90)}`);

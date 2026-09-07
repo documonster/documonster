@@ -402,8 +402,8 @@ function isErrorValue(value: unknown): value is { readonly error: string } {
  */
 function isRichText(value: unknown): value is { readonly richText: readonly RichTextRun[] } {
   return (
-    typeof value === "object" &&
     value !== null &&
+    typeof value === "object" &&
     Array.isArray((value as { richText?: unknown }).richText) &&
     (value as { richText: unknown[] }).richText.length > 0
   );

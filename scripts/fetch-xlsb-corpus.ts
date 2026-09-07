@@ -53,7 +53,9 @@ for (const entry of XLSB_CORPUS) {
     problems.push(`${entry.name}: ${response.status} ${response.statusText} from ${entry.url}`);
     continue;
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  // `response.bytes()` is the Fetch accessor for a binary body; `arrayBuffer()` plus a view over it says the
+  // same thing in two steps. Nothing decides whether these bytes reach the cache except the digest below.
+  const bytes = await response.bytes();
   const actual = digest(bytes);
   if (actual !== entry.sha256) {
     // Not written. A fixture whose bytes changed is a fixture whose upstream moved, and silently

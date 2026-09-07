@@ -72,7 +72,6 @@ import {
   Cell,
   Chart,
   Column,
-  DataValidation,
   DefinedNames,
   Image,
   Pivot,
@@ -1071,6 +1070,10 @@ function align(a: readonly string[], b: readonly string[]): [number | null, numb
 async function generate(): Promise<void> {
   fs.mkdirSync(IN, { recursive: true });
   fs.mkdirSync(REF, { recursive: true });
+  // One listing for all of `in/`, rather than an `existsSync` per case. A check in front of the write below is a
+  // time-of-check/time-of-use race — between the two the file can appear or go — and the listing answers every case
+  // in a single syscall instead of one per workbook.
+  const present = new Set(fs.readdirSync(IN));
   let rewritten = 0;
   for (const item of CASES) {
     const file = path.join(IN, `${item.name}.xlsx`);
@@ -1081,7 +1084,7 @@ async function generate(): Promise<void> {
     // runs are never byte-identical: `docProps/core.xml` carries a timestamp.
     const signature = await structuralSignature(bytes);
     const stamp = path.join(IN, `${item.name}.sig`);
-    const unchanged = fs.existsSync(file) && readIfPresent(stamp) === signature;
+    const unchanged = present.has(`${item.name}.xlsx`) && readIfPresent(stamp) === signature;
     if (!unchanged) {
       fs.writeFileSync(file, bytes);
       fs.writeFileSync(stamp, signature);
