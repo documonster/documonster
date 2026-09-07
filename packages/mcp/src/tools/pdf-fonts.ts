@@ -37,6 +37,8 @@ export function pdfFontOptions(config: { readonly pdfFont?: string }): {
   };
   /** Lines to append to the tool result, most serious first. */
   notes(): string[];
+  /** Refuse to write a PDF with boxes in it. See {@link FontWarningCollector.assertDrawable}. */
+  assertDrawable(allow: boolean): void;
 } {
   const collector = collectFontWarnings();
   const fonts = config.pdfFont === undefined ? undefined : loadFont(config.pdfFont);
@@ -45,7 +47,8 @@ export function pdfFontOptions(config: { readonly pdfFont?: string }): {
       ...(fonts === undefined ? {} : { fonts }),
       onWarning: collector.onWarning
     },
-    notes: collector.notes
+    notes: collector.notes,
+    assertDrawable: collector.assertDrawable
   };
 }
 
@@ -92,23 +95,65 @@ export interface FontWarningCollector {
    * Empty when nothing was raised, so a caller can splat it unconditionally.
    */
   notes(): string[];
+  /**
+   * The writer's own reports of characters that will draw as boxes.
+   *
+   * Empty when the page is sound, which is what {@link assertDrawable} turns into a
+   * refusal.
+   */
+  missingGlyphs(): string[];
+  /**
+   * Refuse to hand back a PDF with boxes in it.
+   *
+   * A PDF is terminal here — this server cannot read its own PDF output structurally, and
+   * the result text asks the caller to verify by opening the file — so a boxed page
+   * reported as a success is a defect the caller finds after the fact, if at all. That is
+   * how a document of Chinese prose came back with every ideograph blank and nobody was
+   * told (issue #218). Failing closed makes the one outcome nobody wants impossible to
+   * reach by accident, and `allowMissingGlyphs` is how a caller who has decided the boxes
+   * are acceptable says so on purpose.
+   *
+   * @throws {McpToolError} When any character will render as `.notdef`.
+   */
+  assertDrawable(allow: boolean): void;
 }
 
 /**
- * The substring the library uses for characters that will visibly render as
- * `.notdef` boxes.
+ * The substring the library uses for a character that will visibly render as a box.
  *
- * Matched rather than re-derived: the condition is decided inside the font
- * manager, and a second rule here would drift from it. Kept as a constant so the
- * coupling is visible at the one place that depends on the wording.
+ * `.notdef` is the discriminator because it appears in both of the writer's wordings —
+ * "no glyph in any available font and will render as `.notdef` boxes" on the fallback
+ * path, and "not covered by the configured PDF font families and will render with the
+ * `.notdef` glyph" when the caller supplied a font that does not reach far enough — and in
+ * neither of the ones that are merely notes. Matching only the first meant the failure that
+ * follows configuring `--pdf-font`, which is the option's whole point, was filed as an
+ * aside.
+ *
+ * Matched rather than re-derived: the condition is decided inside the font manager, and a
+ * second rule here would drift from it. `pdf-fonts.contract.test.ts` runs real exports
+ * down both paths and asserts the wording still contains it, so a reword in the library
+ * fails a test here instead of quietly turning the check off.
  */
-const TOFU_MARKER = "no glyph in any available font";
+const TOFU_MARKER = ".notdef";
 
 export function collectFontWarnings(): FontWarningCollector {
   const messages: string[] = [];
+  const missing = (): string[] => messages.filter(message => message.includes(TOFU_MARKER));
   return {
     onWarning: message => {
       messages.push(message);
+    },
+    missingGlyphs: missing,
+    assertDrawable: allow => {
+      const boxes = missing();
+      if (allow || boxes.length === 0) {
+        return;
+      }
+      throw toolError.unsupported(
+        `the PDF was not written: ${boxes.join(" ")}`,
+        "Point the server at a font that covers these characters with --pdf-font, or pass " +
+          "allowMissingGlyphs: true to accept a page with boxes on it."
+      );
     },
     notes: () => {
       if (messages.length === 0) {

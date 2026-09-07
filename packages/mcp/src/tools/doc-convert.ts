@@ -105,7 +105,13 @@ export const docConvertTool = defineTool({
     overwrite: z
       .boolean()
       .optional()
-      .describe("Replace the destination if it exists. Defaults to false.")
+      .describe("Replace the destination if it exists. Defaults to false."),
+    allowMissingGlyphs: z
+      .boolean()
+      .optional()
+      .describe(
+        "→pdf only: write the PDF even if some characters have no glyph and will draw as boxes. Off by default — the conversion fails instead, because this server cannot read its own PDF output back to notice."
+      )
   },
   annotations: {
     readOnlyHint: false,
@@ -150,6 +156,7 @@ export const docConvertTool = defineTool({
       note = await convert(fromFormat, toFormat, source, temporary, {
         ...args,
         renderDiagrams: args.diagrams ?? config.groups.has("diagram"),
+        allowMissingGlyphs: args.allowMissingGlyphs === true,
         config
       });
     });
@@ -178,6 +185,7 @@ async function convert(
   args: {
     readonly sheet?: string | number;
     readonly renderDiagrams?: boolean;
+    readonly allowMissingGlyphs: boolean;
     readonly config: ServerConfig;
   }
 ): Promise<string[]> {
@@ -204,7 +212,10 @@ async function convert(
       }
       case "pdf": {
         const fonts = pdfFontOptions(args.config);
-        await writeFileAtomic(target, await Pdf.fromDocx(doc, fonts.options));
+        const bytes = await Pdf.fromDocx(doc, fonts.options);
+        // Checked before the bytes reach the filesystem, so a refusal leaves nothing behind.
+        fonts.assertDrawable(args.allowMissingGlyphs);
+        await writeFileAtomic(target, bytes);
         return ["- paginated by the Word layout engine, so page breaks are real", ...fonts.notes()];
       }
       case "odt": {
@@ -236,7 +247,9 @@ async function convert(
     }
     if (to === "pdf") {
       const fonts = pdfFontOptions(args.config);
-      await writeFileAtomic(target, await Pdf.fromDocx(doc, fonts.options));
+      const bytes = await Pdf.fromDocx(doc, fonts.options);
+      fonts.assertDrawable(args.allowMissingGlyphs);
+      await writeFileAtomic(target, bytes);
       return ["- rendered via the Word layout engine", ...fonts.notes()];
     }
     throw unreachable(from, to);
@@ -259,7 +272,9 @@ async function convert(
     }
     if (to === "pdf") {
       const fonts = pdfFontOptions(args.config);
-      await writeFileAtomic(target, await Pdf.fromDocx(doc, fonts.options));
+      const bytes = await Pdf.fromDocx(doc, fonts.options);
+      fonts.assertDrawable(args.allowMissingGlyphs);
+      await writeFileAtomic(target, bytes);
       return [
         "- rendered via Word layout, so pagination is real",
         ...prepared.notes,
@@ -307,10 +322,12 @@ async function convert(
     if (to === "pdf") {
       // Inject the calculation engine so stale cached values are not printed.
       const fonts = pdfFontOptions(args.config);
-      await writeFileAtomic(
-        target,
-        await Pdf.fromExcel(wb, { ...fonts.options, recalculate: calculateFormulas })
-      );
+      const bytes = await Pdf.fromExcel(wb, {
+        ...fonts.options,
+        recalculate: calculateFormulas
+      });
+      fonts.assertDrawable(args.allowMissingGlyphs);
+      await writeFileAtomic(target, bytes);
       return [
         `- all ${Workbook.getWorksheets(wb).length} sheet(s) rendered, honouring each sheet's print setup`,
         "- formulas recalculated before rendering",

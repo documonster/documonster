@@ -108,6 +108,16 @@ because the subsetting embedder cannot use CFF outlines: that rules out macOS
 PingFang and Hiragino, and the official Noto Sans CJK `.otf`/`.otc` releases, so
 reach for Noto Sans SC's `.ttf` build instead.
 
+**A conversion fails rather than writing a PDF with boxes in it.** If any
+character has no glyph in any available font, `doc_convert` and `doc_write`
+refuse and say which Unicode blocks are missing. That is deliberate: a PDF is
+terminal here — this server cannot read its own PDF output back structurally, and
+the result text asks you to verify by opening the file — so a boxed page reported
+as a success is a defect found later, if at all. Latin, Greek, Cyrillic and the
+symbol blocks are drawn from built-in outlines and never trigger it; CJK, and any
+script this library has no glyphs for, needs `--pdf-font`. Pass
+`allowMissingGlyphs: true` on the call to accept the boxes on purpose.
+
 ## Security
 
 An MCP server hands a model the ability to name files, so the boundaries are
