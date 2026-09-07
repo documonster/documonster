@@ -203,15 +203,48 @@ export async function transformWithStream(
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
 
+  // Start reading immediately to avoid potential backpressure deadlocks
+  // (writer.write/close may wait for the readable side to be consumed).
+  //
+  // The read side is folded into a *result value* rather than kept as a bare
+  // promise. When the transform errors — a genuinely corrupt deflate payload,
+  // or Chromium spuriously rejecting a valid one under concurrent stream
+  // creation — the write side and the read side both reject with that error.
+  // Awaiting the write first therefore threw and abandoned the read promise
+  // with nobody observing it, which surfaced as an unhandled rejection even
+  // though the caller had caught the failure and recovered via the pure-JS
+  // fallback. A promise with both handlers already attached can never become
+  // one, so abandoning it is safe on every path below.
+  const read = streamToUint8Array(reader).then(
+    value => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error })
+  );
+
   try {
-    // Start reading immediately to avoid potential backpressure deadlocks
-    // (writer.write/close may wait for the readable side to be consumed).
-    const readPromise = streamToUint8Array(reader);
+    let writeError: { error: unknown } | undefined;
+    try {
+      await writer.write(data as BufferSource);
+      await writer.close();
+    } catch (error) {
+      writeError = { error };
+      // Terminate the read loop so `read` settles even in the case where the
+      // write failed without erroring the readable side. Cancelling an already
+      // errored stream rejects with its stored error, which is not news here.
+      await reader.cancel().catch(() => {
+        // ignore
+      });
+    }
 
-    await writer.write(data as BufferSource);
-    await writer.close();
-
-    return await readPromise;
+    const result = await read;
+    // Prefer the read side's error: for a corrupt payload it is the one that
+    // names the defect, and when both sides fail they carry the same error.
+    if (!result.ok) {
+      throw result.error;
+    }
+    if (writeError) {
+      throw writeError.error;
+    }
+    return result.value;
   } finally {
     try {
       writer.releaseLock();

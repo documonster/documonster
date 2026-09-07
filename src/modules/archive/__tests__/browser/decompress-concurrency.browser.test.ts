@@ -1,5 +1,7 @@
 import { compress, decompress, decompressSync } from "@archive/compression/compress";
 import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.base";
+import { extractAll } from "@archive/unzip/extract";
+import { createZip } from "@archive/zip/zip-bytes";
 import { describe, it, expect } from "vitest";
 
 /**
@@ -83,4 +85,83 @@ describe("decompress robustness under concurrency", () => {
       expect(bytesEqual(viaSync, data)).toBe(true);
     }
   }, 120_000);
+});
+
+/**
+ * The recovery above must also be *silent*, and for a long time it was not.
+ *
+ * When the native stream rejects, both halves of the transform reject: the pending
+ * `writer.write()` and the read loop draining `stream.readable`. `transformWithStream`
+ * awaited the write first and returned the read promise last, so the throw from `write()`
+ * abandoned the read rejection with no handler attached. The fallback then produced correct
+ * bytes and every assertion passed — while the runtime reported
+ * `TypeError: The compressed data was not valid: invalid code lengths set.` as an unhandled
+ * rejection, blamed on whichever test happened to be running when the microtask surfaced.
+ *
+ * That is how the `Browser` job failed with `411 passed / 2 errors`, pointing at
+ * `excel/xlsb/__tests__/protection-and-names.test.ts` — a file that reads an XLSB package,
+ * i.e. does nothing but call `extractAll`.
+ *
+ * Reproducing the native flake itself takes a loaded machine and luck, so this one forces
+ * it: a `DecompressionStream` replacement whose transform always throws puts every decode on
+ * the fallback path deterministically. Measured against the unfixed code, `extractAll`
+ * leaked one unhandled rejection and an XLSB `Workbook.read` leaked ten.
+ */
+describe("decompress fallback does not leak unhandled rejections", () => {
+  /** Swap in a `DecompressionStream` whose transform always errors, as Chromium's flake does. */
+  function installFailingDecompressionStream(): () => void {
+    const original = globalThis.DecompressionStream;
+    class Failing {
+      readable: ReadableStream<Uint8Array>;
+      writable: WritableStream<Uint8Array>;
+      constructor(_format: string) {
+        // Construction must succeed: `hasDeflateRawDecompressionStream()` probes it, and a
+        // constructor that threw would route around the native path instead of failing on it.
+        const transform = new TransformStream<Uint8Array, Uint8Array>({
+          transform() {
+            throw new TypeError("The compressed data was not valid: invalid code lengths set.");
+          }
+        });
+        this.readable = transform.readable;
+        this.writable = transform.writable;
+      }
+    }
+    (globalThis as unknown as { DecompressionStream: unknown }).DecompressionStream = Failing;
+    return () => {
+      (globalThis as unknown as { DecompressionStream: unknown }).DecompressionStream = original;
+    };
+  }
+
+  /** Collect unhandled rejections, keeping them away from the runner's own reporter. */
+  function captureUnhandledRejections(): { reasons: unknown[]; stop: () => void } {
+    const reasons: unknown[] = [];
+    const onRejection = (event: PromiseRejectionEvent): void => {
+      reasons.push(event.reason);
+      event.preventDefault();
+    };
+    globalThis.addEventListener("unhandledrejection", onRejection);
+    return {
+      reasons,
+      stop: () => globalThis.removeEventListener("unhandledrejection", onRejection)
+    };
+  }
+
+  it("recovers a deflated ZIP entry without reporting one", async () => {
+    const body = randomText(200_000);
+    const zip = await createZip([{ name: "a.txt", data: body }], { level: 6 });
+
+    const restore = installFailingDecompressionStream();
+    const captured = captureUnhandledRejections();
+    try {
+      const files = await extractAll(zip);
+      // The fallback still produced the right bytes …
+      expect(bytesEqual(files.get("a.txt")!.data, body)).toBe(true);
+      // … and did so quietly. A rejection surfaces a macrotask after the throw.
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(captured.reasons).toEqual([]);
+    } finally {
+      captured.stop();
+      restore();
+    }
+  }, 60_000);
 });

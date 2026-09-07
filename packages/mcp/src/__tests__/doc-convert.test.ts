@@ -328,10 +328,22 @@ describe("doc_convert", () => {
     // outcome is a property of the host: a machine with a CJK face auto-embeds it and a
     // bare container cannot, and the point here is that *either* is now reported. Which
     // wording each gets is `collectFontWarnings`' own test.
+    //
+    // `allowMissingGlyphs` is what keeps that host-independent. Refusing a boxed page came
+    // later than this test and turned the bare-container half into a thrown
+    // `unsupported` — so the assertion held on a developer machine with a CJK face and
+    // failed on a font-less Linux runner, which is not a difference this test is about.
+    // The opt-in is the supported way to say "report it, do not refuse it", and it leaves
+    // the *reporting* claim testable on both. The refusal has its own coverage in
+    // `pdf-fonts.contract.test.ts`.
     const fx = await fixture();
     await writeFile(path.join(fx.root, "in.md"), "# 季度报表\n\n中文正文。\n", "utf8");
 
-    const report = await run(docConvertTool, fx, { from: "in.md", to: "out.pdf" });
+    const report = await run(docConvertTool, fx, {
+      from: "in.md",
+      to: "out.pdf",
+      allowMissingGlyphs: true
+    });
 
     expect(report).toMatch(/- (font|\*\*font coverage\*\*):/);
   });
