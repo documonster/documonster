@@ -25,6 +25,10 @@ export default defineConfig({
         }
       ]
     },
+    // NOTE: `.oxlintrc.json` mirrors the `include`/`exclude` below in an override
+    // that bans `process`, `Buffer`, `__dirname`/`__filename` and `node:` imports
+    // in these files, so `pnpm lint` reports a browser-unsafe test in seconds
+    // instead of two minutes into the `Browser` job. Keep the two lists in step.
     include: [
       // Platform/runtime browser tests (IIFE smoke, archive/stream native APIs).
       "src/modules/**/__tests__/browser/**/*.test.ts",

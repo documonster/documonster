@@ -15,6 +15,11 @@
  *
  * The Temporal blocks are skipped where the runtime has no `Temporal`, which is every supported version below
  * Node 26 and every Safari. The parts blocks are not skipped anywhere, which is the point of their existing.
+ *
+ * The zone matrix is the one part that cannot run everywhere: moving the process's timezone needs a writable
+ * `process.env.TZ`, and a browser page has no way to be told it is somewhere else, so those cases are skipped
+ * there. CI runs the whole Node suite a second time under `TZ=Asia/Shanghai`, which is where that coverage
+ * actually comes from.
  */
 import { extractAll } from "@archive/unzip/extract";
 import { Cell, Workbook, Worksheet } from "@excel";
@@ -34,17 +39,32 @@ const withTemporal = temporal !== undefined;
  */
 const ZONES = ["UTC", "Asia/Shanghai", "America/New_York", "Pacific/Kiritimati"] as const;
 
+/**
+ * Node's `process.env`, or `undefined` in a browser.
+ *
+ * Held as the object rather than re-read per use so a single check decides whether the zone matrix can run;
+ * writing through this reference is writing to `process.env`, which is the only way to move the timezone.
+ */
+const nodeEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+  ?.env;
+
+/** The zone matrix, skipped where the timezone cannot be moved. CI covers it in a dedicated non-UTC Node job. */
+const itPerZone = nodeEnv === undefined ? it.skip : it;
+
 let originalTz: string | undefined;
 
 beforeEach(() => {
-  originalTz = process.env.TZ;
+  originalTz = nodeEnv?.TZ;
 });
 
 afterEach(() => {
+  if (nodeEnv === undefined) {
+    return;
+  }
   if (originalTz === undefined) {
-    delete process.env.TZ;
+    delete nodeEnv.TZ;
   } else {
-    process.env.TZ = originalTz;
+    nodeEnv.TZ = originalTz;
   }
 });
 
@@ -149,8 +169,8 @@ describe("Cell.getDateParts / Cell.setDateParts", () => {
     }
   });
 
-  it.each(ZONES)("produces the same cell in %s", async zone => {
-    process.env.TZ = zone;
+  itPerZone.each(ZONES)("produces the same cell in %s", async zone => {
+    nodeEnv!.TZ = zone;
     const ws = await roundTrip(s => {
       Cell.setDateParts(s, "A1", { year: 2024, month: 1, day: 15 });
       Cell.setDateParts(s, "A2", { hour: 9, minute: 30 }, "time");
@@ -160,8 +180,8 @@ describe("Cell.getDateParts / Cell.setDateParts", () => {
     expect(Cell.getDateParts(ws, "A2")).toMatchObject({ hour: 9, minute: 30 });
   });
 
-  it.each(ZONES)("reads a UTC-built Date identically in %s", async zone => {
-    process.env.TZ = zone;
+  itPerZone.each(ZONES)("reads a UTC-built Date identically in %s", async zone => {
+    nodeEnv!.TZ = zone;
     const ws = await roundTrip(s => {
       Cell.setValue(s, "A1", new Date(Date.UTC(2024, 0, 15)));
     });
@@ -246,11 +266,11 @@ describe("Cell.setValue with a Temporal Plain value", () => {
     }
   );
 
-  it.each(ZONES)("stores the same serial in %s", async zone => {
+  itPerZone.each(ZONES)("stores the same serial in %s", async zone => {
     if (!withTemporal) {
       return;
     }
-    process.env.TZ = zone;
+    nodeEnv!.TZ = zone;
     const ws = await roundTrip(s => Cell.setValue(s, "A1", temporal!.PlainDate.from("2024-01-15")));
     // The headline claim: a `PlainDate` cannot be misread, because it is not an instant and has nothing for a
     // timezone to act on.

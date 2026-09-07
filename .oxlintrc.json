@@ -108,6 +108,57 @@
         "import/no-self-import": 2,
         "import/no-default-export": 2
       }
+    },
+    {
+      "files": [
+        "src/modules/**/__tests__/browser/**/*.test.ts",
+        "src/utils/__tests__/browser/**/*.test.ts",
+        "src/modules/draw/**/__tests__/**/*.test.ts",
+        "src/modules/xml/__tests__/**/*.test.ts",
+        "src/modules/markdown/__tests__/**/*.test.ts",
+        "src/modules/formula/**/__tests__/**/*.test.ts",
+        "src/modules/word/**/__tests__/**/*.test.ts",
+        "src/modules/excel/**/__tests__/**/*.test.ts"
+      ],
+      "excludeFiles": [
+        "**/*.node.test.ts",
+        "src/modules/formula/__tests__/reference/**/*.ts",
+        "src/modules/excel/chart/__tests__/chart-builder-p1-p2.test.ts",
+        "src/modules/excel/surface/__tests__/namespace-surface.test.ts",
+        "src/modules/excel/stream/__tests__/worksheet-writer.test.ts"
+      ],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "process",
+            "message": "not defined in a browser — probe it via `globalThis`, or rename the file `*.node.test.ts`"
+          },
+          {
+            "name": "Buffer",
+            "message": "not defined in a browser — use `@utils/binary` (decodeBytesToString, toUint8Array), or rename the file `*.node.test.ts`"
+          },
+          {
+            "name": "__dirname",
+            "message": "not defined in a browser — derive it from `import.meta.url`, or rename the file `*.node.test.ts`"
+          },
+          {
+            "name": "__filename",
+            "message": "not defined in a browser — derive it from `import.meta.url`, or rename the file `*.node.test.ts`"
+          }
+        ],
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^node:",
+                "message": "a browser-run test cannot import a Node builtin; a top-level import fails before any `skip` applies, so split the Node-only cases into a `*.node.test.ts` sibling"
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

@@ -10,6 +10,7 @@ import { extractAll } from "@archive/unzip/extract";
 import { Workbook } from "@excel";
 import { iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { recordSpec } from "@excel/xlsb/spec/records";
+import { decodeBytesToString } from "@utils/binary";
 import { describe, expect, it } from "vitest";
 
 /** Payload of the one record of `name` in the first chartsheet part of a written workbook. */
@@ -86,7 +87,7 @@ describe("chartsheet view in XLSB", () => {
     expect(payload).toBeDefined();
     // The 48 bytes Excel wrote into `financial-report1.xlsb`'s chartsheet for margins of 0.5 with a 0.3 header and
     // footer. Six little-endian float64s: left, right, top, bottom, header, footer.
-    expect(Buffer.from(payload!).toString("hex")).toBe(
+    expect(decodeBytesToString(payload!, "hex")).toBe(
       "000000000000e03f000000000000e03f000000000000e03f000000000000e03f" +
         "333333333333d33f333333333333d33f"
     );
