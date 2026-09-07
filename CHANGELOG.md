@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/documonster/documonster/compare/v0.12.0...v0.13.0) (2026-09-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** a PDF conversion that would have written `.notdef` boxes now fails. Pass `allowMissingGlyphs: true` to restore the previous behaviour, or configure `--pdf-font` with a face that covers the text. Latin, Greek, Cyrillic and the symbol blocks are drawn from built-in outlines and never trigger it.
+
+### Features
+
+* **mcp:** Refuse to write a PDF with boxes in it ([755df10](https://github.com/documonster/documonster/commit/755df10522f3e31b0e3af74000a7eddcc34f3687))
+* **pdf:** Draw the scripts the fallback wrongly gave up on, and complete Latin Extended-B ([b97fa00](https://github.com/documonster/documonster/commit/b97fa00c98eefd8225b013a98b040bbb4c552b97)), closes [#218](https://github.com/documonster/documonster/issues/218)
+* **pdf:** Give the Type3 fallback letters, so a page without a font is readable ([ba599e0](https://github.com/documonster/documonster/commit/ba599e0d85e9e4413f43b2b3ffcf43b890ac721a)), closes [#218](https://github.com/documonster/documonster/issues/218)
+
 ## [0.12.0](https://github.com/documonster/documonster/compare/v0.11.1...v0.12.0) (2026-09-07)
 
 
