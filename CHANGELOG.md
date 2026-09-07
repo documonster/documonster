@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/documonster/documonster/compare/v0.13.0...v0.13.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* Stop a recovered decode failure from surfacing as an unhandled rejection ([05f9473](https://github.com/documonster/documonster/commit/05f9473479ce85f0da137d13e2d4c95cd71cfaeb))
+
 ## [0.13.0](https://github.com/documonster/documonster/compare/v0.12.0...v0.13.0) (2026-09-07)
 
 
