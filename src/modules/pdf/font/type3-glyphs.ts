@@ -2537,6 +2537,7 @@ const PUNCT: Record<number, GlyphDef> = {
 // Master lookup table
 // =============================================================================
 
+import { CYRILLIC } from "@pdf/font/type3-glyphs-cyrillic";
 import {
   BOX_FULL,
   BLOCK_FULL,
@@ -2575,6 +2576,8 @@ import {
   NUM_FORMS_FILL,
   FINAL_FILL
 } from "@pdf/font/type3-glyphs-fill";
+import { GREEK } from "@pdf/font/type3-glyphs-greek";
+import { LATIN_EXTENDED } from "@pdf/font/type3-glyphs-latin-ext";
 import {
   SPACES,
   CIRCLED_DIGITS,
@@ -2591,6 +2594,11 @@ import {
 } from "@pdf/font/type3-glyphs-quality";
 
 const ALL_TABLES: Array<Record<number, GlyphDef>> = [
+  // Letterforms. Listed first so a symbol table can never shadow a letter; nothing
+  // overlaps today and this keeps that true by construction rather than by review.
+  GREEK,
+  CYRILLIC,
+  LATIN_EXTENDED,
   GEO,
   ARR,
   MATH,

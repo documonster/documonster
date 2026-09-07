@@ -28,6 +28,19 @@ import { lookupGlyph, NOTDEF_GLYPH } from "@pdf/font/type3-glyphs";
  */
 const UNITS_PER_EM = 1000;
 
+/**
+ * The glyph bounding box every Type3 glyph declares, as `[llx, lly, urx, ury]`.
+ *
+ * The `d1` operator's box is a clip region as far as a viewer is concerned, so it has
+ * to contain the ink. It used to read `0 0 1000 1000`, which was true for as long as
+ * the repertoire was symbols: nothing reached below the baseline. Greek and Cyrillic
+ * brought descenders — `β γ μ φ χ ψ`, `Д Ц Щ у ф` — and accents that sit above the cap
+ * height, so a box starting at zero would have clipped the tail off a letter in any
+ * viewer that honours it. The bounds below sit clear of both, and
+ * `type3-letterforms.test.ts` asserts every glyph fits inside them.
+ */
+export const GLYPH_BBOX = [0, -300, 1000, 1000] as const;
+
 /** Maximum glyphs per Type3 font (single-byte encoding limit). */
 const MAX_GLYPHS_PER_FONT = 256;
 
@@ -152,8 +165,11 @@ function writeSingleType3Font(
 
   // Build the Type3 font dictionary
   const fontObjNum = writer.allocObject();
-  const fontBBox = `[0 0 ${UNITS_PER_EM} ${UNITS_PER_EM}]`;
-  const fontMatrix = "[0.001 0 0 0.001 0 0]";
+  const fontBBox = `[${GLYPH_BBOX.join(" ")}]`;
+  // Derived, not written out: the matrix and the em are the same fact, and the glyph
+  // coordinates every table in this directory uses depend on them agreeing.
+  const unit = 1 / UNITS_PER_EM;
+  const fontMatrix = `[${unit} 0 0 ${unit} 0 0]`;
 
   const fontDict = new PdfDict()
     .set("Type", "/Font")
@@ -182,7 +198,8 @@ function writeGlyphStream(writer: PdfWriter, glyph: GlyphDef): number {
 
   // d1 operator: wx wy llx lly urx ury — sets glyph width and bounding box
   // This tells the PDF viewer the advance width and clip region
-  stream.raw(`${glyph.width} 0 0 0 ${UNITS_PER_EM} ${UNITS_PER_EM} d1`);
+  const [llx, lly, urx, ury] = GLYPH_BBOX;
+  stream.raw(`${glyph.width} 0 ${llx} ${lly} ${urx} ${ury} d1`);
 
   // Draw the glyph using the pen adapter
   const pen = createPen(stream);

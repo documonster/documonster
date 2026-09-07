@@ -35,7 +35,7 @@ import {
 import { TextFeatureReport } from "@pdf/font/text-features";
 import type { TtfFont } from "@pdf/font/ttf-parser";
 import type { Type3FontResult } from "@pdf/font/type3-font";
-import { isType3Drawable } from "@pdf/font/type3-repertoire";
+import { isType3Drawable, isType3Letterform } from "@pdf/font/type3-repertoire";
 import {
   addCjkLanguageEvidence,
   concludeCjkLanguage,
@@ -512,9 +512,24 @@ export class FontManager {
       );
     }
     if (substituted.length > 0) {
+      // "Outside the embedded font" is only true when there is one. On the path this
+      // message matters most — a browser, which cannot read the host's fonts — there is
+      // no embedded face at all, and telling the reader a character fell outside a font
+      // they never supplied sends them looking for the wrong thing.
+      const where = this.hasEmbeddedFont()
+        ? "are outside the embedded font"
+        : "are not covered by any font available here";
+      // Letters are worth naming apart from symbols. A built-in arrow is as good as any
+      // font's, so it is a note; a built-in `Δ` is legible but visibly not the typeface
+      // the document asked for, which is a different thing to decide about.
+      const letters = substituted.filter(cp => isType3Letterform(cp));
       warn(
-        `${substituted.length} character(s) are outside the embedded font and will be drawn ` +
-          `with built-in Type3 glyphs: ${describeCodePointBlocks(new Set(substituted))}. ` +
+        `${substituted.length} character(s) ${where} and will be drawn with built-in ` +
+          `Type3 glyphs: ${describeCodePointBlocks(new Set(substituted))}. ` +
+          (letters.length > 0
+            ? `${letters.length} of them are letters, drawn with a plain built-in letterform ` +
+              `rather than the requested typeface. `
+            : "") +
           `Pass a font covering them through embedFont(bytes) to keep the whole document in ` +
           `one typeface.`
       );

@@ -12,7 +12,7 @@ import {
   _setCandidatesForTest
 } from "../font/system-fonts";
 import { countTtfFaces } from "../font/ttf-parser";
-import { requiresEmbeddedFace } from "../font/type3-repertoire";
+import { isType3Drawable, isType3Letterform, requiresEmbeddedFace } from "../font/type3-repertoire";
 import { pdf } from "../pdf";
 import { buildMinimalTtf, buildTtc, buildTtfWithCmap } from "./ttf-test-utils";
 
@@ -1200,10 +1200,9 @@ describe("Type3 repertoire drives the coverage requirement", () => {
   });
 
   it("matches the Type3 glyph tables code point for code point", async () => {
-    // The ranges in `system-fonts.ts` describe a repertoire that lives in 27,000 lines
-    // of glyph tables it deliberately does not import. This is what stops the two from
-    // drifting: every code point either has a glyph and is substitutable, or has none
-    // and requires a real face.
+    // `type3-repertoire.ts` describes a repertoire that lives in 27,000 lines of glyph
+    // tables it deliberately does not import. This is what stops the two from drifting:
+    // a code point has a drawing exactly when the repertoire says it does.
     const { lookupGlyph } = await import("../font/type3-glyphs");
     const disagreements: string[] = [];
     for (let cp = 0; cp <= 0x2ffff; cp++) {
@@ -1211,7 +1210,7 @@ describe("Type3 repertoire drives the coverage requirement", () => {
         continue;
       }
       const hasGlyph = lookupGlyph(cp) !== undefined;
-      if (hasGlyph === requiresEmbeddedFace(cp)) {
+      if (hasGlyph !== isType3Drawable(cp)) {
         disagreements.push(`U+${cp.toString(16).toUpperCase()} glyph=${hasGlyph}`);
         if (disagreements.length > 8) {
           break;
@@ -1219,5 +1218,37 @@ describe("Type3 repertoire drives the coverage requirement", () => {
       }
     }
     expect(disagreements).toEqual([]);
+  });
+
+  it("keeps a letter drawable and still asks for a real face", () => {
+    // The two predicates stopped being each other's inverse when Greek and Cyrillic
+    // gained outlines, and each caller needs a different one. Diagnostics must not call
+    // `Δ` a `.notdef` box, because it is drawn; discovery must still reject a face that
+    // lacks it, because a monoline fallback is not the typeface the document asked for.
+    for (const cp of [0x394, 0x3c9, 0x41f, 0x44f, 0x401]) {
+      expect(isType3Drawable(cp)).toBe(true);
+      expect(isType3Letterform(cp)).toBe(true);
+      expect(requiresEmbeddedFace(cp)).toBe(true);
+    }
+    // A symbol keeps the old equivalence: drawable, and no reason to demand a face.
+    for (const cp of [0x2610, 0x2192, 0x2248]) {
+      expect(isType3Drawable(cp)).toBe(true);
+      expect(isType3Letterform(cp)).toBe(false);
+      expect(requiresEmbeddedFace(cp)).toBe(false);
+    }
+  });
+
+  it("still rejects a face that cannot draw the document's Cyrillic", () => {
+    // The regression guard for the change above. Greek and Cyrillic are drawable now,
+    // so the naive reading — "drawable means substitutable" — would let a Han-only face
+    // win for `中文报表 Кириллица`, which is how those characters became boxes in the
+    // first place.
+    _setCandidatesForTest([
+      face("Songti SC", HAN),
+      face("Arial Unicode MS", [...HAN, ...CYRILLIC, ...GREEK])
+    ]);
+
+    const wanted = new Set([...HAN, ...CYRILLIC, ...GREEK]);
+    expect(findSystemFontForCodePoints(wanted, [], "zh-Hans")!.familyName).toBe("Arial Unicode MS");
   });
 });
