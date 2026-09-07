@@ -1,5 +1,5 @@
 /**
- * Hands every `.xlsb` this repository produces to LibreOffice, and asks whether an independent implementation can read
+ * Hands every workbook this repository produces to LibreOffice, and asks whether an independent implementation can read
  * it.
  *
  * **Why a third reader exists at all.** Every other check here is judged by one of three parties, and each has a gap
@@ -88,24 +88,28 @@ const CANDIDATES =
 /**
  * Files that are inputs or references rather than this library's output.
  *
- * The two corpora are obvious. `xxxN.xlsb` is less so: those are workbooks *Excel* saved from this library's output, kept
- * beside it for byte comparison — checking them tells you about Excel, and one of them
- * (`sales-dashboard1.xlsb`) converts to a **one-byte** CSV because Excel stored the sheet with its pivots collapsed.
- * That one byte is also why the "not empty" check below is not enough on its own to call a conversion good; it is a
- * floor, not a verdict.
+ * **Whole directories, and only whole directories.** `tmp/xlsb-oracle/` holds the inputs `pnpm oracle:generate` writes
+ * and, in `ref/`, the workbooks a person saved out of Excel — which is where a manual "Save As" belongs, by the contract
+ * `scripts/xlsb-oracle.ts` states. `tmp/xlsb-corpus/` holds third-party fixtures. Checking either tells you about Excel
+ * or about the fixture, not about this writer.
+ *
+ * Everything else under `tmp/` is this library's output and is checked. **That replaced a rule based on the file's
+ * name**, and the replacement is the point rather than a simplification: this gate also used to skip
+ * `tmp/excel-examples/*<digit>.xls[bx]`, on the theory that a trailing digit marked a copy Excel had saved beside the
+ * original. Measured against a clean `pnpm verify:examples`, every one of the 26 files it dropped had been written by
+ * `protection-spin-count.ts`, which numbers its outputs `-0` … `-12` — 13 `.xlsb` and 13 `.xlsx`, one file in seven,
+ * silently unchecked with no true positive to show for it. It had already misfired once before, on
+ * `tmp/xlsb-bisect/g2-array-4x1.xlsb`, and the response then was to narrow it to one directory; that only moved the
+ * hole into the directory where most of the output lands. A name cannot answer "who wrote this" — and neither can the
+ * file, since `app-xform.ts` writes `<Application>Microsoft Excel</Application>` on purpose — so the question is
+ * answered by where the file is put, which is the one part of it a contract can pin.
+ *
+ * One consequence is deliberate: a reference file left in `tmp/excel-examples/` is now checked as though this library
+ * had written it. `sales-dashboard1.xlsb` converts to a **one-byte** CSV, because Excel stored the sheet with its pivots
+ * collapsed — it passes, since the check below is "not empty" rather than a verdict on content. A reference that would
+ * fail belongs in `ref/` anyway.
  */
 const NOT_OURS = ["tmp/xlsb-oracle/", "tmp/xlsb-corpus/"];
-/**
- * Excel's own saves, kept beside this library's output for byte comparison.
- *
- * **Matched by directory and by the `1` suffix convention *together*, because the suffix alone is a guess about a name.**
- * `/\d\.xls[bx]$/` on its own excluded `tmp/xlsb-bisect/g2-array-4x1.xlsb` — a package this library wrote, silently
- * dropped from the gate for ending in a digit. The convention only exists in `tmp/excel-examples/`, where a manual
- * "Save As" sits next to the original, so that is where it is applied.
- */
-function isExcelSaved(path: string): boolean {
-  return path.includes("tmp/excel-examples/") && /\d\.xls[bx]$/.test(path);
-}
 
 async function findSoffice(): Promise<string | undefined> {
   for (const candidate of CANDIDATES) {
@@ -133,13 +137,12 @@ async function collect(dir: string, out: string[]): Promise<void> {
     } else if (
       // **Both containers, and it used to be `.xlsb` only.**
       //
-      // The gate was written while the XLSB writer was the new thing, and the omission left 98 `.xlsx` files this
-      // repository produces unread by anything but itself — a larger set than the 149 `.xlsb` it did check. The
-      // defect that motivated all of this (`c:varyColors`, 498 s against 32 s) was in the *shared* chart renderer and
-      // showed in both containers, so restricting the check to one of them was checking the writer twice and the
-      // library once.
+      // The gate was written while the XLSB writer was the new thing, and the omission left every `.xlsx` this
+      // repository produces unread by anything but itself — 85 of them against 99 `.xlsb`, counted from a clean
+      // `pnpm verify:examples`. The defect that motivated all of this (`c:varyColors`, 498 s against 32 s) was in the
+      // *shared* chart renderer and showed in both containers, so restricting the check to one of them was checking the
+      // writer twice and the library once.
       /\.xls[bx]$/.test(entry.name) &&
-      !isExcelSaved(path) &&
       // **`~$name.xlsb` is Excel's lock file, not something this library wrote.** It appears next to any workbook a
       // human has open, it is a few hundred bytes of owner name, and LibreOffice rightly refuses it — which showed up
       // as four of the first five "failures" here.
@@ -311,12 +314,18 @@ async function main(): Promise<void> {
   // checking less. A floor turns that into a failure without pinning an exact list, which would need editing every time
   // an example is added.
   //
-  // Set from a full run — 209 files, 126 `.xlsb` and 83 `.xlsx` — with room for a couple to move. Raise it when the tree
-  // grows; a failure here means either coverage shrank or this number is stale, and both are worth a look.
+  // **Measured on an empty `tmp/`, and that qualifier is the whole reason this number was wrong.** It was set to 200
+  // from "a full run — 209 files", taken on a developer machine whose `tmp/` had accumulated more than the examples put
+  // there: `pnpm test` writes workbooks under `tmp/` too (`external-links.integration`, `model-hash-artifacts`,
+  // `preserved-vs-modelled`, `cross-container-preservation`), and so does the manual `scripts/xlsb-bisect.ts`. CI runs
+  // `pnpm verify:examples` and nothing else that writes here, so it found 158 and failed on a floor no clean checkout
+  // could ever reach — the gate reporting on the machine that set it rather than on the library.
   //
-  // It earned its place immediately: excluding the committed example *inputs* took the count from 223 to 209 and this
-  // floor caught it, which is the behaviour a floor is for.
-  const FLOOR = 200;
+  // The number below is what `pnpm verify:examples` alone produces from an empty `tmp/`: 183 examples, 184 workbooks,
+  // 99 `.xlsb` and 85 `.xlsx`, with room for a handful to move. To re-measure it, move `tmp/` aside, run
+  // `pnpm verify:examples`, then `pnpm verify:libreoffice --filter ""` and read the count off its first line. Raise it
+  // when the tree grows; a failure here means either coverage shrank or this number is stale, and both are worth a look.
+  const FLOOR = 175;
   if (filter === undefined && targets.length < FLOOR) {
     console.error(
       `✗ verify:libreoffice — found ${targets.length} file(s), fewer than the expected floor of ${FLOOR}.\n` +

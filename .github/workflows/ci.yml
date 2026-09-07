@@ -450,9 +450,12 @@ jobs:
     # (~200MB of apt packages) and the goal is catching open-validation
     # regressions, not multiplying across OS/Node variants.
     needs: should-run
-    # Raised from 20 for the whole-tree LibreOffice gate added at the end of this job: 149 files, each a separate
-    # headless process start, measured at roughly 50 minutes locally.
-    timeout-minutes: 90
+    # Raised from 20 for the whole-tree LibreOffice gate added at the end of this job: 184 files, each a separate
+    # headless process start. Measured at 13 minutes locally on Apple silicon and estimated at three to five times that
+    # on a shared runner, so the budget is generous on purpose — and note it had never been exercised before, because
+    # the gate's coverage floor was set from a developer machine's accumulated `tmp/` and failed here on every run
+    # before reaching a single conversion.
+    timeout-minutes: 120
     name: Chart real-file oracle (LibreOffice)
     runs-on: ubuntu-latest
 
@@ -496,7 +499,7 @@ jobs:
       # library writes. The round-trip tests are judged by this library's own reader, which shares its assumptions with
       # the writer; the byte oracle needs a human to save each reference file and so covers fifteen cases; and most of
       # the files this repository produces have never been opened by anyone. LibreOffice is the only judge that is both
-      # independent and cheap enough to point at all 149 of them.
+      # independent and cheap enough to point at all 184 of them.
       #
       # `--require` is deliberate. Without it the script skips when LibreOffice is absent, which is right for a
       # developer machine and useless here: a skip and a pass are indistinguishable, so a broken apt install would
@@ -510,7 +513,7 @@ jobs:
       - name: Write the examples' output
         run: pnpm verify:examples
 
-      - name: LibreOffice reads every .xlsb this library writes
+      - name: LibreOffice reads every workbook this library writes
         run: pnpm verify:libreoffice --require
         env:
           SOFFICE: soffice
