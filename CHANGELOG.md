@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/documonster/documonster/compare/v0.13.1...v0.14.0) (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **excel:** writing a non-finite number now throws instead of producing a file the consumer rejects — a `NaN` or `Infinity` font size, colour theme, gradient degree or stop position raises `XmlError`, and a non-finite cell *value* is written as a blank cell rather than `<v>NaN</v>`. `CellView.font` and `CellView.alignment` are `DeepReadonly`, so a nested write through `Cell.view` is a compile error; use `Cell.getFont`/`Cell.getStyle` for a mutable copy, or the `Cell.set*` setters to write.
+
+### Performance Improvements
+
+* **excel:** Encode a zip entry's text in batches, not once per XML tag ([de9a135](https://github.com/documonster/documonster/commit/de9a1358b4285fd54213b2a356bf2fde409aa038)), closes [#223](https://github.com/documonster/documonster/issues/223)
+* **excel:** Stop paying per cell for a style many cells agree on ([ff001fe](https://github.com/documonster/documonster/commit/ff001fe74b9c2fdbcf06c66376107828e4391e01)), closes [#224](https://github.com/documonster/documonster/issues/224)
+
 ## [0.13.1](https://github.com/documonster/documonster/compare/v0.13.0...v0.13.1) (2026-09-07)
 
 
