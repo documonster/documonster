@@ -18,6 +18,7 @@ import {
   columnSetHidden,
   columnSetOutlineLevel
 } from "@excel/core/column";
+import { invalidateSharedCellStyle } from "@excel/core/style-sharing";
 import {
   getColumn,
   columnSetHeader,
@@ -88,8 +89,18 @@ export function setOutlineLevel(ws: Sheet, col: string | number, level: number):
 
 // --- style ---
 
+/**
+ * The column's own style object, live — mutating it is how a caller changes the column.
+ *
+ * Cells the column has already styled point at a *snapshot* of these facets, so that
+ * mutation does not reach them (as it does not today). The snapshot is dropped here
+ * because the caller may mutate in place, and a cell created afterwards must copy
+ * what the column says then — see `core/style-sharing.ts`.
+ */
 export function getStyle(ws: Sheet, col: string | number): Partial<Style> {
-  return getColumn(ws, col).style;
+  const { style } = getColumn(ws, col);
+  invalidateSharedCellStyle(style);
+  return style;
 }
 export function setStyle(ws: Sheet, col: string | number, style: Partial<Style>): void {
   columnSetStyle(getColumn(ws, col), style);

@@ -38,7 +38,7 @@ import {
   cellFormula,
   cellFullAddress,
   cellGetModel,
-  cellGetStyle,
+  cellOwnStyle,
   cellGetValue,
   cellHyperlink,
   cellIsMerged,
@@ -104,6 +104,23 @@ export type Sheet = WorksheetData;
  */
 function target(ws: Sheet, addr: string | number, col: number | undefined, argc: number): CellData {
   return argc >= 3 ? getCell(ws, addr, col) : getCell(ws, addr);
+}
+
+/**
+ * {@link target}, for a reader that hands a *style facet* back to the caller.
+ *
+ * A cell's facets may be shared — with the row/column snapshot it inherited, with
+ * sibling cells sharing that snapshot, or with whoever passed the facet to a setter —
+ * so a reader that lets the caller reach one has to give the cell its own copy first
+ * or `Cell.getStyle(a).font.bold = x` would reach every cell in the column.
+ *
+ * This is the only boundary where that happens. Core internals and both writers read
+ * the shared facets directly, which is what keeps a styled sheet's memory flat.
+ */
+function own(ws: Sheet, addr: string | number, col: number | undefined, argc: number): CellData {
+  const cell = target(ws, addr, col, argc);
+  cellOwnStyle(cell);
+  return cell;
 }
 
 /**
@@ -365,7 +382,7 @@ export function getStyle(ws: Sheet, addr: string): Partial<Style>;
 /** Read a cell's style by 1-based (row, col). */
 export function getStyle(ws: Sheet, row: number, col: number): Partial<Style>;
 export function getStyle(ws: Sheet, addr: string | number, col?: number): Partial<Style> {
-  return cellGetStyle(target(ws, addr, col, arguments.length));
+  return cellOwnStyle(target(ws, addr, col, arguments.length));
 }
 /** Merge a partial style into the cell at "A1" address. */
 export function setStyle(ws: Sheet, addr: string, style: Partial<Style>): void;
@@ -584,7 +601,7 @@ export function getModel(ws: Sheet, addr: string): CellModel;
 /** Read a cell's round-trip model by 1-based (row, col). */
 export function getModel(ws: Sheet, row: number, col: number): CellModel;
 export function getModel(ws: Sheet, addr: string | number, col?: number): CellModel {
-  return cellGetModel(target(ws, addr, col, arguments.length));
+  return cellGetModel(own(ws, addr, col, arguments.length));
 }
 /** Apply a round-trip cell model by `"A1"` address. */
 export function setModel(ws: Sheet, addr: string, model: CellModel): void;
@@ -613,7 +630,7 @@ export function getFont(ws: Sheet, addr: string): Partial<Font> | undefined;
 /** Read a cell's font by 1-based (row, col). */
 export function getFont(ws: Sheet, row: number, col: number): Partial<Font> | undefined;
 export function getFont(ws: Sheet, addr: string | number, col?: number): Partial<Font> | undefined {
-  return cellFont(target(ws, addr, col, arguments.length));
+  return cellFont(own(ws, addr, col, arguments.length));
 }
 /** Set a cell's font by `"A1"` address. */
 export function setFont(ws: Sheet, addr: string, value: Partial<Font> | undefined): void;
@@ -678,7 +695,7 @@ export function getAlignment(
   addr: string | number,
   col?: number
 ): Partial<Alignment> | undefined {
-  return cellAlignment(target(ws, addr, col, arguments.length));
+  return cellAlignment(own(ws, addr, col, arguments.length));
 }
 /** Set a cell's alignment by `"A1"` address. */
 export function setAlignment(ws: Sheet, addr: string, value: Partial<Alignment> | undefined): void;
@@ -713,7 +730,7 @@ export function getBorder(
   addr: string | number,
   col?: number
 ): Partial<Borders> | undefined {
-  return cellBorder(target(ws, addr, col, arguments.length));
+  return cellBorder(own(ws, addr, col, arguments.length));
 }
 /** Set a cell's borders by `"A1"` address. */
 export function setBorder(ws: Sheet, addr: string, value: Partial<Borders> | undefined): void;
@@ -744,7 +761,7 @@ export function getFill(ws: Sheet, addr: string): Fill | undefined;
 /** Read a cell's fill by 1-based (row, col). */
 export function getFill(ws: Sheet, row: number, col: number): Fill | undefined;
 export function getFill(ws: Sheet, addr: string | number, col?: number): Fill | undefined {
-  return cellFill(target(ws, addr, col, arguments.length));
+  return cellFill(own(ws, addr, col, arguments.length));
 }
 /** Set a cell's fill by `"A1"` address. */
 export function setFill(ws: Sheet, addr: string, value: Fill | undefined): void;
@@ -774,7 +791,7 @@ export function getProtection(
   addr: string | number,
   col?: number
 ): Partial<Protection> | undefined {
-  return cellProtection(target(ws, addr, col, arguments.length));
+  return cellProtection(own(ws, addr, col, arguments.length));
 }
 /** Set a cell's protection by `"A1"` address. */
 export function setProtection(
@@ -932,6 +949,13 @@ export function find(ws: Sheet, addr: string | number, col?: number): CellData |
  *   const header = Cell.view(cell).text.trim();
  * });
  * ```
+ *
+ * **`font` and `alignment` are frozen.** They are the objects the cell shares with
+ * every other cell its row or column styled, so this projection deliberately does
+ * not copy them — that is what keeps iterating a large sheet allocation-free. Being
+ * frozen, an attempted `view.font.bold = true` throws rather than silently
+ * restyling the whole column. Use {@link getFont} / {@link getStyle} to obtain a
+ * copy the cell owns, or the `Stream` handle setters to write.
  *
  * To *write* through a handle, use the `Stream` namespace's handle operations
  * (`Stream.setCellValue`, `Stream.setCellFont`, …) — they work on any

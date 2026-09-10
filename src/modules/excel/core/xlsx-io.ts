@@ -71,6 +71,13 @@ export function getXlsxIo(wb: WorkbookData): XLSX {
  * and the fallback wraps the existing memory (`Buffer.from(buffer, byteOffset,
  * byteLength)` is a view, never a copy). Either way no bytes are duplicated, and
  * the declared type cannot silently drift from the runtime one.
+ *
+ * **Timing this?** Measure with `NODE_ENV=production`. Outside production (and outside
+ * vitest) every write runs the OOXML self-check, which re-parses the package it just
+ * produced — measured at 38 ms against 124 ms on a 100-column × 200-row table, so a
+ * development-mode figure is roughly **3.3× the real one** and is not distributed
+ * across the write in the way a profile suggests. Pass `{ validate: false }` to
+ * suppress it explicitly; see `XlsxWriteOptions.validate`.
  */
 export async function toBuffer(wb: WorkbookData, options?: WorkbookWriteOptions): Promise<Buffer> {
   const bytes =

@@ -13,6 +13,7 @@ import {
   xmlEncode,
   xmlEncodeAttr,
   validateXmlName,
+  xmlValue,
   encodeCData,
   validateCommentText,
   StdDocAttributes
@@ -93,7 +94,7 @@ class XmlStreamWriter implements XmlSink {
       const value = merged[key];
       if (value !== undefined) {
         validateXmlName(key);
-        s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+        s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
       }
     }
     this._target.write(s + "?>\n");
@@ -112,7 +113,7 @@ class XmlStreamWriter implements XmlSink {
         const value = attributes[key];
         if (value !== undefined) {
           validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
         }
       }
     }
@@ -128,7 +129,7 @@ class XmlStreamWriter implements XmlSink {
     }
     validateXmlName(name);
     // Append to pending buffer — no write call
-    this._pending += ` ${name}="${xmlEncodeAttr(String(value))}"`;
+    this._pending += ` ${name}="${xmlEncodeAttr(xmlValue(value, name))}"`;
   }
 
   addAttributes(attributes: XmlAttributes): void {
@@ -142,7 +143,7 @@ class XmlStreamWriter implements XmlSink {
       const value = attributes[key];
       if (value !== undefined) {
         validateXmlName(key);
-        this._pending += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+        this._pending += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
       }
     }
   }
@@ -152,7 +153,7 @@ class XmlStreamWriter implements XmlSink {
       this._flushOpen(">");
     }
     this._leaf = false;
-    this._target.write(xmlEncode(String(text)));
+    this._target.write(xmlEncode(xmlValue(text, "#text")));
   }
 
   writeRaw(xml: string): void {
@@ -212,12 +213,12 @@ class XmlStreamWriter implements XmlSink {
         const value = attributes[key];
         if (value !== undefined) {
           validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
         }
       }
     }
     if (text !== undefined) {
-      s += `>${xmlEncode(String(text))}</${name}>`;
+      s += `>${xmlEncode(xmlValue(text, "#text"))}</${name}>`;
     } else {
       s += "/>";
     }

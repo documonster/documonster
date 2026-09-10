@@ -21,6 +21,7 @@ import {
   rowSetStyle,
   rowValues
 } from "@excel/core/row";
+import { invalidateSharedCellStyle } from "@excel/core/style-sharing";
 import {
   getRow,
   rowCommit,
@@ -61,8 +62,18 @@ export function setOutlineLevel(ws: Sheet, row: number, level: number): void {
 
 // --- style ---
 
+/**
+ * The row's own style object, live — mutating it is how a caller changes the row.
+ *
+ * Cells the row has already styled point at a *snapshot* of these facets, so that
+ * mutation does not reach them (as it does not today). The snapshot is dropped here
+ * because the caller may mutate in place, and a cell created afterwards must copy
+ * what the row says then — see `core/style-sharing.ts`.
+ */
 export function getStyle(ws: Sheet, row: number): Partial<Style> {
-  return rowGetStyle(getRow(ws, row));
+  const style = rowGetStyle(getRow(ws, row));
+  invalidateSharedCellStyle(style);
+  return style;
 }
 export function setStyle(ws: Sheet, row: number, style: Partial<Style>): void {
   rowSetStyle(getRow(ws, row), style);

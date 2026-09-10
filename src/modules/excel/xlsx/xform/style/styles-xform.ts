@@ -90,6 +90,121 @@ interface StyleIndex {
   model?: StyleModelEntry[];
 }
 
+/**
+ * xf-level boolean attributes, in the order {@link packXfFlags} packs them into
+ * the memo key's bitmask.
+ */
+const XF_FLAGS = [
+  "pivotButton",
+  "applyNumberFormat",
+  "applyFont",
+  "applyFill",
+  "applyBorder",
+  "applyAlignment",
+  "applyProtection"
+] as const satisfies readonly (keyof XfFlags)[];
+
+/** Pack the xf-level booleans of a style model into a bitmask. */
+function packXfFlags(model: Partial<Style>): number {
+  let flags = 0;
+  for (let i = 0; i < XF_FLAGS.length; i++) {
+    if (model[XF_FLAGS[i]]) {
+      flags |= 1 << i;
+    }
+  }
+  return flags;
+}
+
+/**
+ * The facets of {@link Style} that {@link styleModelKey} reads. Anything added to
+ * `Style` has to be keyed or deliberately listed here, and the assertion below
+ * makes that a compile error rather than a silent wrong styleId.
+ */
+type KeyedStyleFacet =
+  | "numFmt"
+  | "font"
+  | "border"
+  | "fill"
+  | "alignment"
+  | "protection"
+  | "styleName";
+
+/**
+ * Fails to compile — naming the offenders — when a `Style` facet is not keyed.
+ * The xf-level flags need no equivalent: {@link XF_FLAGS} is checked against
+ * `XfFlags` by its `satisfies`, and both `packXfFlags` and `addStyleModel` walk
+ * that one list, so a new flag reaches the key and the xf together.
+ */
+const _allStyleFacetsAreKeyed: Exclude<keyof Style, KeyedStyleFacet> extends never
+  ? true
+  : ["unkeyed Style facet(s)", Exclude<keyof Style, KeyedStyleFacet>] = true;
+void _allStyleFacetsAreKeyed;
+
+/** Absent facet marker. Keeps a literal `null` in a key unambiguous — see below. */
+const ABSENT = 0;
+
+/**
+ * A content key identifying the xf {@link StylesXform.addStyleModel} would build
+ * from `model` at cell type `type`. Two models sharing this key produce the same
+ * styleId, so the second can be answered from a memo instead of re-registering.
+ *
+ * `type` is part of the key because it selects the default number format when the
+ * model carries none (`Date` → `mm-dd-yy`) and adds the checkbox extLst.
+ *
+ * Returns `undefined` when the model cannot be keyed *soundly*, in which case the
+ * caller registers it the long way and caches nothing. The invariant that matters
+ * here is that the memo must never change what a registration does — neither the
+ * bytes written nor the errors raised. Two cases:
+ *
+ *  - A cyclic facet, which `JSON.stringify` throws on.
+ *  - A `null` in the output. `JSON.stringify` maps `NaN` and `±Infinity` to `null`
+ *    just as a literal `null` does, and those are not interchangeable: the XML
+ *    writer *refuses* a non-finite number (`<sz val="Infinity"/>` is not valid
+ *    `xsd:int`), while `null` is simply absent. Keying on the JSON alone would let a
+ *    hit on the `null` entry answer the `Infinity` call — silently producing a font
+ *    with no size instead of reporting the bad input. Absent facets are keyed as
+ *    {@link ABSENT}, so a `null` here can only have come from one of those. (A quoted
+ *    string containing "null" trips this too; that costs a cache miss, which is free.)
+ *
+ * The key is order-sensitive — two facets carrying the same properties in a
+ * different insertion order key differently — and does not model each xform's
+ * normalisation, so `{ bold: false }` and `{}` key apart. Both cost a memo entry,
+ * never correctness, because `_addStyle` still deduplicates by rendered XML.
+ */
+function styleModelKey(model: Partial<Style>, type: number): string | undefined {
+  const { numFmt, font, border, fill, alignment, protection, styleName } = model;
+  // Truthiness, not `!== undefined`, to mirror `addStyleModel`'s own
+  // `if (model.numFmt)`: a falsy numFmt (a JS caller's `null`, an empty string)
+  // means the cell type picks the format, and must not be dereferenced.
+  const numFmtCode = !numFmt ? undefined : typeof numFmt === "string" ? numFmt : numFmt.formatCode;
+  const flags = packXfFlags(model);
+  // Fast path for a style that is a number format and nothing else — the shape
+  // `Column.setNumFmt`/`Cell.setNumFmt` produce, and the one case where the array
+  // allocation and JSON walk below cost more than they save (measured: 20k cells
+  // with a distinct numFmt each, 224ms → 132ms). A digit-led key can never
+  // collide with the `[`-led JSON below.
+  if (!font && !border && !fill && !alignment && !protection && !flags && !styleName) {
+    return numFmtCode === undefined ? `${type}` : `${type}\u0000${numFmtCode}`;
+  }
+  let key: string;
+  try {
+    key = JSON.stringify([
+      type,
+      numFmtCode ?? ABSENT,
+      font ?? ABSENT,
+      border ?? ABSENT,
+      fill ?? ABSENT,
+      alignment ?? ABSENT,
+      protection ?? ABSENT,
+      flags,
+      styleName ?? ABSENT
+    ]);
+  } catch {
+    return undefined;
+  }
+  return key.includes("null") ? undefined : key;
+}
+
 // =============================================================================
 // StylesXform is used to generate and parse the styles.xml file
 // it manages the collections of fonts, number formats, alignments, etc
@@ -97,7 +212,34 @@ class StylesXform extends BaseXform {
   declare public map: Record<string, BaseXform>;
   declare public model: StylesModel;
   declare private index?: StyleIndex;
-  declare private weakMap?: WeakMap<object, number>;
+  /**
+   * `addStyleModel` memo, keyed by style *content* — see {@link styleModelKey}.
+   *
+   * Content rather than object reference. When this was written every cell owned a
+   * deep copy of its style, so a reference key could not hit at all: measured on a
+   * 100-column × 200-row table sharing one number format, 204,010 calls and 0 hits,
+   * every one re-rendering an `<xf>` to arrive at one of 8 styles.
+   *
+   * Cells now share one frozen snapshot of their row's or column's facets
+   * (`core/style-sharing.ts`), so a reference key would sometimes hit — but only
+   * for cells reached by the *same* owner, and never for the `numFmt` case above,
+   * which is a primitive that no snapshot covers. A content key subsumes both and
+   * is what the measurements below are against.
+   *
+   * Keying by content is -37% on that number-format table, and -68% when the shared
+   * style also carries a font, fill and border.
+   *
+   * It is not free when it *misses*. On 20k cells with a distinct style each,
+   * building keys that never hit costs +7%, and the retained keys add ~9 MB on
+   * top of the ~18 MB the pre-existing `index.*` pools already hold for that
+   * workbook. Both are bounded — Excel caps a workbook at 65,490 cell formats —
+   * and they buy the two figures above, so this is deliberately neither capped
+   * nor self-disabling: a size cap would keep the time cost while a hit-rate
+   * heuristic can misfire on a sheet whose styles repeat only later, and both
+   * failure modes are invisible. Revisit if a real workbook reports memory
+   * pressure here.
+   */
+  declare private styleMemo?: Map<string, number>;
   declare private _hasCheckboxes?: boolean;
   declare public defaultFont?: Partial<Font>;
   declare public parser?: BaseXform;
@@ -163,6 +305,10 @@ class StylesXform extends BaseXform {
       border: {},
       fill: {}
     };
+    // The memo answers with indices into the pools `index` tracks, so it cannot
+    // outlive them. Rebuilding the pools without dropping it would hand out ids
+    // from the discarded generation.
+    this.styleMemo?.clear();
   }
 
   init(): void {
@@ -197,7 +343,7 @@ class StylesXform extends BaseXform {
     this.model.cellStyles!.push({ name: "Normal", xfId: 0, builtinId: 0 });
     this._namedStyleIds.set("Normal", 0);
 
-    this.weakMap = new WeakMap();
+    this.styleMemo = new Map();
     this._hasCheckboxes = false;
   }
 
@@ -254,6 +400,10 @@ class StylesXform extends BaseXform {
       }
       this._namedStyleIds.set(name, xfId);
     }
+    // A memoised styleId embeds the xfId its `styleName` resolved to. Redefining
+    // a name allocates a fresh cellStyleXf, so a surviving memo entry would hand
+    // out an xf pointing at the superseded one.
+    this.styleMemo?.clear();
   }
 
   /** Ensure fontId 0 (the default font) exists in the fonts collection. */
@@ -498,12 +648,16 @@ class StylesXform extends BaseXform {
 
     const type = cellType || Enums.ValueType.Number;
 
-    // If we have seen this style object before, assume it has the same styleId.
-    // Do not cache by object identity for checkbox cells because the styleId must
-    // include checkbox-specific extLst, and the same style object may be reused
-    // for non-checkbox cells.
-    if (type !== Enums.ValueType.Checkbox && this.weakMap && this.weakMap.has(model)) {
-      return this.weakMap.get(model)!;
+    // Have we already built an xf with this exact content for this cell type?
+    // Everything below is a pure function of (model, type), so an equal key means
+    // an equal xf and the whole registration — up to four XML renders — is
+    // redundant.
+    const memoKey = this.styleMemo ? styleModelKey(model, type) : undefined;
+    if (memoKey !== undefined) {
+      const memoised = this.styleMemo!.get(memoKey);
+      if (memoised !== undefined) {
+        return memoised;
+      }
     }
 
     const style: StyleRef = {};
@@ -546,16 +700,7 @@ class StylesXform extends BaseXform {
     }
 
     // Preserve xf-level attributes (pivotButton, apply* flags)
-    const xfFlags = [
-      "pivotButton",
-      "applyNumberFormat",
-      "applyFont",
-      "applyFill",
-      "applyBorder",
-      "applyAlignment",
-      "applyProtection"
-    ] as const;
-    for (const flag of xfFlags) {
+    for (const flag of XF_FLAGS) {
       if (model[flag]) {
         style[flag] = true;
       }
@@ -579,8 +724,8 @@ class StylesXform extends BaseXform {
     }
 
     const styleId = this._addStyle(style);
-    if (type !== Enums.ValueType.Checkbox && this.weakMap) {
-      this.weakMap.set(model, styleId);
+    if (memoKey !== undefined) {
+      this.styleMemo!.set(memoKey, styleId);
     }
     return styleId;
   }
@@ -646,16 +791,7 @@ class StylesXform extends BaseXform {
 
     // -------------------------------------------------------
     // xf-level attributes (pivotButton, apply* flags)
-    const xfFlags: (keyof XfFlags)[] = [
-      "pivotButton",
-      "applyNumberFormat",
-      "applyFont",
-      "applyFill",
-      "applyBorder",
-      "applyAlignment",
-      "applyProtection"
-    ];
-    for (const flag of xfFlags) {
+    for (const flag of XF_FLAGS) {
       if (style[flag]) {
         model[flag] = true;
       }

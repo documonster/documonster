@@ -56,6 +56,32 @@ export function validateXmlName(name: string): void {
   }
 }
 
+/**
+ * Stringify an attribute value or text node, refusing a non-finite number.
+ *
+ * `String(NaN)` is `"NaN"` and `String(Infinity)` is `"Infinity"`, and neither is a
+ * legal lexical form for any numeric XSD type — so a non-finite number reaching a
+ * writer always produces a document its consumer rejects. It was reached through
+ * `IntegerXform`, whose `if (model || this.zero)` treats `Infinity` as a value worth
+ * writing, and it emitted `<sz val="Infinity"/>` into a stylesheet Excel then refused
+ * to open. Guarding here rather than in that one xform covers every other raw numeric
+ * attribute the same way — a colour's `theme`/`tint`, a gradient's `degree`, a stop's
+ * `position` — instead of waiting for each to be reported separately.
+ *
+ * Throwing, rather than omitting the attribute, matches {@link validateXmlName}: this
+ * writer already refuses input it cannot represent instead of quietly emitting
+ * something broken. The caller gets a stack trace at the point of the write, which is
+ * more use than a file that opens to a repair dialog.
+ */
+export function xmlValue(value: string | number | boolean, name: string): string {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new XmlError(
+      `Invalid XML value for "${name}": ${String(value)} has no valid XML representation`
+    );
+  }
+  return String(value);
+}
+
 // =============================================================================
 // Comment Validation
 // =============================================================================

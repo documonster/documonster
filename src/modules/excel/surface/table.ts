@@ -1,3 +1,4 @@
+import { invalidateSharedCellStyle } from "@excel/core/style-sharing";
 /**
  * `Table` namespace surface.
  *
@@ -8,6 +9,10 @@
  *   `Table.create(...)`, `Table.addRow(t, row)`, `Table.setName(t, name)`,
  *   `Table.model(t)`, `Table.column(t, idx)`, …
  */
+import type { TableColumnView } from "@excel/core/table";
+import { tableColumnStyle } from "@excel/core/table";
+import type { Style } from "@excel/types";
+
 export {
   addTable as add,
   getTable as get,
@@ -49,7 +54,6 @@ export {
   tableColumnSetName as columnSetName,
   tableColumnFilterButton as columnFilterButton,
   tableColumnSetFilterButton as columnSetFilterButton,
-  tableColumnStyle as columnStyle,
   tableColumnSetStyle as columnSetStyle,
   tableColumnTotalsRowLabel as columnTotalsRowLabel,
   tableColumnSetTotalsRowLabel as columnSetTotalsRowLabel,
@@ -63,3 +67,20 @@ export {
 
 /** A table handle. */
 export type { TableData as Handle } from "@excel/core/table";
+
+/**
+ * A table column's style — the live object, so mutating it is how a caller changes
+ * the column.
+ *
+ * Cells the column has already written point at a *snapshot* of these facets, so that
+ * mutation does not reach them. The snapshot is dropped here because the caller may
+ * mutate in place, and the table's next `store()` must apply what the column says
+ * then — see `core/style-sharing.ts`.
+ */
+export function columnStyle(view: TableColumnView): Partial<Style> | undefined {
+  const style = tableColumnStyle(view);
+  if (style) {
+    invalidateSharedCellStyle(style);
+  }
+  return style;
+}

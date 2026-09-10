@@ -31,18 +31,13 @@ import {
   cellComment,
   cellCreate,
   cellGetValue,
-  cellSetAlignment,
-  cellSetBorder,
   cellSetComment,
-  cellSetFill,
-  cellSetFont,
   cellSetModel,
   cellSetNumFmt,
-  cellSetProtection,
   cellSetValue,
   cellType,
   setFacet,
-  setFacetCloned
+  setFacetShared
 } from "@excel/core/cell";
 import type { ColumnData, ColumnDefn, ColumnHeaderValue, ColumnModel } from "@excel/core/column";
 import { columnHeaders } from "@excel/core/column";
@@ -63,6 +58,7 @@ import {
   resolveColumnKeyValue
 } from "@excel/core/row";
 import type { SparklineGroup } from "@excel/core/sparkline";
+import { invalidateSharedCellStyle, sharedCellFacet } from "@excel/core/style-sharing";
 import type { TableData } from "@excel/core/table";
 import type { Workbook } from "@excel/core/workbook";
 import { ExcelError, InvalidAddressError } from "@excel/errors";
@@ -746,36 +742,51 @@ export function columnSetNumFmt(c: ColumnData, value: string | undefined): void 
 
 export function columnSetFont(c: ColumnData, value: Partial<Font> | undefined): void {
   c.style.font = value;
+  invalidateSharedCellStyle(c.style);
+  // One snapshot for the whole column, shared by every cell — see `style-sharing.ts`.
+  const shared = sharedCellFacet(c.style, "font");
   columnEachCell(c, cell => {
-    cellSetFont(cell, value ? structuredClone(value) : value);
+    setFacetShared(cell, "font", shared);
   });
 }
 
 export function columnSetAlignment(c: ColumnData, value: Partial<Alignment> | undefined): void {
   c.style.alignment = value;
+  invalidateSharedCellStyle(c.style);
+  // One snapshot for the whole column, shared by every cell — see `style-sharing.ts`.
+  const shared = sharedCellFacet(c.style, "alignment");
   columnEachCell(c, cell => {
-    cellSetAlignment(cell, value ? structuredClone(value) : value);
+    setFacetShared(cell, "alignment", shared);
   });
 }
 
 export function columnSetProtection(c: ColumnData, value: Partial<Protection> | undefined): void {
   c.style.protection = value;
+  invalidateSharedCellStyle(c.style);
+  // One snapshot for the whole column, shared by every cell — see `style-sharing.ts`.
+  const shared = sharedCellFacet(c.style, "protection");
   columnEachCell(c, cell => {
-    cellSetProtection(cell, value ? structuredClone(value) : value);
+    setFacetShared(cell, "protection", shared);
   });
 }
 
 export function columnSetBorder(c: ColumnData, value: Partial<Borders> | undefined): void {
   c.style.border = value;
+  invalidateSharedCellStyle(c.style);
+  // One snapshot for the whole column, shared by every cell — see `style-sharing.ts`.
+  const shared = sharedCellFacet(c.style, "border");
   columnEachCell(c, cell => {
-    cellSetBorder(cell, value ? structuredClone(value) : value);
+    setFacetShared(cell, "border", shared);
   });
 }
 
 export function columnSetFill(c: ColumnData, value: Fill | undefined): void {
   c.style.fill = value;
+  invalidateSharedCellStyle(c.style);
+  // One snapshot for the whole column, shared by every cell — see `style-sharing.ts`.
+  const shared = sharedCellFacet(c.style, "fill");
   columnEachCell(c, cell => {
-    cellSetFill(cell, value ? structuredClone(value) : value);
+    setFacetShared(cell, "fill", shared);
   });
 }
 
@@ -795,14 +806,16 @@ export function columnSetStyle(c: ColumnData, style: Partial<Style>): void {
   if (keys.length === 0) {
     return;
   }
-  // The column's own style holds each facet by reference; every cell gets a
-  // deep-cloned copy so cells never alias the column's style sub-objects.
+  // The column's own style holds each facet by reference; the cells share a single
+  // snapshot of it, so a column of 200k cells stores one copy rather than 200k.
   for (const k of keys) {
     setFacet(c.style, k, style[k]);
   }
+  invalidateSharedCellStyle(c.style);
+  const shared = keys.map(k => sharedCellFacet(c.style, k));
   columnEachCell(c, cell => {
-    for (const k of keys) {
-      setFacetCloned(cell.style, k, style[k]);
+    for (let i = 0; i < keys.length; i++) {
+      setFacetShared(cell, keys[i], shared[i]);
     }
   });
 }

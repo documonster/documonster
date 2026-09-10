@@ -329,7 +329,15 @@ class CellXform extends BaseXform {
         break;
 
       case Enums.ValueType.Number:
-        xmlStream.leafNode("v", null, model.value);
+        // A non-finite number has no representation in SpreadsheetML — `<v>NaN</v>`
+        // and `<v>Infinity</v>` are not valid `xsd:double`, and Excel opens such a
+        // file to a repair dialog. It is written as a blank cell instead, which is
+        // the same choice the pivot cache already makes for non-finite source data
+        // (it emits the `<m />` null sentinel rather than `v="NaN"`). The cell keeps
+        // its style, so only the unrepresentable value is dropped.
+        if (Number.isFinite(model.value as number)) {
+          xmlStream.leafNode("v", null, model.value);
+        }
         break;
 
       case Enums.ValueType.Boolean:

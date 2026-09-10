@@ -12,6 +12,7 @@ import {
   xmlEncode,
   xmlEncodeAttr,
   validateXmlName,
+  xmlValue,
   encodeCData,
   validateCommentText,
   StdDocAttributes
@@ -31,7 +32,7 @@ function pushAttributes(parts: string[], attributes?: XmlAttributes): void {
     const value = attributes[key];
     if (value !== undefined) {
       validateXmlName(key);
-      parts.push(` ${key}="${xmlEncodeAttr(String(value))}"`);
+      parts.push(` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`);
     }
   }
 }
@@ -133,7 +134,7 @@ class XmlWriter implements XmlSink {
         const value = attributes[key];
         if (value !== undefined) {
           validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
         }
       }
     }
@@ -147,7 +148,7 @@ class XmlWriter implements XmlSink {
       throw new XmlWriteError("add attribute", "no element is open");
     }
     validateXmlName(name);
-    this._parts.push(` ${name}="${xmlEncodeAttr(String(value))}"`);
+    this._parts.push(` ${name}="${xmlEncodeAttr(xmlValue(value, name))}"`);
   }
 
   addAttributes(attributes: XmlAttributes): void {
@@ -163,7 +164,7 @@ class XmlWriter implements XmlSink {
       this._open = false;
     }
     this._leaf = false;
-    this._parts.push(xmlEncode(String(text)));
+    this._parts.push(xmlEncode(xmlValue(text, "#text")));
   }
 
   writeRaw(xml: string): void {
@@ -222,12 +223,12 @@ class XmlWriter implements XmlSink {
         const value = attributes[key];
         if (value !== undefined) {
           validateXmlName(key);
-          s += ` ${key}="${xmlEncodeAttr(String(value))}"`;
+          s += ` ${key}="${xmlEncodeAttr(xmlValue(value, key))}"`;
         }
       }
     }
     if (text !== undefined) {
-      s += ">" + xmlEncode(String(text)) + "</" + name + ">";
+      s += ">" + xmlEncode(xmlValue(text, "#text")) + "</" + name + ">";
     } else {
       s += "/>";
     }

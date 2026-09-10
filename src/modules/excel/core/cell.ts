@@ -11,6 +11,7 @@ import { Enums } from "@excel/core/enums";
 import { isNoteData, noteCreate, noteFromModel, noteModel } from "@excel/core/note";
 import type { NoteData } from "@excel/core/note";
 import type { RowData } from "@excel/core/row";
+import { EMPTY_CELL_STYLE, sharedCellContainer, sharedCellFacet } from "@excel/core/style-sharing";
 import {
   isTemporalPlainValue,
   partsToTemporal,
@@ -45,7 +46,7 @@ import type {
 import type { DateFormatKind } from "@excel/utils/cell-format";
 import { dateFormatKind, getCellDisplayText } from "@excel/utils/cell-format";
 import { colCache } from "@excel/utils/col-cache";
-import { copyStyle } from "@excel/utils/copy-style";
+import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
 import { slideFormula } from "@excel/utils/shared-formula";
 import type { ExcelDateTimeParts } from "@utils/excel-serial";
 import {
@@ -55,6 +56,7 @@ import {
   serialToParts,
   utcDateToParts
 } from "@utils/excel-serial";
+import type { DeepReadonly } from "@utils/types";
 import { excelToDate } from "@utils/utils";
 
 export type FormulaResult = string | number | boolean | Date | CellErrorValue;
@@ -141,6 +143,12 @@ interface ICellValue {
 export type CellValueType = CellValue;
 export type CellValueInputType = CellValueInput;
 
+/**
+ * The style facets that are objects, and therefore the ones that can be shared by
+ * reference or need copying. `numFmt` and `styleName` are primitives.
+ */
+const OBJECT_FACETS = ["font", "alignment", "protection", "border", "fill"] as const;
+
 function hasOwnKeys(v: unknown): boolean {
   return !!v && (typeof v !== "object" || Object.keys(v as object).length > 0);
 }
@@ -195,7 +203,27 @@ export interface CellData {
   column: ColumnData;
   address: string;
   _value: ICellValue;
+  /**
+   * The cell's effective style.
+   *
+   * Its object facets (`font`, `border`, `fill`, `alignment`, `protection`) may be
+   * **shared and frozen** — a cell covered by a styled row or column points at one
+   * snapshot of that owner's facets rather than holding a copy, so a large sheet does
+   * not pay for the same style once per cell. Read them freely; do not mutate them,
+   * which throws.
+   *
+   * To change a facet, go through `Cell.setStyle` / `Cell.set*`, or take a copy the
+   * cell owns from `Cell.getStyle` / `Cell.get*` and mutate that. See
+   * `core/style-sharing.ts` for the full contract.
+   */
   style: Partial<Style>;
+  /**
+   * @internal Set while `style`'s facet objects may be shared — with the row or
+   * column snapshot the cell inherited from, with sibling cells sharing that same
+   * snapshot, or with a caller who passed the facet to a setter. Handing a facet
+   * out then has to give the cell its own copy first; see {@link cellOwnStyle}.
+   */
+  _sharedStyle?: boolean;
   _mergeCount: number;
   _comment?: NoteData;
   /** Internal ownership marker for a formula spill ghost. */
@@ -215,35 +243,38 @@ export function mergeCellStyle(
   if (numFmt) {
     style.numFmt = numFmt;
   }
-  const font =
-    (rowStyle && hasOwnKeys(rowStyle.font) && rowStyle.font) ||
-    (colStyle && hasOwnKeys(colStyle.font) && colStyle.font);
-  if (font) {
-    style.font = structuredClone(font);
+  // Object facets are taken from the owner's shared snapshot rather than deep-copied
+  // per cell — see `style-sharing.ts`. Callers mark the cell `_sharedStyle`.
+  //
+  // Written out per facet rather than as a loop over a key list on purpose. This runs
+  // once per cell created — the hottest path in the library — and a loop reads
+  // `rowStyle[key]` through a variable, which V8 cannot inline the way it inlines
+  // `rowStyle.font`. Measured on 20k `Cell.setValue` calls into unstyled rows and
+  // columns, the loop cost 46% over this.
+  if (hasOwnKeys(rowStyle.font)) {
+    style.font = sharedCellFacet(rowStyle, "font");
+  } else if (hasOwnKeys(colStyle.font)) {
+    style.font = sharedCellFacet(colStyle, "font");
   }
-  const alignment =
-    (rowStyle && hasOwnKeys(rowStyle.alignment) && rowStyle.alignment) ||
-    (colStyle && hasOwnKeys(colStyle.alignment) && colStyle.alignment);
-  if (alignment) {
-    style.alignment = structuredClone(alignment);
+  if (hasOwnKeys(rowStyle.alignment)) {
+    style.alignment = sharedCellFacet(rowStyle, "alignment");
+  } else if (hasOwnKeys(colStyle.alignment)) {
+    style.alignment = sharedCellFacet(colStyle, "alignment");
   }
-  const border =
-    (rowStyle && hasOwnKeys(rowStyle.border) && rowStyle.border) ||
-    (colStyle && hasOwnKeys(colStyle.border) && colStyle.border);
-  if (border) {
-    style.border = structuredClone(border);
+  if (hasOwnKeys(rowStyle.border)) {
+    style.border = sharedCellFacet(rowStyle, "border");
+  } else if (hasOwnKeys(colStyle.border)) {
+    style.border = sharedCellFacet(colStyle, "border");
   }
-  const fill =
-    (rowStyle && hasOwnKeys(rowStyle.fill) && rowStyle.fill) ||
-    (colStyle && hasOwnKeys(colStyle.fill) && colStyle.fill);
-  if (fill) {
-    style.fill = structuredClone(fill);
+  if (hasOwnKeys(rowStyle.fill)) {
+    style.fill = sharedCellFacet(rowStyle, "fill");
+  } else if (hasOwnKeys(colStyle.fill)) {
+    style.fill = sharedCellFacet(colStyle, "fill");
   }
-  const protection =
-    (rowStyle && hasOwnKeys(rowStyle.protection) && rowStyle.protection) ||
-    (colStyle && hasOwnKeys(colStyle.protection) && colStyle.protection);
-  if (protection) {
-    style.protection = structuredClone(protection);
+  if (hasOwnKeys(rowStyle.protection)) {
+    style.protection = sharedCellFacet(rowStyle, "protection");
+  } else if (hasOwnKeys(colStyle.protection)) {
+    style.protection = sharedCellFacet(colStyle, "protection");
   }
   return style;
 }
@@ -266,6 +297,11 @@ export function cellCreate(row: RowData, column: ColumnData, address: string): C
     column,
     address,
     style: mergeCellStyle(row.style, column.style, {}),
+    // Declared here rather than assigned conditionally so every cell keeps one
+    // hidden class. `mergeCellStyle` may have pointed a facet at the row's or
+    // column's shared snapshot; the flag only claims it *may* have, and
+    // `cellOwnStyle` is a cheap no-op when it did not.
+    _sharedStyle: true,
     _mergeCount: 0
   } as CellData;
   cell._value = Value.create(Types.Null, cell);
@@ -293,7 +329,7 @@ export function cellNumFmt(c: CellData): string | NumFmt | undefined {
 }
 
 export function cellSetNumFmt(c: CellData, value: string | undefined): void {
-  c.style.numFmt = value;
+  ownStyleContainer(c).numFmt = value;
 }
 
 export function cellFont(c: CellData): Partial<Font> | undefined {
@@ -301,7 +337,11 @@ export function cellFont(c: CellData): Partial<Font> | undefined {
 }
 
 export function cellSetFont(c: CellData, value: Partial<Font> | undefined): void {
-  c.style.font = value;
+  ownStyleContainer(c).font = value;
+  if (value !== null && typeof value === "object") {
+    // Stored by reference, so the caller still holds it — see {@link cellSetStyle}.
+    c._sharedStyle = true;
+  }
 }
 
 export function cellAlignment(c: CellData): Partial<Alignment> | undefined {
@@ -309,7 +349,11 @@ export function cellAlignment(c: CellData): Partial<Alignment> | undefined {
 }
 
 export function cellSetAlignment(c: CellData, value: Partial<Alignment> | undefined): void {
-  c.style.alignment = value;
+  ownStyleContainer(c).alignment = value;
+  if (value !== null && typeof value === "object") {
+    // Stored by reference, so the caller still holds it — see {@link cellSetStyle}.
+    c._sharedStyle = true;
+  }
 }
 
 export function cellBorder(c: CellData): Partial<Borders> | undefined {
@@ -317,7 +361,11 @@ export function cellBorder(c: CellData): Partial<Borders> | undefined {
 }
 
 export function cellSetBorder(c: CellData, value: Partial<Borders> | undefined): void {
-  c.style.border = value;
+  ownStyleContainer(c).border = value;
+  if (value !== null && typeof value === "object") {
+    // Stored by reference, so the caller still holds it — see {@link cellSetStyle}.
+    c._sharedStyle = true;
+  }
 }
 
 export function cellFill(c: CellData): Fill | undefined {
@@ -325,7 +373,11 @@ export function cellFill(c: CellData): Fill | undefined {
 }
 
 export function cellSetFill(c: CellData, value: Fill | undefined): void {
-  c.style.fill = value;
+  ownStyleContainer(c).fill = value;
+  if (value !== null && typeof value === "object") {
+    // Stored by reference, so the caller still holds it — see {@link cellSetStyle}.
+    c._sharedStyle = true;
+  }
 }
 
 export function cellProtection(c: CellData): Partial<Protection> | undefined {
@@ -333,10 +385,64 @@ export function cellProtection(c: CellData): Partial<Protection> | undefined {
 }
 
 export function cellSetProtection(c: CellData, value: Partial<Protection> | undefined): void {
-  c.style.protection = value;
+  ownStyleContainer(c).protection = value;
+  if (value !== null && typeof value === "object") {
+    // Stored by reference, so the caller still holds it — see {@link cellSetStyle}.
+    c._sharedStyle = true;
+  }
 }
 
-/** Read the cell's full style record (numFmt / font / alignment / border / fill / protection). */
+/**
+ * Give the cell its own style *container*, so it can be written to.
+ *
+ * A cell whose style came wholly from one source — every cell that loaded with a given
+ * `styleId` — points at one shared container rather than holding a copy of it, which
+ * is worth ~85 bytes per cell. The container is frozen, and **that is also the marker**:
+ * no second flag is needed, and any write that forgets to come through here throws
+ * instead of rewriting every cell that shares it.
+ *
+ * Only the container is unshared. The facets inside it stay shared until
+ * {@link cellOwnStyle}, because replacing one facet is no reason to copy the rest.
+ */
+function ownStyleContainer(c: CellData): Partial<Style> {
+  if (Object.isFrozen(c.style)) {
+    c.style = { ...c.style };
+  }
+  return c.style;
+}
+
+/**
+ * Give the cell its own copy of any facet it may be sharing, then return its style.
+ *
+ * This is the boundary that keeps "style isolation" true while cells share facets:
+ * a facet may be shared with the row/column snapshot it was inherited from, with
+ * sibling cells sharing that snapshot, or with a caller who handed it to a setter —
+ * so anything that lets a caller reach a facet must come through here first.
+ * `surface/` calls it on every reader that returns a facet; core internals and the
+ * writers read `c.style` directly and never materialise, which is what keeps a
+ * styled sheet's memory flat.
+ *
+ * Idempotent and allocation-free once the cell owns its facets.
+ */
+export function cellOwnStyle(c: CellData): Partial<Style> {
+  if (c._sharedStyle) {
+    c._sharedStyle = false;
+    const style = ownStyleContainer(c);
+    for (const key of OBJECT_FACETS) {
+      const facet = style[key];
+      if (facet) {
+        style[key] = copyStyleFacet(key, facet) as never;
+      }
+    }
+  }
+  return ownStyleContainer(c);
+}
+
+/**
+ * Read the cell's full style record (numFmt / font / alignment / border / fill /
+ * protection) **without** materialising it. Internal readers and the writers use
+ * this; a public reader must use {@link cellOwnStyle}.
+ */
 export function cellGetStyle(c: CellData): Partial<Style> {
   return c.style;
 }
@@ -344,41 +450,51 @@ export function cellGetStyle(c: CellData): Partial<Style> {
 /** Merge a partial style into the cell's existing style. */
 export function cellSetStyle(c: CellData, style: Partial<Style>): void {
   if (style.numFmt !== undefined) {
-    c.style.numFmt = style.numFmt;
+    ownStyleContainer(c).numFmt = style.numFmt;
   }
   if (style.styleName !== undefined) {
-    c.style.styleName = style.styleName;
+    ownStyleContainer(c).styleName = style.styleName;
   }
-  if (style.font !== undefined) {
-    c.style.font = style.font;
-  }
-  if (style.alignment !== undefined) {
-    c.style.alignment = style.alignment;
-  }
-  if (style.border !== undefined) {
-    c.style.border = style.border;
-  }
-  if (style.fill !== undefined) {
-    c.style.fill = style.fill;
-  }
-  if (style.protection !== undefined) {
-    c.style.protection = style.protection;
+  // Object facets are stored by reference, so the caller — and any other cell set
+  // from the same object — still holds them, and the cell has to be marked as
+  // sharing. Before that flag existed, setting two cells from one style object
+  // aliased them permanently: mutating `Cell.getStyle(a).font` changed the other
+  // cell *and* the caller's object.
+  //
+  // Only mark when an object facet is actually stored. Marking unconditionally
+  // meant that a `numFmt`-only update re-shared the cell, so the *next* read
+  // re-copied facets the cell already owned privately — silently detaching a
+  // reference the caller was still holding from an earlier `Cell.getStyle`.
+  for (const key of OBJECT_FACETS) {
+    const facet = style[key];
+    if (facet !== undefined) {
+      ownStyleContainer(c)[key] = facet as never;
+      if (facet !== null && typeof facet === "object") {
+        c._sharedStyle = true;
+      }
+    }
   }
 }
 
 /**
- * Assign a single style facet onto `target`, deep-cloning the value so the
- * target never aliases a shared sub-object (`numFmt` is a primitive and is
- * effectively copied by value). The generic `K` keeps the key and value types
- * linked — a widened `keyof Style` loop variable would collapse the index type
- * to the intersection of all facet types and break assignment.
+ * Point a cell's facet at `value` without copying it, and mark the cell as sharing.
+ *
+ * This is the row/column propagation path — once per cell per facet — and `value` is
+ * the owner's shared snapshot, so every cell in a styled column ends up pointing at
+ * one object instead of holding its own copy. {@link cellOwnStyle} separates a cell
+ * again the moment a caller can reach the facet.
+ *
+ * The generic `K` keeps the key and value types linked — a widened `keyof Style` loop
+ * variable would collapse the index type to the intersection of all facet types and
+ * break assignment.
  */
-export function setFacetCloned<K extends keyof Style>(
-  target: Partial<Style>,
+export function setFacetShared<K extends keyof Style>(
+  cell: CellData,
   key: K,
   value: Style[K] | undefined
 ): void {
-  target[key] = typeof value === "object" && value !== null ? structuredClone(value) : value;
+  ownStyleContainer(cell)[key] = value;
+  cell._sharedStyle = true;
 }
 
 /**
@@ -500,7 +616,7 @@ export function cellSetValue(c: CellData, v: CellValueInputType): void {
   if (kind !== undefined && c.style.numFmt === undefined) {
     // Only when the cell has none of its own: an explicit format the caller set is theirs, and a value assignment
     // is not the place to overrule it.
-    c.style.numFmt = defaultNumFmtFor(kind);
+    ownStyleContainer(c).numFmt = defaultNumFmtFor(kind);
   }
 }
 
@@ -620,7 +736,7 @@ export function cellSetDateParts(
   // serial (60) but no `Date`, and building one would silently move it to March 1.
   cellSetValue(c, excelToDate(partsToSerial(filled, date1904), date1904));
   if (c.style.numFmt === undefined) {
-    c.style.numFmt = defaultNumFmtFor(resolved);
+    ownStyleContainer(c).numFmt = defaultNumFmtFor(resolved);
   }
 }
 
@@ -730,6 +846,7 @@ export function cellMerge(c: CellData, master: CellData, ignoreStyle?: boolean):
   c._value = Value.create(Types.Merge, c, master);
   if (!ignoreStyle) {
     c.style = (copyStyle(master.style) as Partial<Style>) ?? {};
+    c._sharedStyle = false;
   }
 }
 
@@ -739,6 +856,7 @@ export function cellUnmerge(c: CellData): void {
     c._value.release();
     c._value = Value.create(Types.Null, c);
     c.style = mergeCellStyle(c.row.style, c.column.style, { ...c.style });
+    c._sharedStyle = true;
   }
 }
 
@@ -835,8 +953,21 @@ export interface CellView {
   readonly numFmt: string | NumFmt | undefined;
   readonly text: string;
   readonly effectiveType: ValueType;
-  readonly font: Partial<Font> | undefined;
-  readonly alignment: Partial<Alignment> | undefined;
+  /**
+   * The cell's font — the object it *shares* with every other cell its row or column
+   * styled, deliberately not copied so that iterating a sheet stays allocation-free.
+   *
+   * `DeepReadonly` because it is genuinely immutable, not merely unassignable: the
+   * shared facet is frozen, so `view.font.bold = true` throws at runtime. A shallow
+   * `readonly` said only that `view.font` could not be replaced and let the nested
+   * write compile, which meant the type promised something the object did not honour.
+   *
+   * To change the font, use `Cell.setFont` / the `Stream` handle setters; to obtain a
+   * mutable copy the cell owns, use `Cell.getFont` or `Cell.getStyle`.
+   */
+  readonly font: DeepReadonly<Partial<Font>> | undefined;
+  /** The cell's alignment. Shared and frozen — see {@link CellView.font}. */
+  readonly alignment: DeepReadonly<Partial<Alignment>> | undefined;
 }
 
 export function cellView(c: CellData): CellView {
@@ -980,9 +1111,20 @@ export function cellSetModel(c: CellData, value: CellModel): void {
     }
   }
   if (value.style) {
-    c.style = (copyStyle(value.style) as Partial<Style>) ?? {};
+    // Share the model's whole style *container*, not just its facets. The read path
+    // hands the same style model to every cell carrying a given `styleId`
+    // (`StylesXform.getStyleModel` caches one per id), so one container and one set of
+    // facet snapshots covers all of them — loading a 200k-cell sheet with a single
+    // logical style cost 110 MB of duplicated style objects before this.
+    //
+    // The container is frozen, which both enforces the sharing and marks it: a write
+    // has to come through `ownStyleContainer` and a missed one throws. `_sharedStyle`
+    // separately marks the facets inside it.
+    c.style = sharedCellContainer(value.style);
+    c._sharedStyle = true;
   } else {
-    c.style = {};
+    c.style = EMPTY_CELL_STYLE;
+    c._sharedStyle = false;
   }
 }
 

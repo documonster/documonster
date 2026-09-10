@@ -691,6 +691,16 @@ export interface XlsxWriteOptions {
    * writers that intentionally produce non-conformant xlsx for
    * testing keep working.
    *
+   * **It dominates a development-mode write, so benchmark with
+   * `NODE_ENV=production`.** Measured on a 100-column × 200-row table:
+   * 38 ms with the check off against 124 ms with it on — 3.3×. The cost
+   * is not waste that could be optimised away; the check parses each
+   * part once into a DOM that the structural checks then share. But it
+   * does mean a profile taken in development attributes time to the
+   * writer that production never spends, which is how a reported
+   * "13% in style registration" turned out to be measured against a
+   * denominator inflated by validation.
+   *
    * @see OoxmlValidationReport
    */
   validate?: boolean;

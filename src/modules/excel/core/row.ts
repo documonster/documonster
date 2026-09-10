@@ -5,9 +5,10 @@ import {
   cellGetValue,
   cellType,
   setFacet,
-  setFacetCloned
+  setFacetShared
 } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
+import { invalidateSharedCellStyle, sharedCellFacet } from "@excel/core/style-sharing";
 import type { Worksheet } from "@excel/core/worksheet";
 import type {
   Style,
@@ -68,9 +69,12 @@ export interface RowData {
  */
 function applyStyle<K extends keyof Style>(r: RowData, name: K, value: Style[K] | undefined): void {
   r.style[name] = value;
+  invalidateSharedCellStyle(r.style);
+  // One snapshot for the whole row, shared by every cell — see `style-sharing.ts`.
+  const shared = sharedCellFacet(r.style, name);
   r.cells.forEach(cell => {
     if (cell) {
-      setFacetCloned(cell.style, name, value);
+      setFacetShared(cell, name, shared);
     }
   });
 }
@@ -219,10 +223,12 @@ export function rowSetStyle(r: RowData, style: Partial<Style>): void {
   for (const k of keys) {
     setFacet(r.style, k, style[k]);
   }
+  invalidateSharedCellStyle(r.style);
+  const shared = keys.map(k => sharedCellFacet(r.style, k));
   r.cells.forEach(cell => {
     if (cell) {
-      for (const k of keys) {
-        setFacetCloned(cell.style, k, style[k]);
+      for (let i = 0; i < keys.length; i++) {
+        setFacetShared(cell, keys[i], shared[i]);
       }
     }
   });

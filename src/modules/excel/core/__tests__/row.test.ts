@@ -1,5 +1,5 @@
 import { testUtils } from "@excel/__tests__/shared";
-import { cellBorder, cellFont, cellGetValue, cellSetValue, cellType } from "@excel/core/cell";
+import { cellFont, cellGetValue, cellSetValue, cellType } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
 import type { RowModel } from "@excel/core/row";
 import {
@@ -24,7 +24,7 @@ import {
   columnSetDefn,
   getColumn
 } from "@excel/core/worksheet";
-import { Worksheet } from "@excel/index";
+import { Cell, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Row", () => {
@@ -475,33 +475,59 @@ describe("Row", () => {
   });
 
   describe("style isolation", () => {
+    // These go through the public `Cell` surface, like their `column.test.ts`
+    // counterparts, because that is the boundary where isolation is promised:
+    // cells covered by a styled row share one frozen snapshot of its facets, and
+    // `Cell.get*` is what gives a cell its own copy. Reading a facet off the
+    // internal `CellData` deliberately yields the shared object — see
+    // `core/style-sharing.ts`.
     it("mutating a cell border after Row.border(row) broadcast does not leak to other cells", () => {
-      const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
-      cellSetValue(rowGetCell(row, 1), "A");
-      cellSetValue(rowGetCell(row, 2), "B");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Cell.setValue(ws, "A1", "A");
+      Cell.setValue(ws, "B1", "B");
 
-      rowSetBorder(row, { top: { style: "thin" }, bottom: { style: "thin" } });
+      rowSetBorder(Worksheet.getRow(ws, 1), {
+        top: { style: "thin" },
+        bottom: { style: "thin" }
+      });
 
-      // Mutate A1's border sub-property
-      cellBorder(rowGetCell(row, 1))!.top = { style: "thick" };
+      Cell.getStyle(ws, "A1").border!.top = { style: "thick" };
 
-      expect(cellBorder(rowGetCell(row, 1))!.top).toEqual({ style: "thick" });
-      expect(cellBorder(rowGetCell(row, 2))!.top).toEqual({ style: "thin" });
+      expect(Cell.getStyle(ws, "A1").border!.top).toEqual({ style: "thick" });
+      expect(Cell.getStyle(ws, "B1").border!.top).toEqual({ style: "thin" });
     });
 
     it("mutating a cell font after Row.font(row) broadcast does not leak to other cells", () => {
-      const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
-      cellSetValue(rowGetCell(row, 1), "A");
-      cellSetValue(rowGetCell(row, 2), "B");
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Cell.setValue(ws, "A1", "A");
+      Cell.setValue(ws, "B1", "B");
 
-      rowSetFont(row, { bold: true, size: 12 });
+      rowSetFont(Worksheet.getRow(ws, 1), { bold: true, size: 12 });
 
-      cellFont(rowGetCell(row, 1))!.bold = false;
+      Cell.getStyle(ws, "A1").font!.bold = false;
 
-      expect(cellFont(rowGetCell(row, 1))!.bold).toBe(false);
-      expect(cellFont(rowGetCell(row, 2))!.bold).toBe(true);
+      expect(Cell.getStyle(ws, "A1").font!.bold).toBe(false);
+      expect(Cell.getStyle(ws, "B1").font!.bold).toBe(true);
+    });
+
+    it("a shared facet is frozen, so skipping the surface fails loudly", () => {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "test");
+      Cell.setValue(ws, "A1", "A");
+      Cell.setValue(ws, "B1", "B");
+      rowSetFont(Worksheet.getRow(ws, 1), { bold: true, size: 12 });
+
+      // Reaching a facet without going through `Cell.get*` would rewrite it for
+      // every cell in the row. Freezing the snapshot turns that into a throw
+      // rather than silent cross-cell corruption.
+      const shared = cellFont(rowGetCell(Worksheet.getRow(ws, 1), 1))!;
+      expect(Object.isFrozen(shared)).toBe(true);
+      expect(() => {
+        shared.bold = false;
+      }).toThrow(TypeError);
+      expect(Cell.getStyle(ws, "B1").font!.bold).toBe(true);
     });
   });
 });

@@ -1,5 +1,6 @@
 import type { CellData } from "@excel/core/cell";
-import { cellGetValue, cellSetValue } from "@excel/core/cell";
+import { cellGetValue, cellSetValue, setFacetShared } from "@excel/core/cell";
+import { sharedCellFacet } from "@excel/core/style-sharing";
 import { getRow, getSheetWorkbook, rowGetCell } from "@excel/core/worksheet-core";
 import type { WorksheetData as Worksheet } from "@excel/core/worksheet-core";
 import { TableError } from "@excel/errors";
@@ -330,9 +331,20 @@ export function tableValidate(t: TableData): void {
 
 export function tableStore(t: TableData): void {
   // where the table needs to store table data, headers, footers in the sheet...
+  //
+  // A table column's style is one object applied to its header, every body row and
+  // its totals cell, so it is a style owner in the sense of `style-sharing.ts`: the
+  // cells share one frozen snapshot of it rather than each holding a copy, and they
+  // are marked so that `Cell.get*` separates them again.
+  //
+  // This used to be `Object.assign(cell.style, style)`, which shared the facets *and*
+  // said nothing about it, so every cell in a table column was permanently aliased —
+  // `Cell.getStyle(a).font.bold = false` rewrote the whole column.
   const assignStyle = (cell: CellData, style: Partial<Style> | undefined): void => {
     if (style) {
-      Object.assign(cell.style, style);
+      for (const key of Object.keys(style) as (keyof Style)[]) {
+        setFacetShared(cell, key, sharedCellFacet(style, key));
+      }
     }
   };
 
