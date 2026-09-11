@@ -1,67 +1,23 @@
 /**
- * CRC32 calculation utility for ZIP files
+ * CRC32 for ZIP files — Node variant.
  *
- * - Node.js: Uses native zlib.crc32 (C++ implementation, ~100x faster)
- * - Browser: Uses lookup table optimization
+ * `zlib` is imported **statically**, and that is the invariant this file exists to hold. Loading it lazily
+ * leaves a window in which CRC32 runs on the portable lookup table instead, and the window cannot be closed
+ * synchronously from an ES module. `crc32.browser.ts` is the sibling that has no `zlib` and uses the table.
  *
- * The polynomial used is the standard CRC-32 IEEE 802.3:
+ * `zlib.crc32` has existed since Node 22.2 and `engines.node` is `>=22.13`, so it needs no capability probe.
+ *
+ * The polynomial is the standard CRC-32 IEEE 802.3:
  * x^32 + x^26 + x^23 + x^22 + x^16 + x^12 + x^11 + x^10 + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
- * Represented as 0xEDB88320 in reversed (LSB-first) form
+ * Represented as 0xEDB88320 in reversed (LSB-first) form.
  */
 
-import type * as zlibType from "zlib";
+import { crc32 as nativeCrc32 } from "zlib";
 
-import { crc32JS, crc32UpdateJS, crc32Finalize } from "@archive/compression/crc32.base";
-import { isNode } from "@utils/env";
-
-// Lazy-loaded zlib module for Node.js
-let _zlib: typeof zlibType | null = null;
-let _zlibLoading: Promise<typeof zlibType | null> | null = null;
-let _zlibInitStarted = false;
-
-/**
- * Lazily initialize zlib loading in Node.js.
- * Called on first use rather than at module load time.
- */
-function ensureZlibLoading(): void {
-  if (_zlibInitStarted) {
-    return;
-  }
-  _zlibInitStarted = true;
-  if (isNode()) {
-    _zlibLoading = import("zlib")
-      .then(module => {
-        _zlib = (module as { default?: typeof zlibType }).default ?? (module as typeof zlibType);
-        return _zlib;
-      })
-      .catch(() => {
-        _zlib = null;
-        return null;
-      });
-  }
-}
-
-/**
- * Synchronously ensure zlib is loaded for Node.js.
- * Used by the sync deflate path where the async dynamic import may not have
- * resolved yet. Falls back to `require()` which is synchronous in Node.js.
- */
-export function ensureZlibSync(): void {
-  if (_zlib || !isNode()) {
-    return;
-  }
-  try {
-    // oxlint-disable-next-line typescript/no-require-imports
-    _zlib = require("zlib") as typeof zlibType;
-    _zlibInitStarted = true;
-  } catch {
-    // Bundler or non-Node environment — JS fallback will be used
-  }
-}
+import { crc32Finalize } from "@archive/compression/crc32.base";
 
 /**
  * Calculate CRC32 checksum for the given data
- * Uses native zlib.crc32 in Node.js for ~100x better performance
  *
  * @param data - Input data as Uint8Array or Buffer
  * @returns CRC32 checksum as unsigned 32-bit integer
@@ -74,30 +30,14 @@ export function ensureZlibSync(): void {
  * ```
  */
 export function crc32(data: Uint8Array): number {
-  ensureZlibLoading();
-  // Use native zlib.crc32 if available (Node.js)
-  if (_zlib && typeof _zlib.crc32 === "function") {
-    return _zlib.crc32(data) >>> 0;
-  }
-  // Fallback to JS implementation
-  return crc32JS(data);
-}
-
-/**
- * Ensure zlib is loaded (for use before calling crc32)
- */
-export async function ensureCrc32(): Promise<void> {
-  ensureZlibLoading();
-  if (_zlibLoading) {
-    await _zlibLoading;
-  }
+  return nativeCrc32(data) >>> 0;
 }
 
 /**
  * Calculate CRC32 incrementally (useful for streaming)
  * Call with initial crc of 0xffffffff, then finalize with crc32Finalize
- * In Node.js, this uses native zlib.crc32 when available for performance.
- * The internal CRC state remains the same as the JS table implementation:
+ *
+ * The internal state matches the lookup-table implementation, so the two are interchangeable:
  * - initial state: 0xffffffff
  * - finalize: xor with 0xffffffff
  *
@@ -114,18 +54,11 @@ export async function ensureCrc32(): Promise<void> {
  * ```
  */
 export function crc32Update(crc: number, data: Uint8Array): number {
-  ensureZlibLoading();
-  // If available, use native zlib.crc32 but preserve our internal state shape.
-  // zlib.crc32 returns a finalized CRC value and can accept the previous finalized
-  // CRC as the second parameter (chainable). Our internal state is the inverted
-  // (non-finalized) CRC, so convert with xor before/after.
-  if (_zlib && typeof _zlib.crc32 === "function") {
-    const prevFinal = (crc ^ 0xffffffff) >>> 0;
-    const nextFinal = _zlib.crc32(data, prevFinal) >>> 0;
-    return (nextFinal ^ 0xffffffff) >>> 0;
-  }
-
-  return crc32UpdateJS(crc, data);
+  // `zlib.crc32` takes and returns a *finalized* CRC and chains through its second argument. The state here
+  // is the inverted (non-finalized) form, so convert on the way in and out.
+  const prevFinal = (crc ^ 0xffffffff) >>> 0;
+  const nextFinal = nativeCrc32(data, prevFinal) >>> 0;
+  return (nextFinal ^ 0xffffffff) >>> 0;
 }
 
 /**

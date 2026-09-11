@@ -79,9 +79,6 @@ type _Crc32FinalizeParams = Assert<
 type _Crc32FinalizeReturns = Assert<
   ReturnsEqual<typeof NodeCrc32.crc32Finalize, typeof BrowserCrc32.crc32Finalize>
 >;
-type _EnsureCrc32Params = Assert<
-  ParamsEqual<typeof NodeCrc32.ensureCrc32, typeof BrowserCrc32.ensureCrc32>
->;
 
 // ============================================================================
 // streaming-compress.ts vs streaming-compress.browser.ts

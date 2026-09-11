@@ -6,7 +6,7 @@
  * - In browser builds the bundler aliases those imports to their browser variants.
  */
 
-import { crc32Update, crc32Finalize, ensureZlibSync } from "@archive/compression/crc32";
+import { crc32Update, crc32Finalize } from "@archive/compression/crc32";
 import {
   createDeflateStream,
   SyncDeflater,
@@ -134,7 +134,6 @@ export class ZipDeflateFile {
 
   // Synchronous compression state for pushSync() path.
   private _syncDeflater: SyncDeflater | null = null;
-  private _syncZlibReady = false;
 
   readonly name: string;
   readonly level: number;
@@ -944,13 +943,6 @@ export class ZipDeflateFile {
   private _pushSyncPath(data: Uint8Array, final = false): void {
     if (this._finalized) {
       throw new ArchiveError("Cannot push to finalized ZipDeflateFile");
-    }
-
-    // Ensure native CRC32 is available before the first _writeDataSync call.
-    // Without this, the JS fallback is ~60x slower.
-    if (!this._syncZlibReady) {
-      ensureZlibSync();
-      this._syncZlibReady = true;
     }
 
     if (this._deflateWanted === null) {
