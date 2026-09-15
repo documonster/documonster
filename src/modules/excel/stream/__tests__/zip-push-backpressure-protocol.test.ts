@@ -36,17 +36,20 @@ describe("WorkbookWriter ZIP/backpressure protocol", () => {
     const originalPush = ZipDeflate.prototype.push;
     let heldFinalPush = false;
 
-    vi.spyOn(ZipDeflate.prototype, "push").mockImplementation(
-      function (this: ZipDeflate, data, final, callback) {
-        const completion = originalPush.call(this, data, final, callback);
-        if (!final || heldFinalPush) {
-          return completion;
-        }
-        heldFinalPush = true;
-        finalPushCalled.resolve();
-        return completion.then(() => releaseFinalPush.promise);
+    vi.spyOn(ZipDeflate.prototype, "push").mockImplementation(function (
+      this: ZipDeflate,
+      data,
+      final,
+      callback
+    ) {
+      const completion = originalPush.call(this, data, final, callback);
+      if (!final || heldFinalPush) {
+        return completion;
       }
-    );
+      heldFinalPush = true;
+      finalPushCalled.resolve();
+      return completion.then(() => releaseFinalPush.promise);
+    });
 
     const sink = new ProtocolSink();
     const workbook = new WorkbookWriter({ stream: sink as any, trueStreaming: true });

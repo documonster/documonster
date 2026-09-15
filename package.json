@@ -331,26 +331,26 @@
     "xlsb:bisect": "node --import @oxc-node/core/register scripts/xlsb-bisect.ts"
   },
   "devDependencies": {
-    "@oxc-node/core": "0.1.0",
-    "@rspack/core": "^2.1.10",
-    "@types/node": "^26.2.0",
-    "@vitest/browser": "^4.1.11",
-    "@vitest/browser-playwright": "^4.1.11",
-    "@vitest/ui": "^4.1.11",
+    "@oxc-node/core": "0.1.2",
+    "@rspack/core": "^2.2.4",
+    "@types/node": "catalog:",
+    "@vitest/browser": "^5.0.1",
+    "@vitest/browser-playwright": "^5.0.1",
+    "@vitest/ui": "^5.0.1",
     "concurrently": "^10.0.5",
     "cross-env": "^10.1.0",
     "esbuild": "^0.28.2",
-    "fast-xml-parser": "^5.11.0",
+    "fast-xml-parser": "^5.11.1",
     "husky": "^9.1.7",
-    "oxfmt": "^0.64.0",
-    "oxlint": "^1.79.0",
+    "oxfmt": "^0.68.0",
+    "oxlint": "^1.83.0",
     "oxlint-tsgolint": "^7.0.2001",
-    "playwright": "^1.62.1",
-    "rimraf": "^6.1.3",
-    "rolldown": "^1.2.5",
+    "playwright": "^1.63.0",
+    "rimraf": "catalog:",
+    "rolldown": "^1.2.8",
     "rollup-plugin-visualizer": "^7.1.1",
-    "typescript": "7.0.2",
-    "vitest": "^4.1.11"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "browserslist": [
     "chrome >= 89",
@@ -362,5 +362,5 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@11.22.0"
+  "packageManager": "pnpm@12.4.2"
 }

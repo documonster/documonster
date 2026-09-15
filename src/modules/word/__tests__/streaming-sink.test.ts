@@ -127,17 +127,20 @@ describe("StreamingDocxWriter — sink mode", () => {
     const pushCompleted = deferred();
     const releasePush = deferred();
     const originalPush = ZipDeflate.prototype.push;
-    const pushSpy = vi
-      .spyOn(ZipDeflate.prototype, "push")
-      .mockImplementation(function (this: InstanceType<typeof ZipDeflate>, data, final, callback) {
-        const completion = originalPush.call(this, data, final, callback);
-        return final
-          ? completion
-          : completion.then(() => {
-              pushCompleted.resolve();
-              return releasePush.promise;
-            });
-      });
+    const pushSpy = vi.spyOn(ZipDeflate.prototype, "push").mockImplementation(function (
+      this: InstanceType<typeof ZipDeflate>,
+      data,
+      final,
+      callback
+    ) {
+      const completion = originalPush.call(this, data, final, callback);
+      return final
+        ? completion
+        : completion.then(() => {
+            pushCompleted.resolve();
+            return releasePush.promise;
+          });
+    });
 
     try {
       const writer = Streaming.createDocxStream({
@@ -165,16 +168,19 @@ describe("StreamingDocxWriter — sink mode", () => {
     const auxiliaryPushStarted = deferred();
     const releasePush = deferred();
     const originalPush = ZipDeflate.prototype.push;
-    const pushSpy = vi
-      .spyOn(ZipDeflate.prototype, "push")
-      .mockImplementation(function (this: InstanceType<typeof ZipDeflate>, data, final, callback) {
-        const completion = originalPush.call(this, data, final, callback);
-        if (final && this.name === "word/styles.xml") {
-          auxiliaryPushStarted.resolve();
-          return completion.then(() => releasePush.promise);
-        }
-        return completion;
-      });
+    const pushSpy = vi.spyOn(ZipDeflate.prototype, "push").mockImplementation(function (
+      this: InstanceType<typeof ZipDeflate>,
+      data,
+      final,
+      callback
+    ) {
+      const completion = originalPush.call(this, data, final, callback);
+      if (final && this.name === "word/styles.xml") {
+        auxiliaryPushStarted.resolve();
+        return completion.then(() => releasePush.promise);
+      }
+      return completion;
+    });
 
     try {
       const writer = Streaming.createDocxStream({
@@ -217,14 +223,17 @@ describe("StreamingDocxWriter — sink mode", () => {
   it("surfaces compression failures without an unhandled stream error", async () => {
     const compressionError = new Error("deflate exploded");
     const originalPush = ZipDeflate.prototype.push;
-    const pushSpy = vi
-      .spyOn(ZipDeflate.prototype, "push")
-      .mockImplementation(function (this: InstanceType<typeof ZipDeflate>, data, final, callback) {
-        if (this.name === PartPath.Document) {
-          return Promise.reject(compressionError);
-        }
-        return originalPush.call(this, data, final, callback);
-      });
+    const pushSpy = vi.spyOn(ZipDeflate.prototype, "push").mockImplementation(function (
+      this: InstanceType<typeof ZipDeflate>,
+      data,
+      final,
+      callback
+    ) {
+      if (this.name === PartPath.Document) {
+        return Promise.reject(compressionError);
+      }
+      return originalPush.call(this, data, final, callback);
+    });
 
     try {
       const writer = Streaming.createDocxStream({
