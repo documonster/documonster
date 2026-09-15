@@ -1,11 +1,14 @@
 # Examples
 
-Unlike the other modules, whose examples produce a document, these produce a
-**test environment**: a workspace of deliberately awkward files plus the client
-configuration to point an AI assistant at it.
+Most of these produce a **test environment** rather than a document: a workspace of
+deliberately awkward files plus the client configuration to point an AI assistant at
+it.
 
 That difference is the point. The test suite can prove the tools work; it cannot
 prove a _model_ uses them correctly from plain language. Only a real client can.
+
+`diagram-paging.ts` is the exception — it produces a document, because the two
+decisions it demonstrates are only visible on a page.
 
 ## Files
 
@@ -14,6 +17,7 @@ prove a _model_ uses them correctly from plain language. Only a real client can.
 | `setup-workspace.ts` | Builds `tmp/mcp-examples/workspace/` and prints ready-to-paste client config                          |
 | `probe-tools.ts`     | Drives the real executable over stdio and exercises all six tools — run this before blaming the model |
 | `prompts.md`         | Natural-language prompts to try in a client, with what a good and a bad run look like                 |
+| `diagram-paging.ts`  | How a diagram is fitted to the text column and cut across pages, with the numbers for each case       |
 
 ## Use
 
@@ -28,6 +32,31 @@ node src/examples/probe-tools.ts
 # 3. Paste the printed config into your client, restart it,
 #    then work through prompts.md
 ```
+
+Independently of the workspace:
+
+```bash
+# How a tall or wide diagram is placed on a page (writes a .docx, no build needed)
+node --import @oxc-node/core/register src/examples/diagram-paging.ts
+```
+
+## What `diagram-paging.ts` shows
+
+Two decisions that only exist once a diagram has to live on a page.
+
+**Fitting is not the same as being readable.** Word does not shrink an oversized
+inline image, it runs it off the paper, so an image has to be scaled to the 468-point
+column. Scaling _alone_ is the trap: a 1901-point flowchart drawn at 25% turns its
+14pt labels into 3.4pt. The answer is to make the diagram intrinsically narrower and
+let it grow downwards, wrapping the cheapest text first — gaps, then edge labels,
+then a node's own text last of all.
+
+**A diagram taller than a page is cut, not shrunk.** Shrinking gives back the
+legibility the narrowing just bought. The cut has to fall on a row that crosses no
+box and no word; a row crossing a _link_ is fine, because the line continues at the
+top of the next page like any split figure. Note that a row of entirely background
+pixels does not exist in a top-to-bottom flowchart — the links cross every gap — so
+the obstacles are read out of the display list instead.
 
 ## What the workspace probes
 

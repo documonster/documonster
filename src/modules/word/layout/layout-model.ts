@@ -149,6 +149,14 @@ export interface LayoutParagraph {
   readonly lines: readonly LineBox[];
   readonly sourceIndex: number; // index in doc.body
   /**
+   * End the page when this paragraph has been placed in full.
+   *
+   * Internal pagination marker used for the last paragraph in a Quote run that
+   * follows a continued table. It survives paragraph splitting so a long quote
+   * closes the page only after its tail, not after its first slice.
+   */
+  readonly endPageWhenComplete?: boolean;
+  /**
    * Paragraph borders (`w:pBdr`), already resolved to stroke widths and colours.
    *
    * This is what a themed heading rule, a block quote's left bar and a code

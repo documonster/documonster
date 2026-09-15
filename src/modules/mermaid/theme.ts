@@ -75,9 +75,10 @@ export interface ThemeOptions {
  * — because a name should say what a token *is* for, and "secondary" says only that
  * somebody numbered it second.
  *
- * `edgeLabelBackground` is the one worth pointing at: Mermaid paints a grey panel behind
- * an edge label rather than a white one, so the label reads as sitting on the diagram
- * instead of punching a hole in it.
+ * Edge labels use white rather than Mermaid's grey token. The panel exists to
+ * interrupt the connector behind the words; grey adds a second visual category
+ * that looks like a disabled control and becomes especially muddy after a wide
+ * diagram is reduced to a page column.
  */
 const DEFAULTS = {
   /** `primaryColor` */
@@ -90,7 +91,7 @@ const DEFAULTS = {
   edge: "#333333",
   edgeText: "#333333",
   /** `edgeLabelBackground` */
-  edgeLabelBackground: "#e8e8e8",
+  edgeLabelBackground: "#ffffff",
   /** `secondaryColor` — Mermaid's cluster fill */
   groupFill: "#ffffde",
   /** `secondaryBorderColor` */

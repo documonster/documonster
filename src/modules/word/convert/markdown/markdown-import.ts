@@ -1534,7 +1534,93 @@ async function convertBlocks(
     const converted = await convertBlock(block, opts, 0, state);
     result.push(...converted);
   }
-  return result;
+  // Margins first, then the structural separator: run the other way round and the separator,
+  // which follows a table by construction, is handed the very gap it already carries.
+  return separateAdjacentTables(giveTablesABottomMargin(result));
+}
+
+/**
+ * Put a paragraph between two adjacent tables, and make it carry the gap.
+ *
+ * ECMA-376 §17.13.5.34: a `<w:tbl>` must be followed by a paragraph before the next may begin, or
+ * Word collapses the pair into one malformed table. The writer synthesises a bare `<w:p/>` when it
+ * has to, which is correct and *expensive*: with no properties it inherits the body's 22px line and
+ * 16px bottom margin, so a spec formality costs 30 points of blank page. A blockquote is a
+ * single-cell table, so a quote after a table hit exactly that.
+ *
+ * Emitting the separator here instead means it can be sized: no line of its own worth mentioning,
+ * and the table's bottom margin as its space-after — which is the gap that belongs there anyway.
+ */
+function separateAdjacentTables(blocks: readonly BodyContent[]): BodyContent[] {
+  const out: BodyContent[] = [];
+  for (const block of blocks) {
+    if (block.type === "table" && out.at(-1)?.type === "table") {
+      out.push({
+        type: "paragraph",
+        properties: {
+          // An exact 1pt line, so the mandatory paragraph is as close to invisible as one can be,
+          // and the table's own bottom margin as the gap that belongs there.
+          spacing: { before: 0, after: TABLE_MARGIN_BOTTOM, line: 20, lineRule: "exact" }
+        },
+        children: []
+      });
+    }
+    out.push(block);
+  }
+  return out;
+}
+
+/**
+ * Reinstate the margin below a table by adding it above whatever comes next.
+ *
+ * The stylesheet being modelled expresses its vertical rhythm with bottom margins only —
+ * `p { margin-bottom: 16px }`, and `Normal` accordingly carries `after` and no `before`. Every
+ * block therefore takes its space above from whatever precedes it, and a **table cannot
+ * provide any**: OOXML has no space-after on an inline table, so the chain breaks and the next
+ * block sits flush against the last row's rule. A plain paragraph merely looked tight; a
+ * blockquote, whose tint and left bar are drawn around it, appeared to have absorbed the
+ * table's own layout.
+ *
+ * Adding the space here rather than in the layout engine is what makes it true in Word as
+ * well: a gap invented while painting a page would leave the .docx and the PDF disagreeing
+ * about the same document.
+ *
+ * The style's own `before` has to be read and carried across, not just the paragraph's. Direct
+ * formatting *replaces* what a style asks for rather than adding to it, so writing the table's
+ * margin straight onto the paragraph silently discarded the 8pt a `Quote` contributes — the one
+ * construct where the space is most visible, since its tint is drawn around it.
+ */
+function giveTablesABottomMargin(blocks: readonly BodyContent[]): BodyContent[] {
+  const styleSpacingBefore = new Map(
+    defaultMarkdownStyles()
+      .filter(style => style.type === "paragraph")
+      .map(style => [
+        style.styleId,
+        (style as { paragraphProperties?: ParagraphProperties }).paragraphProperties?.spacing
+          ?.before ?? 0
+      ])
+  );
+
+  return blocks.map((block, index) => {
+    if (index === 0 || blocks[index - 1]?.type !== "table" || block.type !== "paragraph") {
+      return block;
+    }
+    const spacing = block.properties?.spacing;
+    const inherited =
+      block.properties?.style === undefined
+        ? 0
+        : (styleSpacingBefore.get(block.properties.style) ?? 0);
+    return {
+      ...block,
+      properties: {
+        ...block.properties,
+        spacing: {
+          ...spacing,
+          before: (spacing?.before ?? inherited) + TABLE_MARGIN_BOTTOM
+        }
+      }
+    };
+  });
 }
 
 async function convertBlock(
@@ -1600,31 +1686,34 @@ async function convertParagraph(
   };
 }
 
+/**
+ * A blockquote, as paragraphs carrying the `Quote` style.
+ *
+ * It has been a single-cell table twice, because a cell is the only OOXML construct with real
+ * padding, and it must not be a third time. Two separate faults came of it: a cell *is* a table, so a
+ * reader reports the callout as one and draws cell furniture round it; and the tint a cell carries is
+ * a filled band, which is what a reader's table detection reads as another row of the table above.
+ *
+ * The geometry now lives entirely in the `Quote` style, and reproduces the stylesheet exactly — see
+ * the constants for why that only became possible once the background was dropped.
+ */
 async function convertBlockquote(
   block: BlockquoteBlock,
   opts: ConvertOpts,
   state: ConversionState
 ): Promise<BodyContent[]> {
-  // Convert blockquote children with "Quote" style and left indent
   const result: BodyContent[] = [];
   for (const child of block.children) {
     const converted = await convertBlock(child, opts, 0, state);
     for (const item of converted) {
-      if (item.type === "paragraph") {
-        // Geometry and the bar live in the `Quote` style (see
-        // `defaultMarkdownStyles`), so the paragraph only names it — but only
-        // when it has no style of its own. A fenced code block or a heading
-        // inside a quote keeps its own style; overwriting it stripped the code
-        // block's frame, background and leading, and flattened headings to body
-        // text.
-        result.push(
-          item.properties?.style
-            ? item
-            : { ...item, properties: { ...item.properties, style: "Quote" } }
-        );
-      } else {
-        result.push(item);
-      }
+      // The `Quote` style carries the panel. A block that already has a style of its own keeps it:
+      // overwriting stripped a fenced code block of its frame, background and leading, and
+      // flattened a heading to body text.
+      result.push(
+        item.type !== "paragraph" || item.properties?.style
+          ? item
+          : { ...item, properties: { ...item.properties, style: "Quote" } }
+      );
     }
   }
   return result;
@@ -1828,12 +1917,32 @@ async function convertTable(
   ];
 
   // `table { border-collapse: collapse }` with rules only *between* body rows
-  // (`table > tbody > tr + tr > td { border-top: 1px solid }`). There is no
-  // outer frame and no vertical rule — a grid is exactly what the preview
-  // avoids, and it is most of why a Markdown table reads cleanly there.
+  // (`table > tbody > tr + tr > td { border-top: 1px solid }`). There is no outer frame and no
+  // vertical rule — a grid is exactly what the preview avoids, and it is most of why a Markdown
+  // table reads cleanly there.
+  //
+  // `none`, and it has to stay `none`. Declaring these edges in the page colour to suppress Word's
+  // non-printing gridlines was tried and was much worse: an invisible border is still a **real
+  // ruling line** in the PDF, and a vertical one down the column boundary is precisely what a PDF
+  // reader's table detector looks for. Preview then built a grid from it, extended the grid past the
+  // last horizontal rule, and split the block *below* the table into two pieces at the column
+  // boundary — a callout cut in half and reported as two cells of a row it has nothing to do with.
+  //
+  // Word's gridlines are a view setting and never print. Trading a real line in every PDF for them
+  // is not a trade worth making.
   const borders: Required<TableProperties>["borders"] = {
     top: { style: "none" },
-    bottom: { style: "none" },
+    // Close the table. The stylesheet has no outer frame, but omitting the bottom edge leaves the
+    // grid structurally open to a PDF reader's ruling-line analysis. Preview then takes the next
+    // full-width rule on the page — commonly the Markdown `---` after a callout — as the table's
+    // bottom. Everything between the last real row and that rule becomes one phantom final row;
+    // with a vertical divider it is two cells, without one it is one large cell. That is exactly how
+    // an unrelated info box below the table was selected as part of it.
+    //
+    // The closing rule uses the same 1pt light colour as the row separators, so visually it is one
+    // more ordinary row boundary rather than an outer frame. Unlike widening or restyling the info
+    // box, this fixes the object whose structure is wrong.
+    bottom: { style: "single", size: 8, color: COLORS.rule },
     left: { style: "none" },
     right: { style: "none" },
     insideH: { style: "single", size: 8, color: COLORS.rule },
@@ -2525,8 +2634,16 @@ function makeParagraph(children: ParagraphChild[], properties?: ParagraphPropert
 const PX = 11 / 14;
 /** CSS pixels → twips. */
 const pxTwips = (px: number): number => Math.round(px * PX * 20);
-/** CSS pixels → half-points (the unit `w:sz` uses). */
+/** CSS pixels → half-points (the unit `w:sz` uses for a run). */
 const pxHalfPt = (px: number): number => Math.round(px * PX * 2);
+/**
+ * CSS pixels → eighths of a point, which is what a *border* width is measured in.
+ *
+ * A different unit from {@link pxHalfPt} despite both being called `w:sz`, and the reason this
+ * exists: `border-left: 5px` was written as `5 * 8`, which is 5 **points** in eighths, not 5
+ * pixels. The bar came out 27% thicker than the sheet asks for.
+ */
+const pxEighthPt = (px: number): number => Math.round(px * PX * 8);
 /**
  * A CSS `line-height` multiple → `w:spacing/@w:line` in 240ths.
  *
@@ -2538,6 +2655,57 @@ const lineHeight = (multiple: number): number => Math.round((240 * multiple) / 1
 /** `--markdown-font-size: 14px` with `--markdown-line-height: 22px`. */
 const BODY_PX = 14;
 const BODY_LINE = 22 / BODY_PX;
+
+/**
+ * `p { margin-bottom: 16px }` — the whole of this stylesheet's vertical rhythm.
+ *
+ * Named because a second place needs the same number for the opposite reason: every block takes
+ * its space *above* from whatever precedes it, so a construct that can carry no bottom margin
+ * has to hand this much to the block after it instead. See {@link giveTablesABottomMargin}.
+ */
+const BODY_MARGIN_PX = 16;
+
+/** What a table owes the block below it, in twips. */
+const TABLE_MARGIN_BOTTOM = pxTwips(BODY_MARGIN_PX);
+
+/**
+ * `blockquote { padding: 0 16px 0 10px; border-left: 5px solid }` without outside horizontal margins.
+ *
+ * Two departures from the stylesheet, and both were paid for the hard way.
+ *
+ * **No background.** A PDF reader finds tables by their ruling lines, and a Markdown table's rules
+ * span the whole measure; a band of colour beneath them is geometrically one more row, so Preview
+ * selected the callout as a cell of the table above it. It did that whether the callout was built as
+ * a paragraph or as a single-cell table: its selection UI runs its own layout analysis.
+ * The tint was never the sheet's own anyway: `markdown.css` gives a block quote no background, the
+ * webview host supplies one from `--vscode-textBlockQuote-background`, and GitHub renders a
+ * blockquote as a bar and nothing else.
+ *
+ * **No horizontal margin.** The hard separation from a continued table is the page break *after*
+ * its callout; making the callout narrower as a second defence only made it look like a panel
+ * floating in the middle of the text column. The bar therefore starts at the measure's edge. Its
+ * `w:space` supplies the left padding, and the right indent supplies the right padding — both are
+ * inside the callout's usable width rather than empty space outside it.
+ *
+ * What removing the fill *did* buy is the padding. `w:pBdr`'s `w:space` — the gap between the bar and
+ * the text — is white, so on a tinted panel it was a visible break between the bar and the panel it
+ * was meant to be the edge of and had to be zero. With no fill, white is the page, and the same gap
+ * is simply `padding-left`.
+ */
+const QUOTE_MARGIN_LEFT_PX = 0;
+const QUOTE_MARGIN_RIGHT_PX = 0;
+/** `blockquote { border-left: 5px solid }`. */
+const QUOTE_BAR_PX = 5;
+/** `blockquote { padding-left: 10px }` — carried by the bar's `w:space`. */
+const QUOTE_PAD_LEFT_PX = 14;
+/** `blockquote { padding-right: 16px }`. */
+const QUOTE_PAD_RIGHT_PX = 18;
+/** Small external gap between a callout and the block above it. */
+const QUOTE_GAP_ABOVE_PX = 10;
+/** Body text is 14px; a quote is set one step down. */
+const QUOTE_TEXT_PX = 13;
+/** A little more leading than body text: about 2px of extra air above and below each line. */
+const QUOTE_LINE_PX = 26;
 
 /**
  * Light-theme colours, flattened against the surface each one is painted on.
@@ -2561,6 +2729,11 @@ const COLORS = {
    * `textBlockQuote.background` — `#f2f2f2`, applied by the host's
    *
    *     blockquote { background: var(--vscode-textBlockQuote-background); }
+   *
+   * **Deliberately not used.** A band of fill the width of the text column, sitting below a table
+   * whose row rules span that same width, is geometrically another row of it: a PDF reader selects
+   * the callout as a cell of the table above. Kept named because it is a real colour in the sheet
+   * being ported and the omission is a decision, not an oversight — see the quote constants.
    */
   quoteBackground: "F2F2F2",
   /**
@@ -2605,7 +2778,7 @@ function defaultMarkdownDocDefaults(text: string, options?: MarkdownImportOption
     // `html, body { font-size: 14px; line-height: 22px }` and
     // `p { margin-bottom: 16px }`.
     paragraphProperties: {
-      spacing: { after: pxTwips(16), line: lineHeight(BODY_LINE), lineRule: "auto" }
+      spacing: { after: pxTwips(BODY_MARGIN_PX), line: lineHeight(BODY_LINE), lineRule: "auto" }
     },
     runProperties: derived === undefined ? base : withEastAsianDefaults(base, derived)
   };
@@ -2683,26 +2856,50 @@ function defaultMarkdownStyles() {
       }
     },
     {
-      // `blockquote { padding: 0 16px 0 10px; border-left: 5px solid }` from the
-      // extension's sheet, plus the host's background and border colour. What
-      // neither does is italicise or grey the text: the bar and the tint alone
-      // mark the quote.
+      // A bar-only callout. There is deliberately no fill: Preview otherwise
+      // reads a full-width band below a ruled table as another table row.
       type: "paragraph" as const,
       styleId: "Quote",
       name: "Quote",
       basedOn: "Normal",
       paragraphProperties: {
-        indent: { left: pxTwips(10 + 5), right: pxTwips(16) },
-        shading: { fill: COLORS.quoteBackground, pattern: "clear" as const },
+        // `w:pBdr` draws the bar at `indent - space - width`, so the indent
+        // carries the bar and inner padding; outside horizontal margins are 0.
+        indent: {
+          left: pxTwips(QUOTE_MARGIN_LEFT_PX + QUOTE_BAR_PX + QUOTE_PAD_LEFT_PX),
+          right: pxTwips(QUOTE_MARGIN_RIGHT_PX + QUOTE_PAD_RIGHT_PX)
+        },
+        spacing: {
+          // A small external gap keeps the callout from touching the table or
+          // paragraph above it. This is outside spacing; the horizontal inset
+          // remains entirely inside the bar/text box.
+          before: pxTwips(QUOTE_GAP_ABOVE_PX),
+          // Match the effective gap above. When the preceding block is a table,
+          // its missing bottom margin is transferred to `before`; elsewhere the
+          // preceding paragraph supplies that same body margin itself.
+          after: pxTwips(BODY_MARGIN_PX + QUOTE_GAP_ABOVE_PX),
+          line: lineHeight(QUOTE_LINE_PX / QUOTE_TEXT_PX),
+          lineRule: "auto" as const
+        },
+        // No shading, and no edges but the bar. Both were tried and both are what a reader's table
+        // detection latches onto: a filled band reads as a row, and an "invisible" border painted in
+        // the fill or page colour is still a real ruling line in the PDF.
         borders: {
           left: {
             style: "single" as const,
-            size: 5 * 8,
+            size: pxEighthPt(QUOTE_BAR_PX),
             color: COLORS.quoteBar,
-            space: Math.round(10 * PX)
+            // `padding-left`. White here, and white is the page — which is the whole reason the
+            // padding is available at all now.
+            space: Math.round(QUOTE_PAD_LEFT_PX * PX)
           }
         }
-      }
+      },
+      // A point smaller than the body. The sheet sets a quote at the body size and, on a screen
+      // that can scroll, that is fine; on a page a tinted panel of the same size as the text
+      // around it reads as heavier than the aside it is — and a quote whose source marks it up
+      // `**bold**`, as they commonly do, reads heavier still.
+      runProperties: { size: pxHalfPt(QUOTE_TEXT_PX) }
     },
     {
       // `pre { padding: 16px; border: 1px solid; background }` and

@@ -260,7 +260,7 @@ async function convert(
     const prepared =
       args.renderDiagrams === true
         ? await prepareMarkdownDiagrams(markdown)
-        : { markdown, count: 0, notes: [] as readonly string[] };
+        : { markdown, notes: [] as readonly string[] };
     const doc = await markdownToDocx(prepared.markdown, {
       ...("resolveImage" in prepared && prepared.resolveImage !== undefined
         ? { resolveImage: prepared.resolveImage }

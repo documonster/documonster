@@ -183,7 +183,10 @@ describe("diagram_render", () => {
       background: "transparent"
     });
     const svg = await readFile(path.join(fx.root, "clear.svg"), "utf8");
-    expect(svg).not.toContain('fill="#ffffff"');
+    // Transparent means no canvas-sized background plate. Individual diagram
+    // marks may legitimately be white (edge labels use white to mask the line
+    // behind their words).
+    expect(svg).not.toMatch(/<rect x="0" y="0"[^>]*fill="#ffffff"/);
   });
 
   it("rejects a colour it cannot parse instead of silently drawing black", async () => {
@@ -501,13 +504,66 @@ describe("mermaid fences in Markdown documents", () => {
       .flatMap(runEntry => ("content" in runEntry ? runEntry.content : []))
       .find(entry => entry.type === "image");
     expect(image).toBeDefined();
-    // The natural width is 1034 points, so the cap has to bite: exactly the 468
-    // points of text column, in EMU. Word does not shrink an oversized inline
-    // image; it runs it off the edge of the paper.
+    // The natural width is over the column, so the cap has to bite: exactly the 468 points of
+    // text column, in EMU. Word does not shrink an oversized inline image; it runs it off the
+    // edge of the paper.
     const { width, height } = image as { width: number; height: number };
     expect(width).toBe(468 * 12700);
-    // Fitted, not squashed: 1034.2 × 72.2 keeps its aspect ratio.
-    expect(height / width).toBeCloseTo(72.2 / 1034.2, 3);
+    // Fitted, not squashed. Asserted as a property of the pixels actually embedded rather than
+    // against the layout's natural size, which the fitting pass is free to change.
+    const media = doc.images![0]!.data;
+    const view = new DataView(media.buffer, media.byteOffset);
+    expect(height / width).toBeCloseTo(view.getUint32(20) / view.getUint32(16), 2);
+  });
+
+  it("keeps an over-wide diagram's text legible rather than only in bounds", async () => {
+    const fx = await fixture();
+    // Five links out of one node, each labelled. Fitted to the column by scaling alone this is
+    // 1941 points wide and lands at 3.4pt — in bounds, and a grey smear. The layout has to be
+    // re-run tighter so it can grow downwards instead, which is the only lever that changes the
+    // size on the page: a smaller `fontSize` shrinks the whole drawing with it and cancels out.
+    const wide = [
+      "```mermaid",
+      "flowchart TB",
+      "  P[Governance]",
+      ...["One", "Two", "Three", "Four", "Five"].map(
+        target => `  P -->|Programme direction and coordination| ${target}[${target} Team]`
+      ),
+      "```"
+    ].join("\n");
+    const note = await run(docWriteTool, fx, { path: "legible.docx", markdown: wide });
+    // Body text clears the floor after fitting. Edge labels are authored a step
+    // smaller on purpose; requiring every one of them to reach 8pt over-wraps
+    // the whole chart and can turn one page into two.
+    expect(note).not.toContain("wider than the text column allows");
+
+    const doc = await Io.readFile(path.join(fx.root, "legible.docx"));
+    const media = doc.images![0]!.data;
+    const view = new DataView(media.buffer, media.byteOffset);
+    // 1855 × 194 untuned, so a 9.6:1 strip drawn at 3.5pt; 781 × 170 tuned, 4.6:1 at 8.4pt.
+    // The absence of the note above is the direct assertion — the tool worked the point size
+    // out and decided it cleared the floor — and this is the sanity check on the shape.
+    expect(view.getUint32(16) / view.getUint32(20)).toBeLessThan(5);
+  });
+
+  it("says so when a diagram cannot be made legible", async () => {
+    const fx = await fixture();
+    // A chain eight ranks deep left to right is eight nodes wide and one node tall whatever the
+    // gaps are set to. Nothing can fit that in 6.5 inches at a readable size, and claiming
+    // otherwise is worse than saying it.
+    const chain = [
+      "```mermaid",
+      "flowchart LR",
+      "  A[Alpha Component] --> B[Bravo Component] --> C[Charlie Component] --> D[Delta Component]",
+      "  D --> E[Echo Component] --> F[Foxtrot Component] --> G[Golf Component] --> H[Hotel]",
+      "```"
+    ].join("\n");
+    const note = await run(docWriteTool, fx, { path: "cramped.docx", markdown: chain });
+    expect(note).toContain("wider than the text column allows");
+    // Still embedded, and still inside the page: reporting the problem does not mean dropping
+    // the diagram.
+    const doc = await Io.readFile(path.join(fx.root, "cramped.docx"));
+    expect(doc.images).toHaveLength(1);
   });
 
   it("keeps the fence as code when asked", async () => {

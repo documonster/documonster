@@ -312,6 +312,41 @@ describe("edges that would otherwise coincide", () => {
   });
 });
 
+describe("bent edge stems", () => {
+  it("snaps a visually centred edge to one straight segment", () => {
+    // The group frame is 3.5 units off the parent centre because its members
+    // have unequal widths. That is invisible as placement and very visible as
+    // a tiny dogleg in the arrow joining them.
+    const result = layout(`flowchart TB
+      P[Parent]
+      subgraph G[Group]
+        A[A]
+        B[BBB]
+      end
+      P --> G`);
+    const route = result.edges.find(edge => edge.edge.from === "P" && edge.edge.to === "G")!;
+    const horizontal = Math.abs(route.points[0]!.x - route.points.at(-1)!.x);
+    expect(horizontal).toBeLessThanOrEqual(6);
+    expect(route.points[0]!.x).toBeCloseTo(route.points.at(-1)!.x, 5);
+  });
+
+  it("bends halfway through the border gap when node heights differ", () => {
+    // A centre-to-centre midpoint is biased toward the tall parent and left
+    // only a tiny neck before the horizontal fan-out. The visible gap, not the
+    // invisible centres, is what a reader perceives.
+    const result = layout(`flowchart TB
+      P["Tall parent<br/>line two<br/>line three<br/>line four"]
+      P --> A[One]
+      P --> B[Two]`);
+    const parent = nodeById(result, "P");
+    const child = nodeById(result, "A");
+    const route = result.edges.find(edge => edge.edge.to === "A")!;
+    const expected = (parent.y + parent.height + child.y) / 2;
+    expect(route.points[1]!.y).toBeCloseTo(expected, 5);
+    expect(route.points[1]!.y - (parent.y + parent.height)).toBeGreaterThan(15);
+  });
+});
+
 describe("the display list", () => {
   it("draws an arrowhead as a closed triangle, which every backend already has", () => {
     // A marker is an SVG-only concept; the producer lowers it so nothing had to be added
@@ -436,5 +471,213 @@ describe("pie and sequence", () => {
     );
     // Two lifelines, plus the dotted reply.
     expect(dashed.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("edge labels have somewhere to be", () => {
+  /** Every pair of labels that share any area. */
+  const collisions = (source: string, options?: Parameters<typeof layoutFlowchart>[1]): number => {
+    const boxes = layoutFlowchart(parseMermaid(source) as FlowchartDiagram, options)
+      .edges.map(route => route.label)
+      .filter((label): label is NonNullable<typeof label> => label !== undefined);
+    let hits = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        if (overlapX > 0 && overlapY > 0) {
+          hits++;
+        }
+      }
+    }
+    return hits;
+  };
+
+  it("separates a fan of identically labelled links", () => {
+    // Five links out of one node, all labelled the same. The labels sit at the midpoints of
+    // their own links, so they spread only half as far as the targets do — widening the node
+    // gap can never separate them, and five of them merged into one unreadable grey band.
+    expect(
+      collisions(
+        `flowchart TB
+           P[Parent]
+           P -->|Programme direction and coordination| A[One]
+           P -->|Programme direction and coordination| B[Two]
+           P -->|Programme direction and coordination| C[Three]
+           P -->|Programme direction and coordination| D[Four]
+           P -->|Programme direction and coordination| E[Five]`
+      )
+    ).toBe(0);
+  });
+
+  it("separates a fully joined bipartite pair of ranks", () => {
+    // Three sources, four targets, every pair joined and labelled. The midpoints interleave:
+    // `(source1 + target2) / 2` falls left of `(source3 + target1) / 2` however far apart the
+    // ranks are spread, so no rule about neighbours within one rank can state the constraint.
+    const links = ["S1", "S2", "S3"]
+      .flatMap(source =>
+        ["T1", "T2", "T3", "T4"].map(
+          target => `${source} -. dependencies and timeline alignment .-> ${target}`
+        )
+      )
+      .join("\n");
+    expect(collisions(`flowchart TB\n${links}`)).toBe(0);
+  });
+
+  it("separates labels on links that skip a rank", () => {
+    // These are threaded through dummies rather than bending at a boundary, so they get no
+    // lane; the dummy standing in for the label is sized to it instead.
+    expect(
+      collisions(
+        `flowchart TB
+           TOP[Top] --> MID[Middle]
+           TOP -. direct visibility .-> A[One]
+           TOP -. direct visibility .-> B[Two]
+           TOP -. direct visibility .-> C[Three]
+           MID --> A
+           MID --> B
+           MID --> C`
+      )
+    ).toBe(0);
+  });
+
+  it("keeps a label on the line it belongs to", () => {
+    // The lane a link bends in *is* where its label goes. Read back off the finished polyline
+    // instead, the anchor drifts off the crossing run as soon as the bend leaves centre.
+    // Asserted of the label's centre, not its box: a label wider than the run it rides on
+    // overhangs both ends, which is normal and not a defect.
+    for (const route of layout(
+      `flowchart TB
+         P[Parent] -->|first label here| A[One]
+         P -->|second label here| B[Two]
+         P -->|third label here| C[Three]`
+    ).edges) {
+      const label = route.label!;
+      const at = { x: label.x + label.width / 2, y: label.y + label.height / 2 };
+      const onLine = route.points.some((point, index) => {
+        if (index === 0) {
+          return false;
+        }
+        const previous = route.points[index - 1];
+        const length = Math.hypot(point.x - previous.x, point.y - previous.y);
+        if (length === 0) {
+          return false;
+        }
+        // Distance from the point to the segment, by the cross product over its length.
+        const t =
+          ((at.x - previous.x) * (point.x - previous.x) +
+            (at.y - previous.y) * (point.y - previous.y)) /
+          (length * length);
+        if (t < 0 || t > 1) {
+          return false;
+        }
+        const cross = Math.abs(
+          (point.x - previous.x) * (at.y - previous.y) -
+            (point.y - previous.y) * (at.x - previous.x)
+        );
+        return cross / length < 1;
+      });
+      expect(onLine).toBe(true);
+    }
+  });
+});
+
+describe("an edge may name a subgraph", () => {
+  const source = `flowchart TB
+      TOP[Top] --> GROUP
+      subgraph GROUP[Inner]
+        A[One]
+        B[Two]
+      end
+      GROUP -. alignment .-> OUT[Out]`;
+
+  it("draws no node for the group", () => {
+    // `touch` makes a placeholder for every id an edge names, and it cannot know the id is a
+    // group's. Left in, the diagram grew a box labelled GROUP beside the frame that *is*
+    // GROUP.
+    expect(
+      layout(source)
+        .nodes.map(node => node.id)
+        .sort()
+    ).toEqual(["A", "B", "OUT", "TOP"]);
+  });
+
+  it("ranks the group's members below the node pointing at them", () => {
+    // The members have no edges of their own, so without expanding the cluster endpoint they
+    // stayed on rank 0 — beside TOP rather than below it.
+    const result = layout(source);
+    const top = nodeById(result, "TOP");
+    const frame = result.groups.find(group => group.id === "GROUP")!;
+    expect(frame.y).toBeGreaterThan(top.y + top.height);
+    expect(nodeById(result, "OUT").y).toBeGreaterThan(frame.y + frame.height);
+  });
+
+  it("still treats an id that is also a node as a node", () => {
+    const result = layout(`flowchart TB
+        TOP[Top] --> GROUP
+        subgraph GROUP[Inner]
+          GROUP[A real node]
+          A[One]
+        end`);
+    expect(result.nodes.map(node => node.id).sort()).toEqual(["A", "GROUP", "TOP"]);
+  });
+
+  it("threads a long edge to a subgraph past intermediate nodes", () => {
+    // The ordering pass sees expanded member edges, while rendering sees the
+    // original GROUP edge. Losing the representative edge's dummy waypoints at
+    // that boundary made the visible edge cut through M1/M2/M3.
+    const result = layout(`flowchart TB
+        TOP[Top] ----> GROUP
+        TOP --> M1[Middle one] --> M2[Middle two] --> M3[Middle three]
+        subgraph GROUP[Inner]
+          A[One]
+          B[Two]
+        end`);
+    const route = result.edges.find(edge => edge.edge.from === "TOP" && edge.edge.to === "GROUP")!;
+    for (const id of ["M1", "M2", "M3"]) {
+      const box = nodeById(result, id);
+      for (let i = 1; i < route.points.length; i++) {
+        expect(segmentHitsBox(route.points[i - 1]!, route.points[i]!, box), id).toBe(false);
+      }
+    }
+    expect(route.points.length).toBeGreaterThan(2);
+  });
+
+  it("reserves room for a wrapped label on a subgraph edge", () => {
+    const result = layoutFlowchart(
+      parseMermaid(`flowchart TB
+        TOP[Top] -->|a very long label that has to wrap over several lines| GROUP
+        subgraph GROUP[Inner]
+          A[One]
+          B[Two]
+        end`) as FlowchartDiagram,
+      { maxEdgeLabelWidth: 40 }
+    );
+    const route = result.edges.find(edge => edge.edge.to === "GROUP")!;
+    const frame = result.groups.find(group => group.id === "GROUP")!;
+    expect(route.label).toBeDefined();
+    expect(route.label!.y + route.label!.height).toBeLessThanOrEqual(frame.y);
+    expect(route.label!.y).toBeGreaterThanOrEqual(nodeById(result, "TOP").y);
+  });
+});
+
+describe("subgraph frames occupy space", () => {
+  it("leaves room between two frames for the links that cross", () => {
+    // A frame is padding plus a title bar outside its members, and all of it comes out of the
+    // rank gap the links were going to use: two frames ended nine units apart and five links
+    // shared a lane running along the second group's title.
+    const result = layout(`flowchart TB
+        subgraph ONE[First]
+          A[One]
+        end
+        subgraph TWO[Second]
+          B[Two]
+        end
+        A -. alignment .-> B`);
+    const first = result.groups.find(group => group.id === "ONE")!;
+    const second = result.groups.find(group => group.id === "TWO")!;
+    expect(second.y - (first.y + first.height)).toBeGreaterThan(20);
   });
 });

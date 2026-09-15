@@ -188,6 +188,38 @@ export function parseFlowchart(source: string, direction: FlowDirection): Flowch
     });
   }
 
+  // An edge endpoint naming a subgraph attaches to that group, not to a node of the same
+  // name. `touch` cannot know that — the group may be declared after the edge — so the
+  // placeholder it made is withdrawn here. Left in, `DM --> ALIGNMENT` drew a box labelled
+  // `ALIGNMENT` beside the frame that *is* ALIGNMENT, and the group's members, having no
+  // edge of their own, stayed on rank 0 next to the node that pointed at them.
+  //
+  // A group id that also carries a label or a shape of its own (`ALIGNMENT[Text]`) was
+  // written as a node deliberately, and stays one.
+  const withdrawn = new Set<string>();
+  for (const group of subgraphs) {
+    const entry = nodes.get(group.id);
+    if (
+      entry === undefined ||
+      entry.text !== undefined ||
+      entry.shape !== undefined ||
+      entry.classes.length > 0
+    ) {
+      continue;
+    }
+    nodes.delete(group.id);
+    withdrawn.add(group.id);
+  }
+  // `touch` also enrolled it in every group it sat inside, and a frame drawn around a member
+  // that no longer exists is a frame drawn around nothing.
+  const groups =
+    withdrawn.size === 0
+      ? subgraphs
+      : subgraphs.map(group => ({
+          ...group,
+          nodeIds: group.nodeIds.filter(id => !withdrawn.has(id))
+        }));
+
   const list: FlowNode[] = [...nodes].map(([id, entry]) => ({
     id,
     text: entry.text ?? id,
@@ -201,7 +233,7 @@ export function parseFlowchart(source: string, direction: FlowDirection): Flowch
     ...(title === undefined ? {} : { title }),
     nodes: list,
     edges,
-    subgraphs,
+    subgraphs: groups,
     classDefs
   };
 }
@@ -429,7 +461,13 @@ function readLink(text: string, start: number): LinkRef | undefined {
 
   // `-.-`, `-..-`, `-...-` … each extra dot is one more rank, so the whole dotted run has
   // to be taken in one bite; matching a single dot left `-..->` unparsed entirely.
-  const body = /^(-\.+-|-+|=+)/.exec(text.slice(index));
+  //
+  // `-\.+` — dots with no closing dash — is the *split* dotted form `-. text .->`, whose
+  // shaft is interrupted by the label instead of closed. It has to be tried before `-+`,
+  // or `-. x .-> y` matches a bare `-`, reads as solid, and the whole edge is discarded:
+  // that silently dropped all five governance links in a diagram whose remaining edges
+  // then had nothing to rank against, so two clusters landed side by side 7866px wide.
+  const body = /^(-\.+-|-\.+|-+|=+)/.exec(text.slice(index));
   if (!body) {
     return undefined;
   }
@@ -437,8 +475,32 @@ function readLink(text: string, start: number): LinkRef | undefined {
   const stroke: EdgeStroke = raw.includes(".") ? "dotted" : raw.startsWith("=") ? "thick" : "solid";
   index += raw.length;
 
-  // `-- text --> B`: the label sits between two halves of the link.
   let label: string | undefined;
+
+  // `-. text .-> B`. The terminator is a dot rather than a dash, so this needs its own
+  // read: the generic inline form below stops at `-`/`=` and would swallow the `.-`.
+  if (stroke === "dotted" && !raw.endsWith("-")) {
+    // The tail is separated from the label by whitespace; the label itself may
+    // contain dots (`release v1.2`, a sentence, a domain name). Stopping at the
+    // first dot silently changed the destination into part of the label's tail.
+    const split = /^([^-=>|].*?)\s+(\.+-+>|\.+-+)/.exec(text.slice(index));
+    if (split) {
+      label = decodeLabel(split[1]);
+      index += split[0].length;
+      const end = readEndFromTail(split[2]);
+      return finishLink(
+        text,
+        index,
+        stroke,
+        startEnd.end,
+        end,
+        label,
+        rankSpan(raw, split[2], end === "arrow", true)
+      );
+    }
+  }
+
+  // `-- text --> B`: the label sits between two halves of the link.
   const inline = /^([^-=>|][^-=]*?)\s*(-{2,}>|-{2,}|={2,}>|={2,}|-\.->|-\.-)/.exec(
     text.slice(index)
   );
@@ -531,9 +593,11 @@ function readEndFromTail(tail: string): EdgeEnd {
  */
 function rankSpan(head: string, tail: string, hasArrow: boolean, split: boolean): number {
   if (head.includes(".")) {
-    // `-.->` is one, `-..->` is two: the dots are the length.
+    // `-.->` is one, `-..->` is two: the dots are the length. Splitting the link around a
+    // label (`-. text .->`) spends one dot closing the head and one opening the tail, so
+    // the minimum form carries two dots without having asked for any extra rank.
     const dots = (head + tail).replace(/[^.]/g, "").length;
-    return Math.max(1, dots);
+    return Math.max(1, dots - (split ? 1 : 0));
   }
   const shaft = (head + tail).replace(/[^-=]/g, "").length;
   const base = (hasArrow ? 2 : 3) + (split ? 2 : 0);

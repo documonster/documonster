@@ -128,7 +128,7 @@ export const THEME_PRESETS: Readonly<Record<ThemePreset, ThemeOptions>> = {
     nodeText: "#111111",
     edge: "#555555",
     edgeText: "#111111",
-    edgeLabelBackground: "#f4f4f4",
+    edgeLabelBackground: "#ffffff",
     groupFill: "#fafafa",
     groupStroke: "#cccccc",
     title: "#111111",

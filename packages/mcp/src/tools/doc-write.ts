@@ -89,7 +89,7 @@ export const docWriteTool = defineTool({
     const prepared =
       (args.diagrams ?? config.groups.has("diagram"))
         ? await prepareMarkdownDiagrams(args.markdown)
-        : { markdown: args.markdown, count: 0, notes: [] as readonly string[] };
+        : { markdown: args.markdown, notes: [] as readonly string[] };
 
     // markdownToDocx is async — verified; treating it as synchronous yields an
     // empty object that fails much later inside the packager.

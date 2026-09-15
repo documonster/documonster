@@ -210,14 +210,14 @@ describe("markdownToDocxBody", () => {
       expect(para.properties?.style).toBe("Quote");
     });
 
-    it("carries the quote's geometry and bar on the Quote style, not the paragraph", async () => {
-      // Indent, background and the left bar belong to the named style; a
-      // paragraph that repeats them cannot be restyled by editing the style.
-      const { markdownToDocx } = await import("../convert/markdown/markdown-import");
+    it("carries the quote's panel on the Quote style, not the paragraph", async () => {
       const doc = await markdownToDocx("> This is a quote");
       const quote = doc.styles?.find(s => s.styleId === "Quote");
       expect(quote?.paragraphProperties?.indent?.left).toBeGreaterThan(0);
       expect(quote?.paragraphProperties?.borders?.left?.style).toBe("single");
+      // No background: a filled band the width of the text column, below a table whose rules span
+      // that width, is read as another row of it. See the style-regression suite.
+      expect(quote?.paragraphProperties?.shading).toBeUndefined();
       // The stylesheet marks a quote with the bar alone — never italic or grey.
       expect(quote?.runProperties?.italic).toBeUndefined();
       expect(quote?.runProperties?.color).toBeUndefined();
@@ -226,8 +226,7 @@ describe("markdownToDocxBody", () => {
     it("should handle multi-line blockquotes", async () => {
       const body = await mdBody("> Line 1\n> Line 2");
       expect(body).toHaveLength(1);
-      const para = body[0] as Paragraph;
-      expect(para.properties?.style).toBe("Quote");
+      expect((body[0] as Paragraph).properties?.style).toBe("Quote");
     });
   });
 

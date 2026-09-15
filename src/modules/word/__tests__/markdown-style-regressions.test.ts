@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import { markdownToDocx, markdownToDocxBody } from "../convert/markdown/markdown-import";
 import { toBuffer } from "../document-io";
 import { layoutDocumentFull } from "../layout/layout-full";
+import type { Table } from "../types";
 
 /** Read one part out of a packaged .docx as text. */
 async function part(bytes: Uint8Array, path: string): Promise<string> {
@@ -41,127 +42,224 @@ describe("markdownToDocxBody", () => {
 });
 
 describe("blockquote", () => {
+  const quoteStyle = async () =>
+    (await markdownToDocx("> quoted")).styles?.find(s => s.styleId === "Quote")
+      ?.paragraphProperties;
+
   it("does not overwrite the style of a block that carries its own", async () => {
-    // Everything inside a quote was forced to `Quote`, which stripped a fenced
-    // code block of its frame, background and leading, and flattened headings.
+    // Everything inside a quote was forced to `Quote`, which stripped a fenced code block of its
+    // frame, background and leading, and flattened headings.
     const doc = await markdownToDocx("> ```ts\n> code\n> ```\n\n> # heading\n\n> plain");
     const styles = doc.body.filter(b => b.type === "paragraph").map(b => b.properties?.style);
     expect(styles).toEqual(["CodeBlock", "Heading1", "Quote"]);
   });
 
-  it("takes its bar and tint from the theme, and never italicises the text", async () => {
-    // `markdown.css` sets no colours on a block quote — the *webview host* does,
-    // via `--vscode-textBlockQuote-background` / `-border`. Reading only the
-    // extension's stylesheet once led to both being dropped, which turned the
-    // blue bar grey and removed the tint. What no stylesheet does is italicise or
-    // grey the text.
-    const doc = await markdownToDocx("> quoted");
-    const quote = doc.styles?.find(s => s.styleId === "Quote");
-    // `textBlockQuote.border` `#007acc80` over the quote's own `#f2f2f2`.
-    expect(quote?.paragraphProperties?.borders?.left?.color).toBe("79B6DF");
-    // `textBlockQuote.background` `#f2f2f2`.
-    expect(quote?.paragraphProperties?.shading?.fill).toBe("F2F2F2");
+  it("is never a table, however tempting the padding is", async () => {
+    // It has been a single-cell table twice, because a cell is the only OOXML construct with real
+    // padding. A cell *is* a table, and a reader is entitled to treat it as one: with the PDF tagged
+    // it reports the callout as a table and draws cell furniture round it when clicked, and untagged
+    // its ruling lines feed the reader's own table detection. Either way the callout stops being one.
+    const doc = await markdownToDocx("| A | B |\n|---|---|\n| 1 | 2 |\n\n> quoted");
+    expect(doc.body.map(b => b.type)).toEqual(["table", "paragraph"]);
+  });
+
+  it("takes its bar from the theme, and never italicises the text", async () => {
+    // `markdown.css` sets no colours on a block quote — the *webview host* does, via
+    // `--vscode-textBlockQuote-border`. Reading only the extension's sheet turned the bar grey once.
+    const props = await quoteStyle();
+    expect(props?.borders?.left?.color).toBe("79B6DF");
+    const quote = (await markdownToDocx("> quoted")).styles?.find(s => s.styleId === "Quote");
     expect(quote?.runProperties?.italic).toBeUndefined();
     expect(quote?.runProperties?.color).toBeUndefined();
   });
 
+  it("carries no background at all", async () => {
+    // The one change that actually fixed it. A band of fill the width of the text column, below a
+    // table whose row rules span that same width, is geometrically another row of it — Preview
+    // selected the callout as a cell of the table above, and did so whether the callout was built as
+    // a paragraph or as a table. Removing the fill is what stopped it, and it is also what made the
+    // padding below possible.
+    const props = await quoteStyle();
+    expect(props?.shading).toBeUndefined();
+    // And no edge but the bar: an "invisible" border painted in the page or fill colour is still a
+    // real ruling line in the PDF, which is the other thing a table detector latches onto.
+    expect(Object.keys(props?.borders ?? {})).toEqual(["left"]);
+  });
+
+  it("carries comfortable padding, which only a quote with no fill can have", async () => {
+    // `w:pBdr`'s `w:space` is the gap between the bar and the text, and it is *white*. On a tinted
+    // panel that made it a visible break between the bar and the panel it was meant to be the edge
+    // of, so it had to be zero and there was no left padding to be had. With no fill, white is the
+    // page and the same gap is simply `padding-left`.
+    const props = await quoteStyle();
+    const px = (v: number) => Math.round(v * (11 / 14) * 20);
+    // No outside margin. The indent carries only bar + inner padding,
+    // because the bar is drawn at `indent - space - size`.
+    expect(props?.indent?.left).toBe(px(5 + 14));
+    expect(props?.indent?.right).toBe(px(18));
+    expect(props?.borders?.left?.space).toBe(Math.round(14 * (11 / 14)));
+    // A small external gap keeps the callout clear of the content above it;
+    // vertical breathing room inside the text remains in the larger leading.
+    expect(props?.spacing?.before).toBeGreaterThan(0);
+    expect(props?.spacing?.line).toBeGreaterThan(240);
+    expect(props?.spacing?.after).toBeGreaterThan(0);
+  });
+
+  it("puts the bar on the measure edge and spends all horizontal space inside", async () => {
+    // The hard separation from a continued table is the page boundary after
+    // the callout. Styling no longer needs a defensive outside inset.
+    const props = await quoteStyle();
+    const pt = (twips: number) => twips / 20;
+    const barAndPadding =
+      (props!.borders!.left!.size ?? 0) / 8 + (props!.borders!.left!.space ?? 0);
+    // Rounding px independently into twips / eighth-points leaves under a
+    // tenth of a point, visually the measure edge.
+    expect(Math.abs(pt(props!.indent!.left!) - barAndPadding)).toBeLessThan(0.1);
+    expect(pt(props!.indent!.right!)).toBeGreaterThan(10);
+  });
+
+  it("draws the bar at the width the sheet asks for, and inside the measure", async () => {
+    const props = await quoteStyle();
+    // `border-left: 5px` in eighths of a point — not `5 * 8`, which is five *points* and made the bar
+    // 27% too thick.
+    expect(props?.borders?.left?.size).toBe(Math.round(5 * (11 / 14) * 8));
+    // Bar plus padding must fit inside the indent, or the bar is drawn off the page.
+    const barPt = (props!.borders!.left!.size ?? 0) / 8 + (props!.borders!.left!.space ?? 0);
+    expect(barPt).toBeLessThanOrEqual(props!.indent!.left! / 20);
+  });
+
+  it("sets a quote a step below body text", async () => {
+    const doc = await markdownToDocx("> quoted");
+    expect(doc.styles?.find(s => s.styleId === "Quote")?.runProperties?.size).toBeLessThan(
+      doc.docDefaults!.runProperties!.size!
+    );
+  });
+
   it("gives a code block a background but no frame", async () => {
-    // `pre` asks for `1px solid var(--vscode-widget-border)`, and `widget.border`
-    // resolves to nothing outside the high-contrast themes, so the border never
-    // computes.
-    const doc = await markdownToDocx("```ts\nx\n```");
-    const code = doc.styles?.find(s => s.styleId === "CodeBlock");
+    const code = (await markdownToDocx("```ts\nx\n```")).styles?.find(
+      s => s.styleId === "CodeBlock"
+    );
     expect(code?.paragraphProperties?.shading?.fill).toBe("F1F1F1");
     expect(code?.paragraphProperties?.borders).toBeUndefined();
   });
 });
 
-describe("packaged output", () => {
-  it("writes exactly one w:pBdr for a thematic break", async () => {
-    // `w:pPr` permits a single `w:pBdr`. A thematic break that also carried
-    // explicit borders emitted two, and a reader dropped the real settings.
-    const bytes = await toBuffer(await markdownToDocx("a\n\n---\n\nb"));
-    const xml = await part(bytes, "word/document.xml");
-    const bordered = xml.split("<w:p>").filter(p => p.includes("<w:pBdr>"));
-    expect(bordered).not.toHaveLength(0);
-    for (const paragraph of bordered) {
-      expect(paragraph.match(/<w:pBdr>/g)).toHaveLength(1);
+describe("ruling lines", () => {
+  /**
+   * An invisible border is still a real line in the PDF, and a PDF reader's table detector looks for
+   * exactly that. Declaring these edges in the page colour — to suppress Word's non-printing
+   * on-screen gridlines — drew a vertical rule down the column boundary; Preview built a grid from
+   * it, extended the grid past the last horizontal rule, and split the block *below* the table into
+   * two pieces at that boundary. A callout was cut in half and reported as two cells of a row it had
+   * nothing to do with.
+   *
+   * Word's gridlines never print. These tests pin the trade in the direction that survived.
+   */
+  it("draws no vertical rule, but closes the table after its last row", async () => {
+    const doc = await markdownToDocx("| A | B |\n|---|---|\n| 1 | 2 |");
+    const borders = (doc.body[0] as Table).properties?.borders;
+    expect(borders?.insideV?.style).toBe("none");
+    for (const edge of ["top", "left", "right"] as const) {
+      expect(borders?.[edge]?.style, edge).toBe("none");
+    }
+    // Row separators and the closing edge are the only rules. Without the latter Preview takes the
+    // next full-width rule on the page as the table's bottom, so an unrelated callout between them
+    // becomes a phantom final row — two cells when a vertical divider existed, one when it did not.
+    expect(borders?.insideH?.style).toBe("single");
+    expect(borders?.bottom?.style).toBe("single");
+    expect(borders?.bottom?.color).toBe(borders?.insideH?.color);
+    expect(borders?.bottom?.size).toBe(borders?.insideH?.size);
+  });
+
+  it("puts that closing rule on every cell of the last row", async () => {
+    // Asserted after layout rather than only in the style: border conflict resolution is what reaches
+    // the PDF, and that is where an apparently correct declaration can disappear.
+    const doc = await markdownToDocx("| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |");
+    const table = layoutDocumentFull(doc).pages[0]!.content.find(block => block.type === "table")!;
+    const last = Math.max(...table.cells.map(cell => cell.row));
+    const cells = table.cells.filter(cell => cell.row === last);
+    expect(cells).toHaveLength(2);
+    for (const cell of cells) {
+      expect(cell.borders?.bottom?.width).toBeGreaterThan(0);
+      expect(cell.borders?.bottom?.color).toBe("D1D1D1");
     }
   });
 
-  it("writes w:space as a whole number of points", async () => {
-    // `w:space` is ST_PointMeasure. Converted CSS lengths are rarely integral, and
-    // `w:space="12.571428571428571"` is rejected by strict consumers.
-    const bytes = await toBuffer(await markdownToDocx("> q\n\n```ts\nx\n```\n\n# h"));
-    const xml = (await part(bytes, "word/document.xml")) + (await part(bytes, "word/styles.xml"));
-    expect(xml.match(/w:space="[^"]*\.[^"]*"/g)).toBeNull();
-  });
-});
-
-describe("tables", () => {
-  const TABLE = [
-    "| Layer | Technology |",
-    "| ----- | ---------- |",
-    "| Runtime | Node.js 26 |",
-    "| Package Manager | pnpm 11 (workspaces), and a good deal more prose besides |"
-  ].join("\n");
-
-  /** The single table in a converted document. */
-  async function tableOf(markdown: string) {
-    const doc = await markdownToDocx(markdown);
-    const table = doc.body.find(b => b.type === "table");
-    expect(table).toBeDefined();
-    return table!;
-  }
-
-  it("sizes columns from their content instead of dividing the measure equally", async () => {
-    // Nothing downstream will do this: `w:tblLayout w:type="autofit"` is
-    // advisory, Word renders the grid it is given, and the layout divides
-    // equally when there is none. So a `Layer` column got the same 234pt as the
-    // prose beside it — half the table wasted while the other half wrapped.
-    const table = await tableOf(TABLE);
-    const widths = table.columnWidths;
-    expect(widths).toBeDefined();
-    expect(widths).toHaveLength(2);
-    expect(widths![0]).toBeLessThan(widths![1]);
-    // The grid covers the measure exactly, so the table's right edge lands on
-    // the margin: 12240 twips of Letter less two 1440 margins.
-    expect(widths![0] + widths![1]).toBe(9360);
-  });
-
-  it("gives a one-column table the whole measure", async () => {
-    const table = await tableOf("| Only |\n| ---- |\n| cell |");
-    expect(table.columnWidths).toEqual([9360]);
-  });
-
-  it("does not leave a paragraph's bottom margin inside a cell", async () => {
-    // A cell in the preview holds inline content directly — `<td>text</td>`,
-    // with no `<p>` wrapper — so it never picks up `p { margin-bottom: 16px }`.
-    // Inheriting it added 12.55pt of dead space to every cell, which made a
-    // one-line row half again as tall as its padding and leading call for.
-    const table = await tableOf(TABLE);
-    for (const row of table.rows) {
-      for (const cell of row.cells) {
-        for (const block of cell.content) {
-          expect(block.type).toBe("paragraph");
-          expect(block.type === "paragraph" && block.properties?.spacing?.after).toBe(0);
-          // `line` is left to inherit, so a cell leads at the body's 1.57.
-          expect(block.type === "paragraph" && block.properties?.spacing?.line).toBeUndefined();
+  it("leaves a table with no vertical rule at all", async () => {
+    // Measured on the laid-out page rather than the declarations, because a table border reaches the
+    // page through cell-level resolution and that is where the earlier version leaked: every cell
+    // came out with `right: FFFFFF`, a real line down the column boundary that a reader's table
+    // detector then built a grid from.
+    const doc = await markdownToDocx("| A | B |\n|---|---|\n| 1 | 2 |\n\n> quoted");
+    const vertical: string[] = [];
+    for (const block of layoutDocumentFull(doc).pages[0]!.content) {
+      if (block.type !== "table") {
+        continue;
+      }
+      for (const cell of block.cells ?? []) {
+        for (const edge of ["left", "right"] as const) {
+          const border = cell.borders?.[edge];
+          if (border) {
+            vertical.push(`${edge}:${border.color}`);
+          }
         }
       }
     }
+    expect(vertical).toEqual([]);
+  });
+});
+
+describe("what follows a table", () => {
+  const TABLE = "| A | B |\n|---|---|\n| 1 | 2 |\n";
+
+  /** `spacing.before` on the block at `index`, in twips. */
+  const before = (doc: Awaited<ReturnType<typeof markdownToDocx>>, index: number) => {
+    const block = doc.body[index];
+    return block?.type === "paragraph" ? (block.properties?.spacing?.before ?? 0) : undefined;
+  };
+
+  it("gives a plain paragraph the margin the table cannot carry", async () => {
+    // This stylesheet's rhythm is bottom margins only, and OOXML has no space-after on an inline
+    // table — so the chain breaks and the next block sits flush against the last rule.
+    const doc = await markdownToDocx(`${TABLE}\nAfter.`);
+    expect(before(doc, 1)).toBeGreaterThan(0);
   });
 
-  it("writes the computed grid into the package", async () => {
-    const bytes = await toBuffer(await markdownToDocx(TABLE));
-    const xml = await part(bytes, "word/document.xml");
-    const grid = /<w:tblGrid>(.*?)<\/w:tblGrid>/s.exec(xml);
-    expect(grid).not.toBeNull();
-    const cols = [...grid![1].matchAll(/w:w="(\d+)"/g)].map(m => Number(m[1]));
-    expect(cols).toHaveLength(2);
-    // Not the equal split the writer synthesises when no grid is supplied.
-    expect(cols[0]).not.toBe(cols[1]);
-    expect(cols[0] + cols[1]).toBe(9360);
+  it("leaves a block that does not follow a table alone", async () => {
+    const doc = await markdownToDocx("One.\n\nTwo.");
+    expect(before(doc, 1)).toBe(0);
+  });
+
+  it("does not reach past a table to the block after that", async () => {
+    const doc = await markdownToDocx(`${TABLE}\nFirst.\n\nSecond.`);
+    expect(before(doc, 1)).toBeGreaterThan(0);
+    expect(before(doc, 2)).toBe(0);
+  });
+
+  it("puts a paragraph between two adjacent tables", async () => {
+    // ECMA-376 §17.13.5.34: a `<w:tbl>` must be followed by a paragraph before the next may begin,
+    // or Word collapses the pair into one malformed table — which is exactly the "it took the
+    // layout of the table above" failure.
+    const doc = await markdownToDocx(`${TABLE}\n${TABLE}`);
+    expect(doc.body.map(b => b.type)).toEqual(["table", "paragraph", "table"]);
+    const xml = await part(await toBuffer(doc), "word/document.xml");
+    const firstEnd = xml.indexOf("</w:tbl>");
+    const secondStart = xml.indexOf("<w:tbl>", firstEnd);
+    expect(secondStart).toBeGreaterThan(firstEnd);
+    expect(xml.slice(firstEnd + "</w:tbl>".length, secondStart)).toContain("<w:p");
+  });
+
+  it("makes that separator cost a hairline, not a blank line", async () => {
+    // The writer synthesises a bare `<w:p/>` when it has to, which is correct and expensive: with no
+    // properties it inherits the body's 22px line and 16px bottom margin, so a spec formality costs
+    // 30 points of blank page. Emitted here instead it can be sized — an exact 1pt line, and the
+    // table's own bottom margin as the gap that belongs there anyway.
+    const doc = await markdownToDocx(`${TABLE}\n${TABLE}`);
+    const separator = layoutDocumentFull(doc).pages[0]!.content[1]!;
+    expect(separator.type).toBe("paragraph");
+    // The 16px margin, plus a point of line. A bare `<w:p/>` here measured 26.
+    expect(separator.rect.height).toBeLessThan(16);
+    expect(separator.rect.height).toBeGreaterThan(12);
   });
 });
 

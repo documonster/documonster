@@ -938,6 +938,114 @@ describe("layoutDocumentFull — splitting blocks across pages", () => {
     }
   });
 
+  it("keeps a Quote with a continued table but ends the page after it", () => {
+    // Preview extends a table that starts at the top of a continuation page over
+    // a callout immediately below it when the following thematic break supplies
+    // another full-width rule, reporting the callout as a phantom final row.
+    // Keep the callout where the source puts it, but move what follows to a new
+    // page so that rule cannot close a row around it.
+    const cellPara = (text: string): Paragraph => ({
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text }] }]
+    });
+    const rows = Array.from({ length: 80 }, (_, i) => ({
+      cells: [{ content: [cellPara(`row ${i}`)] }, { content: [cellPara(`value ${i}`)] }]
+    }));
+    const quote: Paragraph = {
+      type: "paragraph",
+      properties: { style: "Quote" },
+      children: [{ content: [{ type: "text", text: "standalone callout" }] }]
+    };
+    const after: Paragraph = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "content after callout" }] }]
+    };
+    const out = layoutDocumentFull({ body: [{ type: "table", rows }, quote, after] });
+    const tablePages = out.pages.filter(page => page.content.some(block => block.type === "table"));
+    expect(tablePages.length).toBeGreaterThan(1);
+
+    // `quote` is body item 1; sourceIndex survives pagination and identifies
+    // it without coupling the layout model to a PDF-only semantic role.
+    const quotePage = out.pages.find(page =>
+      page.content.some(block => block.type === "paragraph" && block.sourceIndex === 1)
+    );
+    expect(quotePage).toBeDefined();
+    expect(quotePage!.content.some(block => block.type === "table")).toBe(true);
+    expect(quotePage!.pageNumber).toBe(tablePages.at(-1)!.pageNumber);
+    expect(quotePage!.content.at(-1)?.sourceIndex).toBe(1);
+
+    const afterPage = out.pages.find(page =>
+      page.content.some(
+        block =>
+          block.type === "paragraph" &&
+          block.lines.some(line =>
+            line.runs.some(run => "text" in run && run.text === "content after callout")
+          )
+      )
+    );
+    expect(afterPage).toBeDefined();
+    expect(afterPage!.pageNumber).toBeGreaterThan(quotePage!.pageNumber);
+  });
+
+  it("ends the page after the tail of a long Quote, not its first slice", () => {
+    const cellPara = (text: string): Paragraph => ({
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text }] }]
+    });
+    const rows = Array.from({ length: 80 }, (_, i) => ({
+      cells: [{ content: [cellPara(`row ${i}`)] }, { content: [cellPara(`value ${i}`)] }]
+    }));
+    const quote: Paragraph = {
+      type: "paragraph",
+      properties: { style: "Quote" },
+      children: [{ content: [{ type: "text", text: "quoted words ".repeat(500) }] }]
+    };
+    const after = cellPara("after the long quote");
+    const out = layoutDocumentFull({ body: [{ type: "table", rows }, quote, after] });
+    const quotePages = out.pages.filter(page =>
+      page.content.some(block => block.type === "paragraph" && block.sourceIndex === 1)
+    );
+    expect(quotePages.length).toBeGreaterThan(1);
+    const afterPage = out.pages.find(page =>
+      page.content.some(block => block.type === "paragraph" && block.sourceIndex === 2)
+    )!;
+    expect(afterPage.pageNumber).toBeGreaterThan(quotePages.at(-1)!.pageNumber);
+  });
+
+  it("keeps consecutive Quote paragraphs together before ending the page", () => {
+    const cellPara = (text: string): Paragraph => ({
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text }] }]
+    });
+    const rows = Array.from({ length: 80 }, (_, i) => ({
+      cells: [{ content: [cellPara(`row ${i}`)] }, { content: [cellPara(`value ${i}`)] }]
+    }));
+    const quote = (text: string): Paragraph => ({
+      type: "paragraph",
+      properties: { style: "Quote" },
+      children: [{ content: [{ type: "text", text }] }]
+    });
+    const out = layoutDocumentFull({
+      body: [
+        { type: "table", rows },
+        quote("first quote paragraph"),
+        quote("second quote paragraph"),
+        cellPara("after the quote run")
+      ]
+    });
+    const firstPage = out.pages.find(page =>
+      page.content.some(block => block.type === "paragraph" && block.sourceIndex === 1)
+    )!;
+    const secondPage = out.pages.find(page =>
+      page.content.some(block => block.type === "paragraph" && block.sourceIndex === 2)
+    )!;
+    const afterPage = out.pages.find(page =>
+      page.content.some(block => block.type === "paragraph" && block.sourceIndex === 3)
+    )!;
+    expect(secondPage.pageNumber).toBe(firstPage.pageNumber);
+    expect(afterPage.pageNumber).toBeGreaterThan(secondPage.pageNumber);
+  });
+
   it("keeps a short table whole", () => {
     const cellPara = (text: string): Paragraph => ({
       type: "paragraph",

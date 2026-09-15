@@ -102,6 +102,35 @@ describe("links", () => {
     expect(edgeOf("A -->|piped| B").label).toBe("piped");
   });
 
+  it("takes a label from a split dotted link", () => {
+    // `-. text .->` closes its head with a dot rather than a dash, so the head is `-.` and the
+    // tail `.->`. Read as `-` followed by rubbish, the whole link was discarded — silently,
+    // which cost a real diagram five of its eleven edges and left two clusters with nothing to
+    // rank against, laid out side by side fourteen times wider than tall.
+    for (const source of ["A -. text .-> B", "A-. text .->B"]) {
+      const edge = edgeOf(source);
+      expect([edge.from, edge.to, edge.stroke, edge.endEnd, edge.label]).toEqual([
+        "A",
+        "B",
+        "dotted",
+        "arrow",
+        "text"
+      ]);
+    }
+  });
+
+  it("keeps dots inside a split dotted link label", () => {
+    for (const label of ["release v1.2", "hello.world"]) {
+      const edge = edgeOf(`A -. ${label} .-> B`);
+      expect([edge.from, edge.to, edge.stroke, edge.label]).toEqual(["A", "B", "dotted", label]);
+    }
+  });
+
+  it("reads a split dotted link with no arrowhead", () => {
+    const edge = edgeOf("A -. text .- B");
+    expect([edge.stroke, edge.endEnd, edge.label]).toEqual(["dotted", "none", "text"]);
+  });
+
   it("reads a longer link as a request for more rank separation", () => {
     // The extra dashes are how an author keeps two branches of unequal depth level.
     expect(edgeOf("A --> B").minRankSpan).toBe(1);
@@ -117,6 +146,12 @@ describe("links", () => {
   it("counts a dotted link's dots", () => {
     expect(edgeOf("A -.-> B").minRankSpan).toBe(1);
     expect(edgeOf("A -..-> B").minRankSpan).toBe(2);
+  });
+
+  it("does not count the dots a split label adds", () => {
+    // One dot closes the head and one opens the tail, so the minimum split form carries two
+    // without having asked for a longer link.
+    expect(edgeOf("A -. text .-> B").minRankSpan).toBe(1);
   });
 });
 

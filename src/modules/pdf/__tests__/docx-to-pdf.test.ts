@@ -84,7 +84,10 @@ describe("docxToPdf — layout-driven smoke test", () => {
         families: [{ name: "Wide Family", faces: { regular: wide } }]
       }
     });
-    const pdf = new TextDecoder("latin1").decode(bytes);
+    // Decompressed rather than read raw: streams over 256 bytes are deflated, so a raw scan finds
+    // the operators only while the fixture happens to stay under that. It did until the exporter
+    // began tagging blocks, at which point this asserted nothing.
+    const pdf = decompressPdfContent(bytes);
     const textYs = [...pdf.matchAll(/1 0 0 1 [\d.]+ ([\d.]+) Tm/g)].map(match =>
       Number.parseFloat(match[1])
     );

@@ -575,6 +575,8 @@ type CarriedBlock =
 interface FlowCursor {
   /** Index of the next body item to place. */
   nextItem: number;
+  /** Last paragraph in a Quote run that must end its page once fully placed. */
+  endPageAfterItem?: number;
 }
 
 /**
@@ -1021,6 +1023,15 @@ function buildPage(
   };
 
   // Remainders carried from the previous page go first, at the content top.
+  //
+  // Remember when a continued table finishes here. Preview's PDF selection
+  // analysis extends a table that starts at the top of a continuation page over
+  // a callout immediately below it. The callout itself may stay on this page,
+  // but it has to be the page's last block: a thematic break below it is another
+  // full-width rule, and Preview takes that as the bottom of a phantom final row
+  // containing the whole callout.
+  let completedContinuedTable = false;
+  let completedEndPageParagraph = false;
   for (const carried of carriedIn) {
     if (carried.kind === "paragraph") {
       const rebased: LayoutParagraph = {
@@ -1030,6 +1041,7 @@ function buildPage(
       if (!placeParagraph(rebased)) {
         break;
       }
+      completedEndPageParagraph ||= rebased.endPageWhenComplete === true;
     } else {
       // Cell rects are table-relative, so moving the table is enough.
       const rebased: LayoutTable = {
@@ -1039,6 +1051,7 @@ function buildPage(
       if (!placeTable(rebased, carried.headerRows)) {
         break;
       }
+      completedContinuedTable = true;
     }
   }
 
@@ -1048,7 +1061,25 @@ function buildPage(
   const flowMode = flow !== undefined;
   const startItem = flowMode ? flow.nextItem : 0;
   let placedItems = 0;
-  let stopFlow = false;
+  if (completedEndPageParagraph && flow !== undefined) {
+    delete flow.endPageAfterItem;
+  }
+  const nextAfterContinuation = flow === undefined ? undefined : doc.body[flow.nextItem];
+  const quoteAfterContinuedTable =
+    completedContinuedTable &&
+    nextAfterContinuation?.type === "paragraph" &&
+    nextAfterContinuation.properties?.style === "Quote";
+  let quoteRunEnd = flow?.endPageAfterItem ?? -1;
+  if (quoteAfterContinuedTable && flow !== undefined) {
+    quoteRunEnd = flow.nextItem;
+    let following = doc.body[quoteRunEnd + 1];
+    while (following?.type === "paragraph" && following.properties?.style === "Quote") {
+      quoteRunEnd++;
+      following = doc.body[quoteRunEnd + 1];
+    }
+    flow.endPageAfterItem = quoteRunEnd;
+  }
+  let stopFlow = completedEndPageParagraph;
 
   /** A body item's effective `w:keepNext` — "do not end a page on me". */
   const keepsWithNext = (index: number): boolean => {
@@ -1110,7 +1141,11 @@ function buildPage(
           imageMap,
           listMarkers
         );
-        const positioned = { ...laid, sourceIndex: i };
+        const positioned = {
+          ...laid,
+          sourceIndex: i,
+          ...(i === quoteRunEnd ? { endPageWhenComplete: true } : {})
+        };
         if (
           !placeParagraph(
             pageNumber === 1 && content.length === 0 && startItem === 0
@@ -1289,6 +1324,14 @@ function buildPage(
       // cannot revisit it.
       flow.nextItem = i + 1;
       placedItems++;
+      // Keep the quote beside the table it comments on, which is where the
+      // source puts it. End the page *after* the quote so the following `---`
+      // cannot become the lower ruling line of a table row in Preview's PDF
+      // layout analysis.
+      if (i === quoteRunEnd && carriedOut.length === 0) {
+        stopFlow = true;
+        delete flow.endPageAfterItem;
+      }
     }
   }
 
