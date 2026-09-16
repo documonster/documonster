@@ -74,7 +74,7 @@ jobs:
       - name: Publish documonster canary
         run: |
           VERSION="${{ steps.canary_version.outputs.version }}"
-          if [ "$(npm view documonster@${VERSION} version 2>/dev/null || true)" = "$VERSION" ]; then
+          if node scripts/verify-published.ts --exists "documonster@${VERSION}"; then
             echo "documonster@${VERSION} is already published — skipping"
           else
             pnpm publish --tag canary --no-git-checks
@@ -87,7 +87,7 @@ jobs:
         working-directory: packages/mcp
         run: |
           VERSION="${{ steps.canary_version.outputs.version }}"
-          if [ "$(npm view @documonster/mcp@${VERSION} version 2>/dev/null || true)" = "$VERSION" ]; then
+          if node ../../scripts/verify-published.ts --exists "@documonster/mcp@${VERSION}"; then
             echo "@documonster/mcp@${VERSION} is already published — skipping"
           else
             # `--access public` must be explicit: pnpm does not apply the
@@ -98,22 +98,17 @@ jobs:
           fi
 
       # Deliberately unauthenticated: an anonymous read is the only thing that
-      # proves the packages are actually installable by a user. An authenticated
-      # `npm view` also succeeds for a restricted package.
+      # proves the packages are actually installable by a user, and an
+      # authenticated read succeeds for a restricted package.
+      #
+      # This used to be `sleep 30` plus a single `npm view`, which could not
+      # work: `npm view pkg@version` reads the packument, and that document is
+      # CDN-cached for 300 seconds. See scripts/verify-published.ts.
       - name: Verify canary publishes
         run: |
-          echo "Waiting for npm registry to propagate..."
-          sleep 30
-          EXPECTED_VERSION="${{ steps.canary_version.outputs.version }}"
-          for PACKAGE in documonster @documonster/mcp; do
-            PUBLISHED_VERSION=$(npm view "${PACKAGE}@${EXPECTED_VERSION}" version 2>/dev/null || echo "NOT_FOUND")
-            if [ "$PUBLISHED_VERSION" != "$EXPECTED_VERSION" ]; then
-              echo "ERROR: Expected ${PACKAGE}@${EXPECTED_VERSION} but found ${PUBLISHED_VERSION}"
-              echo "If the package published but reads as NOT_FOUND, check that it is public: npm access get status ${PACKAGE}"
-              exit 1
-            fi
-            echo "Verified: ${PACKAGE}@${EXPECTED_VERSION} is live on npm"
-          done
+          node scripts/verify-published.ts \
+            "documonster@${{ steps.canary_version.outputs.version }}" \
+            "@documonster/mcp@${{ steps.canary_version.outputs.version }}"
 
       - name: Comment on commit
         uses: actions/github-script@v9
@@ -164,7 +159,7 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           # Idempotent: a re-run after a partial release (core published, MCP
           # failed) must not abort on "version already exists".
-          if [ "$(npm view documonster@${VERSION} version 2>/dev/null || true)" = "$VERSION" ]; then
+          if node scripts/verify-published.ts --exists "documonster@${VERSION}"; then
             echo "documonster@${VERSION} is already published — skipping"
             exit 0
           fi
@@ -176,17 +171,11 @@ jobs:
             pnpm publish --no-git-checks
           fi
 
+      # Unauthenticated and polled — see scripts/verify-published.ts for why a
+      # single `npm view` after a fixed sleep reports a false failure.
       - name: Verify publish
         run: |
-          echo "Waiting for npm registry to propagate..."
-          sleep 30
-          EXPECTED_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view documonster@${EXPECTED_VERSION} version 2>/dev/null || echo "NOT_FOUND")
-          if [ "$PUBLISHED_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "ERROR: Expected version ${EXPECTED_VERSION} but found ${PUBLISHED_VERSION} on npm registry"
-            exit 1
-          fi
-          echo "Verified: documonster@${EXPECTED_VERSION} is live on npm"
+          node scripts/verify-published.ts "documonster@$(node -p "require('./package.json').version")"
 
   # Ordering matters. `@documonster/mcp` depends on `documonster: workspace:*`,
   # which `pnpm publish` rewrites to the core version present in this checkout.
@@ -225,7 +214,7 @@ jobs:
         working-directory: packages/mcp
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if [ "$(npm view @documonster/mcp@${VERSION} version 2>/dev/null || true)" = "$VERSION" ]; then
+          if node ../../scripts/verify-published.ts --exists "@documonster/mcp@${VERSION}"; then
             echo "@documonster/mcp@${VERSION} is already published — skipping"
             exit 0
           fi
@@ -238,16 +227,10 @@ jobs:
           fi
 
       # Unauthenticated on purpose — see the canary job's verify step.
+      #
+      # `working-directory` stays on the package so the version is read from its
+      # own manifest, but the script lives at the repository root.
       - name: Verify publish
         working-directory: packages/mcp
         run: |
-          echo "Waiting for npm registry to propagate..."
-          sleep 30
-          EXPECTED_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view @documonster/mcp@${EXPECTED_VERSION} version 2>/dev/null || echo "NOT_FOUND")
-          if [ "$PUBLISHED_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "ERROR: Expected version ${EXPECTED_VERSION} but found ${PUBLISHED_VERSION} on npm registry"
-            echo "If the publish step succeeded, check the package is public: npm access get status @documonster/mcp"
-            exit 1
-          fi
-          echo "Verified: @documonster/mcp@${EXPECTED_VERSION} is live on npm"
+          node ../../scripts/verify-published.ts "@documonster/mcp@$(node -p "require('./package.json').version")"
