@@ -1030,8 +1030,9 @@ describe("merged cells with print titles", () => {
   });
 
   it("should grayscale a border propagated from a merge boundary", async () => {
-    // `propagateMergeBorders` re-converts the boundary cell's border straight
-    // from the Excel style, bypassing the cell-level conversion.
+    // A merged region's outline is read from its boundary cells rather than from
+    // the master's own style, so the black-and-white pass has to cover borders
+    // that never went through any single cell's conversion.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "M");
     Cell.setValue(ws, "A1", "merged");

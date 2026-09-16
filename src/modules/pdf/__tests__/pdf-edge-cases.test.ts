@@ -16,7 +16,7 @@ import { getFontAscent, getFontDescent, measureTextWidth } from "@utils/font-met
  */
 import { describe, it, expect } from "vitest";
 
-import { decompressPdfContent, expectValidPdf } from "./test-helpers";
+import { decompressPdfContent, expectValidPdf, strokedSegmentsPerPage } from "./test-helpers";
 import { buildTtfWithCmap } from "./ttf-test-utils";
 
 /**
@@ -182,6 +182,60 @@ describe("PDF Rendering Edge Cases", () => {
       expectValidPdf(pdfBytes);
       const text = await extractText(pdfBytes);
       expect(text).toContain("Merged");
+    });
+
+    it("should rule a merged column identically on every page it spans (issue #226)", async () => {
+      // The reporter's sheet: a table whose first column is one merged cell
+      // running its whole height, bordered throughout. A merged region used to be
+      // laid out only on the page holding its master, so from page 2 onwards the
+      // merged column had no cell at all — the table's left-hand rules simply
+      // stopped, and came back only where the next merged region started.
+      //
+      // Driven through `excelToPdf` rather than the layout engine because the
+      // follower cells and the region's boundary borders have to survive the
+      // Excel → PDF conversion for the layout to find them at all.
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Sheet1");
+      const rowCount = 200;
+      const colCount = 4;
+      for (let r = 1; r <= rowCount; r++) {
+        for (let c = 1; c <= colCount; c++) {
+          if (c > 1) {
+            Cell.setValue(ws, r, c, 10);
+          }
+          Cell.setStyle(ws, r, c, {
+            border: {
+              top: { style: r === 1 ? "medium" : "thin" },
+              bottom: { style: r === rowCount ? "medium" : "thin" },
+              left: { style: c === 1 ? "medium" : "thin" },
+              right: { style: c === colCount ? "medium" : "thin" }
+            }
+          });
+        }
+      }
+      Worksheet.merge(ws, `A1:A${rowCount}`);
+      // Short enough not to spill into column B: Excel erases the rule that
+      // overflowing text crosses, which would legitimately differ between the
+      // page holding the value and the pages continuing the region.
+      Cell.setValue(ws, "A1", "M");
+      for (let c = 1; c <= colCount; c++) {
+        Column.setWidth(ws, c, 12);
+      }
+
+      const perPage = strokedSegmentsPerPage(await excelToPdf(wb, { fitToPage: true }));
+      expect(perPage.length).toBeGreaterThan(2);
+
+      // The x positions at which each page draws a vertical rule. Every page
+      // shows the same table, so every page must rule it in the same places.
+      const ruleXs = perPage.map(segments =>
+        [
+          ...new Set(segments.filter(s => Math.abs(s.x1 - s.x2) < 0.01).map(s => s.x1.toFixed(2)))
+        ].sort()
+      );
+      expect(ruleXs[0]).toHaveLength(colCount + 1);
+      for (const xs of ruleXs.slice(1)) {
+        expect(xs).toEqual(ruleXs[0]);
+      }
     });
 
     it("should render bordered empty cells", async () => {

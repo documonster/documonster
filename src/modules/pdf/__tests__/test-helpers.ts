@@ -3,6 +3,7 @@
  */
 import { inflateSync } from "node:zlib";
 
+import { PdfDocument } from "@pdf/reader/pdf-document";
 import { expect } from "vitest";
 
 /**
@@ -46,6 +47,44 @@ export function pdfColorOps(pdfBytes: Uint8Array): Array<[number, number, number
     out.push([parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])]);
   }
   return out;
+}
+
+/**
+ * One decoded content stream per page, in page order.
+ *
+ * {@link decompressPdfContent} joins every stream in the file, which cannot
+ * answer "what is on page 3" — and a bug that drops content from the pages after
+ * the first is invisible in the union.
+ */
+export function decompressPdfPageContents(pdfBytes: Uint8Array): string[] {
+  const doc = new PdfDocument(pdfBytes);
+  return doc.getPages().map(page => {
+    const contents = page.get("Contents");
+    const stream = contents ? doc.derefStreamWithObjNum(contents) : null;
+    if (!stream) {
+      return "";
+    }
+    return Buffer.from(doc.getStreamData(stream.stream, stream.objNum, stream.gen)).toString(
+      "latin1"
+    );
+  });
+}
+
+/**
+ * Every stroked straight segment on each page, as drawn by
+ * `PdfContentStream.drawLine` (`m` … `l` … `S`), in page order.
+ */
+export function strokedSegmentsPerPage(
+  pdfBytes: Uint8Array
+): Array<Array<{ x1: number; y1: number; x2: number; y2: number }>> {
+  return decompressPdfPageContents(pdfBytes).map(content =>
+    [...content.matchAll(/(-?[\d.]+) (-?[\d.]+) m\s+(-?[\d.]+) (-?[\d.]+) l\s+S/g)].map(m => ({
+      x1: Number(m[1]),
+      y1: Number(m[2]),
+      x2: Number(m[3]),
+      y2: Number(m[4])
+    }))
+  );
 }
 
 /** Assert every emitted color is neutral gray (r == g == b). */

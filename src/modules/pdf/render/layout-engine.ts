@@ -67,7 +67,9 @@ import type {
   LayoutChart,
   LayoutCell,
   LayoutBorder,
-  LayoutRichTextRun
+  LayoutRichTextRun,
+  PdfBordersData,
+  PdfRect
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
 import { emuToPt, charWidthToPixel } from "@utils/units";
@@ -319,7 +321,7 @@ interface LayoutContext {
   rowHeights: number[];
   visibleRows: number[];
   visibleCols: number[];
-  mergeMap: Map<string, MergeInfo>;
+  mergeMap: Map<string, MergeRegion>;
   rowPages: number[][];
   colGroups: number[][];
   margins: { top: number; right: number; bottom: number; left: number };
@@ -728,80 +730,51 @@ function buildPageLayout(
       const ci = colGroup[gci];
       const wsColNumber = visibleCols[ci];
 
-      const mergeKey = `${wsRowNumber}:${wsColNumber}`;
-      const mergeInfo = mergeMap.get(mergeKey);
-      if (mergeInfo && !mergeInfo.isMaster) {
-        continue;
+      const region = mergeMap.get(`${wsRowNumber}:${wsColNumber}`);
+      let input: Omit<LayoutCellInput, "rect">;
+      if (region) {
+        const piece = resolveMergePiece(
+          region,
+          ri,
+          gci,
+          rowPage,
+          colGroup,
+          visibleRows,
+          visibleCols
+        );
+        if (!piece) {
+          // Inside a piece anchored above or to the left, hence already laid out.
+          continue;
+        }
+        input = mergePieceInput(piece, sheet);
+      } else {
+        const cell = sheet.rows.get(wsRowNumber)?.cells.get(wsColNumber);
+        input = { styleCell: cell, valueCell: cell, colSpan: 1, rowSpan: 1 };
       }
 
-      const row = sheet.rows.get(wsRowNumber);
-      const cell = row?.cells.get(wsColNumber);
-
-      let colSpan = 1;
-      let rowSpan = 1;
-      if (mergeInfo && mergeInfo.isMaster) {
-        const mergeEndCol = wsColNumber + mergeInfo.colSpan - 1;
-        colSpan = 0;
-        for (let s = gci; s < colGroup.length; s++) {
-          if (visibleCols[colGroup[s]] <= mergeEndCol) {
-            colSpan++;
-          } else {
-            break;
-          }
-        }
-        const mergeEndRow = wsRowNumber + mergeInfo.rowSpan - 1;
-        rowSpan = 0;
-        for (let s = visibleRowIdx; s < visibleRows.length; s++) {
-          if (visibleRows[s] <= mergeEndRow) {
-            rowSpan++;
-          } else {
-            break;
-          }
-        }
-        colSpan = Math.max(colSpan, 1);
-        rowSpan = Math.max(rowSpan, 1);
-      }
-
+      // Spans are clamped to this page by `resolveAxisRun`, so the sums below
+      // cannot run past the track arrays.
       const cellX = groupColOffsets[gci];
       const cellY = rowYPositions[ri];
       let cellWidth = 0;
-      for (let s = 0; s < colSpan && gci + s < groupColWidths.length; s++) {
+      for (let s = 0; s < input.colSpan; s++) {
         cellWidth += groupColWidths[gci + s];
       }
       let cellHeight = 0;
-      for (let s = 0; s < rowSpan && ri + s < pageRowHeights.length; s++) {
+      for (let s = 0; s < input.rowSpan; s++) {
         cellHeight += pageRowHeights[ri + s];
       }
-      const rectY = cellY - cellHeight;
 
-      cells.push(
-        buildLayoutCell(
-          cell,
-          cellX,
-          rectY,
-          cellWidth,
-          cellHeight,
-          colSpan,
-          rowSpan,
-          options,
-          fontManager,
-          scaleFactor
-        )
+      const layoutCell = buildLayoutCell(
+        {
+          ...input,
+          rect: { x: cellX, y: cellY - cellHeight, width: cellWidth, height: cellHeight }
+        },
+        options,
+        fontManager,
+        scaleFactor
       );
-
-      const layoutCell = cells[cells.length - 1];
-
-      // Propagate merged cell borders from boundary cells
-      if (mergeInfo?.isMaster) {
-        propagateMergeBorders(layoutCell, mergeInfo, wsRowNumber, wsColNumber, sheet);
-        // Propagation re-converts the boundary cell's border straight from the
-        // Excel style, bypassing the conversion in `buildLayoutCell`, so the
-        // black-and-white pass has to be reapplied to the result.
-        if (options.blackAndWhite) {
-          layoutCell.borders = grayscaleBorders(layoutCell.borders);
-        }
-      }
-
+      cells.push(layoutCell);
       cellGrid.set(`${ri}:${gci}`, layoutCell);
     }
   }
@@ -1541,21 +1514,27 @@ function buildBreakSet(breakTracks: number[], visibleTracks: number[]): Set<numb
 }
 
 // =============================================================================
-// Merge Map
+// Merged Regions
 // =============================================================================
 
-interface MergeInfo {
-  isMaster: boolean;
-  rowSpan: number;
-  colSpan: number;
+/** A merged region's bounds, in 1-based worksheet coordinates. */
+interface MergeRegion {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
 }
 
 /**
- * Build a map of all merged cell regions.
- * Key: "row:col" (1-based), Value: merge info
+ * Map every cell of every merged region to that region.
+ * Key: "row:col" (1-based).
+ *
+ * All cells of one region share a single {@link MergeRegion} object, so the
+ * region's own bounds are always at hand — which is what {@link resolveMergePiece}
+ * needs, and what a per-cell `isMaster` flag could not express.
  */
-function buildMergeMap(sheet: PdfSheetData): Map<string, MergeInfo> {
-  const map = new Map<string, MergeInfo>();
+function buildMergeMap(sheet: PdfSheetData): Map<string, MergeRegion> {
+  const map = new Map<string, MergeRegion>();
 
   const merges = sheet.merges;
   if (!merges || merges.length === 0) {
@@ -1564,26 +1543,132 @@ function buildMergeMap(sheet: PdfSheetData): Map<string, MergeInfo> {
 
   for (const rangeStr of merges) {
     const range = parseRangeRef(rangeStr);
-    const top = range.s.r + 1;
-    const left = range.s.c + 1;
-    const bottom = range.e.r + 1;
-    const right = range.e.c + 1;
+    const region: MergeRegion = {
+      top: range.s.r + 1,
+      left: range.s.c + 1,
+      bottom: range.e.r + 1,
+      right: range.e.c + 1
+    };
 
-    const rowSpan = bottom - top + 1;
-    const colSpan = right - left + 1;
-
-    for (let r = top; r <= bottom; r++) {
-      for (let c = left; c <= right; c++) {
-        map.set(`${r}:${c}`, {
-          isMaster: r === top && c === left,
-          rowSpan,
-          colSpan
-        });
+    for (let r = region.top; r <= region.bottom; r++) {
+      for (let c = region.left; c <= region.right; c++) {
+        map.set(`${r}:${c}`, region);
       }
     }
   }
 
   return map;
+}
+
+/**
+ * The part of a merged region that falls on one page.
+ *
+ * A region is not printed once: pagination cuts it wherever a page or
+ * column-group boundary crosses it, and Excel prints every resulting rectangle.
+ * Laying out only the rectangle that holds the master leaves the rest of the
+ * region with no fill and no outline at all — the merged column of a long table
+ * simply vanishes from page 2 onwards (issue #226).
+ *
+ * The bounds are the piece's own, in worksheet coordinates; comparing them with
+ * `region` says which of its edges are the region's real ones and which are a
+ * cut. Storing that comparison instead would be the same mistake as the
+ * `isMaster` flag this replaced: a derived field that can disagree with what it
+ * was derived from.
+ */
+interface MergePiece {
+  region: MergeRegion;
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+  /** Rows covered on this page, counted from the anchor. */
+  rowSpan: number;
+  /** Columns covered in this column group, counted from the anchor. */
+  colSpan: number;
+}
+
+/**
+ * How far a merged region reaches along one axis of one page, starting at the
+ * page track `at`.
+ *
+ * Returns `undefined` when `at` does not start the run: its predecessor on the
+ * page is both its neighbour in the visible sequence and inside the region, so a
+ * piece anchored earlier already covers it.
+ *
+ * Both halves of that test earn their place. Comparing worksheet numbers instead
+ * of visible indices would cut a region in two at every hidden track inside it,
+ * because the tracks either side of the gap are not consecutive. Dropping the
+ * adjacency test would fuse a repeated print-title band into the body beneath
+ * it: a title row and the first body row sit next to each other on the page but
+ * are far apart in the sheet, so the band's copy of the region and the body's
+ * copy are two pieces, not one.
+ *
+ * Membership is tested against *both* of the region's edges rather than the near
+ * one alone, because the visible track order is not always ascending: a
+ * print-title band outside the print area is emitted ahead of it, so
+ * `printTitlesRow = "25:26"` with `printArea = "A10:C20"` visits rows
+ * 25, 26, 10, 11, … — and a one-sided `<= far` then reads every body row as
+ * still inside a region ending at row 26, growing the piece over the whole page
+ * and underneath the cells already laid out there.
+ */
+function resolveAxisRun(
+  at: number,
+  pageTracks: number[],
+  visible: number[],
+  near: number,
+  far: number
+): { span: number; first: number; last: number } | undefined {
+  const track = pageTracks[at];
+  const inRegion = (idx: number): boolean => visible[idx] >= near && visible[idx] <= far;
+
+  if (at > 0 && pageTracks[at - 1] === track - 1 && inRegion(track - 1)) {
+    return undefined;
+  }
+
+  // Reach forward while the page keeps offering consecutive tracks inside the
+  // region. This clamps the run to the page by construction, so the geometry at
+  // the call site can sum spans without a bounds check.
+  let span = 1;
+  while (
+    at + span < pageTracks.length &&
+    pageTracks[at + span] === track + span &&
+    inRegion(track + span)
+  ) {
+    span++;
+  }
+
+  return { span, first: visible[track], last: visible[track + span - 1] };
+}
+
+/**
+ * Decide whether `(ri, gci)` anchors a piece of `region` on this page, and how
+ * far that piece reaches. A piece is anchored at its top-left, so both axes have
+ * to start a run there.
+ */
+function resolveMergePiece(
+  region: MergeRegion,
+  ri: number,
+  gci: number,
+  rowPage: number[],
+  colGroup: number[],
+  visibleRows: number[],
+  visibleCols: number[]
+): MergePiece | undefined {
+  const rows = resolveAxisRun(ri, rowPage, visibleRows, region.top, region.bottom);
+  const cols = resolveAxisRun(gci, colGroup, visibleCols, region.left, region.right);
+  if (!rows || !cols) {
+    return undefined;
+  }
+
+  return {
+    region,
+    top: rows.first,
+    bottom: rows.last,
+    left: cols.first,
+    right: cols.last,
+    rowSpan: rows.span,
+    colSpan: cols.span
+  };
 }
 
 // =============================================================================
@@ -1703,20 +1788,76 @@ export function paginateRows(
 // Cell Layout
 // =============================================================================
 
+/**
+ * Everything a {@link LayoutCell} needs that is not a global option.
+ *
+ * Format and value arrive separately because a merged region separates them:
+ * Excel applies the master's format across the whole region, and draws the value
+ * exactly once. A piece of a region that does not hold the master therefore
+ * takes `styleCell` from the master and leaves `valueCell` undefined. For an
+ * ordinary cell the two are the same.
+ */
+interface LayoutCellInput {
+  /** Supplies fill, font, alignment and — unless `borders` overrides it — the outline. */
+  styleCell: PdfCellData | undefined;
+  /** Supplies text, rich text and the hyperlink. */
+  valueCell: PdfCellData | undefined;
+  rect: PdfRect;
+  colSpan: number;
+  rowSpan: number;
+  /**
+   * Replaces the outline derived from `styleCell`. Set for a piece of a merged
+   * region, whose edges come from the region's boundary cells rather than from
+   * any single cell's own style.
+   */
+  borders?: Partial<PdfBordersData>;
+}
+
+/**
+ * The layout inputs a merged region contributes at one of its piece anchors.
+ *
+ * Excel keeps a region's outline on its *boundary* cells — the right border on
+ * the rightmost column, the bottom border on the bottom row — and whatever the
+ * interior cells carry is not part of that outline. So each edge is read from
+ * the boundary cell that owns it, and an edge that is a page cut rather than the
+ * region's own is left absent: the cut is interior, and closing it would draw a
+ * line Excel does not print.
+ */
+function mergePieceInput(piece: MergePiece, sheet: PdfSheetData): Omit<LayoutCellInput, "rect"> {
+  const { region } = piece;
+  const borderAt = (row: number, col: number): Partial<PdfBordersData> | undefined =>
+    sheet.rows.get(row)?.cells.get(col)?.style?.border;
+
+  // Excel formats the whole region from the master and draws its value once, in
+  // the piece that holds it — the others are the same box continued, not a
+  // repeat of its contents.
+  const master = sheet.rows.get(region.top)?.cells.get(region.left);
+  const holdsMaster = piece.top === region.top && piece.left === region.left;
+
+  return {
+    styleCell: master,
+    valueCell: holdsMaster ? master : undefined,
+    colSpan: piece.colSpan,
+    rowSpan: piece.rowSpan,
+    borders: {
+      top: piece.top === region.top ? borderAt(region.top, piece.left)?.top : undefined,
+      bottom:
+        piece.bottom === region.bottom ? borderAt(region.bottom, piece.left)?.bottom : undefined,
+      left: piece.left === region.left ? borderAt(piece.top, region.left)?.left : undefined,
+      right: piece.right === region.right ? borderAt(piece.top, region.right)?.right : undefined
+    }
+  };
+}
+
 function buildLayoutCell(
-  cell: PdfCellData | undefined,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  colSpan: number,
-  rowSpan: number,
+  input: LayoutCellInput,
   options: ResolvedPdfOptions,
   fontManager: FontManager,
   scaleFactor: number
 ): LayoutCell {
-  const text = resolveErrorText(cell, options.errors);
-  const style: Partial<PdfCellStyle> = cell?.style ?? {};
+  const { styleCell, valueCell, rect, colSpan, rowSpan } = input;
+  const text = resolveErrorText(valueCell, options.errors);
+  const style: Partial<PdfCellStyle> = styleCell?.style ?? {};
 
   const fontProps = extractFontProperties(
     style.font,
@@ -1737,15 +1878,15 @@ function buildLayoutCell(
   // Rich text runs — pass cell-level font as the fallback for runs without
   // their own font definition (e.g. the first run often has no font object
   // and should inherit the cell's style font including bold/italic).
-  const richText = buildRichTextRuns(cell, options, fontManager, scaleFactor, style.font);
+  const richText = buildRichTextRuns(valueCell, options, fontManager, scaleFactor, style.font);
 
-  const rawBorders = excelBordersToPdf(style.border);
+  const rawBorders = excelBordersToPdf(input.borders ?? style.border);
   const borders = options.blackAndWhite ? grayscaleBorders(rawBorders) : rawBorders;
   const rawFill = excelFillToPdfColor(style.fill);
 
   return {
     text,
-    rect: { x, y, width, height },
+    rect,
     fontFamily: fontProps.fontFamily,
     fontSize: scaledFontSize,
     bold: fontProps.bold,
@@ -1754,7 +1895,7 @@ function buildLayoutCell(
     underline: fontProps.underline,
     textColor: options.blackAndWhite ? toGrayscale(fontProps.textColor) : fontProps.textColor,
     fillColor: options.blackAndWhite && rawFill !== null ? toGrayscale(rawFill) : rawFill,
-    horizontalAlign: resolveHorizontalAlign(style.alignment, cell?.type, cell?.result),
+    horizontalAlign: resolveHorizontalAlign(style.alignment, valueCell?.type, valueCell?.result),
     verticalAlign: excelVAlignToPdf(style.alignment),
     wrapText: style.alignment?.wrapText ?? false,
     borders,
@@ -1766,7 +1907,7 @@ function buildLayoutCell(
     },
     colSpan,
     rowSpan,
-    hyperlink: cell?.hyperlink ?? null,
+    hyperlink: valueCell?.hyperlink ?? null,
     richText,
     indent: style.alignment?.indent ?? 0,
     textRotation:
@@ -2131,46 +2272,6 @@ function assignChartsToPages(
 }
 
 // =============================================================================
-// Merge Border Propagation
-// =============================================================================
-
-/**
- * Excel stores merged-cell borders on the boundary cells, not on the master.
- * Copy the right border from the rightmost column cell and the bottom border
- * from the bottom row cell so the layout cell renders them correctly.
- */
-function propagateMergeBorders(
-  layoutCell: LayoutCell,
-  mergeInfo: MergeInfo,
-  wsRowNumber: number,
-  wsColNumber: number,
-  sheet: PdfSheetData
-): void {
-  if (mergeInfo.colSpan > 1) {
-    const rightCol = wsColNumber + mergeInfo.colSpan - 1;
-    const rightCellData = sheet.rows.get(wsRowNumber)?.cells.get(rightCol);
-    if (rightCellData?.style?.border?.right) {
-      const converted = excelBordersToPdf({ right: rightCellData.style.border.right });
-      if (converted.right) {
-        layoutCell.borders.right = converted.right;
-        layoutCell.borderInsets.right = converted.right.width / 2;
-      }
-    }
-  }
-  if (mergeInfo.rowSpan > 1) {
-    const bottomRowNum = wsRowNumber + mergeInfo.rowSpan - 1;
-    const bottomCellData = sheet.rows.get(bottomRowNum)?.cells.get(wsColNumber);
-    if (bottomCellData?.style?.border?.bottom) {
-      const converted = excelBordersToPdf({ bottom: bottomCellData.style.border.bottom });
-      if (converted.bottom) {
-        layoutCell.borders.bottom = converted.bottom;
-        layoutCell.borderInsets.bottom = converted.bottom.width / 2;
-      }
-    }
-  }
-}
-
-// =============================================================================
 // Text Overflow Calculation
 // =============================================================================
 
@@ -2186,7 +2287,7 @@ function computeTextOverflows(
   visibleRows: number[],
   visibleCols: number[],
   groupColWidths: number[],
-  mergeMap: Map<string, MergeInfo>,
+  mergeMap: Map<string, MergeRegion>,
   fontManager: FontManager
 ): void {
   for (let ri = 0; ri < rowPage.length; ri++) {
