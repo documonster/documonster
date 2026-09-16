@@ -2329,6 +2329,51 @@ key 注册表和单元格样式的一致性。
 `columnDefinitions` 列出的是列**记录**——包括仅被声明的列，以及因某个 cell 被访问而被补齐
 出来的列。两者不可互换。
 
+### 列的值
+
+`Column.values` 把一列读成按**行号**索引的数组——索引 `0` 是空的前导槽位——所以它交给回调的
+索引正是 `Cell.*` 需要的那个：
+
+```typescript
+Column.setValues(ws, "C", [120, -40, 75]); // 密集数组从第 1 行开始
+
+const colNumber = Column.getNumber(ws, "C");
+Column.values(ws, "C").forEach((value, rowNumber) => {
+  if (typeof value === "number" && value < 0) {
+    Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
+  }
+});
+```
+
+`Column.getValues` 是同一次读取的 0-based 形式，用于普通数组索引——这一对与
+`Row.getValues` / `Row.values` 对应。两者都是稀疏数组：空单元格是**空洞**，不是 `null`。
+
+与元数据和样式访问器不同，这两个读取器**不物化任何东西**。那些访问器把引用解析成列**记录**，
+这会把 `Worksheet.columns` 补齐到被访问的那一列；而它们只把引用解析成列**号**，然后遍历已
+存在的行——所以在只有一列的表上读 `Z` 列，它仍然只有一列。单元格路径上的同一区分见
+[单元格句柄](#单元格句柄)。
+
+`Column.setValues` 接受 `Cell.setValue` 能接受的一切，并把前导空洞理解为按行号索引，因此
+`Column.values` 读出来的数组可以原样写回。它是**写入而不是替换**：只有数组实际携带的下标会
+被触及，不像 `Row.setValues` 会整行重置。
+
+```typescript
+Column.setValues(ws, "A", [1, 2]); // 只写第 1-2 行；第 4 行的值保留
+Column.setValues(ws, "A", [1, null]); // 显式清空第 2 行
+```
+
+有两个后果需要知道。用一列覆盖另一列时，源列没有值的位置会被保留下来：
+
+```typescript
+// A1 = "a"、A3 = "c"，而 B2 已经是 "stale"
+Column.setValues(ws, "B", Column.values(ws, "A"));
+Column.values(ws, "B"); // B1 "a"、B2 "stale"、B3 "c"
+```
+
+另外，把读取结果写回时要用 `Column.values` 而不是 `Column.getValues`：第 1 行为空的 0-based
+数组以空洞开头，而按行号索引的数组同样以空洞开头，两者无法区分，值会整体上移一行。
+`Row.getValues` / `Row.setValues` 有同样的歧义。
+
 ### 用你自己的类型写行
 
 行对象按列的 key 取值，所以任何对象都可以——普通 interface 无需 cast：
@@ -2378,7 +2423,7 @@ Cell.find(ws, "A1000"); // undefined；工作表未被改动
 ```
 
 当问题是"这个单元格到底存不存在"时用 `find`。要在不创建任何东西的前提下读取整个区域，
-用 `Range.getValues` / `Worksheet.toAoa`。
+用 `Range.getValues` / `Worksheet.toAoa`；只读一列则用 `Column.values` / `Column.getValues`。
 
 公开 API 涉及的每一个类型都以**声明处的名字**从 `documonster/excel` 导出——也就是
 TypeScript 在报错和悬浮提示里显示的那个名字。没有别名要记，也不需要绕路：可以直接

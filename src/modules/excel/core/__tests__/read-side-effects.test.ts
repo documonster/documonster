@@ -13,7 +13,6 @@
  * to. Every case below is a read, so every case must be a no-op.
  */
 import { captureFormulaSnapshot } from "@excel/core/formula-capture";
-import { columnValues, getColumn } from "@excel/core/worksheet-core";
 import { Anchor, Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
@@ -186,13 +185,32 @@ describe("reads do not mutate the workbook", () => {
   });
 
   describe("column reads", () => {
-    it("columnValues does not materialise cells down the column", async () => {
+    it("Column.values does not materialise cells down the column", async () => {
       const { wb, ws } = styledSheet();
-      let values: ReturnType<typeof columnValues> | undefined;
+      let values: ReturnType<typeof Column.values> | undefined;
       await expectNoMutation(wb, () => {
-        values = columnValues(getColumn(ws, 3));
+        values = Column.values(ws, 3);
       });
       expect(values).toEqual([, "h3", , , 4]);
+    });
+
+    it("Column.getValues does not materialise cells down the column", async () => {
+      const { wb, ws } = styledSheet();
+      let values: ReturnType<typeof Column.getValues> | undefined;
+      await expectNoMutation(wb, () => {
+        values = Column.getValues(ws, 3);
+      });
+      expect(values).toEqual(["h3", , , 4]);
+    });
+
+    it("reading a column that was never declared does not declare it", async () => {
+      const { wb, ws } = styledSheet();
+      // Every other `Column.*` member resolves its reference through
+      // `getColumn`, which would pad `ws._columns` out to column 26 here.
+      await expectNoMutation(wb, () => {
+        expect(Column.values(ws, "Z")).toEqual([]);
+        expect(Column.getValues(ws, 100)).toEqual([]);
+      });
     });
   });
 

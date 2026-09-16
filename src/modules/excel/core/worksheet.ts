@@ -2872,7 +2872,7 @@ export {
   columnSetKey,
   columnEachCell,
   columnValues,
-  columnSetValues,
+  columnSetValuesAt,
   columnFromModel,
   columnSetNumFmt,
   columnSetFont,

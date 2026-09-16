@@ -2594,6 +2594,58 @@ columns through `setColumns` and change them through `Column.set*`. Note that
 `Worksheet.columnCount(ws)` is unrelated: it measures the _used_ range (the
 largest cell count over all rows), not how many columns were declared.
 
+### Column values
+
+`Column.values` reads down a column into an array indexed by **row number** —
+index `0` is an empty leading slot — so the index it hands the callback is the one
+`Cell.*` takes:
+
+```typescript
+Column.setValues(ws, "C", [120, -40, 75]); // a dense array starts at row 1
+
+const colNumber = Column.getNumber(ws, "C");
+Column.values(ws, "C").forEach((value, rowNumber) => {
+  if (typeof value === "number" && value < 0) {
+    Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
+  }
+});
+```
+
+`Column.getValues` is the same read 0-based, for plain array indexing — the pair
+mirrors `Row.getValues` / `Row.values`. Both are sparse: an empty cell is a hole,
+not a `null`.
+
+Unlike the metadata and style accessors, the two readers **materialise nothing**.
+Those resolve their reference through the column record, which pads
+`Worksheet.columns` out to the column asked for; these resolve it to a column
+_number_ and walk the rows that exist, so reading column `Z` of a one-column sheet
+leaves it a one-column sheet. See [Cell handles](#cell-handles) for the same
+distinction on the cell path.
+
+`Column.setValues` takes anything `Cell.setValue` takes, and reads a leading hole
+as row-number indexing so that `Column.values` writes back unchanged. It **writes
+rather than replaces**: only the indices the array carries are touched, unlike
+`Row.setValues`, which resets the row.
+
+```typescript
+Column.setValues(ws, "A", [1, 2]); // rows 1-2; row 4 keeps its value
+Column.setValues(ws, "A", [1, null]); // row 2 cleared explicitly
+```
+
+Two consequences worth knowing. Writing one column over another leaves anything
+the source column has no value for:
+
+```typescript
+// A1 = "a", A3 = "c", and B2 already holds "stale"
+Column.setValues(ws, "B", Column.values(ws, "A"));
+Column.values(ws, "B"); // B1 "a", B2 "stale", B3 "c"
+```
+
+And pass `Column.values`, not `Column.getValues`, when writing a read back: a
+0-based array whose row 1 is empty starts with a hole, which is also how a
+row-number-indexed array starts, so the two cannot be distinguished and the values
+would land one row high. `Row.getValues` / `Row.setValues` share that ambiguity.
+
 ### Rows from your own types
 
 Row objects are matched against the column keys, so any object works — a plain
@@ -2647,7 +2699,8 @@ Cell.find(ws, "A1000"); // undefined; sheet untouched
 ```
 
 Use `find` when the question is whether a cell is there at all. To read a whole
-region without materialising anything, use `Range.getValues` / `Worksheet.toAoa`.
+region without materialising anything, use `Range.getValues` / `Worksheet.toAoa`;
+for one column, `Column.values` / `Column.getValues`.
 
 Every type the public API speaks is exported from `documonster/excel` under its
 **declared** name — the same name TypeScript prints in errors and hovers. There

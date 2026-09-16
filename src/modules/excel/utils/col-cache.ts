@@ -74,7 +74,12 @@ const colCache: ColCache = {
     "Z"
   ],
   _l2nFill: 0,
-  _l2n: {} as Record<string, number>,
+  // Prototype-less: this is keyed by caller-supplied strings, so a plain object
+  // resolves `"toString"` / `"constructor"` / `"valueOf"` against
+  // `Object.prototype` and `l2n` returns that *function* instead of throwing —
+  // the truthiness guards below both pass. A column reference named after an
+  // `Object.prototype` member then reads as a column number of `NaN`.
+  _l2n: Object.create(null) as Record<string, number>,
   _n2l: [] as string[],
   _level(n: number): number {
     if (n <= 26) {

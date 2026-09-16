@@ -265,9 +265,9 @@ table/image/pivot operations moved to their own namespaces.
 | Old (`Worksheet` class)                                | New                                                                          |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
 | `ws.name` (get) / `ws.name = n`                        | `Worksheet.getName(ws)` / `Worksheet.setName(ws, n)`                         |
-| `ws.getCell(addr)` / `ws.getCell(r, c)`                | Use `Cell.*` functions directly (see §4.4). There is no cell object to hold. |
-| `ws.getRow(r)`                                         | Use `Row.*` functions with the row number (see §4.5).                        |
-| `ws.getColumn(c)`                                      | Use `Column.*` functions with the column ref (see §4.6).                     |
+| `ws.getCell(addr)` / `ws.getCell(r, c)`                | Use `Cell.*` functions directly (see §4.3). There is no cell object to hold. |
+| `ws.getRow(r)`                                         | Use `Row.*` functions with the row number (see §4.4).                        |
+| `ws.getColumn(c)`                                      | Use `Column.*` functions with the column ref (see §4.5).                     |
 | `ws.addRow(values, style?)`                            | `Worksheet.addRow(ws, values, style?)`                                       |
 | `ws.addRows(values, style?)`                           | `Worksheet.addRows(ws, values, style?)`                                      |
 | `ws.getRows(start, len)`                               | `Worksheet.getRows(ws, start, len)`                                          |
@@ -409,9 +409,36 @@ All operations take `(ws, colRef)` where `colRef` is a key string, letter
 | `col.hidden` (get) / `= b`       | `Column.getHidden(ws, c)` / `Column.setHidden(ws, c, b)`             |
 | `col.outlineLevel` (get) / `= l` | `Column.getOutlineLevel(ws, c)` / `Column.setOutlineLevel(ws, c, l)` |
 | `col.style` (get)                | `Column.getStyle(ws, c)` / `Column.setStyle(ws, c, style)`           |
+| `col.values` (get) / `= v`       | `Column.values(ws, c)` / `Column.setValues(ws, c, v)`                |
+| `col.eachCell(cb)`               | No direct equivalent — see below                                     |
 
 Per-facet setters (`col.font = …`, etc.) are folded into
 `Column.setStyle(ws, c, { font, numFmt, ... })`.
+
+`Column.values` is indexed by **row number**, exactly like `col.values` was, so
+the index composes with the `Cell` namespace:
+
+```typescript
+const colNumber = Column.getNumber(ws, "total");
+Column.values(ws, "total").forEach((value, rowNumber) => {
+  if (typeof value === "number" && value < 0) {
+    Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
+  }
+});
+```
+
+`Column.getValues` is the same read 0-based, and both leave the sheet untouched —
+`col.eachCell` did not, because it asked every row for a cell in the column and
+therefore created one.
+
+That loop is **not** a full replacement for `col.eachCell`, and the difference
+matters if you relied on it: it visits values, not `CellData` handles, it skips a
+cell that exists but holds no value (so a cell carrying only a style or a comment
+is invisible to it), and there is no `includeEmpty`. For the usual reason to reach
+for `eachCell` — applying a format down a column — use `Column.setStyle` or
+`Column.setNumFmt`, which write the column _and_ the cells already in it. If you
+genuinely need the handles, iterate the rows with `Worksheet.eachRow` and take the
+cell with `Row.getCell`, which is what `col.eachCell` did.
 
 ### 4.6 `Range`
 
@@ -974,15 +1001,16 @@ public surface and are not re-exported by the per-module entries.
 
 ### 8.7 Signature and handle changes on the `Cell` / `Column` / `Worksheet` namespaces
 
-Five things that used to need a workaround, or worked by accident:
+Things that used to need a workaround, or worked by accident:
 
-| Old (excelts, or the first documonster surface)                                                 | Now                                                                                                                         |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `Worksheet.addRows(ws, data as Record<string, unknown>[])`                                      | `Worksheet.addRows(ws, data)` — the keyed row type is `RowObject` (`object`), so a plain `interface` no longer needs a cast |
-| `ws.getColumn("total").number`, or `Worksheet.columns(ws).find(c => c.key === "total")!.number` | `Column.getNumber(ws, "total")` (and `Column.getLetter`)                                                                    |
-| `[...ws.columns.map(c => c.defn), extra]`, or hand-copying 7 fields                             | `[...Worksheet.columnDefinitions(ws), extra]` (single column: `Column.getDefinition(ws, ref)`)                              |
-| `cell.value` on a handle from `Row.eachCell`                                                    | `Cell.view(cell).value` / `.text` / `.numFmt` / `.font` / `.alignment`; write with `Stream.setCell*(cell, …)`               |
-| `Cell.setFont(ws, "B3", …)` only                                                                | `Cell.setFont(ws, 3, 2, …)` too — every cell function takes `"A1"` **or** `(row, col)`                                      |
+| Old (excelts, or the first documonster surface)                                                 | Now                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Worksheet.addRows(ws, data as Record<string, unknown>[])`                                      | `Worksheet.addRows(ws, data)` — the keyed row type is `RowObject` (`object`), so a plain `interface` no longer needs a cast                                                                                     |
+| `ws.getColumn("total").number`, or `Worksheet.columns(ws).find(c => c.key === "total")!.number` | `Column.getNumber(ws, "total")` (and `Column.getLetter`)                                                                                                                                                        |
+| `[...ws.columns.map(c => c.defn), extra]`, or hand-copying 7 fields                             | `[...Worksheet.columnDefinitions(ws), extra]` (single column: `Column.getDefinition(ws, ref)`)                                                                                                                  |
+| `Worksheet.eachRow` + `Row.getCell` to walk one column                                          | `Column.values(ws, ref)` (row-number indexed) / `Column.getValues(ws, ref)` (0-based) / `Column.setValues(ws, ref, v)`; neither read materialises a cell, and the writer takes everything `Cell.setValue` takes |
+| `cell.value` on a handle from `Row.eachCell`                                                    | `Cell.view(cell).value` / `.text` / `.numFmt` / `.font` / `.alignment`; write with `Stream.setCell*(cell, …)`                                                                                                   |
+| `Cell.setFont(ws, "B3", …)` only                                                                | `Cell.setFont(ws, 3, 2, …)` too — every cell function takes `"A1"` **or** `(row, col)`                                                                                                                          |
 
 Two deliberate compile-time breaks:
 

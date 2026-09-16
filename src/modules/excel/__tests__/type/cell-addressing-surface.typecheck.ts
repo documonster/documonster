@@ -15,6 +15,7 @@ import { Cell, Column, Row, Stream, Worksheet } from "@excel/index";
 import type {
   CellData,
   CellValue,
+  CellValueInput,
   CellView,
   ColumnDefn,
   ColumnView,
@@ -91,6 +92,36 @@ Cell.setValue(ws, 2, totalCol, 1);
 const oneDefn: ColumnDefn = Column.getDefinition(ws, "total");
 const allDefns: ColumnDefn[] = Worksheet.columnDefinitions(ws);
 Worksheet.setColumns(ws, [...allDefns, { header: "Error", key: "error", width: 40 }]);
+
+// ---------------------------------------------------------------------------
+// Column values: a read returns `CellValue`, a write takes `CellValueInput`
+//
+// The writer must accept everything `Cell.setValue` accepts, not merely what a
+// read hands back. It forwarded to `cellSetValue` through an `as never` while its
+// public parameter was `CellValue[]`, so the input-only members of the union — a
+// rich-text hyperlink without `text`, a formula hyperlink, the civil `Temporal`
+// types — were rejected at the boundary and nowhere else.
+// ---------------------------------------------------------------------------
+
+const colValues: CellValue[] = Column.values(ws, "total");
+const colValues0: CellValue[] = Column.getValues(ws, 1);
+Column.setValues(ws, "B", colValues0);
+
+Column.setValues(ws, "total", colValues); // a read writes back
+Column.setValues(ws, "A", [1, "two", true, null, new Date()]);
+Column.setValues(ws, 1, [{ formula: "SUM(A1:A9)" }, { error: "#N/A" }]);
+Column.setValues(ws, "A", [{ richText: [{ text: "rich" }] }]);
+Column.setValues(ws, "A", [{ formula: "A1", hyperlink: "https://example.com" }]);
+Column.setValues(ws, "A", [{ hyperlink: "https://example.com", richText: [{ text: "go" }] }]);
+
+// A `readonly` array is accepted: the writer only reads it.
+const frozen: readonly CellValueInput[] = [1, 2, 3];
+Column.setValues(ws, "A", frozen);
+
+// @ts-expect-error a column reference is a key, a letter or a number
+Column.values(ws, true);
+// @ts-expect-error the values are an array, not a single value
+Column.setValues(ws, "A", 1);
 
 // ---------------------------------------------------------------------------
 // Row data: a plain interface needs no cast

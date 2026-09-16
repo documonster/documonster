@@ -1,3 +1,4 @@
+import { ColumnOutOfBoundsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { describe, it, expect } from "vitest";
 
@@ -89,6 +90,16 @@ describe("colCache", () => {
     // misleading (column 4 is actually `D`, a perfectly valid column).
     expect(() => colCache.l2n("AAAA")).toThrow(/Column AAAA/);
     expect(() => colCache.l2n("ZZZZZ")).toThrow(/Column ZZZZZ/);
+  });
+
+  it("rejects an Object.prototype member name instead of returning the function", () => {
+    // Regression: `_l2n` was a plain object, so the two `!this._l2n[l]` guards
+    // both passed for these names and `l2n` returned `Object.prototype.toString`
+    // itself — a function where every caller expects a column number, which then
+    // indexes a cell array as `NaN` and silently reads nothing.
+    for (const name of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+      expect(() => colCache.l2n(name)).toThrow(ColumnOutOfBoundsError);
+    }
   });
 
   it("validates addresses properly", () => {

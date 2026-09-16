@@ -22,7 +22,7 @@ import {
   columnSetHeader,
   columnSetKey,
   columnSetNumFmt,
-  columnSetValues,
+  columnSetValuesAt,
   columnValues,
   getCell,
   getColumn,
@@ -119,7 +119,7 @@ describe("Column", () => {
   it("sets column values from dense array", () => {
     const sheet = testUtils.createSheetMock();
 
-    columnSetValues(getColumn(sheet, 1), [2, 3, 5, 7, 11]);
+    columnSetValuesAt(sheet, 1, [2, 3, 5, 7, 11]);
 
     expect(cellGetValue(getCell(sheet, 1, 1))).toBe(2);
     expect(cellGetValue(getCell(sheet, 2, 1))).toBe(3);
@@ -136,7 +136,7 @@ describe("Column", () => {
     values[3] = 3;
     values[5] = 5;
     values[11] = 11;
-    columnSetValues(getColumn(sheet, 1), values);
+    columnSetValuesAt(sheet, 1, values);
 
     expect(cellGetValue(getCell(sheet, 1, 1))).toBe(null);
     expect(cellGetValue(getCell(sheet, 2, 1))).toBe(2);
@@ -154,7 +154,7 @@ describe("Column", () => {
 
   it("sets column values from elision-style sparse array", () => {
     const sheet = testUtils.createSheetMock();
-    columnSetValues(getColumn(sheet, 1), [, , 2, 3, , 5, , 7, , , , 11]);
+    columnSetValuesAt(sheet, 1, [, , 2, 3, , 5, , 7, , , , 11]);
 
     expect(cellGetValue(getCell(sheet, 1, 1))).toBe(null);
     expect(cellGetValue(getCell(sheet, 2, 1))).toBe(2);

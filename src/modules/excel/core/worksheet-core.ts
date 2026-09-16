@@ -25,7 +25,7 @@ import type { AnchorData } from "@excel/core/anchor";
  *
  * No file below this one imports the heavy `worksheet.ts`.
  */
-import type { CellData, CellValueType } from "@excel/core/cell";
+import type { CellData, CellValueInputType, CellValueType } from "@excel/core/cell";
 import {
   CellTypes,
   cellComment,
@@ -61,7 +61,7 @@ import type { SparklineGroup } from "@excel/core/sparkline";
 import { invalidateSharedCellStyle, sharedCellFacet } from "@excel/core/style-sharing";
 import type { TableData } from "@excel/core/table";
 import type { Workbook } from "@excel/core/workbook";
-import { ExcelError, InvalidAddressError } from "@excel/errors";
+import { ColumnOutOfBoundsError, ExcelError, InvalidAddressError } from "@excel/errors";
 import type {
   Alignment,
   AutoFilter,
@@ -288,6 +288,41 @@ export function eachColumnKey(
 // =============================================================================
 // Columns
 // =============================================================================
+
+/**
+ * The 1-based column number for a key, a letter or a number — **without**
+ * creating the column record, unlike {@link getColumn}.
+ *
+ * A read addressed by column reference needs the number and nothing else (the
+ * cells live in the rows, not in the column record), so it resolves the
+ * reference through this instead of walking through a handle: `getColumn` pads
+ * `ws._columns` up to the column asked for, which moves `Worksheet.columns`
+ * and is a mutation on a read path — see `core/__tests__/read-side-effects.test.ts`.
+ *
+ * Unlike `getColumn` it also *validates*, so a reference that names no column
+ * fails the same way whichever form it took. Without that a numeric reference is
+ * the worst case of all: `0`, `-1`, `1.5` and `NaN` all index the cell array with
+ * something no row can hold, so the read reports an empty column rather than a
+ * bad argument.
+ */
+export function findColumnNumber(ws: WorksheetData, c: string | number): number {
+  if (typeof c === "string") {
+    // Own-property only. `ws._keys` is a plain object, so a bare `ws._keys[c]`
+    // resolves `"toString"` / `"constructor"` against `Object.prototype` and
+    // yields a function, whose `.number` is `undefined` — an unreadable column
+    // instead of an unknown key.
+    const keyed = Object.prototype.hasOwnProperty.call(ws._keys, c) ? ws._keys[c] : undefined;
+    return keyed ? keyed.number : colCache.l2n(c);
+  }
+  if (!Number.isInteger(c)) {
+    throw new ColumnOutOfBoundsError(c);
+  }
+  // `n2l` owns the 1..16384 bound and throws `ColumnOutOfBoundsError` past it,
+  // so the numeric form is rejected exactly as `l2n` rejects `"XFE"` above
+  // rather than duplicating the limit here.
+  colCache.n2l(c);
+  return c;
+}
 
 export function getColumn(ws: WorksheetData, c: string | number): ColumnData {
   let colNum: number;
@@ -625,35 +660,68 @@ export function columnEachCell(
 }
 
 export function columnValues(c: ColumnData): CellValueType[] {
+  return columnValuesAt(c.worksheet, c.number);
+}
+
+/**
+ * The values down a column, addressed by column number rather than by a handle —
+ * so a caller holding only a reference does not have to materialise the column
+ * record to read through it.
+ *
+ * `base` is the index row 1 lands on: `1` keys the array by row number and
+ * leaves an empty leading slot (what `Column.values` returns), `0` makes it a
+ * plain array (`Column.getValues`). Either way an empty cell is a hole.
+ */
+export function columnValuesAt(
+  ws: WorksheetData,
+  colNumber: number,
+  base: 0 | 1 = 1
+): CellValueType[] {
   const v: CellValueType[] = [];
   // Deliberately not via `columnEachCell`: its callback signature demands a
   // `CellData`, so it materialises a cell on every row of the column. This is a
   // getter, so walk the rows non-destructively instead.
-  const rows = c.worksheet._rows;
+  const rows = ws._rows;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (!row) {
       continue;
     }
-    const cell = rowFindCell(row, c.number);
+    const cell = rowFindCell(row, colNumber);
     if (cell && cellType(cell) !== Enums.ValueType.Null) {
-      v[row.number] = cellGetValue(cell);
+      v[row.number - 1 + base] = cellGetValue(cell);
     }
   }
   return v;
 }
 
-export function columnSetValues(c: ColumnData, v: CellValueType[]): void {
+/**
+ * Write values down a column, addressed by column number.
+ *
+ * The array is read as **1-based by row number** when index 0 is a hole — the
+ * shape {@link columnValuesAt} hands back, so a read round-trips — and as
+ * 0-based when index 0 is present, so a plain array starts at row 1. The two
+ * cannot be told apart when a 0-based array's first slot is *also* a hole; that
+ * ambiguity is inherent to the protocol, and `rowSetValues` shares it.
+ *
+ * Only the indices the array actually carries are written: unlike
+ * `rowSetValues`, which resets the row, this leaves every other cell in the
+ * column alone.
+ */
+export function columnSetValuesAt(
+  ws: WorksheetData,
+  colNumber: number,
+  v: readonly CellValueInputType[]
+): void {
   if (!v) {
     return;
   }
-  const colNumber = c.number;
   let offset = 0;
   if (Object.prototype.hasOwnProperty.call(v, "0")) {
     offset = 1;
   }
   v.forEach((value, index) => {
-    cellSetValue(getCell(c.worksheet, index + offset, colNumber), value as never);
+    cellSetValue(getCell(ws, index + offset, colNumber), value);
   });
 }
 
