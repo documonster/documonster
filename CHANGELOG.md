@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0](https://github.com/documonster/documonster/compare/v0.14.0...v0.15.0) (2026-09-16)
+
+
+### Features
+
+* **excel:** Read and write a column's values without materialising it ([e332d87](https://github.com/documonster/documonster/commit/e332d87b927dc1cedf949f9b48fbebbad250d631))
+
+
+### Bug Fixes
+
+* **archive:** Make the native CRC32 guarantee real instead of racing the module loader ([22a2ffc](https://github.com/documonster/documonster/commit/22a2ffcd28bf1359626a97f7effb4b16b7832eb7))
+* **ci:** Harden published package verification ([06e8c37](https://github.com/documonster/documonster/commit/06e8c37e1d05e4d5d655f7e266a308b3bea7ad0c))
+* **ci:** Verify a publish against the registry's actual state, not a cached packument ([2a7be2a](https://github.com/documonster/documonster/commit/2a7be2ab65d029105ccf030867f740c43e28d2a0))
+* Harden the MCP path sandbox, and stop every browser test paying for two ([bf373d0](https://github.com/documonster/documonster/commit/bf373d06aff53af311b35a2b7e4c74c1ffa6b283))
+* Make a real document survive the trip from Markdown to Word and PDF ([cb9e3c2](https://github.com/documonster/documonster/commit/cb9e3c2cbe8bec9609a0dd7d70b7602ffe6018c1))
+* **pdf:** Lay out a merged region on every page it spans, not only the master's ([e6e3692](https://github.com/documonster/documonster/commit/e6e369201d15d382dbd958912fd646835697a6c7))
+
 ## [0.14.0](https://github.com/documonster/documonster/compare/v0.13.1...v0.14.0) (2026-09-10)
 
 
