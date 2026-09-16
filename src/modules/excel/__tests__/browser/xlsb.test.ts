@@ -1,3 +1,4 @@
+import { loadIife } from "@test/browser/load-iife";
 import { beforeAll, describe, expect, it } from "vitest";
 
 /**
@@ -14,12 +15,12 @@ import { beforeAll, describe, expect, it } from "vitest";
  * but that the *browser build* of the whole write-then-read path does.
  */
 
-declare const Documonster: any;
-
 let Workbook: any, Cell: any, Image: any;
-beforeAll(() => {
-  ({ Workbook, Cell, Image } = Documonster.Excel);
-});
+beforeAll(async () => {
+  // Loaded here rather than in a shared setup file: a setup file runs once per
+  // test file, so every browser test would compile this 1.5 MB bundle.
+  ({ Workbook, Cell, Image } = await loadIife<any>("excel", "Excel"));
+}, 60000);
 
 /** A 1×1 PNG, as bytes — small enough to inline and a real file rather than a fake header. */
 const PNG = new Uint8Array([

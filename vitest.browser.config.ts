@@ -14,7 +14,15 @@ export default defineConfig({
   test: {
     globals: true,
     testTimeout: 30000,
-    setupFiles: ["./src/test/browser/setup.ts"],
+    // No `setupFiles`. There used to be one, and all it did was inject the
+    // 1.5 MB Excel IIFE bundle so two smoke tests could read
+    // `Documonster.Excel` off the global — which meant every one of the ~410
+    // browser test files fetched, parsed and compiled that bundle in its own
+    // iframe, for the benefit of two of them. It cost most of the run's import
+    // time and left a detached copy behind per file; Chromium does not reclaim
+    // that promptly (https://issues.chromium.org/issues/530892387), and the
+    // renderer eventually died mid-run with `Browser connection was closed`.
+    // The two tests load the bundle themselves through `loadIife` now.
     browser: {
       enabled: true,
       provider: playwright(),

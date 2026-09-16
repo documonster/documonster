@@ -68,6 +68,18 @@ jobs:
         run: pnpm test
         env:
           CI: true
+          # Chromium does not reclaim what a finished browser-mode test file left
+          # behind (https://issues.chromium.org/issues/530892387), so a long run
+          # accumulates until the renderer is killed — reported by Vitest as
+          # `Browser connection was closed while running tests`, with the whole
+          # run abandoned at whichever file happened to be in flight. Vitest
+          # ships the workaround (a `HeapProfiler.collectGarbage` between files)
+          # but only arms it below 4 GB free in TMPDIR, and a runner here has
+          # more than that while still dying. A threshold larger than any disk
+          # arms it unconditionally; it costs a `statfs` plus a CDP round trip
+          # per file, about 6 ms, and applies only to linux + playwright +
+          # chromium. Remove this when the Chromium bug is fixed.
+          VITEST_CHROMIUM_GC_DISK_THRESHOLD_GB: 1048576
 
   timezone:
     # **The whole suite outside UTC.**

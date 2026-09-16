@@ -1,15 +1,15 @@
+import { loadIife } from "@test/browser/load-iife";
 import { describe, it, expect, beforeAll } from "vitest";
 
-declare const Documonster: any;
-
-// The `Documonster.Excel` global is injected by the IIFE bundle loaded in the
-// browser-setup `beforeAll` (src/test/browser/setup.ts), which runs before
-// this file's `beforeAll`. Bind the namespaces lazily — destructuring at
-// module top-level would run at import time, before the global exists.
+// This file asserts the *shipped* Excel IIFE runs in a browser, so it loads the
+// bundle itself rather than through a shared setup file: a setup file runs once
+// per test file, which made every browser test in the repository pay for this
+// one's 1.5 MB script. Bind the namespaces in `beforeAll` — the global does not
+// exist at import time.
 let Workbook: any, Worksheet: any, Cell: any, Column: any, Image: any;
-beforeAll(() => {
-  ({ Workbook, Worksheet, Cell, Column, Image } = Documonster.Excel);
-});
+beforeAll(async () => {
+  ({ Workbook, Worksheet, Cell, Column, Image } = await loadIife<any>("excel", "Excel"));
+}, 60000);
 
 describe("Documonster.Excel Browser Tests", () => {
   it("should read and write xlsx via binary buffer", async () => {

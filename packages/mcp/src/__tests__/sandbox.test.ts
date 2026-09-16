@@ -4,7 +4,13 @@ import path from "node:path";
 
 import type { ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
-import { assertWritable, isInside, resolveInRoot } from "../sandbox.js";
+import {
+  assertWritable,
+  isInside,
+  reservedDeviceSegment,
+  resolveInRoot,
+  resolveOutputPath
+} from "../sandbox.js";
 
 async function makeConfig(overrides: Partial<ServerConfig> = {}): Promise<ServerConfig> {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "documonster-mcp-sandbox-")));
@@ -110,6 +116,32 @@ describe("resolveInRoot", () => {
     await expectCode(resolveInRoot(config, "   "), "invalid_input");
   });
 
+  it("rejects a NUL byte as invalid input rather than leaking a library error", async () => {
+    // Regression: this used to reach `fs` and surface as an unclassified
+    // `internal` error carrying a raw Node message, which tells a model nothing
+    // it can act on.
+    const config = await makeConfig();
+    await expectCode(resolveInRoot(config, "a.csv\u0000.png"), "invalid_input");
+    await expectCode(resolveOutputPath(config, "out\u0000.xlsx"), "invalid_input");
+  });
+
+  it("refuses a reserved Windows device name on Windows only", async () => {
+    // `<root>/CON` is *inside* the root, so containment cannot catch it. On
+    // Windows it opens the console — this server's own JSON-RPC transport.
+    const config = await makeConfig();
+    if (process.platform === "win32") {
+      await expectCode(resolveInRoot(config, "CON"), "invalid_input");
+      await expectCode(resolveInRoot(config, "sub/nul.txt"), "invalid_input");
+      await expectCode(resolveOutputPath(config, "COM1"), "invalid_input");
+    } else {
+      // On POSIX these are ordinary file names and must stay usable.
+      await expect(resolveInRoot(config, "CON")).resolves.toBe(path.join(config.root, "CON"));
+      await expect(resolveOutputPath(config, "COM1")).resolves.toBe(
+        path.join(config.outputRoot, "COM1")
+      );
+    }
+  });
+
   it("reports not_found only for genuinely missing inputs", async () => {
     const config = await makeConfig();
     await expectCode(resolveInRoot(config, "missing.xlsx", { mustExist: true }), "not_found");
@@ -139,5 +171,65 @@ describe("isInside", () => {
     expect(isInside("/srv/root", "/srv/root-2/file")).toBe(false);
     expect(isInside("/srv/root", "/srv/root/file")).toBe(true);
     expect(isInside("/srv/root", "/srv/root")).toBe(true);
+  });
+});
+
+describe("reservedDeviceSegment", () => {
+  // Tested directly because the guard using it fires on Windows only, so these
+  // rules are otherwise unassertable on a POSIX host or CI runner.
+  it("matches a device name however Windows would spell it", () => {
+    expect(reservedDeviceSegment("NUL")).toBe("NUL");
+    expect(reservedDeviceSegment("nul")).toBe("nul");
+    // Everything from the first dot is an extension, so this is still the device.
+    expect(reservedDeviceSegment("nul.txt")).toBe("nul.txt");
+    // Trailing blanks are ignored by the Win32 path parser.
+    expect(reservedDeviceSegment("NUL ")).toBe("NUL ");
+    expect(reservedDeviceSegment("COM1")).toBe("COM1");
+    expect(reservedDeviceSegment("LPT9.docx")).toBe("LPT9.docx");
+  });
+
+  it("matches the spellings that are easy to miss", () => {
+    // A colon opens a device or an alternate data stream, and the name in front
+    // of it is what Windows resolves — cutting only at "." missed both.
+    expect(reservedDeviceSegment("NUL:stream")).toBe("NUL:stream");
+    expect(reservedDeviceSegment("con:")).toBe("con:");
+    // Windows reads the ISO 8859-1 superscripts as digits, so these are devices.
+    expect(reservedDeviceSegment("COM\u00B9")).toBe("COM\u00B9");
+    expect(reservedDeviceSegment("LPT\u00B2")).toBe("LPT\u00B2");
+    expect(reservedDeviceSegment("com\u00B3.txt")).toBe("com\u00B3.txt");
+    // The console handles: absent from Microsoft's "do not use" list, but
+    // CreateFile opens them.
+    expect(reservedDeviceSegment("CONIN$")).toBe("CONIN$");
+    expect(reservedDeviceSegment("conout$")).toBe("conout$");
+  });
+
+  it("finds one in any segment, on either separator", () => {
+    expect(reservedDeviceSegment("reports/2026/CON")).toBe("CON");
+    expect(reservedDeviceSegment("reports\\AUX\\a.txt")).toBe("AUX");
+    expect(reservedDeviceSegment("@output/prn.pdf")).toBe("prn.pdf");
+  });
+
+  it("leaves ordinary names alone", () => {
+    // The near-misses are the point: rejecting these would be a false positive
+    // on every platform, and `NULL`/`CONSOLE` are perfectly good file names.
+    // `COM0`/`LPT0` are here because no such device exists.
+    for (const ordinary of [
+      "NULL",
+      "CONSOLE",
+      "console.log",
+      "COM",
+      "COM0",
+      "COM10",
+      "LPT",
+      "LPT0",
+      "CONIN",
+      "report.xlsx",
+      "a/b/c.docx",
+      ".",
+      "..",
+      ""
+    ]) {
+      expect(reservedDeviceSegment(ordinary), ordinary).toBeUndefined();
+    }
   });
 });
