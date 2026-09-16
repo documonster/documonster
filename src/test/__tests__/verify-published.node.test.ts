@@ -255,9 +255,9 @@ describe("verify-published", () => {
     }
   });
 
-  it("encodes a scope in the registry path", async () => {
-    // `@documonster/mcp` is `@documonster%2Fmcp` in a registry URL; sending the
-    // raw slash asks for a different path entirely.
+  it("encodes package names and versions as complete registry path segments", async () => {
+    // Encoding only the first slash is incomplete: malformed or future-valid
+    // names must not be able to add path segments or alter the request URL.
     const requested: string[] = [];
     const server = createServer((request, response) => {
       requested.push(request.url ?? "");
@@ -273,9 +273,9 @@ describe("verify-published", () => {
         "1",
         "--interval-ms",
         "1",
-        "@documonster/mcp@1.0.0"
+        "@documonster/mcp/extra@1.0.0+build test"
       ]);
-      expect(requested[0]).toBe("/@documonster%2Fmcp/1.0.0");
+      expect(requested[0]).toBe("/%40documonster%2Fmcp%2Fextra/1.0.0%2Bbuild%20test");
     } finally {
       await new Promise<void>(resolve => server.close(() => resolve()));
     }

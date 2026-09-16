@@ -45,7 +45,7 @@
  *
  * Usage:
  *   node scripts/verify-published.ts documonster@1.2.3 @documonster/mcp@1.2.3
- *   node scripts/verify-published.ts --attempts 20 --interval-ms 15000 pkg@1.0.0
+ *   node scripts/verify-published.ts --attempts 60 --interval-ms 15000 pkg@1.0.0
  *   node scripts/verify-published.ts --registry http://localhost:8080 pkg@1.0.0
  */
 
@@ -54,11 +54,12 @@ import path from "node:path";
 /** Where to look. Overridable so a test can point at a local server. */
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 /**
- * Polling budget. 20 × 15s = 5 minutes, chosen to exceed the worst propagation
- * this repository has measured (4m11s) with room to spare, and to outlast the
- * packument's own 300-second TTL even though this script does not read it.
+ * Polling budget. 60 × 15s is approximately 15 minutes. npm took more than nine
+ * minutes to expose one accepted canary through the per-version endpoint, so a
+ * five-minute budget still produced a false failure despite avoiding the cached
+ * packument.
  */
-const DEFAULT_ATTEMPTS = 20;
+const DEFAULT_ATTEMPTS = 60;
 const DEFAULT_INTERVAL_MS = 15_000;
 
 export interface VerifyOptions {
@@ -98,9 +99,9 @@ export function parseSpec(spec: string): PackageSpec {
   return { name, version };
 }
 
-/** A scope's `/` is encoded in a registry path. */
+/** Encode the package name and version as complete registry path segments. */
 function versionUrl(registry: string, spec: PackageSpec): string {
-  return `${registry.replace(/\/$/, "")}/${spec.name.replace("/", "%2F")}/${encodeURIComponent(spec.version)}`;
+  return `${registry.replace(/\/$/, "")}/${encodeURIComponent(spec.name)}/${encodeURIComponent(spec.version)}`;
 }
 
 /**
