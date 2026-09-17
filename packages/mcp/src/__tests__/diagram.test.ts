@@ -18,6 +18,8 @@ import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { rasterizeToRgba } from "documonster/draw";
+import type * as Draw from "documonster/draw";
 import { Pdf } from "documonster/pdf";
 import { Io, Query } from "documonster/word";
 
@@ -32,6 +34,13 @@ import { docWriteTool } from "../tools/doc-write.js";
 import { inspectTool } from "../tools/inspect.js";
 import { pdfEditTool } from "../tools/pdf-edit.js";
 import type { AnyToolDefinition } from "../tools/types.js";
+
+// Keep the real rasteriser in the path while making its final options observable. Replacing
+// it with a fake would let the tool test pass without producing a valid PNG.
+vi.mock("documonster/draw", async importOriginal => {
+  const actual = await importOriginal<typeof Draw>();
+  return { ...actual, rasterizeToRgba: vi.fn(actual.rasterizeToRgba) };
+});
 
 interface Fixture {
   readonly config: ServerConfig;
@@ -131,7 +140,7 @@ describe("diagram_render", () => {
     expect(text.toLowerCase()).toContain("blank");
   });
 
-  it("actually hands the configured faces to the rasteriser", async () => {
+  it("reports an uncovered label when the configured face is unusable", async () => {
     // Constructing the right options object is not the same as passing it, and a test that
     // only checked the object kept passing when the argument was dropped — the diagram was
     // still rasterised, just with the host's fonts instead of the operator's.
@@ -139,7 +148,8 @@ describe("diagram_render", () => {
     // The observable difference: a configured font switches the host off, so a face that
     // cannot be parsed leaves a non-ASCII label with nothing to draw it and the render says
     // so. Reaching that report proves the options travelled. It needs no real font file and
-    // makes no assumption about what is installed.
+    // makes no assumption about what is installed. Wrapping the real rasteriser below proves
+    // those options reach the final boundary without replacing the render with a fake.
     const fx = await fixture();
     const fontPath = path.join(fx.root, "unusable.ttf");
     await writeFile(fontPath, Buffer.from([0x00, 0x01, 0x00, 0x00, 0x11, 0x22]));
@@ -148,18 +158,19 @@ describe("diagram_render", () => {
       config: { ...fx.config, pdfFont: { path: fontPath } }
     };
 
+    const rasterize = vi.mocked(rasterizeToRgba);
+    rasterize.mockClear();
     const text = await run(diagramRenderTool, withFont, {
       source: "flowchart LR\n  A[\u4e2d\u6587] --> B[ok]",
       to: "cjk.png"
     });
-    expect(text).toContain("U+4E2D");
 
-    // And with no font configured the same diagram draws, because the host is consulted.
-    const plain = await run(diagramRenderTool, fx, {
-      source: "flowchart LR\n  A[\u4e2d\u6587] --> B[ok]",
-      to: "cjk-host.png"
+    expect(rasterize).toHaveBeenCalledOnce();
+    expect(rasterize.mock.calls[0]?.[1]).toMatchObject({
+      fonts: [expect.any(Uint8Array)],
+      useSystemFonts: false
     });
-    expect(plain).not.toContain("U+4E2D");
+    expect(text).toContain("U+4E2D");
   });
 
   it("draws a PNG whose pixels match the requested scale", async () => {
