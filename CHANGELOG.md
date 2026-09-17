@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/documonster/documonster/compare/v0.15.0...v0.16.0) (2026-09-17)
+
+
+### Features
+
+* **fonts:** Shape complex scripts in the rasteriser and PDF, from one font stack at Layer 0 ([7010508](https://github.com/documonster/documonster/commit/7010508bde4dd1a5174f93e3898b48107c3cdf70))
+
+
+### Bug Fixes
+
+* **ci:** Sanitize architecture test fixtures ([7de8dd7](https://github.com/documonster/documonster/commit/7de8dd77e6eec60a6cce9a91dd192d8e6b5aee44))
+* **mcp:** Inject diagram renderer in tests ([a08b4f5](https://github.com/documonster/documonster/commit/a08b4f527f20a1ea206c5846ecc531d94065876d))
+* **mcp:** Make diagram font test deterministic ([5c2f87c](https://github.com/documonster/documonster/commit/5c2f87ca5e5bdf49c63de5fa26ea4bc7eb6c4105))
+
 ## [0.15.0](https://github.com/documonster/documonster/compare/v0.14.0...v0.15.0) (2026-09-16)
 
 
