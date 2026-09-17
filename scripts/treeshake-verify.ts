@@ -600,7 +600,7 @@ const scenarios: Scenario[] = [
   // No Node-only font acquisition in a browser bundle.
   //
   // Two modules exist only to read fonts off a disk, and each carries a table of
-  // per-platform paths and filenames: `pdf/font/system-fonts.ts` (the curated CJK
+  // per-platform paths and filenames: `utils/font-discovery.ts` (the curated CJK
   // families — `/System/Library/Fonts/Supplemental`, `msyh.ttc`, `PingFang SC`, and
   // several hundred more) and `draw/raster/system-raster-font.ts` (the Arial /
   // Helvetica / DejaVu fallbacks). Both used to ship to browsers: a
@@ -623,10 +623,7 @@ const scenarios: Scenario[] = [
     name: `browser /${mod}: no Node-only font acquisition`,
     importFrom: `${PKG_NAME}/${mod}`,
     imports: [name],
-    mustNotInclude: [
-      "modules/pdf/font/system-fonts.js",
-      "modules/draw/raster/system-raster-font.js"
-    ],
+    mustNotInclude: ["utils/font-discovery.js", "modules/draw/raster/system-raster-font.js"],
     platform: "browser" as const,
     lazySplit: true
   }))

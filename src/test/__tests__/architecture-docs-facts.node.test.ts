@@ -1,9 +1,9 @@
 /**
  * The architecture reference states facts about this repository. They have to be true.
  *
- * `AGENT.md` and its translations quote four counts — modules, published entry points,
+ * The architecture reference and its translations quote four counts — modules, published entry points,
  * formula functions, bridge exceptions — because the reader wants the scale. Every one
- * of them is a number only a human keeps in sync, which `AGENT.md`'s own last section
+ * of them is a number only a human keeps in sync, which the reference's own last section
  * says is a number that is eventually wrong. That rule applies to the document stating
  * it, so each count is derived here from the thing it describes.
  *
@@ -23,7 +23,11 @@ import { describe, expect, it } from "vitest";
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 
 /** The three editions, which must agree on structure. */
-const EDITIONS = ["AGENT.md", "AGENT.ja.md", "AGENT.zh.md"] as const;
+const EDITIONS = [
+  "src/test/fixtures/architecture-docs/architecture.md",
+  "src/test/fixtures/architecture-docs/architecture.ja.md",
+  "src/test/fixtures/architecture-docs/architecture.zh.md"
+] as const;
 
 function read(file: string): string {
   return fs.readFileSync(path.join(ROOT, file), "utf8");
@@ -65,36 +69,40 @@ const COUNTS: readonly {
     what: "modules",
     actual: moduleCount,
     patterns: {
-      "AGENT.md": /\| Module count\s*\|\s*(\d+)/,
-      "AGENT.ja.md": /\| モジュール数\s*\|\s*(\d+)/,
-      "AGENT.zh.md": /\| 模块数\s*\|\s*(\d+)/
+      "src/test/fixtures/architecture-docs/architecture.md": /\| Module count\s*\|\s*(\d+)/,
+      "src/test/fixtures/architecture-docs/architecture.ja.md": /\| モジュール数\s*\|\s*(\d+)/,
+      "src/test/fixtures/architecture-docs/architecture.zh.md": /\| 模块数\s*\|\s*(\d+)/
     }
   },
   {
     what: "published entry points",
     actual: entryPointCount,
     patterns: {
-      "AGENT.md": /\| Published entry points\s*\|\s*(\d+)/,
-      "AGENT.ja.md": /\| 公開エントリポイント\s*\|\s*(\d+)/,
-      "AGENT.zh.md": /\| 公开入口\s*\|\s*(\d+)/
+      "src/test/fixtures/architecture-docs/architecture.md":
+        /\| Published entry points\s*\|\s*(\d+)/,
+      "src/test/fixtures/architecture-docs/architecture.ja.md":
+        /\| 公開エントリポイント\s*\|\s*(\d+)/,
+      "src/test/fixtures/architecture-docs/architecture.zh.md": /\| 公开入口\s*\|\s*(\d+)/
     }
   },
   {
     what: "formula functions",
     actual: () => listFunctionNames().length,
     patterns: {
-      "AGENT.md": /\| Formula functions\s*\|\s*(\d+)/,
-      "AGENT.ja.md": /\| 数式関数\s*\|\s*(\d+)/,
-      "AGENT.zh.md": /\| 公式函数\s*\|\s*(\d+)/
+      "src/test/fixtures/architecture-docs/architecture.md": /\| Formula functions\s*\|\s*(\d+)/,
+      "src/test/fixtures/architecture-docs/architecture.ja.md": /\| 数式関数\s*\|\s*(\d+)/,
+      "src/test/fixtures/architecture-docs/architecture.zh.md": /\| 公式函数\s*\|\s*(\d+)/
     }
   },
   {
     what: "bridge exceptions",
     actual: bridgeExceptionCount,
     patterns: {
-      "AGENT.md": /Exactly (\w+) bridge files are registered exceptions/,
-      "AGENT.ja.md": /ブリッジファイルは (\d+) つだけです/,
-      "AGENT.zh.md": /外的桥接文件恰好 (\d+) 个/
+      "src/test/fixtures/architecture-docs/architecture.md":
+        /Exactly (\w+) bridge files are registered exceptions/,
+      "src/test/fixtures/architecture-docs/architecture.ja.md":
+        /ブリッジファイルは (\d+) つだけです/,
+      "src/test/fixtures/architecture-docs/architecture.zh.md": /外的桥接文件恰好 (\d+) 个/
     }
   }
 ];
@@ -109,7 +117,7 @@ const WORDS: Readonly<Record<string, number>> = {
   eight: 8
 };
 
-describe("the architecture reference's counts", () => {
+describe("the architecture documentation's counts", () => {
   it("has something to check", () => {
     // A list that quietly emptied would make every case below vacuous.
     expect(COUNTS.length).toBe(4);
@@ -149,7 +157,7 @@ function headingShape(edition: string): number[] {
   return [...body.matchAll(/^(#{2,3}) /gm)].map(match => match[1].length);
 }
 
-describe("the architecture reference's translations", () => {
+describe("the architecture documentation's translations", () => {
   it("keep the same section outline", () => {
     const shapes = EDITIONS.map(edition => ({ edition, shape: headingShape(edition) }));
     const first = shapes[0].shape;
