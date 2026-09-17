@@ -324,7 +324,12 @@ function applyLayout(
   }
 
   if (spec.freezeRows !== undefined && spec.freezeRows > 0) {
-    ws.views = [{ state: "frozen", ySplit: spec.freezeRows }];
+    // `Worksheet.freeze`, not a hand-written `ws.views` literal. Measured, the difference in
+    // the written file is only `activeCell` — the xlsx writer derives `topLeftCell` itself, so
+    // the literal was not as broken as it looked. What it was, is a reach into a model field
+    // that has a public setter, which then has to be kept in step with it by hand: the setter
+    // also takes a column count, and writing the literal is what quietly limited this to rows.
+    Worksheet.freeze(ws, 0, spec.freezeRows);
   }
 
   for (const range of spec.merges ?? []) {

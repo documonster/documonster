@@ -13,6 +13,7 @@
  */
 
 import { BasicRasterCanvas } from "@draw/raster/canvas";
+import type { RasterFontSource } from "@draw/raster/glyph-outline";
 import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import { DEFAULT_TEXT_FAMILY, flattenPath, roundedRectToPath, sectorToPath } from "@draw/types";
@@ -38,6 +39,33 @@ export interface RasterizeOptions {
   readonly samples?: number;
   /** Background fill. Omitted leaves the canvas transparent. */
   readonly background?: Rgba01;
+  /**
+   * Fonts to draw text with, ahead of anything discovered on the host.
+   *
+   * Raw `.ttf`/`.ttc` bytes, a `RasterFont` from `parseRasterFont`, or
+   * `{ data, collectionIndex }` to name a face inside a collection. In Node these
+   * outrank the discovered face; in a **browser they are the only way to get a glyph
+   * outside ASCII at all**, since there is no font directory to search and the
+   * built-in stroke font covers 32-126 and draws everything else as `?`.
+   *
+   * Pass a parsed `RasterFont` when rendering repeatedly: bytes are re-parsed on
+   * every call, which for a CJK font means rebuilding a 43,000-entry `cmap` each
+   * time, and a fresh object also misses the glyph cache, which is keyed on outline
+   * identity.
+   *
+   * A face that cannot be parsed is skipped rather than throwing — a caller who
+   * supplies a CFF font should still get their Latin text.
+   */
+  readonly fonts?: readonly RasterFontSource[];
+  /**
+   * Whether the host's installed fonts may be used. Defaults to `true`.
+   *
+   * Set `false` together with `fonts` to make the output depend only on the fonts
+   * supplied — the same display list then rasterises identically on any machine,
+   * which a snapshot or a reproducible build needs and font discovery cannot
+   * promise. With no `fonts` it leaves only the built-in stroke font.
+   */
+  readonly useSystemFonts?: boolean;
 }
 
 /**
@@ -51,6 +79,46 @@ export interface RgbaImage {
 }
 
 /**
+ * What {@link rasterizeToRgba} returns: an {@link RgbaImage} plus what it could not
+ * draw.
+ *
+ * A separate type rather than two more fields on `RgbaImage`, because that one is
+ * published and a consumer may construct it — a mock, a PNG adapter, a transform
+ * that returns pixels. Adding a required member there would break all of them to
+ * report something only this function can know.
+ */
+export interface RasterizedImage extends RgbaImage {
+  /**
+   * Code points no available font could draw, sorted.
+   *
+   * Empty in the ordinary case. A non-empty set means the image has holes where
+   * those characters should be — the pen advanced and nothing was painted — or, on
+   * the stroke-font path, that they were drawn as `?`. Reported because the failure
+   * is otherwise invisible: a whole page of Chinese once rasterised blank with no
+   * error raised. Supply `fonts` to fix it.
+   *
+   * Formatting controls are never listed: a variation selector or a bidi isolate has
+   * no glyph in any font, so naming one would ask the caller to install a font that
+   * cannot exist.
+   */
+  readonly uncoveredCodePoints: readonly number[];
+  /**
+   * Text this rasteriser drew but could not lay out correctly, one message per issue.
+   *
+   * Empty in the ordinary case. Non-empty means the image contains a script needing
+   * OpenType shaping (Arabic joining, Indic reordering, Thai mark stacking) or
+   * right-to-left text needing bidi reordering — neither of which this rasteriser
+   * does. Every glyph is drawn, so nothing *looks* broken; the shapes and the order
+   * are simply wrong.
+   *
+   * Unlike {@link uncoveredCodePoints}, supplying a font does not help. `toSvg` and
+   * the DOCX writer both carry the original text and leave shaping to the viewer, so
+   * they render these scripts correctly — the message says so.
+   */
+  readonly textWarnings: readonly string[];
+}
+
+/**
  * Render a display list to pixels.
  *
  * Pixels rather than a PNG: a PNG is a *container*, and building one needs DEFLATE,
@@ -59,7 +127,7 @@ export interface RgbaImage {
  * whatever it likes — `@excel/chart/render/draw-raster-png` is the thin adapter that
  * pairs this with the library's own PNG encoder.
  */
-export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}): RgbaImage {
+export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}): RasterizedImage {
   const width = Math.max(1, Math.round(options.width ?? list.width));
   const height = Math.max(1, Math.round(options.height ?? list.height));
   const scale = normalizeScale(options.scale);
@@ -82,11 +150,16 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
   if (options.background) {
     canvas.fillRect(0, 0, pixelWidth * samples, pixelHeight * samples, token(options.background));
   }
+  // Scoped to this canvas, not to the process: see `BasicRasterCanvas.setFonts`. The
+  // defaults here are the canvas's own, so this is unconditional rather than guarded.
+  canvas.setFonts(options.fonts ?? [], { useSystemFonts: options.useSystemFonts ?? true });
   renderDrawList(list, createRasterSurface(canvas, fit * scale * samples));
   return {
     width: pixelWidth,
     height: pixelHeight,
-    data: samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples)
+    data: samples === 1 ? canvas.data : downsample(canvas.data, pixelWidth, pixelHeight, samples),
+    uncoveredCodePoints: [...canvas.uncoveredCodePoints].sort((a, b) => a - b),
+    textWarnings: canvas.textWarnings()
   };
 }
 

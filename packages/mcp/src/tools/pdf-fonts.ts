@@ -18,8 +18,11 @@
 
 import { readFileSync } from "node:fs";
 
-import type { PdfFontConfig } from "documonster/pdf";
+import type { RasterFontSource } from "documonster/draw";
+import type { CjkLanguage, PdfFontConfig, PdfFontSource } from "documonster/pdf";
+import { z } from "zod";
 
+import type { PdfFontRef, ServerConfig } from "../config.js";
 import { toolError } from "../errors.js";
 
 /**
@@ -29,7 +32,7 @@ import { toolError } from "../errors.js";
  * Returned as one object so a call site cannot wire the diagnostics and forget
  * the font, or the other way round — the two exist for the same failure.
  */
-export function pdfFontOptions(config: { readonly pdfFont?: string }): {
+export function pdfFontOptions(config: FontConfig): {
   /** Spread into the PDF call. Never carries anything the library does not define. */
   readonly options: {
     readonly fonts?: PdfFontConfig;
@@ -41,7 +44,10 @@ export function pdfFontOptions(config: { readonly pdfFont?: string }): {
   assertDrawable(allow: boolean): void;
 } {
   const collector = collectFontWarnings();
-  const fonts = config.pdfFont === undefined ? undefined : loadFont(config.pdfFont);
+  const fonts =
+    config.pdfFont === undefined
+      ? undefined
+      : loadFont(config.pdfFont, config.pdfFontFallbacks ?? []);
   return {
     options: {
       ...(fonts === undefined ? {} : { fonts }),
@@ -60,27 +66,165 @@ export function pdfFontOptions(config: { readonly pdfFont?: string }): {
  * that the file exists and is TrueType, so a failure here is a font deleted while
  * the server was running — worth reporting as itself rather than as a PDF error.
  */
-function loadFont(fontPath: string): PdfFontConfig {
-  const cached = fontCache.get(fontPath);
+function loadFont(primary: PdfFontRef, fallbacks: readonly PdfFontRef[]): PdfFontConfig {
+  const key = [primary, ...fallbacks].map(refKey).join("|");
+  const cached = fontCache.get(key);
   if (cached !== undefined) {
     return cached;
   }
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(readFileSync(fontPath));
-  } catch (cause) {
-    throw toolError.unsupported(
-      `the font configured with --pdf-font could not be read: ${fontPath}`,
-      "It existed at startup, so it has been moved or deleted since.",
-      { cause }
-    );
-  }
-  // One default regular face. Named families would need the operator to state
-  // which Word/Excel family each file serves, and the point of this option is a
-  // floor under every document, not per-family typography.
-  const config: PdfFontConfig = { default: { regular: bytes } };
-  fontCache.set(fontPath, config);
+  // The fallbacks are named families rather than a second `default`, because that is the
+  // only shape the library has for "try this face, then that one". They are numbered rather
+  // than named after a typeface: the operator gave paths, and inventing a family name from a
+  // filename would be a guess that then has to match what the document asks for.
+  const families = fallbacks.map((ref, index) => ({
+    name: `fallback-${index + 1}`,
+    faces: { regular: readFace(ref) }
+  }));
+  const config: PdfFontConfig = {
+    default: { regular: readFace(primary) },
+    ...(families.length === 0
+      ? {}
+      : { families, fallbackFamilies: families.map(family => family.name) })
+  };
+  fontCache.set(key, config);
   return config;
+}
+
+/** Identify one face for the cache: the same file at two indices is two faces. */
+function refKey(ref: PdfFontRef): string {
+  return ref.collectionIndex === undefined ? ref.path : `${ref.path}#${ref.collectionIndex}`;
+}
+
+/**
+ * The parts of the server config this module reads.
+ *
+ * Named rather than repeated inline: three exported functions take it, and an inline literal
+ * in each is three places to update when a font option is added.
+ */
+export type FontConfig = Pick<ServerConfig, "pdfFont" | "pdfFontFallbacks">;
+
+/**
+ * Every face the operator named, primary first.
+ *
+ * One definition of "which faces are configured", because the three exported functions below
+ * each need it and each spelled it out — including `loadFont`'s cache key, which has to agree
+ * with them or two different chains collide on one entry.
+ */
+function configuredRefs(config: FontConfig): readonly PdfFontRef[] {
+  return config.pdfFont === undefined ? [] : [config.pdfFont, ...(config.pdfFontFallbacks ?? [])];
+}
+
+/**
+ * One face's bytes, and which face inside them.
+ *
+ * The shape both consumers actually want. `readFace` below narrows it to the union the library
+ * takes; going the other way needed an `instanceof` check to get the index back out.
+ *
+ * Cached by path — not by face — because a `.ttc` naming two of its faces would otherwise be
+ * read twice, and a CJK collection is tens of megabytes.
+ */
+function faceBytes(ref: PdfFontRef): { bytes: Uint8Array; collectionIndex?: number } {
+  let bytes = byteCache.get(ref.path);
+  if (bytes === undefined) {
+    try {
+      bytes = new Uint8Array(readFileSync(ref.path));
+    } catch (cause) {
+      throw toolError.unsupported(
+        `a font configured with --pdf-font could not be read: ${ref.path}`,
+        "It existed at startup, so it has been moved or deleted since.",
+        { cause }
+      );
+    }
+    byteCache.set(ref.path, bytes);
+  }
+  return ref.collectionIndex === undefined
+    ? { bytes }
+    : { bytes, collectionIndex: ref.collectionIndex };
+}
+
+/**
+ * Read one face's bytes, keeping `collectionIndex` attached.
+ *
+ * Cached by path — not by face — because a `.ttc` naming two of its faces would otherwise be
+ * read twice, and a CJK collection is tens of megabytes.
+ */
+function readFace(ref: PdfFontRef): PdfFontSource {
+  const face = faceBytes(ref);
+  return face.collectionIndex === undefined
+    ? face.bytes
+    : { data: face.bytes, collectionIndex: face.collectionIndex };
+}
+
+const byteCache = new Map<string, Uint8Array>();
+
+/**
+ * The operator's faces as bytes plus face index, for an API that takes exactly that.
+ *
+ * `PdfEditor.embedFont` is one — overlay text is drawn by this library, so it needs a real
+ * face — and it cannot take a `PdfFontConfig`. Expressed here rather than at the call site so
+ * that the `.ttc` index travels: dropping it embedded whichever face came first, which for
+ * `Songti.ttc` is weight 900.
+ */
+export function overlayFaces(
+  config: FontConfig
+): Array<{ bytes: Uint8Array; collectionIndex?: number }> {
+  return configuredRefs(config).map(faceBytes);
+}
+
+/**
+ * `textLanguage`, as a tool parameter.
+ *
+ * Shared so the description is written once: it is the same option for every tool that writes
+ * a PDF, and the schema budget is a real limit (52,000 characters for the whole list).
+ *
+ * Worth a parameter rather than a server flag because it is a property of the *document*, not
+ * of the host — one session legitimately converts a Chinese file and then a Japanese one.
+ */
+export const textLanguageShape = {
+  textLanguage: z
+    .enum(["zh-Hans", "zh-Hant", "ja", "ko"])
+    .optional()
+    .describe(
+      "East Asian language of the content, so the embedded face is drawn in that regional hand. " +
+        "Han characters are shared between Chinese, Japanese and Korean but drawn differently, so " +
+        "a font picked purely by coverage can be correct and still look wrong. Inferred from the " +
+        "text when omitted, which defaults to Chinese for characters common to all three."
+    )
+} as const;
+
+/** Spread into a PDF call. Empty when the caller said nothing. */
+export function textLanguageOption(args: { readonly textLanguage?: CjkLanguage }): {
+  readonly textLanguage?: CjkLanguage;
+} {
+  return args.textLanguage === undefined ? {} : { textLanguage: args.textLanguage };
+}
+
+/**
+ * The operator's faces in the shapes the diagram backends take.
+ *
+ * The rasteriser is offered every configured face, primary and fallbacks alike, because it
+ * resolves each character against the chain itself — there is no "default" face to be primary
+ * *of*. That is also why this cannot simply reuse `PdfFontConfig`.
+ */
+export function diagramFontOptions(config: FontConfig): {
+  readonly pdf?: PdfFontConfig;
+  readonly raster?: readonly RasterFontSource[];
+  readonly useSystemFonts?: boolean;
+} {
+  if (config.pdfFont === undefined) {
+    return {};
+  }
+  return {
+    pdf: loadFont(config.pdfFont, config.pdfFontFallbacks ?? []),
+    raster: configuredRefs(config).map(readFace),
+    // The host is switched off once the operator has named their faces, which is what
+    // `--pdf-font` is for: "the same Markdown produces a readable PDF on a laptop and a boxed
+    // one in a container" is the problem it exists to remove, and leaving discovery on for the
+    // raster backend alone would leave half of it. It also matches what the PDF writer already
+    // does — a configured font set disables auto-discovery there — so the two backends now
+    // answer the same way instead of one of them quietly consulting the machine.
+    useSystemFonts: false
+  };
 }
 
 const fontCache = new Map<string, PdfFontConfig>();

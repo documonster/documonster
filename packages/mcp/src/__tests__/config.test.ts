@@ -102,7 +102,7 @@ describe("resolveConfig --pdf-font", () => {
     // A bare sfnt version is all the startup check reads.
     await writeFile(font, Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x00]));
 
-    expect(resolveConfig(["--pdf-font", "face.ttf"], { cwd }).pdfFont).toBe(font);
+    expect(resolveConfig(["--pdf-font", "face.ttf"], { cwd }).pdfFont).toEqual({ path: font });
   });
 
   it("accepts a TrueType collection", async () => {
@@ -110,7 +110,75 @@ describe("resolveConfig --pdf-font", () => {
     const font = path.join(cwd, "faces.ttc");
     await writeFile(font, Buffer.from("ttcf\u0000\u0001\u0000\u0000", "latin1"));
 
-    expect(resolveConfig(["--pdf-font", "faces.ttc"], { cwd }).pdfFont).toBe(font);
+    expect(resolveConfig(["--pdf-font", "faces.ttc"], { cwd }).pdfFont).toEqual({ path: font });
+  });
+
+  it("selects a face inside a collection with `#index`", async () => {
+    // The reason this exists: on macOS `Songti.ttc` opens at weight 900, so taking face 0 —
+    // which is what naming the file alone did — set Chinese body text in the family's
+    // heaviest weight. Regular is face 6 there, and there was no way to ask for it.
+    const cwd = await makeRoot();
+    const font = path.join(cwd, "faces.ttc");
+    await writeFile(font, Buffer.from("ttcf\u0000\u0001\u0000\u0000", "latin1"));
+
+    expect(resolveConfig(["--pdf-font", "faces.ttc#3"], { cwd }).pdfFont).toEqual({
+      path: font,
+      collectionIndex: 3
+    });
+  });
+
+  it("refuses an index on a file that holds one face", async () => {
+    // Accepting it would silently ignore the number, which is the failure mode this server
+    // treats as worse than an error: the operator believes they selected a face.
+    const cwd = await makeRoot();
+    await writeFile(path.join(cwd, "face.ttf"), Buffer.from([0x00, 0x01, 0x00, 0x00]));
+
+    expect(() => resolveConfig(["--pdf-font", "face.ttf#2"], { cwd })).toThrow(
+      /not a font collection/
+    );
+  });
+
+  it("leaves a `#` that is not an index alone", async () => {
+    // A filename may contain one, and reading it as a malformed index would reject a file
+    // that is perfectly valid.
+    const cwd = await makeRoot();
+    const font = path.join(cwd, "face#2024.ttf");
+    await writeFile(font, Buffer.from([0x00, 0x01, 0x00, 0x00]));
+
+    expect(resolveConfig(["--pdf-font", "face#2024.ttf"], { cwd }).pdfFont).toEqual({
+      path: font
+    });
+  });
+
+  it("builds a fallback chain, in the order given", async () => {
+    // One face cannot serve a document that mixes scripts: a Chinese face has no Arabic, and
+    // a pan-Unicode face that covers both draws Han with Japanese conventions.
+    const cwd = await makeRoot();
+    for (const name of ["cjk.ttf", "arabic.ttf", "symbols.ttf"]) {
+      await writeFile(path.join(cwd, name), Buffer.from([0x00, 0x01, 0x00, 0x00]));
+    }
+
+    const config = resolveConfig(
+      ["--pdf-font", "cjk.ttf", "--pdf-font-fallback", "arabic.ttf,symbols.ttf"],
+      { cwd }
+    );
+    expect(config.pdfFontFallbacks).toEqual([
+      { path: path.join(cwd, "arabic.ttf") },
+      { path: path.join(cwd, "symbols.ttf") }
+    ]);
+  });
+
+  it("accepts the fallback flag more than once", async () => {
+    const cwd = await makeRoot();
+    for (const name of ["a.ttf", "b.ttf"]) {
+      await writeFile(path.join(cwd, name), Buffer.from([0x00, 0x01, 0x00, 0x00]));
+    }
+
+    const config = resolveConfig(
+      ["--pdf-font", "a.ttf", "--pdf-font-fallback", "b.ttf", "--pdf-font-fallback", "a.ttf"],
+      { cwd }
+    );
+    expect(config.pdfFontFallbacks).toHaveLength(2);
   });
 
   it("rejects a CFF-flavoured OpenType font by name", async () => {

@@ -113,6 +113,19 @@ widened.`
 - \`archive_read\` — list or extract a .zip/.tar.
 - \`archive_write\` — package files into a .zip/.tar.
 
+## Fonts
+- CJK, Cyrillic, Greek and anything outside WinAnsi need a font. The operator
+  supplies one with \`--pdf-font\`; without it the host is searched, so the same
+  Markdown is readable on one machine and boxed on another.
+- \`doc_convert\` / \`doc_write\` **refuse** to write a PDF containing \`.notdef\`
+  boxes. Pass \`allowMissingGlyphs: true\` to accept them deliberately.
+- A diagram cannot refuse — an uncovered character paints nothing at all — so the
+  result names the code points instead and says the labels are blank. Believe it:
+  the picture really is missing that text.
+- \`textLanguage\` on \`doc_convert\` / \`doc_write\` picks the regional hand.
+  Chinese, Japanese and Korean share code points and draw them differently, so
+  state it when the user's language is known rather than letting it be inferred.
+
 ## Not available — say so plainly rather than improvising
 - reading a password-protected document
 - PDF → Word, or any conversion with a PDF as the source

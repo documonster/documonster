@@ -25,6 +25,7 @@ import { PdfFontError } from "@pdf/errors";
 import type { TtfFont } from "@pdf/font/ttf-parser";
 import { concatUint8Arrays } from "@utils/binary";
 import { isGlyphlessControl } from "@utils/cjk";
+import { glyphComponents } from "@utils/font-ttf";
 // Subsetting maps a whole cluster — a base character together with the variation
 // selectors and joiners after it — to a single CID, so anything choosing a *face*
 // per character has to agree on these boundaries. Splitting mid-cluster leaves the
@@ -86,7 +87,7 @@ export function embedTtfFont(
   // --- Step 1: Build the glyph subset ---
   // Map: original glyph ID → new glyph ID in subset
   // Map: Unicode code point → CID, then CID → subset glyph ID
-  const { oldToNewGid, unicodeToCid, sequenceToCid, cidToGid, cidWidths, usedGlyphIds } =
+  const { oldToNewGid, unicodeToCid, sequenceToCid, cidToText, cidToGid, cidWidths, usedGlyphIds } =
     buildSubsetMapping(font, usedText);
 
   // --- Step 2: Create the subsetted font program ---
@@ -143,7 +144,7 @@ export function embedTtfFont(
   writer.addObject(cidFontObjNum, cidFontDict);
 
   // --- Step 8: Create the ToUnicode CMap ---
-  const toUnicodeCmap = buildToUnicodeCMap(sequenceToCid);
+  const toUnicodeCmap = buildToUnicodeCMap(cidToText);
   const compressedCmap = zlibSync(toUnicodeCmap, { level: 6 });
   const toUnicodeObjNum = writer.allocObject();
   const toUnicodeDict = new PdfDict()
@@ -184,6 +185,16 @@ interface SubsetMapping {
   unicodeToCid: Map<number, number>;
   /** Map from Unicode sequence → CID */
   sequenceToCid: Map<string, number>;
+  /**
+   * Map from CID → the text it means, for ToUnicode.
+   *
+   * Separate from {@link sequenceToCid} because the two answer different questions once
+   * shaping is involved: the key of that map identifies the *glyph* drawn — a presentation
+   * form such as U+FEE3 — while this map holds what a reader copies out, U+0645. Deriving
+   * ToUnicode from the drawn sequence, as it used to, made a shaped PDF unsearchable and
+   * put presentation forms on the clipboard.
+   */
+  cidToText: Map<number, string>;
   /** Map from CID → subset GID */
   cidToGid: number[];
   /** Widths indexed by CID */
@@ -192,9 +203,28 @@ interface SubsetMapping {
   usedGlyphIds: Set<number>;
 }
 
+/**
+ * One drawn glyph, and the three separate things that have to be known about it.
+ *
+ * They coincide for unshaped text, which is why one field used to do all three jobs. They
+ * do not coincide once a contextual form is substituted, and conflating them then produces
+ * a PDF that looks right and cannot be searched.
+ */
 export interface EmbeddedGlyphUse {
+  /** The code point to look up in the face's `cmap` — the glyph actually drawn. */
   readonly codePoint: number;
+  /**
+   * The key that earns a distinct CID. It must identify the glyph, not the letter: the
+   * initial and medial forms of one Arabic letter are two glyphs and need two CIDs, so
+   * keying on the original letter would collide them onto whichever was seen first.
+   */
   readonly sequence: string;
+  /**
+   * What this glyph means, for ToUnicode, copy and search. Defaults to {@link sequence},
+   * and differs from it exactly when shaping substituted a form — a ligature also makes it
+   * longer, since one glyph stands for two characters.
+   */
+  readonly text?: string;
 }
 
 function buildSubsetMapping(
@@ -203,6 +233,7 @@ function buildSubsetMapping(
 ): SubsetMapping {
   const usedGlyphIds = new Set<number>();
   const sequenceToOrigGid = new Map<string, number>();
+  const sequenceToText = new Map<string, string>();
   const entries: Array<string | number | EmbeddedGlyphUse> = [];
   for (const value of usedText) {
     entries.push(value);
@@ -240,6 +271,7 @@ function buildSubsetMapping(
       : (font.cmap.get(use.codePoint) ?? 0);
     if (!sequenceToOrigGid.has(use.sequence)) {
       sequenceToOrigGid.set(use.sequence, gid);
+      sequenceToText.set(use.sequence, use.text ?? use.sequence);
       if (gid > 0) {
         usedGlyphIds.add(gid);
       }
@@ -278,6 +310,7 @@ function buildSubsetMapping(
   // use the same subset glyph while retaining distinct ToUnicode mappings.
   const unicodeToCid = new Map<number, number>();
   const sequenceToCid = new Map<string, number>();
+  const cidToText = new Map<number, string>();
   const cidToGid = [0];
   const cidWidths = [font.advanceWidths[0] ?? 0];
 
@@ -289,6 +322,7 @@ function buildSubsetMapping(
       );
     }
     sequenceToCid.set(sequence, cid);
+    cidToText.set(cid, sequenceToText.get(sequence) ?? sequence);
     const codePoints = Array.from(sequence, char => char.codePointAt(0)!);
     if (codePoints.length === 1) {
       unicodeToCid.set(codePoints[0], cid);
@@ -301,6 +335,7 @@ function buildSubsetMapping(
     oldToNewGid,
     unicodeToCid,
     sequenceToCid,
+    cidToText,
     cidToGid,
     cidWidths,
     usedGlyphIds
@@ -755,8 +790,8 @@ function calcTableChecksum(data: Uint8Array): number {
  * Build a ToUnicode CMap stream for PDF text extraction.
  * Maps CIDs to Unicode sequences.
  */
-function buildToUnicodeCMap(sequenceToCid: Map<string, number>): Uint8Array {
-  const entries = Array.from(sequenceToCid, ([sequence, cid]) => [cid, sequence] as const).sort(
+function buildToUnicodeCMap(cidToText: ReadonlyMap<number, string>): Uint8Array {
+  const entries = Array.from(cidToText, ([cid, text]) => [cid, text] as const).sort(
     (a, b) => a[0] - b[0]
   );
 
@@ -830,65 +865,25 @@ function buildWidthArray(cidWidths: number[], unitsPerEm: number): string {
 // Composite Glyph Handling
 // =============================================================================
 
-// TrueType composite glyph flags
-const MORE_COMPONENTS = 0x0020;
-const ARG_1_AND_2_ARE_WORDS = 0x0001;
-const WE_HAVE_A_SCALE = 0x0008;
-const WE_HAVE_AN_X_AND_Y_SCALE = 0x0040;
-const WE_HAVE_A_TWO_BY_TWO = 0x0080;
-
 /**
  * Get component glyph IDs from a composite glyph.
  * Returns an empty array for simple glyphs or empty glyph slots.
+ *
+ * The record walk lives in `@utils/font-ttf`: a component's length depends on its own
+ * flags, and there were four copies of that arithmetic — here, in the remapper below,
+ * in the Word subsetter and in the glyph rasteriser — free to disagree about where a
+ * record ends. That module also bounds the read to the glyph, which this did not: it
+ * stepped with a bare cursor and relied on a `DataView` throwing once it left the font.
  */
 function getCompositeComponents(font: TtfFont, glyphId: number, glyfOffset: number): number[] {
-  const start = font.glyphOffsets[glyphId];
-  const end = font.glyphOffsets[glyphId + 1];
-  if (end - start < 4) {
-    return [];
-  }
-
-  const view = new DataView(font.data.buffer, font.data.byteOffset, font.data.byteLength);
-  const absStart = glyfOffset + start;
-  const numberOfContours = view.getInt16(absStart, false);
-
-  if (numberOfContours >= 0) {
-    // Simple glyph, no components
-    return [];
-  }
-
-  // Composite glyph: skip header (10 bytes: numberOfContours + xMin + yMin + xMax + yMax)
-  let offset = absStart + 10;
   const components: number[] = [];
-
-  while (true) {
-    const flags = view.getUint16(offset, false);
-    offset += 2;
-    const componentGid = view.getUint16(offset, false);
-    offset += 2;
-    components.push(componentGid);
-
-    // Skip arguments based on flags
-    if (flags & ARG_1_AND_2_ARE_WORDS) {
-      offset += 4; // two int16/uint16
-    } else {
-      offset += 2; // two int8/uint8
-    }
-
-    // Skip transform data
-    if (flags & WE_HAVE_A_SCALE) {
-      offset += 2; // one F2Dot14
-    } else if (flags & WE_HAVE_AN_X_AND_Y_SCALE) {
-      offset += 4; // two F2Dot14
-    } else if (flags & WE_HAVE_A_TWO_BY_TWO) {
-      offset += 8; // four F2Dot14
-    }
-
-    if (!(flags & MORE_COMPONENTS)) {
-      break;
-    }
+  for (const component of glyphComponents(
+    font.data,
+    glyfOffset + font.glyphOffsets[glyphId],
+    glyfOffset + font.glyphOffsets[glyphId + 1]
+  )) {
+    components.push(component.glyphId);
   }
-
   return components;
 }
 
@@ -904,47 +899,17 @@ function remapCompositeGlyphIds(
     return glyphData;
   }
 
-  const view = new DataView(glyphData.buffer, glyphData.byteOffset, glyphData.byteLength);
-  const numberOfContours = view.getInt16(0, false);
-
-  if (numberOfContours >= 0) {
-    // Simple glyph
-    return glyphData;
-  }
-
-  // Clone to avoid mutating the original font data
+  // Cloned before the walk: each component reports where its glyph ID sits and the
+  // new ID is written back at that offset, so the original font's bytes are untouched.
   const copy = new Uint8Array(glyphData.length);
   copy.set(glyphData);
-  const copyView = new DataView(copy.buffer, copy.byteOffset, copy.byteLength);
 
-  let offset = 10; // skip header
-
-  while (true) {
-    const flags = copyView.getUint16(offset, false);
-    offset += 2;
-    const oldGid = copyView.getUint16(offset, false);
-    const newGid = oldToNewGid.get(oldGid) ?? 0;
-    copyView.setUint16(offset, newGid, false);
-    offset += 2;
-
-    if (flags & ARG_1_AND_2_ARE_WORDS) {
-      offset += 4;
-    } else {
-      offset += 2;
-    }
-
-    if (flags & WE_HAVE_A_SCALE) {
-      offset += 2;
-    } else if (flags & WE_HAVE_AN_X_AND_Y_SCALE) {
-      offset += 4;
-    } else if (flags & WE_HAVE_A_TWO_BY_TWO) {
-      offset += 8;
-    }
-
-    if (!(flags & MORE_COMPONENTS)) {
-      break;
-    }
+  let composite = false;
+  for (const component of glyphComponents(copy, 0, copy.length)) {
+    composite = true;
+    const newGid = oldToNewGid.get(component.glyphId) ?? 0;
+    copy[component.glyphIdOffset] = (newGid >> 8) & 0xff;
+    copy[component.glyphIdOffset + 1] = newGid & 0xff;
   }
-
-  return copy;
+  return composite ? copy : glyphData;
 }

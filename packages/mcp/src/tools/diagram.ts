@@ -26,10 +26,11 @@ import path from "node:path";
 
 import { encodePng } from "documonster/archive";
 import { cssColour, rasterizeToRgba, renderDrawList, toSvg } from "documonster/draw";
-import type { DrawList } from "documonster/draw";
+import type { DrawList, RasterFontSource } from "documonster/draw";
 import { MermaidSyntaxError, mermaidToDrawList, parseMermaid } from "documonster/mermaid";
 import type { MermaidDiagram, MermaidRenderOptions, ThemeOptions } from "documonster/mermaid";
 import { Pdf, createPdfDrawSurface } from "documonster/pdf";
+import type { PdfFontConfig } from "documonster/pdf";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -576,6 +577,15 @@ export interface RenderedDiagram {
   /** Size of the artefact, in the format's own unit. */
   readonly width: number;
   readonly height: number;
+  /**
+   * Code points no available face could draw, as `U+XXXX` strings.
+   *
+   * Only a raster render can report this, and it was previously discarded. That made the PNG
+   * path the one place in this server where a Chinese label could come out **blank** and the
+   * result still said "Rendered … (png, 41.2 kB)": the PDF path refuses a page with
+   * `.notdef` boxes, and a raster has no notdef to draw, so nothing was reported at all.
+   */
+  readonly uncovered?: readonly string[];
 }
 
 /**
@@ -588,7 +598,8 @@ export async function renderDiagram(
   list: DrawList,
   format: DiagramFormat,
   size: RenderSizeArgs,
-  background: string
+  background: string,
+  fonts?: DiagramFontOptions
 ): Promise<RenderedDiagram> {
   const width = size.width ?? list.width;
   const height = size.height ?? list.height;
@@ -614,7 +625,12 @@ export async function renderDiagram(
     const image = rasterizeToRgba(list, {
       scale,
       ...(size.width === undefined ? {} : { width }),
-      ...(size.height === undefined ? {} : { height })
+      ...(size.height === undefined ? {} : { height }),
+      // The operator's faces are offered to the rasteriser too. Without this, `--pdf-font`
+      // fixed a converted document and left a diagram of the same text blank, on the same
+      // host, in the same call.
+      ...(fonts?.raster === undefined ? {} : { fonts: fonts.raster }),
+      ...(fonts?.useSystemFonts === undefined ? {} : { useSystemFonts: fonts.useSystemFonts })
     });
     return {
       // A display list's unit is a point, so `scale` pixels per point is
@@ -622,11 +638,14 @@ export async function renderDiagram(
       // instead of assuming 96, and getting it wrong resizes the picture.
       bytes: encodePng(image.data, image.width, image.height, { dpi: Math.round(72 * scale) }),
       width: image.width,
-      height: image.height
+      height: image.height,
+      ...(image.uncoveredCodePoints.length === 0
+        ? {}
+        : { uncovered: image.uncoveredCodePoints.map(formatCodePoint) })
     };
   }
 
-  const builder = new Pdf.Builder();
+  const builder = new Pdf.Builder(fonts?.pdf === undefined ? undefined : { fonts: fonts.pdf });
   const page = builder.addPage({ width, height });
   // Letterbox: fit the list into the page uniformly, so an explicit page size
   // produces a correct picture rather than a stretched one.
@@ -652,6 +671,25 @@ export async function renderDiagram(
     )
   );
   return { bytes: await builder.build(), width, height };
+}
+
+/** `U+4E2D`, the form an operator can search a font for. */
+function formatCodePoint(codePoint: number): string {
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/**
+ * The operator's faces, expressed once for each backend that can use them.
+ *
+ * Two fields rather than one because the two backends take different things: PDF embeds a
+ * face and needs the family structure, while the rasteriser is handed bytes. Deriving one
+ * from the other here would mean re-reading the file per render.
+ */
+export interface DiagramFontOptions {
+  readonly pdf?: PdfFontConfig;
+  readonly raster?: readonly RasterFontSource[];
+  /** False once the operator named their faces, so the render does not depend on the host. */
+  readonly useSystemFonts?: boolean;
 }
 
 function toPdfColour(token: string): { r: number; g: number; b: number; a?: number } {

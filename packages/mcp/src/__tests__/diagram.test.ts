@@ -112,6 +112,56 @@ describe("diagram_render", () => {
     expect(text).toContain("@output/flow.svg");
   });
 
+  it("reports characters no font could draw in a PNG, instead of shipping a blank label", async () => {
+    // The one place in this server where text could vanish in silence. The PDF path refuses a
+    // page containing `.notdef` boxes; a rasteriser has no notdef, so an uncovered character
+    // paints nothing at all and the result still said "Rendered … (png, 41.2 kB)".
+    //
+    // Plane 16's Private Use Area, because the obvious choice does not work: U+E000 and
+    // U+F8FF are covered on macOS — fonts use the BMP PUA for their own icons — so a test
+    // written with one of those passes for the wrong reason and would keep passing with the
+    // reporting removed. Nothing maps Plane 16.
+    const fx = await fixture();
+    const text = await run(diagramRenderTool, fx, {
+      source: "flowchart LR\n  A[\u{10FFFD}] --> B[ok]",
+      to: "pua.png"
+    });
+
+    expect(text).toContain("U+10FFFD");
+    expect(text.toLowerCase()).toContain("blank");
+  });
+
+  it("actually hands the configured faces to the rasteriser", async () => {
+    // Constructing the right options object is not the same as passing it, and a test that
+    // only checked the object kept passing when the argument was dropped — the diagram was
+    // still rasterised, just with the host's fonts instead of the operator's.
+    //
+    // The observable difference: a configured font switches the host off, so a face that
+    // cannot be parsed leaves a non-ASCII label with nothing to draw it and the render says
+    // so. Reaching that report proves the options travelled. It needs no real font file and
+    // makes no assumption about what is installed.
+    const fx = await fixture();
+    const fontPath = path.join(fx.root, "unusable.ttf");
+    await writeFile(fontPath, Buffer.from([0x00, 0x01, 0x00, 0x00, 0x11, 0x22]));
+    const withFont = {
+      ...fx,
+      config: { ...fx.config, pdfFont: { path: fontPath } }
+    };
+
+    const text = await run(diagramRenderTool, withFont, {
+      source: "flowchart LR\n  A[\u4e2d\u6587] --> B[ok]",
+      to: "cjk.png"
+    });
+    expect(text).toContain("U+4E2D");
+
+    // And with no font configured the same diagram draws, because the host is consulted.
+    const plain = await run(diagramRenderTool, fx, {
+      source: "flowchart LR\n  A[\u4e2d\u6587] --> B[ok]",
+      to: "cjk-host.png"
+    });
+    expect(plain).not.toContain("U+4E2D");
+  });
+
   it("draws a PNG whose pixels match the requested scale", async () => {
     const fx = await fixture();
     await run(diagramRenderTool, fx, { source: FLOW, to: "flow.png", scale: 1 });

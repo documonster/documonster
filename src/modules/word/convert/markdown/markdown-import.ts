@@ -17,6 +17,7 @@
  * @stability experimental
  */
 
+import { isSpacelessScript } from "@utils/cjk";
 import { mapToStandardFont, measureTextWidth, styledFontVariant } from "@utils/font-metrics";
 import { emuToPt, ptToTwips, twipsToPt } from "@utils/units";
 import { eastAsianDefaultsFor, withEastAsianDefaults } from "@word/core/east-asian-defaults";
@@ -869,6 +870,47 @@ function parseTable(
 // Inline Parser
 // =============================================================================
 
+/**
+ * The last character a node contributes, for deciding what a soft break becomes.
+ *
+ * Only a text node is inspected. A soft break after emphasis, a link or code keeps its
+ * space: the thing next to the break is then markup rather than prose, so there is
+ * nothing reliable to judge, and a spurious space is a far smaller defect than two
+ * words run together.
+ */
+function lastVisibleChar(node: InlineNode | undefined): string | undefined {
+  if (node?.type !== "text" || node.text.length === 0) {
+    return undefined;
+  }
+  return [...node.text].at(-1);
+}
+
+/**
+ * Whether a soft line break between these two characters should become a space.
+ *
+ * CommonMark says it always does, which is right for a script that separates words
+ * with a space and wrong for one that does not. A Chinese paragraph hard-wrapped in
+ * the source — which is how nearly every hand-written CJK Markdown file looks, this
+ * repository's own `README_zh.md` included — came out with a space at every wrap
+ * point, in the middle of words.
+ *
+ * The space is dropped only when the characters on *both* sides are from a spaceless
+ * script, so `中文` + newline + `English` keeps its space and only Chinese beside
+ * Chinese loses it. Korean is excluded by {@link isSpacelessScript}, because it does
+ * separate words with spaces.
+ */
+function needsSpaceAcrossSoftBreak(before: string | undefined, after: string | undefined): boolean {
+  if (before === undefined || after === undefined) {
+    return true;
+  }
+  const beforeCp = before.codePointAt(0);
+  const afterCp = after.codePointAt(0);
+  if (beforeCp === undefined || afterCp === undefined) {
+    return true;
+  }
+  return !(isSpacelessScript(beforeCp) && isSpacelessScript(afterCp));
+}
+
 function parseInlines(text: string): InlineNode[] {
   // Emphasis is resolved in a second pass over this list, so a delimiter run is
   // recorded here rather than matched here — see `processEmphasis`.
@@ -903,8 +945,8 @@ function parseInlines(text: string): InlineNode[] {
           lastNode.text = lastNode.text.slice(0, -1);
         }
         appendNode({ type: "lineBreak" });
-      } else {
-        // Soft line break → space
+      } else if (needsSpaceAcrossSoftBreak(lastVisibleChar(tail.node), text[i + 1])) {
+        // Soft line break → space, per CommonMark.
         appendNode({ type: "text", text: " " });
       }
       i++;

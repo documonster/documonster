@@ -1,9 +1,11 @@
 /**
  * Build-local font selection and measurement.
  *
- * Planning deliberately does not perform shaping, script reordering, kerning,
- * or glyph substitution. Consumers that need those features must shape text
- * before PDF encoding; this planner only keeps grapheme clusters on one face.
+ * Planning deliberately does not perform shaping, kerning or glyph substitution: it only
+ * keeps grapheme clusters on one face. Shaping happens in `FontManager` *after* a run has
+ * been routed here, against the face that will draw it — which is the only place the
+ * coverage question can be answered, since a contextual form is used only if that face has
+ * a glyph for it. A word split across two faces therefore loses the join at the seam.
  */
 
 // The canonical WinAnsi predicate. A local copy here excluded the control

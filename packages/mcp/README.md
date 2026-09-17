@@ -71,7 +71,8 @@ No install needed — point your MCP client at `npx`.
 | `--enable <groups>`       | all          | Comma-separated tool groups: `core`, `excel`, `word`, `pdf`, `forms`, `archive`, `diagram`. `core` is always on. |
 | `--max-file-size <bytes>` | 67108864     | Reject larger input documents.                                                                                   |
 | `--max-output-chars <n>`  | 40000        | Truncate tool output — a token budget in disguise.                                                               |
-| `--pdf-font <file>`       | none         | TrueType font embedded in every PDF written. See [PDF fonts](#pdf-fonts).                                        |
+| `--pdf-font <file>[#i]`   | none         | TrueType face embedded in every PDF and diagram written. See [PDF fonts](#pdf-fonts).                            |
+| `--pdf-font-fallback <f>` | none         | Faces tried, in order, for characters the primary lacks. Repeatable, or comma-separated.                         |
 
 ### PDF fonts
 
@@ -102,6 +103,58 @@ Naming a font removes the host from the answer:
 }
 ```
 
+#### Selecting a face inside a `.ttc`
+
+A collection holds several faces and the first is rarely the one wanted: on macOS
+`Songti.ttc` opens at **weight 900**, so naming the file alone sets Chinese body text
+in the heaviest weight the family ships. Append the index to choose:
+
+```
+--pdf-font /System/Library/Fonts/Supplemental/Songti.ttc#6
+```
+
+The order inside a collection is arbitrary and not worth guessing — that file happens to
+run Black, Bold, TC-Bold, Light, STSong, TC-Light, **Regular**, TC-Regular, so Regular is
+face 6 and face 3 is Light. Check the file rather than assuming, and confirm what was
+embedded by looking for `/BaseFont` in the PDF: `STSongti-SC-Regular-Subset` is the
+answer you want, `-Light-` or `-Black-` means the index was wrong.
+
+An index on a file that holds one face is rejected at startup rather than ignored.
+
+#### More than one face
+
+One face cannot serve a document that mixes scripts. A Chinese face has no Arabic, so a
+page of Chinese prose quoting an Arabic phrase either loses the phrase to `.notdef` boxes
+or — if you reach for a pan-Unicode face to cover both — has _all_ of its Han drawn by a
+face whose glyphs follow Japanese conventions. Give the regional face first and let the
+rest fall back:
+
+```
+--pdf-font Songti.ttc#6 --pdf-font-fallback ArialUnicode.ttf,Symbols.ttf
+```
+
+#### What the fonts cover
+
+Every place this server draws text of its own: converted documents, diagrams rendered
+to PNG or PDF, diagrams embedded in a `.docx`, and `pdf_edit`'s watermarks, stamps and
+page numbers. Configuring a font also switches the host's own fonts **off** for these
+renders, which is the point — the output then depends on the files you named and not on
+the machine.
+
+Only `pdf_edit` cannot honour a `#index`: its overlay API takes bytes, so a `.ttc` there
+embeds the collection's first face.
+
+#### Choosing the regional hand
+
+`textLanguage` is a per-call parameter on `doc_write` and `doc_convert`, not a server
+flag, because it is a property of the document — one session legitimately converts a
+Chinese file and then a Japanese one. Han characters are shared between the three
+languages and drawn differently, so a font picked purely by coverage can be correct and
+still look wrong. Omitted, the library infers it from the text, which falls back to
+Chinese for characters common to all three.
+
+#### Requirements
+
 It must be a TrueType font — `.ttf` or `.ttc` with `glyf` outlines. A
 CFF-flavoured `.otf` is rejected at startup rather than at conversion time,
 because the subsetting embedder cannot use CFF outlines: that rules out macOS
@@ -117,6 +170,12 @@ as a success is a defect found later, if at all. Latin, Greek, Cyrillic and the
 symbol blocks are drawn from built-in outlines and never trigger it; CJK, and any
 script this library has no glyphs for, needs `--pdf-font`. Pass
 `allowMissingGlyphs: true` on the call to accept the boxes on purpose.
+
+**A diagram cannot fail this way, so it is reported instead.** A rasteriser has no
+`.notdef` to draw — an uncovered character paints _nothing_ — so `diagram_render`, and any
+tool embedding a `mermaid` fence, names the code points it could not draw and says the
+labels are blank. There is no equivalent refusal because the image is not terminal: it
+sits inside a document you can regenerate.
 
 ## Security
 

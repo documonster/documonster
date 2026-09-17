@@ -10,19 +10,20 @@
  * hundred more names that no browser can act on. A runtime guard cannot remove
  * them, because a bundler has to keep any string the module might reach; only a
  * separate module can. `scripts/link-platform-variants.ts` routes every import of the
- * sibling through `#platform/modules/pdf/font/system-fonts`, and the manifest's
+ * sibling through `#platform/utils/font-discovery`, and the manifest's
  * `imports` map selects this file under the `browser` condition.
  *
- * A browser consumer therefore falls back exactly as it did before — Type1 for
- * WinAnsi text and Type3 for the rest, with `onWarning` reporting the code points
- * nothing covers — and the way to get real CJK glyphs in a browser is what it has
- * always been: `embedFont(bytes)` with a font you ship.
+ * A browser consumer therefore falls back exactly as it did before. For PDF that is
+ * Type1 for WinAnsi text and Type3 for the rest, with `onWarning` reporting the code
+ * points nothing covers; for the rasteriser it is the built-in stroke font. Either
+ * way the route to real CJK glyphs in a browser is to supply the bytes —
+ * `embedFont(bytes)` for a PDF, `RasterizeOptions.fonts` for a PNG.
  *
  * @module
  */
 
-import type { TtfFont } from "@pdf/font/ttf-parser";
-import type { CjkLanguage } from "@utils/cjk";
+import type { CjkLanguage } from "./cjk";
+import type { TtfFont } from "./font-ttf";
 
 /**
  * A face that could be embedded, kept structurally identical to the Node type so
@@ -33,6 +34,22 @@ export interface SystemFontCandidate {
   readonly collectionIndex: number;
   readonly preferred: boolean;
   readonly path?: string;
+}
+
+/** Kept structurally identical to the Node module; see its documentation. */
+export type RequiresFacePredicate = (codePoint: number) => boolean;
+
+/** Kept structurally identical to the Node module; see its documentation. */
+export interface FaceStyle {
+  readonly families?: readonly string[];
+  readonly weight?: number;
+  readonly italic?: boolean;
+}
+
+/** Kept structurally identical to the Node module; see its documentation. */
+export interface FindFaceOptions extends FaceStyle {
+  readonly language?: CjkLanguage;
+  readonly requiresFace?: RequiresFacePredicate;
 }
 
 /**
@@ -77,8 +94,7 @@ export function discoverSystemFont(): SystemFontCandidate | null {
  */
 export function findSystemFontForCodePoints(
   _codePoints: ReadonlySet<number>,
-  _preferredFamilies: readonly string[],
-  _language?: CjkLanguage
+  _options?: FindFaceOptions
 ): TtfFont | null {
   return null;
 }

@@ -160,18 +160,45 @@ describe("text-shaping", () => {
       expect(ba!.visual).toBe(String.fromCodePoint(0xfe91)); // Ba Initial
     });
 
-    it("should apply final form for right-joining letter (Alef) preceded by dual-joining", () => {
-      // با — Ba followed by Alef
-      // Ba is dual-joining, Alef is right-joining
-      // Ba sees next=Alef (R-type, not D or C), so nextJoins=false → Ba gets isolated? No:
-      // Actually let's check: Ba precedes Alef. For Ba: prevJoins=false, nextJoins depends on Alef type.
-      // Alef is R-type. nextJoins checks if next is D or C → Alef is R → nextJoins=false for Ba.
-      // So Ba stays isolated. Alef: prevJoins checks if prev (Ba) is D/C/R → yes (D) → final form.
-      // Alef final: 0xFE8E
+    it("joins a dual-joining letter to a following right-joining one", () => {
+      // با — Ba (dual) then Alef (right-joining). **Both** letters join here: a
+      // right-joining letter attaches on its right, which in logical order is the
+      // character before it. So Ba is initial and Alef is final.
+      //
+      // This case is why the joining pass was wrong for most Arabic words. The test
+      // that used to be here asserted only Alef, and its comment reasoned its way to
+      // "So Ba stays isolated" — recording the bug as expected behaviour. Every other
+      // case in this file is dual-joining throughout (بس, بسم), so nothing else
+      // exercised a dual letter followed by a right-joining one. Alef, dal, reh and waw
+      // are all right-joining and appear in almost every Arabic word, so the effect was
+      // that `مرحبا` rendered as disconnected letters.
       const result = shapeText("\u0628\u0627");
+      const ba = result.find(c => c.chars === "\u0628");
       const alef = result.find(c => c.chars === "\u0627");
-      expect(alef).toBeDefined();
+      expect(ba!.visual).toBe(String.fromCodePoint(0xfe91)); // Ba Initial
       expect(alef!.visual).toBe(String.fromCodePoint(0xfe8e)); // Alef Final
+    });
+
+    it("shapes مرحبا the way the Unicode joining rules require", () => {
+      // A whole real word, letter by letter, because the per-letter cases above can all
+      // pass while a word made of them does not. meem(D) reh(R) hah(D) beh(D) alef(R):
+      // reh and alef are right-joining, so meem is initial and beh is medial.
+      const result = shapeText("\u0645\u0631\u062D\u0628\u0627");
+      const form = (ch: string) => result.find(c => c.chars === ch)!.visual.codePointAt(0);
+      expect(form("\u0645")).toBe(0xfee3); // meem INITIAL
+      expect(form("\u0631")).toBe(0xfeae); // reh  FINAL
+      expect(form("\u062D")).toBe(0xfea3); // hah  INITIAL
+      expect(form("\u0628")).toBe(0xfe92); // beh  MEDIAL
+      expect(form("\u0627")).toBe(0xfe8e); // alef FINAL
+    });
+
+    it("shapes بالعالم, where a right-joining letter breaks the run twice", () => {
+      // beh(D) alef(R) lam(D) ain(D) alef(R) lam(D) meem(D). Each alef ends a join and
+      // the letter after it starts a new one, so the word has two initial forms.
+      const result = shapeText("\u0628\u0627\u0644\u0639\u0627\u0644\u0645");
+      const visual = result.map(c => c.visual.codePointAt(0));
+      // Reported in visual (right-to-left) order.
+      expect(visual).toEqual([0xfee2, 0xfedf, 0xfe8e, 0xfecc, 0xfedf, 0xfe8e, 0xfe91]);
     });
 
     it("should apply isolated form for standalone letter", () => {
@@ -328,5 +355,50 @@ describe("text-shaping", () => {
       expect(result[2].chars).toBe("\u0645");
       expect(result[2].visual).toBe("\u0645");
     });
+  });
+});
+
+describe("Lam-Alef ligatures", () => {
+  // These were completely uncovered, and the ligature was broken in the worst way a text
+  // renderer can be: the alef was *lost*. `applyLamAlefLigatures` wrote U+FEFB into the
+  // lam's cluster and marked the alef's cluster zero-width, but it ran *before* the
+  // contextual-form loop, which then read `codePointAt(0)` of the merged cluster — still
+  // lam — and overwrote the ligature with lam's own initial form U+FEDD. The alef had
+  // already been dropped, so `لا` rendered as a single ﻝ.
+
+  it("joins lam + alef into one ligature glyph instead of dropping the alef", () => {
+    const drawn = shapeText("\u0644\u0627").filter(c => c.advanceMultiplier !== 0);
+    expect(drawn).toHaveLength(1);
+    // U+FEFB, the isolated lam-alef ligature — not U+FEDD, which is lam alone.
+    expect(drawn[0].visual).toBe("\uFEFB");
+    // The cluster still carries both original characters, so a consumer writing a
+    // ToUnicode map or extracting text recovers "لا" rather than one letter.
+    expect(drawn[0].chars).toBe("\u0644\u0627");
+  });
+
+  it("uses the final ligature form when the lam is joined from the right", () => {
+    // بلا — beh is dual-joining, so the lam is attached on its right and the ligature
+    // takes its final form U+FEFC. Getting this from the same code path that had the
+    // ordering bug is what shows the fix did not simply hardcode the isolated form.
+    const drawn = shapeText("\u0628\u0644\u0627").filter(c => c.advanceMultiplier !== 0);
+    expect(drawn.map(c => c.visual).join("")).toContain("\uFEFC");
+  });
+
+  it.each([
+    ["\u0622", "\uFEF5"], // alef with madda
+    ["\u0623", "\uFEF7"], // alef with hamza above
+    ["\u0625", "\uFEF9"] // alef with hamza below
+  ])("ligates lam with the alef variant %s", (alef, ligature) => {
+    const drawn = shapeText(`\u0644${alef}`).filter(c => c.advanceMultiplier !== 0);
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].visual).toBe(ligature);
+  });
+
+  it("leaves lam alone when what follows is not an alef", () => {
+    // لم — no ligature, so the lam must keep its ordinary initial form. Without this the
+    // fix could pass by ligating anything that follows a lam.
+    const drawn = shapeText("\u0644\u0645").filter(c => c.advanceMultiplier !== 0);
+    expect(drawn).toHaveLength(2);
+    expect(drawn.map(c => c.visual).join("")).not.toContain("\uFEFB");
   });
 });

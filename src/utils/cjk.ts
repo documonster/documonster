@@ -272,6 +272,31 @@ function isProhibitedLineEnd(cp: number): boolean {
 }
 
 /**
+ * Whether this code point belongs to a script that does not separate words with a
+ * space, so a line break next to it introduces no gap.
+ *
+ * Used to decide what a Markdown *soft* line break becomes. CommonMark turns one into a
+ * space, which is right for a script that marks word boundaries that way and wrong for
+ * one that does not: a Chinese paragraph hard-wrapped in the source came out with a
+ * space at every wrap point, mid-word. Pandoc solves the same problem with its
+ * `east_asian_line_breaks` extension.
+ *
+ * Derived from {@link isCjkBreakable} rather than restating its ranges. Written out
+ * separately it drifted immediately — the copy was missing Yi and the halfwidth CJK
+ * punctuation, and split a Bopomofo range for no reason. The two questions are almost
+ * the same and differ by exactly one script, so the difference is what the code should
+ * say.
+ *
+ * **Hangul is the difference.** Korean *does* separate words with spaces, so dropping
+ * the one at a soft break would run two words together. `isCjkBreakable` includes
+ * Hangul because it answers "may a line break here at all" — text written without
+ * spaces has to wrap somewhere — while this answers "does a break here mean a space".
+ */
+export function isSpacelessScript(cp: number): boolean {
+  return isCjkBreakable(cp) && !isHangul(cp);
+}
+
+/**
  * Whether a break may occur on either side of this code point purely because of
  * what it is — i.e. it is an East Asian character that does not need a space to
  * mark a word boundary.
@@ -719,7 +744,10 @@ function isHangul(cp: number): boolean {
   return (
     (cp >= 0xac00 && cp <= 0xd7a3) || // Hangul Syllables
     (cp >= 0x1100 && cp <= 0x11ff) || // Jamo
-    (cp >= 0x3131 && cp <= 0x318e) // Compatibility Jamo
+    (cp >= 0xa960 && cp <= 0xa97f) || // Jamo Extended-A
+    (cp >= 0xd7b0 && cp <= 0xd7ff) || // Jamo Extended-B
+    (cp >= 0x3131 && cp <= 0x318e) || // Compatibility Jamo
+    (cp >= 0xffa0 && cp <= 0xffdc) // Halfwidth Jamo
   );
 }
 

@@ -20,7 +20,7 @@
  */
 
 import { encodePng } from "documonster/archive";
-import { rasterizeToRgba, translate, type DrawList } from "documonster/draw";
+import { rasterizeToRgba, translate, type DrawList, type RasterFontSource } from "documonster/draw";
 import type { MermaidRenderOptions } from "documonster/mermaid";
 import type { MarkdownImageData, MarkdownImportOptions } from "documonster/word/markdown";
 
@@ -199,7 +199,8 @@ const DEFAULT_DIAGRAM_FONT_POINTS = 14;
  */
 export async function prepareMarkdownDiagrams(
   markdown: string,
-  style: DiagramStyleArgs = {}
+  style: DiagramStyleArgs = {},
+  fonts?: { readonly raster?: readonly RasterFontSource[]; readonly useSystemFonts?: boolean }
 ): Promise<PreparedMarkdown> {
   const fences = findMermaidFences(markdown);
   if (fences.length === 0) {
@@ -219,6 +220,14 @@ export async function prepareMarkdownDiagrams(
     style.maxLabelWidth === undefined && style.nodeGap === undefined && style.rankGap === undefined;
   const images = new Map<string, MarkdownImageData>();
   const failures: string[] = [];
+  /**
+   * Code points no available face could draw in any embedded diagram.
+   *
+   * Reported for the same reason the standalone PNG path reports it, and it matters more here:
+   * the reader opens a .docx and sees a diagram whose labels are simply absent, with no clue
+   * that a font was the problem. A raster has no `.notdef` to draw, so this is the only signal.
+   */
+  const uncovered = new Set<number>();
   const cramped: number[] = [];
   const split: { line: number; pieces: number }[] = [];
   const forced: number[] = [];
@@ -264,7 +273,14 @@ export async function prepareMarkdownDiagrams(
             }
           ]
         };
-        const piece = rasterizeToRgba(slice, { scale: EMBED_SCALE * fit });
+        const piece = rasterizeToRgba(slice, {
+          scale: EMBED_SCALE * fit,
+          // An embedded diagram is rasterised, so it needs the operator's faces exactly as a
+          // standalone PNG does. Without them, `--pdf-font` made the prose of a converted
+          // document readable and left the labels inside its diagrams blank.
+          ...(fonts?.raster === undefined ? {} : { fonts: fonts.raster }),
+          ...(fonts?.useSystemFonts === undefined ? {} : { useSystemFonts: fonts.useSystemFonts })
+        });
         const encoded = {
           bytes: encodePng(piece.data, piece.width, piece.height, {
             // Pixels and the OOXML extent have both already been reduced by
@@ -275,6 +291,9 @@ export async function prepareMarkdownDiagrams(
           width: piece.width,
           height: piece.height
         };
+        for (const codePoint of piece.uncoveredCodePoints) {
+          uncovered.add(codePoint);
+        }
         spendEmbedBudget(fenceBudget, encoded, fence.line);
         const url =
           cuts.length === 1
@@ -340,6 +359,17 @@ export async function prepareMarkdownDiagrams(
             ? []
             : [
                 `- diagram(s) at line ${[...cramped].reverse().join(", ")} are wider than the text column allows: their text lands under ${MIN_EMBED_FONT_POINTS}pt even at the tightest layout. Split the widest rank, or render them separately with diagram_render.`
+              ]),
+          ...(uncovered.size === 0
+            ? []
+            : [
+                `- ⚠ no available font covers ${[...uncovered]
+                  .sort((a, b) => a - b)
+                  .slice(0, 12)
+                  .map(codePoint => `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`)
+                  .join(
+                    " "
+                  )}${uncovered.size > 12 ? ` (and ${uncovered.size - 12} more)` : ""} — those characters are **blank** inside the diagram image(s). Configure a font with \`--pdf-font\`.`
               ]),
           ...failures
         ];

@@ -419,8 +419,20 @@ export function isFullWidthCodePoint(codePoint: number): boolean {
  * the glyphs around them; they are not glyphs. Charging each one an average
  * character width measured a four-person family emoji — one glyph — as five and
  * a half characters wide, which threw off every wrap and page break after it.
+ *
+ * **Tab is deliberately not here.** It draws nothing, but it does occupy space, so
+ * measuring it as zero would pull the rest of the line left. It is the one control
+ * character that is width without ink, and both the measurer and the rasteriser
+ * treat it that way.
+ *
+ * {@link isNonPrintingControl} is this set minus the combining marks — see there for
+ * why a rasteriser needs the narrower question.
  */
 export function isZeroWidthCodePoint(codePoint: number): boolean {
+  // C0 and C1 controls, except tab: not text, and not width either.
+  if (codePoint !== 0x09 && (codePoint < 0x20 || (codePoint >= 0x7f && codePoint <= 0x9f))) {
+    return true;
+  }
   return (
     codePoint === 0x200b || // zero width space
     codePoint === 0x200c || // zero width non-joiner
@@ -434,6 +446,33 @@ export function isZeroWidthCodePoint(codePoint: number): boolean {
     (codePoint >= 0x0300 && codePoint <= 0x036f) || // combining diacritical marks
     (codePoint >= 0xe0100 && codePoint <= 0xe01ef) // variation selectors supplement
   );
+}
+
+/**
+ * Whether a code point is a formatting control that draws no glyph at all.
+ *
+ * A rasteriser needs a different question from {@link isZeroWidthCodePoint}, and the
+ * difference is **combining marks**. Both take no width, but a combining acute is
+ * *ink* — a face that has a glyph for it draws it, at a zero advance — whereas a
+ * variation selector or a bidi isolate is an instruction and must never be drawn,
+ * never be charged an advance, and never be reported as a character the font could
+ * not draw.
+ *
+ * Getting that wrong is not cosmetic. Charging a variation selector half an em made
+ * `✈️` wider than it is, and because the raster backend normalises a line's advances
+ * to its measured width, the error was redistributed over every *visible* glyph in
+ * the label. It also put U+FE0F into `uncoveredCodePoints`, so a caller was told to
+ * install a font for a character that has no glyph in any font — and whether it
+ * appeared there at all depended on whether the host's face happened to carry an
+ * empty glyph for it, which made the report differ per machine.
+ *
+ * C0 and C1 controls are included for the same reason: they are not text.
+ */
+export function isNonPrintingControl(codePoint: number): boolean {
+  // Everything zero-width except the combining marks, which draw. Tab is excluded by
+  // `isZeroWidthCodePoint` itself: it has no glyph but it does have width, so a
+  // rasteriser must advance the pen for it rather than skip it.
+  return isZeroWidthCodePoint(codePoint) && !(codePoint >= 0x0300 && codePoint <= 0x036f);
 }
 
 /** One em, in the thousandths-of-a-unit scale these metrics use. */

@@ -969,6 +969,21 @@ export interface PdfExportOptions {
    * best-effort search rather than constraining it. Use {@link fonts} when a
    * specific face is a requirement.
    *
+   * ## This is a priority order, not a fallback chain
+   *
+   * The first named family that covers the text wins, so **a pan-Unicode face at the
+   * head of the list wins for every language** and the regional choice this search
+   * would otherwise make never happens. `["Arial Unicode MS", "Songti SC"]` sets a
+   * Chinese document in `Arial Unicode MS`, whose Han glyphs follow Japanese
+   * conventions — 者 gains a dot, and 径, 前 and 母 are drawn with a different number
+   * of strokes — and a Japanese document in the same face, when the point of detecting
+   * the language is that the two should differ. `Songti SC` is never reached, because
+   * nothing was left for it to cover.
+   *
+   * So list families that are alternatives to each other, not a broad face followed by
+   * narrow ones. For a document whose language varies, naming nothing is usually right:
+   * the search reads the language off the text and picks the regional face itself.
+   *
    * Node-only, and ignored when a font is supplied explicitly.
    */
   preferSystemFonts?: readonly string[];

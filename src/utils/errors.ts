@@ -73,6 +73,23 @@ export class BaseError extends Error {
 // =============================================================================
 
 /**
+ * A font file could not be parsed.
+ *
+ * Lives here rather than in a module because the TrueType parser it comes from
+ * (`@utils/font-ttf`) is at Layer 0: `draw` rasterises glyphs from a font and
+ * `pdf` embeds one, and neither may import the other. A font is untrusted input,
+ * so the message always names the table or header at fault.
+ *
+ * `PdfFontError` is *not* derived from this — it predates it, is published from
+ * `documonster/pdf`, and must keep answering `isPdfError()`. The PDF module
+ * translates at its own boundary (`@pdf/font/ttf-parser`) so that its public
+ * error contract is unchanged by where the parser lives.
+ */
+export class FontParseError extends BaseError {
+  override name = "FontParseError";
+}
+
+/**
  * Error thrown when an operation is aborted.
  */
 export class AbortError extends BaseError {

@@ -30,6 +30,7 @@ import {
   isWideCharacter
 } from "./font-data";
 import type { FontMetrics } from "./font-data";
+import { isZeroWidthCodePoint } from "./font-metrics";
 import { graphemeClusters } from "./grapheme";
 
 /** Screen resolution the pixel widths are expressed in. */
@@ -272,6 +273,17 @@ export function createLineMeasurer(
   /** One grapheme cluster's advance; the cluster's width belongs to its base. */
   const clusterPx = (cluster: string): number => {
     const base = clusterBaseCodePoint(cluster);
+    // A cluster whose *own base* is a formatting character is not text: a lone
+    // variation selector, joiner or bidi isolate. Tested before the emoji rule below,
+    // because a bare U+FE0F contains a presentation selector and would otherwise be
+    // charged a full em for shaping a neighbour it does not have.
+    //
+    // Clustering already folds these into the character they modify, so this only
+    // fires when one arrives alone — and then the old answer was the face's default
+    // advance, half an em of width for something that occupies none.
+    if (isZeroWidthCodePoint(base)) {
+      return 0;
+    }
     if (!isWideCharacter(base) && hasEmojiPresentationSelector(cluster)) {
       return wideAdvance;
     }
@@ -317,6 +329,9 @@ export function createLineMeasurer(
         return;
       }
       const cp = clusterBaseCodePoint(cluster);
+      if (isZeroWidthCodePoint(cp)) {
+        return; // counted as neither narrow nor wide: it has no width at all
+      }
       if (isWideCharacter(cp) || hasEmojiPresentationSelector(cluster)) {
         parts.wide += 2;
       } else if (cluster >= "A" && cluster <= "Z") {
@@ -326,6 +341,11 @@ export function createLineMeasurer(
       }
     },
     addAscii(parts, charCode) {
+      // A C0 control is not a character. Tab is the exception and is handled by
+      // `isZeroWidthCodePoint`: it has no glyph but it does occupy space.
+      if (isZeroWidthCodePoint(charCode)) {
+        return;
+      }
       if (useGlyphs) {
         parts.advance += charPx(charCode);
         return;

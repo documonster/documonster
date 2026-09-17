@@ -28,10 +28,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const SCRIPTS = path.resolve(import.meta.dirname, "../../../scripts");
 
 /** The two modules `verify-browser-stubs.ts` requires a variant for, by policy. */
-const POLICY_MODULES = [
-  "src/modules/pdf/font/system-fonts",
-  "src/modules/draw/raster/system-raster-font"
-];
+const POLICY_MODULES = ["src/utils/font-discovery", "src/modules/draw/raster/system-raster-font"];
 
 let root: string;
 

@@ -2,7 +2,8 @@
  * Tests for the chart glyph rasterizer's horizontal metrics handling.
  */
 
-import { parseRasterFont, rasterizeGlyph } from "@draw/raster/glyph-rasterizer";
+import { parseRasterFont } from "@draw/raster/glyph-outline";
+import { rasterizeGlyph } from "@draw/raster/glyph-rasterizer";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================

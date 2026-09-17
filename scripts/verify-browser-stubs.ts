@@ -12,7 +12,7 @@
  * That is what this checks, and why it checks the artifact rather than the source: the source
  * deliberately imports the Node name (`@utils/fs`), and the rewrite happens on the way out.
  *
- * The concrete failure that prompted it: `pdf/font/system-fonts.ts` and
+ * The concrete failure that prompted it: `utils/font-discovery.ts` and
  * `draw/raster/system-raster-font.ts` exist only to read font files off a disk, and
  * each carries a table of per-platform paths — the curated CJK families
  * (`/System/Library/Fonts/Supplemental`, `msyh.ttc`, `PingFang SC`, several hundred
@@ -74,12 +74,12 @@ const TREES = [path.resolve(ROOT, "dist/esm"), path.resolve(ROOT, "dist/types")]
  */
 const REQUIRE_BROWSER_STUB: readonly { readonly module: string; readonly why: string }[] = [
   {
-    module: "src/modules/pdf/font/system-fonts.ts",
+    module: "src/utils/font-discovery.ts",
     why: "curated CJK font filenames and per-platform font directories — 38 kB of paths a browser cannot open"
   },
   {
     module: "src/modules/draw/raster/system-raster-font.ts",
-    why: "Arial / Helvetica / DejaVu fallback paths for the rasteriser"
+    why: "per-platform system font directories for the rasteriser"
   }
 ];
 

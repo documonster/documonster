@@ -1,5 +1,7 @@
 import { createWorkbook, addWorksheet } from "@excel/core/workbook";
 import { Cell } from "@excel/index";
+import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
+import { PdfEditor } from "@pdf/builder/pdf-editor";
 import { PdfFontError } from "@pdf/errors";
 import { collectEmbeddedGlyphUses, embedTtfFont } from "@pdf/font/font-embedder";
 import { FontManager } from "@pdf/font/font-manager";
@@ -1045,5 +1047,34 @@ describe("widening a fallback face cannot change measured widths", () => {
   it("registers straight away when there is no incumbent", () => {
     const manager = new FontManager();
     expect(manager.widenFallbackFont(wide())).toBe(true);
+  });
+});
+
+describe("embedFont selects a face inside a collection", () => {
+  // `embedFont` took only bytes, so a caller holding a `.ttc` embedded whichever face came
+  // first — and the order inside a collection is arbitrary: macOS `Songti.ttc` runs Black,
+  // Bold, TC-Bold, Light, …, Regular, so face 0 sets body text in the heaviest weight the
+  // family ships. Both builders now pass the index through to the parser.
+  //
+  // Asserted by *rejection* rather than by building a real collection: the parser refuses a
+  // non-zero index on a single-face font, so an index that is honoured throws and an index
+  // that is dropped does not. That is exact, and needs no `.ttc` fixture.
+  const singleFace = (): Uint8Array =>
+    buildTtfWithCmap([{ start: 0x41, end: 0x5a, delta: 1 - 0x41 }], 30, { familyName: "Probe" });
+
+  it("passes the index through from PdfDocumentBuilder", () => {
+    const font = singleFace();
+    expect(() => new PdfDocumentBuilder().embedFont(font)).not.toThrow();
+    expect(() => new PdfDocumentBuilder().embedFont(font, 0)).not.toThrow();
+    expect(() => new PdfDocumentBuilder().embedFont(font, 3)).toThrow(/collection index/i);
+  });
+
+  it("passes the index through from PdfEditor", async () => {
+    const font = singleFace();
+    const source = new PdfDocumentBuilder();
+    source.addPage({ width: 200, height: 200 });
+    const blank = await source.build();
+    expect(() => PdfEditor.load(blank).embedFont(font)).not.toThrow();
+    expect(() => PdfEditor.load(blank).embedFont(font, 3)).toThrow(/collection index/i);
   });
 });

@@ -26,6 +26,7 @@ import {
   toRenderOptions
 } from "./diagram.js";
 import { writeBytesWithPolicy } from "./fs-helpers.js";
+import { diagramFontOptions } from "./pdf-fonts.js";
 import { formatBytes, textResult } from "./result.js";
 import { defineTool } from "./types.js";
 
@@ -122,7 +123,8 @@ export const diagramRenderTool = defineTool({
         ...(args.height === undefined ? {} : { height: args.height }),
         ...(args.scale === undefined ? {} : { scale: args.scale })
       },
-      style.background
+      style.background,
+      diagramFontOptions(config)
     );
 
     await writeBytesWithPolicy(target, args.overwrite === true, rendered.bytes);
@@ -132,6 +134,13 @@ export const diagramRenderTool = defineTool({
       config,
       [
         `Rendered **${outputDisplay(args.to)}** (${format}, ${formatBytes(rendered.bytes.byteLength)}, ${round(rendered.width)}×${round(rendered.height)} ${unit}).`,
+        // Reported because a raster cannot fail visibly: a character no face covers paints
+        // nothing, so the picture is silently missing a label unless this says so.
+        ...(rendered.uncovered === undefined
+          ? []
+          : [
+              `- ⚠ no available font covers ${rendered.uncovered.slice(0, 12).join(" ")}${rendered.uncovered.length > 12 ? ` (and ${rendered.uncovered.length - 12} more)` : ""} — those characters are **blank** in the image. Configure a font with \`--pdf-font\`.`
+            ]),
         // Only when it came from a file; an inline source has nothing to name.
         ...(resolved.origin === "inline"
           ? []

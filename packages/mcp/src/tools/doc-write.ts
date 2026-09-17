@@ -20,7 +20,12 @@ import { assertWritable, outputDisplay, resolveOutputPath } from "../sandbox.js"
 import { prepareMarkdownDiagrams } from "./diagram-markdown.js";
 import { assertNonMacroOutput, requireFormat } from "./document.js";
 import { writeWithPolicy } from "./fs-helpers.js";
-import { pdfFontOptions } from "./pdf-fonts.js";
+import {
+  diagramFontOptions,
+  pdfFontOptions,
+  textLanguageOption,
+  textLanguageShape
+} from "./pdf-fonts.js";
 import { formatBytes, textResult } from "./result.js";
 import { defineTool } from "./types.js";
 
@@ -47,6 +52,7 @@ export const docWriteTool = defineTool({
       .describe(
         "Render ```mermaid fences as embedded diagrams. Defaults to true when the diagram tool group is enabled; set false to keep them as code blocks."
       ),
+    ...textLanguageShape,
     allowMissingGlyphs: z
       .boolean()
       .optional()
@@ -88,7 +94,7 @@ export const docWriteTool = defineTool({
     // the bytes.
     const prepared =
       (args.diagrams ?? config.groups.has("diagram"))
-        ? await prepareMarkdownDiagrams(args.markdown)
+        ? await prepareMarkdownDiagrams(args.markdown, {}, diagramFontOptions(config))
         : { markdown: args.markdown, notes: [] as readonly string[] };
 
     // markdownToDocx is async — verified; treating it as synchronous yields an
@@ -116,7 +122,7 @@ export const docWriteTool = defineTool({
       // Built here rather than above the branch: a DOCX write has no use for a PDF font,
       // and loading one meant a `--pdf-font` deleted after startup broke a Word write.
       fonts = pdfFontOptions(config);
-      const bytes = await Pdf.fromDocx(doc, fonts.options);
+      const bytes = await Pdf.fromDocx(doc, { ...fonts.options, ...textLanguageOption(args) });
       fonts.assertDrawable(args.allowMissingGlyphs === true);
       await writeWithPolicy(target, args.overwrite === true, temporary =>
         writeFile(temporary, bytes)

@@ -431,9 +431,15 @@ export class PdfEditor {
 
   /**
    * Embed a TrueType font for Unicode/CJK support.
+   *
+   * @param fontBytes - Raw .ttf or .ttc file bytes
+   * @param collectionIndex - Which face, for a `.ttc`. Defaults to 0. Overlay text — a
+   *   watermark, a stamp, a page number — is drawn by this library rather than copied from
+   *   the file, so it needs a face like any other text; without a way to name one inside a
+   *   collection, a caller holding a `.ttc` had to embed whichever face happened to be first.
    */
-  embedFont(fontBytes: Uint8Array): this {
-    const ttfFont = parseTtf(fontBytes);
+  embedFont(fontBytes: Uint8Array, collectionIndex?: number): this {
+    const ttfFont = parseTtf(fontBytes, collectionIndex);
     this._fontManager.registerEmbeddedFont(ttfFont);
     return this;
   }

@@ -13,13 +13,61 @@
  * it without each one needing its own check.
  */
 
-import type { RasterFont } from "@draw/raster/glyph-rasterizer";
+import type { GlyphOutline, RasterFont, RasterFontSource } from "@draw/raster/glyph-outline";
+import { fontHasGlyph, parseInjectedFonts } from "@draw/raster/glyph-outline";
 import { rasterizeGlyph } from "@draw/raster/glyph-rasterizer";
 import { STROKE_FONT } from "@draw/raster/stroke-font";
-import { loadSystemFont } from "@draw/raster/system-raster-font";
+import { resolveFontChain } from "@draw/raster/system-raster-font";
 import { measureText } from "@draw/text";
 import { DEFAULT_TEXT_FAMILY } from "@draw/types";
+import type { RasterTextStyle } from "@draw/types";
+import { TextFeatureTally, isSimpleText, isWellMeasuredText } from "@utils/complex-text";
+import {
+  isFullWidthCodePoint,
+  isNonPrintingControl,
+  isZeroWidthCodePoint
+} from "@utils/font-metrics";
 import { parseCssColor } from "@utils/svg-lex";
+import { shapeTextForFace } from "@utils/text-shaping";
+
+/**
+ * Tab: the one control character that is width without ink.
+ *
+ * It has no glyph in practically any font, so it is neither drawn nor reported as
+ * undrawable — but it does advance the pen, by the same half em `@utils/text-measure`
+ * charges it. Treating it as a formatting control would collapse it to nothing and
+ * pull the rest of the line left; treating it as an ordinary missing glyph would draw
+ * `?` and tell the caller to install a font.
+ */
+const TAB = 0x09;
+
+/** Tab's advance, in em. Matches the default advance the measurer uses for it. */
+const TAB_EM_WIDTH = 0.5;
+
+/**
+ * Shape `text`, taking a contextual form only when some face in `fonts` can draw it.
+ *
+ * Substituting unconditionally is what a viewer does, and it is wrong here for the same
+ * reason it is wrong in the PDF writer: many faces publish the base letters and none of the
+ * presentation forms. Measured on one macOS host, eleven of the fifty Arabic-capable system
+ * faces are like that.
+ *
+ * And the failure was worse here than a `.notdef` box. This rasteriser has no notdef to
+ * fall back on, so a form nothing could draw painted **nothing at all** — `مرحبا` came out
+ * as an empty line — and the uncovered-code-point report then asked the caller to install a
+ * font for U+FE8E, which is not a thing anyone has. Falling back to the base letters gives
+ * up the joining and keeps the word.
+ */
+function shapeAgainstChain(text: string, fonts: readonly RasterFont[]): string {
+  const drawable = (codePoint: number): boolean =>
+    fonts.some(font => fontHasGlyph(font, codePoint));
+  return shapeTextForFace(text, drawable)
+    .map(cluster => cluster.visual)
+    .join("");
+}
+
+/** A code point resolved to the face that draws it. */
+type ResolvedGlyph = { font: RasterFont; outline: GlyphOutline };
 
 /** A glyph rasterised to a coverage bitmap. */
 type RasterizedGlyph = {
@@ -37,7 +85,7 @@ type RasterizedGlyph = {
 const glyphCache = new WeakMap<object, Map<number, RasterizedGlyph>>();
 
 function cachedRasterizeGlyph(
-  outline: object & { contours: unknown[]; advanceWidth: number },
+  outline: GlyphOutline,
   fontSize: number,
   unitsPerEm: number
 ): RasterizedGlyph {
@@ -48,7 +96,7 @@ function cachedRasterizeGlyph(
   }
   let cached = sizeMap.get(fontSize);
   if (!cached) {
-    cached = rasterizeGlyph(outline as Parameters<typeof rasterizeGlyph>[0], fontSize, unitsPerEm);
+    cached = rasterizeGlyph(outline, fontSize, unitsPerEm);
     sizeMap.set(fontSize, cached);
   }
   return cached;
@@ -758,18 +806,26 @@ export class BasicRasterCanvas {
     color: string | undefined,
     anchor: string | undefined,
     rotation?: { angle: number; originX: number; originY: number },
-    style: { family?: string; bold?: boolean; italic?: boolean } = {}
+    style: RasterTextStyle = {}
   ): void {
     if (!text) {
       return;
     }
-    // Measure with the style the caller asked for, not with the default face.
+    // Recorded here, before either drawing path is chosen, so the finding does not
+    // depend on which one runs. Text drawn at zero alpha is therefore reported too:
+    // the statement is about whether the text *can* be laid out, which stays true when
+    // it happens to be invisible, and moving this past the paint check would mean
+    // calling it from both paths — one more place to forget.
+    this.textFeatures.note(text);
+    // Measure with the style the caller asked for. The width decides where centred and
+    // right-anchored text starts, so measuring bold text as regular shifted every such
+    // label left by the difference.
     //
-    // The glyphs themselves come from one system font — selecting a family, a weight and
-    // a slant means font discovery and matching, which this rasteriser does not do — but
-    // the *width* has to follow the requested style regardless, because it decides where
-    // centred and right-anchored text starts. Measuring bold text as regular shifted
-    // every such label left by the difference.
+    // The glyphs are chosen for the same style — `fontChain` passes it to font
+    // discovery — but the *width* still comes from the static advance tables rather
+    // than the chosen face. That is deliberate: layout has to be identical on every
+    // machine, and it cannot be if it depends on which fonts are installed. The
+    // per-glyph advances are then normalised to this width.
     const measured = measureText(text, {
       size: fontSize,
       family: style.family ?? DEFAULT_TEXT_FAMILY,
@@ -779,24 +835,225 @@ export class BasicRasterCanvas {
     const textWidth = measured > 0 ? measured : Math.max(1, fontSize * 0.5) * text.length;
     const startX = anchor === "middle" ? x - textWidth / 2 : anchor === "end" ? x - textWidth : x;
 
-    // Try system font rasterization first (high quality filled glyphs)
-    const font = loadSystemFont();
-    if (font) {
-      this.drawTextWithFont(font, startX, y, text, fontSize, textWidth, color, rotation);
+    // A chain, not a font: a face that covers `混合` may not cover `Mixed`, and the
+    // rasteriser has nothing to fall back to for a missing glyph except another
+    // face. The chain is ordered here; `drawTextWithFonts` picks per character.
+    // Complex scripts are shaped first: Arabic letters take their contextual forms and
+    // right-to-left runs are put in visual order, so the glyphs drawn below are the ones
+    // a reader expects rather than a row of isolated letters. `isSimpleText` gates it so
+    // that ordinary text — the overwhelming majority — takes exactly the path it did
+    // before, at exactly the same cost.
+    //
+    // `visualText` is what gets drawn; `text` is what was measured. Two independent
+    // decisions follow, and they are gated on different predicates because they answer
+    // different questions — conflating them broke a line in each direction.
+    //
+    // Shaping runs when the text might need it. Layout mode depends instead on whether
+    // the measurer's static tables describe the text: for a complex script they do not
+    // (Tamil measures at roughly half its real width), so normalising the glyph advances
+    // to that measurement squeezes the line into an overlapping mess, and the font's own
+    // advances have to be used. Latin carrying a stray bidi control is the converse case
+    // — it needs reordering but *is* measured correctly, and putting it on natural widths
+    // shifted every glyph by a rounding step, which is how inserting a zero-width control
+    // came to move visible text.
+    // The chain is resolved from the *original* text, before shaping. That order matters
+    // twice over. Font discovery should search for what the text actually is — nobody has a
+    // font installed "for U+FEE3" — and shaping needs the chain's answer, because a
+    // contextual form may only be used if something in the chain can draw it.
+    const fonts = this.fontChain(text, style);
+    const visualText =
+      isSimpleText(text) || fonts.length === 0 ? text : shapeAgainstChain(text, fonts);
+    const useNaturalWidth = !isWellMeasuredText(text);
+
+    if (fonts.length > 0) {
+      // Text on natural widths is anchored and spaced by the font's own advances; the
+      // rest keeps the measured width, so centring stays identical to what it was.
+      const width = useNaturalWidth
+        ? this.naturalWidth(fonts, visualText, fontSize, new Map())
+        : textWidth;
+      const left = anchor === "middle" ? x - width / 2 : anchor === "end" ? x - width : x;
+      this.drawTextWithFonts(
+        fonts,
+        left,
+        y,
+        visualText,
+        fontSize,
+        useNaturalWidth ? undefined : textWidth,
+        color,
+        rotation
+      );
       return;
     }
 
-    // Fallback: stroke font
-    this.drawTextStroke(startX, y, text, fontSize, textWidth, color, rotation);
+    // Fallback: stroke font. ASCII 32–126 only — everything else becomes `?`.
+    this.drawTextStroke(startX, y, visualText, fontSize, textWidth, color, rotation);
   }
 
-  private drawTextWithFont(
-    font: RasterFont,
+  /**
+   * Every code point this canvas could not draw in any available face, accumulated
+   * across all {@link drawText} calls and never cleared.
+   *
+   * Accumulated rather than per-call because the useful question is about the
+   * finished picture, not the last label in it: `rasterizeToRgba` builds one canvas
+   * per render and reports this as `RgbaImage.uncoveredCodePoints`.
+   *
+   * A missing glyph is otherwise invisible — the pen advances and nothing is painted,
+   * which is exactly how a page of Chinese came out blank with no error raised. This
+   * lets a caller act on the gap (supply a font) instead of shipping a picture with
+   * holes in it.
+   */
+  readonly uncoveredCodePoints = new Set<number>();
+
+  /**
+   * Scripts and directionality this canvas cannot lay out, accumulated per canvas.
+   *
+   * A missing glyph is one kind of wrong output; text that needs shaping is another,
+   * and a worse one, because every glyph *is* drawn — just in the wrong shape or the
+   * wrong order. Arabic comes out as disconnected isolated letters, Devanagari with
+   * its vowel signs on the wrong side of the consonant. Nothing about the image looks
+   * broken to a reader who cannot read the script.
+   *
+   * `rasterizeToRgba` surfaces this as `RasterizedImage.textWarnings`. The detection
+   * is shared with the PDF writer, which has the same limitation for the same reason
+   * — see `@utils/complex-text`.
+   */
+  private readonly textFeatures = new TextFeatureTally();
+
+  /** Warnings about text this canvas drew but could not lay out correctly. */
+  textWarnings(): string[] {
+    return this.textFeatures.warnings("This rasteriser", {
+      contextualForms: true,
+      visualOrder: true
+    });
+  }
+
+  /** Faces this canvas draws with, ahead of anything discovered on the host. */
+  private ownFonts: readonly RasterFont[] = [];
+  private ownUseSystemFonts = true;
+
+  /**
+   * Use these fonts for this canvas, instead of the process-wide registry.
+   *
+   * Scoped to the instance on purpose. This used to go through a module-level
+   * registry, which meant one render's fonts stayed in place for the next render that
+   * passed none — so two rasterisations in a process could not use different faces,
+   * and a caller who supplied a font once silently changed every later render.
+   *
+   * With `useSystemFonts: false` the chain is exactly `fonts`, which is what a
+   * reproducible render needs: font discovery cannot promise the same pixels on two
+   * machines.
+   */
+  setFonts(
+    fonts: readonly RasterFontSource[],
+    options: { readonly useSystemFonts?: boolean } = {}
+  ): void {
+    this.ownFonts = parseInjectedFonts(fonts);
+    this.ownUseSystemFonts = options.useSystemFonts ?? true;
+  }
+
+  /** The ordered faces to try for `text`, in the style it asked for. */
+  private fontChain(text: string, style: RasterTextStyle): readonly RasterFont[] {
+    return resolveFontChain(text, this.ownFonts, this.ownUseSystemFonts, style);
+  }
+
+  /**
+   * Resolve one code point against the chain, returning the face that can draw it.
+   *
+   * `hasGlyph` is asked before `getOutline` because a `.notdef` gid must not count
+   * as coverage: it draws a box, so a chain has to keep looking rather than stop at
+   * the first face that technically answers.
+   */
+  private resolveGlyph(
+    fonts: readonly RasterFont[],
+    codePoint: number,
+    memo: Map<number, ResolvedGlyph | undefined>
+  ): ResolvedGlyph | undefined {
+    // Both passes below — measuring the advances, then drawing — ask about the same
+    // characters, and a chain lookup is a walk over every face. Memoising within the
+    // call halves it, and repeated characters cost one lookup instead of one each.
+    if (memo.has(codePoint)) {
+      return memo.get(codePoint);
+    }
+    let found: ResolvedGlyph | undefined;
+    for (const font of fonts) {
+      if (!fontHasGlyph(font, codePoint)) {
+        continue;
+      }
+      const outline = font.getOutline(codePoint);
+      if (outline) {
+        found = { font, outline };
+        break;
+      }
+    }
+    memo.set(codePoint, found);
+    return found;
+  }
+
+  /**
+   * The advance to assume for a character no face can draw.
+   *
+   * It has to agree with what `measureText` assumed for the same character, or the
+   * `hScale` correction below redistributes the difference across the rest of the
+   * line. This was a flat `fontSize * 0.4` while `measureText` gives an ideograph a
+   * full em (`@utils/text-measure`'s `wideAdvance`), so a label mixing scripts had
+   * its *surviving* Latin letters stretched apart to fill the measured width — the
+   * missing CJK was invisible, but the visible text was visibly wrong too.
+   *
+   * A zero-width character takes nothing even when the face has no glyph for it: a
+   * combining acute the font cannot draw must not push the rest of the line along.
+   */
+  private missingAdvance(codePoint: number, fontSize: number): number {
+    if (isZeroWidthCodePoint(codePoint)) {
+      return 0;
+    }
+    return isFullWidthCodePoint(codePoint) ? fontSize : fontSize * 0.5;
+  }
+
+  /**
+   * Width of `text` as the chain's own advances give it, in user units.
+   *
+   * Used for shaped text, where the static advance tables cannot answer: they hold no
+   * entry for a presentation form, so `measureText` would report the width of the
+   * unshaped letters instead. Anchoring and normalisation then have to agree, and the
+   * only figure both can use is the one the faces actually being drawn provide.
+   */
+  private naturalWidth(
+    fonts: readonly RasterFont[],
+    text: string,
+    fontSize: number,
+    memo: Map<number, ResolvedGlyph | undefined>
+  ): number {
+    let total = 0;
+    for (const ch of text) {
+      const code = ch.codePointAt(0)!;
+      if (isNonPrintingControl(code)) {
+        continue;
+      }
+      const found = this.resolveGlyph(fonts, code, memo);
+      total += found
+        ? found.outline.advanceWidth * (fontSize / found.font.unitsPerEm)
+        : this.missingAdvance(code, fontSize);
+    }
+    return total;
+  }
+
+  private drawTextWithFonts(
+    fonts: readonly RasterFont[],
     startX: number,
     y: number,
     text: string,
     fontSize: number,
-    textWidth: number,
+    /**
+     * Width to stretch the glyph advances onto, or `undefined` to use the font's own.
+     *
+     * Normalising is right when the width came from the static advance tables for the
+     * *same* characters — it absorbs the difference between the table's estimate and the
+     * face actually used. It is wrong after shaping: the glyphs drawn are presentation
+     * forms whose advances are deliberately narrower than the isolated letters the table
+     * measured, so stretching them to the unshaped width pulled a joined Arabic word
+     * apart into evenly-spaced letters that merely *looked* connected.
+     */
+    normalizeTo: number | undefined,
     color: string | undefined,
     rotation?: { angle: number; originX: number; originY: number }
   ): void {
@@ -805,17 +1062,24 @@ export class BasicRasterCanvas {
       return;
     }
 
-    const scale = fontSize / font.unitsPerEm;
-
     // Compute total advance from font metrics, then scale to match measured width.
     // Iterate by code point (not UTF-16 code unit) so surrogate pairs for
     // non-BMP characters resolve to a single glyph lookup.
+    const memo = new Map<number, ResolvedGlyph | undefined>();
     let totalAdvance = 0;
     for (const ch of text) {
-      const outline = font.getOutline(ch.codePointAt(0)!);
-      totalAdvance += outline ? outline.advanceWidth * scale : fontSize * 0.4;
+      const code = ch.codePointAt(0)!;
+      // A formatting control is an instruction, not a character: it must not be
+      // looked up, charged an advance, or reported as undrawable.
+      if (isNonPrintingControl(code)) {
+        continue;
+      }
+      const found = this.resolveGlyph(fonts, code, memo);
+      totalAdvance += found
+        ? found.outline.advanceWidth * (fontSize / found.font.unitsPerEm)
+        : this.missingAdvance(code, fontSize);
     }
-    const hScale = totalAdvance > 0 ? textWidth / totalAdvance : 1;
+    const hScale = normalizeTo !== undefined && totalAdvance > 0 ? normalizeTo / totalAdvance : 1;
 
     const theta = rotation && rotation.angle !== 0 ? (rotation.angle * Math.PI) / 180 : 0;
     const cos = Math.cos(theta);
@@ -826,11 +1090,23 @@ export class BasicRasterCanvas {
     let curX = startX;
     for (const ch of text) {
       const code = ch.codePointAt(0)!;
-      const outline = font.getOutline(code);
-      if (!outline) {
-        curX += fontSize * 0.4 * hScale;
+      if (isNonPrintingControl(code)) {
         continue;
       }
+      const found = this.resolveGlyph(fonts, code, memo);
+      if (!found) {
+        // Nothing on this machine can draw it. Record it so the gap is reportable
+        // rather than a silent hole in the picture — but tab is not a gap: it is
+        // width without ink, and practically no font carries a glyph for it, so
+        // reporting it would tell the caller to install a font that cannot help.
+        if (code !== TAB) {
+          this.uncoveredCodePoints.add(code);
+        }
+        curX += this.missingAdvance(code, fontSize) * hScale;
+        continue;
+      }
+      const { font, outline } = found;
+      const scale = fontSize / font.unitsPerEm;
 
       const glyph = cachedRasterizeGlyph(outline, fontSize, font.unitsPerEm);
       if (glyph.pixels.length === 0) {
@@ -885,6 +1161,22 @@ export class BasicRasterCanvas {
     let totalGlyphW = 0;
     for (const ch of text) {
       const code = ch.codePointAt(0)!;
+      // A formatting control has no glyph in any font, so substituting `?` for it
+      // would invent a character the text does not contain.
+      if (isNonPrintingControl(code)) {
+        continue;
+      }
+      // The stroke font covers ASCII 32-126 and nothing else, so anything outside
+      // it is drawn as `?`. That is a substitution, not a rendering: record it so a
+      // caller is told their CJK became punctuation rather than discovering it in
+      // the image. Tab is exempt for the same reason as above.
+      if (STROKE_FONT[code] === undefined && code !== TAB) {
+        this.uncoveredCodePoints.add(code);
+      }
+      if (code === TAB) {
+        totalGlyphW += TAB_EM_WIDTH; // width, no ink
+        continue;
+      }
       const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
       totalGlyphW += glyph ? glyph.w : 0.4;
     }
@@ -894,6 +1186,13 @@ export class BasicRasterCanvas {
       let cx = startX;
       for (const ch of text) {
         const code = ch.codePointAt(0)!;
+        if (isNonPrintingControl(code)) {
+          continue;
+        }
+        if (code === TAB) {
+          cx += TAB_EM_WIDTH * fontSize * scale;
+          continue;
+        }
         const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
         if (glyph) {
           for (const stroke of glyph.d) {
@@ -923,6 +1222,13 @@ export class BasicRasterCanvas {
     let cx = startX;
     for (const ch of text) {
       const code = ch.codePointAt(0)!;
+      if (isNonPrintingControl(code)) {
+        continue;
+      }
+      if (code === TAB) {
+        cx += TAB_EM_WIDTH * fontSize * scale;
+        continue;
+      }
       const glyph = STROKE_FONT[code] ?? STROKE_FONT[63];
       if (glyph) {
         for (const stroke of glyph.d) {

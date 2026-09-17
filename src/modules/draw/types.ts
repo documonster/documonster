@@ -116,12 +116,23 @@ export const DEFAULT_TEXT_FAMILY = "arial";
 export type DrawTextAnchor = "start" | "middle" | "end";
 
 /** Font selection and size for a text node. */
-export interface DrawTextStyle {
-  /** Size in user units. */
-  readonly size: number;
+/**
+ * The part of a text style that decides *which face* draws it.
+ *
+ * A strict subset of {@link DrawTextStyle}: size, colour and anchor affect where and how
+ * big the text is, not which font is chosen. Named separately because font selection is
+ * a question a caller can ask on its own — `BasicRasterCanvas.drawText` takes this, and
+ * so does the chain resolver behind it.
+ */
+export interface RasterTextStyle {
   readonly family?: string;
   readonly bold?: boolean;
   readonly italic?: boolean;
+}
+
+export interface DrawTextStyle extends RasterTextStyle {
+  /** Size in user units. */
+  readonly size: number;
   readonly anchor?: DrawTextAnchor;
   readonly fill?: Rgba01;
 }

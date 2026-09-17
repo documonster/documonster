@@ -14,6 +14,7 @@
  * glyphs that are actually used in the document.
  */
 
+import { glyphComponents, parseTtf } from "@utils/font-ttf";
 import { obfuscateFont, generateFontKey } from "@word/font/font-obfuscation";
 import type { DocxDocument, FontDef, EmbeddedFont } from "@word/types";
 
@@ -87,11 +88,6 @@ export function subsetFont(fontData: Uint8Array, characters: string): Uint8Array
   }
 }
 
-/** Read a uint16 big-endian from buffer. */
-function readU16(data: Uint8Array, offset: number): number {
-  return (data[offset] << 8) | data[offset + 1];
-}
-
 /** Read a uint32 big-endian from buffer. */
 function readU32(data: Uint8Array, offset: number): number {
   return (
@@ -103,284 +99,69 @@ function readU32(data: Uint8Array, offset: number): number {
   );
 }
 
-/** Read an int16 big-endian from buffer. */
-function readI16(data: Uint8Array, offset: number): number {
-  const v = readU16(data, offset);
-  return v > 0x7fff ? v - 0x10000 : v;
-}
-
-/** Write uint16 big-endian. */
+/** Write a uint16 big-endian into buffer. */
 function writeU16(data: Uint8Array, offset: number, value: number): void {
   data[offset] = (value >> 8) & 0xff;
   data[offset + 1] = value & 0xff;
 }
 
-/** Write uint32 big-endian. */
+/** Write a uint32 big-endian into buffer. */
 function writeU32(data: Uint8Array, offset: number, value: number): void {
-  data[offset] = (value >>> 24) & 0xff;
-  data[offset + 1] = (value >>> 16) & 0xff;
-  data[offset + 2] = (value >>> 8) & 0xff;
+  data[offset] = (value >> 24) & 0xff;
+  data[offset + 1] = (value >> 16) & 0xff;
+  data[offset + 2] = (value >> 8) & 0xff;
   data[offset + 3] = value & 0xff;
 }
 
-interface TableRecord {
-  tag: string;
-  checksum: number;
-  offset: number;
-  length: number;
-}
-
-function parseTableDirectory(data: Uint8Array): {
-  numTables: number;
-  tables: Map<string, TableRecord>;
-} {
-  const numTables = readU16(data, 4);
-  const tables = new Map<string, TableRecord>();
-
-  // numTables comes from a u16 → max 65535. Reject directories that
-  // claim more entries than the buffer can possibly hold so we don't
-  // walk off the end and accumulate garbage records.
-  const maxRecords = Math.floor((data.length - 12) / 16);
-  if (numTables > maxRecords) {
-    return { numTables: 0, tables };
-  }
-
-  for (let i = 0; i < numTables; i++) {
-    const recOffset = 12 + i * 16;
-    const tag = String.fromCharCode(
-      data[recOffset],
-      data[recOffset + 1],
-      data[recOffset + 2],
-      data[recOffset + 3]
-    );
-    tables.set(tag, {
-      tag,
-      checksum: readU32(data, recOffset + 4),
-      offset: readU32(data, recOffset + 8),
-      length: readU32(data, recOffset + 12)
-    });
-  }
-
-  return { numTables, tables };
-}
-
-// Hard cap on how many codepoints we materialise from a cmap table.
-// Real fonts reach ~150K glyphs at the upper end (CJK pan-Unicode);
-// bigger numbers indicate a malformed or hostile table built to drive
-// the parser into a multi-gigabyte Map allocation.
-const CMAP_MAX_ENTRIES = 200_000;
-
 /**
- * Parse cmap format 4 (BMP characters) to build codepoint → glyph ID map.
- */
-function parseCmapFormat4(data: Uint8Array, offset: number): Map<number, number> {
-  const map = new Map<number, number>();
-  const segCountX2 = readU16(data, offset + 6);
-  const segCount = segCountX2 / 2;
-
-  const endCodes = offset + 14;
-  const startCodes = endCodes + segCountX2 + 2; // +2 for reservedPad
-  const idDeltas = startCodes + segCountX2;
-  const idRangeOffsets = idDeltas + segCountX2;
-
-  for (let i = 0; i < segCount; i++) {
-    const endCode = readU16(data, endCodes + i * 2);
-    const startCode = readU16(data, startCodes + i * 2);
-    const idDelta = readI16(data, idDeltas + i * 2);
-    const idRangeOffset = readU16(data, idRangeOffsets + i * 2);
-
-    if (startCode === 0xffff) {
-      break;
-    }
-
-    for (let c = startCode; c <= endCode; c++) {
-      if (map.size >= CMAP_MAX_ENTRIES) {
-        return map;
-      }
-      let glyphId: number;
-      if (idRangeOffset === 0) {
-        glyphId = (c + idDelta) & 0xffff;
-      } else {
-        const glyphOffset = idRangeOffsets + i * 2 + idRangeOffset + (c - startCode) * 2;
-        glyphId = readU16(data, glyphOffset);
-        if (glyphId !== 0) {
-          glyphId = (glyphId + idDelta) & 0xffff;
-        }
-      }
-      if (glyphId !== 0) {
-        map.set(c, glyphId);
-      }
-    }
-  }
-
-  return map;
-}
-
-/**
- * Parse cmap format 12 (full Unicode including supplementary planes).
- */
-function parseCmapFormat12(data: Uint8Array, offset: number): Map<number, number> {
-  const map = new Map<number, number>();
-  const numGroups = readU32(data, offset + 12);
-
-  // numGroups is a u32 — without bounds it can claim 4×10⁹ groups and
-  // each group can claim a 4×10⁹-codepoint range. Reject crazy values
-  // up front. The 4-byte multiplier 12 (group record size) plus the
-  // 16-byte header puts an absolute ceiling on legitimate groups.
-  const maxGroups = Math.max(0, Math.floor((data.length - offset - 16) / 12));
-  if (numGroups > maxGroups) {
-    return map;
-  }
-
-  for (let i = 0; i < numGroups; i++) {
-    const groupOffset = offset + 16 + i * 12;
-    const startCharCode = readU32(data, groupOffset);
-    const endCharCode = readU32(data, groupOffset + 4);
-    const startGlyphID = readU32(data, groupOffset + 8);
-
-    if (
-      endCharCode < startCharCode ||
-      endCharCode > 0x10ffff /* Unicode max */ ||
-      endCharCode - startCharCode > CMAP_MAX_ENTRIES
-    ) {
-      // Malformed or abusive range — skip rather than expand it.
-      continue;
-    }
-
-    for (let c = startCharCode; c <= endCharCode; c++) {
-      if (map.size >= CMAP_MAX_ENTRIES) {
-        return map;
-      }
-      const gid = startGlyphID + (c - startCharCode);
-      map.set(c, gid);
-    }
-  }
-
-  return map;
-}
-
-/**
- * Get the glyph IDs for composite glyphs (compound glyphs referencing other glyphs).
+ * The glyph IDs a composite glyph is built from.
+ *
+ * Empty for a simple glyph or an empty slot. The record walk itself lives in
+ * `@utils/font-ttf`, which is also where the bounds checking is — this used to step
+ * with a bare cursor and rely on a `DataView` throwing once it left the buffer.
  */
 function getCompositeGlyphDeps(
   data: Uint8Array,
   glyfOffset: number,
-  locaEntries: number[],
+  locaEntries: ArrayLike<number>,
   glyphId: number
 ): number[] {
   const deps: number[] = [];
-  const glyphStart = glyfOffset + locaEntries[glyphId];
-  const glyphEnd = glyfOffset + locaEntries[glyphId + 1];
-
-  if (glyphStart >= glyphEnd) {
-    return deps; // empty glyph
+  for (const component of glyphComponents(
+    data,
+    glyfOffset + locaEntries[glyphId],
+    glyfOffset + locaEntries[glyphId + 1]
+  )) {
+    deps.push(component.glyphId);
   }
-
-  const numContours = readI16(data, glyphStart);
-  if (numContours >= 0) {
-    return deps; // simple glyph
-  }
-
-  // Composite glyph
-  let pos = glyphStart + 10; // skip header
-  const MORE_COMPONENTS = 0x0020;
-  const ARG_1_AND_2_ARE_WORDS = 0x0001;
-  const WE_HAVE_A_SCALE = 0x0008;
-  const WE_HAVE_AN_X_AND_Y_SCALE = 0x0040;
-  const WE_HAVE_A_TWO_BY_TWO = 0x0080;
-
-  let flags: number;
-  do {
-    flags = readU16(data, pos);
-    const componentGid = readU16(data, pos + 2);
-    deps.push(componentGid);
-    pos += 4;
-
-    // Skip arguments
-    if (flags & ARG_1_AND_2_ARE_WORDS) {
-      pos += 4;
-    } else {
-      pos += 2;
-    }
-
-    // Skip transform data
-    if (flags & WE_HAVE_A_TWO_BY_TWO) {
-      pos += 8;
-    } else if (flags & WE_HAVE_AN_X_AND_Y_SCALE) {
-      pos += 4;
-    } else if (flags & WE_HAVE_A_SCALE) {
-      pos += 2;
-    }
-  } while (flags & MORE_COMPONENTS);
-
   return deps;
 }
 
 function _subsetTtf(fontData: Uint8Array, characters: string): Uint8Array {
   // Check if it's a TrueType font (not CFF/OTF with PostScript outlines)
-  const sfVersion = readU32(fontData, 0);
-  const isTtf =
-    sfVersion === 0x00010000 || // TrueType
-    sfVersion === 0x74727565; // 'true'
-
-  if (!isTtf) {
-    // CFF fonts require a full CFF subsetter which is much more complex.
-    // Return original for now.
-    return fontData;
-  }
-
-  const { tables } = parseTableDirectory(fontData);
-
-  const cmapTable = tables.get("cmap");
-  const glyfTable = tables.get("glyf");
-  const locaTable = tables.get("loca");
-  const headTable = tables.get("head");
-  const maxpTable = tables.get("maxp");
-
-  if (!cmapTable || !glyfTable || !locaTable || !headTable || !maxpTable) {
-    return fontData; // Missing required tables
-  }
-
-  // Determine loca format (0 = short, 1 = long)
-  const indexToLocFormat = readI16(fontData, headTable.offset + 50);
-  const numGlyphs = readU16(fontData, maxpTable.offset + 4);
-
-  // Parse loca table
-  const locaEntries: number[] = [];
-  for (let i = 0; i <= numGlyphs; i++) {
-    if (indexToLocFormat === 0) {
-      locaEntries.push(readU16(fontData, locaTable.offset + i * 2) * 2);
-    } else {
-      locaEntries.push(readU32(fontData, locaTable.offset + i * 4));
-    }
-  }
-
-  // Parse cmap to get character → glyph mapping
-  const cmapOffset = cmapTable.offset;
-  const numSubtables = readU16(fontData, cmapOffset + 2);
-  let charToGlyph = new Map<number, number>();
-
-  // Prefer format 12 (full Unicode), fall back to format 4 (BMP)
-  for (let i = 0; i < numSubtables; i++) {
-    const subOffset = cmapOffset + 4 + i * 8;
-    const platformId = readU16(fontData, subOffset);
-    const encodingId = readU16(fontData, subOffset + 2);
-    const subtableOffset = cmapOffset + readU32(fontData, subOffset + 4);
-    const format = readU16(fontData, subtableOffset);
-
-    // Prefer platform 3 (Windows), encoding 10 (full Unicode) with format 12
-    if (format === 12 && platformId === 3 && encodingId === 10) {
-      charToGlyph = parseCmapFormat12(fontData, subtableOffset);
-      break;
-    }
-    // Or platform 3, encoding 1 (BMP) with format 4
-    if (format === 4 && platformId === 3 && encodingId === 1 && charToGlyph.size === 0) {
-      charToGlyph = parseCmapFormat4(fontData, subtableOffset);
-    }
-  }
+  // Parsed by `@utils/font-ttf`, the one TrueType reader in the repository.
+  //
+  // This file used to carry its own — table directory, `cmap` formats 4 and 12,
+  // `head`, `maxp` and `loca` — and the two had already drifted: the copy here
+  // accepted only Windows (platform 3) `cmap` subtables, so a font publishing a
+  // Unicode-platform table and nothing on platform 3 was declared unsubsettable and
+  // embedded whole. Several macOS system faces are exactly that shape. The shared
+  // reader also bounds every table read, where the copy trusted the offsets a font
+  // gave it.
+  //
+  // `parseTtf` throws for anything it cannot use — a CFF/OTF face, a bitmap-only
+  // face, a truncated header — and `subsetFont` turns that into "return the original",
+  // which is this function's contract.
+  const ttf = parseTtf(fontData);
+  const glyfTable = ttf.tables.get("glyf")!;
+  const tables = ttf.tables;
+  const numGlyphs = ttf.numGlyphs;
+  const charToGlyph = ttf.cmap;
+  // `glyphOffsets` is `numGlyphs + 1` entries, clamped into `glyf` and non-decreasing.
+  const locaEntries = ttf.glyphOffsets;
 
   if (charToGlyph.size === 0) {
-    return fontData; // Can't parse cmap
+    return fontData; // nothing maps to a glyph, so there is nothing to keep
   }
 
   // Collect glyph IDs we need
@@ -492,8 +273,11 @@ function _subsetTtf(fontData: Uint8Array, characters: string): Uint8Array {
     "GPOS", // Glyph Positioning (kerning, mark attachment)
     "GSUB", // Glyph Substitution (ligatures, contextual alternates)
     "GDEF", // Glyph Definition (glyph classes, mark attachment)
-    "kern", // Legacy kerning table
-    "DSIG" // Digital Signature (preserve for validation)
+    "kern" // Legacy kerning table
+    // `DSIG` is deliberately absent. It is a signature over the font's bytes, and
+    // subsetting rewrites them, so carrying it forward ships a signature that cannot
+    // verify — which is worse than shipping none. It used to be kept with a comment
+    // claiming it was "preserved for validation", exactly backwards.
   ];
   const tablesToInclude: { tag: string; data: Uint8Array }[] = [];
 
@@ -507,11 +291,14 @@ function _subsetTtf(fontData: Uint8Array, characters: string): Uint8Array {
     } else if (tag === "loca") {
       tablesToInclude.push({ tag, data: newLocaData });
     } else if (tag === "head") {
-      // Update indexToLocFormat to long (1)
       const headData = fontData.slice(tableRec.offset, tableRec.offset + tableRec.length);
       const headCopy = new Uint8Array(headData.length);
       headCopy.set(headData);
       writeU16(headCopy, 50, 1); // indexToLocFormat = 1 (long)
+      // The whole-font checksum is computed with this field zeroed and written back
+      // afterwards; leaving the original font's value here described bytes that no
+      // longer exist, so every subset font carried a checksum that cannot verify.
+      writeU32(headCopy, 8, 0);
       tablesToInclude.push({ tag, data: headCopy });
     } else {
       tablesToInclude.push({
@@ -572,7 +359,44 @@ function _subsetTtf(fontData: Uint8Array, characters: string): Uint8Array {
     dataOffset += paddedLen;
   }
 
+  writeCheckSumAdjustment(output, tablesToInclude);
   return output;
+}
+
+/** The magic total a valid sfnt's whole-font checksum must reach. */
+const CHECKSUM_MAGIC = 0xb1b0afba;
+
+/** Sum a byte range as big-endian u32s, padding a short tail with zeroes. */
+function sfntChecksum(data: Uint8Array, from = 0, to = data.length): number {
+  let sum = 0;
+  for (let at = from; at < to; at += 4) {
+    const b0 = data[at] ?? 0;
+    const b1 = data[at + 1] ?? 0;
+    const b2 = data[at + 2] ?? 0;
+    const b3 = data[at + 3] ?? 0;
+    sum = (sum + (((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) >>> 0)) >>> 0;
+  }
+  return sum;
+}
+
+/**
+ * Write `head.checkSumAdjustment` so the finished font checksums to the magic value.
+ *
+ * Required by the specification and checked by font validators; Word itself is
+ * lenient, but a document is not only ever opened by Word. The field must be zero
+ * while the sum is taken, which is why `head` is emitted with it cleared.
+ */
+function writeCheckSumAdjustment(
+  output: Uint8Array,
+  tablesToInclude: readonly { tag: string; data: Uint8Array }[]
+): void {
+  const headIndex = tablesToInclude.findIndex(t => t.tag === "head");
+  if (headIndex < 0) {
+    return; // no head table: nothing claims a checksum
+  }
+  const headOffset = readU32(output, 12 + headIndex * 16 + 8);
+  const adjustment = (CHECKSUM_MAGIC - sfntChecksum(output)) >>> 0;
+  writeU32(output, headOffset + 8, adjustment);
 }
 
 // =============================================================================

@@ -165,7 +165,16 @@ describe("sheet_write", () => {
     expect(Cell.getStyle(ws, "A1").font?.bold).toBe(true);
     expect(Cell.getNumFmt(ws, "B2")).toBe("#,##0.00");
     expect(Worksheet.mergedRegions(ws)).toEqual([{ top: 4, left: 1, bottom: 4, right: 2 }]);
-    expect(ws.views[0]).toMatchObject({ state: "frozen", ySplit: 1 });
+    // `activeCell` as well as the split, because that is the one field that actually
+    // distinguishes the public setter from a hand-written `ws.views` literal. `topLeftCell`
+    // does *not*: the xlsx writer derives it either way, so asserting it passes whichever
+    // route was taken and says nothing — which is what a first version of this test did.
+    expect(ws.views[0]).toMatchObject({
+      state: "frozen",
+      ySplit: 1,
+      topLeftCell: "A2",
+      activeCell: "A2"
+    });
   });
 
   it("accepts a colour with or without a leading hash, and rejects nonsense", async () => {

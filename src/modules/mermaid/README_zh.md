@@ -46,6 +46,8 @@ const svg = toSvg(list); // 标记
 const pixels = rasterizeToRgba(list, { scale: 2 }); // RGBA
 ```
 
+标签不是拉丁字母的图,需要一张光栅化器能找到的字体。`rasterizeToRgba` 在 Node 上会自动发现,并回报画不出来的码点;浏览器里则必须由你提供字节。见 [`draw` 的 README](../draw/README_zh.md#字体以及中日韩文字是怎么画出来的)。
+
 ```typescript
 import { renderDrawList } from "documonster/draw";
 import { Pdf, createPdfDrawSurface } from "documonster/pdf";

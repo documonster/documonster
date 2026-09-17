@@ -43,6 +43,8 @@ import {
   isGlyphlessControl
 } from "@utils/cjk";
 import type { CjkLanguage } from "@utils/cjk";
+import { isSimpleText } from "@utils/complex-text";
+import { shapeTextForFace } from "@utils/text-shaping";
 import { describeCodePointBlocks } from "@utils/unicode-blocks";
 
 export interface RoutedFontSegment {
@@ -209,6 +211,18 @@ export class FontManager {
 
   // --- Embedded TrueType font tracking ---
   private embeddedFont: TtfFont | null = null;
+  /**
+   * The runs that shaping might change, kept verbatim until a face is known.
+   *
+   * Registering a glyph needs the face — a presentation form is only used if that face can
+   * draw it — but the face is *discovered from* the code points tracked, so the two cannot
+   * happen in one pass. The text is therefore held here during tracking and shaped in
+   * {@link prepare}, once discovery has run and before the font resources are frozen.
+   *
+   * Only text `isSimpleText` rejects is kept, which is why this costs nothing in practice:
+   * for a Latin or CJK document it stays empty, so a 100k-cell sheet retains no strings.
+   */
+  private readonly shapableRuns = new Set<string>();
   private embeddedResourceName = "";
   /**
    * True when `embeddedFont` is a *fallback* face rather than the document's
@@ -437,7 +451,14 @@ export class FontManager {
    * (see `text-features.ts`).
    */
   reportDiagnostics(warn: (message: string) => void): void {
-    this.textFeatures.report(warn);
+    this.textFeatures.report(warn, {
+      // Recorded as the text was shaped, not inferred from the font list: whether a form was
+      // substituted depends on the face publishing a glyph for *that form*, which many do
+      // not. A face carrying only the base letters reorders the run and draws it unjoined,
+      // and the caller has to be told the second thing without being told the first.
+      contextualForms: this.substitutesForms(),
+      visualOrder: this.appliesShaping()
+    });
     if (this.autoDiscovered) {
       warn(
         `Auto-embedded system font '${this.autoDiscovered.familyName}' to render ` +
@@ -685,6 +706,9 @@ export class FontManager {
     // must be recorded here or this path would stay silent.
     this.textFeatures.noteText(text);
     collectGlyphUsesInto(this.usedGlyphUses, text);
+    if (!isSimpleText(text)) {
+      this.shapableRuns.add(text);
+    }
     for (let i = 0; i < text.length; i++) {
       const cp = text.codePointAt(i)!;
       if (cp > 0xffff) {
@@ -785,8 +809,9 @@ export class FontManager {
       for (const codePoint of codepoints) {
         face.codepoints.add(codePoint);
       }
-      collectGlyphUsesInto(face.glyphUses, text);
-      return [configuredSegment(text, codepoints, face)];
+      // Measured and encoded from the shaped text, so the width matches the glyphs.
+      const shaped = this.noteSubstitution(text, shapeConfiguredSegment(face, text));
+      return [configuredSegment(shaped, codePointsOf(shaped), face)];
     }
 
     // Long strings carry their full text plus segment/codepoint arrays in a
@@ -835,12 +860,21 @@ export class FontManager {
             this.missingCodePoints.add(codePoint);
           }
         }
-        collectGlyphUsesInto(state.glyphUses, segment.text);
+        const shapedText = this.noteSubstitution(
+          segment.text,
+          shapeConfiguredSegment(state, segment.text)
+        );
+        // A shaped segment is re-measured against the face rather than reusing the
+        // planner's width, which was computed from the unshaped characters.
+        const shapedSegment =
+          shapedText === segment.text
+            ? segment
+            : configuredSegment(shapedText, codePointsOf(shapedText), state);
         return Object.freeze({
-          text: segment.text,
+          text: shapedText,
           resourceName: state.resourceName,
-          codepoints: segment.codepoints,
-          width: segment.width,
+          codepoints: shapedSegment.codepoints,
+          width: shapedSegment.width,
           ascent: segment.ascent,
           descent: segment.descent
         });
@@ -891,6 +925,89 @@ export class FontManager {
     this.type3PlanningWidths = new Map(
       [...needingType3].map(codePoint => [codePoint, lookupGlyph(codePoint)?.width ?? 600])
     );
+  }
+
+  /**
+   * Register the glyphs shaping will ask for, while the subset can still grow.
+   *
+   * This is the second half of the two-pass arrangement described on {@link shapableRuns}.
+   * Tracking registered the author's characters, which is what font discovery needs; the
+   * glyphs actually drawn may be contextual forms, and a CID is only assigned to a
+   * sequence that was registered. Skipping this step produced a page of blanks — the
+   * encoder asked for a form the subset had never heard of and got CID 0.
+   *
+   * Called at the top of `writeFontResources`, which is the last point the subset can
+   * grow and the one place every pipeline reaches. It is idempotent, so the second pass of
+   * a two-pass export costs nothing.
+   */
+  private registerShapedGlyphs(): void {
+    if (!this.embeddedFont || this.shapableRuns.size === 0) {
+      return;
+    }
+    for (const run of this.shapableRuns) {
+      for (const use of shapeForFace(this.embeddedFont, run).uses) {
+        this.usedGlyphUses.set(use.sequence, use);
+        this.usedCodePoints.add(use.codePoint);
+      }
+    }
+  }
+
+  /**
+   * Whether this document's text is shaped before it is drawn.
+   *
+   * True once any face is embedded, whether the caller supplied it, configured it or it was
+   * discovered off the host. It is deliberately not "does the face cover every form": that
+   * is decided per cluster in {@link shapeForFace}, and a face covering most of a script
+   * still means the run is shaped.
+   */
+  private appliesShaping(): boolean {
+    return this.embeddedFont !== null || this.configuredResourceFaces.size > 0;
+  }
+
+  /**
+   * Whether any run actually had a contextual form substituted into it.
+   *
+   * Set from the shaping result rather than from the presence of a face, because the two
+   * differ for a real and common class of font: measured across the 50 Arabic-capable system
+   * faces on one macOS host, eleven publish no presentation forms at all. For those the
+   * shaper's output falls back to the original letters, nothing is joined, and claiming
+   * otherwise in a warning would be a plain falsehood.
+   */
+  private substitutedForms = false;
+
+  /**
+   * Whether any of this document's text has a contextual form substituted into it.
+   *
+   * Answered by *predicting* rather than by observing, because the diagnostics are reported
+   * before the content streams are serialised: `PdfDocumentBuilder` raises them just above
+   * `writeFontResources`, while encoding happens later still, so a flag set during drawing
+   * is always false when it is read. Shaping is a pure function of the text and the face, so
+   * running it here gives the same answer the encoder will reach.
+   *
+   * The configured-fonts path routes during tracking and therefore has already measured it,
+   * which is what {@link substitutedForms} carries.
+   */
+  private substitutesForms(): boolean {
+    if (this.substitutedForms) {
+      return true;
+    }
+    if (this.embeddedFont) {
+      for (const run of this.shapableRuns) {
+        if (this.substitutedForms) {
+          break;
+        }
+        this.noteSubstitution(run, shapeForFace(this.embeddedFont, run).visual);
+      }
+    }
+    return this.substitutedForms;
+  }
+
+  /** Note that shaping changed the glyphs, not merely their order. */
+  private noteSubstitution(original: string, drawn: string): string {
+    if (!this.substitutedForms && drawn !== original && !isReorderOnly(original, drawn)) {
+      this.substitutedForms = true;
+    }
+    return drawn;
   }
 
   /** Alias for build contexts that name the pre-layout step finalize. */
@@ -1015,6 +1132,27 @@ export class FontManager {
    * drawing with another is what produced the stray gaps after non-WinAnsi
    * runs.
    */
+  /**
+   * The text that will actually be drawn for `text`, shaped against the embedded face.
+   *
+   * Shaping is confined to this class on purpose. Measurement, glyph registration and
+   * encoding all have to agree on the exact string, and every caller that shaped for
+   * itself would be another chance for them to diverge — a divergence whose symptom is a
+   * CID the subset does not contain, i.e. a blank page. It also means the callers do not
+   * change at all: `Pdf`, the Excel renderer, the chart surface and the Word bridge each
+   * keep passing the author's text and get shaped output.
+   *
+   * Only the embedded face is consulted, because it is the only one that can draw a
+   * presentation form: the standard 14 fonts have no Arabic at all, and Type3 fallback
+   * glyphs cover no form in U+FE70–FEFC.
+   */
+  private shapedForDrawing(text: string): string {
+    if (!this.embeddedFont || isSimpleText(text)) {
+      return text;
+    }
+    return this.noteSubstitution(text, shapeForFace(this.embeddedFont, text).visual);
+  }
+
   measureText(text: string, resourceName: string, fontSize: number): number {
     if (this.config) {
       return (
@@ -1022,6 +1160,12 @@ export class FontManager {
         fontSize
       );
     }
+    // Measure what will be drawn, not what was asked for: a shaped run is around a
+    // quarter narrower than the same letters in isolated form, and a caller laying out
+    // against the unshaped width would place every following run too far along. The Word
+    // bridge injects this method as its measurer, which is how `run.x` and `run.width`
+    // stay consistent with the glyphs without the layout engine knowing about shaping.
+    text = this.shapedForDrawing(text);
     if (this.embeddedFont && resourceName === this.embeddedResourceName) {
       return measureEmbeddedText(text, this.embeddedFont, fontSize);
     }
@@ -1212,21 +1356,30 @@ export class FontManager {
     }
     if (this.config) {
       let state: ConfiguredFaceState | undefined;
+      // What gets encoded is the *shaped* text, which is not what was passed in. Routing
+      // already decided it, so it is taken from the segment rather than recomputed: shaping
+      // a presentation form a second time would put it through the joining tables again.
+      let drawn = text;
       if (this.configuredRequests.has(resourceName)) {
         const segments = this.routeText(text, resourceName);
         if (segments.length !== 1) {
           throw new PdfFontError("Text spans multiple font faces; encode each routeText segment");
         }
         state = this.configuredResourceFaces.get(segments[0].resourceName);
+        drawn = segments[0].text;
       } else {
         state = this.configuredResourceFaces.get(resourceName);
+        // No routing for this resource, so this is the only place the face is known.
+        if (state) {
+          drawn = this.noteSubstitution(text, shapeConfiguredSegment(state, text));
+        }
       }
       if (!state?.embedded) {
         throw new PdfFontError(
           "encodeText called before writeFontResources — subset mapping not available"
         );
       }
-      return encodeWithEmbeddedFont(text, state.embedded);
+      return encodeWithEmbeddedFont(drawn, state.embedded);
     }
     if (!this.embeddedFont || resourceName !== this.embeddedResourceName) {
       return null;
@@ -1235,7 +1388,7 @@ export class FontManager {
     // After writeFontResources, use the subset's CID mapping
     // (maps Unicode sequences → CIDs, independently from subset glyph IDs)
     if (this._embeddedResult) {
-      return encodeWithEmbeddedFont(text, this._embeddedResult);
+      return encodeWithEmbeddedFont(this.shapedForDrawing(text), this._embeddedResult);
     }
 
     // writeFontResources not called yet — this is a programming error
@@ -1287,6 +1440,12 @@ export class FontManager {
    * never bundles the glyph tables (verified by scripts/treeshake-verify).
    */
   async writeFontResources(writer: PdfWriter): Promise<Map<string, number>> {
+    // Last moment the subset can still grow, and the only one every pipeline passes
+    // through. Hooking this to `prepare()` instead left the whole builder path unshaped:
+    // `PdfDocumentBuilder` never calls it — only the spreadsheet exporter does — so the
+    // glyphs were registered for `Pdf.fromExcel` and not for `Pdf.create`. Doing it here
+    // needs no cooperation from the caller and cannot be forgotten by a new one.
+    this.registerShapedGlyphs();
     const fontObjectMap = new Map<string, number>();
 
     if (this.config) {
@@ -1497,6 +1656,80 @@ function collectGlyphUsesInto(target: Map<string, EmbeddedGlyphUse>, text: strin
   for (const use of collectEmbeddedGlyphUses(text)) {
     target.set(use.sequence, use);
   }
+}
+
+/**
+ * Shape `text` for `state`'s face, register the glyphs it needs, and return what to draw.
+ *
+ * The configured-fonts path routes a run into per-face segments *before* anything is
+ * shaped, so each segment is shaped against the face that will draw it. A word split
+ * across two faces therefore loses the join at the seam — the same limitation the legacy
+ * path has at a `splitTextRuns` boundary, and preferable to shaping against a face that
+ * will not draw the glyph.
+ */
+/**
+ * Whether `drawn` is `original` with the same characters in a different order.
+ *
+ * Distinguishes the two halves of shaping for the diagnostics: a right-to-left run that was
+ * merely reordered has had no glyph substituted, so a warning must not claim its letters are
+ * joined. Comparing sorted characters is exact for this purpose — reordering is a
+ * permutation, and any substitution changes the multiset.
+ */
+function isReorderOnly(original: string, drawn: string): boolean {
+  if (original.length !== drawn.length) {
+    return false;
+  }
+  return [...original].sort().join("") === [...drawn].sort().join("");
+}
+
+function shapeConfiguredSegment(state: ConfiguredFaceState, text: string): string {
+  if (isSimpleText(text)) {
+    collectGlyphUsesInto(state.glyphUses, text);
+    return text;
+  }
+  const { visual, uses } = shapeForFace(state.source.font, text);
+  for (const use of uses) {
+    state.glyphUses.set(use.sequence, use);
+  }
+  for (const use of uses) {
+    state.codepoints.add(use.codePoint);
+  }
+  return visual;
+}
+
+/**
+ * Shape `text` against `face` and return both what to draw and what it means.
+ *
+ * The single place shaping is decided, so that measurement, glyph registration and
+ * encoding cannot disagree — three callers that each shaped for themselves would be three
+ * chances to write a CID the subset does not contain.
+ *
+ * The `uses` carry the original characters in `text`, so the ToUnicode map the embedder
+ * builds from them yields the letters a reader typed rather than the presentation forms
+ * drawn for them.
+ */
+function shapeForFace(face: TtfFont, text: string): { visual: string; uses: EmbeddedGlyphUse[] } {
+  const clusters = shapeTextForFace(text, codePoint => face.cmap.has(codePoint));
+  let visual = "";
+  const uses: EmbeddedGlyphUse[] = [];
+  for (const cluster of clusters) {
+    visual += cluster.visual;
+    const clusterUses = collectEmbeddedGlyphUses(cluster.visual);
+    // The source text is attached only when the cluster collapsed to a *single* glyph,
+    // which is the case where the glyph drawn and the characters it stands for genuinely
+    // differ — a presentation form, or a ligature standing for two letters.
+    //
+    // When the cluster fell back to its original characters it draws one glyph each, and
+    // those glyphs already mean themselves. Attributing the whole cluster to each of them
+    // was wrong in a way that only shows up on the clipboard: a rejected lam-alef would
+    // have written "لا" twice, once per glyph.
+    if (clusterUses.length === 1) {
+      uses.push({ ...clusterUses[0], text: cluster.source });
+    } else {
+      uses.push(...clusterUses);
+    }
+  }
+  return { visual, uses };
 }
 
 function normalizeFamilyName(name: string): string {

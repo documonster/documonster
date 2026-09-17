@@ -167,7 +167,7 @@ Layer 4:  excel, word → formula, draw, archive, xml, csv, markdown, stream, ut
 Layer 3:  formula  → utils    (independent calc engine; no excel imports)
 Layer 2:  csv, archive → stream, utils; mermaid → draw, utils
 Layer 1:  xml, markdown, stream, draw → utils
-Layer 0:  utils    (no module dependencies)
+Layer 0:  utils    (no module dependencies; owns the shared TTF parser and font discovery)
 ```
 
 ### The `draw` module
@@ -207,6 +207,145 @@ The rasteriser used to live in `excel/chart/render/`, which was an accident of w
 charts were written rather than a statement about what it does: it paints a display
 list and knows nothing about a workbook. It sits in `draw/` now, alongside the glyph
 rasteriser and the stroke font it needs, and `documonster/draw` exports it.
+
+**Fonts are shared with `pdf`, at Layer 0.** Drawing text needs a font file read, and
+that was written twice: `pdf/font/ttf-parser.ts` to embed and subset a face, and
+`draw/raster/glyph-rasterizer.ts` to rasterise glyphs, each with its own big-endian
+readers, table directory, `cmap` formats 4 and 12, `hmtx`, `loca` and `.ttc` header —
+around 330 duplicated lines that were free to disagree.
+
+The duplication was not the real cost. **System font _discovery_ could only be built
+once, and it was built on the PDF copy**, so `draw` could not reach it: `pdf` is
+Layer 5. The rasteriser therefore had a hardcoded list of five Latin filenames per
+platform, took the first that existed, and used that one face for everything — and
+since none of Arial, Helvetica, DejaVu or Liberation contains a Han glyph, a PNG of a
+Chinese label came out **blank** while the PDF of the same display list embedded
+`Songti SC` and rendered correctly. Nothing reported it: a missing outline advanced
+the pen and painted nothing.
+
+So the split is now by job, not by module:
+
+| Job                                                | Lives in                          |
+| -------------------------------------------------- | --------------------------------- |
+| TTF/TTC tables — directory, `cmap`, `hmtx`, `loca` | `@utils/font-ttf`                 |
+| Walking a composite glyph's component records      | `@utils/font-ttf`                 |
+| Finding an installed face that covers a text       | `@utils/font-discovery`           |
+| `glyf` outlines → contours, and a `RasterFont`     | `draw/raster/glyph-outline.ts`    |
+| Contours → an alpha bitmap                         | `draw/raster/glyph-rasterizer.ts` |
+| Choosing and chaining faces for the rasteriser     | `draw/raster/system-raster-font`  |
+| PDF descriptors, subsetting, Type3                 | `pdf/font/*`                      |
+| Word subsetting, ODTTF obfuscation                 | `word/font/font-embed.ts`         |
+
+Layer 0 is forced, not chosen: `draw` may only import `utils`, so anything shared
+with it has to be there — and `utils` already held `font-data`, `font-metrics` and
+`text-measure`. Outline _decoding_ deliberately stayed in `draw`, because PDF embeds
+`glyf` bytes verbatim and never needs a point; lowering it would put code at Layer 0
+that exactly one consumer can use.
+
+**Word was the third copy, and it had already drifted.** `word/font/font-embed.ts`
+carried its own table directory, `cmap` formats 4 and 12, `head`, `maxp` and `loca` —
+and accepted only Windows (platform 3) `cmap` subtables, where the shared reader also
+accepts the Unicode platform. A font publishing only a `(0,3)` table, which several
+macOS system faces do, was therefore declared unsubsettable and embedded whole, with
+nothing reported. That is the second bug this split produced, after the blank CJK PNG,
+and the reason the rule is one reader rather than one reader per consumer.
+
+**A composite glyph's component records are walked in one place too.** A record's
+length depends on its own flags, and there were four copies of that arithmetic: the
+rasteriser needed the transform, the PDF subsetter needed both to collect dependencies
+and to renumber glyph IDs, and the Word subsetter needed the dependencies. Three of
+them could disagree with the fourth about where a record ends, and none of them bounded
+the read to the glyph — they stepped with a bare cursor and relied on a `DataView`
+throwing once it left the buffer. `glyphComponents` yields `flags`, the component's
+glyph ID, **the offset of that ID** so a subsetter can write a new one back, the
+placement offsets and the 2×2 transform; each consumer reads the fields it needs.
+
+Two things did **not** move, and both are policy rather than mechanism. Whether a code
+point _requires_ a real face is passed in (`RequiresFacePredicate`): PDF draws an arrow
+or a checkbox with a Type3 glyph so those must not disqualify a Chinese font, while the
+rasteriser has no such fallback and needs everything. And `PdfFontError` stayed in
+`pdf` — it is published, `isPdfError()` answers for it, and the exporter branches on
+it — so `pdf/font/ttf-parser.ts` remains as a boundary that translates Layer 0's
+`FontParseError` into it. Both files are thin and exist to keep a contract, not to
+forward calls.
+
+**The rasteriser resolves each character against a chain, not a font.** PDF can fall
+back to a Type3 drawing for a glyph its chosen face lacks; a rasteriser has nothing to
+fall back to but another face, and no single font covers `Mixed 混合 ABC`. The Latin
+face is ordered _before_ the discovered one on purpose — a CJK face carries Latin
+glyphs too, and putting it first set the ASCII of a mixed label in Songti's serif hand
+while the SVG of the same drawing used Arial. A character nothing can draw is recorded
+in `RgbaImage.uncoveredCodePoints` rather than silently skipped, and
+`RasterizeOptions.fonts` / `useSystemFonts` let a caller supply faces outright — which
+is the only route to a non-ASCII glyph in a browser, and the way to make a render
+reproducible across machines. Supplied fonts belong to the **canvas**, not to the
+process: routing them through a module-level registry left one render's fonts in place
+for the next render that passed none, so there is no such registry in the public
+surface. `fonts` takes bytes, a parsed `RasterFont` (parse once, reuse across renders —
+bytes are re-parsed every call) or `{ data, collectionIndex }`, which is the only way to
+name a face inside a `.ttc`. Bytes are recognised structurally rather than with
+`instanceof Uint8Array`, because a typed array from another realm fails that test and
+was being dropped in silence — in a browser, where supplying bytes is the only option.
+Normalising a supplied font touches no filesystem, so it lives in `glyph-outline.ts` and
+is shared; only _discovery_ is a platform variant, which is what keeps the browser
+sibling at 42 lines instead of a second copy of it.
+
+**A formatting control is not a character.** A variation selector, a joiner, a bidi
+isolate or a zero-width space has no glyph in any font, so it is never looked up, never
+charged an advance and never reported as uncovered. Doing otherwise told callers to
+install a font for `U+FE0F`, and — because a line's advances are normalised to its
+measured width — spread the phantom half-em over every _visible_ glyph in the label.
+Whether it appeared at all depended on whether the host's face happened to carry an
+empty glyph for it, so the report differed between machines.
+
+The rule is expressed as two predicates, and the difference between them is the point.
+`isZeroWidthCodePoint` is "takes no width" and is what `@utils/text-measure` consults;
+`isNonPrintingControl` is "draws nothing" and is what the rasteriser consults. They
+differ by **combining marks**, which take no width but do draw. **Tab is in neither**: it
+draws nothing yet occupies space, so the measurer charges it and the rasteriser advances
+the pen for it without reporting a gap — the one control character that is width without
+ink.
+
+Both halves are needed. The rasteriser skipping a control is not enough on its own,
+because a line's glyph advances are normalised to its _measured_ width: while the
+measurer still charged a zero-width space half an em, inserting one moved every visible
+glyph in the label even though it was no longer drawn.
+
+**Style reaches the face, not just the width.** `family`, `bold` and `italic` used to
+affect only measurement, so a label asking for `Courier New` was drawn in Arial and a
+bold one was drawn regular, then stretched to the measured width — the right size in the
+wrong shape, while SVG and PDF honoured the same request. Discovery ranks candidates
+`family` → `italic` → `weight` (`FaceStyle`, `styleDistance`), because a wrong slant is
+seen immediately and a weight one step off is not. The Latin slot is resolved for the
+requested style too, not only the CJK one: it is consulted first, so leaving Arial in
+front of a requested `Courier New` claimed every ASCII character and the request had no
+visible effect. Its fallback list is Latin families by name — searching for "covers A, a
+and 0" with no family preference answers with whichever face heads the built-in order,
+which is a CJK one, so `bold` produced a Chinese face for Latin text.
+
+Measurement still comes from the static advance tables rather than the chosen face, and
+that is deliberate: layout has to be identical on every machine, and it cannot be if it
+depends on which fonts are installed.
+
+**Discovery keeps asking until it stops making progress.** It may return a face
+covering only _part_ of what was requested, which is deliberate — most of the text beats
+none of it — so taking the first answer dropped the rest: `αא` loaded the Greek face and
+lost the Hebrew with a Hebrew font installed. Each round must cover at least one
+previously-missing code point, faces are deduplicated, the chain is capped, and whatever
+is still missing is recorded so a search that cannot succeed is not repeated on every
+later label.
+
+Two caches sit behind that chain, keyed differently on purpose because the costs are
+different. Faces are found **per script** (`detectCjkLanguage`), so a diagram's eighteen
+Chinese labels run one search rather than eighteen — measured at 17 ms against 293 ms,
+since every search re-runs candidate enumeration and the coverage check. Faces are then
+deduplicated **by the face that came back**, because two keys legitimately resolve to one
+font: `detectCjkLanguage` answers `undefined` for text shaped identically in Simplified
+and Traditional (`开始处理`) and `zh-Hans` for text that is not (`数据校验`), so one
+diagram alternates between two keys and built `Songti SC` twice — two 43,000-entry
+`cmap`s, and a glyph cache that missed on every label because it is keyed on outline
+identity. Deduplicating on the answer rather than on the question fixes that class of
+problem instead of guessing which keys ought to have been equal.
 
 **It yields pixels, not a PNG.** Encoding one needs DEFLATE, which lives at Layer 2 in
 `archive/`, and dragging that down into Layer 1 to return a file format would make

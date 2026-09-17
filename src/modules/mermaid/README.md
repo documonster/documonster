@@ -46,6 +46,8 @@ const svg = toSvg(list); // markup
 const pixels = rasterizeToRgba(list, { scale: 2 }); // RGBA
 ```
 
+A diagram whose labels are not Latin needs a font the rasteriser can find. `rasterizeToRgba` discovers one on Node and reports what it could not draw; in a browser you have to supply the bytes. See [the `draw` README](../draw/README.md#fonts-and-how-cjk-gets-drawn).
+
 ```typescript
 import { renderDrawList } from "documonster/draw";
 import { Pdf, createPdfDrawSurface } from "documonster/pdf";

@@ -1459,12 +1459,15 @@ export class PdfDocumentBuilder {
    * and must be called before the first `drawText()` command. Pages may already
    * have been added if no text has been drawn yet.
    *
-   * @param fontBytes - Raw .ttf file bytes
+   * @param fontBytes - Raw .ttf or .ttc file bytes
+   * @param collectionIndex - Which face, for a `.ttc`. Defaults to 0, which is rarely the
+   *   one wanted: macOS `Songti.ttc` runs Black, Bold, TC-Bold, Light, …, so face 0 sets
+   *   body text in the family's heaviest weight. Ignored for a single-face `.ttf`.
    */
-  embedFont(fontBytes: Uint8Array): this {
+  embedFont(fontBytes: Uint8Array, collectionIndex?: number): this {
     this._assertFontsMutable();
     const manager = new FontManager();
-    manager.registerEmbeddedFont(parseTtf(fontBytes));
+    manager.registerEmbeddedFont(parseTtf(fontBytes, collectionIndex));
     this._replaceFontManager(manager);
     return this;
   }

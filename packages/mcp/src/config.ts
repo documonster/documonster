@@ -68,7 +68,7 @@ export interface ServerConfig {
   /** Truncate tool output beyond this many characters. */
   readonly maxOutputChars: number;
   /**
-   * Absolute path to a TrueType font every PDF this server writes embeds.
+   * The TrueType face every PDF this server writes embeds.
    *
    * Unset, PDF text outside WinAnsi — CJK, Cyrillic, Greek — depends on the host
    * having a usable face installed, and a host that has none renders `.notdef`
@@ -76,7 +76,31 @@ export interface ServerConfig {
    * Markdown produces a readable PDF on a laptop and a boxed one in a container.
    * Naming a font here removes the host from the answer.
    */
-  readonly pdfFont?: string;
+  readonly pdfFont?: PdfFontRef;
+  /**
+   * Faces consulted, in order, for characters {@link pdfFont} has no glyph for.
+   *
+   * One face is not enough for a document that mixes scripts, and the failure is not
+   * hypothetical: a Chinese face carries no Arabic, so a page of Chinese prose quoting one
+   * Arabic phrase either loses the phrase to `.notdef` boxes or — if the operator picks a
+   * pan-Unicode face to cover both — has all of its Han drawn by a face whose glyphs follow
+   * Japanese conventions. A chain lets the primary face be the regional one.
+   */
+  readonly pdfFontFallbacks?: readonly PdfFontRef[];
+}
+
+/**
+ * One face, and which face inside the file when the file is a collection.
+ *
+ * `collectionIndex` exists because a `.ttc` holds several faces and the first one is not
+ * usually the one wanted: on macOS, `Songti.ttc` opens at weight 900, so naming that file
+ * and taking face 0 — which is what this server did — set every paragraph of Chinese body
+ * text in the heaviest weight the family ships. Its order is Black, Bold, TC-Bold, Light,
+ * STSong, TC-Light, Regular, TC-Regular, so the one wanted for body text is face 6.
+ */
+export interface PdfFontRef {
+  readonly path: string;
+  readonly collectionIndex?: number;
 }
 
 export class ConfigError extends Error {
@@ -113,6 +137,7 @@ export function resolveConfig(
         "max-file-size": { type: "string" },
         "max-output-chars": { type: "string" },
         "pdf-font": { type: "string" },
+        "pdf-font-fallback": { type: "string", multiple: true },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false }
       },
@@ -159,6 +184,11 @@ export function resolveConfig(
   }
 
   const pdfFont = resolvePdfFont(values["pdf-font"], cwd);
+  const pdfFontFallbacks = (values["pdf-font-fallback"] ?? [])
+    .flatMap(entry => entry.split(","))
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0)
+    .map(entry => resolvePdfFont(entry, cwd) as PdfFontRef);
 
   return {
     root,
@@ -172,7 +202,8 @@ export function resolveConfig(
       "--max-output-chars",
       DEFAULT_MAX_OUTPUT_CHARS
     ),
-    ...(pdfFont === undefined ? {} : { pdfFont })
+    ...(pdfFont === undefined ? {} : { pdfFont }),
+    ...(pdfFontFallbacks.length === 0 ? {} : { pdfFontFallbacks })
   };
 }
 
@@ -187,11 +218,19 @@ export function resolveConfig(
  * covers the fonts an operator is most likely to reach for by mistake (macOS
  * PingFang, the official Noto Sans CJK `.otf` release).
  */
-function resolvePdfFont(input: string | undefined, cwd: string): string | undefined {
+function resolvePdfFont(input: string | undefined, cwd: string): PdfFontRef | undefined {
   if (input === undefined) {
     return undefined;
   }
-  const absolute = path.resolve(cwd, input);
+  // `path#index` selects a face inside a collection. Split from the right so a directory
+  // containing a `#` does not break, and only when what follows is entirely digits — a bare
+  // `#` in a filename is then left alone rather than read as a malformed index.
+  const hash = input.lastIndexOf("#");
+  const suffix = hash < 0 ? "" : input.slice(hash + 1);
+  const indexed = hash > 0 && /^\d+$/.test(suffix);
+  const file = indexed ? input.slice(0, hash) : input;
+  const collectionIndex = indexed ? Number(suffix) : undefined;
+  const absolute = path.resolve(cwd, file);
   let head: Buffer;
   try {
     head = readFileSync(absolute).subarray(0, 4);
@@ -211,7 +250,13 @@ function resolvePdfFont(input: string | undefined, cwd: string): string | undefi
       `--pdf-font is not a TrueType font: ${input}. Expected a .ttf or .ttc file.`
     );
   }
-  return absolute;
+  if (collectionIndex !== undefined && magic !== "ttcf") {
+    throw new ConfigError(
+      `--pdf-font names face ${collectionIndex} of ${file}, which is not a font collection. ` +
+        `Drop the "#${suffix}" — a .ttf holds one face.`
+    );
+  }
+  return collectionIndex === undefined ? { path: absolute } : { path: absolute, collectionIndex };
 }
 
 function containsPath(parent: string, child: string): boolean {

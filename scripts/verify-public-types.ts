@@ -163,7 +163,11 @@ const REPO_PRIVATE_MEMBER_TYPES = new Set([
   // (the public read API hands out `UnzipEntry`, never this)
   "ZipEntry @ modules/archive/unzip/stream.base.ts",
   "TarPendingEntry @ modules/archive/fs/archive-file.ts",
-  "ZipPendingEntry @ modules/archive/fs/archive-file.ts"
+  "ZipPendingEntry @ modules/archive/fs/archive-file.ts",
+  // draw — `BasicRasterCanvas.resolveGlyph`, which walks the font fallback chain.
+  // The public surface hands out `RasterFont` and `GlyphOutline`; this pairs them
+  // for one character and exists only inside the text-drawing loop.
+  "ResolvedGlyph @ modules/draw/raster/canvas.ts"
 ]);
 
 /**

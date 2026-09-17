@@ -164,6 +164,73 @@ const png = encodePng(image.data, image.width, image.height, { dpi: 192 });
 
 在浏览器里你可能更愿意用平台自带的编码器 —— 用 `putImageData` 把像素放进 canvas,再调 `toBlob`。无论哪种方式,绘图引擎都不参与。
 
+### 字体,以及中日韩文字是怎么画出来的
+
+SVG 只写下字体名,由查看器去解析。光栅化必须拿到真实的字形轮廓,所以 `rasterizeToRgba` 会去找一张能覆盖该文本的已安装字体 —— 和 PDF 内嵌用的是同一套发现逻辑 —— 并且**逐字符沿一条字体链解析**,因为没有哪一张字体能同时覆盖 `Mixed 混合 ABC`。
+
+由此有两件事,而且都是可上报的,不是静默的:
+
+```typescript
+import { rasterizeToRgba } from "documonster/draw";
+
+const image = rasterizeToRgba(list);
+if (image.uncoveredCodePoints.length > 0) {
+  // 本机没有任何字体能画这些码点。它们是图上的空洞,而不是一个错误。
+  console.warn(image.uncoveredCodePoints.map(cp => cp.toString(16)));
+}
+```
+
+当你无法依赖宿主环境时就直接给字节 —— **在浏览器里这是拿到 ASCII 以外字形的唯一途径**,因为没有字体目录可搜,而内置的笔画字体只覆盖 ASCII 32–126,其余一律画成 `?`:
+
+```typescript
+const image = rasterizeToRgba(list, { fonts: [notoSansScBytes] });
+```
+
+`fonts` 同样接受已解析的字体和字体集合中的某一 face。反复渲染时请先解析一次:传字节的话每次调用都会重新解析,对中日韩字体意味着每次重建一张 43000 条目的 `cmap`,而且新对象还会错过字形缓存。
+
+```typescript
+import { parseRasterFont } from "documonster/draw";
+
+const regular = parseRasterFont(songtiTtcBytes, 3); // .ttc 中的某一 face
+const image = rasterizeToRgba(list, { fonts: [regular] });
+
+// 不想自己解析时,等价写法:
+rasterizeToRgba(list, { fonts: [{ data: songtiTtcBytes, collectionIndex: 3 }] });
+```
+
+再加上 `useSystemFonts: false`,输出就**只**取决于你传入的字体。快照测试和可复现构建需要这一点 —— 字体发现无法保证两台机器给出相同的像素:
+
+```typescript
+const image = rasterizeToRgba(list, { fonts: [notoSansScBytes], useSystemFonts: false });
+```
+
+字体属于一次渲染,或属于一张画布(`BasicRasterCanvas.setFonts`)—— 刻意没有进程级注册表,这样一个调用方就无法改变另一个调用方画布所用的字体。
+
+格式控制字符永远不会被上报:变体选择符、连接符、bidi 隔离符在任何字体里都没有字形,所以它们不会被查找、不占宽度,也不会出现在 `uncoveredCodePoints` 里。制表符是那个恰好相反的例外 —— 它不落墨,但确实占位,所以笔位仍会推进。
+
+### 需要 shaping 的文字
+
+覆盖率不是文本出错的唯一途径。阿拉伯字母会按位置改变形状并与邻字连接;印度语的元音符号存储在辅音之后、却要画在它之前;泰文的符号需要叠加;从右往左的文本必须先重排再绘制。
+
+其中**不依赖 OpenType 表**的那部分,光栅化器通过 `@utils/text-shaping` 已经做了:阿拉伯字母取其词首、词中、词尾或独立形态,从右往左的行被放成视觉顺序,印度语元音符号被移到它实际绘制的一侧。所以阿拉伯文现在是连写的,希伯来文的顺序也是对的而不是反的。
+
+仍然缺的那部分需要字体自己的 GSUB 与 GPOS 表:合体连字仍按独立字形绘制,叠加符号没有定位。这一点选择上报,而不是假装:
+
+```typescript
+const image = rasterizeToRgba(list);
+for (const warning of image.textWarnings) {
+  console.warn(warning); // "Text contains Arabic. This rasteriser applies contextual forms…"
+}
+```
+
+与 `uncoveredCodePoints` 不同,提供字体在这里没有帮助 —— 每个字形其实都画出来了。正因为它**看不出**坏掉,才必须上报。
+
+**`toSvg` 和 DOCX 写入器对这些文字仍然是完全正确的**,因为两者都原样携带文本,把 shaping 交给查看器或 Word。**PDF 写入器现在也做 shaping。** 两者都只在某张字体确实能画出该形态时才替换:很多字体提供基础字母而完全不提供 presentation form,不加判断地替换在 PDF 里代价是 `.notdef` 豆腐块,而在光栅化器里 —— 因为它没有 notdef 可退 —— 代价是**整行空白**。所以两个后端都可能顺序正确却仍未连写,并各自上报自己实际做到了哪一半。
+
+每段文本要做两个决定,而它们由不同的谓词把关。shaping 在文本**可能**需要时运行;而字形 advance 是否归一化到测量宽度,取决于内置 advance 表是否描述得了这段文本 —— 它只覆盖拉丁、CJK、西里尔和希腊字母,对泰米尔文报出的宽度约为真实值的一半,所以复杂文字改用字体自身的 advance 来排布。用同一个谓词决定这两件事,会在一个方向上把泰米尔文挤成重叠,在另一个方向上让夹有双向控制符的拉丁文整体位移。
+
+`family`、`bold`、`italic` 决定的是**用哪张字体**,而不只是宽度。要求 `Courier New` 的标签在该字体已安装时就用它,要求加粗则使用该家族的粗体脸;回退目标是常规拉丁家族,而不是随便一张能覆盖 ASCII 的脸。文本测量仍来自内置的 advance 表,因此无论宿主装了什么字体,排版在每台机器上都一致。
+
 ---
 
 ## 刻意不做的事

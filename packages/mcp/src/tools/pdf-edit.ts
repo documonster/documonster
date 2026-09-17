@@ -57,6 +57,7 @@ import {
   writeBytesWithPolicy,
   writeFileAtomic
 } from "./fs-helpers.js";
+import { overlayFaces } from "./pdf-fonts.js";
 import { formatBytes, textResult } from "./result.js";
 import { defineTool } from "./types.js";
 
@@ -251,6 +252,18 @@ export const pdfEditTool = defineTool({
       editor = Pdf.Editor.load(bytes);
     } catch (cause) {
       throw toolError.unsupported(`could not open ${args.path} for editing`, undefined, { cause });
+    }
+
+    // Overlay text — a watermark, a stamp, a page number — is drawn by this server, not
+    // copied from the file, so it needs a face like any other text this server writes. Without
+    // this the standard 14 fonts were the only option and a Chinese watermark could not be
+    // stamped at all: the request succeeded and the mark was absent.
+    for (const ref of overlayFaces(config)) {
+      // Only the first face is embedded: `registerEmbeddedFont` replaces rather than chains,
+      // so a fallback list cannot be expressed here. Naming the primary is what makes a
+      // Chinese watermark possible at all, and a second face would silently displace it.
+      editor.embedFont(ref.bytes, ref.collectionIndex);
+      break;
     }
 
     // Page count changes as pages are removed, so it is tracked through the

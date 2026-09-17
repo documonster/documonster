@@ -53,7 +53,7 @@ describe("pdfFontOptions", () => {
     const bytes = Buffer.from([0x00, 0x01, 0x00, 0x00, 0x11, 0x22]);
     await writeFile(file, bytes);
 
-    const { options } = pdfFontOptions({ pdfFont: file });
+    const { options } = pdfFontOptions({ pdfFont: { path: file } });
 
     expect(options.fonts?.default.regular).toEqual(new Uint8Array(bytes));
   });
@@ -65,13 +65,63 @@ describe("pdfFontOptions", () => {
     const file = path.join(dir, "cached.ttf");
     await writeFile(file, Buffer.from([0x00, 0x01, 0x00, 0x00]));
 
-    expect(pdfFontOptions({ pdfFont: file }).options.fonts).toBe(
-      pdfFontOptions({ pdfFont: file }).options.fonts
+    expect(pdfFontOptions({ pdfFont: { path: file } }).options.fonts).toBe(
+      pdfFontOptions({ pdfFont: { path: file } }).options.fonts
+    );
+  });
+
+  it("turns the fallbacks into a real chain the library will follow", async () => {
+    // `{ default: { regular } }` alone cannot express "try this, then that", which is why one
+    // configured face meant a mixed-script document lost a script to `.notdef` boxes.
+    const dir = await mkdtemp(path.join(tmpdir(), "documonster-mcp-font-"));
+    const primary = path.join(dir, "cjk.ttf");
+    const arabic = path.join(dir, "arabic.ttf");
+    await writeFile(primary, Buffer.from([0x00, 0x01, 0x00, 0x00, 0x01]));
+    await writeFile(arabic, Buffer.from([0x00, 0x01, 0x00, 0x00, 0x02]));
+
+    const { options } = pdfFontOptions({
+      pdfFont: { path: primary },
+      pdfFontFallbacks: [{ path: arabic }]
+    });
+
+    expect(options.fonts?.fallbackFamilies).toEqual(["fallback-1"]);
+    expect(options.fonts?.families?.[0]?.faces.regular).toEqual(
+      new Uint8Array([0x00, 0x01, 0x00, 0x00, 0x02])
+    );
+  });
+
+  it("keeps collectionIndex attached to the bytes", async () => {
+    // Handing over just the bytes embeds face 0, which for `Songti.ttc` is weight 900.
+    const dir = await mkdtemp(path.join(tmpdir(), "documonster-mcp-font-"));
+    const file = path.join(dir, "faces.ttc");
+    await writeFile(file, Buffer.from([0x74, 0x74, 0x63, 0x66]));
+
+    const { options } = pdfFontOptions({ pdfFont: { path: file, collectionIndex: 3 } });
+
+    expect(options.fonts?.default.regular).toEqual({
+      data: new Uint8Array([0x74, 0x74, 0x63, 0x66]),
+      collectionIndex: 3
+    });
+  });
+
+  it("caches per face, not per file", async () => {
+    // Two faces of one collection must not collapse to one cache entry.
+    const dir = await mkdtemp(path.join(tmpdir(), "documonster-mcp-font-"));
+    const file = path.join(dir, "two.ttc");
+    await writeFile(file, Buffer.from([0x74, 0x74, 0x63, 0x66]));
+
+    const first = pdfFontOptions({ pdfFont: { path: file, collectionIndex: 0 } }).options.fonts;
+    const second = pdfFontOptions({ pdfFont: { path: file, collectionIndex: 3 } }).options.fonts;
+    expect(first).not.toBe(second);
+    expect(pdfFontOptions({ pdfFont: { path: file, collectionIndex: 3 } }).options.fonts).toBe(
+      second
     );
   });
 
   it("reports a font deleted after startup as itself", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "documonster-mcp-font-"));
-    expect(() => pdfFontOptions({ pdfFont: path.join(dir, "gone.ttf") })).toThrow(/--pdf-font/);
+    expect(() => pdfFontOptions({ pdfFont: { path: path.join(dir, "gone.ttf") } })).toThrow(
+      /--pdf-font/
+    );
   });
 });

@@ -164,6 +164,73 @@ const png = encodePng(image.data, image.width, image.height, { dpi: 192 });
 
 In a browser you may prefer the platform's own encoder — put the pixels into a canvas with `putImageData` and call `toBlob`. Either way the drawing engine stays out of it.
 
+### Fonts, and how CJK gets drawn
+
+SVG names a font and lets the viewer resolve it. A rasteriser has to find real glyph outlines, so `rasterizeToRgba` looks for an installed face that covers the text — the same discovery the PDF embedder uses — and resolves **each character against a chain of faces**, because no single font covers `Mixed 混合 ABC`.
+
+Two things follow, and both are reportable rather than silent:
+
+```typescript
+import { rasterizeToRgba } from "documonster/draw";
+
+const image = rasterizeToRgba(list);
+if (image.uncoveredCodePoints.length > 0) {
+  // Nothing installed can draw these. They are holes in the picture, not an error.
+  console.warn(image.uncoveredCodePoints.map(cp => cp.toString(16)));
+}
+```
+
+Supply the bytes when you cannot rely on the host — **in a browser this is the only way to get a glyph outside ASCII**, since there is no font directory to search and the built-in stroke font covers ASCII 32–126 and draws everything else as `?`:
+
+```typescript
+const image = rasterizeToRgba(list, { fonts: [notoSansScBytes] });
+```
+
+`fonts` also accepts a parsed face and a face inside a collection. Parse once when you render repeatedly: bytes are re-parsed on every call, which for a CJK font means rebuilding a 43,000-entry `cmap` each time, and a fresh object also misses the glyph cache.
+
+```typescript
+import { parseRasterFont } from "documonster/draw";
+
+const regular = parseRasterFont(songtiTtcBytes, 3); // a face inside a .ttc
+const image = rasterizeToRgba(list, { fonts: [regular] });
+
+// Equivalently, without parsing yourself:
+rasterizeToRgba(list, { fonts: [{ data: songtiTtcBytes, collectionIndex: 3 }] });
+```
+
+Add `useSystemFonts: false` to make the output depend _only_ on the fonts you passed. That is what a snapshot or a reproducible build needs — font discovery cannot promise the same pixels on two machines:
+
+```typescript
+const image = rasterizeToRgba(list, { fonts: [notoSansScBytes], useSystemFonts: false });
+```
+
+Fonts belong to a render or to a canvas (`BasicRasterCanvas.setFonts`) — there is deliberately no process-wide registry, so one caller cannot change what another caller's canvas draws with.
+
+Formatting characters are never reported: a variation selector, a joiner or a bidi isolate has no glyph in any font, so it is not looked up, not given a width, and not listed in `uncoveredCodePoints`. Tab is the exception that proves the rule — it draws nothing but does occupy space, so the pen advances for it.
+
+### Scripts that need shaping
+
+Coverage is not the only way text can come out wrong. Arabic letters change shape by position and join to their neighbours; Indic vowel signs are stored after the consonant but drawn before it; Thai marks stack; right-to-left text has to be reordered before it is drawn.
+
+The rasteriser does the part of this that needs no OpenType tables, through `@utils/text-shaping`: Arabic letters take their initial, medial, final or isolated form, right-to-left runs are put in visual order, and an Indic vowel sign is moved to the side it is drawn on. So Arabic comes out joined and Hebrew comes out in the right order rather than reversed.
+
+What is still missing needs the font's own GSUB and GPOS tables: conjunct ligatures are drawn as separate glyphs, and stacked marks are not positioned. That is reported rather than pretended:
+
+```typescript
+const image = rasterizeToRgba(list);
+for (const warning of image.textWarnings) {
+  console.warn(warning); // "Text contains Arabic. This rasteriser applies contextual forms…"
+}
+```
+
+Unlike `uncoveredCodePoints`, supplying a font does not help — every glyph is already there. Nothing _looks_ broken, which is why it is reported at all.
+
+**`toSvg` and the DOCX writer remain fully correct for these scripts**, because both carry the original text and leave shaping to the viewer or to Word. **The PDF writer shapes too.** Both take a contextual form only when a face can draw it: many faces publish the base letters and none of the presentation forms, and substituting regardless costs a `.notdef` box in a PDF and — since a rasteriser has no notdef — an **entirely blank line** here. So either backend may be correctly reordered and still unjoined, and each reports which of the two it managed.
+
+Two decisions are made per run of text, and they are gated separately. Shaping runs when the text might need it. Whether the glyph advances are normalised to the measured width depends instead on whether the built-in advance tables describe the text at all — they cover Latin, CJK, Cyrillic and Greek, and report roughly half the real width for Tamil, so a complex script is spaced by the font's own advances instead. Deciding both from one predicate squeezed Tamil into an overlap in one direction and shifted Latin containing a bidi control in the other.
+
+`family`, `bold` and `italic` choose the face, not just the width. A label asking for `Courier New` is drawn in Courier New if it is installed, and a bold one in the family's bold face; the fallback is an ordinary Latin family rather than whatever happens to cover ASCII. Text measurement still comes from built-in advance tables, so layout is identical on every machine regardless of what is installed.
+
 ---
 
 ## Deliberately absent

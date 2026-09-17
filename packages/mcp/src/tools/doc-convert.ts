@@ -16,6 +16,7 @@ import { ExcelNotSupportedError, Workbook, Worksheet } from "documonster/excel";
 import { readCsvFile, writeCsvFile } from "documonster/excel/csv";
 import { calculateFormulas } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
+import type { CjkLanguage } from "documonster/pdf";
 import { Convert, Io } from "documonster/word";
 import { renderToHtml } from "documonster/word/html";
 import { markdownToDocx, renderToMarkdown } from "documonster/word/markdown";
@@ -32,7 +33,12 @@ import {
   writeFileAtomic,
   writeWithPolicy
 } from "./fs-helpers.js";
-import { pdfFontOptions } from "./pdf-fonts.js";
+import {
+  diagramFontOptions,
+  pdfFontOptions,
+  textLanguageOption,
+  textLanguageShape
+} from "./pdf-fonts.js";
 import { formatBytes, textResult } from "./result.js";
 import { requireSheet, sheetName } from "./spreadsheet.js";
 import { defineTool } from "./types.js";
@@ -106,6 +112,7 @@ export const docConvertTool = defineTool({
       .boolean()
       .optional()
       .describe("Replace the destination if it exists. Defaults to false."),
+    ...textLanguageShape,
     allowMissingGlyphs: z
       .boolean()
       .optional()
@@ -185,6 +192,7 @@ async function convert(
   args: {
     readonly sheet?: string | number;
     readonly renderDiagrams?: boolean;
+    readonly textLanguage?: CjkLanguage;
     readonly allowMissingGlyphs: boolean;
     readonly config: ServerConfig;
   }
@@ -212,7 +220,7 @@ async function convert(
       }
       case "pdf": {
         const fonts = pdfFontOptions(args.config);
-        const bytes = await Pdf.fromDocx(doc, fonts.options);
+        const bytes = await Pdf.fromDocx(doc, { ...fonts.options, ...textLanguageOption(args) });
         // Checked before the bytes reach the filesystem, so a refusal leaves nothing behind.
         fonts.assertDrawable(args.allowMissingGlyphs);
         await writeFileAtomic(target, bytes);
@@ -247,7 +255,7 @@ async function convert(
     }
     if (to === "pdf") {
       const fonts = pdfFontOptions(args.config);
-      const bytes = await Pdf.fromDocx(doc, fonts.options);
+      const bytes = await Pdf.fromDocx(doc, { ...fonts.options, ...textLanguageOption(args) });
       fonts.assertDrawable(args.allowMissingGlyphs);
       await writeFileAtomic(target, bytes);
       return ["- rendered via the Word layout engine", ...fonts.notes()];
@@ -259,7 +267,7 @@ async function convert(
     const markdown = await readFile(source, "utf8");
     const prepared =
       args.renderDiagrams === true
-        ? await prepareMarkdownDiagrams(markdown)
+        ? await prepareMarkdownDiagrams(markdown, {}, diagramFontOptions(args.config))
         : { markdown, notes: [] as readonly string[] };
     const doc = await markdownToDocx(prepared.markdown, {
       ...("resolveImage" in prepared && prepared.resolveImage !== undefined
@@ -272,7 +280,7 @@ async function convert(
     }
     if (to === "pdf") {
       const fonts = pdfFontOptions(args.config);
-      const bytes = await Pdf.fromDocx(doc, fonts.options);
+      const bytes = await Pdf.fromDocx(doc, { ...fonts.options, ...textLanguageOption(args) });
       fonts.assertDrawable(args.allowMissingGlyphs);
       await writeFileAtomic(target, bytes);
       return [
@@ -324,6 +332,7 @@ async function convert(
       const fonts = pdfFontOptions(args.config);
       const bytes = await Pdf.fromExcel(wb, {
         ...fonts.options,
+        ...textLanguageOption(args),
         recalculate: calculateFormulas
       });
       fonts.assertDrawable(args.allowMissingGlyphs);

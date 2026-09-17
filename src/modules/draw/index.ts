@@ -48,7 +48,15 @@ export {
   normalizeSamples,
   rasterizeToRgba
 } from "@draw/raster/surface";
-export type { RasterizeOptions, RgbaImage } from "@draw/raster/surface";
+export type { RasterizeOptions, RasterizedImage, RgbaImage } from "@draw/raster/surface";
+/**
+ * Ask, before rendering, whether text can be laid out one glyph per code point.
+ *
+ * `RasterizedImage.textWarnings` reports this after the fact; these answer beforehand,
+ * so a caller can route Arabic or Devanagari to `toSvg` — which is correct for them —
+ * instead of producing pixels it will have to discard.
+ */
+export { isSimpleText, textFeaturesOf } from "@utils/complex-text";
 export { BasicRasterCanvas } from "@draw/raster/canvas";
 /**
  * Reachable from {@link BasicRasterCanvas}'s own signatures — its point lists and the
@@ -56,7 +64,32 @@ export { BasicRasterCanvas } from "@draw/raster/canvas";
  * cannot declare a variable to hold what they take.
  */
 export type { RasterPoint } from "@draw/raster/canvas";
-export type { RasterFont } from "@draw/raster/glyph-rasterizer";
+export type { GlyphOutline, RasterFont } from "@draw/raster/glyph-outline";
+/**
+ * Parse font bytes once, to hand the result to several renders.
+ *
+ * `RasterizeOptions.fonts` accepts bytes directly, but re-parses them on every call —
+ * for a CJK face that means rebuilding a 43,000-entry `cmap` each time, and a fresh
+ * object also misses the glyph cache, which is keyed on outline identity. It is also
+ * the only way to choose a face inside a `.ttc`.
+ *
+ * `fontHasGlyph` answers coverage for any `RasterFont`, including one a consumer
+ * implemented themselves without the optional `hasGlyph` member.
+ */
+export { fontHasGlyph, parseRasterFont } from "@draw/raster/glyph-outline";
+/**
+ * How a font may be supplied: bytes, a parsed face, or a face inside a collection.
+ *
+ * Named because it appears in `RasterizeOptions.fonts` and
+ * `BasicRasterCanvas.setFonts`.
+ *
+ * There is deliberately **no process-wide font registry**, published or otherwise.
+ * Fonts belong to a render — `RasterizeOptions.fonts` — or to a canvas —
+ * `BasicRasterCanvas.setFonts`. A module-level setter would let one caller change what
+ * another caller's canvas draws with; the one that existed was used by nothing but the
+ * tests, and removing it took two mutable globals with it.
+ */
+export type { RasterFontSource } from "@draw/raster/glyph-outline";
 export {
   DEFAULT_TEXT_FAMILY,
   IDENTITY,
@@ -92,5 +125,6 @@ export type {
   DrawPoint,
   DrawTextAnchor,
   DrawTextLine,
-  DrawTextStyle
+  DrawTextStyle,
+  RasterTextStyle
 } from "@draw/types";

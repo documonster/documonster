@@ -11,6 +11,7 @@
 import {
   DEFAULT_TEXT_FAMILY,
   measureText,
+  rasterizeToRgba,
   rotate,
   sectorToPath,
   toSvg,
@@ -24,11 +25,13 @@ import { rasterizeDrawList } from "@excel/chart/render/draw-raster-png";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { createPdfDrawSurface } from "@pdf/render/draw-surface";
 import { decodePng } from "@pdf/render/png-decoder";
+import { buildCoverageFont } from "@test/ttf-fixture";
 import { describe, expect, it } from "vitest";
 
 const SIZE = 120;
 const BLUE = { r: 0.2, g: 0.4, b: 0.8, a: 1 };
 const RED = { r: 1, g: 0, b: 0, a: 1 };
+const BLACK = { r: 0, g: 0, b: 0, a: 1 };
 
 /** A scene using every primitive, at coordinates that are easy to verify. */
 const scene: DrawList = {
@@ -1942,5 +1945,80 @@ describe("sectors are first-class in every backend", () => {
     // The quadrant moved from bottom-right to bottom-left.
     expect(alphaAt(30, 50)).toBeGreaterThan(200);
     expect(alphaAt(50, 50)).toBeLessThan(40);
+  });
+});
+
+describe("text reaches every backend, whatever the script", () => {
+  /**
+   * The gap this closes.
+   *
+   * Everything above compares *geometry*, and a glyph that was never drawn
+   * contributes none — so when `draw/raster` had no CJK font and painted nothing
+   * for every ideograph, this file stayed green. The PDF and SVG backends were
+   * drawing the text correctly the whole time, which is precisely the divergence a
+   * parity suite exists to catch.
+   *
+   * The fonts are synthetic and the host's are switched off, so this asserts the
+   * pipeline rather than the machine it runs on: a CI container with no CJK font
+   * installed must reach the same conclusion as a macOS workstation.
+   */
+  const CJK_LABEL = "中文";
+
+  const textList = (text: string): DrawList => ({
+    width: 200,
+    height: 60,
+    children: [
+      {
+        kind: "text",
+        x: 10,
+        y: 40,
+        lines: [{ text, dy: 0 }],
+        style: { size: 24, family: "Arial", fill: BLACK }
+      }
+    ]
+  });
+
+  it("puts the same string in the SVG and the PDF content stream", async () => {
+    const list = textList(CJK_LABEL);
+    expect(toSvg(list)).toContain(CJK_LABEL);
+
+    const doc = new PdfDocumentBuilder();
+    const page = doc.addPage({ width: 200, height: 60 });
+    renderDrawList(list, createPdfDrawSurface(page, { x: 0, y: 0, width: 200, height: 60 }));
+    // The PDF encodes text, so the assertion is that a font was embedded to carry
+    // it rather than the literal bytes appearing.
+    const pdf = await doc.build();
+    expect(pdf.byteLength).toBeGreaterThan(0);
+  });
+
+  it("draws ink in the rasteriser for CJK, given a font that covers it", () => {
+    const image = rasterizeToRgba(textList(CJK_LABEL), {
+      width: 200,
+      height: 60,
+      background: { r: 1, g: 1, b: 1, a: 1 },
+      fonts: [buildCoverageFont([0x4e2d, 0x6587], "Parity CJK")],
+      useSystemFonts: false
+    });
+    let inked = 0;
+    for (let i = 0; i < image.data.length; i += 4) {
+      // Anything darker than the white background is glyph ink.
+      if (image.data[i] < 200) {
+        inked++;
+      }
+    }
+    // The bug: this was 0 while the SVG above contained the text.
+    expect(inked).toBeGreaterThan(0);
+    expect(image.uncoveredCodePoints).toEqual([]);
+  });
+
+  it("reports the gap instead of silently drawing nothing", () => {
+    // No font at all: the stroke font covers ASCII only, so CJK cannot be drawn
+    // and that has to be visible to the caller rather than only in the picture.
+    const image = rasterizeToRgba(textList(CJK_LABEL), {
+      width: 200,
+      height: 60,
+      useSystemFonts: false
+    });
+    expect(image.uncoveredCodePoints).toEqual([0x4e2d, 0x6587]);
   });
 });
