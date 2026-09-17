@@ -18,29 +18,25 @@ import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { rasterizeToRgba } from "documonster/draw";
-import type * as Draw from "documonster/draw";
 import { Pdf } from "documonster/pdf";
 import { Io, Query } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { formatToolError } from "../errors.js";
 import { diagramInspectTool } from "../tools/diagram-inspect.js";
-import { diagramRenderTool } from "../tools/diagram-render.js";
-import { findMermaidFences, unwrapFence } from "../tools/diagram.js";
+import { createDiagramRenderTool, diagramRenderTool } from "../tools/diagram-render.js";
+import {
+  findMermaidFences,
+  renderDiagram,
+  unwrapFence,
+  type DiagramFontOptions
+} from "../tools/diagram.js";
 import { docConvertTool } from "../tools/doc-convert.js";
 import { docReadTool } from "../tools/doc-read.js";
 import { docWriteTool } from "../tools/doc-write.js";
 import { inspectTool } from "../tools/inspect.js";
 import { pdfEditTool } from "../tools/pdf-edit.js";
 import type { AnyToolDefinition } from "../tools/types.js";
-
-// Keep the real rasteriser in the path while making its final options observable. Replacing
-// it with a fake would let the tool test pass without producing a valid PNG.
-vi.mock("documonster/draw", async importOriginal => {
-  const actual = await importOriginal<typeof Draw>();
-  return { ...actual, rasterizeToRgba: vi.fn(actual.rasterizeToRgba) };
-});
 
 interface Fixture {
   readonly config: ServerConfig;
@@ -158,16 +154,20 @@ describe("diagram_render", () => {
       config: { ...fx.config, pdfFont: { path: fontPath } }
     };
 
-    const rasterize = vi.mocked(rasterizeToRgba);
-    rasterize.mockClear();
-    const text = await run(diagramRenderTool, withFont, {
+    let receivedFonts: DiagramFontOptions | undefined;
+    const observedTool = createDiagramRenderTool({
+      render: (...args) => {
+        receivedFonts = args[4];
+        return renderDiagram(...args);
+      }
+    });
+    const text = await run(observedTool, withFont, {
       source: "flowchart LR\n  A[\u4e2d\u6587] --> B[ok]",
       to: "cjk.png"
     });
 
-    expect(rasterize).toHaveBeenCalledOnce();
-    expect(rasterize.mock.calls[0]?.[1]).toMatchObject({
-      fonts: [expect.any(Uint8Array)],
+    expect(receivedFonts).toMatchObject({
+      raster: [expect.any(Uint8Array)],
       useSystemFonts: false
     });
     expect(text).toContain("U+4E2D");
