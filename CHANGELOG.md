@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/documonster/documonster/compare/v0.16.0...v0.16.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **compat:** State the real support matrix, and stop shipping a regex SVG rasteriser ([b8aedf6](https://github.com/documonster/documonster/commit/b8aedf6943ab55bc4444786863b6dd1c9f68e5cc))
+
 ## [0.16.0](https://github.com/documonster/documonster/compare/v0.15.0...v0.16.0) (2026-09-17)
 
 
