@@ -13,7 +13,7 @@ Documonster is a zero-dependency TypeScript toolkit for spreadsheets and documen
 - **AI-Friendly** — Clean, consistent API designed for AI coding agents. Every module has comprehensive documentation and runnable examples for AI to learn from. An [MCP server](packages/mcp/README.md) is available for AI clients that need to work on real files
 - **Zero Runtime Dependencies** — Pure TypeScript, no external packages
 - **Nine Modules** — Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream
-- **Cross-Platform** — Node.js 22.13+, Bun, Chrome 89+, Firefox 102+, Safari 14.1+
+- **Cross-Platform** — Node.js LTS + Current (22, 24, 26), Bun latest, Chrome 98+, Firefox 102+, Safari 15.4+
 - **ESM only** — Native ES Modules with full tree-shaking; CommonJS consumers `require()` it unchanged on Node >= 22.13
 
 ## Modules
@@ -246,13 +246,24 @@ For older browsers without native `CompressionStream` API, Documonster automatic
 
 ## Requirements
 
-- **Node.js >= 22.13.0**
-- **Bun >= 1.0**
+| Runtime    | Supported         |
+| ---------- | ----------------- |
+| Node.js 22 | LTS — floor 22.13 |
+| Node.js 24 | LTS               |
+| Node.js 26 | Current           |
+| Bun        | latest            |
+
+| Browser | Minimum Version     |
+| ------- | ------------------- |
+| Chrome  | 98+ (February 2022) |
+| Edge    | 98+ (February 2022) |
+| Firefox | 102+ (June 2022)    |
+| Safari  | 15.4+ (March 2022)  |
+| Opera   | 84+ (February 2022) |
 
 The package is ESM-only. Nothing changes for Node ESM, a bundler or a `<script>` tag, and a
 CommonJS `require()` call site is unchanged too — Node loads an ES module through `require()`
-from 22.12, and stops printing an experimental warning about it from 22.13, which is why that
-is the floor.
+from 22.12, and stops warning about it from 22.13, which is why the floor is that patch.
 
 <details>
 <summary>Using it from TypeScript with <code>module: node16</code></summary>
@@ -297,14 +308,6 @@ module.exports = { presets: [["@babel/preset-env", { targets: { node: "current" 
 Vitest needs no configuration.
 
 </details>
-
-| Browser | Minimum Version    |
-| ------- | ------------------ |
-| Chrome  | 89+ (March 2021)   |
-| Edge    | 89+ (March 2021)   |
-| Firefox | 102+ (June 2022)   |
-| Safari  | 14.1+ (April 2021) |
-| Opera   | 75+ (March 2021)   |
 
 ## Links
 

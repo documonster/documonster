@@ -331,8 +331,8 @@
     "xlsb:bisect": "node --import @oxc-node/core/register scripts/xlsb-bisect.ts"
   },
   "devDependencies": {
-    "@oxc-node/core": "0.1.2",
-    "@rspack/core": "^2.2.4",
+    "@oxc-node/core": "0.1.3",
+    "@rspack/core": "^2.2.6",
     "@types/node": "catalog:",
     "@vitest/browser": "^5.0.1",
     "@vitest/browser-playwright": "^5.0.1",
@@ -344,23 +344,23 @@
     "husky": "^9.1.7",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.83.0",
-    "oxlint-tsgolint": "^7.0.2001",
+    "oxlint-tsgolint": "^7.0.2002",
     "playwright": "^1.63.0",
     "rimraf": "catalog:",
-    "rolldown": "^1.2.8",
+    "rolldown": "^1.2.9",
     "rollup-plugin-visualizer": "^7.1.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "browserslist": [
-    "chrome >= 89",
-    "edge >= 89",
+    "chrome >= 98",
+    "edge >= 98",
     "firefox >= 102",
-    "safari >= 14.1",
-    "opera >= 75"
+    "safari >= 15.4",
+    "opera >= 84"
   ],
   "engines": {
     "node": ">=22.13.0"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@12.5.1"
 }

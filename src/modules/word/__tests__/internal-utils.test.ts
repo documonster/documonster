@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { sanitizeUrl } from "../core/internal-utils";
+import { generateGuid, sanitizeUrl } from "../core/internal-utils";
 
 describe("sanitizeUrl", () => {
   describe("nullish & empty", () => {
@@ -119,5 +119,26 @@ describe("sanitizeUrl", () => {
     it("strips surrounding control characters", () => {
       expect(sanitizeUrl("\u0000https://example.com\u0001")).toBe("https://example.com");
     });
+  });
+});
+
+/**
+ * `generateGuid` — the braced `w:fontKey` / building-block id format. Only the
+ * wrapping is pinned here; randomness tiers live in
+ * `src/utils/__tests__/uuid.test.ts`, the key round trip in `font-embed.test.ts`.
+ */
+describe("generateGuid", () => {
+  it("wraps a v4 UUID in braces", () => {
+    expect(generateGuid()).toMatch(
+      /^\{[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\}$/
+    );
+  });
+
+  it("is 38 characters — 36 plus the two braces", () => {
+    expect(generateGuid()).toHaveLength(38);
+  });
+
+  it("differs across calls", () => {
+    expect(generateGuid()).not.toBe(generateGuid());
   });
 });

@@ -13,7 +13,7 @@ Documonster 是一个零依赖的 TypeScript 电子表格和文档工具包：
 - **AI 友好** — 简洁一致的 API,专为 AI 编程助手设计。每个模块都配有完整的文档和可运行的示例供 AI 学习。另提供 [MCP 服务器](packages/mcp/README.md),供需要操作真实文件的 AI 客户端使用
 - **零运行时依赖** — 纯 TypeScript,无外部包
 - **九大模块** — Excel、Word、Formula、PDF、CSV、Markdown、XML、Archive、Stream
-- **跨平台** — Node.js 22.13+、Bun、Chrome 89+、Firefox 102+、Safari 14.1+
+- **跨平台** — Node.js LTS + Current（22、24、26）、Bun latest、Chrome 98+、Firefox 102+、Safari 15.4+
 - **纯 ESM** — 原生 ES Modules,完整 tree-shaking;CommonJS 消费者在 Node >= 22.13 上写法不变,直接 `require()`
 
 ## 模块
@@ -231,12 +231,24 @@ URL 中的版本号是刻意锁定的：不锁版本的 `unpkg.com/documonster/�
 
 ## 系统要求
 
-- **Node.js >= 22.13.0**
-- **Bun >= 1.0**
+| 运行时     | 支持范围          |
+| ---------- | ----------------- |
+| Node.js 22 | LTS —— 下限 22.13 |
+| Node.js 24 | LTS               |
+| Node.js 26 | Current           |
+| Bun        | latest            |
 
-本包是纯 ESM。Node ESM、打包工具、`<script>` 标签一切不变;CommonJS 的 `require()` 写法也
-不变——Node 从 22.12 起支持用 `require()` 加载 ES 模块,从 22.13 起不再为此打印实验特性警告,
-所以下限定在 22.13。
+| 浏览器  | 最低版本              |
+| ------- | --------------------- |
+| Chrome  | 98+（2022 年 2 月）   |
+| Edge    | 98+（2022 年 2 月）   |
+| Firefox | 102+（2022 年 6 月）  |
+| Safari  | 15.4+（2022 年 3 月） |
+| Opera   | 84+（2022 年 2 月）   |
+
+本包是纯 ESM。Node ESM、打包工具、`<script>` 标签一切不变；CommonJS 的 `require()` 写法也
+不变 —— Node 从 22.12 起支持用 `require()` 加载 ES 模块，从 22.13 起不再为此打印警告，所以
+下限定在这个补丁版本。
 
 <details>
 <summary>TypeScript 用 <code>module: node16</code> 时</summary>
@@ -278,14 +290,6 @@ module.exports = { presets: [["@babel/preset-env", { targets: { node: "current" 
 Vitest 无需任何配置。
 
 </details>
-
-| 浏览器  | 最低版本           |
-| ------- | ------------------ |
-| Chrome  | 89+（2021年3月）   |
-| Edge    | 89+（2021年3月）   |
-| Firefox | 102+（2022年6月）  |
-| Safari  | 14.1+（2021年4月） |
-| Opera   | 75+（2021年3月）   |
 
 ## 链接
 

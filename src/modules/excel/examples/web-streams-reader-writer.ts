@@ -7,7 +7,7 @@
  * 3) Read it back from a Web ReadableStream<Uint8Array> using WorkbookReader
  *
  * Works in:
- * - Node.js 20+ (has WHATWG ReadableStream/WritableStream)
+ * - Node.js on any supported line (LTS 22+; WHATWG ReadableStream/WritableStream are global)
  * - Modern browsers (when bundled)
  */
 

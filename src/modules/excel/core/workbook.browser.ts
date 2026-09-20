@@ -1067,11 +1067,17 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
   wb._writerExternalLinkCache = new Map();
 }
 
+/**
+ * Deep-clone workbook-model data.
+ *
+ * `structuredClone` unguarded: it exists in every supported environment, and
+ * the `JSON.parse(JSON.stringify(...))` fallback this used to carry was a
+ * lossier second implementation, not a fallback — it strips a typed-array
+ * prototype, which the `Uint8Array` values on `ChartExModel.externalParts`
+ * need. `chart/chart-handle.ts` had already dropped the same fallback.
+ */
 function deepClone<T>(value: T): T {
-  if (typeof structuredClone === "function") {
-    return structuredClone(value);
-  }
-  return JSON.parse(JSON.stringify(value));
+  return structuredClone(value);
 }
 
 /**

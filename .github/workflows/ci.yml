@@ -31,10 +31,17 @@ jobs:
         # a promise about the *published artifact*, so it is checked where that can be
         # checked: `pnpm verify:install`, against a real install of the tarball.
         #
-        # Odd-numbered lines are deliberately absent. Node 25 never becomes LTS — it is a
-        # six-month staging line for what lands in 26 — so 24 (LTS) and 26 bracket it, and
-        # a failure unique to 25 would be a failure in a runtime no consumer is asked to
-        # use. Three versions across three operating systems is nine jobs; four was twelve.
+        # These three are exactly what the support policy covers: the living LTS lines
+        # (22 Jod, maintenance to 2027-04-30; 24 Krypton, active to 2028-04-30) plus the
+        # Current release (26, which becomes LTS on 2026-10-28).
+        #
+        # 23 and 25 are absent because they are EOL (2025-06-01 and 2026-06-01), not because
+        # they are odd. Current rotates every six months and is odd-numbered half the time, so
+        # an odd line is in support while it holds Current: when 27 ships (2027-04-22) it
+        # becomes Current and joins this matrix, by which point 26 is LTS. When 22 reaches
+        # EOL, drop it here and raise `engines.node` in the same commit.
+        #
+        # Three versions across three operating systems is nine jobs; four was twelve.
         node-version: [22.x, 24.x, 26.x]
         os: [ubuntu-latest, macOS-latest, windows-latest]
     runs-on: ${{ matrix.os }}

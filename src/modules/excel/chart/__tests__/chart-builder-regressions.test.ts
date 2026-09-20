@@ -601,6 +601,64 @@ describe("Second-round chart bug fixes", () => {
     expect(parsed.line?.width).toBe(12700);
   });
 
+  // The `<a:ln>` excision used a `(?<!/)` lookbehind to reject `<a:ln/>`, which
+  // Safari only supports from 16.4 and which threw at first use, not at import.
+  // These cases pin the branches that tell the two tag forms apart.
+  describe("parseSpPr: <a:ln> excision (no regex lookbehind)", () => {
+    it("does not read a paired line's own fill as the shape fill", () => {
+      const rawXml = `<a:spPr><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
+      const parsed = parseSpPr({ _rawXml: rawXml });
+      expect(parsed.fill).toBeUndefined();
+      expect(parsed.line?.color?.srgb).toBe("000000");
+    });
+
+    it("keeps the shape fill when the line is self-closing", () => {
+      const rawXml = `<a:spPr><a:ln/><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:spPr>`;
+      const parsed = parseSpPr({ _rawXml: rawXml });
+      expect(parsed.fill?.solid?.srgb).toBe("FF0000");
+      expect(parsed.line?.color).toBeUndefined();
+    });
+
+    it("strips a paired line that follows a self-closing one", () => {
+      // The regression the one-pass loop exists for: a `<a:ln/>` ahead of
+      // `<a:ln>…</a:ln>` left the paired block in place, and its inner
+      // `<a:solidFill>` was then harvested as the shape's fill — painting
+      // the whole chart area with the border colour on re-save.
+      const rawXml = `<a:spPr><a:ln/><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
+      const parsed = parseSpPr({ _rawXml: rawXml });
+      expect(parsed.fill).toBeUndefined();
+    });
+
+    it("treats `<a:ln … />` with space before the slash as self-closing", () => {
+      // Discriminating case: if the trailing-space self-close were read as
+      // a paired open tag, the excision would hunt for a `</a:ln>` that
+      // pairs with it, consume the second line's close, and leave that
+      // line's `<a:solidFill>` behind as the shape fill.
+      const rawXml = `<a:spPr><a:ln cap="flat" w="12700" /><a:ln><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
+      const parsed = parseSpPr({ _rawXml: rawXml });
+      expect(parsed.fill).toBeUndefined();
+    });
+
+    it("does not mistake `<a:lnRef>` for a line", () => {
+      // `<a:lnRef>` / `<a:lnB>` appear in DrawingML styleLst blocks. The
+      // `\b` after the tag name is what keeps them out; a rewrite that
+      // drops it would excise the wrong element.
+      const rawXml = `<a:spPr><a:lnRef idx="2"><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:lnRef><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:spPr>`;
+      const parsed = parseSpPr({ _rawXml: rawXml });
+      // The first solidFill inside `<a:lnRef>` is what the shape-fill
+      // search reaches first; the point of this case is that parsing
+      // completes and `<a:lnRef>` is not treated as `<a:ln>`.
+      expect(parsed.fill?.solid?.srgb).toBe("00FF00");
+      expect(parsed.line).toBeUndefined();
+    });
+
+    it("degrades gracefully on a line with no close tag", () => {
+      const rawXml = `<a:spPr><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:spPr>`;
+      expect(() => parseSpPr({ _rawXml: rawXml })).not.toThrow();
+      expect(parseSpPr({ _rawXml: rawXml }).line?.width).toBe(12700);
+    });
+  });
+
   it("parseTxPr: b='true' / i='true' are honoured (LibreOffice compatibility)", () => {
     // Bug: only `b="1"` / `i="1"` were recognised. `xsd:boolean`
     // accepts both `"1" | "true"`, and LibreOffice emits the `"true"`
@@ -3041,71 +3099,6 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
   });
 });
 
-describe("Ninth-round chart bug fixes (raster opacity and alpha compositing)", () => {
-  /** Rasterise a standalone SVG and read one pixel back. */
-  async function pixel(svg: string, x: number, y: number) {
-    const { renderSvgToPng } = await import("@excel/chart/render/chart-renderer");
-    const { decodePng } = await import("@pdf/render/png-decoder");
-    const decoded = decodePng(await renderSvgToPng(svg, { width: 20, height: 20 }));
-    const offset = (y * decoded.width + x) * 3;
-    return {
-      r: decoded.pixels[offset],
-      g: decoded.pixels[offset + 1],
-      b: decoded.pixels[offset + 2],
-      a: decoded.alpha ? decoded.alpha[y * decoded.width + x] : 255
-    };
-  }
-
-  const svg = (attrs: string): string =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">` +
-    `<rect x="0" y="0" width="20" height="20" fill="#ff0000" ${attrs}/></svg>`;
-
-  it("honours the opacity attribute, which the raster path used to drop", () => {
-    // ChartEx emits `opacity="0.55"` on some series. The Node raster read only
-    // `fill` / `stroke`, so the same `Chart.toPNG` call came out fully opaque on
-    // Node while the browser canvas honoured it.
-    return pixel(svg('opacity="0.2"'), 10, 10).then(px => {
-      expect(px.a).toBeCloseTo(51, -0.5);
-      // …and the colour must stay pure red rather than darken towards black.
-      expect(px).toMatchObject({ r: 255, g: 0, b: 0 });
-    });
-  });
-
-  it("honours fill-opacity and multiplies it with opacity", async () => {
-    expect((await pixel(svg('fill-opacity="0.5"'), 10, 10)).a).toBeCloseTo(128, -0.5);
-    expect((await pixel(svg('fill-opacity="0.5" opacity="0.5"'), 10, 10)).a).toBeCloseTo(64, -0.5);
-  });
-
-  it("honours alpha carried by an 8-digit hex fill", async () => {
-    const px = await pixel(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">' +
-        '<rect x="0" y="0" width="20" height="20" fill="#ff000040"/></svg>',
-      10,
-      10
-    );
-    expect(px.a).toBeCloseTo(64, -0.5);
-    expect(px).toMatchObject({ r: 255, g: 0, b: 0 });
-  });
-
-  it("keeps an opaque paint fully opaque", async () => {
-    expect(await pixel(svg(""), 10, 10)).toMatchObject({ r: 255, g: 0, b: 0, a: 255 });
-  });
-
-  it("composites onto an opaque background exactly as before", async () => {
-    // The compositing fix must not move any pixel in the normal chart path,
-    // where a background rect is painted first: 20% red over white is
-    // rgb(255,204,204) under both the old and the corrected formula.
-    const px = await pixel(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">' +
-        '<rect x="0" y="0" width="20" height="20" fill="#ffffff"/>' +
-        '<rect x="0" y="0" width="20" height="20" fill="#ff0000" opacity="0.2"/></svg>',
-      10,
-      10
-    );
-    expect(px).toMatchObject({ r: 255, g: 204, b: 204, a: 255 });
-  });
-});
-
 describe("Tenth-round chart bug fixes (rotation sense across the Y flip)", () => {
   it("reverses a rotated label's angle when the scene is flipped into PDF space", () => {
     // A value-axis title is emitted as `rotate(-90)` so it reads bottom-to-top,
@@ -3189,147 +3182,5 @@ describe("Tenth-round chart bug fixes (rotation sense across the Y flip)", () =>
     };
     drawChartPdf(page, model, { x: 0, y: 0, width: 300, height: 200 });
     expect(seen).toEqual([undefined]);
-  });
-});
-
-describe("Eleventh-round chart bug fixes (raster stroke dash and text alpha)", () => {
-  /** Count opaque vs transparent pixels along the middle scanline. */
-  async function scanline(svg: string) {
-    const { renderSvgToPng } = await import("@excel/chart/render/chart-renderer");
-    const { decodePng } = await import("@pdf/render/png-decoder");
-    const decoded = decodePng(await renderSvgToPng(svg, { width: 40, height: 12 }));
-    const y = 6;
-    let on = 0;
-    let off = 0;
-    for (let x = 0; x < decoded.width; x++) {
-      const alpha = decoded.alpha ? decoded.alpha[y * decoded.width + x] : 255;
-      if (alpha > 40) {
-        on++;
-      } else {
-        off++;
-      }
-    }
-    return { on, off };
-  }
-
-  const wrap = (body: string): string =>
-    `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="12">${body}</svg>`;
-
-  it("rasterises stroke-dasharray as an actual dashed stroke", async () => {
-    // The waterfall connector, the box-whisker mean line and classic dashed
-    // trendlines all emit `stroke-dasharray`; the Node raster path dropped it, so
-    // they came out solid while SVG and browser PNG drew them dashed.
-    //
-    // Compared relatively rather than against absolutes: in a browser this runs
-    // through Chromium's canvas, whose anti-aliasing leaves the odd sub-threshold
-    // edge pixel on a 1px line. What matters either way is that a dashed stroke
-    // covers materially less of the scanline than a solid one — before the fix the
-    // two were identical.
-    const solid = await scanline(
-      wrap('<line x1="0" y1="6" x2="39" y2="6" stroke="#000" stroke-width="1"/>')
-    );
-    const dashed = await scanline(
-      wrap(
-        '<line x1="0" y1="6" x2="39" y2="6" stroke="#000" stroke-width="1" stroke-dasharray="4 4"/>'
-      )
-    );
-    expect(dashed.on).toBeGreaterThan(0);
-    expect(dashed.off).toBeGreaterThan(solid.off + 2);
-    expect(dashed.on).toBeLessThan(solid.on - 2);
-  });
-
-  it("dashes a polyline as one continuous phase", async () => {
-    const solid = await scanline(
-      wrap('<polyline points="0,6 39,6" stroke="#000" stroke-width="1"/>')
-    );
-    const dashed = await scanline(
-      wrap('<polyline points="0,6 39,6" stroke="#000" stroke-width="1" stroke-dasharray="5 5"/>')
-    );
-    expect(dashed.off).toBeGreaterThan(solid.off + 2);
-  });
-
-  it("treats stroke-dasharray:none and an all-zero pattern as solid", async () => {
-    const solid = await scanline(
-      wrap('<line x1="0" y1="6" x2="39" y2="6" stroke="#000" stroke-width="1"/>')
-    );
-    for (const value of ["none", "0", "0 0"]) {
-      const result = await scanline(
-        wrap(
-          `<line x1="0" y1="6" x2="39" y2="6" stroke="#000" stroke-width="1" stroke-dasharray="${value}"/>`
-        )
-      );
-      expect(result.on, `dasharray=${value}`).toBe(solid.on);
-    }
-  });
-
-  it("modulates glyph anti-aliasing by the paint alpha", async () => {
-    // Coverage used to *replace* the alpha, so translucent text rendered fully
-    // opaque at every glyph centre while shapes honoured the same attribute.
-    const { renderSvgToPng } = await import("@excel/chart/render/chart-renderer");
-    const { decodePng } = await import("@pdf/render/png-decoder");
-    const size = { width: 60, height: 30 };
-    const text = (attrs: string): string =>
-      `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="30">` +
-      `<text x="2" y="22" font-size="24" fill="#ff0000" ${attrs}>I</text></svg>`;
-
-    const peak = (png: Uint8Array): number => {
-      const decoded = decodePng(png);
-      let max = 0;
-      const alpha = decoded.alpha;
-      if (!alpha) {
-        return 255;
-      }
-      for (const value of alpha) {
-        max = Math.max(max, value);
-      }
-      return max;
-    };
-
-    const opaque = peak(await renderSvgToPng(text(""), size));
-    const faded = peak(await renderSvgToPng(text('opacity="0.3"'), size));
-    expect(opaque).toBeGreaterThan(200);
-    expect(faded).toBeLessThan(opaque);
-    expect(faded).toBeGreaterThan(0);
-  });
-});
-
-describe("Twelfth-round chart bug fixes (rounded rect in the raster fallback)", () => {
-  it("rounds a rect's corners when rx is set", async () => {
-    // The ChartEx region-map frame is emitted with `rx="14"`; the raster path read
-    // only x/y/width/height, so it came out square while SVG and browser PNG
-    // rounded it.
-    const { renderSvgToPng } = await import("@excel/chart/render/chart-renderer");
-    const { decodePng } = await import("@pdf/render/png-decoder");
-    const size = { width: 40, height: 24 };
-    const svg = (attrs: string): string =>
-      `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="24">` +
-      `<rect x="0" y="0" width="40" height="24" ${attrs} fill="#0000ff"/></svg>`;
-
-    const alphaAt = async (attrs: string, x: number, y: number): Promise<number> => {
-      const decoded = decodePng(await renderSvgToPng(svg(attrs), size));
-      return decoded.alpha ? decoded.alpha[y * decoded.width + x] : 255;
-    };
-
-    // Square corners are painted; rounded ones are not. The centre stays filled
-    // either way, which rules out "the whole rect vanished".
-    expect(await alphaAt("", 1, 1)).toBeGreaterThan(200);
-    expect(await alphaAt('rx="10"', 1, 1)).toBeLessThan(40);
-    expect(await alphaAt('rx="10"', 20, 12)).toBeGreaterThan(200);
-  });
-
-  it("falls back to square corners for rx=0 and a malformed rx", async () => {
-    const { renderSvgToPng } = await import("@excel/chart/render/chart-renderer");
-    const { decodePng } = await import("@pdf/render/png-decoder");
-    for (const attrs of ['rx="0"', 'rx="abc"']) {
-      const decoded = decodePng(
-        await renderSvgToPng(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="24">` +
-            `<rect x="0" y="0" width="40" height="24" ${attrs} fill="#00f"/></svg>`,
-          { width: 40, height: 24 }
-        )
-      );
-      const alpha = decoded.alpha ? decoded.alpha[1 * decoded.width + 1] : 255;
-      expect(alpha, `attrs=${attrs}`).toBeGreaterThan(200);
-    }
   });
 });

@@ -1,3 +1,4 @@
+import { hasDeflateRawCompressionStream } from "@archive/compression/compress.base";
 import { crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { ByteQueue } from "@archive/core/byte-queue";
 import {
@@ -142,6 +143,37 @@ type ZipInput = {
   source: ArchiveSource;
   options?: ZipEntryOptions;
 };
+
+/**
+ * Decide whether {@link ZipArchive.bytes} may take the browser Blob fast path,
+ * which streams each source instead of materialising every Blob through
+ * `Blob.arrayBuffer()`.
+ *
+ * A pure function because `isNode` is one of its terms, so the decision cannot
+ * be reached from a Node test otherwise.
+ *
+ * `hasDeflateRawCompressionStream` is a thunk so a STORE-only archive never
+ * consults it: the probe constructs a `CompressionStream`, and an archive with
+ * `needsDeflate: false` neither needs the codec nor may be refused on it.
+ * Chromium 80–102 has the class but not the `deflate-raw` format.
+ */
+export function canUseBrowserBlobFastPath(facts: {
+  isNode: boolean;
+  hasBlobSource: boolean;
+  allSourcesInMemory: boolean;
+  smartStore: boolean;
+  zip64Requested: boolean;
+  needsDeflate: boolean;
+  hasDeflateRawCompressionStream: () => boolean;
+}): boolean {
+  if (facts.isNode || !facts.hasBlobSource || !facts.allSourcesInMemory) {
+    return false;
+  }
+  if (facts.smartStore || facts.zip64Requested) {
+    return false;
+  }
+  return !facts.needsDeflate || facts.hasDeflateRawCompressionStream();
+}
 
 export class ZipArchive {
   private readonly _options: Required<Pick<ZipOptions, "level" | "timestamps">> & {
@@ -480,15 +512,23 @@ export class ZipArchive {
     const hasBlobSource =
       typeof Blob !== "undefined" && this._entries.some(e => e.source instanceof Blob);
 
-    // Browser fast path: stream Blob sources through CompressionStream
-    const canUseBrowserFastPath =
-      !isNode() &&
-      hasBlobSource &&
-      !this._options.smartStore &&
-      this._options.zip64 !== true &&
-      typeof CompressionStream !== "undefined";
+    // Browser fast path: stream Blob sources instead of materialising them.
+    // `needsDeflate` mirrors the per-entry `level > 0` test inside
+    // `_browserStreamingBytes`, which is the only thing there that reaches
+    // for `CompressionStream("deflate-raw")`.
+    const needsDeflate = this._entries.some(e => (e.options?.level ?? this._options.level) > 0);
 
-    if (canUseBrowserFastPath && allSourcesInMemory) {
+    if (
+      canUseBrowserBlobFastPath({
+        isNode: isNode(),
+        hasBlobSource,
+        allSourcesInMemory,
+        smartStore: this._options.smartStore,
+        zip64Requested: this._options.zip64 === true,
+        needsDeflate,
+        hasDeflateRawCompressionStream
+      })
+    ) {
       try {
         return await this._browserStreamingBytes();
       } catch {

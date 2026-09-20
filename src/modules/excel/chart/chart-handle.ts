@@ -1558,10 +1558,10 @@ function _chartExtractFirstRunProperties(
 }
 
 /**
- * Deep-clone a chart model. Uses `structuredClone` which is always available
- * in our supported environments (Node 22+, all modern browsers) and handles
- * the `Uint8Array` captured on {@link ChartExModel.rawXml} correctly — the
- * older `JSON.parse(JSON.stringify(...))` fallback stripped the typed-array
+ * Deep-clone a chart model. `structuredClone` is available in every supported
+ * environment and preserves the `Uint8Array` values on
+ * {@link ChartExModel.externalParts}; the older
+ * `JSON.parse(JSON.stringify(...))` fallback stripped the typed-array
  * prototype and corrupted round-trip data.
  */
 function deepClone<T>(obj: T): T {

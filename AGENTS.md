@@ -5,7 +5,7 @@
 **documonster** — zero-dependency TypeScript toolkit. Nine modules: Excel, Word, Formula, PDF, CSV, Markdown, XML, Archive, Stream.
 
 - Zero runtime dependencies — never add packages to `dependencies`
-- Cross-platform: Node.js 22+ and modern browsers
+- Cross-platform: Node.js LTS lines (22, 24) and Current (26), plus modern browsers
 - ESM-only; CommonJS consumers load it through `require(esm)` (Node >= 22.13)
 
 ## Hard Rules
@@ -701,6 +701,24 @@ type stripping is unflagged only from 22.18 — 22.17.1 still throws
 all nine jobs for a reason unrelated to the package. So the `test` matrix runs `22.x`, and the
 floor is verified where it can be: against the installed artifact, by the one script here
 written in plain CommonJS (`scripts/verify-installed-package.cjs`) so that it runs there at all.
+
+**Support policy: Node LTS lines and Current, while each is still alive.** The floor is the
+oldest non-EOL LTS line, so it moves on Node's schedule rather than ours — as of Node 22 (Jod,
+maintenance until 2027-04-30) and 24 (Krypton, active until 2028-04-30), with 26 as Current and
+becoming LTS on 2026-10-28. That is what the `test` matrix `22.x / 24.x / 26.x` covers. Odd
+lines are absent because 23 and 25 are **EOL**, not because they are odd: Current rotates every
+six months and is odd-numbered half the time, so when 27 ships (2027-04-22) it becomes Current
+and joins the matrix while 26 will already be LTS. `engines.node` still carries a **floor, not
+an allowlist** — an upper bound or a line-by-line range would reject a future release and trip
+`engine-strict` installs for no benefit — so an unsupported line is untested rather than
+blocked. When 22 reaches EOL, raise the floor to the next living LTS and drop `22.x` from the
+matrix in the same commit; do not leave a comment claiming support for a line nothing runs.
+
+**Bun is supported on `latest` only, and that is why there is no `engines.bun`.** Bun has no
+LTS line and no maintenance branches, so there is nothing to express a range against: a floor
+like `>=1` would claim every 1.x works, which is a stronger promise than anything here tests.
+"Latest" is not a semver range, so the policy cannot live in `engines` at all — it lives in the
+one place it can be enforced, the `bun-version: [latest]` CI matrix.
 
 One methodological trap is worth recording, because it produced a wrong "verified" reading
 first time round: the `ExperimentalWarning` goes through `process.emitWarning`, which defers

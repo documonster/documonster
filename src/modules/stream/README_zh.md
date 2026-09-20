@@ -952,6 +952,8 @@ stream.destroy(new Error("Manual destruction"));
 | Safari  | 14.1+    |
 | Edge    | 89+      |
 
+仅为本模块的下限；整个包的下限更高，见[根 README](../../../README_zh.md#系统要求)。
+
 Node.js 和浏览器之间的 API **完全相同**，允许你编写一次代码即可在任何平台运行。
 
 ---

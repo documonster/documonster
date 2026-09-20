@@ -6,6 +6,7 @@
  * implementations of base64, UUID, UTF-16LE encoding, and XML helpers.
  */
 
+import { uuidV4 } from "@utils/uuid";
 import { DocxError } from "@word/errors";
 
 // =============================================================================
@@ -72,27 +73,17 @@ export function base64ToBytes(s: string): Uint8Array {
 // =============================================================================
 
 /**
- * Generate a random UUID v4 string in the form "XXXXXXXX-XXXX-4XXX-YXXX-XXXXXXXXXXXX".
- * Uses `crypto.getRandomValues` for cryptographic randomness.
- */
-function generateUuid(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-
-  // RFC 4122 v4 UUID: set version (4) and variant (10xx) bits
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-  const hex = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
-  return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
-}
-
-/**
  * Generate a GUID in braced format: "{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}".
  * Used by font obfuscation (w:fontKey) and building blocks.
+ *
+ * Delegates to {@link uuidV4} rather than assembling a third copy of the v4 bit
+ * masking here. These ids identify rather than protect — a `w:fontKey` is
+ * stored in the document in plain text — so a non-cryptographic tier is
+ * acceptable. Keys, salts and verifiers use {@link randomBytes}, which throws
+ * when Web Crypto is missing.
  */
 export function generateGuid(): string {
-  return `{${generateUuid()}}`;
+  return `{${uuidV4()}}`;
 }
 
 // =============================================================================

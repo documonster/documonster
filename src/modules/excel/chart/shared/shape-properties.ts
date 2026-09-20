@@ -448,26 +448,26 @@ function parsePatternFill(xml: string): ChartFill | undefined {
 }
 
 /**
- * Remove the FIRST matching `<tag …>…</tag>` (or self-closing
- * `<tag …/>`) block from the input XML, returning the remainder. Used
- * by {@link parseSpPr} to isolate shape-level children (fill / effects)
- * from decorative children that nest inside `<a:ln>` — the line's own
- * `<a:solidFill>` / `<a:noFill/>` / `<a:gradFill>` should not be
- * harvested as the shape's fill.
+ * Remove `<tag …>…</tag>` (or self-closing `<tag …/>`) blocks from the input
+ * XML, returning the remainder. Used by {@link parseSpPr} to keep the line's
+ * own `<a:solidFill>` / `<a:noFill/>` / `<a:gradFill>` inside `<a:ln>` from
+ * being harvested as the shape's fill.
  *
- * Strips ALL occurrences of `tag` (both self-closing and paired) in
- * one pass. A previous version returned after the earliest match,
- * which failed on inputs like `<a:ln/>…<a:ln>…</a:ln>` — the paired
- * block survived and its inner `<a:solidFill>` was then mistakenly
- * parsed as the shape's fill.
+ * Strips up to eight occurrences in one pass, so a `<a:ln/>` ahead of
+ * `<a:ln>…</a:ln>` does not leave the paired block behind.
  *
- * Not a general-purpose XML tool — does not handle same-named nested
- * occurrences. Sufficient for DrawingML spPr, where `<a:ln>` never
- * nests another `<a:ln>`.
+ * The trailing slash is **captured** rather than excluded with a `(?<!/)`
+ * lookbehind, which Safari only supports from 16.4 and which threw
+ * `SyntaxError` here at first use, not at import.
+ *
+ * Not a general-purpose XML tool: no same-named nesting, and no `>` inside an
+ * attribute value. Sufficient for DrawingML spPr.
  */
 function stripOuterElement(xml: string, tag: string): string {
-  const selfCloseRe = new RegExp(`<${tag}\\b[^>]*/>`);
-  const openRe = new RegExp(`<${tag}\\b[^>]*(?<!/)>`);
+  // `[^>]*?` is lazy so `(/?)` gets the chance to claim the slash of a
+  // self-closing tag; a greedy `[^>]*` would swallow it and report every
+  // `<tag …/>` as a paired open tag.
+  const tagRe = new RegExp(`<${tag}\\b[^>]*?(/?)>`);
   const closeRe = new RegExp(`</${tag}>`);
 
   let current = xml;
@@ -476,38 +476,29 @@ function stripOuterElement(xml: string, tag: string): string {
   // the ceiling guards against pathological input causing infinite
   // loops without changing the happy path.
   for (let i = 0; i < 8; i++) {
-    const selfCloseMatch = selfCloseRe.exec(current);
-    const openMatch = openRe.exec(current);
-    const selfCloseIndex = selfCloseMatch ? selfCloseMatch.index : Infinity;
-    const openIndex = openMatch ? openMatch.index : Infinity;
-
-    if (selfCloseIndex === Infinity && openIndex === Infinity) {
+    const match = tagRe.exec(current);
+    if (!match) {
       break;
     }
+    const matchEnd = match.index + match[0].length;
 
-    if (selfCloseIndex < openIndex && selfCloseMatch) {
-      current =
-        current.slice(0, selfCloseMatch.index) +
-        current.slice(selfCloseMatch.index + selfCloseMatch[0].length);
+    if (match[1] === "/") {
+      current = current.slice(0, match.index) + current.slice(matchEnd);
       continue;
     }
-    if (openMatch) {
-      // Find the close tag that pairs with this open — start searching
-      // after the open's end to avoid capturing `</tag>` that belongs
-      // to a prior unrelated (e.g. self-closing lookalike) open.
-      const openEnd = openMatch.index + openMatch[0].length;
-      const closeMatch = closeRe.exec(current.slice(openEnd));
-      if (!closeMatch) {
-        // Malformed — stop stripping to avoid further mutation of
-        // input we don't understand.
-        break;
-      }
-      const closeStart = openEnd + closeMatch.index;
-      const closeEnd = closeStart + closeMatch[0].length;
-      current = current.slice(0, openMatch.index) + current.slice(closeEnd);
-      continue;
+
+    // Find the close tag that pairs with this open — start searching
+    // after the open's end to avoid capturing `</tag>` that belongs
+    // to a prior unrelated (e.g. self-closing lookalike) open.
+    const closeMatch = closeRe.exec(current.slice(matchEnd));
+    if (!closeMatch) {
+      // Malformed — stop stripping to avoid further mutation of
+      // input we don't understand.
+      break;
     }
-    break;
+    current =
+      current.slice(0, match.index) +
+      current.slice(matchEnd + closeMatch.index + closeMatch[0].length);
   }
   return current;
 }

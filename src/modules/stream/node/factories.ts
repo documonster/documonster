@@ -46,8 +46,10 @@ import { Writable } from "@stream/node/writable";
 /**
  * Ensure the options include a highWaterMark so that native Node.js streams
  * use the same default as the browser implementation (from common/utils.ts).
- * This matters on Node.js 20/21 where the native default is 16 KB instead of
- * the 64 KB we standardise on across both platforms.
+ *
+ * Every supported Node line already defaults to the same 64 KB, so this is not
+ * a version workaround: it exists so `setDefaultHighWaterMark` is honoured on
+ * native streams too, which otherwise read Node's default rather than ours.
  */
 function withDefaultHWM<O extends { highWaterMark?: number; objectMode?: boolean }>(
   options: O | undefined

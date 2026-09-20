@@ -2022,3 +2022,52 @@ describe("text reaches every backend, whatever the script", () => {
     expect(image.uncoveredCodePoints).toEqual([0x4e2d, 0x6587]);
   });
 });
+
+describe("glyph antialiasing modulates the paint alpha", () => {
+  // Text draws through a coverage mask rather than a scanline fill, and that
+  // mask used to *replace* the paint's alpha instead of scaling it. The shape
+  // counterpart is in "paint semantics agree across backends" above.
+  const GLYPH = 0x48; // "H", so a synthetic face can cover it.
+
+  /** Peak alpha over the whole image, which is the glyph's densest pixel. */
+  function peakAlpha(fill: { r: number; g: number; b: number; a: number }): number {
+    const image = rasterizeToRgba(
+      {
+        width: 60,
+        height: 30,
+        children: [
+          {
+            kind: "text",
+            x: 4,
+            y: 24,
+            lines: [{ text: "H", dy: 0 }],
+            style: { size: 24, fill }
+          }
+        ]
+      },
+      {
+        width: 60,
+        height: 30,
+        fonts: [buildCoverageFont([GLYPH], "Alpha Text")],
+        useSystemFonts: false
+      }
+    );
+    let max = 0;
+    for (let i = 3; i < image.data.length; i += 4) {
+      max = Math.max(max, image.data[i]);
+    }
+    return max;
+  }
+
+  it("draws an opaque glyph opaque", () => {
+    expect(peakAlpha({ r: 1, g: 0, b: 0, a: 1 })).toBeGreaterThan(200);
+  });
+
+  it("scales a translucent glyph's densest pixel by the paint alpha", () => {
+    const opaque = peakAlpha({ r: 1, g: 0, b: 0, a: 1 });
+    const faded = peakAlpha({ r: 1, g: 0, b: 0, a: 0.3 });
+    // The bug: `faded` equalled `opaque`, because coverage replaced the alpha.
+    expect(faded).toBeLessThan(opaque);
+    expect(faded).toBeGreaterThan(0);
+  });
+});

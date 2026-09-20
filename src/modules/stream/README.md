@@ -953,6 +953,9 @@ The browser implementation uses Web Streams API and is compatible with:
 | Safari  | 14.1+           |
 | Edge    | 89+             |
 
+Floors for this module only; the package as a whole is higher — see the
+[root README](../../../README.md#requirements).
+
 The API is **identical** between Node.js and browsers, allowing you to write code once and run anywhere.
 
 ---
