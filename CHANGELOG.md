@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/documonster/documonster/compare/v0.16.1...v0.17.0) (2026-09-22)
+
+
+### Features
+
+* **mermaid:** Make the published Theme obtainable, and the public layout paintable ([637b020](https://github.com/documonster/documonster/commit/637b020e064f9f187e11e5f701aebad34c365ad8))
+
+
+### Bug Fixes
+
+* **excel,pdf:** Keep merged cells whose master row or column is hidden ([a2b4eb6](https://github.com/documonster/documonster/commit/a2b4eb6d5d3234bcc3fe750c8f7525f3a36fc0ae)), closes [#231](https://github.com/documonster/documonster/issues/231)
+
 ## [0.16.1](https://github.com/documonster/documonster/compare/v0.16.0...v0.16.1) (2026-09-20)
 
 
