@@ -1101,6 +1101,35 @@ describe("excelToPdf", () => {
     });
   });
 
+  describe("Merged Cells + Hidden Master", () => {
+    // Issue #231: a merge whose master row sits in a collapsed outline group.
+    it("prints a vertical merge whose master row is hidden", async () => {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Outline");
+      Worksheet.merge(ws, "A2:A4");
+      Cell.setValue(ws, "A2", "Collapsed Merge");
+      rowSetHidden(Worksheet.getRow(ws, 2), true);
+      rowSetHidden(Worksheet.getRow(ws, 3), true);
+      Cell.setValue(ws, "B4", "Sub Total");
+
+      const text = pdfToString(await excelToPdf(wb));
+      expect(text).toContain("Collapsed Merge");
+      expect(text).toContain("Sub Total");
+    });
+
+    it("prints a horizontal merge whose master column is hidden", async () => {
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "Cols");
+      Worksheet.merge(ws, "A1:C1");
+      Cell.setValue(ws, "A1", "Hidden Master Column");
+      Column.setHidden(ws, 1, true);
+      Cell.setValue(ws, "B2", "Data");
+
+      const text = pdfToString(await excelToPdf(wb));
+      expect(text).toContain("Hidden Master Column");
+    });
+  });
+
   describe("Repeat Rows", () => {
     it("should repeat header rows on subsequent pages", async () => {
       const wb = Workbook.create();

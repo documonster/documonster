@@ -466,6 +466,10 @@ Cell.setNote(worksheet, "C1", {
 
 ```typescript
 Worksheet.autoFitColumns(worksheet);
+
+// 与 Excel 一致，默认忽略隐藏行。若希望折叠的大纲分组展开后列宽也足够，
+// 可以把隐藏行一起计算：
+Worksheet.autoFitColumns(worksheet, { includeHiddenRows: true });
 ```
 
 ## 图表

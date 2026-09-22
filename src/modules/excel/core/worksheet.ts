@@ -156,7 +156,8 @@ import { buildSheetProtection, verifySheetPassword } from "@excel/utils/sheet-pr
 import {
   calculateAutoFitWidth,
   getMaxDigitWidth,
-  getColumnContentWidthPx,
+  charWidthToPixel,
+  getPixelPadding,
   getCellTextWidthPx,
   getCellHeightPt
 } from "@excel/utils/text-metrics";
@@ -1876,17 +1877,58 @@ export function removeConditionalFormatting(
   }
 }
 
-export function autoFitColumn(ws: WorksheetData, col: number | string): WorksheetData {
+/**
+ * Options for {@link autoFitColumn} and {@link autoFitColumns}.
+ */
+export interface AutoFitColumnOptions {
+  /**
+   * Also measure cells in hidden rows — for example rows inside a collapsed
+   * outline group, so the column is already wide enough once it is expanded.
+   *
+   * @default false — hidden rows are ignored, as Excel's own AutoFit does.
+   */
+  includeHiddenRows?: boolean;
+}
+
+/**
+ * Set a column's width to fit its content, as Excel's AutoFit does.
+ *
+ * Cells in hidden rows are ignored unless `includeHiddenRows` is set. A
+ * merged cell counts as visible while any row of the merge is, since that is
+ * where Excel draws it; a merge spanning several columns is not measured,
+ * because its width cannot be attributed to one of them.
+ */
+export function autoFitColumn(
+  ws: WorksheetData,
+  col: number | string,
+  options?: AutoFitColumnOptions
+): WorksheetData {
   const colNum = typeof col === "string" ? colCache.l2n(col) : col;
-  _autoFitColumnImpl(ws, colNum);
+  _autoFitColumnImpl(ws, colNum, options);
   return ws;
 }
 
+/**
+ * {@link autoFitColumn} for every column in use, or for `startCol`–`endCol`.
+ * Pass the options on their own to fit every column:
+ * `autoFitColumns(ws, { includeHiddenRows: true })`.
+ */
+export function autoFitColumns(ws: WorksheetData, options?: AutoFitColumnOptions): WorksheetData;
 export function autoFitColumns(
   ws: WorksheetData,
   startCol?: number | string,
-  endCol?: number | string
+  endCol?: number | string,
+  options?: AutoFitColumnOptions
+): WorksheetData;
+export function autoFitColumns(
+  ws: WorksheetData,
+  startColOrOptions?: number | string | AutoFitColumnOptions,
+  endCol?: number | string,
+  rangeOptions?: AutoFitColumnOptions
 ): WorksheetData {
+  const rangeGiven = startColOrOptions === null || typeof startColOrOptions !== "object";
+  const startCol = rangeGiven ? startColOrOptions : undefined;
+  const options = rangeGiven ? rangeOptions : startColOrOptions;
   const dims = getSheetDimensions(ws);
   if (!dims || dims.left === undefined) {
     return ws;
@@ -1901,7 +1943,7 @@ export function autoFitColumns(
     endCol != null ? (typeof endCol === "string" ? colCache.l2n(endCol) : endCol) : dims.right;
 
   for (let c = start; c <= end; c++) {
-    _autoFitColumnImpl(ws, c);
+    _autoFitColumnImpl(ws, c, options);
   }
   return ws;
 }
@@ -1925,8 +1967,54 @@ export function autoFitRows(ws: WorksheetData, startRow?: number, endRow?: numbe
   return ws;
 }
 
-function _autoFitColumnImpl(ws: WorksheetData, colNum: number): void {
+/** A row that has never been created has default visibility. */
+function _isRowHidden(ws: WorksheetData, rowNumber: number): boolean {
+  const row = ws._rows[rowNumber - 1];
+  return row ? rowHidden(row) : false;
+}
+
+function _isColumnHidden(ws: WorksheetData, colNum: number): boolean {
+  return ws._columns[colNum - 1]?.hidden === true;
+}
+
+function _anyRowVisible(ws: WorksheetData, top: number, bottom: number): boolean {
+  for (let r = top; r <= bottom; r++) {
+    if (!_isRowHidden(ws, r)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function _anyColumnVisible(ws: WorksheetData, left: number, right: number): boolean {
+  for (let c = left; c <= right; c++) {
+    if (!_isColumnHidden(ws, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The merged range a master cell heads, or `undefined` for any other cell.
+ *
+ * A merge's content is stored only in its master, yet it is displayed wherever
+ * any part of the merge is. Auto-fit therefore decides a master's visibility
+ * over this range rather than its own row or column — which is what keeps a
+ * merge whose master is hidden, one inside a collapsed outline group say, from
+ * being dropped.
+ */
+function _mergeRangeOf(ws: WorksheetData, cell: CellData): RangeData | undefined {
+  return cellIsMerged(cell) ? ws._merges[cell.address] : undefined;
+}
+
+function _autoFitColumnImpl(
+  ws: WorksheetData,
+  colNum: number,
+  options: AutoFitColumnOptions | undefined
+): void {
   const mdw = getMaxDigitWidth(); // default font MDW
+  const includeHiddenRows = options?.includeHiddenRows === true;
 
   // Check if this column is under an autofilter
   const hasAutoFilter = _isColumnInAutoFilter(ws, colNum);
@@ -1938,27 +2026,27 @@ function _autoFitColumnImpl(ws: WorksheetData, colNum: number): void {
     if (!row) {
       return;
     }
-    // Skip hidden rows — Excel excludes them from auto-fit
-    if (rowHidden(row)) {
-      return;
-    }
     const cell = rowFindCell(row, colNum);
     if (!cell) {
       return;
     }
 
     // Skip merged cell slaves — the content belongs to the master cell.
-    // For the master cell of a multi-column merge, skip too (the width
-    // should not be attributed to a single column).
     if (cellType(cell) === Enums.ValueType.Merge) {
       return;
     }
-    if (cellIsMerged(cell)) {
-      // This is a master cell with merges spanning multiple columns
-      const mergeRange = ws._merges[cell.address];
-      if (mergeRange && mergeRange.left !== mergeRange.right) {
-        return; // multi-column merge — skip
-      }
+
+    const merge = _mergeRangeOf(ws, cell);
+    // A multi-column merge's width should not be attributed to one column.
+    if (merge && merge.left !== merge.right) {
+      return;
+    }
+    // Skip content in hidden rows — Excel excludes it from auto-fit
+    if (
+      !includeHiddenRows &&
+      (merge ? !_anyRowVisible(ws, merge.top, merge.bottom) : rowHidden(row))
+    ) {
+      return;
     }
 
     // Skip shrinkToFit cells — they adapt to the column, not vice versa
@@ -2003,20 +2091,24 @@ function _autoFitRowImpl(ws: WorksheetData, rowNumber: number): void {
     if (cellType(cell) === Enums.ValueType.Merge) {
       return;
     }
-    // Skip multi-row merged masters
-    if (cellIsMerged(cell)) {
-      const mergeRange = ws._merges[cell.address];
-      if (mergeRange && mergeRange.top !== mergeRange.bottom) {
-        return;
-      }
+    const merge = _mergeRangeOf(ws, cell);
+    // A multi-row merge's height should not be attributed to one row.
+    if (merge && merge.top !== merge.bottom) {
+      return;
     }
-    // Skip cells in hidden columns
-    const col = ws._columns[cellCol(cell) - 1];
-    if (col?.hidden) {
+    // Skip content in hidden columns
+    const col = cellCol(cell);
+    if (merge ? !_anyColumnVisible(ws, merge.left, merge.right) : _isColumnHidden(ws, col)) {
       return;
     }
 
-    const columnWidthPx = _getColumnContentWidthForCell(ws, cell, mdw);
+    const columnWidthPx = _getColumnContentWidthForCell(
+      ws,
+      cell,
+      mdw,
+      merge?.left ?? col,
+      merge?.right ?? col
+    );
     const heightPt = getCellHeightPt(cellView(cell), mdw, columnWidthPx);
     if (heightPt > maxHeightPt) {
       maxHeightPt = heightPt;
@@ -2032,15 +2124,27 @@ function _autoFitRowImpl(ws: WorksheetData, rowNumber: number): void {
 function _getColumnContentWidthForCell(
   ws: WorksheetData,
   cell: CellData,
-  mdw: number
+  mdw: number,
+  left: number,
+  right: number
 ): number | undefined {
   if (!cellAlignment(cell)?.wrapText) {
     return undefined;
   }
-  // Try to get explicit column width; avoid creating a column as side effect
-  const col = ws._columns[cellCol(cell) - 1];
-  const colWidth = col?.width ?? ws.properties.defaultColWidth ?? 9;
-  return getColumnContentWidthPx(colWidth, mdw);
+  // Text wraps across the visible columns the cell spans, with the cell padding
+  // charged once for the whole merge rather than once per column.
+  let totalPx = 0;
+  for (let c = left; c <= right; c++) {
+    if (!_isColumnHidden(ws, c)) {
+      totalPx += charWidthToPixel(_columnWidthChars(ws, c), mdw);
+    }
+  }
+  return Math.max(0, totalPx - getPixelPadding(mdw));
+}
+
+/** Width of a column in characters, without creating it as a side effect. */
+function _columnWidthChars(ws: WorksheetData, colNum: number): number {
+  return ws._columns[colNum - 1]?.width ?? ws.properties.defaultColWidth ?? 9;
 }
 
 function _isColumnInAutoFilter(ws: WorksheetData, colNum: number): boolean {

@@ -186,6 +186,7 @@ export type { AutoFilterCriteria, SheetProtection } from "@excel/core/worksheet-
 export type {
   AddAOAOptions,
   AddJSONOptions,
+  AutoFitColumnOptions,
   SheetToJSONOptions,
   WorksheetModel
 } from "@excel/core/worksheet";

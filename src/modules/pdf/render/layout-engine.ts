@@ -1523,6 +1523,22 @@ interface MergeRegion {
   left: number;
   bottom: number;
   right: number;
+  /**
+   * The region's outermost *unhidden* tracks: where it begins and ends on the
+   * sheet as displayed. They differ from the bounds above when a boundary row or
+   * column is hidden — a merge in a collapsed outline group, say — and they are
+   * what Excel treats as the region's edges: its value is drawn from the first
+   * displayed cell and its outline sits on the displayed boundary. Reading those
+   * from the stored bounds instead lost the value outright whenever the master's
+   * row or column was hidden, since no piece then starts there (issue #231).
+   *
+   * Equal to the stored bounds on an axis where every track is hidden; such a
+   * region is never laid out, so the value is never read.
+   */
+  shownTop: number;
+  shownLeft: number;
+  shownBottom: number;
+  shownRight: number;
 }
 
 /**
@@ -1543,11 +1559,23 @@ function buildMergeMap(sheet: PdfSheetData): Map<string, MergeRegion> {
 
   for (const rangeStr of merges) {
     const range = parseRangeRef(rangeStr);
+    const top = range.s.r + 1;
+    const left = range.s.c + 1;
+    const bottom = range.e.r + 1;
+    const right = range.e.c + 1;
+    const rowShown = (r: number): boolean => !sheet.rows.get(r)?.hidden;
+    const colShown = (c: number): boolean => !sheet.columns.get(c)?.hidden;
+    const [shownTop, shownBottom] = shownSpan(top, bottom, rowShown);
+    const [shownLeft, shownRight] = shownSpan(left, right, colShown);
     const region: MergeRegion = {
-      top: range.s.r + 1,
-      left: range.s.c + 1,
-      bottom: range.e.r + 1,
-      right: range.e.c + 1
+      top,
+      left,
+      bottom,
+      right,
+      shownTop,
+      shownLeft,
+      shownBottom,
+      shownRight
     };
 
     for (let r = region.top; r <= region.bottom; r++) {
@@ -1558,6 +1586,22 @@ function buildMergeMap(sheet: PdfSheetData): Map<string, MergeRegion> {
   }
 
   return map;
+}
+
+/**
+ * The first and last tracks in `first..last` that are shown, or the range
+ * itself when none is.
+ */
+function shownSpan(first: number, last: number, shown: (n: number) => boolean): [number, number] {
+  let lo = first;
+  while (lo < last && !shown(lo)) {
+    lo++;
+  }
+  let hi = last;
+  while (hi > lo && !shown(hi)) {
+    hi--;
+  }
+  return shown(lo) ? [lo, hi] : [first, last];
 }
 
 /**
@@ -1829,22 +1873,28 @@ function mergePieceInput(piece: MergePiece, sheet: PdfSheetData): Omit<LayoutCel
     sheet.rows.get(row)?.cells.get(col)?.style?.border;
 
   // Excel formats the whole region from the master and draws its value once, in
-  // the piece that holds it — the others are the same box continued, not a
-  // repeat of its contents.
+  // the piece that begins where the region is first displayed — the others are
+  // the same box continued, not a repeat of its contents. That is the master's
+  // own piece unless the master's row or column is hidden.
   const master = sheet.rows.get(region.top)?.cells.get(region.left);
-  const holdsMaster = piece.top === region.top && piece.left === region.left;
+  const holdsValue = piece.top === region.shownTop && piece.left === region.shownLeft;
 
+  // Each edge is the region's own only where the piece reaches its displayed
+  // boundary; the style is still read from the boundary cells that own it.
   return {
     styleCell: master,
-    valueCell: holdsMaster ? master : undefined,
+    valueCell: holdsValue ? master : undefined,
     colSpan: piece.colSpan,
     rowSpan: piece.rowSpan,
     borders: {
-      top: piece.top === region.top ? borderAt(region.top, piece.left)?.top : undefined,
+      top: piece.top === region.shownTop ? borderAt(region.top, piece.left)?.top : undefined,
       bottom:
-        piece.bottom === region.bottom ? borderAt(region.bottom, piece.left)?.bottom : undefined,
-      left: piece.left === region.left ? borderAt(piece.top, region.left)?.left : undefined,
-      right: piece.right === region.right ? borderAt(piece.top, region.right)?.right : undefined
+        piece.bottom === region.shownBottom
+          ? borderAt(region.bottom, piece.left)?.bottom
+          : undefined,
+      left: piece.left === region.shownLeft ? borderAt(piece.top, region.left)?.left : undefined,
+      right:
+        piece.right === region.shownRight ? borderAt(piece.top, region.right)?.right : undefined
     }
   };
 }

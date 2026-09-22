@@ -634,6 +634,116 @@ describe("Auto-Fit Integration", () => {
     expect(col.width).toBeLessThan(Column.getWidth(ws2, "A")!);
   });
 
+  it("includes hidden rows when includeHiddenRows is set", () => {
+    const build = () => {
+      const ws = Workbook.addWorksheet(Workbook.create(), "test");
+      Cell.setValue(ws, "A1", "Short");
+      Cell.setValue(ws, "A2", "This is a very long hidden row value");
+      Cell.setValue(ws, "B1", "B");
+      Row.setHidden(ws, 2, true);
+      return ws;
+    };
+    const reference = Workbook.addWorksheet(Workbook.create(), "ref");
+    Cell.setValue(reference, "A1", "Short");
+    Cell.setValue(reference, "A2", "This is a very long hidden row value");
+    Worksheet.autoFitColumn(reference, "A");
+    const expected = Column.getWidth(reference, "A");
+
+    const single = Worksheet.autoFitColumn(build(), "A", { includeHiddenRows: true });
+    const all = Worksheet.autoFitColumns(build(), { includeHiddenRows: true });
+    const range = Worksheet.autoFitColumns(build(), "A", "A", { includeHiddenRows: true });
+    expect(Column.getWidth(single, "A")).toBe(expected);
+    expect(Column.getWidth(all, "A")).toBe(expected);
+    expect(Column.getWidth(range, "A")).toBe(expected);
+    // The range form still limits which columns are touched.
+    expect(getColumn(range, "B").bestFit).toBeUndefined();
+    expect(getColumn(all, "B").bestFit).toBe(true);
+  });
+
+  // Issue #231: a vertical merge whose master row is hidden (a collapsed
+  // outline group) is still displayed in its visible rows.
+  describe("vertical merge visibility", () => {
+    const text = "Merged Text - this one is quite wide";
+    const build = (hideRows: number[], includeHiddenRows?: boolean) => {
+      const ws = Workbook.addWorksheet(Workbook.create(), "test");
+      Cell.setValue(ws, "A1", "Header A");
+      Worksheet.merge(ws, "A2:A4");
+      Cell.setValue(ws, "A2", text);
+      Cell.setValue(ws, "A10", "Grand Total");
+      for (const r of hideRows) {
+        Row.setHidden(ws, r, true);
+      }
+      return Column.getWidth(Worksheet.autoFitColumn(ws, "A", { includeHiddenRows }), "A")!;
+    };
+    const visible = build([]);
+
+    it("measures the merge when only its master row is hidden", () => {
+      expect(build([2, 3])).toBe(visible);
+    });
+
+    it("measures the merge when only its last row is visible through a hidden middle", () => {
+      expect(build([2])).toBe(visible);
+      expect(build([3, 4])).toBe(visible);
+    });
+
+    it("ignores a merge whose every row is hidden", () => {
+      expect(build([2, 3, 4])).toBeLessThan(visible);
+    });
+
+    it("measures a fully hidden merge when includeHiddenRows is set", () => {
+      expect(build([2, 3, 4], true)).toBe(visible);
+    });
+  });
+
+  it("measures a horizontal merge whose master column is hidden but another is visible", () => {
+    const build = (hideCols: string[]) => {
+      const ws = Workbook.addWorksheet(Workbook.create(), "test");
+      Cell.setValue(ws, "D1", "Normal");
+      Worksheet.merge(ws, "A1:B1");
+      Cell.setValue(ws, "A1", "Many\nlines\nof\ntext");
+      for (const c of hideCols) {
+        Column.setHidden(ws, c, true);
+      }
+      return Row.getHeight(Worksheet.autoFitRow(ws, 1), 1)!;
+    };
+    const visible = build([]);
+    expect(build(["A"])).toBe(visible);
+    expect(build(["A", "B"])).toBeLessThan(visible);
+  });
+
+  describe("wrapped merged cell width", () => {
+    const text = "word ".repeat(30).trim();
+    const fit = (merge: string | undefined, widths: number[], hidden: string[] = []) => {
+      const ws = Workbook.addWorksheet(Workbook.create(), "test");
+      widths.forEach((w, i) => Column.setWidth(ws, i + 1, w));
+      if (merge) {
+        Worksheet.merge(ws, merge);
+      }
+      Cell.setValue(ws, "A1", text);
+      Cell.setAlignment(ws, "A1", { wrapText: true });
+      for (const c of hidden) {
+        Column.setHidden(ws, c, true);
+      }
+      return Row.getHeight(Worksheet.autoFitRow(ws, 1), 1)!;
+    };
+
+    it("wraps across the combined width of the merged columns", () => {
+      const one = fit(undefined, [10, 10, 10]);
+      const two = fit("A1:B1", [10, 10, 10]);
+      const three = fit("A1:C1", [10, 10, 10]);
+      expect(two).toBeLessThan(one);
+      expect(three).toBeLessThan(two);
+    });
+
+    it("excludes hidden columns from the width a merge wraps across", () => {
+      // A1:C1 with a wide but hidden B wraps exactly like A1:B1 of two
+      // equally narrow columns: the hidden width contributes nothing.
+      expect(fit("A1:C1", [10, 60, 10], ["B"])).toBe(fit("A1:B1", [10, 10]));
+      // Hiding the master column moves the text, it does not remove it.
+      expect(fit("A1:C1", [60, 10, 10], ["A"])).toBe(fit("A1:B1", [10, 10]));
+    });
+  });
+
   it("skips hidden columns when auto-fitting rows", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "test");

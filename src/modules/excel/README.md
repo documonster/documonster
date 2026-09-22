@@ -489,6 +489,10 @@ Cell.setNote(worksheet, "C1", {
 
 ```typescript
 Worksheet.autoFitColumns(worksheet);
+
+// Hidden rows are ignored, as in Excel. To size columns for a collapsed
+// outline group as it will look once expanded, measure them too:
+Worksheet.autoFitColumns(worksheet, { includeHiddenRows: true });
 ```
 
 ## Charts

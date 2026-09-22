@@ -236,6 +236,7 @@ function borderedSheet(opts: {
   /** Cells given a fill, keyed as "row:col". */
   fills?: string[];
   hiddenRows?: number[];
+  hiddenCols?: number[];
   pageSetup?: PdfPageSetupData;
   /** Text per cell, keyed as "row:col". Cells outside the map are empty. */
   text?: Record<string, string>;
@@ -246,7 +247,7 @@ function borderedSheet(opts: {
 
   const columns = new Map<number, PdfColumnData>();
   for (let c = 1; c <= opts.colCount; c++) {
-    columns.set(c, { width: 12 });
+    columns.set(c, { width: 12, hidden: opts.hiddenCols?.includes(c) || undefined });
   }
 
   const rows = new Map<number, PdfRowData>();
@@ -431,6 +432,58 @@ describe("layout-engine merged regions across page boundaries", () => {
     expect(merged.rowSpan).toBe(5);
     expect(merged.borders.top?.width).toBeCloseTo(MEDIUM_WIDTH, 5);
     expect(merged.borders.bottom?.width).toBeCloseTo(MEDIUM_WIDTH, 5);
+  });
+
+  // Issue #231: a merge in a collapsed outline group has its master's row
+  // hidden while the rest of it is displayed. No piece starts at the master,
+  // so keying the value and the outline on the master's row dropped both.
+  it("should draw a merged region's value and outline when its master row is hidden", async () => {
+    const sheet = borderedSheet({
+      rowCount: 6,
+      colCount: 2,
+      merges: ["A2:A4"],
+      ring: { top: 2, left: 1, bottom: 4, right: 1 },
+      hiddenRows: [2, 3],
+      text: { "2:1": "M" }
+    });
+    const pages = await layoutSheet(sheet, buildOptions(), new FontManager());
+
+    const merged = cellsInColumn(pages[0], 0).find(cell => cell.text === "M");
+    expect(merged).toBeDefined();
+    expect(merged!.rowSpan).toBe(1);
+    expect(merged!.borders.top?.width).toBeCloseTo(MEDIUM_WIDTH, 5);
+    expect(merged!.borders.bottom?.width).toBeCloseTo(MEDIUM_WIDTH, 5);
+  });
+
+  it("should draw a merged region's value and outline when its master column is hidden", async () => {
+    const sheet = borderedSheet({
+      rowCount: 2,
+      colCount: 4,
+      merges: ["A1:C1"],
+      ring: { top: 1, left: 1, bottom: 1, right: 3 },
+      hiddenCols: [1],
+      text: { "1:1": "M" }
+    });
+    const pages = await layoutSheet(sheet, buildOptions(), new FontManager());
+
+    const merged = pages[0].cells.find(cell => cell.text === "M");
+    expect(merged).toBeDefined();
+    expect(merged!.colSpan).toBe(2);
+    expect(merged!.rect.x).toBeCloseTo(pages[0].columnOffsets[0], 5);
+    expect(merged!.borders.left?.width).toBeCloseTo(MEDIUM_WIDTH, 5);
+    expect(merged!.borders.right?.width).toBeCloseTo(MEDIUM_WIDTH, 5);
+  });
+
+  it("should not lay out a merged region whose every row is hidden", async () => {
+    const sheet = borderedSheet({
+      rowCount: 5,
+      colCount: 2,
+      merges: ["A2:A3"],
+      hiddenRows: [2, 3],
+      text: { "2:1": "M" }
+    });
+    const pages = await layoutSheet(sheet, buildOptions(), new FontManager());
+    expect(pages[0].cells.some(cell => cell.text === "M")).toBe(false);
   });
 
   it("should tile a merged region that also appears in a repeated title band", async () => {
