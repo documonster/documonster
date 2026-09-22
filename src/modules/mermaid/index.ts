@@ -58,7 +58,7 @@ import {
   requirementNodeSizer,
   requirementToFlowchart
 } from "@mermaid/render/model";
-import { backdrop } from "@mermaid/render/shared";
+import { backdrop, centredText } from "@mermaid/render/shared";
 import { pieDrawList, sequenceDrawList } from "@mermaid/render/simple";
 import { stateToFlowchart } from "@mermaid/render/state";
 import { journeyDrawList, timelineDrawList } from "@mermaid/render/track";
@@ -242,6 +242,33 @@ export { MermaidSyntaxError, parseMermaid };
 export { layoutFlowchart };
 export type { LayoutOptions, ThemeOptions };
 export type { EdgeRoute, FlowLayout, GroupBox, NodeBox } from "@mermaid/layout/flowchart";
+/**
+ * Draw a laid-out diagram yourself, in the colours and at the text positions the built-in
+ * renderer would have used.
+ *
+ * {@link layoutFlowchart} is public, so "use the layout and render it your own way" is a
+ * supported route — a caller wanting a different node shape, an annotation of their own, or
+ * an HTML/canvas target rather than a `DrawList` takes it. It was half-open: the geometry
+ * came back, and everything needed to *paint* it was internal.
+ *
+ * {@link Theme} was published without either the function that produces one or any signature
+ * accepting one, which made it a name for a thing a consumer could not obtain, could not
+ * construct — ten required `Rgba01` fields plus a `paletteText` callback — and could not pass
+ * anywhere. `resolveTheme` is what it was missing: {@link MermaidRenderOptions.theme} takes
+ * CSS strings, and this is the same resolution the renderer applies to them, so a
+ * self-rendered diagram matches one from {@link mermaidToSvg} instead of approximating it.
+ * Without it the only route to the palette was to copy the hex literals out of this module's
+ * source and hope they did not move.
+ *
+ * `centredText` is exported rather than the two constants behind it (`LINE_HEIGHT`,
+ * `BASELINE_SHIFT`) on purpose. A display list positions text by its baseline, because that
+ * is the one thing every backend can honour, so stacking `NodeBox.lines` in the middle of a
+ * box is arithmetic the caller has to do — and handing out the constants invites a ninth copy
+ * of that arithmetic, free to disagree with the eight inside. The box shape it takes is
+ * exactly what the layout already returns: `NodeBox`, `GroupBox` and `EdgeRoute.label` all
+ * carry `x`/`y`/`width`/`height`, and the last two carry the wrapped `lines` with them.
+ */
+export { centredText, resolveTheme };
 export type { Theme } from "@mermaid/theme";
 export type {
   ClassBox,

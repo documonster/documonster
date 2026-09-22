@@ -10,7 +10,14 @@
 import { rasterizeToRgba, toSvg } from "@draw/index";
 import { renderDrawList } from "@draw/render";
 import type { DrawNode, DrawPaint } from "@draw/types";
-import { layoutFlowchart, mermaidToDrawList, mermaidToSvg, parseMermaid } from "@mermaid/index";
+import {
+  centredText,
+  layoutFlowchart,
+  mermaidToDrawList,
+  mermaidToSvg,
+  parseMermaid,
+  resolveTheme
+} from "@mermaid/index";
 import type { FlowchartDiagram } from "@mermaid/types";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { createPdfDrawSurface } from "@pdf/render/draw-surface";
@@ -679,5 +686,58 @@ describe("subgraph frames occupy space", () => {
     const first = result.groups.find(group => group.id === "ONE")!;
     const second = result.groups.find(group => group.id === "TWO")!;
     expect(second.y - (first.y + first.height)).toBeGreaterThan(20);
+  });
+});
+
+describe("rendering a public layout yourself", () => {
+  // `layoutFlowchart` is public, so taking the geometry and painting it another way is a
+  // supported route. It was half-open: the boxes came back and nothing needed to paint them
+  // did, so the only way to colour one was to copy the hex literals out of `theme.ts`.
+  //
+  // These assert what the two exports that closed it *do*, deliberately not that they agree
+  // with the built-in renderer — the renderer calls both (`render/flowchart.ts:74`,
+  // `mermaidToDrawList` → `resolveTheme`), so comparing the two would be one function
+  // measured against itself and could not fail. The import above is what pins their
+  // existence; a test cannot usefully add to that.
+
+  it("fills a theme out from CSS strings, keeping the defaults for the rest", () => {
+    const theme = resolveTheme({ nodeFill: "#ff0000" });
+    expect(theme.nodeFill).toEqual({ r: 1, g: 0, b: 0, a: 1 });
+    // Every token arrives resolved rather than absent or still a string, which is the whole
+    // reason a consumer needs this instead of reading `ThemeOptions` themselves: one missing
+    // token is a paint of `undefined`, which draws nothing and raises nothing.
+    const channels = (value: unknown): boolean =>
+      typeof value === "object" &&
+      value !== null &&
+      ["r", "g", "b", "a"].every(
+        key => typeof (value as Record<string, unknown>)[key] === "number"
+      );
+    for (const [token, value] of Object.entries(theme)) {
+      if (token === "background" || token === "palette" || token === "paletteText") {
+        continue;
+      }
+      expect(channels(value), `${token} is not a resolved colour`).toBe(true);
+    }
+    expect(theme.palette.every(entry => channels(entry))).toBe(true);
+    // `paletteText` is a function of the colour, so a pale slice and a dark one differ.
+    expect(theme.paletteText({ r: 1, g: 1, b: 1, a: 1 })).not.toEqual(
+      theme.paletteText({ r: 0, g: 0, b: 0, a: 1 })
+    );
+  });
+
+  it("stacks lines symmetrically about the middle of the box it is given", () => {
+    // A display list positions text by its baseline, so vertical centring is arithmetic the
+    // caller would otherwise redo — this is the ninth copy that does not exist.
+    const box = { x: 0, y: 100, width: 80, height: 40 };
+    const node = centredText(box, ["one", "two"], 10, "Arial", { r: 0, g: 0, b: 0, a: 1 });
+    expect(node.kind).toBe("text");
+    if (node.kind !== "text") {
+      return;
+    }
+    expect(node.x).toBe(40);
+    const baselines = node.lines.map(line => node.y + (line.dy ?? 0));
+    // Two lines, 10pt at the module's 1.3 line height: 13 units apart, centred on y=120.
+    expect(baselines[1]! - baselines[0]!).toBeCloseTo(13, 5);
+    expect((baselines[0]! + baselines[1]!) / 2 - 120).toBeCloseTo(10 * 0.36, 5);
   });
 });
