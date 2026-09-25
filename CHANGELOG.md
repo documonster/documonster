@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/documonster/documonster/compare/v0.17.0...v0.17.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **excel:** Let documonster/excel bundle into a single UMD/IIFE file again ([033e5d6](https://github.com/documonster/documonster/commit/033e5d6231e93c159e806b48d14831b3cfb28f7f)), closes [#233](https://github.com/documonster/documonster/issues/233)
+
 ## [0.17.0](https://github.com/documonster/documonster/compare/v0.16.1...v0.17.0) (2026-09-22)
 
 
