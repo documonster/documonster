@@ -39,6 +39,7 @@ import {
 } from "@excel/core/workbook.browser";
 import {
   addBackgroundImage,
+  mergeCells,
   getColumn as worksheetColumn,
   getRow as worksheetRow,
   setHeaderFooterImage
@@ -49,7 +50,6 @@ import { ExcelFileError, XlsbFormulaDecodeError } from "@excel/errors";
 import { getValue, setStyle, setValue } from "@excel/surface/cell";
 import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/surface/column";
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
-import { merge } from "@excel/surface/worksheet";
 import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
 import { decodeRange, encodeCol } from "@excel/utils/address";
 import {
@@ -1086,7 +1086,7 @@ async function readInto(
     // Merged after the cells, because merging clears every covered cell but the master — doing
     // it first would erase values that were about to be written.
     for (const range of read.merges) {
-      merge(worksheet, range);
+      mergeCells(worksheet, range);
     }
 
     // After the row styles, which reset a row's height as a side effect of setting its format.

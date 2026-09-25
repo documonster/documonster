@@ -921,6 +921,74 @@ async function runRolldown(scenario: Scenario): Promise<ScenarioResult> {
   }
 }
 
+/**
+ * A consumer library bundling `documonster/excel` into one UMD file — tree-shaken, with code
+ * splitting off — must get exactly one file (issue #233).
+ *
+ * When the entry uses a binding that a module re-exports (`surface/worksheet.js`), and that module
+ * is also imported from code reachable only through a tree-shaken `import()`
+ * (`xlsb/read/package.js`), rolldown emits it as its own lazy-init chunk even with
+ * `codeSplitting: false`, and a UMD/IIFE build then refuses to run at all
+ * (rolldown/rolldown#11001). The scenario gate above cannot see it: it builds ESM with splitting
+ * on, where an extra chunk is legitimate.
+ *
+ * This guards the path #233 reported, not every entry shape: the bundler defect itself is upstream.
+ *
+ * The entry deliberately does not call `Workbook.read`: the stray chunk appears only while the XLSB
+ * reader is reachable solely through `import()` and not otherwise used. Calling `read` pulls it in
+ * for real and the build passes even with the defect present — verified against the unfixed tree.
+ */
+const SINGLE_FILE_ENTRY = `import { Workbook, Worksheet, Row, Column, Cell } from "${PKG_NAME}/excel";
+export function run() {
+  const wb = Workbook.create();
+  const ws = Workbook.addWorksheet(wb, "S");
+  Worksheet.setColumns(ws, [{ header: "a", key: "a" }]);
+  Row.setHeight(ws, 1, 20);
+  Column.setWidth(ws, 1, 9);
+  Cell.setValue(ws, "A1", 1);
+  return Worksheet.rowCount(ws);
+}
+`;
+
+async function runRolldownSingleFile(platform: "browser" | "node"): Promise<ScenarioResult> {
+  const name = `excel single-file umd (${platform})`;
+  const slug = `single-file-${platform}`;
+  const entryFile = path.join(TMP_DIR, `rolldown-${slug}.mjs`);
+  const outDir = path.join(TMP_DIR, `rolldown-${slug}-out`);
+  fs.writeFileSync(entryFile, SINGLE_FILE_ENTRY);
+  try {
+    for (const format of ["esm", "umd"] as const) {
+      const dir = path.join(outDir, format);
+      await rolldownBuild({
+        input: entryFile,
+        platform,
+        resolve: {
+          conditionNames:
+            platform === "browser" ? ["browser", "import", "default"] : ["import", "default"]
+        },
+        treeshake: true,
+        external: [/^node:/],
+        output: { dir, format, name: "consumer", codeSplitting: false, minify: false }
+      });
+      const files = fs.readdirSync(dir).filter(f => f.endsWith(".js"));
+      if (files.length !== 1) {
+        return makeError(name, "rolldown", `${format} emitted ${files.length} files: ${files}`);
+      }
+    }
+    return {
+      name,
+      bundler: "rolldown",
+      bundleSize: fs.statSync(path.join(outDir, "umd", "rolldown-" + slug + ".js")).size,
+      contributingModules: [],
+      parsedModuleCount: 0,
+      violations: [],
+      passed: true
+    };
+  } catch (err: any) {
+    return makeError(name, "rolldown", err.message);
+  }
+}
+
 function runRspack(scenario: Scenario): Promise<ScenarioResult> {
   const { entryFile, slug } = writeEntry("rspack", scenario);
   const outDir = path.join(TMP_DIR, `rspack-${slug}-out`);
@@ -1068,6 +1136,7 @@ async function main(): Promise<void> {
       results.push(await runRolldown(s));
     }
   }
+  results.push(await runRolldownSingleFile("browser"), await runRolldownSingleFile("node"));
   for (const s of scenarios) {
     if (!s.excludeBundlers?.includes("rspack")) {
       results.push(await runRspack(s));
