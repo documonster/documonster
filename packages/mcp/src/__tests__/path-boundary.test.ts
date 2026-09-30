@@ -339,6 +339,10 @@ const NON_PATH_LEAVES: ReadonlySet<string> = new Set([
   "doc_search::text",
   // doc_write
   "doc_write::markdown",
+  // text_write: the content itself, never opened as a file
+  "text_write::text",
+  // text_write: an upload id, checked against a fixed pattern before any use
+  "text_write::upload",
   // form_fill
   "form_fill::values{}",
   // formula_evaluate
@@ -657,6 +661,36 @@ function casesFor(fx: Fixture): readonly BoundaryCase[] {
       mentions: "../escape.docx"
     },
     {
+      carrier: "doc_write::from",
+      args: { path: "from.docx", from: outside },
+      mentions: SECRET_MENTION
+    },
+    {
+      carrier: "text_write::path",
+      args: { path: "../escape.md", total: 1, part: 1, text: "x" },
+      mentions: "../escape.md"
+    },
+    {
+      carrier: "sheet_write::sheetsFrom",
+      args: { path: "from.xlsx", sheetsFrom: outside },
+      mentions: SECRET_MENTION
+    },
+    {
+      carrier: "sheet_edit::opsFrom",
+      args: { path: "real.xlsx", out: "from.xlsx", opsFrom: outside },
+      mentions: SECRET_MENTION
+    },
+    {
+      carrier: "form_fill::valuesFrom",
+      args: { path: "real.docx", out: "from.docx", valuesFrom: outside },
+      mentions: SECRET_MENTION
+    },
+    {
+      carrier: "template_fill::dataFrom",
+      args: { template: "real.docx", out: "from-t.docx", dataFrom: outside },
+      mentions: SECRET_MENTION
+    },
+    {
       carrier: "doc_convert::from",
       args: { from: outside, to: "out.md" },
       mentions: SECRET_MENTION
@@ -861,6 +895,8 @@ function baseArgsFor(tool: string): Record<string, unknown> | undefined {
       return { path: "real.docx", find: "alpha", replace: "beta", out: "e.docx", overwrite: true };
     case "doc_write":
       return { path: "w.docx", markdown: "# x", overwrite: true };
+    case "text_write":
+      return { path: "t.md", total: 1, part: 1, text: "x", overwrite: true };
     case "doc_convert":
       return { from: "a.csv", to: "c.xlsx", overwrite: true };
     case "doc_paginate":

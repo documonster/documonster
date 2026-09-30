@@ -79,7 +79,8 @@ describe("MCP server", () => {
         "sheet_read",
         "sheet_write",
         "template_fill",
-        "template_inspect"
+        "template_inspect",
+        "text_write"
       ]);
     } finally {
       await harness.close();
@@ -112,7 +113,8 @@ describe("MCP server", () => {
         "formula_evaluate",
         "sheet_edit",
         "sheet_read",
-        "sheet_write"
+        "sheet_write",
+        "text_write"
       ]);
     } finally {
       await harness.close();
@@ -131,7 +133,8 @@ describe("MCP server", () => {
         "doc_edit",
         "pdf_edit",
         "template_fill",
-        "archive_write"
+        "archive_write",
+        "text_write"
       ]) {
         expect(names, `${withheld} must be withheld`).not.toContain(withheld);
       }

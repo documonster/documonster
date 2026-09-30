@@ -33,6 +33,7 @@ import {
   type ResolvedImage
 } from "./image.js";
 import { textResult } from "./result.js";
+import { chooseSource, readJsonSource } from "./text-source.js";
 import { defineTool } from "./types.js";
 
 /**
@@ -153,8 +154,16 @@ export const templateFillTool = defineTool({
       .describe("Output .docx path below --output-root; returned as @output/<path>."),
     data: z
       .record(z.string(), z.unknown())
+      .optional()
       .describe(
-        'Values keyed by placeholder name, e.g. { "client": { "name": "Acme" }, "items": [{ "name": "X", "amount": 10 }], "overdue": true }.'
+        'Values keyed by placeholder name, e.g. { "client": { "name": "Acme" }, "items": [{ "name": "X", "amount": 10 }], "overdue": true }. Use this or `dataFrom`.'
+      ),
+    dataFrom: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Read the data from a .json file instead — for data too large for one call, built with text_write. Use this or `data`."
       ),
     images: z
       .record(z.string(), z.object(imageSourceShape))
@@ -187,6 +196,7 @@ export const templateFillTool = defineTool({
     const templatePath = await resolveInRoot(config, args.template, { mustExist: true });
     await assertReadableSize(config, templatePath, args.template);
     const target = await resolveOutputPath(config, args.out);
+    const data = await readTemplateData(config, args);
 
     if (path.extname(args.out).toLowerCase() !== ".docx") {
       throw toolError.invalidInput(
@@ -215,7 +225,7 @@ export const templateFillTool = defineTool({
     // Merged *before* the try, so a name collision is reported as itself rather
     // than being caught below and re-labelled "filling the template failed" with
     // the wrong hint attached.
-    const templateData = mergeTemplateData(args.data, images, media);
+    const templateData = mergeTemplateData(data, images, media);
 
     // Typed explicitly: a bare `let` is implicitly `any`, which would silently
     // erase the tag types read off the result below.
@@ -833,4 +843,25 @@ async function readTemplate(resolved: string, displayPath: string) {
       { cause }
     );
   });
+}
+
+/** The fill data, from `data` or from the JSON file `dataFrom` names. */
+async function readTemplateData(
+  config: ServerConfig,
+  args: {
+    readonly data?: Record<string, unknown> | undefined;
+    readonly dataFrom?: string | undefined;
+  }
+): Promise<Record<string, unknown>> {
+  if (chooseSource(args.data, args.dataFrom, ["data", "dataFrom"]) === "inline") {
+    return args.data as Record<string, unknown>;
+  }
+  const parsed = await readJsonSource(config, args.dataFrom as string);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw toolError.invalidInput(
+      `${args.dataFrom} must hold a JSON object keyed by placeholder name`,
+      'e.g. { "client": { "name": "Acme" }, "items": [ … ] } — not an array or a single value.'
+    );
+  }
+  return parsed as Record<string, unknown>;
 }

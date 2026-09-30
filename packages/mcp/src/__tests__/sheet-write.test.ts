@@ -53,6 +53,22 @@ async function reopen(fx: Fixture, relative: string) {
 }
 
 describe("sheet_write", () => {
+  it("reads its sheets from a JSON file with sheetsFrom", async () => {
+    const fx = await fixture();
+    await writeFile(
+      path.join(fx.root, "spec.json"),
+      JSON.stringify([{ name: "Big", rows: Array.from({ length: 3000 }, (_, index) => [index]) }])
+    );
+    await write(fx, { path: "big.xlsx", sheetsFrom: "spec.json" });
+    const ws = Workbook.getWorksheet(await reopen(fx, "big.xlsx"), "Big")!;
+    expect(Cell.getValue(ws, "A3000")).toBe(2999);
+
+    await writeFile(path.join(fx.root, "bad.json"), JSON.stringify([{ rows: [] }]));
+    await expect(write(fx, { path: "bad.xlsx", sheetsFrom: "bad.json" })).rejects.toThrow(
+      /not a valid sheets array/
+    );
+  });
+
   it("writes rows that read back identically", async () => {
     const fx = await fixture();
     await write(fx, {

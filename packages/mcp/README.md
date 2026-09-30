@@ -225,6 +225,7 @@ server root with an untrusted local account or process while the server runs.
 | **Orientation**         |                                                                                                                                                                  |
 | `documonster_help`      | Conventions, path rules, and formula/document/editing notes kept out of tool schemas to save context.                                                            |
 | `doc_inspect`           | Identify a file (type, size, sheet list, CSV dialect, extension mismatches) or list a directory. Always first.                                                   |
+| `text_write`            | Upload a long text file (Markdown, JSON, CSV) in numbered parts, for content too large for one tool call. See [Long content](#long-content).                     |
 | **Spreadsheets**        |                                                                                                                                                                  |
 | `sheet_read`            | Read a bounded window as a Markdown table with column letters and row numbers. Paginates; reports what it omitted.                                               |
 | `sheet_write`           | Create an `.xlsx` from a declarative spec. `fromCsv` pulls source data in server-side; `images` places pictures.                                                 |
@@ -248,6 +249,67 @@ server root with an untrusted local account or process while the server runs.
 | **Archives**            |                                                                                                                                                                  |
 | `archive_read`          | List or extract a `.zip`/`.tar`. Guards traversal, decompression bombs and symlink entries.                                                                      |
 | `archive_write`         | Package files and directories into a `.zip`/`.tar`, verified by reading it back.                                                                                 |
+
+### Long content
+
+A model generates a tool call's arguments in full before the client sends it, so no
+argument can be longer than one model reply. A call that tries — a full translated
+report in `doc_write`'s `markdown`, thousands of rows in `sheet_edit`'s `ops` — is
+aborted on the client before this server sees it, and MCP has no streamed arguments
+to split it with. Nothing the server does can accept it.
+
+So large content goes in two steps: `text_write` uploads a file in numbered parts,
+each small enough for one reply, and every content-heavy argument has a twin that
+reads that file by path.
+
+| Argument                 | File twin                  |
+| ------------------------ | -------------------------- |
+| `doc_write.markdown`     | `from` (Markdown)          |
+| `template_fill.data`     | `dataFrom` (JSON object)   |
+| `sheet_write.sheets`     | `sheetsFrom` (JSON array)  |
+| `sheet_write` sheet rows | `fromCsv` (CSV)            |
+| `sheet_edit.ops`         | `opsFrom` (JSON array)     |
+| `form_fill.values`       | `valuesFrom` (JSON object) |
+| `diagram_render.source`  | `from` (`.mmd` / `.md`)    |
+
+```jsonc
+text_write { "path": "report.md", "total": 6, "part": 1, "text": "# Report\n\n…\n\n" }
+                                     // → Upload **3f9c…** — pass it with every later part
+text_write { "upload": "3f9c…", "part": 2, "text": "## Findings\n\n…\n\n" }
+…                                    // parts may arrive in any order, or concurrently
+text_write { "upload": "3f9c…", "part": 6, "text": "…" }   // → **published** @output/report.md
+doc_write  { "path": "report.pdf", "from": "@output/report.md" }
+```
+
+An upload is a session, and its guarantees are the point of it:
+
+- **Nothing is published with a part missing.** `total` is declared up front and the
+  file appears only when parts 1…total are all stored; `{ upload }` alone reports
+  what is still missing.
+- **One commit point.** A part's bytes go to a new file, then the session manifest
+  is replaced atomically to point at it; a failure in between leaves the previous,
+  consistent state. A call that is rejected changes nothing, including a `total` it
+  carried.
+- **Publishing follows the manifest, not the last call.** Every change bumps a
+  revision; whenever the upload is complete and the published revision is behind,
+  any call publishes — so a failed publish is retried by a bare `{ upload }`.
+- **Retries are safe.** Resending a part with identical text changes nothing. A late
+  call from an earlier upload carries that upload's id, so it cannot leak into a
+  newer one.
+- **Limits hold before work is done.** The size limit is checked for the whole
+  request before anything is written and again before every publish; assembly
+  streams part by part.
+- **A republish never clobbers someone else's write**: it replaces the file only if
+  its SHA-256 is one this upload wrote, and a crash between installing the file and
+  recording it is recognised rather than mistaken for a foreign edit.
+- Sessions untouched for 24 hours are removed; any call, a status check included,
+  counts as use.
+
+Serialisation is within one server process: two processes sharing a session, or a
+program writing the destination in the instant between the hash check and the
+rename, are not guarded against.
+
+A file read through a twin is validated by the same schema as the inline argument.
 
 ### Two worked examples
 

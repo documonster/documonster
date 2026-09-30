@@ -44,6 +44,13 @@ never document bytes.
 4. **Reuse returned \`@output/...\` paths.** Plain paths are read-only input.
    Every write returns a path below the separate output root; pass that exact
    path to the next read, edit, convert or archive call.
+5. **Send long content in parts.** A tool call is generated in full before it is
+   sent, so one argument cannot be longer than one of your replies — a call that
+   tries is aborted before the server sees it. Build anything long (a report, a
+   translation, large JSON or CSV) with \`text_write\`, a few thousand words per
+   part, then pass the file by path: \`doc_write\` \`from\`, \`template_fill\`
+   \`dataFrom\`, \`sheet_write\` \`sheetsFrom\` / \`fromCsv\`, \`sheet_edit\`
+   \`opsFrom\`, \`form_fill\` \`valuesFrom\`, \`diagram_render\` \`from\`.
 
 ## Constraints
 
@@ -79,6 +86,7 @@ widened.`
 ## Orientation
 - \`documonster_help\` — this documentation.
 - \`doc_inspect\` — identify a file or list a directory. Always first.
+- \`text_write\` — upload a long text file (Markdown, JSON, CSV) in numbered parts.
 
 ## Spreadsheets
 - \`sheet_read\` — read a bounded window.
@@ -443,6 +451,21 @@ tells you up front whether a PDF has any text at all.
 \`doc_write\` takes **Markdown** and produces .docx or .pdf. Write the content as
 Markdown — that is the input language. A \`\`\`mermaid fence in it becomes a real
 embedded diagram rather than a code block; see the \`diagrams\` topic.
+
+A long document — more than a few pages, a full translation — must not go into
+\`markdown\` in one call: the call can exceed your output limit and be aborted
+before it is sent. Write it with \`text_write\` instead:
+
+1. \`text_write({ path: "report.md", total: 6, part: 1, text: "# Title\\n\\n…\\n\\n" })\`
+   — the reply gives an upload id
+2. \`text_write({ upload: "<id>", part: 2, text: "## Section 2\\n\\n…\\n\\n" })\`, and so on
+3. once all 6 are in, the reply says **published**; then
+   \`doc_write({ path: "report.pdf", from: "@output/report.md" })\`
+
+Parts are joined exactly as sent, so end each one with a blank line. The file does
+not exist until every part has arrived, so it is never read half-written. A part
+that came out wrong is fixed by resending its number; \`text_write({ upload })\`
+alone reports which parts are still missing.
 
 ## Converting
 

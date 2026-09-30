@@ -130,6 +130,32 @@ describe("template_inspect", () => {
 });
 
 describe("template_fill", () => {
+  it("reads its data from a JSON file with dataFrom", async () => {
+    const fx = await fixture();
+    const file = await makeTemplate(fx);
+    await writeFile(
+      path.join(fx.root, "data.json"),
+      JSON.stringify({
+        invoice: { number: "INV-FROM-FILE" },
+        client: { name: "Acme", email: "a@b.c" },
+        overdue: false,
+        items: Array.from({ length: 500 }, (_, index) => ({ name: `Item ${index}`, amount: "1" }))
+      })
+    );
+    await run(templateFillTool, fx, { template: file, out: "filled.docx", dataFrom: "data.json" });
+    const text = Query.extractText(await Io.readFile(path.join(fx.root, "filled.docx")));
+    expect(text).toContain("INV-FROM-FILE");
+    expect(text).toContain("Item 499");
+
+    await writeFile(path.join(fx.root, "list.json"), "[1, 2]");
+    await expect(
+      run(templateFillTool, fx, { template: file, out: "x.docx", dataFrom: "list.json" })
+    ).rejects.toThrow(/must hold a JSON object/);
+    await expect(
+      run(templateFillTool, fx, { template: file, out: "x.docx", data: {}, dataFrom: "data.json" })
+    ).rejects.toThrow(/not both/);
+  });
+
   it("fills variables, dotted paths, conditionals and loops", async () => {
     const fx = await fixture();
     const file = await makeTemplate(fx);

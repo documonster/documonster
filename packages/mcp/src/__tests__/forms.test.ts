@@ -130,6 +130,22 @@ describe("form_fill — Word", () => {
     expect(text).toContain("## Values shape");
   });
 
+  it("reads its values from a JSON file with valuesFrom", async () => {
+    const fx = await fixture();
+    const file = await makeWordForm(fx);
+    await writeFile(
+      path.join(fx.root, "values.json"),
+      JSON.stringify({ applicantName: "From File", company: "Acme", agreeTerms: true })
+    );
+    await run(formFillTool, fx, { path: file, valuesFrom: "values.json" });
+    const fields = Query.extractFormFields(await Io.readFile(path.join(fx.root, file)));
+    expect(Object.fromEntries(fields.map(f => [f.name, f.value]))).toEqual({
+      applicantName: "From File",
+      company: "Acme",
+      agreeTerms: true
+    });
+  });
+
   it("fills text and checkbox fields", async () => {
     const fx = await fixture();
     const file = await makeWordForm(fx);

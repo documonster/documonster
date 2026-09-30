@@ -43,6 +43,7 @@ import {
   toArgb,
   type SheetHandle
 } from "./spreadsheet.js";
+import { chooseSource, readJsonSource } from "./text-source.js";
 import { defineTool } from "./types.js";
 
 /** Cells one op may touch, so an unbounded range cannot hang the server. */
@@ -136,7 +137,18 @@ export const sheetEditTool = defineTool({
       .union([z.string(), z.number().int().positive()])
       .optional()
       .describe("Sheet the edits apply to, by name or 1-based index. Defaults to the first."),
-    ops: z.array(opSchema).min(1).describe("Edits, applied in order."),
+    ops: z
+      .array(opSchema)
+      .min(1)
+      .optional()
+      .describe("Edits, applied in order. Use this or `opsFrom`."),
+    opsFrom: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Read the ops from a .json file holding the same array — for edits too large for one call (thousands of rows), built with text_write. Use this or `ops`."
+      ),
     dryRun: z
       .boolean()
       .optional()
@@ -163,6 +175,7 @@ export const sheetEditTool = defineTool({
     const { config } = context;
     assertWritable(config);
 
+    const ops = await readOps(config, args);
     const resolved = await resolveInRoot(config, args.path, { mustExist: true });
     const inputVersion = await fingerprint(resolved);
     const stats = await stat(resolved);
@@ -192,11 +205,11 @@ export const sheetEditTool = defineTool({
     // is synchronous by design — every change lands in memory before anything is
     // written — so the one asynchronous step has to happen ahead of it, and a
     // picture that cannot be read fails before any edit is applied.
-    const images = await resolveOpImages(config, args.ops);
+    const images = await resolveOpImages(config, ops);
 
     // Every op runs against the in-memory workbook first. Nothing is written
     // until all of them have succeeded, so a failure leaves the file untouched.
-    for (const [index, op] of args.ops.entries()) {
+    for (const [index, op] of ops.entries()) {
       try {
         applied.push(applyOp(wb, ws, op, images));
       } catch (cause) {
@@ -463,4 +476,32 @@ function requireAddress(address: string): string {
   // Reuse the range parser for the Excel row/column bounds.
   parseRange(upper);
   return upper;
+}
+
+/** The ops to apply, from `ops` or from the JSON file `opsFrom` names. */
+async function readOps(
+  config: ServerConfig,
+  args: {
+    readonly ops?: readonly z.infer<typeof opSchema>[] | undefined;
+    readonly opsFrom?: string | undefined;
+  }
+): Promise<readonly z.infer<typeof opSchema>[]> {
+  if (chooseSource(args.ops, args.opsFrom, ["ops", "opsFrom"]) === "inline") {
+    return args.ops as readonly z.infer<typeof opSchema>[];
+  }
+  const source = args.opsFrom as string;
+  // Validated with the very schema the inline argument gets, so a file cannot
+  // smuggle in an op or a field the tool would have rejected in `ops`.
+  const parsed = z
+    .array(opSchema)
+    .min(1)
+    .safeParse(await readJsonSource(config, source));
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw toolError.invalidInput(
+      `${source} is not a valid ops array: ${issue === undefined ? "invalid" : `${issue.path.join(".") || "(root)"}: ${issue.message}`}`,
+      'It must be the same JSON array `ops` takes, e.g. [{ "op": "set_range", "range": "A2:C4", "rows": [[1, 2, 3]] }].'
+    );
+  }
+  return parsed.data;
 }

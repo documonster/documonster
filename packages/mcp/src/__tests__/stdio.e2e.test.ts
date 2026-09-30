@@ -149,7 +149,8 @@ describe("documonster-mcp executable", () => {
         "sheet_read",
         "sheet_write",
         "template_fill",
-        "template_inspect"
+        "template_inspect",
+        "text_write"
       ]);
     } finally {
       await server.close();

@@ -48,7 +48,7 @@ export function createServer(
     { name: identity.name, version: identity.version },
     {
       instructions:
-        "Document toolkit for Excel, Word, PDF, CSV and ZIP files. Plain paths read from the input root; writes go to a separate output root and are returned as @output/<path>, which later tools can read. Input files are never modified unless the operator explicitly enabled in-place writes. Call doc_inspect before reading any document, and read narrow ranges rather than whole files. Call documonster_help for detailed guidance.",
+        "Document toolkit for Excel, Word, PDF, CSV and ZIP files. Plain paths read from the input root; writes go to a separate output root and are returned as @output/<path>, which later tools can read. Input files are never modified unless the operator explicitly enabled in-place writes. Call doc_inspect before reading any document, and read narrow ranges rather than whole files. Never put long content (a full report or translation, large JSON or CSV) in one argument — the call can exceed your output limit and be aborted before it is sent; build it with text_write in parts and pass the file by path. Call documonster_help for detailed guidance.",
       capabilities: { tools: {}, resources: {}, prompts: {} }
     }
   );

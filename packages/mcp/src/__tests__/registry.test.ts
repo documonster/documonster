@@ -131,7 +131,8 @@ describe("ALL_TOOLS", () => {
       "pdf_edit",
       "sheet_edit",
       "sheet_write",
-      "template_fill"
+      "template_fill",
+      "text_write"
     ]);
   });
 

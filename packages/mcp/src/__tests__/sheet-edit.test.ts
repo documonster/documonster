@@ -69,6 +69,26 @@ async function reopen(fx: Fixture, name: string) {
 }
 
 describe("sheet_edit — operations", () => {
+  it("reads its ops from a JSON file with opsFrom, validated like ops", async () => {
+    const fx = await fixture();
+    const file = await makeWorkbook(fx);
+    const rows = Array.from({ length: 2000 }, (_, index) => [`r${index}`, index]);
+    await writeFile(
+      path.join(fx.root, "ops.json"),
+      JSON.stringify([{ op: "set_range", range: "D1:E2000", rows }])
+    );
+    await edit(fx, { path: file, opsFrom: "ops.json" });
+    const ws = Workbook.getWorksheet(await reopen(fx, file), "Data")!;
+    expect(Cell.getValue(ws, "D2000")).toBe("r1999");
+    expect(Cell.getValue(ws, "E2000")).toBe(1999);
+
+    await writeFile(path.join(fx.root, "bad.json"), JSON.stringify([{ op: "rename", to: "x" }]));
+    await expect(edit(fx, { path: file, opsFrom: "bad.json" })).rejects.toThrow(
+      /not a valid ops array/
+    );
+    await expect(edit(fx, { path: file })).rejects.toThrow(/`ops` or `opsFrom` is required/);
+  });
+
   it("sets a single cell", async () => {
     const fx = await fixture();
     const file = await makeWorkbook(fx);

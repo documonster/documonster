@@ -23,6 +23,7 @@ import { Pdf } from "documonster/pdf";
 import { Io, Query } from "documonster/word";
 import { z } from "zod";
 
+import type { ServerConfig } from "../config.js";
 import { toolError } from "../errors.js";
 import { assertWritable, resolveEditTarget, resolveInRoot, type WriteTarget } from "../sandbox.js";
 import { requireFormat, supportsIncrementalUpdate } from "./document.js";
@@ -38,6 +39,7 @@ import {
   writeFileAtomic
 } from "./fs-helpers.js";
 import { textResult } from "./result.js";
+import { chooseSource, readJsonSource } from "./text-source.js";
 import { defineTool } from "./types.js";
 
 /** Where a fill writes, and what was preserved. */
@@ -62,7 +64,14 @@ export const formFillTool = defineTool({
       .record(z.string(), z.union([z.string(), z.boolean(), z.number()]))
       .optional()
       .describe(
-        'Values keyed by field name, e.g. { "fullName": "Jane Doe", "agree": true }. Omit to list the fields without changing anything.'
+        'Values keyed by field name, e.g. { "fullName": "Jane Doe", "agree": true }. Omit (and omit `valuesFrom`) to list the fields without changing anything.'
+      ),
+    valuesFrom: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Read the values from a .json object file instead — for a form too large to fill in one call, built with text_write. Use this or `values`."
       ),
     out: z
       .string()
@@ -104,7 +113,7 @@ export const formFillTool = defineTool({
       );
     }
 
-    if (args.values === undefined) {
+    if (args.values === undefined && args.valuesFrom === undefined) {
       return textResult(
         config,
         format === "docx"
@@ -132,12 +141,13 @@ export const formFillTool = defineTool({
       );
     }
     const write = { target: writeTarget, inPlace, takeBackup: inPlace && (args.backup ?? true) };
+    const filling = { ...args, values: await readFormValues(config, args) };
 
     return textResult(
       config,
       format === "docx"
-        ? await fillWordFields(resolved, write, args)
-        : await fillPdfFields(resolved, write, args)
+        ? await fillWordFields(resolved, write, filling)
+        : await fillPdfFields(resolved, write, filling)
     );
   }
 });
@@ -392,4 +402,28 @@ async function readWord(resolved: string, displayPath: string) {
       { cause }
     );
   });
+}
+
+/** The field values, from `values` or from the JSON file `valuesFrom` names. */
+async function readFormValues(
+  config: ServerConfig,
+  args: {
+    readonly values?: Record<string, string | boolean | number> | undefined;
+    readonly valuesFrom?: string | undefined;
+  }
+): Promise<Record<string, string | boolean | number>> {
+  if (chooseSource(args.values, args.valuesFrom, ["values", "valuesFrom"]) === "inline") {
+    return args.values as Record<string, string | boolean | number>;
+  }
+  const source = args.valuesFrom as string;
+  const parsed = z
+    .record(z.string(), z.union([z.string(), z.boolean(), z.number()]))
+    .safeParse(await readJsonSource(config, source));
+  if (!parsed.success) {
+    throw toolError.invalidInput(
+      `${source} must hold a JSON object of field name → string, number or boolean`,
+      'e.g. { "fullName": "Jane Doe", "agree": true }.'
+    );
+  }
+  return parsed.data;
 }

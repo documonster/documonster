@@ -34,6 +34,7 @@ import {
   type SheetHandle,
   type WorkbookHandle
 } from "./spreadsheet.js";
+import { chooseSource, readJsonSource } from "./text-source.js";
 import { defineTool } from "./types.js";
 
 /** A single cell value in `rows`. `null` writes a blank. */
@@ -131,7 +132,18 @@ export const sheetWriteTool = defineTool({
       .describe(
         "Output .xlsx or .xlsb path below --output-root; returned as @output/<path>. XLSB opens faster for large sheets and carries less: the tool reports what it dropped."
       ),
-    sheets: z.array(sheetSchema).min(1).describe("One entry per worksheet, in order."),
+    sheets: z
+      .array(sheetSchema)
+      .min(1)
+      .optional()
+      .describe("One entry per worksheet, in order. Use this or `sheetsFrom`."),
+    sheetsFrom: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Read the sheets array from a .json file instead — for a spec too large for one call, built with text_write. For plain row data prefer a sheet's fromCsv. Use this or `sheets`."
+      ),
     overwrite: z
       .boolean()
       .optional()
@@ -158,10 +170,11 @@ export const sheetWriteTool = defineTool({
     assertNonMacroOutput(args.path);
 
     const target = await resolveOutputPath(config, args.path);
-    for (const sheet of args.sheets) {
+    const sheets = await readSheets(config, args);
+    for (const sheet of sheets) {
       assertLegalSheetName(sheet.name);
     }
-    assertUniqueNames(args.sheets.map(sheet => sheet.name));
+    assertUniqueNames(sheets.map(sheet => sheet.name));
 
     const wb = Workbook.create();
     const report: string[] = [];
@@ -170,9 +183,9 @@ export const sheetWriteTool = defineTool({
     // sheet is built. A picture that cannot be read must not leave a half-built
     // workbook behind, and the resolution is the only asynchronous step in the
     // whole spec.
-    const images = await resolveImages(config, args.sheets);
+    const images = await resolveImages(config, sheets);
 
-    for (const spec of args.sheets) {
+    for (const spec of sheets) {
       const ws = await buildSheet(wb, spec, config, report);
       applyLayout(wb, ws, spec, images, report);
     }
@@ -214,7 +227,7 @@ export const sheetWriteTool = defineTool({
     return textResult(
       config,
       [
-        `Wrote **${outputDisplay(args.path)}** (${args.sheets.length} sheet(s)): ${args.sheets.map(sheet => JSON.stringify(sheet.name)).join(", ")}`,
+        `Wrote **${outputDisplay(args.path)}** (${sheets.length} sheet(s)): ${sheets.map(sheet => JSON.stringify(sheet.name)).join(", ")}`,
         `- ${formulaNote}`,
         ...(format === "xlsb"
           ? [
@@ -451,4 +464,31 @@ function assertUniqueNames(names: readonly string[]): void {
     }
     seen.add(key);
   }
+}
+
+/** The sheet specs, from `sheets` or from the JSON file `sheetsFrom` names. */
+async function readSheets(
+  config: ServerConfig,
+  args: {
+    readonly sheets?: readonly z.infer<typeof sheetSchema>[] | undefined;
+    readonly sheetsFrom?: string | undefined;
+  }
+): Promise<readonly z.infer<typeof sheetSchema>[]> {
+  if (chooseSource(args.sheets, args.sheetsFrom, ["sheets", "sheetsFrom"]) === "inline") {
+    return args.sheets as readonly z.infer<typeof sheetSchema>[];
+  }
+  const source = args.sheetsFrom as string;
+  // The same schema as the inline argument, so a file is held to the same rules.
+  const parsed = z
+    .array(sheetSchema)
+    .min(1)
+    .safeParse(await readJsonSource(config, source));
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw toolError.invalidInput(
+      `${source} is not a valid sheets array: ${issue === undefined ? "invalid" : `${issue.path.join(".") || "(root)"}: ${issue.message}`}`,
+      'It must be the same JSON array `sheets` takes, e.g. [{ "name": "Data", "rows": [["a", 1]] }].'
+    );
+  }
+  return parsed.data;
 }

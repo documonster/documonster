@@ -15,6 +15,7 @@ import { Io } from "documonster/word";
 import { markdownToDocx } from "documonster/word/markdown";
 import { z } from "zod";
 
+import type { ServerConfig } from "../config.js";
 import { toolError } from "../errors.js";
 import { assertWritable, outputDisplay, resolveOutputPath } from "../sandbox.js";
 import { prepareMarkdownDiagrams } from "./diagram-markdown.js";
@@ -27,6 +28,7 @@ import {
   textLanguageShape
 } from "./pdf-fonts.js";
 import { formatBytes, textResult } from "./result.js";
+import { chooseSource, readTextSource } from "./text-source.js";
 import { defineTool } from "./types.js";
 
 export const docWriteTool = defineTool({
@@ -34,7 +36,7 @@ export const docWriteTool = defineTool({
   group: "word",
   title: "Write a Word or PDF document",
   description:
-    "Create a .docx or .pdf from Markdown. Headings, lists, tables, bold/italic, code blocks and links are all converted, and a ```mermaid fence becomes a real embedded diagram. Write the content as Markdown — that is the input language for this tool.",
+    "Create a .docx or .pdf from Markdown. Headings, lists, tables, bold/italic, code blocks and links are all converted, and a ```mermaid fence becomes a real embedded diagram. Write the content as Markdown — that is the input language for this tool. For a long document (more than a few pages, e.g. a full translation) do not put it all in `markdown`: one call that large can exceed your output limit and be aborted before it is sent. Build it with text_write in parts, then pass that file as `from`.",
   inputSchema: {
     path: z
       .string()
@@ -45,7 +47,17 @@ export const docWriteTool = defineTool({
     markdown: z
       .string()
       .min(1)
-      .describe("Document content as Markdown. Use # for headings, - for lists, | for tables."),
+      .optional()
+      .describe(
+        "Document content as Markdown. Use # for headings, - for lists, | for tables. Use this or `from`."
+      ),
+    from: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Read the Markdown from a file instead, e.g. one built with text_write (@output/report.md). Use this or `markdown`."
+      ),
     diagrams: z
       .boolean()
       .optional()
@@ -89,13 +101,14 @@ export const docWriteTool = defineTool({
     }
 
     const target = await resolveOutputPath(config, args.path);
+    const markdown = await readMarkdownArgument(config, args);
     // Diagrams first: the fences have to become image references before the
     // Markdown reaches the converter, and the resolver it returns is what embeds
     // the bytes.
     const prepared =
       (args.diagrams ?? config.groups.has("diagram"))
-        ? await prepareMarkdownDiagrams(args.markdown, {}, diagramFontOptions(config))
-        : { markdown: args.markdown, notes: [] as readonly string[] };
+        ? await prepareMarkdownDiagrams(markdown, {}, diagramFontOptions(config))
+        : { markdown, notes: [] as readonly string[] };
 
     // markdownToDocx is async — verified; treating it as synchronous yields an
     // empty object that fails much later inside the packager.
@@ -145,3 +158,21 @@ export const docWriteTool = defineTool({
     );
   }
 });
+
+/** The Markdown to convert, from the argument or from the file it names. */
+async function readMarkdownArgument(
+  config: ServerConfig,
+  args: { readonly markdown?: string | undefined; readonly from?: string | undefined }
+): Promise<string> {
+  if (chooseSource(args.markdown, args.from, ["markdown", "from"]) === "inline") {
+    return args.markdown as string;
+  }
+  const markdown = await readTextSource(config, args.from as string);
+  if (markdown.trim() === "") {
+    throw toolError.invalidInput(
+      `${args.from} is empty`,
+      "Write its content with text_write first."
+    );
+  }
+  return markdown;
+}

@@ -26,6 +26,7 @@ import { sheetEditTool } from "./sheet-edit.js";
 import { sheetReadTool } from "./sheet-read.js";
 import { sheetWriteTool } from "./sheet-write.js";
 import { templateFillTool, templateInspectTool } from "./template.js";
+import { textWriteTool } from "./text-write.js";
 import type { AnyToolDefinition } from "./types.js";
 
 /**
@@ -45,6 +46,7 @@ export const ALL_TOOLS: readonly AnyToolDefinition[] = [
   formulaEvaluateTool,
   docReadTool,
   docWriteTool,
+  textWriteTool,
   docConvertTool,
   docSearchTool,
   docEditTool,
