@@ -409,7 +409,10 @@ describe("text_write → doc_write", () => {
       await upload(fx, {
         upload: id,
         part: index,
-        text: `## 第 ${index} 节 Section ${index}\n\n${"内容 content ".repeat(200)}\n\n`
+        // Latin only: this is about size, not scripts. A CJK PDF needs a CJK face on
+        // the host, which a CI runner does not have — font coverage is pdf-fonts' job,
+        // and CJK bytes are covered, font-free, by the byte-exact test above.
+        text: `## Section ${index}\n\n${"content ".repeat(300)}\n\n`
       });
     }
     await run(docWriteTool, fx, { path: "doc.pdf", from: "doc.md" });
