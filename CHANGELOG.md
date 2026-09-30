@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/documonster/documonster/compare/v0.17.1...v0.18.0) (2026-09-30)
+
+
+### Features
+
+* **mcp:** Upload long content in parts, and read large arguments from files ([0107f9f](https://github.com/documonster/documonster/commit/0107f9fab881f84fef06936dc1bc9008acbf614c))
+
 ## [0.17.1](https://github.com/documonster/documonster/compare/v0.17.0...v0.17.1) (2026-09-25)
 
 
