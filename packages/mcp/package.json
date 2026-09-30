@@ -48,7 +48,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rimraf dist && tsc --project tsconfig.build.json",
+    "build": "node ../../scripts/clean.ts dist && tsc --project tsconfig.build.json",
     "type": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -65,7 +65,6 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "rimraf": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

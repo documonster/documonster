@@ -11,10 +11,9 @@ packages:
 # major behind put two copies of vitest in the tree. Declaring them once means a
 # renovate bump lands on both at the same time instead of drifting.
 catalog:
-  "@types/node": ^26.6.2
-  rimraf: ^6.1.3
+  "@types/node": ^26.6.3
   typescript: 7.0.2
-  vitest: ^5.0.1
+  vitest: ^5.0.2
 
 allowBuilds:
   esbuild: false
