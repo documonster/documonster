@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/documonster/documonster/compare/v0.18.0...v0.18.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **build:** Drop rimraf in favour of scripts/clean.ts ([06a5173](https://github.com/documonster/documonster/commit/06a5173afd0d4056b492604925e0c7592e86b364))
+* **excel:** Keep differential formats intact across a round trip ([24124ac](https://github.com/documonster/documonster/commit/24124acb03bd5578bf74fbc13228d03c31259960)), closes [#237](https://github.com/documonster/documonster/issues/237)
+
 ## [0.18.0](https://github.com/documonster/documonster/compare/v0.17.1...v0.18.0) (2026-09-30)
 
 
