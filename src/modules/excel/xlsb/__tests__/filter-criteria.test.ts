@@ -402,6 +402,18 @@ describe("the three dynamic kinds and the date group item", () => {
     expect(result.records).toEqual([]);
   });
 
+  it("translates a colour filter's dxfId into the written table, and declines one that has no entry", () => {
+    // The stated number indexes the table the workbook was read with; the written one is rebuilt.
+    const xml = `<filterColumn colId="0"><colorFilter dxfId="3"/></filterColumn>`;
+    const translated = filterCriteriaRecords(xml, id => (id === 3 ? 1 : undefined));
+    const [, payload] = translated.records.find(([name]) => name === "BrtColorFilter")!;
+    expect(new DataView(payload!.buffer, payload!.byteOffset).getUint32(0, true)).toBe(1);
+
+    const declined = filterCriteriaRecords(xml, () => undefined);
+    expect(declined.records).toEqual([]);
+    expect(declined.unsupported).toEqual(["colorFilter"]);
+  });
+
   it("maps every icon set to its KPISets value", () => {
     const setOf = (name: string): number =>
       payloadOf(

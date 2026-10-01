@@ -8,7 +8,12 @@ import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { BorderXform } from "@excel/xlsx/xform/style/border-xform";
 import type { CellStyleModel } from "@excel/xlsx/xform/style/cell-style-xform";
 import { CellStyleXform } from "@excel/xlsx/xform/style/cell-style-xform";
-import { DxfXform } from "@excel/xlsx/xform/style/dxf-xform";
+import {
+  dxfExtensionsOf,
+  setDxfExtensions,
+  withInheritedNamespaces
+} from "@excel/xlsx/xform/style/dxf-extensions";
+import { DxfEntryXform } from "@excel/xlsx/xform/style/dxf-xform";
 import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
@@ -240,6 +245,14 @@ class StylesXform extends BaseXform {
    * pressure here.
    */
   declare private styleMemo?: Map<string, number>;
+  /**
+   * `dxfId` of each differential format already in `model.dxfs`, by object identity. A rule or column read
+   * from a file holds the very object its `dxfId` resolved to, so identity is what lets it be handed its
+   * original index back instead of appending a duplicate. See {@link seedDxfs}.
+   */
+  declare private dxfIds?: Map<DxfStyle, number>;
+  /** Namespace declarations on the source's `<styleSheet>`, by prefix; see `withInheritedNamespaces`. */
+  declare private rootNamespaces?: Record<string, string>;
   declare private _hasCheckboxes?: boolean;
   declare public defaultFont?: Partial<Font>;
   declare public parser?: BaseXform;
@@ -270,7 +283,12 @@ class StylesXform extends BaseXform {
         count: true,
         childXform: new StyleXform({ xfId: true })
       }),
-      dxfs: new ListXform({ tag: "dxfs", always: true, count: true, childXform: new DxfXform() }),
+      dxfs: new ListXform({
+        tag: "dxfs",
+        always: true,
+        count: true,
+        childXform: new DxfEntryXform()
+      }),
 
       // for style manager
       numFmt: new NumFmtXform(),
@@ -309,6 +327,7 @@ class StylesXform extends BaseXform {
     // outlive them. Rebuilding the pools without dropping it would hand out ids
     // from the discarded generation.
     this.styleMemo?.clear();
+    this.dxfIds?.clear();
   }
 
   init(): void {
@@ -568,6 +587,12 @@ class StylesXform extends BaseXform {
     switch (node.name) {
       case "styleSheet":
         this.initIndex();
+        // The namespaces the source declared at the root, for a preserved `<dxf>` extension that relies on them.
+        this.rootNamespaces = Object.fromEntries(
+          Object.entries(node.attributes)
+            .filter(([name]) => name.startsWith("xmlns:"))
+            .map(([name, uri]) => [name.slice("xmlns:".length), uri])
+        );
         return true;
       default:
         this.parser = this.map[node.name];
@@ -606,6 +631,14 @@ class StylesXform extends BaseXform {
         add("borders", this.map.borders);
         add("styles", this.map.cellXfs);
         add("dxfs", this.map.dxfs);
+        // A preserved `<extLst>` is written under this writer's `<styleSheet>`, not the source's: any prefix it
+        // borrowed from the source's root is declared on it now, while the source's declarations are known.
+        for (const dxf of (this.model.dxfs ?? []) as object[]) {
+          const extensions = dxfExtensionsOf(dxf);
+          if (extensions !== undefined) {
+            setDxfExtensions(dxf, withInheritedNamespaces(extensions, this.rootNamespaces ?? {}));
+          }
+        }
         add("cellStyleXfs", this.map.cellStyleXfs);
         add("cellStyles", this.map.cellStyles);
 
@@ -881,16 +914,54 @@ class StylesXform extends BaseXform {
     return result;
   }
 
-  addDxfStyle(style: DxfStyle): number {
-    if (style.numFmt) {
-      // register numFmtId to use it during dxf-xform rendering
-      style.numFmtId = this._addNumFmtStr(
-        typeof style.numFmt === "string" ? style.numFmt : style.numFmt.formatCode
-      );
+  /**
+   * Start the `<dxfs>` table from the one the workbook was read with, at the same indices.
+   *
+   * `dxfId` is an index, and not every holder of one is modelled: a pivot table's `<formats>`, a
+   * `<colorFilter>` and whatever else is carried through as preserved XML keep the number they were read
+   * with. Rebuilding the table from only the styles the model can name left those pointing past its end —
+   * or, worse, at a different format once something else was allocated there (#237). Seeding it first makes
+   * every such reference valid without having to find them, and a modelled style that came from this table
+   * is resolved back to its own index by {@link addDxfStyle}.
+   *
+   * Must run before any {@link addDxfStyle} call. A hole in the source table is kept as an empty format so
+   * that the entries after it keep their index.
+   */
+  seedDxfs(dxfs: readonly (DxfStyle | undefined)[]): void {
+    if (!this.model.dxfs || this.model.dxfs.length > 0) {
+      return;
     }
+    for (const style of dxfs) {
+      this.appendDxf(style ?? {});
+    }
+  }
 
-    this.model.dxfs!.push(style);
-    return this.model.dxfs!.length - 1;
+  addDxfStyle(style: DxfStyle): number {
+    return this.dxfIds?.get(style) ?? this.appendDxf(style);
+  }
+
+  private appendDxf(style: DxfStyle): number {
+    // **The written entry is a copy; the caller's style is never touched.** `numFmtId` is an allocation of
+    // *this* write — it depends on which other formats the workbook registered first — so it belongs to the
+    // table being written, not to the style. It used to be stamped onto the style itself, and a style object
+    // is routinely shared: two workbooks written concurrently with one constant `{ numFmt: "0.0%" }` each
+    // overwrote the other's id between preparing and rendering, and one of them shipped a `<dxf>` naming a
+    // `numFmtId` its own `<numFmts>` never declared.
+    const entry: DxfStyle = style.numFmt
+      ? {
+          ...style,
+          numFmtId: this._addNumFmtStr(
+            typeof style.numFmt === "string" ? style.numFmt : style.numFmt.formatCode
+          )
+        }
+      : style;
+
+    const dxfId = this.model.dxfs!.push(entry) - 1;
+    this.dxfIds ??= new Map();
+    if (!this.dxfIds.has(style)) {
+      this.dxfIds.set(style, dxfId);
+    }
+    return dxfId;
   }
 
   getDxfStyle(id: number): DxfStyle | undefined {
@@ -1043,8 +1114,32 @@ class StylesXformMock extends StylesXform {
       fills: [
         { type: "pattern", pattern: "none" },
         { type: "pattern", pattern: "gray125" }
-      ]
+      ],
+      // `useStyles: false` drops *cell* formatting, not the differential formats a conditional format, a pivot
+      // table's `<formats>` or a `<colorFilter>` refer to by index. Without a table here the first rule with a
+      // style threw, and a read workbook's preserved references were written against an empty `<dxfs>`.
+      dxfs: []
     };
+  }
+
+  // The mock renders its model as plain JSON (it has no `index`), so a differential format's number format is
+  // registered as a `{ id, formatCode }` model rather than as pre-rendered XML.
+  _addNumFmtStr(formatCode: string): number {
+    const builtIn = NumFmtXform.getDefaultFmtId(formatCode);
+    if (builtIn !== undefined) {
+      return builtIn;
+    }
+    const numFmts = this.model.numFmts!;
+    const existing = numFmts.find(
+      (numFmt): numFmt is { id: number; formatCode: string } =>
+        typeof numFmt !== "string" && numFmt.formatCode === formatCode
+    );
+    if (existing) {
+      return existing.id;
+    }
+    const id = NUMFMT_BASE + numFmts.length;
+    numFmts.push({ id, formatCode });
+    return id;
   }
 
   // =========================================================================

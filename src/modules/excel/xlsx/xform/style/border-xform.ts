@@ -15,6 +15,8 @@ interface BorderModel {
   bottom?: EdgeModel;
   right?: EdgeModel;
   diagonal?: EdgeModel & { up?: boolean; down?: boolean };
+  vertical?: EdgeModel;
+  horizontal?: EdgeModel;
   color?: Partial<Color>;
 }
 
@@ -131,16 +133,28 @@ class BorderXform extends BaseXform {
   declare public parser?: BaseXform;
   declare private diagonalUp: boolean | undefined;
   declare private diagonalDown: boolean | undefined;
+  /**
+   * How deep inside an element this xform does not model the parser currently is.
+   *
+   * Without it, the *close* of an unknown child was taken as the end of the border: the parent stopped
+   * delegating, the real `</border>` never reached this xform, and the whole border — every edge already
+   * read — was dropped. `<vertical>` and `<horizontal>` did exactly that to every differential format that
+   * carried them, before they were modelled; anything the schema adds later would do it again.
+   */
+  declare private unknownDepth: number;
 
   constructor() {
     super();
 
+    this.unknownDepth = 0;
     this.map = {
       top: new EdgeXform("top"),
       left: new EdgeXform("left"),
       bottom: new EdgeXform("bottom"),
       right: new EdgeXform("right"),
-      diagonal: new EdgeXform("diagonal")
+      diagonal: new EdgeXform("diagonal"),
+      vertical: new EdgeXform("vertical"),
+      horizontal: new EdgeXform("horizontal")
     };
   }
 
@@ -171,6 +185,13 @@ class BorderXform extends BaseXform {
     add(model.top, this.map.top);
     add(model.bottom, this.map.bottom);
     add(model.diagonal, this.map.diagonal);
+    // Inner edges only when the model has them, so a cell's border is written exactly as before.
+    if (model.vertical) {
+      add(model.vertical, this.map.vertical);
+    }
+    if (model.horizontal) {
+      add(model.horizontal, this.map.horizontal);
+    }
 
     xmlStream.closeNode();
   }
@@ -180,9 +201,14 @@ class BorderXform extends BaseXform {
       this.parser.parseOpen(node);
       return true;
     }
+    if (this.unknownDepth > 0) {
+      this.unknownDepth++;
+      return true;
+    }
     switch (node.name) {
       case "border":
         this.reset();
+        this.unknownDepth = 0;
         this.diagonalUp = parseBoolean(node.attributes.diagonalUp);
         this.diagonalDown = parseBoolean(node.attributes.diagonalDown);
         return true;
@@ -192,7 +218,8 @@ class BorderXform extends BaseXform {
           this.parser.parseOpen(node);
           return true;
         }
-        return false;
+        this.unknownDepth = 1;
+        return true;
     }
   }
 
@@ -209,11 +236,15 @@ class BorderXform extends BaseXform {
       }
       return true;
     }
+    if (this.unknownDepth > 0) {
+      this.unknownDepth--;
+      return true;
+    }
     if (name === "border") {
       const model: BorderModel = {};
       let hasContent = false;
       const add = (
-        key: "left" | "right" | "top" | "bottom" | "diagonal",
+        key: "left" | "right" | "top" | "bottom" | "diagonal" | "vertical" | "horizontal",
         edgeModel: EdgeModel | undefined,
         extensions?: { up?: boolean; down?: boolean }
       ): void => {
@@ -230,6 +261,8 @@ class BorderXform extends BaseXform {
       add("top", this.map.top.model);
       add("bottom", this.map.bottom.model);
       add("diagonal", this.map.diagonal.model, { up: this.diagonalUp, down: this.diagonalDown });
+      add("vertical", this.map.vertical.model);
+      add("horizontal", this.map.horizontal.model);
       this.model = hasContent ? model : undefined;
     }
     return false;

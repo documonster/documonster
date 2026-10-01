@@ -29,6 +29,11 @@ interface FontModel {
 interface FontOptions {
   tagName: string;
   fontNameTag: string;
+  /**
+   * The font of a differential format (`<dxf>`), where an explicit `false` is an instruction — `<b val="0"/>`
+   * removes bold — rather than the same thing as an absent element. See `BooleanXform`'s `writeFalse`.
+   */
+  differential?: boolean;
 }
 
 // Font encapsulates translation from font model to xlsx
@@ -41,21 +46,38 @@ class FontXform extends BaseXform {
     super();
 
     this.options = options || FontXform.OPTIONS;
+    const writeFalse = this.options.differential === true;
 
     // Define properties in render order (Excel's expected order)
     const fontProperties = [
-      { tag: "b", prop: "bold", xform: new BooleanXform({ tag: "b", attr: "val" }) },
-      { tag: "i", prop: "italic", xform: new BooleanXform({ tag: "i", attr: "val" }) },
+      { tag: "b", prop: "bold", xform: new BooleanXform({ tag: "b", attr: "val", writeFalse }) },
+      { tag: "i", prop: "italic", xform: new BooleanXform({ tag: "i", attr: "val", writeFalse }) },
       { tag: "u", prop: "underline", xform: new UnderlineXform() },
-      { tag: "strike", prop: "strike", xform: new BooleanXform({ tag: "strike", attr: "val" }) },
+      {
+        tag: "strike",
+        prop: "strike",
+        xform: new BooleanXform({ tag: "strike", attr: "val", writeFalse })
+      },
       {
         tag: "condense",
         prop: "condense",
-        xform: new BooleanXform({ tag: "condense", attr: "val" })
+        xform: new BooleanXform({ tag: "condense", attr: "val", writeFalse })
       },
-      { tag: "extend", prop: "extend", xform: new BooleanXform({ tag: "extend", attr: "val" }) },
-      { tag: "outline", prop: "outline", xform: new BooleanXform({ tag: "outline", attr: "val" }) },
-      { tag: "shadow", prop: "shadow", xform: new BooleanXform({ tag: "shadow", attr: "val" }) },
+      {
+        tag: "extend",
+        prop: "extend",
+        xform: new BooleanXform({ tag: "extend", attr: "val", writeFalse })
+      },
+      {
+        tag: "outline",
+        prop: "outline",
+        xform: new BooleanXform({ tag: "outline", attr: "val", writeFalse })
+      },
+      {
+        tag: "shadow",
+        prop: "shadow",
+        xform: new BooleanXform({ tag: "shadow", attr: "val", writeFalse })
+      },
       { tag: "sz", prop: "size", xform: new IntegerXform({ tag: "sz", attr: "val" }) },
       { tag: "color", prop: "color", xform: new ColorXform() },
       {
@@ -155,7 +177,9 @@ class FontXform extends BaseXform {
   parseClose(name: string): boolean {
     if (this.parser && !this.parser.parseClose(name)) {
       const item = this.map![name];
-      if (this.parser.model) {
+      // `!== undefined`, not truthiness: `<b val="0"/>` parses to `false`, and in a differential format that
+      // is an instruction to remove bold, not the absence of one.
+      if (this.parser.model !== undefined) {
         this.model[item.prop] = this.parser.model;
       }
       this.parser = undefined;
@@ -172,6 +196,12 @@ class FontXform extends BaseXform {
   static OPTIONS: FontOptions = {
     tagName: "font",
     fontNameTag: "name"
+  };
+
+  static DIFFERENTIAL_OPTIONS: FontOptions = {
+    tagName: "font",
+    fontNameTag: "name",
+    differential: true
   };
 }
 

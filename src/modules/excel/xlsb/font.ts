@@ -91,7 +91,7 @@ export const INFERRED_FONT_VALUES = {
 } as const;
 
 /** `uls` values. Only `single` (1) appears in the corpus. */
-const UNDERLINE = {
+export const UNDERLINE = {
   none: 0,
   single: 1,
   double: 2,
@@ -100,10 +100,10 @@ const UNDERLINE = {
 } as const;
 
 /** `sss` values. None appears in the corpus; the field is 0 throughout. */
-const VERTICAL_ALIGN = { none: 0, superscript: 1, subscript: 2 } as const;
+export const VERTICAL_ALIGN = { none: 0, superscript: 1, subscript: 2 } as const;
 
 /** `bFontScheme`. `minor` (2) is established from Excel's default Calibri. */
-const SCHEME = { none: 0, major: 1, minor: 2 } as const;
+export const SCHEME = { none: 0, major: 1, minor: 2 } as const;
 
 /** Read a `BrtFont` payload. */
 export function readFont(payload: Uint8Array, part: string): Partial<Font> | undefined {
@@ -273,7 +273,11 @@ export function underlineValue(underline: Partial<Font>["underline"]): number {
   return underline === true ? UNDERLINE.single : UNDERLINE[underline];
 }
 
-function nameOf<T extends Record<string, number>>(table: T, value: number): keyof T | undefined {
+/** The key of `table` whose value is `value` — the reverse of an enumeration lookup. */
+export function nameOf<T extends Record<string, number>>(
+  table: T,
+  value: number
+): keyof T | undefined {
   for (const key of Object.keys(table) as (keyof T)[]) {
     if (table[key] === value) {
       return key;

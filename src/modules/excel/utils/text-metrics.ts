@@ -30,7 +30,6 @@ import type { FontMetrics } from "@utils/font-data";
 import { getFontMetrics } from "@utils/font-data";
 import { graphemeClusters } from "@utils/grapheme";
 import { createLineMeasurer, isAscii, measureTextWidthPx, resolveFont } from "@utils/text-measure";
-import type { MeasuredFont } from "@utils/text-measure";
 import { charWidthToPixel, getPixelPadding, pixelToCharWidth, pixelToPoints } from "@utils/units";
 
 // =============================================================================
@@ -72,7 +71,7 @@ export { getMaxDigitWidth, measureTextWidthPx } from "@utils/text-measure";
 export type { MeasuredFont } from "@utils/text-measure";
 
 /** A `Font` reduced to what measurement reads. */
-type ResolvedFont = MeasuredFont;
+type ResolvedFont = ReturnType<typeof resolveFont>;
 
 // =============================================================================
 // Rich Text Width Measurement

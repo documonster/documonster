@@ -16,11 +16,14 @@ interface AlignmentModel {
   shrinkToFit?: boolean;
   indent?: number;
   textRotation?: number | "vertical";
-  readingOrder?: "ltr" | "rtl";
+  readingOrder?: "ltr" | "rtl" | "context";
+  justifyLastLine?: boolean;
+  relativeIndent?: number;
 }
 
 const validation = {
   horizontalValues: [
+    "general",
     "left",
     "center",
     "right",
@@ -69,8 +72,10 @@ const validation = {
     const numValue = validInt(value);
     return Math.max(0, numValue!);
   },
-  readingOrder(value: "ltr" | "rtl"): number | undefined {
+  readingOrder(value: "ltr" | "rtl" | "context"): number | undefined {
     switch (value) {
+      case "context":
+        return 0;
       case "ltr":
         return Enums.ReadingOrder.LeftToRight;
       case "rtl":
@@ -117,8 +122,30 @@ const textRotationXform = {
   }
 };
 
+/** `ST_ReadingOrder`: 0 context, 1 left-to-right, 2 right-to-left. */
+const READING_ORDER_NAMES: Readonly<Record<string, "context" | "ltr" | "rtl">> = {
+  "0": "context",
+  "1": "ltr",
+  "2": "rtl"
+};
+
 // Alignment encapsulates translation from style.alignment model to/from xlsx
 class AlignmentXform extends BaseXform {
+  /**
+   * Whether this is the alignment of a differential format (`<dxf>`).
+   *
+   * A cell's alignment can drop a default — no `wrapText` is the same as `wrapText="0"` — so it does, and its
+   * output stays as it always was. A differential format cannot: it changes only what it states, so
+   * `wrapText="0"`, `indent="0"`, `textRotation="0"`, `horizontal="general"` and `readingOrder="0"` are each an
+   * instruction to *reset* that property, and leaving them out turned the instruction into "change nothing".
+   */
+  declare private differential: boolean;
+
+  constructor(differential = false) {
+    super();
+    this.differential = differential;
+  }
+
   get tag(): string {
     return "alignment";
   }
@@ -126,18 +153,50 @@ class AlignmentXform extends BaseXform {
   render(xmlStream: XmlSink, model: AlignmentModel): void {
     // Collect valid attributes first, only write if any exist
     const attrs: Record<string, string | number> = {};
+    const differential = this.differential;
     function add(name: string, value: string | number | boolean | undefined): void {
-      if (value) {
+      if (differential ? value !== undefined && value !== false : value) {
         attrs[name] = value as string | number;
       }
     }
-    add("horizontal", validation.horizontal(model.horizontal!));
+    const flag = (value: boolean | undefined): string | false | undefined =>
+      value === undefined ? undefined : value ? "1" : differential ? "0" : false;
+    // `general` is the default: a cell never states it, a differential format may.
+    add(
+      "horizontal",
+      model.horizontal === "general" && !differential
+        ? undefined
+        : validation.horizontal(model.horizontal!)
+    );
     add("vertical", validation.vertical(model.vertical!));
-    add("wrapText", validation.wrapText(model.wrapText!) ? "1" : false);
-    add("shrinkToFit", validation.shrinkToFit(model.shrinkToFit!) ? "1" : false);
-    add("indent", validation.indent(model.indent!));
-    add("textRotation", textRotationXform.toXml(model.textRotation!));
-    add("readingOrder", validation.readingOrder(model.readingOrder!));
+    add("wrapText", flag(model.wrapText));
+    add("shrinkToFit", flag(model.shrinkToFit));
+    add("indent", model.indent === undefined ? undefined : validation.indent(model.indent));
+    add(
+      "relativeIndent",
+      differential && model.relativeIndent !== undefined
+        ? validInt(model.relativeIndent)
+        : undefined
+    );
+    add("justifyLastLine", flag(model.justifyLastLine));
+    add(
+      "textRotation",
+      model.textRotation === 0 ? 0 : textRotationXform.toXml(model.textRotation!)
+    );
+    add(
+      "readingOrder",
+      model.readingOrder === "context" && !differential
+        ? undefined
+        : validation.readingOrder(model.readingOrder!)
+    );
+    // A cell's zeros are defaults and are dropped, exactly as before; see `differential`.
+    if (!differential) {
+      for (const [name, value] of Object.entries(attrs)) {
+        if (value === 0) {
+          delete attrs[name];
+        }
+      }
+    }
 
     if (Object.keys(attrs).length > 0) {
       xmlStream.leafNode("alignment", attrs);
@@ -146,33 +205,33 @@ class AlignmentXform extends BaseXform {
 
   parseOpen(node: ParseOpenTag): void {
     const model: Record<string, unknown> = {};
+    const { attributes } = node;
 
     let valid = false;
-    function add(truthy: unknown, name: string, value: unknown): void {
-      if (truthy) {
+    function add(present: unknown, name: string, value: unknown): void {
+      if (present !== undefined && value !== undefined) {
         model[name] = value;
         valid = true;
       }
     }
-    add(node.attributes.horizontal, "horizontal", node.attributes.horizontal);
+    add(attributes.horizontal, "horizontal", attributes.horizontal);
     add(
-      node.attributes.vertical,
+      attributes.vertical,
       "vertical",
-      node.attributes.vertical === "center" ? "middle" : node.attributes.vertical
+      attributes.vertical === "center" ? "middle" : attributes.vertical
     );
-    add(node.attributes.wrapText, "wrapText", parseBoolean(node.attributes.wrapText));
-    add(node.attributes.shrinkToFit, "shrinkToFit", parseBoolean(node.attributes.shrinkToFit));
-    add(node.attributes.indent, "indent", parseInt(node.attributes.indent, 10));
+    add(attributes.wrapText, "wrapText", parseBoolean(attributes.wrapText));
+    add(attributes.shrinkToFit, "shrinkToFit", parseBoolean(attributes.shrinkToFit));
+    add(attributes.justifyLastLine, "justifyLastLine", parseBoolean(attributes.justifyLastLine));
+    add(attributes.indent, "indent", validInt(attributes.indent));
+    add(attributes.relativeIndent, "relativeIndent", validInt(attributes.relativeIndent));
     add(
-      node.attributes.textRotation,
+      attributes.textRotation,
       "textRotation",
-      textRotationXform.toModel(node.attributes.textRotation)
+      textRotationXform.toModel(attributes.textRotation)
     );
-    add(
-      node.attributes.readingOrder,
-      "readingOrder",
-      node.attributes.readingOrder === "2" ? "rtl" : "ltr"
-    );
+    // `0` is *context*, not left-to-right: reading every value but "2" as `ltr` turned a reset into an override.
+    add(attributes.readingOrder, "readingOrder", READING_ORDER_NAMES[attributes.readingOrder]);
 
     this.model = valid ? model : null;
   }

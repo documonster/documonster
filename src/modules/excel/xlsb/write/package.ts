@@ -66,6 +66,7 @@ import type {
   SheetProtectionLike,
   WorkbookViewLike
 } from "@excel/xlsb/defaults";
+import { encodeDxf } from "@excel/xlsb/dxf";
 import { futureFunctionStubName, isFutureFunction } from "@excel/xlsb/formula/ptg";
 import {
   pivotCacheDefinitionRecords,
@@ -369,7 +370,16 @@ export async function writeXlsbPackage(
       worksheet =>
         (worksheet as unknown as { conditionalFormattings?: readonly SheetConditionalFormatting[] })
           .conditionalFormattings ?? []
-    )
+    ),
+    {
+      source: model.dxfs,
+      // The number-format id does not decide whether a format is writable, only which number it is written
+      // under — that is allocated with the styles part, so any id serves for the question asked here.
+      describe: style => {
+        const { payload, dropped } = encodeDxf(style, () => 0);
+        return { writable: payload !== undefined, dropped };
+      }
+    }
   );
   // `iPri` "MUST NOT duplicate" another rule's anywhere in the sheet. The model's priorities are per block and
   // routinely collide, so they cannot simply be copied — but they also cannot simply be replaced, which is what
@@ -736,6 +746,9 @@ export async function writeXlsbPackage(
     });
   }
   const styles = writeStyles(formats, model.defaultFont, namedStyles, dxfIndex.styles);
+  // Properties a differential format carries that `BrtDXF` cannot express. Everything the model can hold is
+  // written; this is the guard for what it cannot, and for a model field added without a branch.
+  unsupported.push(...dxfIndex.lost.map(entry => `xl/styles.bin: ${entry}`));
 
   // Parts the reader preserved verbatim — the theme, media, drawings, a VBA project. Filtered to
   // the ones still reachable, so deleting a sheet that pointed at a drawing does not leave the

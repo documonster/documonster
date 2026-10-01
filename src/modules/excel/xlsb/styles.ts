@@ -31,7 +31,7 @@
  * arrived in.
  */
 
-import type { Alignment, BorderStyle, Borders, Fill, Font, Protection, Style } from "@excel/types";
+import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
 import {
   ATTRIBUTE_MASK,
   encodeAlignmentAndProtection,
@@ -44,15 +44,10 @@ import {
   iterateInterpretableRecords,
   readWideString
 } from "@excel/xlsb/binary";
-import { borderStyleName, borderStyleValue, encodeBorder, readBorder } from "@excel/xlsb/border";
+import { encodeBorder, readBorder } from "@excel/xlsb/border";
+import { encodeDxf, readDxf } from "@excel/xlsb/dxf";
 import { MANDATORY_FILL_PATTERNS, encodeFill, mandatoryFill, readFill } from "@excel/xlsb/fill";
-import {
-  defaultFont,
-  encodeFont,
-  readFont,
-  unmodelledFlagsOf,
-  underlineValue
-} from "@excel/xlsb/font";
+import { defaultFont, encodeFont, readFont, unmodelledFlagsOf } from "@excel/xlsb/font";
 import { requireRecordSpec, recordSpec } from "@excel/xlsb/spec/records";
 import type { StyleFacets } from "@excel/xlsb/write/types";
 import { defaultNumFormats } from "@excel/xlsx/defaultnumformats";
@@ -134,6 +129,8 @@ export interface StyleTable {
    * it sets one. Reporting the count is the alternative to silently dropping the bit.
    */
   readonly unmodelledFontFlags: number;
+  /** Properties a `BrtDXF` carried that the model cannot hold, one entry per property, naming its `dxfId`. */
+  readonly dxfUnread: readonly string[];
   /**
    * The font at index 0 — the one every cell that names no font inherits.
    *
@@ -197,6 +194,7 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
   const alignments: (Partial<Alignment> | undefined)[] = [];
   const protections: (Partial<Protection> | undefined)[] = [];
   let unmodelledFontFlags = 0;
+  const dxfUnread: string[] = [];
   let inCellXfs = false;
 
   for (const record of iterateInterpretableRecords(bytes, part)) {
@@ -216,7 +214,11 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
         // Differential formats, in the order the `BrtBeginDXFs` collection declares them — which is what a
         // conditional-formatting rule's `dxfId` indexes. Pushed even when it reads as `undefined`, because a
         // gap would shift every id after it.
-        dxfs.push(readDxf(record.payload, part));
+        const decoded = readDxf(record.payload, formatById);
+        dxfs.push(decoded.style);
+        for (const property of decoded.unread) {
+          dxfUnread.push(`differential format ${dxfs.length - 1}: ${property}`);
+        }
         break;
       }
       case "BrtFont": {
@@ -341,6 +343,7 @@ export function readStyles(bytes: Uint8Array, part: string): StyleTable {
     alignments,
     protections,
     unmodelledFontFlags,
+    dxfUnread,
     fontTable,
     ...(fontTable[0] === undefined ? {} : { defaultFont: fontTable[0] })
   };
@@ -575,17 +578,26 @@ export function writeStyles(
     formatIdByIndex.set(index, id);
   }
   // A named style's format has to reach the same table, or its style XF points at an id no `BrtFmt`
-  // declares — which is a format Excel resolves to `General`, silently.
-  for (const named of namedStyles) {
+  // declares — which is a format Excel resolves to `General`, silently. A differential format's `ifmt` is
+  // bound by the same rule.
+  const declare = (code: string | undefined): void => {
     if (
-      named.numFmt !== undefined &&
-      named.numFmt !== "General" &&
-      !BUILT_IN_FORMAT_IDS.has(named.numFmt) &&
-      !idByFormat.has(named.numFmt)
+      code !== undefined &&
+      code !== "General" &&
+      !BUILT_IN_FORMAT_IDS.has(code) &&
+      !idByFormat.has(code)
     ) {
-      idByFormat.set(named.numFmt, FIRST_CUSTOM_FORMAT_ID + idByFormat.size);
+      idByFormat.set(code, FIRST_CUSTOM_FORMAT_ID + idByFormat.size);
     }
+  };
+  for (const named of namedStyles) {
+    declare(named.numFmt);
   }
+  for (const dxf of dxfs) {
+    declare(typeof dxf.numFmt === "string" ? dxf.numFmt : dxf.numFmt?.formatCode);
+  }
+  const formatIdOf = (code: string): number =>
+    code === "General" ? 0 : (BUILT_IN_FORMAT_IDS.get(code) ?? idByFormat.get(code) ?? 0);
   // Omitted when there is nothing in it. Excel writes no `BrtBeginFmts` at all for a workbook with only
   // built-in number formats — verified across eight styles parts it produced — while this wrote an empty
   // collection. The same distinction as `BrtBeginColInfos`, which is noted in the record table for the same
@@ -709,12 +721,12 @@ export function writeStyles(
   // where the grammar puts them, and omitted the collection when empty. Excel puts
   // `Styles → DXFs → TableStyles` and writes `BrtBeginDXFs` with a count of zero when there are none, in every
   // styles part it produced.
-  // **Encoded before the count is written**, because a style that yields no properties is not writable and the
-  // declared count has to match the records that follow. Excel discards the whole collection when it meets an
-  // empty `BrtDXF` — six bytes saying "a differential format that changes nothing" — so one unhandled font
-  // property cost a workbook every rule's formatting. See `encodeDxf`.
+  // **Encoded before the count is written**, because the declared count has to match the records that follow.
+  // An empty `BrtDXF` — "a differential format that changes nothing" — makes Excel discard the whole collection,
+  // so one is never written. On the workbook path this skips nothing: `collectDxfs` gives a style an index only
+  // if it encodes, precisely because skipping one *here* would shift every later `dxfId` onto its neighbour.
   const encodedDxfs = dxfs
-    .map(style => encodeDxf(style))
+    .map(style => encodeDxf(style, formatIdOf).payload)
     .filter((payload): payload is Uint8Array => payload !== undefined);
   record("BrtBeginDXFs", count(encodedDxfs.length));
   for (const payload of encodedDxfs) {
@@ -862,222 +874,6 @@ function readNamedStyle(
   }
 }
 
-/**
- * A `BrtDXF` — MS-XLSB 2.4.359.
- *
- * A *differential* format: a set of overrides rather than a complete one, so its payload is a flag word
- * and then an `XFProps` — a counted array of `XFProp`, each a type, a size and a blob whose shape the type
- * decides. Thirty-eight types are defined; this writes the ones the model's `Style` can express.
- *
- * **`cb` is the size of the whole `XFProp`, header included.** Writing the blob length instead makes every
- * property after the first land four bytes early, which a reader does not detect — it reads a plausible
- * type from the middle of a colour.
- *
- * Two mutual exclusions the specification states and this respects by construction: an `XFProp` of type 0
- * (a fill pattern) cannot coexist with types 3 or 4 (a gradient), and the model has no gradient here; and
- * `fNewBorder` must be 0 unless types 0x0B/0x0C are used, which are the *internal* borders of a range and
- * are not something a cell style carries.
- */
-function encodeDxf(style: Partial<Style>): Uint8Array | undefined {
-  const props: { type: number; bytes: Uint8Array }[] = [];
-  const font = style.font;
-  const fill = style.fill as { pattern?: string; fgColor?: unknown; bgColor?: unknown } | undefined;
-
-  // Fill. The pattern comes first because type 0 is the pattern and the two colours refer to it.
-  if (fill?.pattern !== undefined) {
-    // **A `FillPattern` is one byte** (MS-XLSB 2.5.51 — an enumeration from 0x00 to 0x12), and this wrote four.
-    // Excel writes `cb=5` for this property where this wrote `cb=8`.
-    props.push(xfProp(0x00, new BinaryWriter().writeUint8(FILL_PATTERN_SOLID).toUint8Array()));
-  }
-  if (fill?.fgColor !== undefined) {
-    props.push(xfProp(0x01, xfPropColor(fill.fgColor)));
-  }
-  if (fill?.bgColor !== undefined) {
-    props.push(xfProp(0x02, xfPropColor(fill.bgColor)));
-  }
-
-  // Font. `Bold` is an *enumeration* — 0x0190 normal, 0x02BC bold — not a boolean, so a `1` here is
-  // neither value and Excel reads it as a weight of one.
-  if (font?.color !== undefined) {
-    props.push(xfProp(0x05, xfPropColor(font.color)));
-  }
-  if (font?.name !== undefined) {
-    props.push(xfProp(0x18, lpWideString(font.name)));
-  }
-  if (font?.bold !== undefined) {
-    props.push(
-      xfProp(0x19, new BinaryWriter().writeUint16(font.bold ? 0x02bc : 0x0190).toUint8Array())
-    );
-  }
-  if (font?.italic !== undefined) {
-    props.push(xfProp(0x1c, new BinaryWriter().writeUint8(font.italic ? 1 : 0).toUint8Array()));
-  }
-  if (font?.underline !== undefined && font.underline !== false) {
-    // **`0x1A`, and it was missing entirely.** `bold`, `italic`, `strike`, `size`, `name` and `color` all had a
-    // branch and the underline had none, so a rule formatted with nothing but an underline yielded a `BrtDXF`
-    // with a property count of zero — six bytes that say "a differential format that changes nothing". Excel
-    // discards the collection, and with it every other rule's formatting.
-    //
-    // The value is an `Underline` enumeration (0 none, 1 single, 2 double, 0x21/0x22 accounting), not a boolean,
-    // and it comes from the same `underlineValue` the ordinary font records use.
-    props.push(
-      xfProp(0x1a, new BinaryWriter().writeUint16(underlineValue(font.underline)).toUint8Array())
-    );
-  }
-  if (font?.strike !== undefined) {
-    props.push(xfProp(0x1d, new BinaryWriter().writeUint8(font.strike ? 1 : 0).toUint8Array()));
-  }
-  // Borders. Each edge is its own `XFProp` — an `XFPropBorder`, which is the same eight-byte `XFPropColor`
-  // as above followed by a two-byte `dgBorder`. Types 0x0B and 0x0C are the *internal* borders of a range
-  // and are gated by `fNewBorder`; a cell style has no such thing, so the flag stays 0 and they are never
-  // written.
-  const border = style.border as Partial<Borders> | undefined;
-  for (const [type, edge] of [
-    [0x06, border?.top],
-    [0x07, border?.bottom],
-    [0x08, border?.left],
-    [0x09, border?.right],
-    [0x0a, border?.diagonal]
-  ] as const) {
-    if (edge !== undefined) {
-      props.push(xfProp(type, xfPropBorder(edge)));
-    }
-  }
-  // The two diagonal directions are separate one-byte flags rather than part of the diagonal edge, because
-  // one diagonal border can be drawn in either direction or both.
-  const diagonal = border?.diagonal as
-    | { readonly up?: boolean; readonly down?: boolean }
-    | undefined;
-  if (diagonal?.up !== undefined) {
-    props.push(xfProp(0x0d, new BinaryWriter().writeUint8(diagonal.up ? 1 : 0).toUint8Array()));
-  }
-  if (diagonal?.down !== undefined) {
-    props.push(xfProp(0x0e, new BinaryWriter().writeUint8(diagonal.down ? 1 : 0).toUint8Array()));
-  }
-
-  if (font?.size !== undefined) {
-    // Twips, and bounded at 20–8191 by the specification — 20 twips is one point.
-    const twips = Math.max(20, Math.min(8191, Math.round(font.size * DXF_TWIPS_PER_POINT)));
-    props.push(xfProp(0x24, new BinaryWriter().writeUint32(twips).toUint8Array()));
-  }
-
-  // Ascending by type. The specification does not require an order — it constrains which types may
-  // *coexist*, not their sequence — but Excel writes an enumerated property array in type order, and
-  // matching that costs nothing while a needless deviation is one more thing a reader could be strict
-  // about. The one ordering rule that does exist is that a gradient (type 3) is followed by its stops
-  // (type 4); nothing here produces a gradient, and a sort by type would preserve that pairing anyway.
-  props.sort((left, right) => left.type - right.type);
-  if (props.length === 0) {
-    // **A differential format that changes nothing is not writable.** Excel discards the whole `DXFs` collection
-    // when it meets one — and with it every other rule's formatting, which is how a single unhandled font
-    // property (the underline, above) cost an entire workbook its conditional formatting.
-    //
-    // Returning `undefined` rather than an empty record makes the caller decide: `collectDxfs` drops the style
-    // and the rule keeps `dxfId` "none", so the rule still applies and simply carries no format. That is a
-    // visible, reportable loss instead of a package Excel repairs. It is also a guard rather than a fix — the
-    // fix is for every model property to have a branch — but the next one that is missed will cost one rule's
-    // formatting instead of all of them.
-    return undefined;
-  }
-  return concatUint8Arrays([
-    // The flag word: fifteen unused bits, then `fNewBorder` at bit 15.
-    //
-    // **Set.** It is a *capability* — "internal border formatting can be used in `xfprops`", meaning the
-    // `XFProp` types `0x0B` and `0x0C` are permitted — not a statement that any is present. Excel sets it on
-    // every `BrtDXF` it writes; this wrote zero, which forbids those types. Nothing here emits one today, so
-    // the difference is latent rather than visible, and it is the sort of latency that turns into a puzzle the
-    // first time an inner border is added.
-    new BinaryWriter().writeUint16(DXF_NEW_BORDER).toUint8Array(),
-    // `XFProps`: two reserved bytes, then the count.
-    new BinaryWriter().writeUint16(0).writeUint16(props.length).toUint8Array(),
-    ...props.map(property => property.bytes)
-  ]);
-}
-
-/** `fNewBorder`, bit 15 of `BrtDXF`'s flag word: the inner-border `XFProp` types are permitted. */
-const DXF_NEW_BORDER = 0x8000;
-
-/** `FillPattern` for a solid fill, which is the only pattern a differential format here expresses. */
-const FILL_PATTERN_SOLID = 1;
-
-/** Twips per point, for a differential font size. */
-const DXF_TWIPS_PER_POINT = 20;
-
-/** One `XFProp`: a type, the size of the *whole* structure, then the blob. */
-function xfProp(type: number, blob: Uint8Array): { type: number; bytes: Uint8Array } {
-  const bytes = concatUint8Arrays([
-    new BinaryWriter()
-      .writeUint16(type)
-      .writeUint16(blob.length + 4)
-      .toUint8Array(),
-    blob
-  ]);
-  return { type, bytes };
-}
-
-/**
- * An `XFPropColor` — MS-XLSB 2.5.161. Eight bytes.
- *
- * `xclrType` 2 is an RGBA colour and 3 a theme index; 4 is "not set". `fValidRGBA` says whether `dwRgba`
- * was derived from the other three fields, and it is set for an explicit ARGB because that is exactly
- * what `dwRgba` then holds.
- */
-function xfPropColor(color: unknown): Uint8Array {
-  const value = color as { argb?: string; theme?: number; tint?: number } | undefined;
-  const writer = new BinaryWriter();
-  if (value?.theme !== undefined) {
-    writer.writeUint8(0x03).writeUint8(value.theme & 0xff);
-  } else if (typeof value?.argb === "string") {
-    // Bit 0 is `fValidRGBA`, and `xclrType` occupies the seven bits above it.
-    writer.writeUint8(0x01 | (0x02 << 1)).writeUint8(0);
-  } else {
-    writer.writeUint8(0x04 << 1).writeUint8(0);
-  }
-  // `nTintShade` maps to -1.0…1.0 and MUST NOT be -32768. Written through `writeUint16` with the
-  // two's-complement conversion done here, because the writer has no signed 16-bit method — and a negative
-  // tint passed to the unsigned one would be written as a very large lightening value.
-  const tint = Math.max(-32767, Math.min(32767, Math.round((value?.tint ?? 0) * 32767)));
-  writer.writeUint16(tint < 0 ? tint + 0x10000 : tint);
-  const argb = typeof value?.argb === "string" ? value.argb : "00000000";
-  // `LongRGBA` is a byte order all its own: red, green, blue, alpha — *not* the ARGB the string spells.
-  const bytes = argb.padStart(8, "0").slice(-8);
-  const at = (index: number): number => Number.parseInt(bytes.slice(index, index + 2), 16) || 0;
-  writer.writeUint8(at(2)).writeUint8(at(4)).writeUint8(at(6)).writeUint8(at(0));
-  return writer.toUint8Array();
-}
-
-/**
- * An `XFPropBorder` — MS-XLSB 2.5.160. Ten bytes: the colour, then the line style.
- *
- * `dgBorder` comes from `borderStyleValue` rather than a second table here: a `BrtBorder` edge writes the
- * same enumeration, and two copies of those fourteen names in two orders is how one of the two ends up
- * writing "medium" where the caller asked for "thin".
- */
-function xfPropBorder(edge: unknown): Uint8Array {
-  const value = edge as { style?: BorderStyle; color?: unknown } | undefined;
-  return concatUint8Arrays([
-    xfPropColor(value?.color),
-    new BinaryWriter().writeUint16(borderStyleValue(value?.style)).toUint8Array()
-  ]);
-}
-
-/** An `LPWideString`: a one-byte character count, then UTF-16. */
-function lpWideString(value: string): Uint8Array {
-  const characters = [...value].slice(0, 32);
-  // **`cchCharacters` is two bytes** (MS-XLSB 2.5.92), and this wrote one. Everything after the count therefore
-  // landed a byte early, so a differential format naming a font read its name from the wrong offset — Excel
-  // discarded the whole `DXFs` collection, and with it every conditional-formatting rule's formatting.
-  //
-  // Verified against Excel's own bytes for the same font: `0d 00 43 00 6f 00 …` for "Comic Sans MS", where this
-  // wrote `0d 43 00 6f 00 …`. The record's `cb` differed by exactly one — 32 against 31 — which is the whole
-  // visible symptom of a field being half the width it should be.
-  const writer = new BinaryWriter().writeUint16(characters.length);
-  for (const character of characters.join("")) {
-    writer.writeUint16(character.charCodeAt(0));
-  }
-  return writer.toUint8Array();
-}
-
 /** `StyleFlags.fBuiltIn`. */
 const STYLE_FLAG_BUILT_IN = 0x01;
 /** `StyleFlags.fHidden` — hidden from Excel's Cell Styles gallery. */
@@ -1116,154 +912,6 @@ function normalStyle(): Uint8Array {
       .toUint8Array(),
     encodeWideString("Normal")
   ]);
-}
-
-/**
- * Read a `BrtDXF` back into the partial `Style` a conditional-formatting rule holds.
- *
- * The inverse of {@link encodeDxf}, and it exists because the rule survived a round trip while its *format*
- * did not: `dxfId` came back as an index into a table nothing read, so the second write found a rule with no
- * `style` and wrote `0xFFFFFFFF`. The rule then fired and displayed nothing — harder to notice than the rule
- * disappearing, because the conditional formatting is still listed in Excel's dialog.
- *
- * Walked by `cb` rather than by a fixed field order. The specification constrains which property types may
- * coexist, not their sequence, so a producer other than this writer may order them differently — and `cb`
- * covering the whole `XFProp` is what makes the walk possible at all.
- */
-export function readDxf(payload: Uint8Array, part: string): Partial<Style> | undefined {
-  if (payload.length < 6) {
-    return undefined;
-  }
-  const view = new DataView(payload.buffer, payload.byteOffset, payload.length);
-  const font: Record<string, unknown> = {};
-  const fill: Record<string, unknown> = {};
-  const border: Record<string, unknown> = {};
-  // Two flag bytes, then `XFProps`: two reserved and the property count.
-  let offset = 6;
-  while (offset + 4 <= payload.length) {
-    const type = view.getUint16(offset, true);
-    const size = view.getUint16(offset + 2, true);
-    if (size < 4 || offset + size > payload.length) {
-      break;
-    }
-    const blob = offset + 4;
-    switch (type) {
-      case 0x00:
-        // The fill pattern. Only solid is written, and a fill with a colour and no pattern is not a fill the
-        // model can express.
-        fill.type = "pattern";
-        fill.pattern = "solid";
-        break;
-      case 0x01:
-        fill.fgColor = readDxfColor(view, blob);
-        break;
-      case 0x02:
-        fill.bgColor = readDxfColor(view, blob);
-        break;
-      case 0x05:
-        font.color = readDxfColor(view, blob);
-        break;
-      case 0x06:
-      case 0x07:
-      case 0x08:
-      case 0x09:
-      case 0x0a:
-        border[DXF_BORDER_EDGE[type]!] = readDxfBorder(view, blob);
-        break;
-      case 0x18:
-        font.name = readLpWideString(view, blob);
-        break;
-      case 0x19:
-        // `Bold` is an enumeration: 0x02BC is bold, 0x0190 normal. Anything else is neither, so it is not
-        // reported as a boolean either.
-        font.bold = view.getUint16(blob, true) === 0x02bc;
-        break;
-      case 0x1c:
-        font.italic = view.getUint8(blob) === 1;
-        break;
-      case 0x1d:
-        font.strike = view.getUint8(blob) === 1;
-        break;
-      case 0x24:
-        // Twips back to points.
-        font.size = view.getUint32(blob, true) / 20;
-        break;
-      default:
-        break;
-    }
-    offset += size;
-  }
-  const style: Record<string, unknown> = {};
-  if (Object.keys(font).length > 0) {
-    style.font = font;
-  }
-  if (Object.keys(fill).length > 0) {
-    // A pattern, even when the record did not carry one. This writer always emits type 0x00 alongside the
-    // colours, but a `Fill` with a colour and no `type` is not a shape the model can express — and another
-    // producer is free to omit it, since the specification only forbids a *gradient* beside a pattern.
-    fill.type ??= "pattern";
-    fill.pattern ??= "solid";
-    style.fill = fill;
-  }
-  if (Object.keys(border).length > 0) {
-    style.border = border;
-  }
-  return Object.keys(style).length === 0 ? undefined : (style as Partial<Style>);
-}
-
-/** `XFProp` type to the border edge it formats — MS-XLSB 2.5.159 types 0x06 through 0x0A. */
-const DXF_BORDER_EDGE: Readonly<Record<number, string>> = {
-  0x06: "top",
-  0x07: "bottom",
-  0x08: "left",
-  0x09: "right",
-  0x0a: "diagonal"
-};
-
-/** An `XFPropColor`: `fValidRGBA` and `xclrType` share a byte, then a palette index, a tint and `LongRGBA`. */
-function readDxfColor(view: DataView, offset: number): Record<string, unknown> {
-  const kind = view.getUint8(offset) >> 1;
-  const tint = view.getInt16(offset + 2, true);
-  const colour: Record<string, unknown> = {};
-  if (kind === 0x03) {
-    colour.theme = view.getUint8(offset + 1);
-  } else if (kind === 0x02) {
-    // `LongRGBA` is red, green, blue, alpha — not the order the model's `argb` string spells, so the bytes are
-    // reordered rather than concatenated.
-    const hex = (value: number): string => value.toString(16).padStart(2, "0").toUpperCase();
-    colour.argb =
-      hex(view.getUint8(offset + 7)) +
-      hex(view.getUint8(offset + 4)) +
-      hex(view.getUint8(offset + 5)) +
-      hex(view.getUint8(offset + 6));
-  }
-  if (tint !== 0) {
-    colour.tint = tint / 32767;
-  }
-  return colour;
-}
-
-/** An `XFPropBorder`: an eight-byte colour then a two-byte `dgBorder`. */
-function readDxfBorder(view: DataView, offset: number): Record<string, unknown> {
-  const style = borderStyleName(view.getUint16(offset + 8, true));
-  const colour = readDxfColor(view, offset);
-  return {
-    ...(style === undefined ? {} : { style }),
-    ...(Object.keys(colour).length === 0 ? {} : { color: colour })
-  };
-}
-
-/** An `LPWideString`: a one-byte character count, then UTF-16. */
-function readLpWideString(view: DataView, offset: number): string {
-  // **Two bytes of count**, matching `lpWideString`. Both read and wrote one, so a font name round-tripped
-  // through this codec perfectly and was rejected by Excel — the fifth time in this module that a reader and a
-  // writer sharing a wrong assumption made a defect invisible from the inside.
-  const characters = view.getUint16(offset, true);
-  let text = "";
-  for (let index = 0; index < characters; index += 1) {
-    text += String.fromCharCode(view.getUint16(offset + 2 + index * 2, true));
-  }
-  return text;
 }
 
 /**

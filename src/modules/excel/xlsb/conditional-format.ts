@@ -138,34 +138,84 @@ export interface CfLoss {
 }
 
 /**
- * The `BrtBeginDXFs` collection: one entry per distinct rule style.
+ * The `BrtBeginDXFs` collection, and where each format lands in it.
  *
  * A `dxfId` is an index into this, so it has to be built across every sheet before any of them is written
  * — which is why this is a separate pass rather than something the sheet writer does. Deduplicated by
  * serialised form, because two rules with the same fill share one entry in Excel's own output.
+ *
+ * **The table the workbook was read with comes first** (`options.source`). Not every holder of a `dxfId` is
+ * modelled: a `<colorFilter>` is preserved as XML with the number it was read with, and `fromSource` is how
+ * that number is translated. A modelled rule read from the same file holds the very object its `dxfId`
+ * resolved to, so it is matched by identity before its serialised form is ever computed.
+ *
+ * **A format this writer cannot encode gets no index at all** (`options.describe`), rather than an index the
+ * styles writer then leaves out. Handing it an index and dropping it later moved every format after it down by
+ * one, so each later rule — and every preserved reference — pointed at its neighbour's formatting. A format that
+ * encodes only *in part* is kept, and what it lost is returned in `lost`, once per distinct format.
  */
-export function collectDxfs(blocks: readonly SheetConditionalFormatting[]): {
+export function collectDxfs(
+  blocks: readonly SheetConditionalFormatting[],
+  options: {
+    readonly source?: readonly (Partial<Style> | undefined)[];
+    readonly describe?: (style: Partial<Style>) => {
+      readonly writable: boolean;
+      readonly dropped: readonly string[];
+    };
+  } = {}
+): {
   readonly styles: readonly Partial<Style>[];
   readonly indexOf: (style: unknown) => number;
+  readonly fromSource: (sourceId: number) => number | undefined;
+  readonly lost: readonly string[];
 } {
+  const { source = [], describe = () => ({ writable: true, dropped: [] }) } = options;
   const styles: Partial<Style>[] = [];
+  const lost: string[] = [];
   const indexByKey = new Map<string, number>();
+  const indexByIdentity = new Map<unknown, number>();
+  const add = (style: Partial<Style>): number => {
+    const known = indexByIdentity.get(style);
+    if (known !== undefined) {
+      return known;
+    }
+    const key = JSON.stringify(style);
+    let index = indexByKey.get(key);
+    if (index === undefined) {
+      const { writable, dropped } = describe(style);
+      index = writable ? styles.push(style) - 1 : NO_DXF;
+      if (writable && dropped.length > 0) {
+        lost.push(`differential format ${index}: ${dropped.join(", ")}`);
+      }
+      indexByKey.set(key, index);
+    }
+    indexByIdentity.set(style, index);
+    return index;
+  };
+  const sourceIndex = source.map(style => (style === undefined ? NO_DXF : add(style)));
   for (const block of blocks) {
     for (const rule of block.rules ?? []) {
-      if (rule.style === undefined) {
-        continue;
-      }
-      const key = JSON.stringify(rule.style);
-      if (!indexByKey.has(key)) {
-        indexByKey.set(key, styles.length);
-        styles.push(rule.style);
+      if (rule.style !== undefined) {
+        add(rule.style);
       }
     }
   }
   return {
     styles,
     indexOf: style =>
-      style === undefined ? NO_DXF : (indexByKey.get(JSON.stringify(style)) ?? NO_DXF)
+      style === undefined
+        ? NO_DXF
+        : (indexByIdentity.get(style) ?? indexByKey.get(JSON.stringify(style)) ?? NO_DXF),
+    fromSource: sourceId => {
+      // With no table read from a file there is nothing to translate from: a stated id can only mean the table
+      // being written, which is how the XLSX writer treats the same XML — it writes the number as it is.
+      if (source.length === 0) {
+        return sourceId < styles.length ? sourceId : undefined;
+      }
+      const index = sourceIndex[sourceId];
+      return index === undefined || index === NO_DXF ? undefined : index;
+    },
+    lost
   };
 }
 
@@ -198,6 +248,11 @@ export function conditionalFormattingRecords(
     }
     const encoded = (block.rules ?? [])
       .map(rule => {
+        // A style `BrtDXF` cannot express gets no `dxfId` (see `collectDxfs`): the rule is still written and
+        // still applies, but without its formatting — which is a loss, and was silent.
+        if (rule.style !== undefined && dxf.indexOf(rule.style) === NO_DXF) {
+          lost.push(`conditional formatting format on ${block.ref ?? "an unnamed range"}`);
+        }
         // The block's range travels with the rule, because a derived formula is written relative to the
         // range's top-left cell and a single rule does not carry the range itself.
         const payload = encodeRule(

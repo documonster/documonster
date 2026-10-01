@@ -57,7 +57,8 @@ export interface MeasuredFont {
   size: number;
   bold: boolean;
   italic: boolean;
-  vertAlign?: "superscript" | "subscript";
+  /** `baseline` is ordinary text, measured the same as an absent value. */
+  vertAlign?: "superscript" | "subscript" | "baseline";
 }
 
 /** Resolved font parameters for measurement */
@@ -133,7 +134,7 @@ export function resolveFont(font?: Partial<MeasuredFont>): ResolvedFont {
     size: font?.size ?? DEFAULT_FONT_SIZE,
     bold: font?.bold ?? false,
     italic: font?.italic ?? false,
-    vertAlign: font?.vertAlign
+    vertAlign: font?.vertAlign === "baseline" ? undefined : font?.vertAlign
   };
 }
 

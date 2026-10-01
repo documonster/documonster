@@ -274,6 +274,102 @@ describe("the dxf table", () => {
   it("resolves an unstyled rule to no differential format", () => {
     expect(collectDxfs([]).indexOf(undefined)).toBe(0xffffffff);
   });
+
+  it("gives an unwritable style no index, so the formats after it do not shift", () => {
+    // The styles writer leaves out a format it cannot encode. Handing that format an index first moved every
+    // later one down by one, and each later rule then pointed at its neighbour's formatting.
+    const unwritable = { protection: { locked: false } };
+    const bold = { font: { bold: true } };
+    const table = collectDxfs(
+      [
+        {
+          ref: "A1",
+          rules: [
+            { type: "cellIs", style: unwritable },
+            { type: "cellIs", style: bold }
+          ]
+        }
+      ] as never,
+      { describe: style => ({ writable: style !== unwritable, dropped: [] }) }
+    );
+    expect(table.styles).toEqual([bold]);
+    expect(table.indexOf(unwritable)).toBe(0xffffffff);
+    expect(table.indexOf(bold)).toBe(0);
+  });
+
+  it("starts from the source table and translates the ids preserved XML states", () => {
+    const red = { font: { color: { argb: "FFFF0000" } } };
+    const unwritable = { protection: { locked: false } };
+    const green = { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FF00FF00" } } };
+    const italic = { font: { italic: true } };
+    const table = collectDxfs(
+      [
+        {
+          ref: "A1",
+          // `red` is the source's own object — a rule read from the file — and must not be appended again.
+          rules: [
+            { type: "cellIs", style: red },
+            { type: "cellIs", style: italic }
+          ]
+        }
+      ] as never,
+      {
+        source: [red, undefined, unwritable, green] as never,
+        describe: style => ({ writable: style !== unwritable, dropped: [] })
+      }
+    );
+    expect(table.styles).toEqual([red, green, italic]);
+    expect([0, 1, 2, 3, 4].map(table.fromSource)).toEqual([0, undefined, undefined, 1, undefined]);
+    expect(table.indexOf(red)).toBe(0);
+    expect(table.indexOf(italic)).toBe(2);
+  });
+
+  it("with no table read from a file, takes a stated id as an index into the table being written", () => {
+    // A hand-built `<colorFilter dxfId="0"/>` next to a rule: the XLSX writer writes the 0 as it is, so this
+    // must too — declining it would drop a filter that XLSX keeps.
+    const table = collectDxfs([
+      { ref: "A1", rules: [{ type: "expression", style: { font: { bold: true } } }] }
+    ] as never);
+    expect([0, 1].map(table.fromSource)).toEqual([0, undefined]);
+  });
+
+  it("reports what a partly writable format loses, once per format", () => {
+    const style = { font: { bold: true }, styleName: "Heading 1" };
+    const table = collectDxfs(
+      [
+        {
+          ref: "A1",
+          rules: [
+            { type: "expression", style },
+            { type: "expression", style }
+          ]
+        }
+      ] as never,
+      { describe: () => ({ writable: true, dropped: ["styleName"] }) }
+    );
+    expect(table.lost).toEqual(["differential format 0: styleName"]);
+  });
+
+  it("reports a rule whose style has no writable format, and still writes the rule", () => {
+    const unwritable = { protection: { locked: false } };
+    const table = collectDxfs([], {
+      describe: style => ({ writable: style !== unwritable, dropped: [] })
+    });
+    const result = conditionalFormattingRecords(
+      [
+        { ref: "A1", rules: [{ type: "expression", formulae: ["TRUE"], style: unwritable }] }
+      ] as never,
+      table,
+      { sheetNames: ["S"] },
+      () => 1
+    );
+    expect(result.lost).toEqual(["conditional formatting format on A1"]);
+    const rule = result.records.find(entry => recordSpec(entry.id)?.name === "BrtBeginCFRule");
+    // Written with dxfId "none" rather than dropped — the condition still applies.
+    expect(new DataView(rule!.payload!.buffer, rule!.payload!.byteOffset).getUint32(8, true)).toBe(
+      0xffffffff
+    );
+  });
 });
 
 describe("through a workbook", () => {

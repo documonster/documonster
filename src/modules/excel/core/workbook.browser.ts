@@ -1020,6 +1020,7 @@ export function setWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
   wb._cellStyles = value.cellStyles
     ? new Map(value.cellStyles.map(cs => [cs.name, cs]))
     : undefined;
+  wb._dxfs = value.dxfs;
   // Restore chart entries
   wb._chartEntries = value.chartEntries || {};
   wb._chartRels = value.chartRels || {};

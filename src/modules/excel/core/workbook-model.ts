@@ -32,6 +32,7 @@ import { getSheetModel } from "@excel/core/worksheet";
 import type {
   CalculationProperties,
   Font,
+  Style,
   ThreadedCommentPerson,
   WorkbookProperties,
   WorkbookView
@@ -107,6 +108,8 @@ export interface WorkbookModel {
   defaultFont?: Partial<Font>;
   /** Workbook-level named cell styles (OOXML cellStyles), in definition order. */
   cellStyles?: NamedStyleEntry[];
+  /** Differential formats (`<dxfs>`) as read, in index order — see `WorkbookCore._dxfs`. */
+  dxfs?: (Partial<Style> | undefined)[];
   /** Chart entries indexed by 1-based chart number */
   chartEntries?: Record<number, ChartEntry>;
   /** Chart rels indexed by chart number — preserved for round-trip */
@@ -324,6 +327,7 @@ export function getWorkbookModel(wb: WorkbookData): WorkbookModel {
     calcProperties: wb.calcProperties,
     defaultFont: wb._defaultFont,
     cellStyles: wb._cellStyles ? [...wb._cellStyles.values()] : undefined,
+    dxfs: wb._dxfs,
     externalLinks: wb.externalLinks,
     chartEntries: wb._chartEntries,
     chartRels: wb._chartRels,

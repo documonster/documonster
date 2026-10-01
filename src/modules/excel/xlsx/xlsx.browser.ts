@@ -6106,6 +6106,12 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
         model.cellStyles = namedStyles;
       }
     }
+    // The `<dxfs>` table, at its source indices. Rules and table columns reconciled above hold these very
+    // objects; preserved XML (pivot `<formats>`, `<colorFilter>`) holds only the index. See `seedDxfs`.
+    const dxfs = model.styles?.model?.dxfs;
+    if (dxfs?.length) {
+      model.dxfs = dxfs;
+    }
     delete model.styles;
     delete model.mediaIndex;
     delete model.drawings;
@@ -8359,6 +8365,10 @@ class XLSX<TWorkbook extends Workbook = Workbook> {
         (model.cellStyles as NamedStyleEntry[]).map(cs => [cs.name, cs])
       );
       model.styles.registerNamedStyles(namedStyleMap);
+    }
+    // Before any worksheet is prepared: every `addDxfStyle` must see the source table already in place.
+    if (model.dxfs && model.styles.seedDxfs) {
+      model.styles.seedDxfs(model.dxfs);
     }
 
     const workbookXform = new WorkbookXform();

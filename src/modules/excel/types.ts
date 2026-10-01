@@ -58,7 +58,8 @@ export interface Font {
   bold: boolean;
   italic: boolean;
   underline: boolean | "none" | "single" | "double" | "singleAccounting" | "doubleAccounting";
-  vertAlign: "superscript" | "subscript";
+  /** `baseline` is the default; stated, it resets a super- or subscript in a differential format. */
+  vertAlign: "superscript" | "subscript" | "baseline";
   strike: boolean;
   outline: boolean;
   condense: boolean;
@@ -70,13 +71,34 @@ export interface Font {
 // Alignment Types
 // ============================================================================
 export interface Alignment {
-  horizontal: "left" | "center" | "right" | "fill" | "justify" | "centerContinuous" | "distributed";
+  /**
+   * `general` is Excel's default, so a cell never needs to say it. It exists for a *differential* format — a
+   * conditional-formatting rule's `style` — where omitting the field leaves the cell's alignment alone and
+   * `general` resets it.
+   */
+  horizontal:
+    | "general"
+    | "left"
+    | "center"
+    | "right"
+    | "fill"
+    | "justify"
+    | "centerContinuous"
+    | "distributed";
   vertical: "top" | "middle" | "bottom" | "distributed" | "justify";
   wrapText: boolean;
   shrinkToFit: boolean;
   indent: number;
-  readingOrder: "rtl" | "ltr";
+  /** `context` — follow the text — is the default; stated, like `general`, to reset it in a differential format. */
+  readingOrder: "rtl" | "ltr" | "context";
   textRotation: number | "vertical";
+  /** Justify the last line of `distributed` text as well (`justifyLastLine`). */
+  justifyLastLine?: boolean;
+  /**
+   * Indent levels *added to* the cell's own, -15…15 — the `relativeIndent` of a differential format. A cell's
+   * format has only the absolute `indent`; Excel ignores this there.
+   */
+  relativeIndent?: number;
 }
 
 // ============================================================================
@@ -121,6 +143,13 @@ export interface Borders {
   bottom: Partial<Border>;
   right: Partial<Border>;
   diagonal: Partial<BorderDiagonal>;
+  /**
+   * The lines *between* cells of a range — its inner verticals and horizontals. Meaningful in a differential
+   * format (a conditional format, or a table style element), where the format is applied to a range; a single
+   * cell has no inner edges, and Excel ignores these on a cell's own border.
+   */
+  vertical?: Partial<Border>;
+  horizontal?: Partial<Border>;
 }
 
 // ============================================================================
@@ -149,7 +178,15 @@ export type FillPatterns =
 
 export interface FillPattern {
   type: "pattern";
-  pattern: FillPatterns;
+  /**
+   * The pattern. Always present on a cell's fill.
+   *
+   * Absent only on the fill of a *differential* format — a conditional-formatting rule's `style` — where it
+   * means "keep the cell's pattern" and the colour is painted solid. That is how Excel writes its preset
+   * highlight fills (`{ type: "pattern", bgColor: { argb: "FFFFC7CE" } }`), and it is not the same as
+   * `"none"`, which removes the fill.
+   */
+  pattern?: FillPatterns;
   fgColor?: Partial<Color>;
   bgColor?: Partial<Color>;
 }

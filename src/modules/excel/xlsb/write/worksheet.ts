@@ -201,7 +201,11 @@ export interface WriteWorksheetPartOptions {
   /** Conditional-formatting blocks, each a range and the rules on it. */
   readonly conditionalFormattings?: readonly SheetConditionalFormatting[];
   /** Resolves a rule's style to its `dxfId`. Built across the whole workbook before any sheet is written. */
-  readonly dxfIndex?: { readonly indexOf: (style: unknown) => number };
+  readonly dxfIndex?: {
+    readonly indexOf: (style: unknown) => number;
+    /** Where a `dxfId` stated by preserved XML (a `<colorFilter>`) lands in the written table. */
+    readonly fromSource?: (sourceId: number) => number | undefined;
+  };
   /** Hands out the next workbook-unique `iPri`. */
   readonly nextCfPriority?: (stated: number | undefined) => number;
   /** Sparkline groups, each with the cells its sparklines occupy and the ranges they plot. */
@@ -493,8 +497,25 @@ export function worksheetEpilogueRecords(
       // The criteria nest *inside* the range record, per the worked example in MS-XLSB 3.4. Pushing them
       // after `BrtEndAFilter` would put them at worksheet scope, where they belong to nothing.
       if (autoFilterCriteriaXml !== undefined) {
-        for (const [name, payload] of filterCriteriaRecords(autoFilterCriteriaXml).records) {
+        // A colour filter names its colour by `dxfId`, and the table it indexed is rebuilt — so the number
+        // is translated, and a filter whose format did not survive is reported rather than pointed at
+        // whichever format now sits there.
+        let unresolved = 0;
+        const resolveDxfId = (sourceId: number): number | undefined => {
+          const dxfId = dxfIndex?.fromSource ? dxfIndex.fromSource(sourceId) : sourceId;
+          unresolved += dxfId === undefined ? 1 : 0;
+          return dxfId;
+        };
+        for (const [name, payload] of filterCriteriaRecords(autoFilterCriteriaXml, resolveDxfId)
+          .records) {
           records.push(record(name, payload));
+        }
+        if (unresolved > 0) {
+          unsupported.push(
+            unresolved === 1
+              ? "colour filter with no writable format"
+              : `colour filter with no writable format (${unresolved})`
+          );
         }
       }
       records.push(record("BrtEndAFilter"));

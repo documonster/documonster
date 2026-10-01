@@ -94,8 +94,20 @@ export function encodeFill(fill: Fill | undefined): Uint8Array {
     const first = fill.stops[0]?.color;
     return patternFill(PATTERNS.indexOf("solid"), first, undefined);
   }
-  const index = PATTERNS.indexOf(fill.pattern);
-  return patternFill(index < 0 ? 0 : index, fill.fgColor, fill.bgColor);
+  // A cell fill has no "leave the pattern alone" to express, so an absent pattern is `none` — the
+  // same default ECMA-376 gives an absent `patternType` on a cell fill.
+  return patternFill(fillPatternValue(fill.pattern) ?? 0, fill.fgColor, fill.bgColor);
+}
+
+/** The `FillPattern` (MS-XLSB 2.5.51) value of a pattern name, or `undefined` for one it does not define. */
+export function fillPatternValue(pattern: FillPatterns | undefined): number | undefined {
+  const index = pattern === undefined ? -1 : PATTERNS.indexOf(pattern);
+  return index < 0 ? undefined : index;
+}
+
+/** The pattern name of a `FillPattern` value, or `undefined` for one outside the enumeration. */
+export function fillPatternName(value: number): FillPatterns | undefined {
+  return PATTERNS[value];
 }
 
 /**

@@ -10,7 +10,8 @@ interface StopModel {
 
 interface PatternFillModel {
   type: "pattern";
-  pattern: string;
+  /** Absent only in a differential format, where it means "leave the pattern alone" — see `differential`. */
+  pattern?: string;
   fgColor?: Partial<Color>;
   bgColor?: Partial<Color>;
 }
@@ -90,10 +91,21 @@ class StopXform extends BaseXform {
 class PatternFillXform extends BaseXform {
   declare public map: { fgColor: ColorXform; bgColor: ColorXform };
   declare public parser?: BaseXform;
+  /**
+   * Whether this is the fill of a differential format (`<dxf>`).
+   *
+   * There an absent `patternType` does not mean `none`. It means the format does not change the pattern, and
+   * Excel paints `bgColor` solid — which is exactly how it writes every preset conditional-format fill:
+   * `<patternFill><bgColor rgb="FFFFC7CE"/></patternFill>`. Reading that as `none` and writing it back as
+   * `patternType="none"` said "remove the fill", and the highlight disappeared from every rule on re-save
+   * (confirmed against LibreOffice, which draws the first and not the second).
+   */
+  declare private differential: boolean;
 
-  constructor() {
+  constructor(differential = false) {
     super();
 
+    this.differential = differential;
     this.map = {
       fgColor: new ColorXform("fgColor"),
       bgColor: new ColorXform("bgColor")
@@ -116,7 +128,9 @@ class PatternFillXform extends BaseXform {
     // literal string "undefined" — the latter is not a valid ST_PatternType
     // enum value and makes strict OOXML readers (openpyxl, Excel's own
     // validator) reject the entire stylesheet.
-    xmlStream.addAttribute("patternType", model.pattern ?? "none");
+    if (model.pattern !== undefined || !this.differential) {
+      xmlStream.addAttribute("patternType", model.pattern ?? "none");
+    }
     if (model.fgColor) {
       this.map.fgColor.render(xmlStream, model.fgColor);
     }
@@ -133,12 +147,15 @@ class PatternFillXform extends BaseXform {
     }
     switch (node.name) {
       case "patternFill":
-        this.model = {
-          type: "pattern",
-          // `patternType` is optional per ECMA-376; an absent attribute
-          // means "none" rather than an undefined pattern.
-          pattern: node.attributes.patternType ?? "none"
-        };
+        this.model =
+          node.attributes.patternType === undefined && this.differential
+            ? { type: "pattern" }
+            : {
+                type: "pattern",
+                // `patternType` is optional per ECMA-376; in a cell fill an absent attribute
+                // means "none" rather than an undefined pattern.
+                pattern: node.attributes.patternType ?? "none"
+              };
         return true;
       default:
         this.parser = this.map[node.name];
@@ -293,11 +310,12 @@ class FillXform extends BaseXform {
   declare public map: { patternFill: PatternFillXform; gradientFill: GradientFillXform };
   declare public parser?: PatternFillXform | GradientFillXform;
 
-  constructor() {
+  /** @param differential - The fill of a `<dxf>`; see `PatternFillXform`. */
+  constructor(differential = false) {
     super();
 
     this.map = {
-      patternFill: new PatternFillXform(),
+      patternFill: new PatternFillXform(differential),
       gradientFill: new GradientFillXform()
     };
   }

@@ -42,6 +42,7 @@ import type {
   Font,
   ImageData,
   NamedStyle,
+  Style,
   WorkbookProperties,
   CalculationProperties,
   WorkbookView,
@@ -118,6 +119,15 @@ export interface WorkbookData {
    * `cellStyles`/`cellStyleXfs`.
    */
   _cellStyles?: Map<string, NamedStyleEntry>;
+  /**
+   * The workbook-level differential-format table (`<dxfs>`) as it was read, in index order.
+   *
+   * Carried because a `dxfId` is an index and not every holder of one is modelled — a pivot table's
+   * `<formats>` and a `<colorFilter>` are preserved as XML with the number they were read with. The writer
+   * starts its table from this one so those numbers stay valid; modelled rules and table columns hold these
+   * same objects and are resolved back to the same index.
+   */
+  _dxfs?: (Partial<Style> | undefined)[];
   _writerExternalLinkCache: Map<string, ExternalLinkModel>;
   _tableNames: Set<string>;
   _chartEntries: Record<number, ChartEntry>;

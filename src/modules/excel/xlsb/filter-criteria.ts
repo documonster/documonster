@@ -170,7 +170,8 @@ function flag(element: XmlElement, name: string): boolean {
  * The records for one `<filterColumn>`'s child, or `undefined` when the kind is not expressed here.
  */
 function criterionRecords(
-  child: XmlElement
+  child: XmlElement,
+  resolveDxfId: DxfIdResolver
 ): readonly (readonly [string, Uint8Array | undefined])[] | undefined {
   switch (localName(child)) {
     case "filters":
@@ -184,7 +185,7 @@ function criterionRecords(
       return payload === undefined ? undefined : [["BrtDynamicFilter", payload]];
     }
     case "colorFilter": {
-      const payload = colorFilterPayload(child);
+      const payload = colorFilterPayload(child, resolveDxfId);
       return payload === undefined ? undefined : [["BrtColorFilter", payload]];
     }
     case "iconFilter": {
@@ -333,14 +334,21 @@ function dynamicFilterPayload(element: XmlElement): Uint8Array | undefined {
  * only an explicit `cellColor="0"` means the font colour. Reading it as a plain flag inverts every
  * fill-colour filter into a font-colour one.
  */
-function colorFilterPayload(element: XmlElement): Uint8Array | undefined {
-  const dxfId = element.attributes.dxfId;
-  if (dxfId === undefined || !Number.isInteger(Number(dxfId)) || Number(dxfId) < 0) {
+function colorFilterPayload(
+  element: XmlElement,
+  resolveDxfId: DxfIdResolver
+): Uint8Array | undefined {
+  const sourceId = element.attributes.dxfId;
+  if (sourceId === undefined || !Number.isInteger(Number(sourceId)) || Number(sourceId) < 0) {
+    return undefined;
+  }
+  const dxfId = resolveDxfId(Number(sourceId));
+  if (dxfId === undefined) {
     return undefined;
   }
   const cellColour = element.attributes.cellColor === undefined || flag(element, "cellColor");
   return new BinaryWriter()
-    .writeUint32(Number(dxfId))
+    .writeUint32(dxfId)
     .writeUint32(cellColour ? 1 : 0)
     .toUint8Array();
 }
@@ -407,11 +415,23 @@ function dateGroupItemPayload(element: XmlElement): Uint8Array {
 }
 
 /**
+ * Maps a `dxfId` as the preserved XML states it — an index into the table the workbook was read with — to
+ * its index in the table being written, or `undefined` when that format is not in it.
+ */
+export type DxfIdResolver = (sourceId: number) => number | undefined;
+
+/**
  * The records nested inside `BrtBeginAFilter` for the criteria the XLSX reader preserved.
  *
  * @param xml - The `autoFilterCriteria.xml` fragment: a run of `<filterColumn>` elements with no wrapper.
+ * @param resolveDxfId - Where a `<colorFilter>`'s format lands in the written `BrtBeginDXFs`. The writer
+ *   rebuilds that collection, so the stated number is only right by coincidence. Defaults to taking it as
+ *   stated, which is what a caller asking only which *kinds* are expressible wants.
  */
-export function filterCriteriaRecords(xml: string): FilterCriteriaResult {
+export function filterCriteriaRecords(
+  xml: string,
+  resolveDxfId: DxfIdResolver = sourceId => sourceId
+): FilterCriteriaResult {
   const records: (readonly [string, Uint8Array | undefined])[] = [];
   const unsupported = new Set<string>();
   // The fragment has no single root, so it gets one here rather than using the parser's `fragment` mode:
@@ -433,7 +453,7 @@ export function filterCriteriaRecords(xml: string): FilterCriteriaResult {
       if (child.type !== "element") {
         continue;
       }
-      const criterion = criterionRecords(child);
+      const criterion = criterionRecords(child, resolveDxfId);
       if (criterion === undefined) {
         unsupported.add(localName(child));
       } else {

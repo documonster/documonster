@@ -433,6 +433,12 @@ async function readInto(
     const { name, ...facets } = named;
     defineCellStyle(workbook, name, facets as never);
   }
+  // The differential-format table at its source indices: a preserved `<colorFilter>` names its format by
+  // position in it, and the rules resolved below hold these same objects. See `WorkbookCore._dxfs`.
+  if (styles !== undefined && styles.dxfs.length > 0) {
+    workbook._dxfs = [...styles.dxfs];
+  }
+  lost.push(...(styles?.dxfUnread ?? []).map(entry => `xl/styles.bin: ${entry}`));
   // Font index 0 is what an unstyled cell inherits, so it belongs to the workbook rather than to any
   // cell format. `writeStyles` reads it back from here; without it an XLSB round trip replaced the
   // author's default with Calibri 11.
