@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/documonster/documonster/compare/v0.18.1...v0.18.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* **excel:** Keep every pivot table attribute across a round trip ([cb6d19d](https://github.com/documonster/documonster/commit/cb6d19d16ad8a03135f79e62c316da86dd349301))
+
 ## [0.18.1](https://github.com/documonster/documonster/compare/v0.18.0...v0.18.1) (2026-10-01)
 
 
