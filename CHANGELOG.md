@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.19.0](https://github.com/documonster/documonster/compare/v0.18.2...v0.19.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **excel:** `Workbook.getXlsxIo` is removed. Use `Workbook.read`, `readFile`, `readStream`, `toBuffer`, `writeFile` and `writeStream`.
+
+### Features
+
+* **excel:** Keep reader, charts and parsers out of write-only bundles ([4ad9ead](https://github.com/documonster/documonster/commit/4ad9ead66e6601f6167f3f46779ebd27585a9f0f))
+
+
+### Bug Fixes
+
+* **excel:** Read worksheets correctly and faster in both readers ([6bf2101](https://github.com/documonster/documonster/commit/6bf210152407871b03566990d2f091c0bfa00adb))
+
 ## [0.18.2](https://github.com/documonster/documonster/compare/v0.18.1...v0.18.2) (2026-10-02)
 
 
