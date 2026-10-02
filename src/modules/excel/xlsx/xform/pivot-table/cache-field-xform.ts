@@ -2,6 +2,7 @@ import type { CacheField, SharedItemValue } from "@excel/core/pivot-table-types"
 import { pivotError } from "@excel/core/pivot-table-types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
+import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
 import { parseOoxmlDate } from "@utils/utils";
 import type { ParseOpenTag } from "@xml/types";
 
@@ -210,7 +211,7 @@ function parseSharedItemValue(tag: string, attributes: Record<string, string>): 
       }
       return parseFloat(attributes.v);
     case "b":
-      return attributes.v === "1";
+      return parseXsdBoolean(attributes.v) ?? false;
     case "e":
       return pivotError(attributes.v ?? "");
     case "m":

@@ -105,6 +105,24 @@ describe("PivotCacheRecordsXform", () => {
       ]);
     });
 
+    it("should parse xsd:boolean true/false spellings in <b>", () => {
+      const xform = new PivotCacheRecordsXform();
+
+      xform.parseOpen({ name: "pivotCacheRecords", attributes: { count: "1" } });
+      xform.parseOpen({ name: "r", attributes: {} });
+      xform.parseOpen({ name: "b", attributes: { v: "true" } });
+      xform.parseClose("b");
+      xform.parseOpen({ name: "b", attributes: { v: "false" } });
+      xform.parseClose("b");
+      xform.parseClose("r");
+      xform.parseClose("pivotCacheRecords");
+
+      expect(xform.model!.records[0]).toEqual([
+        { type: "b", value: true },
+        { type: "b", value: false }
+      ]);
+    });
+
     it("should parse missing value (<m>)", () => {
       const xform = new PivotCacheRecordsXform();
 

@@ -14,6 +14,7 @@
  */
 
 import type { CacheField, SharedItemValue } from "@excel/core/pivot-table-types";
+import { encodeWideString } from "@excel/xlsb/binary";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 import { dateToExcel } from "@utils/utils";
 
@@ -27,16 +28,6 @@ export type PivotRecord = readonly [string, Uint8Array | undefined];
  */
 const CACHE_APP_VERSION = 8;
 const CACHE_MIN_VERSION = 3;
-
-/** An `XLWideString`: a four-byte character count, then UTF-16. */
-function wideString(value: string): Uint8Array {
-  const characters = [...value];
-  const writer = new BinaryWriter().writeUint32(characters.length);
-  for (const character of characters.join("")) {
-    writer.writeUint16(character.charCodeAt(0));
-  }
-  return writer.toUint8Array();
-}
 
 /** An `RfX`: four unsigned 32-bit bounds, first row, last row, first column, last column. */
 function rfx(
@@ -82,7 +73,7 @@ export function pivotCacheIdRecords(
       "BrtBeginPivotCacheID",
       concatUint8Arrays([
         new BinaryWriter().writeUint32(cache.cacheId).toUint8Array(),
-        wideString(cache.relationshipId)
+        encodeWideString(cache.relationshipId)
       ])
     ]);
     records.push(["BrtEndPivotCacheID", undefined]);
@@ -216,7 +207,7 @@ function cacheDefinitionPayload(cache: PivotCacheModel): Uint8Array {
     .writeUint32(cache.records.length);
   const parts: Uint8Array[] = [writer.toUint8Array()];
   if (hasRecords) {
-    parts.push(wideString(cache.recordsRelationshipId!));
+    parts.push(encodeWideString(cache.recordsRelationshipId!));
   }
   // Present because `fLoadRefreshedWho` is 0 — see the note above.
   parts.push(new BinaryWriter().writeUint32(0).toUint8Array());
@@ -240,7 +231,7 @@ function sourceRangePayload(cache: PivotCacheModel): Uint8Array {
       // single sheet, which is what makes `sheetName` meaningful.
       .writeUint8(0x02)
       .toUint8Array(),
-    wideString(cache.sheetName),
+    encodeWideString(cache.sheetName),
     rfx(cache.range.rowFirst, cache.range.rowLast, cache.range.columnFirst, cache.range.columnLast)
   ]);
 }
@@ -266,7 +257,7 @@ function cacheFieldPayload(field: CacheField): Uint8Array {
       // `cIsxtmps` — member-property field indices, which only an OLAP cache has.
       .writeUint32(0)
       .toUint8Array(),
-    wideString(field.name)
+    encodeWideString(field.name)
   ]);
 }
 
@@ -453,7 +444,7 @@ function sharedItemRecord(item: SharedItemValue): PivotRecord {
   // A value none of the above: written as text. `String(item)` on a `Date` is what used to happen here, and
   // it put `"Mon Jan 15 2024 00:00:00 GMT+0800 (China Standard Time)"` into the cache — a sentence whose
   // content depends on the machine's locale and timezone.
-  return ["BrtPCDIString", wideString(String(item))];
+  return ["BrtPCDIString", encodeWideString(String(item))];
 }
 
 /**
@@ -536,7 +527,7 @@ function cacheRecordPayload(
       parts.push(encodePcdiDateTime(value));
       continue;
     }
-    parts.push(wideString(value === null || value === undefined ? "" : String(value)));
+    parts.push(encodeWideString(value === null || value === undefined ? "" : String(value)));
   }
   return concatUint8Arrays(parts);
 }

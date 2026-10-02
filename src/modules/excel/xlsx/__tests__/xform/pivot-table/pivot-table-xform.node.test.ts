@@ -1,8 +1,11 @@
+import { extractAll } from "@archive/unzip/extract";
 import { ZipParser } from "@archive/unzip/zip-parser";
+import { createZip } from "@archive/zip/zip-bytes";
+import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
 import type { PivotTableModel } from "@excel/core/pivot-table";
 import { getXlsxIo } from "@excel/core/workbook";
 import { addPivotTable, addTable } from "@excel/core/worksheet";
-import { Workbook } from "@excel/index";
+import { Workbook, Worksheet } from "@excel/index";
 import type { CellFormulaValue, CellValue } from "@excel/types";
 import { PivotTableXform } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import { XmlWriter } from "@xml/writer";
@@ -1776,5 +1779,283 @@ describe("PivotTableXform - Round 4 fixes", () => {
       expect(xml).toContain('dragToRow="0"');
       expect(xml).toContain("</pivotHierarchies>");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #238 — everything a loaded pivot table carries must survive a roundtrip,
+// exercised through the real SAX parser rather than hand-fed parse events.
+// ---------------------------------------------------------------------------
+
+const MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+async function parsePivotXml(xml: string) {
+  const bytes = new TextEncoder().encode(xml);
+  const stream = {
+    async *[Symbol.asyncIterator]() {
+      yield bytes;
+    }
+  };
+  const model = await new PivotTableXform().parseStream(stream);
+  expect(model).toBeTruthy();
+  return model!;
+}
+
+function renderPivotModel(model: unknown): string {
+  const xmlStream = new XmlWriter();
+  new PivotTableXform().render(xmlStream, model as any);
+  return xmlStream.xml;
+}
+
+function rootTag(xml: string): string {
+  return xml.match(/<pivotTableDefinition\b[^>]*>/)![0];
+}
+
+describe("PivotTableXform - issue #238 roundtrip fidelity", () => {
+  it("preserves every unmodeled root attribute, escaped, exactly once", async () => {
+    const model = await parsePivotXml(
+      `<pivotTableDefinition xmlns="${MAIN_NS}"` +
+        ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="xr"' +
+        ' xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"' +
+        ' name="PT1" cacheId="21" dataCaption="Werte" grandTotalCaption="Test 4"' +
+        ' rowHeaderCaption="R &amp; &lt;D&gt; &quot;q&quot;" colHeaderCaption="" showHeaders="0"' +
+        ' pageWrap="2" pageStyle="PS" tag="t">' +
+        '<location ref="A1:B2" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>' +
+        "</pivotTableDefinition>"
+    );
+    const root = rootTag(renderPivotModel(model));
+
+    expect(root).toContain('rowHeaderCaption="R &amp; &lt;D&gt; &quot;q&quot;"');
+    // An empty caption is a value, not an absence
+    expect(root).toContain('colHeaderCaption=""');
+    expect(root).toContain('dataCaption="Werte"');
+    expect(root).toContain('grandTotalCaption="Test 4"');
+    for (const attr of ['showHeaders="0"', 'pageWrap="2"', 'pageStyle="PS"', 'tag="t"']) {
+      expect(root).toContain(attr);
+    }
+    // mc:Ignorable="xr" requires the prefix declared even with no xr:uid
+    expect(root).toContain('mc:Ignorable="xr"');
+    expect(root).toContain("xmlns:xr=");
+    for (const attr of ["xmlns", "xmlns:xr", "xmlns:mc", "name", "cacheId", "dataCaption"]) {
+      expect(root.match(new RegExp(`\\s${attr}=`, "g"))).toHaveLength(1);
+    }
+  });
+
+  it("keeps each field's own extLst with that field and the table's with the table", async () => {
+    const model = await parsePivotXml(
+      `<pivotTableDefinition xmlns="${MAIN_NS}" name="PT1" cacheId="0">` +
+        '<location ref="A1:B2" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>' +
+        '<pivotFields count="2">' +
+        '<pivotField axis="axisPage" showAll="0">' +
+        '<items count="2"><item n="Renamed &amp; &lt;ok&gt;" x="0"/><item t="default"/></items>' +
+        '<extLst><ext uri="{2946ED86-A175-432a-8AC1-64E0C546D7DE}"><x14:pivotField fillDownLabels="1"/></ext></extLst>' +
+        "</pivotField>" +
+        '<pivotField dataField="1" showAll="0"/>' +
+        "</pivotFields>" +
+        '<pageFields count="1"><pageField fld="0" hier="-1" cap="Region">' +
+        '<extLst><ext uri="{PAGE}"><x:pageExt v="p"/></ext></extLst>' +
+        "</pageField></pageFields>" +
+        '<dataFields count="1"><dataField name="Pct" fld="1" showDataAs="percentOfTotal" baseField="0" baseItem="0">' +
+        '<extLst><ext uri="{E15A36E0-9728-4e99-A89B-3F7291B0FE68}"><x14:dataField pivotShowAs="percentOfParent"/></ext></extLst>' +
+        "</dataField></dataFields>" +
+        '<extLst><ext uri="{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}"><x14:pivotTableDefinition hideValuesRow="1"/></ext></extLst>' +
+        "</pivotTableDefinition>"
+    );
+
+    expect(model.extLstXml).toContain("hideValuesRow");
+    expect(model.extLstXml).not.toMatch(/fillDownLabels|pivotShowAs|pageExt/);
+
+    const xml = renderPivotModel(model);
+    expect(xml).toContain('<item n="Renamed &amp; &lt;ok&gt;" x="0"/>');
+    expect(xml).toMatch(
+      /<pivotField [^>]*>.*<\/items><extLst>.*fillDownLabels="1".*<\/extLst><\/pivotField>/
+    );
+    expect(xml).toMatch(
+      /<pageField fld="0" hier="-1" cap="Region"><extLst>.*pageExt.*<\/extLst><\/pageField>/
+    );
+    expect(xml).toMatch(
+      /<dataField [^>]*showDataAs="percentOfTotal"[^>]*><extLst>.*pivotShowAs="percentOfParent".*<\/extLst><\/dataField>/
+    );
+    expect(xml.match(/hideValuesRow/g)).toHaveLength(1);
+    // Table extLst stays the last child of the root
+    expect(xml).toMatch(/hideValuesRow="1"\s*\/><\/ext><\/extLst><\/pivotTableDefinition>$/);
+  });
+
+  it("captures autoSortScope and chartFormat pivotArea subtrees completely", async () => {
+    const area =
+      '<pivotArea dataOnly="0" outline="0" fieldPosition="0">' +
+      '<references count="1"><reference field="4294967294" count="1" selected="0"><x v="0"/></reference></references>' +
+      '<extLst><ext uri="{AREA}"><y:areaExt a="1"/></ext></extLst>' +
+      "</pivotArea>";
+    const model = await parsePivotXml(
+      `<pivotTableDefinition xmlns="${MAIN_NS}" name="PT1" cacheId="0" chartFormat="1">` +
+        '<location ref="A1:B2" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>' +
+        '<pivotFields count="1"><pivotField axis="axisRow" showAll="0" sortType="descending">' +
+        '<items count="1"><item t="default"/></items>' +
+        `<autoSortScope>${area}</autoSortScope>` +
+        "</pivotField></pivotFields>" +
+        `<chartFormats count="1"><chartFormat chart="0" format="1" series="true">${area}</chartFormat></chartFormats>` +
+        "</pivotTableDefinition>"
+    );
+
+    const field = model.pivotFields[0];
+    // The pivotArea's extLst belongs to the sort scope, not to the field
+    expect(field.extLstXml).toBeUndefined();
+    expect(field.autoSortScopeXml).toContain("areaExt");
+    expect(model.chartFormats![0].series).toBe(true);
+    expect(model.chartFormats![0].pivotAreaXml).toContain("areaExt");
+    expect(model.extLstXml).toBeUndefined();
+
+    const xml = renderPivotModel(model);
+    expect(xml.match(/areaExt/g)).toHaveLength(2);
+    expect(xml).toContain('<chartFormat chart="0" format="1" series="1">');
+  });
+
+  it("reads xsd:boolean true/false spellings, not only 1/0", async () => {
+    const model = await parsePivotXml(
+      `<pivotTableDefinition xmlns="${MAIN_NS}" name="PT1" cacheId="0"` +
+        ' compact="false" compactData="false" outline="true" outlineData="true">' +
+        '<location ref="A1:B2" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>' +
+        '<pivotFields count="2">' +
+        '<pivotField axis="axisRow" compact="false" outline="false" showAll="false"' +
+        ' defaultSubtotal="false" subtotalTop="false" insertBlankRow="true" multipleItemSelectionAllowed="true"/>' +
+        '<pivotField dataField="true" showAll="false"/>' +
+        "</pivotFields></pivotTableDefinition>"
+    );
+
+    expect(model.compact).toBe(false);
+    expect(model.compactData).toBe(false);
+    expect(model.outline).toBe(true);
+    expect(model.outlineData).toBe(true);
+    expect(model.pivotFields[0]).toMatchObject({
+      compact: false,
+      outline: false,
+      showAll: false,
+      defaultSubtotal: false,
+      subtotalTop: false,
+      insertBlankRow: true,
+      multipleItemSelectionAllowed: true
+    });
+    expect(model.pivotFields[1].dataField).toBe(true);
+
+    const root = rootTag(renderPivotModel(model));
+    for (const attr of ['compact="0"', 'compactData="0"', 'outline="1"', 'outlineData="1"']) {
+      expect(root).toContain(attr);
+    }
+  });
+
+  it("does not leak state when one xform instance parses a second table", async () => {
+    const xform = new PivotTableXform();
+    const stream = (xml: string) => ({
+      async *[Symbol.asyncIterator]() {
+        yield new TextEncoder().encode(xml);
+      }
+    });
+    // Truncated mid-capture: the nested collector is left active
+    await xform
+      .parseStream(
+        stream(
+          `<pivotTableDefinition xmlns="${MAIN_NS}" name="A" cacheId="0" rowHeaderCaption="first">` +
+            '<pivotFields count="1"><pivotField showAll="0"><extLst><ext uri="{X}">'
+        )
+      )
+      .catch(() => undefined);
+    const model = await xform.parseStream(
+      stream(
+        `<pivotTableDefinition xmlns="${MAIN_NS}" name="B" cacheId="1">` +
+          '<location ref="A1:B2" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>' +
+          "</pivotTableDefinition>"
+      )
+    );
+    expect(model!.name).toBe("B");
+    expect(model!.extraRootAttrs).toBeUndefined();
+    expect(model!.location?.ref).toBe("A1:B2");
+  });
+});
+
+describe("Workbook - issue #238 pivot table roundtrip", () => {
+  const PIVOT_PATH = "xl/pivotTables/pivotTable1.xml";
+
+  async function workbookWithPivotXml(pivotXml: string): Promise<Uint8Array> {
+    const workbook = Workbook.create();
+    const data = Workbook.addWorksheet(workbook, "Data");
+    Worksheet.addRows(data, [
+      ["Region", "Kind", "Qty"],
+      ["N", "x", 1],
+      ["S", "y", 2],
+      ["N", "y", 3]
+    ]);
+    const pivot = Workbook.addWorksheet(workbook, "Pivot");
+    addPivotTable(pivot, {
+      sourceSheet: data,
+      rows: ["Region"],
+      columns: ["Kind"],
+      values: ["Qty"],
+      metric: "sum"
+    });
+    const entries = await extractAll(await Workbook.toBuffer(workbook));
+    const generated = new TextDecoder().decode(entries.get(PIVOT_PATH)!.data);
+    const cacheId = generated.match(/cacheId="(\d+)"/)![1];
+    entries.get(PIVOT_PATH)!.data = new TextEncoder().encode(
+      pivotXml.replace("{{cacheId}}", cacheId)
+    );
+    return createZip([...entries].map(([name, entry]) => ({ name, data: entry.data })));
+  }
+
+  async function roundtrip(bytes: Uint8Array): Promise<{ bytes: Uint8Array; xml: string }> {
+    const workbook = Workbook.create();
+    await Workbook.read(workbook, bytes);
+    const out = await Workbook.toBuffer(workbook);
+    const entries = await extractAll(out);
+    return { bytes: out, xml: new TextDecoder().decode(entries.get(PIVOT_PATH)!.data) };
+  }
+
+  it("keeps captions, value display and extensions through two read/write cycles", async () => {
+    const source = await workbookWithPivotXml(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        `<pivotTableDefinition xmlns="${MAIN_NS}"` +
+        ' xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="xr"' +
+        ' xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"' +
+        ' xr:uid="{47B333F7-2D57-44FB-98E2-850A6958A134}"' +
+        ' name="PivotTable1" cacheId="{{cacheId}}" applyNumberFormats="0" applyBorderFormats="0"' +
+        ' applyFontFormats="0" applyPatternFormats="0" applyAlignmentFormats="0"' +
+        ' applyWidthHeightFormats="1" dataCaption="Werte" grandTotalCaption="Gesamt"' +
+        ' updatedVersion="8" minRefreshableVersion="3" createdVersion="8" indent="0"' +
+        ' outline="true" outlineData="true" rowHeaderCaption="Région &amp; Co" colHeaderCaption="Art">' +
+        '<location ref="A3:D7" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>' +
+        '<pivotFields count="3">' +
+        '<pivotField axis="axisRow" showAll="0"><items count="3"><item n="Nord" x="0"/><item x="1"/><item t="default"/></items>' +
+        '<extLst><ext uri="{2946ED86-A175-432a-8AC1-64E0C546D7DE}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:pivotField fillDownLabels="1"/></ext></extLst>' +
+        "</pivotField>" +
+        '<pivotField axis="axisCol" showAll="0"><items count="3"><item x="0"/><item x="1"/><item t="default"/></items></pivotField>' +
+        '<pivotField dataField="1" showAll="0"/>' +
+        "</pivotFields>" +
+        '<rowFields count="1"><field x="0"/></rowFields>' +
+        '<rowItems count="3"><i><x/></i><i><x v="1"/></i><i t="grand"><x/></i></rowItems>' +
+        '<colFields count="1"><field x="1"/></colFields>' +
+        '<colItems count="3"><i><x/></i><i><x v="1"/></i><i t="grand"><x/></i></colItems>' +
+        '<dataFields count="1"><dataField name="Anteil" fld="2" showDataAs="percentOfTotal" baseField="0" baseItem="0" numFmtId="10"/></dataFields>' +
+        '<pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0" showLastColumn="1"/>' +
+        '<extLst><ext uri="{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"><x14:pivotTableDefinition hideValuesRow="1" xmlns:xm="http://schemas.microsoft.com/office/excel/2006/main"/></ext></extLst>' +
+        "</pivotTableDefinition>"
+    );
+
+    const first = await roundtrip(source);
+    const root = rootTag(first.xml);
+    expect(root).toContain('rowHeaderCaption="Région &amp; Co"');
+    expect(root).toContain('colHeaderCaption="Art"');
+    expect(root).toContain('dataCaption="Werte"');
+    expect(root).toContain('grandTotalCaption="Gesamt"');
+    expect(root).toContain('mc:Ignorable="xr"');
+    expect(root).toContain('outline="1"');
+    expect(first.xml).toContain('<item n="Nord" x="0"/>');
+    expect(first.xml).toContain('showDataAs="percentOfTotal"');
+    expect(first.xml).toMatch(/<\/items><extLst>.*fillDownLabels="1".*<\/extLst><\/pivotField>/);
+    expect(first.xml.match(/hideValuesRow/g)).toHaveLength(1);
+    await expectValidXlsx(first.bytes, { label: "issue #238 first roundtrip" });
+
+    // A second cycle must be a fixed point: nothing lost, nothing duplicated
+    const second = await roundtrip(first.bytes);
+    expect(second.xml).toBe(first.xml);
   });
 });

@@ -260,6 +260,27 @@ export interface PivotTable {
   cacheDefinition?: ParsedCacheDefinition;
   /** Cache records for loaded pivot tables */
   cacheRecords?: ParsedCacheRecords;
+  // View strings carried from a loaded definition, so that writing the table into another container (XLSB)
+  // keeps them; the XLSX writer re-renders the loaded definition and does not read them from here. The two
+  // flags keep the file's own `xsd:boolean` spelling.
+  /** Caption of the data field, shown with two or more data items. */
+  dataCaption?: string;
+  /** Caption for grand totals. */
+  grandTotalCaption?: string;
+  /** Header caption over the row labels (compact layout). */
+  rowHeaderCaption?: string;
+  /** Header caption over the column labels (compact layout). */
+  colHeaderCaption?: string;
+  /** Whether `errorCaption` replaces error values. */
+  showError?: string;
+  /** String shown in place of an error value. */
+  errorCaption?: string;
+  /** Whether `missingCaption` is shown for empty values. */
+  showMissing?: string;
+  /** String shown for an empty value. */
+  missingCaption?: string;
+  /** User-defined string associated with the table. */
+  tag?: string;
   /** Root chartFormat attribute used by pivot charts. */
   chartFormat?: number;
   /** Chart format entries used by pivot charts. */

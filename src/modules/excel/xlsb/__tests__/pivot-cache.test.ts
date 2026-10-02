@@ -407,3 +407,17 @@ describe("the cache records part", () => {
     expect(payloadOf(records, "BrtPCRRecord").getUint32(0, true)).toBe(2);
   });
 });
+
+describe("strings outside the Basic Multilingual Plane", () => {
+  it("writes a shared item as UTF-16 code units, surrogate pair intact", () => {
+    // The writer carried its own XLWideString that counted code points and wrote each one's first unit only,
+    // so "😀" was declared one unit long and stored as a lone high surrogate.
+    const records = pivotCacheDefinitionRecords(
+      sampleCache({ cacheFields: [{ name: "F", sharedItems: ["😀"] }], records: [[0]] })
+    );
+    const item = payloadOf(records, "BrtPCDIString");
+    expect(item.getUint32(0, true)).toBe(2);
+    expect(item.getUint16(4, true)).toBe(0xd83d);
+    expect(item.getUint16(6, true)).toBe(0xde00);
+  });
+});

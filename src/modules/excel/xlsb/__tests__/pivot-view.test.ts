@@ -8,11 +8,13 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
+import { createZip } from "@archive/zip/zip-bytes";
 import { Pivot, Workbook, Worksheet } from "@excel";
 import { VALID_SUBTOTALS } from "@excel/core/pivot-table-types";
-import { iterateInterpretableRecords } from "@excel/xlsb/binary";
+import { iterateInterpretableRecords, readWideString } from "@excel/xlsb/binary";
 import { pivotViewRecords, type PivotViewModel } from "@excel/xlsb/pivot-view";
 import { RECORD_BY_NAME, recordSpec } from "@excel/xlsb/spec/records";
+import { BinaryReader } from "@utils/binary";
 import { describe, expect, it } from "vitest";
 
 function sampleView(overrides: Partial<PivotViewModel> = {}): PivotViewModel {
@@ -975,5 +977,176 @@ describe("XLSB and XLSX agree about the same pivot table", () => {
       }
     }
     expect(columns).toBe(1);
+  });
+});
+
+/**
+ * `BrtBeginSXView`'s conditional strings, decoded from the flags that declare them. The reader is written from
+ * the field table independently of the writer, so a flag and a string that disagree fail here rather than in
+ * Excel.
+ */
+function viewStrings(payload: Uint8Array): Record<string, string> {
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.length);
+  const second = view.getUint32(4, true);
+  const third = view.getUint32(8, true);
+  const reader = new BinaryReader(payload, 32, "view");
+  const read = (): string => readWideString(reader, "view");
+  const out: Record<string, string> = { name: read() };
+  if (second & (1 << 19)) {
+    out.data = read();
+  }
+  if (second & (1 << 20)) {
+    out.grand = read();
+  }
+  if (!(third & (1 << 6))) {
+    out.error = read();
+  }
+  if (!(third & (1 << 7))) {
+    out.missing = read();
+  }
+  for (const [bit, key] of [
+    [21, "pageFieldStyle"],
+    [22, "tableStyle"],
+    [23, "vacateStyle"],
+    [30, "tag"]
+  ] as const) {
+    if (second & (1 << bit)) {
+      out[key] = read();
+    }
+  }
+  if (third & (1 << 11)) {
+    out.colHeader = read();
+  }
+  if (third & (1 << 10)) {
+    out.rowHeader = read();
+  }
+  // Every byte accounted for: a flag claiming a string the writer did not write, or the reverse, leaves a
+  // remainder or runs out.
+  expect(reader.remaining).toBe(0);
+  return out;
+}
+
+function viewPayloadBytes(view: PivotViewModel): Uint8Array {
+  return pivotViewRecords(view).find(([name]) => name === "BrtBeginSXView")![1]!;
+}
+
+describe("BrtBeginSXView view strings (issue #238)", () => {
+  it("writes only name and data caption when nothing else is set", () => {
+    expect(viewStrings(viewPayloadBytes(sampleView()))).toEqual({
+      name: "PivotTable1",
+      data: "Values"
+    });
+  });
+
+  it("writes every caption in record order, each declared by its own flag", () => {
+    const payload = viewPayloadBytes(
+      sampleView({
+        dataCaption: "Werte",
+        grandTotalCaption: "Gesamt",
+        showError: true,
+        errorCaption: "#ERR",
+        missingCaption: "-",
+        tag: "t",
+        rowHeaderCaption: "Région",
+        colHeaderCaption: "Art"
+      })
+    );
+    expect(viewStrings(payload)).toEqual({
+      name: "PivotTable1",
+      data: "Werte",
+      grand: "Gesamt",
+      error: "#ERR",
+      missing: "-",
+      tag: "t",
+      colHeader: "Art",
+      rowHeader: "Région"
+    });
+    const second = new DataView(payload.buffer, payload.byteOffset).getUint32(4, true);
+    expect(second & (1 << 9)).toBe(1 << 9); // fDisplayErrorString
+    expect(second & (1 << 10)).toBe(1 << 10); // fDisplayNullString
+  });
+
+  it("keeps an empty caption, which is a value rather than an absence", () => {
+    expect(viewStrings(viewPayloadBytes(sampleView({ colHeaderCaption: "" })))).toMatchObject({
+      colHeader: ""
+    });
+  });
+
+  it("clears fDisplayNullString when showMissing is off", () => {
+    const payload = viewPayloadBytes(sampleView({ showMissing: false }));
+    expect(new DataView(payload.buffer, payload.byteOffset).getUint32(4, true) & (1 << 10)).toBe(0);
+  });
+
+  it("shortens a caption over the record's limit without splitting a surrogate pair", () => {
+    const long = "a".repeat(254) + "😀" + "tail";
+    const strings = viewStrings(viewPayloadBytes(sampleView({ grandTotalCaption: long })));
+    expect(strings.grand).toBe("a".repeat(254));
+    const header = "h".repeat(40_000);
+    expect(
+      viewStrings(viewPayloadBytes(sampleView({ rowHeaderCaption: header }))).rowHeader
+    ).toHaveLength(32_767);
+  });
+
+  it("encodes astral characters as two UTF-16 code units", () => {
+    // The pivot writers carried their own XLWideString that counted code points and wrote only each one's
+    // first unit, so "😀" came out as a lone high surrogate with a count of one.
+    const strings = viewStrings(viewPayloadBytes(sampleView({ name: "P😀", dataCaption: "😀😀" })));
+    expect(strings.name).toBe("P😀");
+    expect(strings.data).toBe("😀😀");
+  });
+});
+
+describe("XLSX to XLSB keeps a loaded pivot table's view strings (issue #238)", () => {
+  it("carries captions, error and missing strings into BrtBeginSXView", async () => {
+    const workbook = Workbook.create();
+    const source = Workbook.addWorksheet(workbook, "Data");
+    Worksheet.addAoa(source, [
+      ["Region", "Units"],
+      ["APAC", 10],
+      ["EMEA", 20]
+    ]);
+    Pivot.add(Workbook.addWorksheet(workbook, "Pivot"), {
+      sourceSheet: source,
+      rows: ["Region"],
+      columns: [],
+      values: ["Units"],
+      metric: "sum"
+    });
+    const entries = await extractAll(await Workbook.toBuffer(workbook, { format: "xlsx" }));
+    const path = "xl/pivotTables/pivotTable1.xml";
+    const xml = new TextDecoder()
+      .decode(entries.get(path)!.data)
+      .replace(
+        /<pivotTableDefinition\b([^>]*)>/,
+        '<pivotTableDefinition$1 grandTotalCaption="Gesamt 😀" rowHeaderCaption="Région"' +
+          ' colHeaderCaption="Art" showError="true" errorCaption="#ERR" missingCaption="-" tag="t">'
+      )
+      .replace('dataCaption="Values"', 'dataCaption="Werte"');
+    entries.get(path)!.data = new TextEncoder().encode(xml);
+    const input = await createZip([...entries].map(([name, e]) => ({ name, data: e.data })));
+
+    const loaded = Workbook.create();
+    await Workbook.read(loaded, input);
+    const parts = await extractAll(await Workbook.toBuffer(loaded, { format: "xlsb" }));
+
+    let payload: Uint8Array | undefined;
+    for (const entry of iterateInterpretableRecords(
+      parts.get("xl/pivotTables/pivotTable1.bin")!.data,
+      "s"
+    )) {
+      if (recordSpec(entry.id)?.name === "BrtBeginSXView") {
+        payload = entry.payload;
+      }
+    }
+    expect(viewStrings(payload!)).toEqual({
+      name: "PivotTable1",
+      data: "Werte",
+      grand: "Gesamt 😀",
+      error: "#ERR",
+      missing: "-",
+      tag: "t",
+      colHeader: "Art",
+      rowHeader: "Région"
+    });
   });
 });

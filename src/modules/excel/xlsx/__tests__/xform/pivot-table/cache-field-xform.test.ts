@@ -103,6 +103,19 @@ describe("CacheFieldXform", () => {
       expect(model.sharedItems).toEqual([true, false]);
     });
 
+    it("should parse xsd:boolean true/false spellings in <b>", () => {
+      const model = parseCacheField({ name: "Flag", numFmtId: "0" }, xform => {
+        xform.parseOpen({ name: "sharedItems", attributes: { count: "2" } });
+        xform.parseOpen({ name: "b", attributes: { v: "true" } });
+        xform.parseClose("b");
+        xform.parseOpen({ name: "b", attributes: { v: "false" } });
+        xform.parseClose("b");
+        xform.parseClose("sharedItems");
+      });
+
+      expect(model.sharedItems).toEqual([true, false]);
+    });
+
     it("should parse date shared items (<d>)", () => {
       const model = parseCacheField({ name: "Date", numFmtId: "0" }, xform => {
         xform.parseOpen({ name: "sharedItems", attributes: { count: "1" } });

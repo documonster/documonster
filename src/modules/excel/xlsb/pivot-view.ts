@@ -12,6 +12,7 @@
  * beside it.
  */
 
+import { encodeWideString } from "@excel/xlsb/binary";
 import type { PivotRecord } from "@excel/xlsb/pivot-cache";
 import { encodeTableStyleClient } from "@excel/xlsb/table-style";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
@@ -110,16 +111,6 @@ const PIVOT_APP_VERSION = 8;
 
 /** `bVerSxUpdateableMin` — the oldest version allowed to update the view. Three, as Excel writes. */
 const PIVOT_MIN_VERSION = 3;
-
-/** An `XLWideString`: a four-byte character count, then UTF-16. */
-function wideString(value: string): Uint8Array {
-  const characters = [...value];
-  const writer = new BinaryWriter().writeUint32(characters.length);
-  for (const character of characters.join("")) {
-    writer.writeUint16(character.charCodeAt(0));
-  }
-  return writer.toUint8Array();
-}
 
 /** A counted array of 32-bit field indices, which four of these collections are. */
 function indexArray(indices: readonly number[]): Uint8Array {
@@ -220,6 +211,22 @@ export interface PivotViewModel {
   }[];
   /** The caption above the data-field column when there are two or more data items. */
   readonly dataCaption: string;
+  /** `irstGrand`: a user-defined grand-total caption. Absent means the application's own. */
+  readonly grandTotalCaption?: string;
+  /** `fDisplayErrorString`: show `errorCaption` in place of an error value. */
+  readonly showError?: boolean;
+  /** `irstErrorString`. */
+  readonly errorCaption?: string;
+  /** `fDisplayNullString`: show `missingCaption` for an empty value. Defaults to true, as XLSX's `showMissing`. */
+  readonly showMissing?: boolean;
+  /** `irstNullString`. */
+  readonly missingCaption?: string;
+  /** `irstTag`. */
+  readonly tag?: string;
+  /** `irstRwHdrName`: the row header caption in compact layout. */
+  readonly rowHeaderCaption?: string;
+  /** `irstColHdrName`: the column header caption in compact layout. */
+  readonly colHeaderCaption?: string;
 }
 
 /**
@@ -410,13 +417,24 @@ export function pivotViewRecords(view: PivotViewModel): PivotRecord[] {
 /**
  * `BrtBeginSXView` — MS-XLSB 2.4.278. Thirty-two fixed bytes and up to eleven conditional strings.
  *
- * Three of the flags are **presence** flags for those strings, and two of them are **inverted**:
- * `fDisplayData` (bit 25 of the second word) says `irstData` *is* present and MUST be 1, while
- * `fEmptyDisplayErrorString` and `fEmptyDisplayNullString` say their strings are *absent*. So a minimal
- * record has to *set* the two "empty" bits and clear the rest — reading them as ordinary "has a value" flags
- * produces a record whose string fields are read from whatever follows it.
+ * Every string after `irstName` has a **presence** flag, and two of them are **inverted**: `fDisplayData`
+ * (bit 19 of the second word) says `irstData` *is* present and MUST be 1, while `fEmptyDisplayErrorString`
+ * and `fEmptyDisplayNullString` say their strings are *absent*. So a record without those strings has to
+ * *set* the two "empty" bits — reading them as ordinary "has a value" flags produces a record whose string
+ * fields are read from whatever follows it.
+ *
+ * Note the specification's own slip: it says `irstColHdrName` is governed by `fUseRwHdrName`. Each header
+ * string has its own flag (`fUseColHdrName` for the column one), and the column string comes first.
  */
 function viewPayload(view: PivotViewModel): Uint8Array {
+  // The conditional strings, each paired with the flag that declares it. A flag and its string must agree or
+  // every later string is read from the wrong offset, so both come from the same `!== undefined` test.
+  const grand = limitedCaption(view.grandTotalCaption, SHORT_STRING_LIMIT);
+  const error = limitedCaption(view.errorCaption, SHORT_STRING_LIMIT);
+  const missing = limitedCaption(view.missingCaption, SHORT_STRING_LIMIT);
+  const tag = limitedCaption(view.tag, SHORT_STRING_LIMIT);
+  const columnHeader = limitedCaption(view.colHeaderCaption, HEADER_STRING_LIMIT);
+  const rowHeader = limitedCaption(view.rowHeaderCaption, HEADER_STRING_LIMIT);
   // Every value below was read out of an XLSB that Excel wrote for this pivot table. Where a bit's purpose is
   // known it is named; where it is not, it is still written, because a view Excel will not open is worth less
   // than a view carrying a flag nobody here can explain.
@@ -436,21 +454,26 @@ function viewPayload(view: PivotViewModel): Uint8Array {
         (1 << 6) | // fEnableFieldDialog
         (1 << 7) | // fPreserveFormatting
         (1 << 8) | // fAutoFormat
-        (1 << 10) | // fDisplayNullString
+        (view.showError === true ? 1 << 9 : 0) | // fDisplayErrorString
+        (view.showMissing === false ? 0 : 1 << 10) | // fDisplayNullString
         (1 << 13) | // fRwGrand
         (1 << 14) | // fColGrand
         (1 << 17) | // fRepeatItemsOnEachPrintedPage
         (1 << 19) | // fDisplayData — MUST be 1, `irstData` follows
-        (1 << 29) // ibitAtrProt
+        (grand !== undefined ? 1 << 20 : 0) | // fDisplayGrand — `irstGrand` follows
+        (1 << 29) | // ibitAtrProt
+        (tag !== undefined ? 1 << 30 : 0) // fDisplayTag — `irstTag` follows
     )
     // Third flag word, `0x000002D0`. `fCompactData` is **clear**: it was set here to "match what Excel writes
     // for a new pivot table", and Excel writes it clear for this one — as does this library's XLSX writer,
     // which declares `compactData="0"` in the file Excel opens.
     .writeUint32(
       (1 << (36 - 32)) | // fNewDropZones
-        (1 << (38 - 32)) | // fEmptyDisplayErrorString
-        (1 << (39 - 32)) | // fEmptyDisplayNullString
-        (1 << (41 - 32)) // fSingleFilterPerField
+        (error === undefined ? 1 << (38 - 32) : 0) | // fEmptyDisplayErrorString — inverted
+        (missing === undefined ? 1 << (39 - 32) : 0) | // fEmptyDisplayNullString — inverted
+        (1 << (41 - 32)) | // fSingleFilterPerField
+        (rowHeader !== undefined ? 1 << (42 - 32) : 0) | // fUseRwHdrName
+        (columnHeader !== undefined ? 1 << (43 - 32) : 0) // fUseColHdrName
     )
     // `sxaxis4Data`: the axis the data field sits on — see {@link dataFieldAxis} for why this is a constant.
     .writeUint8(dataFieldAxis())
@@ -468,12 +491,42 @@ function viewPayload(view: PivotViewModel): Uint8Array {
     // `dwCrtFmtId`: the next pivot-chart identifier. 0 because no pivot chart is written.
     .writeUint32(0)
     .writeUint32(view.cacheId);
+  // In the record's order: name, data, grand, error, null, page-field style, table style, vacate style, tag,
+  // column header, row header. The three styles are never written, so their flags stay clear.
+  const strings = [
+    view.name,
+    // `irstData`, present because `fDisplayData` is 1.
+    limitedCaption(view.dataCaption, SHORT_STRING_LIMIT),
+    grand,
+    error,
+    missing,
+    tag,
+    columnHeader,
+    rowHeader
+  ];
   return concatUint8Arrays([
     writer.toUint8Array(),
-    wideString(view.name),
-    // `irstData`, present because `fDisplayData` is 1.
-    wideString(view.dataCaption)
+    ...strings.flatMap(value => (value === undefined ? [] : [encodeWideString(value)]))
   ]);
+}
+
+/** `XLWideString` limit for the view's captions — 255 characters, as Excel's own user interface enforces. */
+const SHORT_STRING_LIMIT = 255;
+
+/** `irstRwHdrName` / `irstColHdrName` may be longer when `bVerSxMacro` is 3 or more, which this writer's is. */
+const HEADER_STRING_LIMIT = 32_767;
+
+/**
+ * A caption cut to the length the record allows. XLSX has no such limit, so a longer caption from a loaded
+ * file has to be shortened rather than written into a record a reader is entitled to reject; the cut is made
+ * on a code-unit boundary that does not split a surrogate pair.
+ */
+function limitedCaption(value: string | undefined, limit: number): string | undefined {
+  if (value === undefined || value.length <= limit) {
+    return value;
+  }
+  const end = /[\uD800-\uDBFF]/.test(value[limit - 1]!) ? limit - 1 : limit;
+  return value.slice(0, end);
 }
 
 /**
@@ -806,6 +859,6 @@ function dataItemPayload(item: PivotViewModel["dataItems"][number]): Uint8Array 
       // `fLoadDisplayName` — the caption follows.
       .writeUint8(1)
       .toUint8Array(),
-    wideString(item.caption)
+    encodeWideString(item.caption)
   ]);
 }

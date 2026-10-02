@@ -31,6 +31,7 @@ import {
   type PivotLine,
   type PivotViewModel
 } from "@excel/xlsb/pivot-view";
+import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
 
 /** Both halves of one pivot table, ready to encode. */
 export interface PivotParts {
@@ -229,7 +230,17 @@ export function pivotParts(
           `${METRIC_DISPLAY_NAMES[subtotal]} of ${pivot.cacheFields[field]?.name ?? ""}`
       };
     }),
-    dataCaption: "Values"
+    // A loaded table carries its own view strings; a new one has only the default data caption. They were
+    // all dropped here, so converting a workbook to XLSB reset every caption the user had typed.
+    dataCaption: pivot.dataCaption ?? "Values",
+    grandTotalCaption: pivot.grandTotalCaption,
+    rowHeaderCaption: pivot.rowHeaderCaption,
+    colHeaderCaption: pivot.colHeaderCaption,
+    showError: parseXsdBoolean(pivot.showError),
+    errorCaption: pivot.errorCaption,
+    showMissing: parseXsdBoolean(pivot.showMissing),
+    missingCaption: pivot.missingCaption,
+    tag: pivot.tag
   };
   return { cache, view };
 }

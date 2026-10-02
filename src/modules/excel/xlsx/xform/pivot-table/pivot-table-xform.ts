@@ -8,10 +8,8 @@ import type {
 import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/core/pivot-table-types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import {
-  RawXmlCollector,
-  serializeAttributes
-} from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
+import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
+import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
@@ -31,7 +29,7 @@ const DEFAULT_PIVOT_STYLE = "PivotStyleLight16";
 const VALID_PIVOT_AXES = new Set(["axisRow", "axisCol", "axisPage", "axisValues"]);
 
 /** PivotFieldItem attribute keys — used to build the attrs object for rendering */
-const PIVOT_FIELD_ITEM_KEYS = ["x", "t", "h", "sd", "f", "m", "c", "d"] as const;
+const PIVOT_FIELD_ITEM_KEYS = ["n", "t", "h", "s", "sd", "f", "m", "c", "x", "d", "e"] as const;
 
 /**
  * Model for generating pivot table (with live source)
@@ -66,6 +64,8 @@ interface PivotTableRenderModel {
  * Items can reference a shared item index (x attribute) or indicate a subtotal type (t attribute).
  */
 interface PivotFieldItem {
+  /** User caption — the name the item was renamed to in Excel */
+  n?: string;
   /** Shared item index (maps to cacheField sharedItems) */
   x?: number;
   /** Item type: "default" for subtotals, "sum", "count", "avg", "max", "min", "grand", etc. */
@@ -82,6 +82,10 @@ interface PivotFieldItem {
   c?: string;
   /** Drill across flag */
   d?: string;
+  /** Value-is-string flag (OLAP) */
+  s?: string;
+  /** Expanded flag (OLAP) */
+  e?: string;
 }
 
 /**
@@ -103,6 +107,19 @@ interface ParsedPivotField {
   multipleItemSelectionAllowed?: boolean;
   /** Bag of additional attributes not individually modeled (for roundtrip preservation) */
   extraAttrs?: Record<string, string>;
+  /** Preserved field-level `<extLst>` XML (e.g. x14:pivotField fillDownLabels) */
+  extLstXml?: string;
+}
+
+/**
+ * Parsed data field (value field). Extends the public shape with what a
+ * loaded file carries but the builder never produces.
+ */
+interface ParsedDataField extends DataField {
+  /** Attributes not individually modeled, e.g. `showDataAs` (for roundtrip preservation) */
+  extraAttrs?: Record<string, string>;
+  /** Preserved field-level `<extLst>` XML (e.g. x14:dataField pivotShowAs) */
+  extLstXml?: string;
 }
 
 /**
@@ -113,6 +130,10 @@ interface ParsedPageField {
   item?: number;
   hier?: number;
   name?: string;
+  /** Display caption of the hierarchy (OLAP) */
+  cap?: string;
+  /** Preserved field-level `<extLst>` XML */
+  extLstXml?: string;
 }
 
 /**
@@ -139,7 +160,7 @@ interface ParsedPivotTableModel {
   rowFields: number[]; // Field indices for rows
   colFields: number[]; // Field indices for columns
   pageFields: ParsedPageField[]; // Page fields (report filters)
-  dataFields: DataField[];
+  dataFields: ParsedDataField[];
 
   // Style and formatting
   applyNumberFormats?: string;
@@ -184,6 +205,18 @@ interface ParsedPivotTableModel {
   showMissing?: string;
   missingCaption?: string;
   grandTotalCaption?: string;
+  /** Header caption over the row labels in compact layout */
+  rowHeaderCaption?: string;
+  /** Header caption over the column labels in compact layout */
+  colHeaderCaption?: string;
+  /** User-defined string associated with the table */
+  tag?: string;
+
+  /**
+   * Root attributes not individually modeled — showHeaders, pageStyle,
+   * mc:Ignorable, … — preserved verbatim for roundtrip.
+   */
+  extraRootAttrs?: Record<string, string>;
 
   // Row/col items (for grand totals etc)
   rowItems?: RowColItem[];
@@ -260,19 +293,81 @@ type PivotSection =
 interface ParserState {
   /** Which top-level section we are currently inside, or null if between sections. */
   currentSection: PivotSection | null;
-  /** Whether we are inside a <pivotArea> element (nested inside chartFormats or autoSortScope). */
-  inPivotArea: boolean;
-  /** Whether we are inside an <autoSortScope> element (nested inside a pivotField). */
-  inAutoSortScope: boolean;
 }
 
 /** Factory for default ParserState values */
 function createDefaultParserState(): ParserState {
   return {
-    currentSection: null,
-    inPivotArea: false,
-    inAutoSortScope: false
+    currentSection: null
   };
+}
+
+/**
+ * Root `<pivotTableDefinition>` attributes that are parsed individually. Every
+ * other attribute is kept in `extraRootAttrs`: CT_pivotTableDefinition defines
+ * some seventy, and a whitelist that only re-emits the ones it names silently
+ * drops the rest (issue #238 lost rowHeaderCaption/colHeaderCaption that way).
+ */
+const KNOWN_ROOT_KEYS = new Set([
+  // xmlns:xr is deliberately absent: an original mc:Ignorable="xr" needs the
+  // prefix declared even when the table carries no xr:uid.
+  "xmlns",
+  "xr:uid",
+  "name",
+  "cacheId",
+  "applyNumberFormats",
+  "applyBorderFormats",
+  "applyFontFormats",
+  "applyPatternFormats",
+  "applyAlignmentFormats",
+  "applyWidthHeightFormats",
+  "dataCaption",
+  "updatedVersion",
+  "minRefreshableVersion",
+  "createdVersion",
+  "useAutoFormatting",
+  "itemPrintTitles",
+  "indent",
+  "compact",
+  "compactData",
+  "multipleFieldFilters",
+  "outline",
+  "outlineData",
+  "chartFormat",
+  "colGrandTotals",
+  "rowGrandTotals",
+  "showError",
+  "errorCaption",
+  "showMissing",
+  "missingCaption",
+  "grandTotalCaption",
+  "rowHeaderCaption",
+  "colHeaderCaption",
+  "tag"
+]);
+
+/** dataField attributes that are parsed individually */
+const KNOWN_DATA_FIELD_KEYS = new Set([
+  "name",
+  "fld",
+  "subtotal",
+  "baseField",
+  "baseItem",
+  "numFmtId"
+]);
+
+/** Collect the attributes not named in `known`, or undefined when there are none. */
+function collectExtraAttrs(
+  attributes: Record<string, string>,
+  known: ReadonlySet<string>
+): Record<string, string> | undefined {
+  let extra: Record<string, string> | undefined;
+  for (const [k, v] of Object.entries(attributes)) {
+    if (!known.has(k) && v != null) {
+      (extra ??= {})[k] = String(v);
+    }
+  }
+  return extra;
 }
 
 /** Known pivotField attributes that we parse individually (hoisted to module scope) */
@@ -299,12 +394,17 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   private currentRowItem: RowColItem | null = null;
   private currentColItem: RowColItem | null = null;
   private currentChartFormat: ChartFormatItem | null = null;
-  // Buffer for collecting pivotArea XML
-  private pivotAreaXmlBuffer: string[] = [];
-  // Buffer for collecting autoSortScope XML
-  private autoSortScopeXmlBuffer: string[] = [];
+  private currentDataField: ParsedDataField | null = null;
+  private currentPageField: ParsedPageField | null = null;
   // Raw XML collectors (replacing manual in/depth/buffer triples)
   private extLstCollector = new RawXmlCollector("extLst");
+  /**
+   * Verbatim capture of a subtree that belongs to the element being parsed —
+   * a field's own `<extLst>`, a pivotField's `<autoSortScope>`, a chartFormat's
+   * `<pivotArea>`. `commit` receives the XML once the subtree closes.
+   */
+  private nestedCollector = new RawXmlCollector("");
+  private nestedCommit: ((xml: string) => void) | null = null;
   private formatsCollector = new RawXmlCollector("formats");
   private conditionalFormatsCollector = new RawXmlCollector("conditionalFormats");
   private filtersCollector = new RawXmlCollector("filters");
@@ -331,8 +431,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     this.currentRowItem = null;
     this.currentColItem = null;
     this.currentChartFormat = null;
-    this.pivotAreaXmlBuffer = [];
-    this.autoSortScopeXmlBuffer = [];
+    this.currentDataField = null;
+    this.currentPageField = null;
+    this.nestedCollector.reset();
+    this.nestedCommit = null;
     this.extLstCollector.reset();
     this.formatsCollector.reset();
     this.conditionalFormatsCollector.reset();
@@ -643,7 +745,16 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         if (pf.name !== undefined) {
           pfAttrs.name = pf.name;
         }
-        xmlStream.leafNode("pageField", pfAttrs);
+        if (pf.cap !== undefined) {
+          pfAttrs.cap = pf.cap;
+        }
+        if (pf.extLstXml) {
+          xmlStream.openNode("pageField", pfAttrs);
+          xmlStream.writeRaw(pf.extLstXml);
+          xmlStream.closeNode();
+        } else {
+          xmlStream.leafNode("pageField", pfAttrs);
+        }
       }
       xmlStream.closeNode();
     }
@@ -668,7 +779,18 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         if (dataField.numFmtId !== undefined) {
           dfAttrs.numFmtId = dataField.numFmtId;
         }
-        xmlStream.leafNode("dataField", dfAttrs);
+        if (dataField.extraAttrs) {
+          for (const [k, v] of Object.entries(dataField.extraAttrs)) {
+            dfAttrs[k] ??= v;
+          }
+        }
+        if (dataField.extLstXml) {
+          xmlStream.openNode("dataField", dfAttrs);
+          xmlStream.writeRaw(dataField.extLstXml);
+          xmlStream.closeNode();
+        } else {
+          xmlStream.leafNode("dataField", dfAttrs);
+        }
       }
       xmlStream.closeNode();
     }
@@ -796,6 +918,15 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     if (model.grandTotalCaption !== undefined) {
       attrs.grandTotalCaption = model.grandTotalCaption;
     }
+    if (model.rowHeaderCaption !== undefined) {
+      attrs.rowHeaderCaption = model.rowHeaderCaption;
+    }
+    if (model.colHeaderCaption !== undefined) {
+      attrs.colHeaderCaption = model.colHeaderCaption;
+    }
+    if (model.tag !== undefined) {
+      attrs.tag = model.tag;
+    }
     // Only write compact/compactData when false (non-default).
     // OOXML spec: absent = true (default). So if the original file had compact="0",
     // we must preserve it; omitting it would change semantics from false to true.
@@ -804,6 +935,11 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     }
     if (model.compactData === false) {
       attrs.compactData = "0";
+    }
+    if (model.extraRootAttrs) {
+      for (const [k, v] of Object.entries(model.extraRootAttrs)) {
+        attrs[k] ??= v;
+      }
     }
 
     return attrs;
@@ -914,7 +1050,9 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     }
 
     const hasChildren =
-      (field.items !== undefined && field.items.length > 0) || field.autoSortScopeXml !== undefined;
+      (field.items !== undefined && field.items.length > 0) ||
+      field.autoSortScopeXml !== undefined ||
+      field.extLstXml !== undefined;
 
     if (hasChildren) {
       xmlStream.openNode("pivotField", attrs);
@@ -934,6 +1072,9 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
       if (field.autoSortScopeXml) {
         xmlStream.writeRaw(field.autoSortScopeXml);
       }
+      if (field.extLstXml) {
+        xmlStream.writeRaw(field.extLstXml);
+      }
       xmlStream.closeNode(); // pivotField
     } else {
       xmlStream.leafNode("pivotField", attrs);
@@ -946,7 +1087,19 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
   parseOpen(node: ParseOpenTag): boolean {
     const { name, attributes } = node;
 
-    // Collect raw XML verbatim for roundtrip preservation (5 collectors)
+    // A new root always starts a fresh table, even if a previous parse on this
+    // instance was abandoned mid-capture. The unprefixed main-namespace root
+    // cannot legally occur inside a captured subtree (extension content is
+    // namespaced, e.g. x14:pivotTableDefinition), so this cannot cut one short.
+    if (name === this.tag) {
+      this.reset();
+    }
+
+    // Collect raw XML verbatim for roundtrip preservation
+    if (this.nestedCollector.active) {
+      this.nestedCollector.feedOpen(name, attributes);
+      return true;
+    }
     if (this.extLstCollector.active) {
       this.extLstCollector.feedOpen(name, attributes);
       return true;
@@ -970,8 +1123,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
     switch (name) {
       case this.tag:
-        // pivotTableDefinition root element
-        this.reset();
+        // pivotTableDefinition root element (state was reset above)
         this.model = {
           name: attributes.name,
           cacheId: parseInt(attributes.cacheId ?? "0", 10),
@@ -994,11 +1146,11 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
           useAutoFormatting: attributes.useAutoFormatting,
           itemPrintTitles: attributes.itemPrintTitles,
           indent: attributes.indent !== undefined ? parseInt(attributes.indent, 10) : undefined,
-          compact: attributes.compact !== "0",
-          compactData: attributes.compactData !== "0",
+          compact: parseXsdBoolean(attributes.compact) ?? true,
+          compactData: parseXsdBoolean(attributes.compactData) ?? true,
           multipleFieldFilters: attributes.multipleFieldFilters,
-          outline: attributes.outline === "1",
-          outlineData: attributes.outlineData === "1",
+          outline: parseXsdBoolean(attributes.outline) ?? false,
+          outlineData: parseXsdBoolean(attributes.outlineData) ?? false,
           chartFormat:
             attributes.chartFormat !== undefined ? parseInt(attributes.chartFormat, 10) : undefined,
           colGrandTotals: attributes.colGrandTotals,
@@ -1008,6 +1160,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
           showMissing: attributes.showMissing,
           missingCaption: attributes.missingCaption,
           grandTotalCaption: attributes.grandTotalCaption,
+          rowHeaderCaption: attributes.rowHeaderCaption,
+          colHeaderCaption: attributes.colHeaderCaption,
+          tag: attributes.tag,
+          extraRootAttrs: collectExtraAttrs(attributes, KNOWN_ROOT_KEYS),
           rowItems: [],
           colItems: [],
           chartFormats: [],
@@ -1049,32 +1205,25 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
       case "pivotField":
         if (this.state.currentSection === "pivotFields") {
-          // Collect unknown attributes into extraAttrs bag for roundtrip preservation
-          const extraAttrs: Record<string, string> = {};
-          for (const [k, v] of Object.entries(attributes)) {
-            if (!KNOWN_PIVOT_FIELD_KEYS.has(k)) {
-              extraAttrs[k] = String(v);
-            }
-          }
           this.currentPivotField = {
             axis: VALID_PIVOT_AXES.has(attributes.axis)
               ? (attributes.axis as ParsedPivotField["axis"])
               : undefined,
-            dataField: attributes.dataField === "1",
+            dataField: parseXsdBoolean(attributes.dataField) ?? false,
             items: [],
-            compact: attributes.compact !== "0",
-            outline: attributes.outline !== "0",
-            showAll: attributes.showAll !== "0",
-            defaultSubtotal: attributes.defaultSubtotal !== "0",
+            compact: parseXsdBoolean(attributes.compact) ?? true,
+            outline: parseXsdBoolean(attributes.outline) ?? true,
+            showAll: parseXsdBoolean(attributes.showAll) ?? true,
+            defaultSubtotal: parseXsdBoolean(attributes.defaultSubtotal) ?? true,
             numFmtId:
               attributes.numFmtId !== undefined ? parseInt(attributes.numFmtId, 10) : undefined,
             sortType: attributes.sortType,
-            subtotalTop:
-              attributes.subtotalTop !== undefined ? attributes.subtotalTop === "1" : undefined,
-            insertBlankRow: attributes.insertBlankRow === "1" ? true : undefined,
+            subtotalTop: parseXsdBoolean(attributes.subtotalTop),
+            insertBlankRow: parseXsdBoolean(attributes.insertBlankRow) === true ? true : undefined,
             multipleItemSelectionAllowed:
-              attributes.multipleItemSelectionAllowed === "1" ? true : undefined,
-            extraAttrs: Object.keys(extraAttrs).length > 0 ? extraAttrs : undefined
+              parseXsdBoolean(attributes.multipleItemSelectionAllowed) === true ? true : undefined,
+            // Unknown attributes kept verbatim for roundtrip preservation
+            extraAttrs: collectExtraAttrs(attributes, KNOWN_PIVOT_FIELD_KEYS)
           };
         }
         break;
@@ -1103,8 +1252,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
       case "autoSortScope":
         // Start collecting autoSortScope XML for the current pivotField
         if (this.currentPivotField) {
-          this.state.inAutoSortScope = true;
-          this.autoSortScopeXmlBuffer = ["<autoSortScope>"];
+          const field = this.currentPivotField;
+          this.startNested(name, attributes, xml => {
+            field.autoSortScopeXml = xml;
+          });
         }
         break;
 
@@ -1130,12 +1281,14 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
       case "pageField":
         if (this.state.currentSection === "pageFields" && this.model) {
-          this.model.pageFields.push({
+          this.currentPageField = {
             fld: parseInt(attributes.fld ?? "0", 10),
             item: attributes.item !== undefined ? parseInt(attributes.item, 10) : undefined,
             hier: attributes.hier !== undefined ? parseInt(attributes.hier, 10) : undefined,
-            name: attributes.name
-          });
+            name: attributes.name,
+            cap: attributes.cap
+          };
+          this.model.pageFields.push(this.currentPageField);
         }
         break;
 
@@ -1169,16 +1322,8 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         break;
 
       case "x":
-        // Handle x element inside row/col items or pivotArea
-        if (this.state.inPivotArea) {
-          // Collect x element for pivotArea XML (re-encode attribute values for XML safety)
-          const xAttrs = serializeAttributes(attributes);
-          if (this.state.inAutoSortScope) {
-            this.autoSortScopeXmlBuffer.push(xAttrs ? `<x ${xAttrs}/>` : "<x/>");
-          } else {
-            this.pivotAreaXmlBuffer.push(xAttrs ? `<x ${xAttrs}/>` : "<x/>");
-          }
-        } else if (this.currentRowItem) {
+        // x element inside row/col items (pivotArea x elements are captured verbatim)
+        if (this.currentRowItem) {
           this.currentRowItem.x.push({ v: parseInt(attributes.v ?? "0", 10) });
         } else if (this.currentColItem) {
           this.currentColItem.x.push({ v: parseInt(attributes.v ?? "0", 10) });
@@ -1194,34 +1339,18 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
           this.currentChartFormat = {
             chart: parseInt(attributes.chart ?? "0", 10),
             format: parseInt(attributes.format ?? "0", 10),
-            series: attributes.series !== undefined ? attributes.series === "1" : undefined
+            series: parseXsdBoolean(attributes.series)
           };
         }
         break;
 
       case "pivotArea":
-        // Start collecting pivotArea XML for chartFormat or autoSortScope
+        // A chartFormat's pivotArea is kept verbatim for roundtrip
         if (this.currentChartFormat) {
-          this.state.inPivotArea = true;
-          const attrsStr = serializeAttributes(attributes);
-          this.pivotAreaXmlBuffer = [attrsStr ? `<pivotArea ${attrsStr}>` : "<pivotArea>"];
-        } else if (this.state.inAutoSortScope) {
-          this.state.inPivotArea = true;
-          const attrsStr = serializeAttributes(attributes);
-          this.autoSortScopeXmlBuffer.push(attrsStr ? `<pivotArea ${attrsStr}>` : "<pivotArea>");
-        }
-        break;
-
-      case "references":
-      case "reference":
-        // Collect nested elements in pivotArea
-        if (this.state.inPivotArea) {
-          const attrsStr = serializeAttributes(attributes);
-          if (this.state.inAutoSortScope) {
-            this.autoSortScopeXmlBuffer.push(`<${name}${attrsStr ? " " + attrsStr : ""}>`);
-          } else {
-            this.pivotAreaXmlBuffer.push(`<${name}${attrsStr ? " " + attrsStr : ""}>`);
-          }
+          const chartFormat = this.currentChartFormat;
+          this.startNested(name, attributes, xml => {
+            chartFormat.pivotAreaXml = xml;
+          });
         }
         break;
 
@@ -1239,7 +1368,7 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
       case "dataField":
         if (this.state.currentSection === "dataFields" && this.model) {
-          this.model.dataFields.push({
+          this.currentDataField = {
             name: attributes.name ?? "",
             fld: parseInt(attributes.fld ?? "0", 10),
             baseField:
@@ -1250,8 +1379,10 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
               ? (attributes.subtotal as PivotTableSubtotal)
               : undefined,
             numFmtId:
-              attributes.numFmtId !== undefined ? parseInt(attributes.numFmtId, 10) : undefined
-          });
+              attributes.numFmtId !== undefined ? parseInt(attributes.numFmtId, 10) : undefined,
+            extraAttrs: collectExtraAttrs(attributes, KNOWN_DATA_FIELD_KEYS)
+          };
+          this.model.dataFields.push(this.currentDataField);
         }
         break;
 
@@ -1270,9 +1401,19 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         break;
 
       case "extLst":
-        // Start collecting extLst XML for roundtrip preservation
+        // Start collecting extLst XML for roundtrip preservation. A pivotField or
+        // dataField may carry its own extLst; it belongs to that field, not the table.
         if (this.model) {
-          this.extLstCollector.start(attributes);
+          // Per CT_PivotField / CT_DataField / CT_PageField these are the only
+          // modeled elements that carry an extLst besides the table itself.
+          const owner = this.currentPivotField ?? this.currentDataField ?? this.currentPageField;
+          if (owner) {
+            this.startNested(name, attributes, xml => {
+              owner.extLstXml = xml;
+            });
+          } else {
+            this.extLstCollector.start(attributes);
+          }
         }
         break;
 
@@ -1303,14 +1444,9 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         // This preserves elements like pivotHierarchies, rowHierarchiesUsage,
         // colHierarchiesUsage, etc. that we don't individually model.
         // R8-B1: Only activate at the top level of pivotTableDefinition — NOT inside
-        // known sections (pivotFields, rowFields, etc.) or pivotArea/autoSortScope,
+        // known sections (pivotFields, rowFields, etc.),
         // otherwise the collector would steal subsequent tags from normal parsing.
-        if (
-          this.model &&
-          this.state.currentSection === null &&
-          !this.state.inPivotArea &&
-          !this.state.inAutoSortScope
-        ) {
+        if (this.model && this.state.currentSection === null) {
           this.unknownCollector.startAs(name, attributes);
         }
         break;
@@ -1321,7 +1457,9 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
   parseText(text: string): void {
     // Forward text nodes to whichever raw-XML collector is active (B3 fix)
-    if (this.extLstCollector.active) {
+    if (this.nestedCollector.active) {
+      this.nestedCollector.feedText(text);
+    } else if (this.extLstCollector.active) {
       this.extLstCollector.feedText(text);
     } else if (this.formatsCollector.active) {
       this.formatsCollector.feedText(text);
@@ -1332,6 +1470,16 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
     } else if (this.unknownCollector.active) {
       this.unknownCollector.feedText(text);
     }
+  }
+
+  /** Begin capturing the subtree rooted at `name`; `commit` receives it when it closes. */
+  private startNested(
+    name: string,
+    attributes: Record<string, string>,
+    commit: (xml: string) => void
+  ): void {
+    this.nestedCommit = commit;
+    this.nestedCollector.startAs(name, attributes);
   }
 
   /** Feed a close-tag to a collector; if it completes, store the result on the model. */
@@ -1350,6 +1498,14 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
 
   parseClose(name: string): boolean {
     // Handle raw-XML collectors — close tags
+    if (this.nestedCollector.active) {
+      if (this.nestedCollector.feedClose(name)) {
+        this.nestedCommit?.(this.nestedCollector.result);
+        this.nestedCommit = null;
+        this.nestedCollector.reset();
+      }
+      return true;
+    }
     if (this.extLstCollector.active) {
       this.tryCloseCollector(this.extLstCollector, name, "extLstXml");
       return true;
@@ -1371,32 +1527,6 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         this.unknownElementsXmlParts.push(this.unknownCollector.result);
         this.unknownCollector.reset();
       }
-      return true;
-    }
-
-    // Handle pivotArea nested elements - close tags
-    if (this.state.inPivotArea) {
-      if (name === "pivotArea") {
-        if (this.state.inAutoSortScope) {
-          this.autoSortScopeXmlBuffer.push("</pivotArea>");
-        } else {
-          this.pivotAreaXmlBuffer.push("</pivotArea>");
-          if (this.currentChartFormat) {
-            this.currentChartFormat.pivotAreaXml = this.pivotAreaXmlBuffer.join("");
-          }
-          this.pivotAreaXmlBuffer = [];
-        }
-        this.state.inPivotArea = false;
-        return true;
-      } else if (name === "references" || name === "reference") {
-        if (this.state.inAutoSortScope) {
-          this.autoSortScopeXmlBuffer.push(`</${name}>`);
-        } else {
-          this.pivotAreaXmlBuffer.push(`</${name}>`);
-        }
-        return true;
-      }
-      // x elements are self-closing, no need to handle close
       return true;
     }
 
@@ -1426,18 +1556,16 @@ class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
         }
         break;
 
-      case "items":
-        // No close handling needed — item parsing guarded by currentPivotField
+      case "dataField":
+        this.currentDataField = null;
         break;
 
-      case "autoSortScope":
-        // Finish collecting autoSortScope XML
-        if (this.state.inAutoSortScope && this.currentPivotField) {
-          this.autoSortScopeXmlBuffer.push("</autoSortScope>");
-          this.currentPivotField.autoSortScopeXml = this.autoSortScopeXmlBuffer.join("");
-          this.autoSortScopeXmlBuffer = [];
-          this.state.inAutoSortScope = false;
-        }
+      case "pageField":
+        this.currentPageField = null;
+        break;
+
+      case "items":
+        // No close handling needed — item parsing guarded by currentPivotField
         break;
 
       case "i":

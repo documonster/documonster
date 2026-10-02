@@ -9,6 +9,7 @@ import { isPivotError } from "@excel/core/pivot-table-types";
 import { PivotTableError } from "@excel/errors";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { formatDateForExcel } from "@excel/xlsx/xform/pivot-table/cache-field";
+import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
 import { parseOoxmlDate } from "@utils/utils";
 import { xmlEncode } from "@xml/encode";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -280,7 +281,7 @@ class PivotCacheRecordsXform extends BaseXform<ParsedCacheRecords | null> {
         if (this.currentRecord) {
           this.currentRecord.push({
             type: "b",
-            value: attributes.v === "1"
+            value: parseXsdBoolean(attributes.v) ?? false
           });
         }
         break;
