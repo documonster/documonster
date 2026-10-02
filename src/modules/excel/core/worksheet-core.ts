@@ -905,7 +905,14 @@ export function rowSetModel(r: RowData, value: RowModel): void {
       default: {
         let address: DecodedAddress | undefined;
         if (cellModel.address) {
-          address = colCache.decodeAddress(cellModel.address);
+          // A canonical reference is used as written: `decodeAddress` would return the same string, column and row,
+          // but allocates an object and two strings per cell to say so. Anything else — `$A$1`, `A01`, out of range —
+          // still goes through it, so it is interpreted exactly as before.
+          const row = colCache.decodePlainRow(cellModel.address);
+          address =
+            row > 0
+              ? { address: cellModel.address, col: colCache.decodeCol(cellModel.address), row }
+              : colCache.decodeAddress(cellModel.address);
         } else if (previousAddress) {
           const { row } = previousAddress;
           const col = previousAddress.col + 1;

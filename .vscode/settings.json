@@ -1,23 +1,8 @@
 {
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "editor.formatOnSave": true,
-  "[typescript]": {
+  "[typescript][javascript][json][jsonc][yaml][github-actions-workflow][markdown]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[javascript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[json]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[jsonc]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[yaml]": {
-    "editor.formatOnSave": false
-  },
-  "[github-actions-workflow]": {
-    "editor.formatOnSave": false
   },
   "editor.codeActionsOnSave": {
     "source.fixAll.oxc": "explicit"

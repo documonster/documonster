@@ -302,7 +302,13 @@ export function cellCreate(row: RowData, column: ColumnData, address: string): C
     // column's shared snapshot; the flag only claims it *may* have, and
     // `cellOwnStyle` is a cheap no-op when it did not.
     _sharedStyle: true,
-    _mergeCount: 0
+    _mergeCount: 0,
+    // Every field a cell is later given is declared up front. A property added after the literal does not fit the
+    // object V8 allocated for it and costs a separate backing store — 40 bytes for every cell of a loaded sheet,
+    // because `_value` is always assigned below and `cellSetModel` always assigns `_formulaGhostOwner`.
+    _value: undefined as unknown as CellData["_value"],
+    _comment: undefined,
+    _formulaGhostOwner: undefined
   } as CellData;
   cell._value = Value.create(Types.Null, cell);
   return cell;
@@ -1650,6 +1656,9 @@ class FormulaValue {
     }
     if (typeof v === "number") {
       return Enums.ValueType.Number;
+    }
+    if (typeof v === "boolean") {
+      return Enums.ValueType.Boolean;
     }
     if (v instanceof Date) {
       return Enums.ValueType.Date;

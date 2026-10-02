@@ -274,7 +274,9 @@ export async function runLibreOfficeOpenValidationAuto(
     ],
     input,
     inputName,
-    autoMode: true
+    // `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=0` turns the automatic run off: each open takes seconds, so a local loop
+    // that is not about chart output can skip it. Any other value, or none, keeps the default.
+    autoMode: process.env.DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION !== "0"
   });
 }
 

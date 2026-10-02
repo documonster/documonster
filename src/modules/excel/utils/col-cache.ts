@@ -1,8 +1,6 @@
 import { ColumnOutOfBoundsError, InvalidAddressError } from "@excel/errors";
 import type { DecodedAddress, Location } from "@excel/types";
 
-const addressRegex = /^[A-Z]+\d+$/;
-
 // Internal type with required $col$row for caching
 type CachedAddress = DecodedAddress & { $col$row: string };
 
@@ -32,6 +30,7 @@ interface ColCache {
   n2l(n: number): string;
   validateAddress(value: string): boolean;
   decodeCol(value: string): number;
+  decodePlainRow(value: string): number;
   decodeAddress(value: string): CachedAddress;
   getAddress(r: number | string, c?: number): CachedAddress;
   decode(value: string): CachedAddress | DecodedRange;
@@ -198,9 +197,58 @@ const colCache: ColCache = {
     return col;
   },
 
+  /**
+   * Row of a canonical cell reference (`A1`…`XFD1048576`), or 0 when `value` is anything else.
+   *
+   * "Canonical" is exactly what a writer emits and `decodeAddress` would return unchanged: letters, then a row with
+   * no leading zero, then the end — no `$`, no lowercase, no suffix, both parts in range. A caller can therefore keep
+   * `value` as the cell's address and read its column with `decodeCol`, skipping `decodeAddress`, which allocates an
+   * object and two strings per call; any other input must go through it.
+   */
+  decodePlainRow(value: string): number {
+    const len = value.length;
+    let i = 0;
+    let col = 0;
+    while (i < len) {
+      const c = value.charCodeAt(i);
+      if (c < 65 || c > 90) {
+        break;
+      }
+      col = col * 26 + c - 64;
+      i++;
+    }
+    if (i === 0 || i > 3 || col > 16384 || i === len || value.charCodeAt(i) === 48) {
+      return 0;
+    }
+    let row = 0;
+    for (; i < len; i++) {
+      const c = value.charCodeAt(i);
+      if (c < 48 || c > 57) {
+        return 0;
+      }
+      row = row * 10 + c - 48;
+    }
+    return row <= 1048576 ? row : 0;
+  },
+
   // check if value looks like an address
   validateAddress(value: string): boolean {
-    if (!addressRegex.test(value)) {
+    // `^[A-Z]+\d+$`, by hand: this runs once for every cell created, and the loop is cheaper than the regex.
+    const len = value.length;
+    let i = 0;
+    while (i < len) {
+      const c = value.charCodeAt(i);
+      if (c < 65 || c > 90) {
+        break;
+      }
+      i++;
+    }
+    let ok = i > 0 && i < len;
+    for (; ok && i < len; i++) {
+      const c = value.charCodeAt(i);
+      ok = c >= 48 && c <= 57;
+    }
+    if (!ok) {
       throw new InvalidAddressError(value);
     }
     return true;

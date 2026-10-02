@@ -1,9 +1,11 @@
-import { cellFont, cellGetValue, cellNumFmt, cellSetValue } from "@excel/core/cell";
+import { zip } from "@archive/create-archive";
+import { extractAll } from "@archive/unzip/extract";
+import { cellFont, cellGetValue, cellNumFmt, cellOwnStyle, cellSetValue } from "@excel/core/cell";
 import type { RowData } from "@excel/core/row";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { rowGetCell } from "@excel/core/worksheet";
 import { ExcelStreamStateError } from "@excel/errors";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { describe, it, expect } from "vitest";
 
@@ -19,6 +21,26 @@ async function buildXlsxBuffer(builder: (wb: WorkbookData) => void): Promise<Uin
   const wb = Workbook.create();
   builder(wb);
   return Workbook.toBuffer(wb);
+}
+
+/**
+ * Rewrite one sheet's XML inside an XLSX buffer. Used to produce shapes our writer
+ * never emits but other producers do — e.g. `<row>`/`<c>` without the optional `r`.
+ */
+async function patchSheetXml(
+  buffer: Uint8Array,
+  patch: (xml: string) => string,
+  path = "xl/worksheets/sheet1.xml"
+): Promise<Uint8Array> {
+  const entries = await extractAll(buffer);
+  const archive = zip();
+  for (const [name, file] of entries) {
+    if (file.type === "directory") {
+      continue;
+    }
+    archive.add(name, name === path ? patch(new TextDecoder().decode(file.data)) : file.data);
+  }
+  return archive.bytes();
 }
 
 /** Result of streaming a single worksheet */
@@ -410,6 +432,198 @@ describe("WorksheetReader", () => {
   });
 
   // ===========================================================================
+  // Cell shapes the streaming reader used to get wrong — read by `CellXform` now
+  // ===========================================================================
+
+  describe("cell values agree with the full reader", () => {
+    const SHEET_DATA = [
+      "<sheetData>",
+      '<row r="1">',
+      '<c r="A1" t="inlineStr"><is><r><rPr><b/></rPr><t>Bold</t></r><r><t xml:space="preserve"> plain</t></r></is></c>',
+      '<c r="B1" t="b"><f>1=1</f><v>1</v></c>',
+      '<c r="C1" t="e"><f>1/0</f><v>#DIV/0!</v></c>',
+      '<c r="D1" t="str"><f>"a"&amp;"b"</f><v>ab</v></c>',
+      '<c r="E1" t="d"><v>2020-01-15T00:00:00</v></c>',
+      '<c r="F1" t="inlineStr"><is><t>plain _x0041_</t></is></c>',
+      "</row>",
+      '<row r="3"><c r="A3"><v>1</v></c><c r="B3"><f t="shared" ref="B3:B5" si="0">A3*2</f><v>2</v></c></row>',
+      '<row r="4"><c r="A4"><v>2</v></c><c r="B4"><f t="shared" si="0"/><v>4</v></c></row>',
+      '<row r="5"><c r="A5"><v>3</v></c><c r="B5"><f t="shared" si="0"/><v>6</v></c></row>',
+      "</sheetData>"
+    ].join("");
+
+    async function buildFixture(): Promise<Uint8Array> {
+      const buffer = await buildXlsxBuffer(wb => {
+        Cell.setValue(Workbook.addWorksheet(wb, "Sheet1"), "A1", 0);
+      });
+      return patchSheetXml(buffer, xml =>
+        xml.replace(/<sheetData>.*<\/sheetData>|<sheetData\/>/s, SHEET_DATA)
+      );
+    }
+
+    it("reads each shape correctly when streaming", async () => {
+      const sheet = await readFirstSheet(await buildFixture());
+      const [row1, row3, row4, row5] = sheet.rows;
+      const value = (row: RowData, col: number) => cellGetValue(rowGetCell(row, col));
+
+      expect(value(row1, 1)).toEqual({
+        richText: [{ text: "Bold", font: { bold: true } }, { text: " plain" }]
+      });
+      expect(value(row1, 2)).toMatchObject({ formula: "1=1", result: true });
+      expect(value(row1, 3)).toMatchObject({ formula: "1/0", result: { error: "#DIV/0!" } });
+      expect(value(row1, 4)).toMatchObject({ formula: '"a"&"b"', result: "ab" });
+      expect(value(row1, 5)).toEqual(new Date(Date.UTC(2020, 0, 15)));
+      expect(value(row1, 6)).toBe("plain A");
+
+      expect(value(row3, 2)).toMatchObject({ formula: "A3*2", result: 2 });
+      expect(value(row4, 2)).toMatchObject({ formula: "A4*2", sharedFormula: "B3", result: 4 });
+      expect(value(row5, 2)).toMatchObject({ formula: "A5*2", sharedFormula: "B3", result: 6 });
+    });
+
+    it("matches the full reader cell for cell", async () => {
+      const fixture = await buildFixture();
+      const sheet = await readFirstSheet(fixture);
+      const wb = Workbook.create();
+      await Workbook.read(wb, fixture);
+      const ws = Workbook.getWorksheet(wb, "Sheet1")!;
+      for (const row of sheet.rows) {
+        for (let col = 1; col <= row.cells.length; col++) {
+          const streamed = cellGetValue(rowGetCell(row, col));
+          const loaded = Cell.getValue(ws, row.number, col);
+          if (streamed && typeof streamed === "object" && "sharedFormula" in streamed) {
+            // A streamed shared-formula cell also carries its slid formula text, which a loaded one derives on demand.
+            expect(streamed).toMatchObject(loaded as object);
+            expect(Cell.getFormula(ws, row.number, col)).toBe(
+              (streamed as { formula: string }).formula
+            );
+          } else {
+            expect(streamed).toEqual(loaded);
+          }
+        }
+      }
+    });
+  });
+
+  describe("hyperlinks after the sheet", () => {
+    it("are on worksheet.hyperlinks once its rows are read, with external targets from the reader", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", { text: "ext", hyperlink: "https://example.com/" });
+        Cell.setValue(ws, "B2", { text: "int", hyperlink: "#Sheet1!A1" });
+      });
+      const reader = new WorkbookReader(buffer, {
+        worksheets: "emit",
+        sharedStrings: "cache",
+        hyperlinks: "cache"
+      });
+      for await (const ws of reader) {
+        const rows: RowData[] = [];
+        for await (const row of ws) {
+          rows.push(row as RowData);
+        }
+        // `<hyperlinks>` follows `<sheetData>`, so a row carries only the display text…
+        expect(cellGetValue(rowGetCell(rows[0], 1))).toBe("ext");
+        // …and the links arrive with the end of the sheet.
+        const { A1, B2 } = ws.hyperlinks!;
+        expect(B2.target).toBe("#Sheet1!A1");
+        expect(reader.getHyperlinkTarget(ws.sheetNo, A1.rId!)).toBe("https://example.com/");
+      }
+    });
+  });
+
+  // ===========================================================================
+  // Omitted `r` attributes (ECMA-376 §18.3.1.73 / §18.3.1.4: both optional)
+  // ===========================================================================
+
+  describe("omitted r attributes", () => {
+    /**
+     * Rows 1, (2), 5, (6) and cells A, (B), D, (E): every omitted address must
+     * follow the previous one, not the count seen so far.
+     */
+    async function buildWithoutSomeRefs(): Promise<Uint8Array> {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        for (const r of [1, 2, 5, 6]) {
+          for (const c of ["A", "B", "D", "E"]) {
+            Cell.setValue(ws, `${c}${r}`, `${c}${r}`);
+          }
+        }
+        Cell.setStyle(ws, "E6", { font: { bold: true } });
+      });
+      return patchSheetXml(buffer, xml =>
+        xml.replace(/<row r="(2|6)"/g, "<row").replace(/<c r="[BE]\d+"/g, "<c")
+      );
+    }
+
+    function expectAddresses(rows: { number: number; get: (col: number) => unknown }[]) {
+      expect(rows.map(r => r.number)).toEqual([1, 2, 5, 6]);
+      for (const row of rows) {
+        for (const [col, letter] of [
+          [1, "A"],
+          [2, "B"],
+          [4, "D"],
+          [5, "E"]
+        ] as const) {
+          expect(row.get(col)).toBe(`${letter}${row.number}`);
+        }
+      }
+    }
+
+    it("are derived from the previous row and cell when streaming", async () => {
+      const patched = await buildWithoutSomeRefs();
+      const xml = new TextDecoder().decode(
+        (await extractAll(patched)).get("xl/worksheets/sheet1.xml")!.data
+      );
+      expect(xml).toContain("<row ");
+      expect(xml).not.toContain('r="E6"');
+
+      const sheet = await readFirstSheet(patched);
+      expectAddresses(
+        sheet.rows.map(row => ({
+          number: row.number,
+          get: (col: number) => cellGetValue(rowGetCell(row, col))
+        }))
+      );
+      expect(cellFont(rowGetCell(sheet.rows[3], 5))?.bold).toBe(true);
+    });
+
+    it("does not file a malformed reference under the next column", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", 1);
+        Cell.setValue(ws, "B1", 2);
+      });
+      const patched = await patchSheetXml(buffer, xml =>
+        xml.replace('<c r="B1"', '<c r="garbage"')
+      );
+      await expect(readFirstSheet(patched)).rejects.toThrow(/garbage/);
+    });
+
+    it("reads an absolute reference by the column it names", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Cell.setValue(ws, "A1", "a");
+        Cell.setValue(ws, "C1", "c");
+      });
+      const patched = await patchSheetXml(buffer, xml => xml.replace('<c r="C1"', '<c r="$C$1"'));
+      const sheet = await readFirstSheet(patched);
+      expect(cellGetValue(rowGetCell(sheet.rows[0], 3))).toBe("c");
+    });
+
+    it("agree with the full reader", async () => {
+      const patched = await buildWithoutSomeRefs();
+      const wb = Workbook.create();
+      await Workbook.read(wb, patched);
+      const ws = Workbook.getWorksheet(wb, "Sheet1")!;
+      const rows: { number: number; get: (col: number) => unknown }[] = [];
+      Worksheet.eachRow(ws, (_row, number) => {
+        rows.push({ number, get: col => Cell.getValue(ws, `${"ABCDE"[col - 1]}${number}`) });
+      });
+      expectAddresses(rows);
+    });
+  });
+
+  // ===========================================================================
   // Styles
   // ===========================================================================
 
@@ -428,6 +642,42 @@ describe("WorksheetReader", () => {
       expect(cellFont(cell)).toBeDefined();
       expect(cellFont(cell)!.bold).toBe(true);
       expect(cellNumFmt(cell)).toBe("0.00%");
+    });
+
+    it("lets a cell's style inherited from its row be changed without touching the row", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        Row.setFont(ws, 1, { bold: true });
+        Cell.setValue(ws, "A1", 1);
+        Cell.setValue(ws, "B1", 2);
+      });
+      const patched = await patchSheetXml(buffer, xml =>
+        xml.replace(/(<c r="[AB]1") s="\d+"/g, "$1")
+      );
+      const sheet = await readFirstSheet(patched);
+      const row = sheet.rows[0];
+      const a1 = rowGetCell(row, 1);
+      expect(cellFont(a1)?.bold).toBe(true);
+      // The documented way to write through a facet: it copies a shared one first.
+      cellOwnStyle(a1).font!.italic = true;
+      expect(cellFont(a1)?.italic).toBe(true);
+      expect(cellFont(rowGetCell(row, 2))?.bold).toBe(true);
+      expect(cellFont(rowGetCell(row, 2))?.italic).toBeUndefined();
+    });
+
+    it("gives each cell its own mutable style, as the streaming handle always has", async () => {
+      const buffer = await buildXlsxBuffer(wb => {
+        const ws = Workbook.addWorksheet(wb, "Sheet1");
+        for (const ref of ["A1", "B1"]) {
+          Cell.setValue(ws, ref, 1);
+          Cell.setStyle(ws, ref, { font: { bold: true } });
+        }
+      });
+      const sheet = await readFirstSheet(buffer);
+      const a1 = rowGetCell(sheet.rows[0], 1);
+      const b1 = rowGetCell(sheet.rows[0], 2);
+      a1.style.font!.bold = false;
+      expect(cellFont(b1)?.bold).toBe(true);
     });
   });
 

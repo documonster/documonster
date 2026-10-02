@@ -995,7 +995,7 @@ for (const drop of drops) {
 
 ### Oracle 与语料库测试
 
-该仓库包含用于真实应用验证的可选测试框架。它们默认禁用，因为需要外部二进制文件或私有的固定语料库。
+该仓库包含用于真实应用验证的可选测试框架。它们默认禁用，因为需要外部二进制文件或私有的固定语料库——只有一个例外：装了 LibreOffice 时，图表往返测试会自动用它打开生成的工作簿。每次打开要几秒，设置 `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=0` 可以跳过。
 
 这些测试框架中每一个生成的工作簿在外部转换前还会运行一次 OOXML 包审计。该审计检查必需的部件内容类型、关系目标、重复的关系 ID、chart/ChartEx/drawing/chartsheet 结构、ChartEx 数据/坐标轴引用以及 ChartEx 外部数据关系 ID，从而让常见的 Excel"已修复记录"问题在 CI 中尽早失败。当已启用的 Office/LibreOffice 打开验证命令记录了修复/损坏/错误文本时，测试会将其视为硬性验证失败。
 
@@ -2187,6 +2187,38 @@ for await (const worksheet of reader) {
   console.log(`Reading: ${worksheet.name}`);
   for await (const row of worksheet) {
     console.log(row.values);
+  }
+}
+```
+
+流式读取单元格用的是与 `Workbook.read` 相同的代码，所以富文本、各种类型的公式结果、`t="d"` 日期和动态数组
+读出来与整表读取一致。`<row r>` 和 `<c r>` 按 ECMA-376 可以省略，省略时取上一行或上一格的下一个；写了但不是
+指向本行的有效引用，两种读取方式都会报错。有三处差异源于只能向前读：
+
+- **共享公式的每个单元格都带有公式文本。** 整表读取时由组的主单元格按需推导；流式读到时主单元格已经释放，
+  所以每个单元格除了 `sharedFormula`，还带有已平移到自身地址的 `formula`。
+- **超链接随工作表结束到达，而不是挂在单元格上。** `<hyperlinks>` 位于 `<sheetData>` 之后，所以在知道任何
+  链接之前行已经发出去了；要挂到单元格上就得把整张表留在内存里。使用 `hyperlinks: "cache"` 时，在读完行之后
+  从工作表上取（见下例）。
+- **共享公式中排在主单元格之前的单元格会报错。** 它的公式要读到主单元格才知道，那时该单元格已经发出去了。
+  这种文件请用 `Workbook.read` 读取。
+
+```typescript
+import { Stream } from "documonster/excel";
+
+const reader = new Stream.WorkbookReader("links.xlsx", {
+  worksheets: "emit",
+  sharedStrings: "cache",
+  hyperlinks: "cache"
+});
+
+for await (const worksheet of reader) {
+  for await (const row of worksheet) {
+    // 行只带显示文本
+  }
+  for (const [address, link] of Object.entries(worksheet.hyperlinks ?? {})) {
+    const target = link.target ?? reader.getHyperlinkTarget(worksheet.sheetNo, link.rId!);
+    console.log(address, target);
   }
 }
 ```

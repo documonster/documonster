@@ -373,3 +373,53 @@ describe("colCache", () => {
     });
   });
 });
+
+describe("colCache.decodePlainRow", () => {
+  it("reads a canonical reference", () => {
+    expect(colCache.decodePlainRow("A1")).toBe(1);
+    expect(colCache.decodePlainRow("XFD1048576")).toBe(1048576);
+    expect(colCache.decodePlainRow("AB12")).toBe(12);
+  });
+
+  it.each([
+    "",
+    "A",
+    "1",
+    "$A$1",
+    "A$1",
+    "a1",
+    "A01",
+    "A0",
+    "A1x",
+    "A 1",
+    "XFE1",
+    "AAAA1",
+    "A1048577"
+  ])("rejects %j, leaving it to decodeAddress", value => {
+    expect(colCache.decodePlainRow(value)).toBe(0);
+  });
+
+  it("agrees with decodeAddress on every reference it accepts", () => {
+    for (const value of ["A1", "Z99", "AA100", "XFD1048576", "C7"]) {
+      const decoded = colCache.decodeAddress(value);
+      expect([colCache.decodeCol(value), colCache.decodePlainRow(value)]).toEqual([
+        decoded.col,
+        decoded.row
+      ]);
+      expect(decoded.address).toBe(value);
+    }
+  });
+});
+
+describe("colCache.validateAddress", () => {
+  it.each(["A1", "XFD1048576", "A0", "A01", "AAAA1"])(
+    "accepts %j, as /^[A-Z]+\\d+$/ does",
+    value => {
+      expect(colCache.validateAddress(value)).toBe(true);
+    }
+  );
+
+  it.each(["", "A", "1", "a1", "$A$1", "A1 ", "A1B", "Ä1"])("rejects %j", value => {
+    expect(() => colCache.validateAddress(value)).toThrow();
+  });
+});

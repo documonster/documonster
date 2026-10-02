@@ -2,6 +2,7 @@ import { MaxItemsExceededError } from "@excel/errors";
 import type { Style } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { readCellColumn, readRowNumber } from "@excel/xlsx/xform/sheet/cell-reference";
 import { CellXform } from "@excel/xlsx/xform/sheet/cell-xform";
 import { parseBoolean } from "@utils/utils";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -82,7 +83,7 @@ class RowXform extends BaseXform<RowModel> {
   declare private options?: RowXformOptions;
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
-  declare private numRowsSeen: number;
+  declare private lastRowNumber: number;
   declare private lastCellCol: number;
 
   constructor(options?: RowXformOptions) {
@@ -101,7 +102,7 @@ class RowXform extends BaseXform<RowModel> {
 
   reset(): void {
     super.reset();
-    this.numRowsSeen = 0;
+    this.lastRowNumber = 0;
     this.lastCellCol = 0;
   }
 
@@ -170,7 +171,6 @@ class RowXform extends BaseXform<RowModel> {
       return true;
     }
     if (node.name === "row") {
-      this.numRowsSeen += 1;
       // Reset lastCellCol for each new row
       this.lastCellCol = 0;
       const spans = node.attributes.spans;
@@ -181,8 +181,10 @@ class RowXform extends BaseXform<RowModel> {
         spanMin = parseInt(spans, 10); // parses up to non-digit
         spanMax = colonIdx > -1 ? parseInt(spans.substring(colonIdx + 1), 10) : undefined;
       }
-      // If r attribute is missing, use numRowsSeen as the row number
-      const rowNumber = node.attributes.r ? parseInt(node.attributes.r, 10) : this.numRowsSeen;
+      // `r` is optional (ECMA-376 §18.3.1.73): a row without one follows the previous row, which is not the same
+      // as the count of rows seen once an explicit `r` has skipped ahead.
+      const rowNumber = readRowNumber(node.attributes.r, this.lastRowNumber);
+      this.lastRowNumber = rowNumber;
       const model: RowModel = (this.model = {
         number: rowNumber,
         min: spanMin,
@@ -234,13 +236,11 @@ class RowXform extends BaseXform<RowModel> {
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
         const cellModel = this.parser.model;
-        // If cell has address, extract column number from it
-        // Otherwise, calculate address based on position
-        if (cellModel.address) {
-          this.lastCellCol = colCache.decodeCol(cellModel.address);
-        } else {
-          // No r attribute, calculate address from position
-          this.lastCellCol += 1;
+        // See `cell-reference.ts`: a missing `r` follows the previous cell, a present one must name a cell of this row.
+        const written = cellModel.address;
+        this.lastCellCol = readCellColumn(written, this.model!.number, this.lastCellCol);
+        if (!written || colCache.decodePlainRow(written) === 0) {
+          // Absent, or spelled `$A$1`: the address is the one the cell was placed at.
           cellModel.address = colCache.encodeAddress(this.model!.number, this.lastCellCol);
         }
         // **A styled cell with no value is collapsed rather than materialised.**

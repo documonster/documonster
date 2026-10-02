@@ -426,9 +426,14 @@ class CellXform extends BaseXform {
     }
     switch (node.name) {
       case "c":
-        // const address = colCache.decodeAddress(node.attributes.r);
+        // The fields every cell ends up with are declared here. The model is kept as the loaded cell's value model, and
+        // a property added after the literal costs a separate backing store — 40 bytes for every cell of the sheet.
         this.model = {
-          address: node.attributes.r
+          address: node.attributes.r,
+          type: undefined,
+          value: undefined,
+          styleId: undefined,
+          style: undefined
         };
         this.t = node.attributes.t;
         if (node.attributes.s) {
@@ -503,6 +508,9 @@ class CellXform extends BaseXform {
               model.result = parseInt(model.value, 10) !== 0;
             } else if (this.t === "e") {
               model.result = { error: model.value };
+            } else if (this.t === "d") {
+              // A cached result is typed by `t` like a value: an ISO date, read as a value cell's is below.
+              model.result = parseOoxmlDate(model.value);
             } else {
               model.result = parseFloat(model.value);
             }
@@ -657,10 +665,18 @@ class CellXform extends BaseXform {
           if (model.ref) {
             // master
             options.formulae[model.si] = model.address;
+            if (options.sharedFormulaText) {
+              options.sharedFormulaText[model.si] = model.formula;
+            }
           } else {
             // slave
             model.sharedFormula = options.formulae[model.si];
             delete model.shareType;
+            if (model.sharedFormula === undefined && options.pendingSharedFormulas) {
+              // Its master has not been reached: it comes later in the sheet, or not at all. Settled once every
+              // cell has been seen — see `settleSharedFormulas`.
+              options.pendingSharedFormulas.push({ model, si: model.si });
+            }
           }
           delete model.si;
         }
@@ -686,43 +702,59 @@ class CellXform extends BaseXform {
       default:
         break;
     }
-
-    // look for hyperlink
-    const hyperlink = options.hyperlinkMap[model.address];
-    if (hyperlink) {
-      // CellHyperlinkValue.text is typed as string; if the shared-string
-      // resolution produced a rich-text payload ({ richText: [...] }) we must
-      // flatten it for `text` AND preserve the runs on `richText` so formatted
-      // display survives round-trip.
-      let source: unknown;
-      if (model.type === Enums.ValueType.Formula) {
-        // Formula + hyperlink: surface as a Hyperlink cell whose display is
-        // the formula's evaluated result, but keep `model.formula` (and the
-        // original result) on the model so write-time can re-emit both the
-        // formula <c> and the <hyperlink> entry. The cell value layer ignores
-        // unknown model fields, so the public Hyperlink shape stays clean
-        // while round-trip data is preserved internally.
-        source = model.result;
-      } else {
-        source = model.value;
-        model.value = undefined;
-      }
-      const display = extractHyperlinkDisplay(source);
-      model.text = display.text;
-      if (display.richText) {
-        model.richText = display.richText;
-      } else {
-        delete model.richText;
-      }
-      model.type = Enums.ValueType.Hyperlink;
-      model.hyperlink = hyperlink;
-    }
-
-    const comment = options.commentsMap && options.commentsMap[model.address];
-    if (comment) {
-      model.comment = comment;
-    }
   }
 }
 
-export { CellXform };
+/**
+ * Turn a reconciled cell model into a hyperlink cell pointing at `hyperlink`.
+ *
+ * Must run after the cell's own reconcile, because the display text comes from the resolved value — a shared string
+ * index is not a display.
+ */
+function attachHyperlink(model, hyperlink: string): void {
+  // CellHyperlinkValue.text is typed as string; if the shared-string
+  // resolution produced a rich-text payload ({ richText: [...] }) we must
+  // flatten it for `text` AND preserve the runs on `richText` so formatted
+  // display survives round-trip.
+  let source: unknown;
+  if (model.type === Enums.ValueType.Formula) {
+    // Formula + hyperlink: surface as a Hyperlink cell whose display is
+    // the formula's evaluated result, but keep `model.formula` (and the
+    // original result) on the model so write-time can re-emit both the
+    // formula <c> and the <hyperlink> entry. The cell value layer ignores
+    // unknown model fields, so the public Hyperlink shape stays clean
+    // while round-trip data is preserved internally.
+    source = model.result;
+  } else {
+    source = model.value;
+    model.value = undefined;
+  }
+  const display = extractHyperlinkDisplay(source);
+  model.text = display.text;
+  if (display.richText) {
+    model.richText = display.richText;
+  } else {
+    delete model.richText;
+  }
+  model.type = Enums.ValueType.Hyperlink;
+  model.hyperlink = hyperlink;
+}
+
+/**
+ * Make a formula cell whose formula text is not in the file a plain value cell holding its cached result.
+ *
+ * That is a shared-formula dependent whose group has no master: the text lives only on the master, so the file holds
+ * the result and nothing else.
+ */
+function formulaResultAsValue(model): void {
+  const { result } = model;
+  model.formula = undefined;
+  model.sharedFormula = undefined;
+  model.result = undefined;
+  model.shareType = undefined;
+  model.ref = undefined;
+  model.value = result;
+  model.type = getValueType(result);
+}
+
+export { CellXform, attachHyperlink, formulaResultAsValue };

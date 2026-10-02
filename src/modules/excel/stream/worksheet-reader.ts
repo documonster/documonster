@@ -4,22 +4,26 @@
  * Works in both Node.js and Browser.
  */
 
-import { cellGetValue, cellNumFmt, cellSetValue } from "@excel/core/cell";
+import { cellGetValue, cellSetModel, cellSetValue } from "@excel/core/cell";
+import type { CellData, CellModel } from "@excel/core/cell";
 import type { ColumnData } from "@excel/core/column";
+import { Enums } from "@excel/core/enums";
 import type { RangeData } from "@excel/core/range";
 import { rangeCreate, rangeExpandRow } from "@excel/core/range";
 import type { RowData } from "@excel/core/row";
 import { rowCreate, rowDimensions } from "@excel/core/row";
 import { columnCreate, columnFromModel, rowGetCell } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
-import { ExcelStreamStateError } from "@excel/errors";
+import { ExcelError, ExcelStreamStateError } from "@excel/errors";
 import type { InternalWorksheetOptions } from "@excel/stream/workbook-reader.browser";
-import type { WorksheetState, CellErrorValue, Style } from "@excel/types";
+import type { WorksheetState, Style } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { copyStyle } from "@excel/utils/copy-style";
+import { slideFormula } from "@excel/utils/shared-formula";
 import type { SharedStringValue } from "@excel/utils/shared-strings";
+import { readCellColumn, readRowNumber } from "@excel/xlsx/xform/sheet/cell-reference";
+import { CellXform, formulaResultAsValue } from "@excel/xlsx/xform/sheet/cell-xform";
 import { EventEmitter } from "@utils/event-emitter";
-import { isDateFmt, excelToDate, decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser } from "@xml/sax";
 import type { SaxTag } from "@xml/types";
 
@@ -33,17 +37,6 @@ interface ParsedColumnModel {
   max: number;
   width: number;
   styleId: number;
-}
-
-/** Cell parsing state during XML processing */
-interface CellParseState {
-  ref: string;
-  s?: number;
-  t?: string;
-  /** cm attribute — cell metadata index (1-indexed), used for dynamic array formulas */
-  cm?: number;
-  f?: { text: string };
-  v?: { text: string };
 }
 
 /** Hyperlink reference from worksheet XML */
@@ -88,6 +81,27 @@ export interface WorksheetReaderOptions {
   id: number;
   iterator: AsyncIterable<unknown>;
   options?: InternalWorksheetOptions;
+}
+
+/**
+ * Put a parsed `<c>` onto a streamed cell, as `rowSetModel` does for a loaded one, but keeping the cell's style
+ * object its own and mutable — the streaming handle has always been a plain record its consumer may edit, where a
+ * loaded cell shares a frozen container and is written through `cellOwnStyle`.
+ */
+function applyCellModel(cell: CellData, model: CellModel, style: Partial<Style> | undefined): void {
+  // Without a style of its own the cell keeps what it inherited from its row or column, whose facets may be shared
+  // snapshots — so their sharing flag is kept too, and the first write still copies them first.
+  const inherited = cell.style;
+  const shared = cell._sharedStyle;
+  model.style = undefined;
+  cellSetModel(cell, model);
+  if (style) {
+    cell.style = copyStyle(style) ?? {};
+    cell._sharedStyle = false;
+  } else {
+    cell.style = inherited;
+    cell._sharedStyle = shared;
+  }
 }
 
 class WorksheetReader extends EventEmitter {
@@ -252,16 +266,121 @@ class WorksheetReader extends EventEmitter {
     // parse state
     let cols: ParsedColumnModel[] | null = null;
     let row: RowData | null = null;
-    let c: CellParseState | null = null;
-    let current: { text: string } | null = null;
+    // Each `<c>` is parsed and reconciled by the same `CellXform` the full reader uses, so the two agree on values.
+    const cellXform = new CellXform();
+    /** Column of the `<c>` being read, or 0 when none is open. */
+    let cellCol = 0;
+    /** Groups a dependent asked for before any master was seen — see `resolveSharedFormula`. */
+    const orphanedGroups = new Map<string, string>();
+    const { workbook } = this;
+    const date1904 = properties?.model?.date1904;
+    const reconcileOptions = {
+      styles,
+      date1904,
+      sharedStrings: sharedStrings && { getString: (index: number) => sharedStrings[index] },
+      // Group index → master address and formula text, recorded by `reconcile` as each master is read.
+      formulae: Object.create(null) as Record<string, string>,
+      sharedFormulaText: Object.create(null) as Record<string, string>,
+      // Read per cell, as before: a metadata part may arrive after the reader was created.
+      get dynamicArrayCmIndices() {
+        return workbook.dynamicArrayCmIndices;
+      },
+      get hasDynamicArrayMetadata() {
+        return workbook.hasDynamicArrayMetadata;
+      }
+    };
+    // An omitted `<row r>` / `<c r>` follows the previous one — see `cell-reference.ts`.
+    let lastRowNumber = 0;
+    let lastCellCol = 0;
 
     // Direct SAX callback mode — zero intermediate event objects.
     // We collect worksheet events per-chunk and yield them.
     let worksheetEvents: WorksheetEvent[] | null = null;
 
+    const finishCell = (model: CellModel & Record<string, any>, col: number): void => {
+      const cell = rowGetCell(row!, col);
+      // The address the cell was filed under, not the attribute: it may be absent, or spelled `$C$1`.
+      model.address = cell.address;
+      if (model.type === Enums.ValueType.Merge) {
+        // `<c r="B1"/>` — no value and no style. The cell exists, as it always did here, and holds nothing.
+        return;
+      }
+      const styleId = model.styleId as number | undefined;
+      let unresolvedSharedString: number | undefined;
+      if (
+        !sharedStrings &&
+        model.type === Enums.ValueType.String &&
+        typeof model.value === "number"
+      ) {
+        // Shared strings not cached: the index is all there is, handed over as `{ sharedString }`.
+        unresolvedSharedString = model.value;
+        model.value = undefined;
+        model.type = Enums.ValueType.Null;
+      }
+      // `reconcile` consumes the group index, so it is read first.
+      const si = model.si as string | undefined;
+      cellXform.reconcile(model, reconcileOptions);
+      if (si !== undefined && model.type === Enums.ValueType.Formula) {
+        resolveSharedFormula(model, si);
+      }
+      applyCellModel(
+        cell,
+        model,
+        styleId !== undefined ? (model.style as Partial<Style>) : undefined
+      );
+      if (unresolvedSharedString !== undefined) {
+        cellSetValue(cell, { sharedString: unresolvedSharedString } as never);
+      }
+      // `<hyperlinks>` follows `<sheetData>` in a conforming sheet, so this only fires for a producer that writes it
+      // first; otherwise the links reach the caller through `hyperlinks` once the sheet has been read.
+      const hyperlink = hyperlinks?.[cell.address];
+      if (hyperlink) {
+        // Streaming-specific: stash the cell's value as `text` and attach the hyperlink. These fields are not part
+        // of the standard CellData.
+        const streamingCell = cell as typeof cell & {
+          text?: ReturnType<typeof cellGetValue>;
+          hyperlink?: WorksheetHyperlink;
+        };
+        streamingCell.text = cellGetValue(cell);
+        cellSetValue(cell, undefined);
+        streamingCell.hyperlink = hyperlink;
+      }
+    };
+
+    // A shared-formula dependent gets the master's formula slid to its own address now, since the master is gone by
+    // the time a caller would ask. The master comes first in a conforming sheet. A dependent whose master never
+    // appears keeps its cached result — the file holds no formula text for it. A master arriving after a dependent
+    // already emitted is an error: that dependent's formula can no longer be supplied. Groups live for the whole
+    // sheet because a dependent may lie outside its master's declared range.
+    const resolveSharedFormula = (model: CellModel & Record<string, any>, si: string): void => {
+      if (model.formula) {
+        const orphan = orphanedGroups.get(si);
+        if (orphan !== undefined) {
+          throw new ExcelError(
+            `Shared formula ${si}: cell ${orphan} comes before its master ${model.address}, so its formula cannot be ` +
+              "recovered by a forward-only reader. Read this workbook with Workbook.read."
+          );
+        }
+        return;
+      }
+      const text = reconcileOptions.sharedFormulaText[si];
+      if (model.sharedFormula && text) {
+        model.formula = slideFormula(text, model.sharedFormula, model.address);
+        return;
+      }
+      if (!orphanedGroups.has(si)) {
+        orphanedGroups.set(si, model.address);
+      }
+      formulaResultAsValue(model);
+    };
+
     const parser = new SaxParser({ position: false, invalidCharHandling: "skip" });
 
     parser.on("opentag", (node: SaxTag) => {
+      if (cellCol !== 0) {
+        cellXform.parseOpen(node);
+        return;
+      }
       if (emitSheet) {
         switch (node.name) {
           case "cols":
@@ -285,7 +404,9 @@ class WorksheetReader extends EventEmitter {
 
           case "row":
             if (inRows) {
-              const r = parseInt(node.attributes.r, 10);
+              const r = readRowNumber(node.attributes.r, lastRowNumber);
+              lastRowNumber = r;
+              lastCellCol = 0;
               row = rowCreate(this as unknown as Worksheet, r);
               if (node.attributes.ht) {
                 row.height = parseFloat(node.attributes.ht);
@@ -304,30 +425,10 @@ class WorksheetReader extends EventEmitter {
             break;
           case "c":
             if (row) {
-              const styleAttr = node.attributes.s;
-              const cmAttr = node.attributes.cm;
-              c = {
-                ref: node.attributes.r,
-                s: styleAttr !== undefined ? parseInt(styleAttr, 10) : undefined,
-                t: node.attributes.t,
-                cm: cmAttr !== undefined ? parseInt(cmAttr, 10) : undefined
-              };
-            }
-            break;
-          case "f":
-            if (c) {
-              current = c.f = { text: "" };
-            }
-            break;
-          case "v":
-            if (c) {
-              current = c.v = { text: "" };
-            }
-            break;
-          case "is":
-          case "t":
-            if (c) {
-              current = c.v = { text: "" };
+              // See `cell-reference.ts`, shared with the full reader.
+              cellCol = readCellColumn(node.attributes.r, row.number, lastCellCol);
+              lastCellCol = cellCol;
+              cellXform.parseOpen(node);
             }
             break;
           case "mergeCell":
@@ -367,15 +468,23 @@ class WorksheetReader extends EventEmitter {
     });
 
     parser.on("text", (text: string) => {
-      // only text data is for sheet values
-      if (emitSheet) {
-        if (current) {
-          current.text += text;
-        }
+      // Only a cell's text is sheet data.
+      if (cellCol !== 0) {
+        cellXform.parseText(text);
       }
     });
 
     parser.on("closetag", (tag: SaxTag) => {
+      if (cellCol !== 0) {
+        cellXform.parseClose(tag.name);
+        // Ended by its own close tag, not by `parseClose` returning false: that also answers for a child element
+        // `CellXform` does not know, which would end the cell early.
+        if (tag.name === "c") {
+          finishCell(cellXform.model as CellModel, cellCol);
+          cellCol = 0;
+        }
+        return;
+      }
       if (emitSheet) {
         switch (tag.name) {
           case "cols":
@@ -397,116 +506,6 @@ class WorksheetReader extends EventEmitter {
             row = null;
             break;
 
-          case "c":
-            if (row && c) {
-              const address = colCache.decodeAddress(c.ref);
-              const cell = rowGetCell(row, address.col);
-              if (c.s !== undefined) {
-                const style = styles.getStyleModel(c.s);
-                if (style) {
-                  cell.style = copyStyle(style) ?? {};
-                }
-              }
-
-              if (c.f) {
-                const cellValue: {
-                  formula: string;
-                  result?: string | number;
-                  isDynamicArray?: boolean;
-                } = {
-                  formula: c.f.text
-                };
-                if (c.v) {
-                  if (c.t === "str") {
-                    cellValue.result = c.v.text;
-                  } else {
-                    cellValue.result = parseFloat(c.v.text);
-                  }
-                }
-                // Check if this cell is a dynamic array formula via cm → metadata mapping.
-                // Uses the precise dynamicArrayCmIndices set from WorkbookReaderBase,
-                // falling back to the coarser hasDynamicArrayMetadata boolean.
-                if (c.cm !== undefined) {
-                  const { workbook: wb } = this;
-                  if (wb.dynamicArrayCmIndices) {
-                    if (wb.dynamicArrayCmIndices.has(c.cm)) {
-                      cellValue.isDynamicArray = true;
-                    }
-                  } else if (wb.hasDynamicArrayMetadata) {
-                    cellValue.isDynamicArray = true;
-                  }
-                }
-                cellSetValue(cell, cellValue);
-              } else if (c.v) {
-                switch (c.t) {
-                  case "s": {
-                    const index = parseInt(c.v.text, 10);
-                    if (sharedStrings) {
-                      cellSetValue(cell, sharedStrings[index]);
-                    } else {
-                      // Streaming format - unresolved shared string reference
-                      cellSetValue(cell, {
-                        sharedString: index
-                      } as never);
-                    }
-                    break;
-                  }
-
-                  case "inlineStr":
-                    // Inline strings come from <is><t>...</t></is> which uses
-                    // OOXML _xHHHH_ escaping in addition to XML entities.
-                    cellSetValue(
-                      cell,
-                      c.v.text.includes("_x") ? decodeOoxmlEscape(c.v.text) : c.v.text
-                    );
-                    break;
-                  case "str":
-                    cellSetValue(cell, c.v.text);
-                    break;
-
-                  case "e":
-                    cellSetValue(cell, { error: c.v.text as CellErrorValue["error"] });
-                    break;
-
-                  case "b":
-                    cellSetValue(cell, parseInt(c.v.text, 10) !== 0);
-                    break;
-
-                  default: {
-                    const numFmtValue = cellNumFmt(cell);
-                    const numFmtStr =
-                      typeof numFmtValue === "string" ? numFmtValue : numFmtValue?.formatCode;
-                    if (numFmtStr && isDateFmt(numFmtStr)) {
-                      cellSetValue(
-                        cell,
-                        excelToDate(parseFloat(c.v.text), properties?.model?.date1904)
-                      );
-                    } else {
-                      cellSetValue(cell, parseFloat(c.v.text));
-                    }
-                    break;
-                  }
-                }
-              }
-              if (hyperlinks) {
-                const hyperlink = hyperlinks[c.ref];
-                if (hyperlink) {
-                  // Streaming-specific: stash the cell's value as `text` and
-                  // attach the hyperlink so downstream processing can pick them
-                  // up. These fields are not part of the standard CellData.
-                  const streamingCell = cell as typeof cell & {
-                    text?: ReturnType<typeof cellGetValue>;
-                    hyperlink?: WorksheetHyperlink;
-                  };
-                  streamingCell.text = cellGetValue(cell);
-                  cellSetValue(cell, undefined);
-                  streamingCell.hyperlink = hyperlink;
-                }
-              }
-              c = null;
-              current = null;
-            }
-            break;
           default:
             break;
         }

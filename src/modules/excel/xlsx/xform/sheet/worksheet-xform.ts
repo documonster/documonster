@@ -22,12 +22,14 @@ import {
   vmlDrawingRelTargetFromWorksheet,
   vmlDrawingHFRelTargetFromWorksheet
 } from "@excel/utils/ooxml-paths";
+import { slideFormula } from "@excel/utils/shared-formula";
 import { RelType } from "@excel/xlsx/rel-type";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import { AutoFilterXform, resolveAutoFilterRef } from "@excel/xlsx/xform/sheet/auto-filter-xform";
+import { attachHyperlink, formulaResultAsValue } from "@excel/xlsx/xform/sheet/cell-xform";
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
 import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
 import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
@@ -145,24 +147,148 @@ function mergeConditionalFormattings(
   return model;
 }
 
-/** Whether the parsed rows already hold a cell at `address`. */
-function hasCellAt(
-  rows:
-    | readonly (
-        | { readonly cells?: readonly ({ readonly address?: string } | undefined)[] }
-        | undefined
-      )[]
-    | undefined,
-  address: string
-): boolean {
-  for (const row of rows ?? []) {
-    for (const cell of row?.cells ?? []) {
-      if (cell?.address === address) {
-        return true;
-      }
+interface ReconcileCellModel {
+  address?: string;
+  type?: number;
+  comment?: unknown;
+}
+
+interface ReconcileRowModel {
+  number: number;
+  cells?: (ReconcileCellModel | undefined)[];
+}
+
+/** What a sheet's `<hyperlinks>` and comments part say about one cell. */
+interface CellAnnotation {
+  hyperlink?: string;
+  comment?: unknown;
+}
+
+/**
+ * Finish the shared-formula dependents whose master came later in the sheet, or never.
+ *
+ * A master is the top-left cell of its range, so a conforming sheet always reaches it first and nothing is pending.
+ * A dependent written before its master is given the master's formula slid to its own address, as a plain formula —
+ * `sharedFormula` cannot name a master below or right of it, which the writer rejects. A dependent with no master at
+ * all has no formula text anywhere in the file, so it is kept as the cached result it does have.
+ */
+function settleSharedFormulas(options: {
+  formulae: Record<string, string>;
+  sharedFormulaText: Record<string, string | undefined>;
+  pendingSharedFormulas: { model: Record<string, any>; si: string }[];
+}): void {
+  for (const { model, si } of options.pendingSharedFormulas) {
+    const masterAddress = options.formulae[si];
+    const text = options.sharedFormulaText[si];
+    if (masterAddress !== undefined && text) {
+      model.formula = slideFormula(text, masterAddress, model.address);
+      model.sharedFormula = undefined;
+    } else {
+      formulaResultAsValue(model);
     }
   }
-  return false;
+  options.pendingSharedFormulas = [];
+}
+
+/** The row number an address names (`"AB12"` → 12), or 0 when it names none. */
+function addressRowNumber(address: string): number {
+  return colCache.decodePlainRow(address) || Number(/\d+$/.exec(address)?.[0] ?? "0");
+}
+
+/**
+ * Put each hyperlink and comment on the cell it names.
+ *
+ * Annotations are grouped by row first, so each annotated row is walked once and every other row not at all: the cost
+ * is the size of the annotated rows, however the annotations are spread. Matching is by the address string exactly as
+ * written. A comment whose cell has no `<c>` gets an empty cell to live on —
+ * `comments1.xml` keys comments by address, and Excel shows one on an empty cell perfectly well.
+ */
+function attachAnnotations(
+  rows: ReconcileRowModel[],
+  hyperlinks: ReadonlyMap<string, string>,
+  comments: ReadonlyMap<string, unknown>
+): void {
+  const byRow = new Map<number, Map<string, CellAnnotation>>();
+  function annotation(address: string): CellAnnotation | undefined {
+    const rowNumber = addressRowNumber(address);
+    if (rowNumber === 0) {
+      return undefined;
+    }
+    let inRow = byRow.get(rowNumber);
+    if (inRow === undefined) {
+      inRow = new Map();
+      byRow.set(rowNumber, inRow);
+    }
+    let entry = inRow.get(address);
+    if (entry === undefined) {
+      entry = {};
+      inRow.set(address, entry);
+    }
+    return entry;
+  }
+  for (const [address, hyperlink] of hyperlinks) {
+    const entry = annotation(address);
+    if (entry) {
+      entry.hyperlink = hyperlink;
+    }
+  }
+  for (const [address, comment] of comments) {
+    const entry = annotation(address);
+    if (entry) {
+      entry.comment = comment;
+    }
+  }
+
+  let rowsAdded = false;
+  for (const row of rows) {
+    const inRow = row && byRow.get(row.number);
+    if (inRow === undefined) {
+      continue;
+    }
+    // Only the first row model carrying a number receives its annotations, as before.
+    byRow.delete(row.number);
+    for (const cell of row.cells ?? []) {
+      const entry = cell?.address === undefined ? undefined : inRow.get(cell.address);
+      if (entry === undefined) {
+        continue;
+      }
+      // First cell with the address wins, as before.
+      inRow.delete(cell!.address!);
+      if (entry.hyperlink !== undefined) {
+        attachHyperlink(cell, entry.hyperlink);
+      }
+      if (entry.comment !== undefined) {
+        cell!.comment = entry.comment;
+      }
+    }
+    appendCommentCells(row, inRow);
+  }
+  // Rows that hold no `<c>` at all, only comments.
+  for (const [number, inRow] of byRow) {
+    const row: ReconcileRowModel = { number, cells: [] };
+    appendCommentCells(row, inRow);
+    if (row.cells!.length > 0) {
+      rows.push(row);
+      rowsAdded = true;
+    }
+  }
+  if (rowsAdded) {
+    rows.sort((left, right) => left.number - right.number);
+  }
+}
+
+/** Give each still-unmatched comment in `inRow` an empty cell of its own, appended in one pass. */
+function appendCommentCells(
+  row: ReconcileRowModel,
+  inRow: ReadonlyMap<string, CellAnnotation>
+): void {
+  for (const [address, entry] of inRow) {
+    if (entry.comment !== undefined) {
+      // `ValueType.Null` — a real cell holding nothing, which is what a comment-only cell is. Omitting the type
+      // reaches `rowSetModel` as a cell of unknown kind and throws.
+      (row.cells ??= []).push({ address, type: 0, comment: entry.comment });
+    }
+  }
 }
 
 /**
@@ -1427,26 +1553,32 @@ class WorkSheetXform extends BaseXform {
         }
       }
     }
-    options.commentsMap = (model.comments ?? []).reduce((h, comment) => {
+    // **Attached by address after the cell pass, not looked up by every cell.** The per-cell lookup ran once per cell
+    // whether or not the sheet had a single hyperlink or comment; measured on a 3.4M-cell sheet with neither, it was
+    // about a second of a 4.8 s read. See `attachAnnotations`.
+    const commentsMap = new Map<string, unknown>();
+    for (const comment of model.comments ?? []) {
       if (comment.ref) {
-        h[comment.ref] = comment;
+        commentsMap.set(comment.ref, comment);
       }
-      return h;
-    }, {});
-    options.hyperlinkMap = (model.hyperlinks ?? []).reduce((h, hyperlink) => {
+    }
+    const hyperlinkMap = new Map<string, string>();
+    for (const hyperlink of model.hyperlinks ?? []) {
       if (hyperlink.rId) {
         // External link: resolve target from relationship
         const rel = rels[hyperlink.rId];
         if (rel) {
-          h[hyperlink.address] = rel.Target;
+          hyperlinkMap.set(hyperlink.address, rel.Target);
         }
       } else if (hyperlink.target) {
         // Internal link: target was restored from location attribute (with "#" prefix)
-        h[hyperlink.address] = hyperlink.target;
+        hyperlinkMap.set(hyperlink.address, hyperlink.target);
       }
-      return h;
-    }, {});
+    }
+    // Attached after the cell pass, because a hyperlink's display text is the resolved value.
     options.formulae = {};
+    options.sharedFormulaText = {};
+    options.pendingSharedFormulas = [];
 
     // compact the rows and cells — remove any holes from sparse parse results
     if (model.rows) {
@@ -1483,6 +1615,7 @@ class WorkSheetXform extends BaseXform {
 
     this.map.cols.reconcile(model.cols, options);
     this.map.sheetData.reconcile(model.rows, options);
+    settleSharedFormulas(options);
 
     // **A comment on an empty cell needs a cell to live on.**
     //
@@ -1493,29 +1626,8 @@ class WorkSheetXform extends BaseXform {
     //
     // Found by the cross-container check in `verify-xlsb-corpus`, which is worth saying because an XLSX round trip
     // never showed it: a workbook this library *wrote* put values in those cells, so the comment always had one.
-    for (const [address, comment] of Object.entries(
-      (options.commentsMap ?? {}) as Record<string, unknown>
-    )) {
-      if (hasCellAt(model.rows, address)) {
-        continue;
-      }
-      const rowNumber = Number(/\d+$/.exec(address)?.[0] ?? "0");
-      if (rowNumber === 0) {
-        continue;
-      }
-      let row = model.rows.find(
-        (candidate: { number: number } | undefined) => candidate?.number === rowNumber
-      );
-      if (row === undefined) {
-        row = { number: rowNumber, cells: [] };
-        model.rows.push(row);
-        model.rows.sort(
-          (left: { number: number }, right: { number: number }) => left.number - right.number
-        );
-      }
-      // `ValueType.Null` — a real cell holding nothing, which is what a comment-only cell is. Omitting the type
-      // reaches `rowSetModel` as a cell of unknown kind and throws.
-      row.cells = [...(row.cells ?? []), { address, type: 0, comment }];
+    if (hyperlinkMap.size > 0 || commentsMap.size > 0) {
+      attachAnnotations(model.rows as ReconcileRowModel[], hyperlinkMap, commentsMap);
     }
     this.map.conditionalFormatting.reconcile(model.conditionalFormattings, options);
     // A `type: "date"` bound is a serial, so it needs the workbook's epoch just as a cell value does. Reconcile

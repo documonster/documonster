@@ -1,7 +1,7 @@
 import { Enums } from "@excel/core/enums";
 import { ExcelError } from "@excel/errors";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
-import { CellXform } from "@excel/xlsx/xform/sheet/cell-xform";
+import { CellXform, attachHyperlink } from "@excel/xlsx/xform/sheet/cell-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { describe, expect, it } from "vitest";
 
@@ -22,11 +22,6 @@ const fakeStyles = {
         return null;
     }
   }
-};
-
-const fakeHyperlinkMap = {
-  H1: "http://www.foo.com",
-  H2: "http://www.rich.com"
 };
 
 const expectations = [
@@ -107,7 +102,7 @@ const expectations = [
       value: "Foo"
     },
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
-    options: { hyperlinkMap: fakeHyperlinkMap, styles: fakeStyles }
+    options: { styles: fakeStyles }
   },
   {
     title: "String with Invalid Number",
@@ -133,7 +128,6 @@ const expectations = [
     },
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
     options: {
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles
     }
   },
@@ -150,7 +144,7 @@ const expectations = [
       value: "Foo"
     },
     tests: ["parse", "reconcile"],
-    options: { hyperlinkMap: fakeHyperlinkMap, styles: fakeStyles }
+    options: { styles: fakeStyles }
   },
   {
     title: "Inline String with OOXML escape (lowercase _x000a_)",
@@ -169,7 +163,7 @@ const expectations = [
       value: "Col3\nnew line"
     },
     tests: ["parse", "reconcile"],
-    options: { hyperlinkMap: fakeHyperlinkMap, styles: fakeStyles }
+    options: { styles: fakeStyles }
   },
   {
     title: "Inline String with RichText",
@@ -218,7 +212,7 @@ const expectations = [
       }
     },
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
-    options: { hyperlinkMap: fakeHyperlinkMap, styles: fakeStyles }
+    options: { styles: fakeStyles }
   },
   {
     title: "Shared String",
@@ -242,7 +236,6 @@ const expectations = [
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
     options: {
       sharedStrings: new SharedStringsXform(),
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles
     }
   },
@@ -291,7 +284,6 @@ const expectations = [
     tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
     options: {
       sharedStrings: new SharedStringsXform(),
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles
     }
   },
@@ -328,7 +320,6 @@ const expectations = [
     options: {
       sharedStrings: new SharedStringsXform(),
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles
     }
   },
@@ -358,11 +349,10 @@ const expectations = [
       text: "www.foo.com",
       hyperlink: "http://www.foo.com"
     },
-    tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
+    tests: ["prepare", "render", "renderIn", "parse"],
     options: {
       sharedStrings: new SharedStringsXform(),
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles
     }
   },
@@ -401,11 +391,10 @@ const expectations = [
       hyperlink: "http://www.rich.com",
       richText: [{ text: "hello ", font: { bold: true } }, { text: "world" }]
     },
-    tests: ["prepare", "render", "renderIn", "parse", "reconcile"],
+    tests: ["prepare", "render", "renderIn", "parse"],
     options: {
       sharedStrings: new SharedStringsXform(),
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles
     }
   },
@@ -443,7 +432,6 @@ const expectations = [
     options: {
       sharedStrings: new SharedStringsXform(),
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       styles: fakeStyles,
       formulae: {},
       siFormulae: 0
@@ -506,7 +494,6 @@ const expectations = [
     options: {
       styles: fakeStyles,
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       formulae: {},
       siFormulae: 0
     }
@@ -547,7 +534,6 @@ const expectations = [
     options: {
       styles: fakeStyles,
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       formulae: {
         A1: {
           address: "A1",
@@ -595,7 +581,6 @@ const expectations = [
     options: {
       styles: fakeStyles,
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       formulae: {},
       siFormulae: 0
     }
@@ -632,7 +617,6 @@ const expectations = [
     options: {
       styles: fakeStyles,
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       formulae: {},
       siFormulae: 0
     }
@@ -676,7 +660,6 @@ const expectations = [
     options: {
       styles: fakeStyles,
       hyperlinks: [],
-      hyperlinkMap: fakeHyperlinkMap,
       formulae: {},
       siFormulae: 0,
       hasDynamicArrayMetadata: true,
@@ -701,7 +684,7 @@ describe("CellXform", () => {
     it("throws ExcelError when shared-string index is out of range", () => {
       const xform = new CellXform();
       const sharedStrings = new SharedStringsXform();
-      const options = { sharedStrings, hyperlinkMap: {}, styles: fakeStyles };
+      const options = { sharedStrings, styles: fakeStyles };
       // sharedStrings table is empty — index 5 is out of range
       const makeModel = () => ({ address: "B47", type: Enums.ValueType.String, value: 5 });
 
@@ -715,13 +698,56 @@ describe("CellXform", () => {
       // sharedStrings table is absent we leave the raw index in place rather
       // than throwing, so the rest of the workbook still loads.
       const xform = new CellXform();
-      const options = { hyperlinkMap: {}, styles: fakeStyles };
+      const options = { styles: fakeStyles };
       const model = { address: "C12", type: Enums.ValueType.String, value: 0 };
 
       expect(() => xform.reconcile(model, options)).not.toThrow();
       // Index is preserved unchanged when the lookup table is missing
       expect(model.value).toBe(0);
       expect(model.type).toBe(Enums.ValueType.String);
+    });
+  });
+});
+
+describe("attachHyperlink", () => {
+  it("makes a reconciled string cell a hyperlink displaying its text", () => {
+    const model: any = { address: "H1", type: Enums.ValueType.String, value: "www.foo.com" };
+    attachHyperlink(model, "http://www.foo.com");
+    expect(model).toEqual({
+      address: "H1",
+      type: Enums.ValueType.Hyperlink,
+      value: undefined,
+      text: "www.foo.com",
+      hyperlink: "http://www.foo.com"
+    });
+  });
+
+  it("flattens rich-text display into text and keeps the runs", () => {
+    const runs = [{ text: "hello ", font: { bold: true } }, { text: "world" }];
+    const model: any = { address: "H2", type: Enums.ValueType.RichText, value: { richText: runs } };
+    attachHyperlink(model, "http://www.rich.com");
+    expect(model).toMatchObject({
+      type: Enums.ValueType.Hyperlink,
+      text: "hello world",
+      richText: runs,
+      hyperlink: "http://www.rich.com"
+    });
+  });
+
+  it("keeps a formula and displays its result", () => {
+    const model: any = {
+      address: "A1",
+      type: Enums.ValueType.Formula,
+      formula: "B1",
+      result: "shown"
+    };
+    attachHyperlink(model, "#Sheet1!A1");
+    expect(model).toMatchObject({
+      type: Enums.ValueType.Hyperlink,
+      formula: "B1",
+      result: "shown",
+      text: "shown",
+      hyperlink: "#Sheet1!A1"
     });
   });
 });

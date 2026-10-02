@@ -1026,7 +1026,7 @@ Preserved inbound relationships are re-emitted on the package root, on `xl/workb
 
 ### Oracle And Corpus Testing
 
-The repository includes optional harnesses for real-application validation. They are disabled by default because they require external binaries or private fixture corpora.
+The repository includes optional harnesses for real-application validation. They are disabled by default because they require external binaries or private fixture corpora — with one exception: the chart round-trip tests open their workbooks in LibreOffice automatically when it is installed. Each open takes seconds; set `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=0` to skip them.
 
 Every generated workbook in these harnesses also runs an OOXML package audit before external conversion. The audit checks required part content types, relationship targets, duplicate relationship IDs, chart/ChartEx/drawing/chartsheet structure, ChartEx data/axis references, and ChartEx external-data relationship IDs so common Excel "repaired records" issues fail early in CI. When an enabled Office/LibreOffice open-validation command logs repair/corruption/error text, the test treats it as a hard validation failure.
 
@@ -2394,6 +2394,40 @@ for await (const worksheet of reader) {
   console.log(`Reading: ${worksheet.name}`);
   for await (const row of worksheet) {
     console.log(row.values);
+  }
+}
+```
+
+A streamed cell is read by the same code as `Workbook.read`, so rich text, formula results of every type, `t="d"`
+dates and dynamic arrays come out as they do when loading. `<row r>` and `<c r>` may be omitted, as ECMA-376 allows; a
+missing one follows the previous row or cell, and a present one that is not a valid reference to its own row is an
+error in both readers. Three differences come from reading forward:
+
+- **A shared formula's cells carry their formula text.** A loaded cell derives it from the group's master on demand;
+  a stream has released the master by then, so each cell is given `formula` (slid to its own address) alongside
+  `sharedFormula`.
+- **Hyperlinks arrive with the end of the sheet, not on the cell.** `<hyperlinks>` follows `<sheetData>`, so the rows
+  have been emitted before any link is known, and attaching them would mean holding the whole sheet. With
+  `hyperlinks: "cache"`, read them from the worksheet once its rows are done (see below).
+- **A shared-formula cell that precedes its group's master is an error.** Its formula is only known once the master
+  is read, and by then the cell has been emitted. `Workbook.read` handles such a file.
+
+```typescript
+import { Stream } from "documonster/excel";
+
+const reader = new Stream.WorkbookReader("links.xlsx", {
+  worksheets: "emit",
+  sharedStrings: "cache",
+  hyperlinks: "cache"
+});
+
+for await (const worksheet of reader) {
+  for await (const row of worksheet) {
+    // a row carries the display text
+  }
+  for (const [address, link] of Object.entries(worksheet.hyperlinks ?? {})) {
+    const target = link.target ?? reader.getHyperlinkTarget(worksheet.sheetNo, link.rId!);
+    console.log(address, target);
   }
 }
 ```

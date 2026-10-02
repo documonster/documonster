@@ -247,7 +247,8 @@ class SaxParser {
   private q: number | null = null;
   private tags: SaxTag[] = [];
   private tag: SaxTag | null = null;
-  private attribList: Array<{ name: string; value: string }> = [];
+  /** Names repeated on the tag being opened, reported when it opens — `null` until the first one. */
+  private duplicateAttributes: string[] | null = null;
   private entity: string = "";
   private entityReturnState: number = S_TEXT;
   private openWakaBang: string = "";
@@ -298,7 +299,7 @@ class SaxParser {
     this.q = null;
     this.tags = [];
     this.tag = null;
-    this.attribList = [];
+    this.duplicateAttributes = null;
     this.entity = "";
     this.openWakaBang = "";
     this.sawRoot = this.fragment;
@@ -1116,7 +1117,7 @@ class SaxParser {
       attributes: Object.create(null) as Record<string, string>,
       isSelfClosing: false
     };
-    this.attribList = [];
+    this.duplicateAttributes = null;
     this.sawRoot = true;
 
     if (c === GREATER) {
@@ -1124,10 +1125,121 @@ class SaxParser {
     } else if (c === FORWARD_SLASH) {
       this.state = S_OPEN_TAG_SLASH;
     } else if (isS(c)) {
-      this.state = S_ATTRIB;
+      this.scanAttributes();
     } else {
       this.fail("unexpected character in tag");
       this.state = S_ATTRIB;
+    }
+  }
+
+  /**
+   * Read a start tag's ordinary attributes, and its `>` or `/>`, in one pass.
+   *
+   * The state machine takes one dispatch per step of an attribute — name, `=`, value, after-value — which on a
+   * worksheet is most of the parse: `<c r="A1" s="1" t="s">` is twelve of them, for every cell. This consumes the
+   * common shape directly: a name of ASCII name characters, `=`, a quoted value of printable ASCII with no `&` or `<`,
+   * then whitespace or the end of the tag.
+   *
+   * Anything else is handed back to the state machine **at the start of the attribute in question**, never part-way
+   * through it — an entity, a control or non-ASCII character, a missing `=` or quote, a chunk boundary, a newline when
+   * positions are tracked. Every attribute before that point is complete and recorded exactly as the state machine
+   * would have recorded it, so the result, the errors and their positions are the state machine's own.
+   */
+  private scanAttributes(): void {
+    const { chunk, trackPosition } = this;
+    const len = chunk.length;
+    const start = this.i;
+    let pos = start;
+
+    for (;;) {
+      while (pos < len) {
+        const c = chunk.charCodeAt(pos);
+        // A line break moves the line counter, which is the state machine's job when positions are tracked.
+        if (c === SPACE || c === TAB || (!trackPosition && (c === NL || c === CR))) {
+          pos++;
+        } else {
+          break;
+        }
+      }
+      if (pos >= len) {
+        break;
+      }
+      let c = chunk.charCodeAt(pos);
+      if (c === GREATER) {
+        this.finishScan(start, pos + 1);
+        this.openTag();
+        return;
+      }
+      if (c === FORWARD_SLASH) {
+        if (pos + 1 < len && chunk.charCodeAt(pos + 1) === GREATER) {
+          this.finishScan(start, pos + 2);
+          this.openSelfClosingTag();
+          return;
+        }
+        break;
+      }
+      if (c >= 128 || NAME_START_CHAR_ASCII[c] !== 1) {
+        break;
+      }
+
+      const nameStart = pos;
+      pos++;
+      while (pos < len) {
+        c = chunk.charCodeAt(pos);
+        if (c < 128 && NAME_CHAR_ASCII[c] === 1) {
+          pos++;
+        } else {
+          break;
+        }
+      }
+      const quote =
+        pos + 1 < len && chunk.charCodeAt(pos) === EQUAL ? chunk.charCodeAt(pos + 1) : -1;
+      if (quote !== DQUOTE && quote !== SQUOTE) {
+        pos = nameStart;
+        break;
+      }
+      const valueStart = pos + 2;
+      let end = valueStart;
+      while (end < len) {
+        c = chunk.charCodeAt(end);
+        if (c >= 0x20 && c <= 0x7e && c !== quote && c !== AMP && c !== LESS) {
+          end++;
+        } else {
+          break;
+        }
+      }
+      if (end >= len || c !== quote) {
+        pos = nameStart;
+        break;
+      }
+      this.addAttribute(chunk.slice(nameStart, pos), chunk.slice(valueStart, end));
+      pos = end + 1;
+
+      // After a value only whitespace or the end of the tag may follow; anything else, and the end of the chunk, is
+      // the after-value state's to judge — it is what reports "no whitespace between attributes".
+      c = pos < len ? chunk.charCodeAt(pos) : -1;
+      if (
+        c !== SPACE &&
+        c !== TAB &&
+        c !== NL &&
+        c !== CR &&
+        c !== GREATER &&
+        c !== FORWARD_SLASH
+      ) {
+        this.finishScan(start, pos);
+        this.state = S_ATTRIB_VALUE_CLOSED;
+        return;
+      }
+    }
+    this.finishScan(start, pos);
+    this.state = S_ATTRIB;
+  }
+
+  /** Move past what `scanAttributes` consumed. It never consumes a line break while positions are tracked. */
+  private finishScan(start: number, end: number): void {
+    this.i = end;
+    if (this.trackPosition) {
+      this.column += end - start;
     }
   }
 
@@ -1204,7 +1316,7 @@ class SaxParser {
       this.state = S_ATTRIB_NAME_SAW_WHITE;
     } else if (c === GREATER) {
       this.fail("attribute without value");
-      this.attribList.push({ name: this.name, value: this.name });
+      this.addAttribute(this.name, this.name);
       this.name = "";
       this.openTag();
     } else {
@@ -1277,10 +1389,7 @@ class SaxParser {
         if (this.trackPosition) {
           this.column++;
         }
-        this.attribList.push({
-          name: this.name,
-          value: this.text + chunk.slice(start, this.prevI)
-        });
+        this.addAttribute(this.name, this.text + chunk.slice(start, this.prevI));
         this.name = "";
         this.text = "";
         this.q = null;
@@ -1311,7 +1420,7 @@ class SaxParser {
         }
         this.text += chunk.slice(start, this.prevI);
         this.fail("< not allowed in attribute value");
-        this.attribList.push({ name: this.name, value: this.text });
+        this.addAttribute(this.name, this.text);
         this.name = "";
         this.text = "";
         this.q = null;
@@ -1909,17 +2018,37 @@ class SaxParser {
   // Tag Emission
   // ===========================================================================
 
+  /**
+   * Record an attribute on the tag being opened.
+   *
+   * Written straight onto `tag.attributes` rather than staged in a list and copied at `openTag`: that cost one
+   * `{ name, value }` object per attribute and one array per tag — on a worksheet, three of each per cell — for no
+   * information the attributes object does not already hold. The later value still wins, and a duplicate is still
+   * reported when the tag opens — at the same position, after any error found earlier in the tag — so error order and
+   * positions are unchanged. Only a tag that has one pays for the list.
+   */
+  private addAttribute(name: string, value: string): void {
+    const attributes = this.tag!.attributes;
+    if (name in attributes) {
+      (this.duplicateAttributes ??= []).push(name);
+    }
+    attributes[name] = value;
+  }
+
+  private reportDuplicateAttributes(): void {
+    const duplicates = this.duplicateAttributes;
+    if (duplicates !== null) {
+      this.duplicateAttributes = null;
+      for (const name of duplicates) {
+        this.fail(`duplicate attribute: ${name}`);
+      }
+    }
+  }
+
   private openTag(): void {
     const tag = this.tag!;
     tag.isSelfClosing = false;
-
-    for (const { name, value } of this.attribList) {
-      if (name in tag.attributes) {
-        this.fail(`duplicate attribute: ${name}`);
-      }
-      tag.attributes[name] = value;
-    }
-    this.attribList = [];
+    this.reportDuplicateAttributes();
 
     if (this.xmlns) {
       this.applyNamespaces(tag);
@@ -1940,14 +2069,7 @@ class SaxParser {
   private openSelfClosingTag(): void {
     const tag = this.tag!;
     tag.isSelfClosing = true;
-
-    for (const { name, value } of this.attribList) {
-      if (name in tag.attributes) {
-        this.fail(`duplicate attribute: ${name}`);
-      }
-      tag.attributes[name] = value;
-    }
-    this.attribList = [];
+    this.reportDuplicateAttributes();
 
     if (this.xmlns) {
       this.applyNamespaces(tag);
