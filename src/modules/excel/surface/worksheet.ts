@@ -39,7 +39,6 @@ export {
   getHasMerges as hasMerges,
   getMergedRegions as mergedRegions,
   getSheetModel as getModel,
-  setSheetModel as setModel,
   setSheetName as setName,
   getSheetName as getName,
   setColumns,
@@ -57,6 +56,7 @@ export {
   setAutoFilter,
   autoFilter
 } from "@excel/core/worksheet";
+export { setSheetModel as setModel } from "@excel/core/worksheet-load";
 
 export {
   addRow,

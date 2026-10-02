@@ -23,11 +23,8 @@ import {
   parseChartStyle,
   buildChartScene
 } from "@excel/chart";
-import {
-  definedNamesAdd,
-  definedNamesAddFormula,
-  definedNamesSetModel
-} from "@excel/core/defined-names";
+import { definedNamesAdd, definedNamesAddFormula } from "@excel/core/defined-names";
+import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { addChart, addChartEx, addComboChart, getCharts, removeChart } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
@@ -744,7 +741,7 @@ describe("chart cache population — defined names", () => {
     Cell.setValue(ws2, "A2", 200);
 
     // Workbook-scoped points at Sheet1
-    definedNamesSetModel(getDefinedNames(wb), [
+    loadDefinedNamesModel(getDefinedNames(wb), [
       { name: "Local", ranges: ["Sheet1!$A$1:$A$2"] },
       // Sheet-scoped on Sheet2 (localSheetId = 1 since Sheet2 is index 1 in worksheets)
       { name: "Local", ranges: ["Sheet2!$A$1:$A$2"], localSheetId: 1 }

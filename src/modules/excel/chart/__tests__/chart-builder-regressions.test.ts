@@ -1508,29 +1508,16 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // OOXML theme-index mapping (0..3 are bg/fg slots; accents start
     // at 4) and emitted nonsense tokens like `accent0` /
     // `accent4` for `theme=4` when the correct output is `accent1`.
-    const { buildChartExModel: buildEx } = await import("@excel/chart/build/chart-ex-builder");
-    void buildEx;
-    // Drive the function directly via a lightweight call — we can't
-    // easily trigger the raw patch path from public API, so reach
-    // into the exported helper that writes theme colour runs.
-    const module = await import("@excel/xlsx/xlsx.browser");
-    // Internal helper not declared on the module type; cast to access.
-    const build = (module as unknown as Record<string, unknown>).buildRawChartExRunPropertiesXml;
-    // If the export is renamed later, skip the test gracefully rather
-    // than blocking the build.
-    if (typeof build !== "function") {
-      return;
-    }
-    const xml4 = (build as (props: unknown) => string)({
-      color: { theme: 4 }
-    });
+    // Driven directly: the raw patch path is not reachable from a public call. This used to look the
+    // helper up by name and return early when it was missing — and it was never exported, so the test
+    // passed without asserting anything.
+    const { buildRawChartExRunPropertiesXml } = await import("@excel/xlsx/write/charts");
+    const xml4 = buildRawChartExRunPropertiesXml({ color: { theme: 4 } });
     expect(xml4).toContain('val="accent1"');
     expect(xml4).not.toContain('val="accent4"');
     expect(xml4).not.toContain('val="accent0"');
 
-    const xml0 = (build as (props: unknown) => string)({
-      color: { theme: 0 }
-    });
+    const xml0 = buildRawChartExRunPropertiesXml({ color: { theme: 0 } });
     expect(xml0).toContain('val="dk1"');
   });
 
@@ -2289,12 +2276,8 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
   });
 
   it("raw-patch scaling skips non-finite values instead of serialising 'NaN'", async () => {
-    const { buildRawScalingXml: internal } = (await import("@excel/xlsx/xlsx.browser")) as any;
-    // This helper is a file-local function and isn't exported. Drive
-    // it indirectly through a writeBuffer round-trip. Build a chart,
-    // poke a NaN into the axis scaling, write, and confirm the
-    // serialiser does NOT emit `val="NaN"` (which Excel rejects).
-    void internal;
+    // Driven through a write round-trip: build a chart, poke a NaN into the axis scaling, write, and
+    // confirm the serialiser does NOT emit `val="NaN"` (which Excel rejects).
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Worksheet.addRow(ws, ["a", 1]);
@@ -2436,7 +2419,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
 
   it("threaded-comments rejects NaN / negative / non-integer mention startIndex / length", async () => {
     const { renderThreadedComments } =
-      await import("@excel/xlsx/xform/comment/threaded-comments-xform");
+      await import("@excel/xlsx/xform/comment/threaded-comments-render");
     const base = {
       ref: "A1",
       comment: {

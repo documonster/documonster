@@ -174,7 +174,7 @@ export interface WorkbookModel {
   /**
    * What an XLSX write had to drop because it belongs to the other container's sheet family.
    *
-   * Written by `_resolveOpaqueReachability` and read back by `writeToZip` in the same call, which is what distinguishes
+   * Written by `resolveOpaqueReachability` and read back by `writeXlsxPackage` in the same call, which is what distinguishes
    * it from `opaqueDrops` — that one is a *read-time* report and a write never reaches its readers. This exists so
    * `unsupported` can govern the one loss an XLSX write has; see `refuseXlsxUnsupported`.
    */

@@ -38,6 +38,7 @@ function cloneDeep(obj: unknown, preserveUndefined = true): unknown {
   }
   return clone;
 }
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { XmlWriter } from "@xml/writer";
 import { expect } from "vitest";
 
@@ -326,7 +327,7 @@ const its: { [key: string]: (expectation: Expectation) => () => Promise<void> } 
       const stream = new PassThrough();
       stream.write(xml);
       stream.end();
-      const model = await xform.parse(parseSax(stream));
+      const model = await parseXformEvents(xform, parseSax(stream));
 
       // eliminate the undefined
       const clone = cloneDeep(model, false);
@@ -345,7 +346,7 @@ const its: { [key: string]: (expectation: Expectation) => () => Promise<void> } 
       const stream = new PassThrough();
       stream.write(xml);
       stream.end();
-      const model = await xform.parse(parseSax(stream));
+      const model = await parseXformEvents(xform, parseSax(stream));
 
       // eliminate the undefined
       const clone = cloneDeep(model, false);

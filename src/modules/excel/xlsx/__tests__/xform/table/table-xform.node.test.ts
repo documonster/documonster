@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { TableXform } from "@excel/xlsx/xform/table/table-xform";
 import { PassThrough } from "@stream";
 import { parseSax } from "@xml/sax";
@@ -48,7 +49,7 @@ describe("TableXform", () => {
     const stream = new PassThrough();
     stream.end(xml);
     const xform = new TableXform();
-    const model = await xform.parse(parseSax(stream));
+    const model = await parseXformEvents(xform, parseSax(stream));
 
     expect(model!.columns![0].filterButton).toBeUndefined();
     expect(model!.columns![1].filterButton).toBeUndefined();
@@ -78,7 +79,7 @@ describe("TableXform", () => {
     const stream = new PassThrough();
     stream.end(xml);
     const xform = new TableXform();
-    const model = await xform.parse(parseSax(stream));
+    const model = await parseXformEvents(xform, parseSax(stream));
 
     xform.prepare(model!, {});
     const rendered = xform.toXml(model);
@@ -99,7 +100,7 @@ describe("TableXform", () => {
       "</table>";
     const stream = new PassThrough();
     stream.end(xml);
-    const model = await new TableXform().parse(parseSax(stream));
+    const model = await parseXformEvents(new TableXform(), parseSax(stream));
 
     expect(model!.columns![0].filterButton).toBe(false);
     expect(model!.columns![1].filterButton).toBe(true);
@@ -116,7 +117,7 @@ describe("TableXform", () => {
     const stream = new PassThrough();
     stream.end(xml);
     const xform = new TableXform();
-    const model = await xform.parse(parseSax(stream));
+    const model = await parseXformEvents(xform, parseSax(stream));
 
     xform.prepare(model!, {});
     const rendered = xform.toXml(model);

@@ -12,8 +12,7 @@ const outputFile = path.join(outDir, "comments-out.xlsx");
 
 const wb = Workbook.create();
 
-Workbook.getXlsxIo(wb)
-  .readFile(inputFile)
+Workbook.readFile(wb, inputFile)
   .then(() => {
     Workbook.getWorksheets(wb).forEach(sheet => {
       console.info(Cell.getModel(sheet, "A1"));

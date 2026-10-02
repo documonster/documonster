@@ -20,6 +20,7 @@ import { dataValidationAdd } from "@excel/core/data-validations";
 // The public cell surface, on purpose: setting a value through it is what keeps dimensions,
 // row materialisation and shared-string bookkeeping consistent.
 import { definedNamesAdd } from "@excel/core/defined-names";
+import { loadWorkbookModel } from "@excel/core/model-load";
 import type { OpaqueSourceRelationship } from "@excel/core/opaque-part";
 import { applyPrintName, isPrintName, type PrintSetup } from "@excel/core/print-names";
 import { createTable, tableSetModel, type TableModel } from "@excel/core/table";
@@ -31,12 +32,7 @@ import {
   getWorksheets
 } from "@excel/core/workbook-core";
 import type { WorkbookModel } from "@excel/core/workbook.browser";
-import {
-  addWorksheet,
-  createWorkbook,
-  getWorkbookModel,
-  setWorkbookModel
-} from "@excel/core/workbook.browser";
+import { addWorksheet, createWorkbook, getWorkbookModel } from "@excel/core/workbook.browser";
 import {
   addBackgroundImage,
   mergeCells,
@@ -82,7 +78,8 @@ import { RelType } from "@excel/xlsx/rel-type";
 import {
   parsePersonList,
   parseThreadedComments
-} from "@excel/xlsx/xform/comment/threaded-comments-xform";
+} from "@excel/xlsx/xform/comment/threaded-comments-parse";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { excelToDate, isDateFmt } from "@utils/utils";
 
 /** What a read could not fully recover, for the caller to inspect. */
@@ -268,7 +265,7 @@ export async function parseXlsbPackage(
 
 /** Apply a parsed package, replacing whatever the workbook held. */
 export function commitXlsbRead(workbook: WorkbookData, parsed: ParsedXlsbPackage): void {
-  setWorkbookModel(workbook, parsed.model);
+  loadWorkbookModel(workbook, parsed.model);
   // **The bytes this workbook arrived as, and what its model hashed to at that moment.**
   //
   // Kept so that writing it back *unchanged* can return the original package instead of rebuilding one. That is not
@@ -871,7 +868,8 @@ async function readInto(
         // Through the same xform the XLSX reader uses. `parseStream` takes an async iterable, and the
         // bytes are already in hand — so a one-chunk iterable is the adapter, rather than a second VML
         // parser appearing here.
-        const shapes = await new VmlDrawingXform().parseStream(
+        const shapes = await parseXformStream(
+          new VmlDrawingXform(),
           (async function* () {
             yield new TextDecoder().decode(vmlBytes);
           })()
@@ -1450,10 +1448,10 @@ async function readDocumentProperties(
     import("@excel/xlsx/xform/core/app-xform")
   ]);
   if (core !== undefined) {
-    Object.assign(workbook, (await new CoreXform().parseStream(bytesAsStream(core))) ?? {});
+    Object.assign(workbook, (await parseXformStream(new CoreXform(), bytesAsStream(core))) ?? {});
   }
   if (app !== undefined) {
-    Object.assign(workbook, (await new AppXform().parseStream(bytesAsStream(app))) ?? {});
+    Object.assign(workbook, (await parseXformStream(new AppXform(), bytesAsStream(app))) ?? {});
   }
 }
 

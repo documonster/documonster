@@ -13,7 +13,7 @@
  */
 import type { WorkbookData } from "@excel/core/workbook-core";
 import type { WorkbookFormat } from "@excel/core/workbook-format";
-import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
+import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
 
 /**
  * Options common to reading either format.

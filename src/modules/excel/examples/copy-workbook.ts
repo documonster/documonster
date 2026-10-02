@@ -19,8 +19,7 @@ const filenameOut = process.argv[3] ?? path.join(outDir, "copy-workbook.xlsx");
 const stopwatch = new HrStopwatch();
 const wb = Workbook.create();
 stopwatch.start();
-Workbook.getXlsxIo(wb)
-  .readFile(filenameIn)
+Workbook.readFile(wb, filenameIn)
   .then(() => writeBothFormats(wb, filenameOut))
   .then(() => {
     const micros = stopwatch.microseconds;

@@ -12,8 +12,7 @@ const wb = Workbook.create();
 const stopwatch = new HrStopwatch();
 stopwatch.start();
 
-Workbook.getXlsxIo(wb)
-  .readFile(filename)
+Workbook.readFile(wb, filename)
   .then(() => {
     const micros = stopwatch.microseconds;
 

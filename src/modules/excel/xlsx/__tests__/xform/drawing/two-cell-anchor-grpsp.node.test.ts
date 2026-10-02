@@ -1,4 +1,6 @@
+import type { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { XmlWriter } from "@xml/writer";
 import { describe, expect, it } from "vitest";
 
@@ -6,11 +8,11 @@ import { describe, expect, it } from "vitest";
  * Feed a chunk of XML to a fresh xform via its streaming parser and return the
  * resulting model.
  */
-async function parseXml<T>(makeXform: () => { parseStream: (s: any) => Promise<T> }, xml: string) {
+async function parseXml<T>(makeXform: () => BaseXform<T>, xml: string) {
   async function* one() {
     yield xml;
   }
-  return makeXform().parseStream(one());
+  return parseXformStream(makeXform(), one());
 }
 
 function render(xform: { render: (s: XmlWriter, m: any) => void }, model: any): string {
@@ -110,14 +112,16 @@ describe("TwoCellAnchorXform — grouped shapes and picture geometry", () => {
     // Reuse a SINGLE xform instance across two anchors (as the drawing parser
     // does) to prove child-model reset prevents cross-anchor bleed.
     const xform = new TwoCellAnchorXform();
-    const picModel: any = await xform.parseStream(
+    const picModel: any = await parseXformStream(
+      xform,
       (async function* () {
         yield PIC_ANCHOR;
       })()
     );
     expect(picModel.picture).toBeDefined();
 
-    const groupModel: any = await xform.parseStream(
+    const groupModel: any = await parseXformStream(
+      xform,
       (async function* () {
         yield GROUP_ANCHOR;
       })()

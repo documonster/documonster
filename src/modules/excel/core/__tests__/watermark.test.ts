@@ -9,10 +9,10 @@ import {
   getWatermark,
   removeHeaderFooterImage,
   removeWatermark,
-  setHeaderFooterImage,
-  setSheetModel
+  setHeaderFooterImage
 } from "@excel/core/worksheet";
 import type { WorksheetData } from "@excel/core/worksheet-core";
+import { setSheetModel } from "@excel/core/worksheet-load";
 import { Cell, Workbook } from "@excel/index";
 import type { HeaderFooterImagePosition } from "@excel/types";
 import { createTextWatermarkImage } from "@excel/utils/watermark-image";

@@ -488,7 +488,7 @@ export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string |
     // `chartUserShapes`, plural, ECMA-376 URI). An
     // earlier version hardcoded the singular `chartUserShape` here,
     // which drifted from `RelType.ChartUserShapes` used by the xlsx
-    // writer (see `xlsx.browser.ts`). The writer couldn't recognise
+    // writer (see `xlsx/write/charts.ts`). The writer couldn't recognise
     // this placeholder as the existing userShapes rel and would push
     // a second rel on every write, producing a duplicate rel entry
     // in the chart rels file.
@@ -827,11 +827,11 @@ export function chartMutateChartEx(
   // `renderChartEx(model)` (e.g. standalone preview, tests) honour the
   // mutation instead of short-circuiting to the bytes captured at parse
   // time. The xlsx writer path has its own change-detection (see
-  // `hasChartExEntryChanged` in xlsx.browser.ts) and does not depend on
+  // `hasChartExEntryChanged` in xlsx/write/charts.ts) and does not depend on
   // this flag, but direct consumers of `renderChartEx` do.
   //
   // `preferRawPatch` consumers explicitly opt in to surgical byte
-  // patching — they keep the rawXml so the patcher in xlsx.browser.ts
+  // patching — they keep the rawXml so the patcher in xlsx/write/charts.ts
   // can reuse it.
   if (!options.preferRawPatch && !options.requireRawPatch) {
     draft.rawXml = undefined;

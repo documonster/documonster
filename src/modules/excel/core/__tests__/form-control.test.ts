@@ -5,12 +5,8 @@ import {
   formCheckboxVmlAnchor,
   isFormCheckbox
 } from "@excel/core/form-control";
-import {
-  addFormCheckbox,
-  getFormCheckboxes,
-  getSheetModel,
-  setSheetModel
-} from "@excel/core/worksheet";
+import { addFormCheckbox, getFormCheckboxes, getSheetModel } from "@excel/core/worksheet";
+import { setSheetModel } from "@excel/core/worksheet-load";
 import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 

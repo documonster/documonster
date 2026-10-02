@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { ContentTypesXform } from "@excel/xlsx/xform/core/content-types-xform";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { describe, expect, it } from "vitest";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,7 +109,7 @@ describe("ContentTypesXform", () => {
             ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"/>
         </ct:Types>`;
     }
-    const model = await new ContentTypesXform().parseStream(xml());
+    const model = await parseXformStream(new ContentTypesXform(), xml());
     expect(model?.workbookContentType).toBe(
       "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
     );

@@ -1,11 +1,11 @@
 import type { Readable } from "node:stream";
 
 /**
- * Node xlsx IO handle accessor and the canonical public IO surface (Node).
+ * The canonical public workbook IO surface — Node variant.
  *
- * Same shape as `xlsx-io.browser.ts`, but binds the Node `XLSX` serializer
- * (which adds file-path `readFile` / `writeFile` and true-streaming `read`)
- * and layers the Node-only file-path free functions on top. Selected over the
+ * Same shape as `xlsx-io.browser.ts`, plus the Node-only file-path `readFile` /
+ * `writeFile`. `readStream` reaches the Node variant of `xlsx/read/stream`, which
+ * parses ZIP entries as they arrive instead of buffering the package. Selected over the
  * browser variant via the `.browser` same-name swap at build/test time.
  */
 import type { WorkbookData } from "@excel/core/workbook-core";
@@ -21,8 +21,10 @@ import { readWorkbookWithDiagnostics } from "@excel/core/workbook-io-types";
 import type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
 import type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 import { createXlsxByteStream } from "@excel/core/xlsx-stream";
-import { XLSX } from "@excel/xlsx/xlsx";
-import type { XlsxReadOptions } from "@excel/xlsx/xlsx.browser";
+import { ExcelFileError } from "@excel/errors";
+import type { XlsxReadOptions } from "@excel/xlsx/types";
+import { writeXlsxBytes, writeXlsxToStream } from "@excel/xlsx/write/package";
+import { createReadStream, createWriteStream, fileExists } from "@utils/fs";
 
 export type {
   WorkbookDiagnosticReadOptions,
@@ -39,19 +41,17 @@ import type {
 } from "@excel/core/workbook-io-types";
 
 /**
- * Get (or lazily create) the Node xlsx IO handle bound to a workbook.
+ * The XLSX reader, loaded on demand — the boundary `workbook-format.ts` already draws for XLSB.
  *
- * **`_xlsx`, the slot `WorkbookData` declares — this used an undeclared `_xlsxNode` reached through a cast.** Two slots
- * for one handle meant the declared field was dead on Node: nothing but the browser variant ever wrote it, so any code
- * reading `wb._xlsx` by its declaration got `undefined` there. They can never coexist, because `#platform/*` loads one
- * of these two files and not both, so one slot is both sufficient and the only one that can be typed.
+ * What this boundary buys depends on the bundler, and it is worth being exact about. One that drops
+ * unused members of a namespace (rolldown, rspack) already leaves the reader out of a `toBuffer`-only
+ * bundle, static import or not — the reader is kept out of the *writer* by `xlsx/write/` never importing
+ * `xlsx/read/`, and `scripts/treeshake-verify.ts` asserts that. One that keeps a namespace object whole
+ * (esbuild) retains `read` with `toBuffer`, and there this `import()` is what moves the reader into a
+ * chunk fetched on first read instead of on page load. Every read entry is async, so it costs nothing.
  */
-export function getXlsxIo(wb: WorkbookData): XLSX {
-  if (!wb._xlsx) {
-    // The declaration names the browser class; the Node one extends the same base, which is why the slot holds either.
-    wb._xlsx = new XLSX(wb) as unknown as NonNullable<WorkbookData["_xlsx"]>;
-  }
-  return wb._xlsx as unknown as XLSX;
+function loadXlsxReader() {
+  return import("@excel/xlsx/read/package");
 }
 
 // =============================================================================
@@ -83,7 +83,7 @@ export async function toBuffer(wb: WorkbookData, options?: WorkbookWriteOptions)
   const bytes =
     options?.format === "xlsb"
       ? await writeXlsbBytes(wb, options)
-      : await getXlsxIo(wb).writeBuffer(options);
+      : await writeXlsxBytes(wb, options);
   return Buffer.isBuffer(bytes)
     ? bytes
     : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -107,11 +107,11 @@ export async function read(
   if (format === "xlsb") {
     if (!bytes) {
       // Only reachable when a caller forces `format: "xlsb"` on a string without `base64`.
-      return getXlsxIo(wb).load(data, options);
+      return (await loadXlsxReader()).readXlsxInto(wb, data, options);
     }
     return readXlsbInto(wb, bytes, undefined, options);
   }
-  return getXlsxIo(wb).load(bytes ?? data, options);
+  return (await loadXlsxReader()).readXlsxInto(wb, bytes ?? data, options);
 }
 
 /**
@@ -136,12 +136,13 @@ export async function readWithDiagnostics(
 }
 
 /** Read a workbook from a parse stream (mutates and returns `wb`). */
-export function readStream(
+export async function readStream(
   wb: WorkbookData,
   stream: unknown,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).read(stream as never, options);
+  const { readXlsxStreamInto } = await import("@excel/xlsx/read/stream");
+  return readXlsxStreamInto(wb, stream as never, options);
 }
 
 /**
@@ -196,7 +197,7 @@ export async function writeStream(
     await writeXlsbToStream(wb, stream, options);
     return;
   }
-  await getXlsxIo(wb).write(stream, options);
+  await writeXlsxToStream(wb, stream, options);
 }
 
 /**
@@ -305,7 +306,6 @@ export function toStream(
       options
     ) as XlsxReadable & Readable;
   }
-  const io = getXlsxIo(wb);
   // `createXlsxByteStream` is shared with the browser build, so it is typed as
   // the portable `XlsxReadable`. On Node the stream it builds is a real
   // `stream.Readable` — `@stream`'s `createReadable` constructs one — which is
@@ -313,13 +313,13 @@ export function toStream(
   // `surface/__tests__/node-io-types.node.test.ts` ("is a byte-mode
   // stream.Readable"), so the claim cannot rot silently.
   return createXlsxByteStream(
-    (sink, writeOptions) => io.write(sink, writeOptions),
+    (sink, writeOptions) => writeXlsxToStream(wb, sink, writeOptions),
     options
   ) as XlsxReadable & Readable;
 }
 
 export type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
-export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
+export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
 export type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 export type { WorkbookFormat } from "@excel/core/workbook-format";
 
@@ -343,7 +343,15 @@ export async function readFile(
     const { readFile: readFileBytes } = await import("node:fs/promises");
     return readXlsbInto(wb, await readFileBytes(filename), filename, options);
   }
-  return getXlsxIo(wb).readFile(filename, options);
+  if (!(await fileExists(filename))) {
+    throw new ExcelFileError(filename, "read", "File not found");
+  }
+  // The reader clears stale origin metadata for every read. Set the path only after a successful
+  // parse, so a failed read leaves the previously loaded workbook's origin in place.
+  const { readXlsxStreamInto } = await import("@excel/xlsx/read/stream");
+  const workbook = await readXlsxStreamInto(wb, createReadStream(filename), options);
+  workbook.sourceFilePath = filename;
+  return workbook;
 }
 
 /**
@@ -362,5 +370,45 @@ export async function writeFile(
     await writeFileBytes(filename, await writeXlsbBytes(wb, options));
     return;
   }
-  await getXlsxIo(wb).writeFile(filename, options);
+  const stream = createWriteStream(filename);
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      stream.off("error", onError);
+      stream.off("close", onClose);
+    };
+
+    const onError = (error: Error) => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(error);
+      }
+    };
+
+    // Wait for "close" (fd released) instead of "finish" — on Windows,
+    // reading the file before the fd is closed can see truncated content.
+    const onClose = () => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve();
+      }
+    };
+
+    stream.once("error", onError);
+    stream.once("close", onClose);
+
+    writeXlsxToStream(wb, stream, options).catch(err => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+      // Ensure the underlying FD is closed on failure. Keep listeners
+      // attached until the stream closes, otherwise the emitted 'error'
+      // event can become an uncaught exception.
+      stream.destroy(err);
+    });
+  });
 }

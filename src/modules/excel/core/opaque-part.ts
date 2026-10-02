@@ -145,7 +145,7 @@ export interface OpaquePart {
  * deleted sheet taking its drawing with it is correct, not damage. Reporting it as a loss made the *default*
  * `unsupported: "error"` refuse a perfectly good workbook. A part from the other container's sheet family *is* a loss —
  * an XLSB chartsheet has no form in a SpreadsheetML package — and `writeXlsbPackage` reports that one in `unsupported`,
- * beside everything else it cannot carry. An XLSX write has no such channel; see `_resolveOpaqueReachability`.
+ * beside everything else it cannot carry. An XLSX write has no such channel; see `resolveOpaqueReachability`.
  */
 export type OpaqueDropReason = "stale-cache" | "invalidated-signature" | "unreachable";
 

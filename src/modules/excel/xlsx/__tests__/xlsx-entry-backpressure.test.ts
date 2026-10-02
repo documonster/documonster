@@ -12,8 +12,8 @@ import type { XlsxWritable } from "@excel/core/xlsx-io-types";
  * the adapter joins outstanding output inside `waitForDrain()`.
  */
 import * as Workbook from "@excel/surface/workbook.browser";
-import type { IZipWriter, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
-import { XLSX } from "@excel/xlsx/xlsx.browser";
+import { writeXlsxToZip } from "@excel/xlsx/write/package";
+import { createZipWriterAdapter } from "@excel/xlsx/zip-writer";
 import { describe, expect, it } from "vitest";
 
 /** Records how many bytes the sink had received each time drain was sampled. */
@@ -22,18 +22,16 @@ interface DrainProbe {
   bytesWritten: number;
 }
 
-function createProbedXlsx(workbook: Workbook.Handle, probe: DrainProbe) {
-  return new (class extends XLSX {
-    protected override createZipWriter(options?: XlsxWriteOptions["zip"]): IZipWriter {
-      const zip = super.createZipWriter(options);
-      const waitForDrain = zip.waitForDrain.bind(zip);
-      zip.waitForDrain = async () => {
-        await waitForDrain();
-        probe.bytesAtDrain.push(probe.bytesWritten);
-      };
-      return zip;
-    }
-  })(workbook);
+/** Writes `workbook` through a zip adapter whose drain sampling is recorded. */
+async function writeProbed(workbook: Workbook.Handle, sink: XlsxWritable, probe: DrainProbe) {
+  const zip = createZipWriterAdapter();
+  const waitForDrain = zip.waitForDrain.bind(zip);
+  zip.waitForDrain = async () => {
+    await waitForDrain();
+    probe.bytesAtDrain.push(probe.bytesWritten);
+  };
+  zip.pipe(sink);
+  await writeXlsxToZip(workbook, zip);
 }
 
 function createCountingSink(probe: DrainProbe): XlsxWritable {
@@ -61,7 +59,7 @@ describe("XLSX backpressure sampling", () => {
     Workbook.addWorksheet(workbook, "S");
 
     const probe: DrainProbe = { bytesAtDrain: [], bytesWritten: 0 };
-    await createProbedXlsx(workbook, probe).write(createCountingSink(probe));
+    await writeProbed(workbook, createCountingSink(probe), probe);
 
     expect(probe.bytesAtDrain.length).toBeGreaterThan(0);
     // The first sample already sees bytes: nothing may be checked "for free"

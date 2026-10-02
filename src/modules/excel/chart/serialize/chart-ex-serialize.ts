@@ -1406,7 +1406,7 @@ function renderAxis(axis: ChartExAxis): string {
 
 /**
  * Serialise a `cx:legend` element to XML. Exported so the xlsx raw-
- * patch path (`buildRawChartExLegendXml` in `xlsx.browser.ts`) can
+ * patch path (`buildRawChartExLegendXml` in `xlsx/write/charts.ts`) can
  * produce identical output to the structured writer. Previously the
  * raw patcher emitted a self-closing `<cx:legend pos="…"/>`, dropping
  * `align`, `cx:legendEntry*`, `cx:spPr`, `cx:txPr`, and `cx:extLst`

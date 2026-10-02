@@ -1,5 +1,6 @@
 import { XlsxParseError } from "@excel/errors";
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { FilterColumnXform } from "@excel/xlsx/xform/table/filter-column-xform";
 import { PassThrough } from "@stream";
 import { parseSax } from "@xml/sax";
@@ -184,7 +185,7 @@ describe("FilterColumnXform", () => {
     const stream = new PassThrough();
     stream.write(xml);
     stream.end();
-    return new FilterColumnXform().parse(parseSax(stream));
+    return parseXformEvents(new FilterColumnXform(), parseSax(stream));
   };
 
   it("rejects an unknown filter criteria element", async () => {

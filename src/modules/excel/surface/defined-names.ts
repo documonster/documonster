@@ -15,9 +15,9 @@ export {
   definedNamesRemove as remove,
   definedNamesGetNames as getNames,
   definedNamesGetAllEntries as getAllEntries,
-  definedNamesModel as model,
-  definedNamesSetModel as setModel
+  definedNamesModel as model
 } from "@excel/core/defined-names";
+export { loadDefinedNamesModel as setModel } from "@excel/core/model-load";
 
 /** A defined-names handle. */
 export type { DefinedNamesData as Handle } from "@excel/core/defined-names";

@@ -1,0 +1,4426 @@
+/**
+ * Chart and chartEx parts: rendering a structured chart, byte-preserving a loaded one, and patching a
+ * loaded one in place when only patchable fields were edited.
+ *
+ * The largest part of the writer, and loaded by `writeXlsxPackage` only when the package has a chart. The
+ * XLSB writer imports it too, since a chart part is XML in both containers.
+ */
+import type {
+  ChartExData,
+  ChartExEntry,
+  ChartExModel,
+  ChartExNumericDimension,
+  ChartExSeries,
+  ChartExStringDimension
+} from "@excel/chart/model/chart-ex-types";
+import type {
+  AxisBase,
+  Bevel,
+  ChartColor,
+  ChartEntry,
+  ChartFill,
+  ChartLayout,
+  ChartMarker,
+  ChartRichText,
+  ChartTextProperties,
+  DataLabelEntry,
+  DataPoint,
+  EffectList,
+  NumberCache,
+  NumberReference,
+  Scene3D,
+  SeriesBase,
+  Shadow,
+  ShapeProperties,
+  ShapeProperties3D,
+  StringCache,
+  StringReference,
+  Trendline,
+  TrendlineLabel
+} from "@excel/chart/model/types";
+import {
+  renderChartEx,
+  renderChartExLegendXml,
+  rewriteChartExDataRefsToDefinedNames
+} from "@excel/chart/serialize/chart-ex-serialize";
+import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-sidecar";
+import { themeIndexToName } from "@excel/chart/shared/chart-utils";
+import { definedNamesAddHidden, definedNamesModel } from "@excel/core/defined-names";
+import { ChartOptionsError } from "@excel/errors";
+import {
+  chartPath,
+  chartRelsPath,
+  chartStylePath,
+  chartColorsPath,
+  chartExStylePath,
+  chartExColorsPath,
+  chartStyleRelTarget,
+  chartExStyleRelTarget,
+  chartExPath,
+  chartExRelsPath,
+  chartColorsRelTarget,
+  chartExColorsRelTarget,
+  chartUserShapesPath,
+  chartUserShapesRelTarget
+} from "@excel/utils/ooxml-paths";
+import { snapshotChartModel } from "@excel/xlsx/chart-snapshot";
+import { RelType } from "@excel/xlsx/rel-type";
+import type { IZipWriter } from "@excel/xlsx/types";
+import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
+import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { appendToZip, renderToZip } from "@excel/xlsx/zip-writer";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
+import type { XmlSink } from "@xml/types";
+import { XmlWriter } from "@xml/writer";
+
+/**
+ * Extract leading XML comments that appear immediately before a target
+ * element's open tag in an OOXML chart part. We use this to preserve
+ * vendor / annotation comments (e.g. style provenance markers) when the
+ * chart writer falls back to a structured rebuild — `BaseXform.parseStreamDirect`
+ * does not surface `comment` events, so the structured model has no
+ * memory of them.
+ *
+ * Returns the substring of comment nodes (whitespace stripped, joined
+ * by no separator). Empty string when no comment precedes the open tag.
+ */
+function extractLeadingComments(originalXml: string, openTagRegex: RegExp): string {
+  const m = openTagRegex.exec(originalXml);
+  if (!m) {
+    return "";
+  }
+  const before = originalXml.slice(0, m.index);
+  // Walk backwards collecting consecutive `<!--…-->` blocks (with
+  // optional whitespace between them and the open tag).
+  const comments: string[] = [];
+  let cursor = before.length;
+  while (cursor > 0) {
+    // Skip trailing whitespace
+    let head = cursor;
+    while (head > 0 && /\s/.test(before.charAt(head - 1))) {
+      head--;
+    }
+    // Look for `-->` ending right at `head`
+    if (head < 3 || before.slice(head - 3, head) !== "-->") {
+      break;
+    }
+    // Find the matching `<!--` start
+    const start = before.lastIndexOf("<!--", head - 3);
+    if (start < 0) {
+      break;
+    }
+    comments.unshift(before.slice(start, head));
+    cursor = start;
+  }
+  return comments.join("");
+}
+
+/**
+ * Render a chart part (classic) to bytes via `XmlWriter`, then splice
+ * preserved leading comments from the original raw XML in front of the
+ * `<c:chart>` open tag. If the original has no leading comments or no
+ * `rawData` is available, returns the unmodified rendered bytes.
+ */
+/**
+ * Exported so the XLSB writer can render the same chart XML.
+ *
+ * A chart part is XML in *both* containers — `cal-any_sheets.xlsb` carries `xl/charts/chart1.xml` beside
+ * a `.bin` chartsheet — so there is nothing for a BIFF12 writer to translate. Keeping this file-local was
+ * the only thing stopping XLSB charts.
+ */
+export function renderChartWithLeadingComments(
+  entry: ChartEntry,
+  xform: { render(xmlStream: XmlSink, model?: unknown): void }
+): Uint8Array {
+  const writer = new XmlWriter();
+  xform.render(writer, entry.model);
+  let xml = writer.toString();
+  if (entry.rawData) {
+    const originalXml = new TextDecoder().decode(entry.rawData);
+    const comments = extractLeadingComments(originalXml, /<c:chart(?:\s|>)/);
+    if (comments) {
+      xml = xml.replace(/<c:chart(\s|>)/, `${comments}<c:chart$1`);
+    }
+  }
+  return new TextEncoder().encode(xml);
+}
+
+/**
+ * Splice preserved leading comments from a ChartEx raw XML buffer into
+ * a freshly-rendered structural rebuild output.
+ */
+function spliceChartExLeadingComments(
+  renderedXml: string,
+  originalRawXml: string | undefined
+): string {
+  if (!originalRawXml) {
+    return renderedXml;
+  }
+  const comments = extractLeadingComments(originalRawXml, /<cx:chart(?:\s|>)/);
+  if (!comments) {
+    return renderedXml;
+  }
+  return renderedXml.replace(/<cx:chart(\s|>)/, `${comments}<cx:chart$1`);
+}
+
+function shouldPassthroughChartEntry(
+  entry: ChartEntry
+): entry is ChartEntry & { rawData: Uint8Array } {
+  if (!entry.rawData || entry.dirty) {
+    return false;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return true;
+  }
+  return snapshotChartModel(entry.model) === entry.modelSnapshot;
+}
+
+function shouldPassthroughChartExEntry(
+  entry: ChartExEntry
+): entry is ChartExEntry & { rawData: Uint8Array } {
+  if (!entry.rawData || entry.dirty) {
+    return false;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return true;
+  }
+  return snapshotChartModel(entry.model) === entry.modelSnapshot;
+}
+
+function stripChartExRawXml(model: ChartExModel): ChartExModel {
+  return { ...model, rawXml: undefined };
+}
+
+function hasChartEntryChanged(entry: ChartEntry): boolean {
+  if (!entry.rawData) {
+    return false;
+  }
+  if (entry.dirty) {
+    return true;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return false;
+  }
+  return snapshotChartModel(entry.model) !== entry.modelSnapshot;
+}
+
+function hasChartExEntryChanged(entry: ChartExEntry): boolean {
+  if (!entry.rawData) {
+    return false;
+  }
+  if (entry.dirty) {
+    return true;
+  }
+  if (entry.modelSnapshot === undefined) {
+    return false;
+  }
+  return snapshotChartModel(entry.model) !== entry.modelSnapshot;
+}
+
+function shouldRequireChartRawPatch(entry: ChartEntry, strictTemplateMode: boolean): boolean {
+  return !!entry.requireRawPatch || (strictTemplateMode && hasChartEntryChanged(entry));
+}
+
+function shouldRequireChartExRawPatch(entry: ChartExEntry, strictTemplateMode: boolean): boolean {
+  return !!entry.requireRawPatch || (strictTemplateMode && hasChartExEntryChanged(entry));
+}
+
+/**
+ * Assemble the error message thrown when a loaded chartEx part cannot be
+ * raw-patched but the caller required it (either `requireRawPatch` on the
+ * entry or `strictTemplateMode` at the writer). Surfaces any unknown XML
+ * elements the parser noticed so the author can decide whether to relax
+ * the requirement or adjust the mutation shape.
+ */
+function buildChartExStrictFailureMessage(entryName: string, model: ChartExEntry["model"]): string {
+  const base =
+    `ChartEx ${entryName} requires raw XML patching ` +
+    `(requireRawPatch/strict template mode), but the mutation cannot be safely applied as a raw XML patch.`;
+  const unknown = (model as { unknownElements?: Array<{ path: string }> })?.unknownElements;
+  return appendUnknownElementsSummary(base, unknown);
+}
+
+/**
+ * Classic-chart counterpart of {@link buildChartExStrictFailureMessage}.
+ * Pulls `unknownElements` off the {@link ChartModel} so the same
+ * "you are about to silently drop these vendor extensions" warning is
+ * surfaced when strict template mode refuses a re-render.
+ */
+function buildChartStrictFailureMessage(entryName: string, model: ChartEntry["model"]): string {
+  const base =
+    `Chart ${entryName} requires raw XML patching ` +
+    `(requireRawPatch/strict template mode), but the mutation cannot be safely applied as a raw XML patch.`;
+  const unknown = (model as { unknownElements?: Array<{ path: string }> })?.unknownElements;
+  return appendUnknownElementsSummary(base, unknown);
+}
+
+function appendUnknownElementsSummary(
+  base: string,
+  unknown: Array<{ path: string }> | undefined
+): string {
+  if (!unknown || unknown.length === 0) {
+    return base;
+  }
+  // De-duplicate by path; real files often repeat the same extension element
+  // across multiple series/axes and noise doesn't help diagnosis.
+  const uniquePaths = Array.from(new Set(unknown.map(entry => entry.path))).slice(0, 8);
+  const extra =
+    unknown.length > uniquePaths.length
+      ? ` (showing ${uniquePaths.length} of ${unknown.length})`
+      : "";
+  return (
+    `${base} The loaded part contains unstructured XML at: ${uniquePaths.join(", ")}${extra}. ` +
+    `Rebuilding the part would discard these extensions; adjust the mutation to a ` +
+    `patch-friendly shape or relax strictTemplateMode.`
+  );
+}
+
+function tryPatchChartExRawXml(entry: ChartExEntry, forceRawPatch = false): Uint8Array | undefined {
+  if (
+    !entry.rawData ||
+    (!entry.preferRawPatch && !forceRawPatch) ||
+    !hasChartExEntryChanged(entry)
+  ) {
+    return undefined;
+  }
+  const patchPlan = getChartExRawPatchPlan(entry);
+  if (patchPlan === undefined) {
+    return undefined;
+  }
+  const raw = new TextDecoder().decode(entry.rawData);
+  const chartRange = findXmlBlock(raw, "cx:chartSpace");
+  if (!chartRange) {
+    return undefined;
+  }
+  const chartBlock = raw.slice(chartRange.start, chartRange.end);
+  const patchedChartBlock = patchRawChartExChartBlock(chartBlock, entry.model, patchPlan);
+  if (patchedChartBlock === undefined) {
+    return undefined;
+  }
+  const patched = raw.slice(0, chartRange.start) + patchedChartBlock + raw.slice(chartRange.end);
+
+  return patched !== raw ? new TextEncoder().encode(patched) : undefined;
+}
+
+type RawPatchListPlan<T> = true | T[] | false;
+
+interface ChartExSeriesRawPatchPlan {
+  hidden: boolean;
+  ownerIdx: boolean;
+  tx: boolean;
+  dataRefs: boolean;
+  layoutPr: boolean;
+  axisId: boolean;
+  dataLabels: boolean;
+  spPr: boolean;
+  dataPoints: boolean;
+}
+
+interface ChartExAxisRawPatchPlan {
+  hidden: boolean;
+  majorTickMark: boolean;
+  minorTickMark: boolean;
+  numFmt: boolean;
+  title: boolean;
+  valScaling: boolean;
+  catScaling: boolean;
+  spPr: boolean;
+  txPr: boolean;
+}
+
+interface ChartExRawPatchPlan {
+  data: boolean;
+  title: boolean;
+  legend: boolean;
+  autoTitleDeleted: boolean;
+  /** `<cx:chartSpace/cx:spPr>` — chart-frame shape properties. Renamed
+   *  from the legacy `chartSpPr` after `ChartExChart.spPr` was removed
+   *  (it was a schema violation — see the parser migration path). */
+  chartSpaceSpPr: boolean;
+  plotAreaSpPr: boolean;
+  plotSurface: boolean;
+  series: RawPatchListPlan<ChartExSeriesRawPatchPlan>;
+  axes: RawPatchListPlan<ChartExAxisRawPatchPlan>;
+}
+
+interface ChartSeriesRawPatchPlan {
+  tx: boolean;
+  spPr: boolean;
+  marker: boolean;
+  dataPoints: boolean;
+  trendlines: boolean;
+  errorBars: boolean;
+  cat: boolean;
+  val: boolean;
+  xVal: boolean;
+  yVal: boolean;
+  bubbleSize: boolean;
+  dataLabels: boolean;
+}
+
+interface ChartAxisRawPatchPlan {
+  scaling: boolean;
+  delete: boolean;
+  title: boolean;
+  numFmt: boolean;
+  majorGridlines: boolean;
+  minorGridlines: boolean;
+  majorTickMark: boolean;
+  minorTickMark: boolean;
+  tickLblPos: boolean;
+  spPr: boolean;
+  txPr: boolean;
+  crosses: boolean;
+  crossesAt: boolean;
+  auto: boolean;
+  lblAlgn: boolean;
+  lblOffset: boolean;
+  tickLblSkip: boolean;
+  tickMarkSkip: boolean;
+  noMultiLvlLbl: boolean;
+  crossBetween: boolean;
+  majorUnit: boolean;
+  minorUnit: boolean;
+  baseTimeUnit: boolean;
+  majorTimeUnit: boolean;
+  minorTimeUnit: boolean;
+}
+
+function getChartExRawPatchPlan(entry: ChartExEntry): ChartExRawPatchPlan | undefined {
+  if (entry.modelSnapshot === undefined) {
+    return {
+      title: true,
+      data: true,
+      legend: true,
+      autoTitleDeleted: true,
+      chartSpaceSpPr: true,
+      plotAreaSpPr: true,
+      plotSurface: true,
+      series: true,
+      axes: true
+    };
+  }
+  let previous: any;
+  try {
+    previous = JSON.parse(entry.modelSnapshot);
+  } catch {
+    return undefined;
+  }
+  const current = entry.model;
+  if (!sameJson(stripPatchableChartExFields(previous), stripPatchableChartExFields(current))) {
+    return undefined;
+  }
+  const prevChart = previous.chartSpace?.chart;
+  const curChart = current.chartSpace?.chart;
+  const series = buildChartExSeriesRawPatchPlan(previous, current);
+  const axes = buildChartExAxisRawPatchPlan(
+    prevChart?.plotArea?.axis ?? [],
+    curChart?.plotArea?.axis ?? []
+  );
+  const plan = {
+    data: !sameJson(previous.chartSpace?.chartData, current.chartSpace?.chartData),
+    title: !sameJson(prevChart?.title, curChart?.title),
+    legend: !sameJson(prevChart?.legend, curChart?.legend),
+    autoTitleDeleted: !sameJson(prevChart?.autoTitleDeleted, curChart?.autoTitleDeleted),
+    // Chart-frame styling lives on `CT_ChartSpace/spPr` in Chart2014,
+    // not on `CT_Chart`. Diff the correct slot; the `ChartExChart.spPr`
+    // field has been removed from the type.
+    chartSpaceSpPr: !sameJson(previous.chartSpace?.spPr, current.chartSpace?.spPr),
+    plotAreaSpPr: !sameJson(prevChart?.plotArea?.spPr, curChart?.plotArea?.spPr),
+    plotSurface: !sameJson(
+      prevChart?.plotArea?.plotAreaRegion?.plotSurface,
+      curChart?.plotArea?.plotAreaRegion?.plotSurface
+    ),
+    series,
+    axes
+  };
+  return plan.data ||
+    plan.title ||
+    plan.legend ||
+    plan.autoTitleDeleted ||
+    plan.chartSpaceSpPr ||
+    plan.plotAreaSpPr ||
+    plan.plotSurface ||
+    hasRawPatchListChanges(plan.series) ||
+    hasRawPatchListChanges(plan.axes)
+    ? plan
+    : undefined;
+}
+
+function buildChartExSeriesRawPatchPlan(previous: any, current: any): ChartExSeriesRawPatchPlan[] {
+  const previousSeries = extractChartExSeries(previous);
+  const currentSeries = extractChartExSeries(current);
+  return currentSeries.map((series, index) => {
+    const prev = previousSeries[index] ?? {};
+    return {
+      hidden: !sameJson(prev.hidden, series.hidden),
+      ownerIdx: !sameJson(prev.ownerIdx, series.ownerIdx),
+      tx: !sameJson(prev.tx, series.tx),
+      dataRefs: !sameJson(prev.dataRefs, series.dataRefs),
+      layoutPr: !sameJson(prev.layoutPr, series.layoutPr),
+      axisId: !sameJson(prev.axisId, series.axisId),
+      dataLabels: !sameJson(prev.dataLabels, series.dataLabels),
+      spPr: !sameJson(prev.spPr, series.spPr),
+      dataPoints: !sameJson(prev.dataPt, series.dataPt)
+    };
+  });
+}
+
+function buildChartExAxisRawPatchPlan(
+  previousAxes: any[],
+  currentAxes: any[]
+): ChartExAxisRawPatchPlan[] {
+  const previousById = new Map(previousAxes.map(axis => [axis.axisId, axis]));
+  return currentAxes.map(axis => {
+    const prev = previousById.get(axis.axisId) ?? {};
+    return {
+      hidden: !sameJson(prev.hidden, axis.hidden),
+      majorTickMark: !sameJson(prev.majorTickMark, axis.majorTickMark),
+      minorTickMark: !sameJson(prev.minorTickMark, axis.minorTickMark),
+      numFmt: !sameJson(prev.numFmt, axis.numFmt),
+      title: !sameJson(prev.title, axis.title),
+      valScaling: !sameJson(prev.valScaling, axis.valScaling),
+      catScaling: !sameJson(prev.catScaling, axis.catScaling),
+      spPr: !sameJson(prev.spPr, axis.spPr),
+      txPr: !sameJson(prev.txPr, axis.txPr)
+    };
+  });
+}
+
+function stripPatchableChartExFields(model: any): any {
+  const clone = structuredClone(model);
+  clone.rawXml = undefined;
+  // Vendor / extension metadata the parser recorded but the raw patcher
+  // does not rewrite. Letting them differ in the diff keeps
+  // `getChartExRawPatchPlan` from giving up on fast-path patches for
+  // loaded templates that carry c14/c15/c16 extensions. The patcher
+  // never touches these bytes, so the raw XML already preserves them
+  // verbatim.
+  clone.unknownElements = undefined;
+  if (clone.chartSpace) {
+    clone.chartSpace.chartData = undefined;
+    clone.chartSpace.clrMapOvr = undefined;
+    clone.chartSpace.extLst = undefined;
+  }
+  if (clone.chartSpace?.chart) {
+    clone.chartSpace.chart.title = undefined;
+    clone.chartSpace.chart.legend = undefined;
+    clone.chartSpace.chart.autoTitleDeleted = undefined;
+    // NOTE: `chart.spPr` was previously cleared here, but the field
+    // has been removed from `ChartExChart` (see the migration in
+    // chart-ex-parser); the writer now emits chart-frame styling from
+    // `chartSpace.spPr` only.
+    if (clone.chartSpace.chart.plotArea) {
+      clone.chartSpace.chart.plotArea.spPr = undefined;
+      clone.chartSpace.chart.plotArea.axis = undefined;
+      if (clone.chartSpace.chart.plotArea.plotAreaRegion) {
+        clone.chartSpace.chart.plotArea.plotAreaRegion.layout = undefined;
+        clone.chartSpace.chart.plotArea.plotAreaRegion.plotSurface = undefined;
+        clone.chartSpace.chart.plotArea.plotAreaRegion.series = (
+          clone.chartSpace.chart.plotArea.plotAreaRegion.series ?? []
+        ).map(stripPatchableChartExSeriesFields);
+      }
+      if (clone.chartSpace.chart.plotArea.series) {
+        clone.chartSpace.chart.plotArea.series = clone.chartSpace.chart.plotArea.series.map(
+          stripPatchableChartExSeriesFields
+        );
+      }
+    }
+  }
+  return clone;
+}
+
+function stripPatchableChartExSeriesFields(series: any): any {
+  return {
+    ...series,
+    hidden: undefined,
+    ownerIdx: undefined,
+    tx: undefined,
+    spPr: undefined,
+    dataRefs: undefined,
+    layoutPr: undefined,
+    axisId: undefined,
+    dataLabels: undefined,
+    dataPt: undefined
+  };
+}
+
+function extractChartExSeries(model: any): any[] {
+  const plotArea = model.chartSpace?.chart?.plotArea;
+  return plotArea?.plotAreaRegion?.series ?? plotArea?.series ?? [];
+}
+
+function patchRawChartExChartBlock(
+  block: string,
+  model: any,
+  patchPlan: ChartExRawPatchPlan
+): string | undefined {
+  let patched = block;
+  const chart = model.chartSpace?.chart;
+  if (!chart) {
+    return undefined;
+  }
+  if (patchPlan.data) {
+    const dataRange = findXmlBlock(patched, "cx:chartData");
+    if (!dataRange) {
+      return undefined;
+    }
+    const dataXml = buildRawChartExDataXml(model.chartSpace?.chartData);
+    patched = patched.slice(0, dataRange.start) + dataXml + patched.slice(dataRange.end);
+  }
+  if (patchPlan.title) {
+    const titleText = chart.title?.text?.paragraphs?.[0]?.runs?.[0]?.text;
+    patched =
+      titleText !== undefined
+        ? replaceOrInsertBeforeGeneric(
+            patched,
+            "cx:title",
+            buildRawChartExTitleXml(titleText),
+            ["cx:autoTitleDeleted", "cx:plotArea", "cx:legend", "cx:spPr"],
+            "cx:chart"
+          )
+        : removeXmlBlock(patched, "cx:title");
+  }
+  if (patchPlan.autoTitleDeleted) {
+    patched =
+      chart.autoTitleDeleted !== undefined
+        ? replaceOrInsertBeforeGeneric(
+            patched,
+            "cx:autoTitleDeleted",
+            `<cx:autoTitleDeleted val="${chart.autoTitleDeleted ? "1" : "0"}"/>`,
+            ["cx:plotArea", "cx:legend", "cx:spPr"],
+            "cx:chart"
+          )
+        : removeXmlBlock(patched, "cx:autoTitleDeleted");
+  }
+  if (patchPlan.legend) {
+    patched =
+      chart.legend !== undefined
+        ? replaceOrInsertBeforeGeneric(
+            patched,
+            "cx:legend",
+            buildRawChartExLegendXml(chart.legend),
+            ["cx:spPr"],
+            "cx:chart"
+          )
+        : removeXmlBlock(patched, "cx:legend");
+  }
+  if (patchPlan.chartSpaceSpPr) {
+    // Target `<cx:chartSpace>` (the root element) rather than
+    // `<cx:chart>`. Chart-frame styling belongs on the chartSpace
+    // parent per Chart2014; previous versions of this patcher
+    // incorrectly wrote it inside `<cx:chart>`, producing output
+    // strict validators reject. The siblings list is CT_ChartSpace's
+    // child order after `cx:chart`: `cx:spPr, cx:txPr, cx:externalData,
+    // cx:printSettings, cx:extLst`.
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(model.chartSpace?.spPr, "cx"),
+      ["cx:txPr", "cx:externalData", "cx:printSettings", "cx:extLst"],
+      "cx:chartSpace"
+    );
+  }
+  if (patchPlan.plotAreaSpPr || patchPlan.plotSurface) {
+    const plotRange = findXmlBlock(patched, "cx:plotArea");
+    if (!plotRange) {
+      return undefined;
+    }
+    let plotBlock = patched.slice(plotRange.start, plotRange.end);
+    const plotArea = chart.plotArea;
+    if (patchPlan.plotAreaSpPr) {
+      // `CT_PlotArea` sequence: `plotAreaRegion?` → `axis*` → `spPr?` →
+      // `extLst?`. `spPr` is the next-to-last child, so its only
+      // follower is `extLst`.
+      plotBlock = patchGenericChild(
+        plotBlock,
+        "cx:spPr",
+        buildRawShapePropertiesXml(plotArea?.spPr, "cx"),
+        ["cx:extLst"],
+        "cx:plotArea"
+      );
+    }
+    if (patchPlan.plotSurface) {
+      // `CT_PlotAreaRegion` (Chart2014): `plotSurface?` → `series*` →
+      // `extLst?`. The `spPr` is a child of `<cx:plotSurface>`, NOT a
+      // direct child of `<cx:plotAreaRegion>`. Previously the raw
+      // patcher wrote a bare `<cx:spPr>` under `<cx:plotAreaRegion>`
+      // (schema violation) and also had a separate
+      // `plotAreaRegionLayout` patch that emitted `<cx:layout>`
+      // there (also invalid — layout only lives on `<cx:plotArea>` /
+      // `<cx:title>` via the manualLayout extension).
+      //
+      // The correct form is:
+      //   <cx:plotAreaRegion>
+      //     <cx:plotSurface>
+      //       <cx:spPr>…</cx:spPr>
+      //     </cx:plotSurface>
+      //     <cx:series/>
+      //     …
+      //   </cx:plotAreaRegion>
+      const regionRange = findXmlBlock(plotBlock, "cx:plotAreaRegion");
+      if (!regionRange) {
+        return undefined;
+      }
+      let regionBlock = plotBlock.slice(regionRange.start, regionRange.end);
+      const region = plotArea?.plotAreaRegion;
+      const surfaceSpPrXml = buildRawShapePropertiesXml(region?.plotSurface, "cx");
+      const plotSurfaceXml = surfaceSpPrXml
+        ? `<cx:plotSurface>${surfaceSpPrXml}</cx:plotSurface>`
+        : undefined;
+      regionBlock = patchGenericChild(
+        regionBlock,
+        "cx:plotSurface",
+        plotSurfaceXml,
+        ["cx:series", "cx:extLst"],
+        "cx:plotAreaRegion"
+      );
+      plotBlock =
+        plotBlock.slice(0, regionRange.start) + regionBlock + plotBlock.slice(regionRange.end);
+    }
+    patched = patched.slice(0, plotRange.start) + plotBlock + patched.slice(plotRange.end);
+  }
+  if (hasRawPatchListChanges(patchPlan.series)) {
+    const next = patchRawChartExSeries(patched, chart, patchPlan);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (hasRawPatchListChanges(patchPlan.axes)) {
+    const next = patchRawChartExAxes(patched, chart, patchPlan.axes);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  return patched;
+}
+
+function tryPatchChartRawXml(entry: ChartEntry, forceRawPatch = false): Uint8Array | undefined {
+  if (!entry.rawData || (!entry.preferRawPatch && !forceRawPatch) || !hasChartEntryChanged(entry)) {
+    return undefined;
+  }
+  const patchPlan = getChartRawPatchPlan(entry);
+  if (patchPlan === undefined) {
+    return undefined;
+  }
+  const raw = new TextDecoder().decode(entry.rawData);
+  let patched = raw;
+  if (patchPlan.title) {
+    const titleText = entry.model.chart?.title?.text?.paragraphs?.[0]?.runs?.[0]?.text;
+    const hasTitle = /<c:title>[\s\S]*?<\/c:title>/.test(patched);
+    if (titleText !== undefined && hasTitle) {
+      patched = patched.replace(/<c:title>[\s\S]*?<\/c:title>/, buildRawChartTitleXml(titleText));
+    } else if (titleText === undefined && hasTitle) {
+      patched = patched.replace(/<c:title>[\s\S]*?<\/c:title>/, "");
+    }
+  }
+  if (patchPlan.legend) {
+    const legend = entry.model.chart?.legend;
+    if (legend === undefined) {
+      patched = patched.replace(/<c:legend>[\s\S]*?<\/c:legend>/, "");
+    } else if (/<c:legend>[\s\S]*?<\/c:legend>/.test(patched)) {
+      patched = patched.replace(
+        /<c:legend>[\s\S]*?<\/c:legend>/,
+        buildRawChartLegendXml(legend.legendPos ?? "b")
+      );
+    }
+  }
+  if (hasRawPatchListChanges(patchPlan.series)) {
+    const next = patchRawSeries(patched, entry.model, patchPlan.series);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (patchPlan.groupDataLabels) {
+    const next = patchRawChartGroupDataLabels(patched, entry.model);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (patchPlan.groupSimpleFields) {
+    const next = patchRawChartGroupSimpleFields(patched, entry.model);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (patchPlan.plotAreaLayout) {
+    const next = patchRawPlotAreaLayout(patched, entry.model);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  if (hasRawPatchListChanges(patchPlan.axes)) {
+    const next = patchRawAxes(patched, entry.model, patchPlan.axes);
+    if (next === undefined) {
+      return undefined;
+    }
+    patched = next;
+  }
+  return patched !== raw ? new TextEncoder().encode(patched) : undefined;
+}
+
+interface ChartRawPatchPlan {
+  title: boolean;
+  legend: boolean;
+  series: RawPatchListPlan<ChartSeriesRawPatchPlan>;
+  axes: RawPatchListPlan<ChartAxisRawPatchPlan>;
+  groupDataLabels: boolean;
+  /**
+   * Any chart-type group's simple leaf field (`gapWidth`, `overlap`,
+   * `varyColors`, `firstSliceAng`, `holeSize`, `gapDepth`,
+   * `radarStyle`, `scatterStyle`, `ofPieType`, `smooth`, and friends —
+   * see {@link SIMPLE_GROUP_FIELD_TAGS}) has changed. When true,
+   * `tryPatchChartRawXml` rewrites those leaves in place via
+   * `patchRawChartGroupSimpleFields` instead of falling through to a
+   * structural rebuild.
+   */
+  groupSimpleFields: boolean;
+  plotAreaLayout: boolean;
+}
+
+function getChartRawPatchPlan(entry: ChartEntry): ChartRawPatchPlan | undefined {
+  if (entry.modelSnapshot === undefined) {
+    return {
+      title: true,
+      legend: true,
+      series: true,
+      axes: true,
+      groupDataLabels: true,
+      groupSimpleFields: true,
+      plotAreaLayout: true
+    };
+  }
+  let previous: any;
+  try {
+    previous = JSON.parse(entry.modelSnapshot);
+  } catch {
+    return undefined;
+  }
+  const current = entry.model;
+  const prevChart = previous.chart;
+  const curChart = current.chart;
+  const plan: ChartRawPatchPlan = {
+    title: false,
+    legend: false,
+    series: buildChartSeriesRawPatchPlan(previous, current),
+    axes: buildChartAxisRawPatchPlan(
+      prevChart?.plotArea?.axes ?? [],
+      curChart?.plotArea?.axes ?? []
+    ),
+    groupDataLabels: false,
+    groupSimpleFields: false,
+    plotAreaLayout: false
+  };
+  const curWithoutPatchable = stripPatchableChartFields(current);
+  const prevWithoutPatchable = stripPatchableChartFields(previous);
+  if (!sameJson(curWithoutPatchable, prevWithoutPatchable)) {
+    return undefined;
+  }
+  plan.title = plan.title || !sameJson(prevChart?.title, curChart?.title);
+  plan.legend = plan.legend || !sameJson(prevChart?.legend, curChart?.legend);
+  plan.groupDataLabels = !sameJson(
+    extractPatchableGroupDataLabels(previous),
+    extractPatchableGroupDataLabels(current)
+  );
+  plan.groupSimpleFields = !sameJson(
+    extractSimpleGroupFields(previous),
+    extractSimpleGroupFields(current)
+  );
+  plan.plotAreaLayout = !sameJson(prevChart?.plotArea?.layout, curChart?.plotArea?.layout);
+  return plan.title ||
+    plan.legend ||
+    hasRawPatchListChanges(plan.series) ||
+    hasRawPatchListChanges(plan.axes) ||
+    plan.groupDataLabels ||
+    plan.groupSimpleFields ||
+    plan.plotAreaLayout
+    ? plan
+    : undefined;
+}
+
+function stripPatchableChartFields(model: any): any {
+  const clone = structuredClone(model);
+  // Top-level fields that tryPatchChartRawXml does not rewrite. Allowing
+  // them to differ between `previous` and `current` means a caller can
+  // load a template that carries c14/c15/c16 extension XML, edit a
+  // title or legend, and still take the fast raw-patch path — without
+  // this the extLst JSON shape shifts (e.g. empty string `""` vs
+  // `undefined` after a round-trip) and the plan gets rejected.
+  //
+  // We deliberately do NOT strip `pivotOptions`: it is structurally
+  // parsed, and the raw patcher has no branch to replay a mutation
+  // into the XML. Keeping it out of the whitelist forces a rebuild so
+  // the user's change is honoured.
+  clone.extLst = undefined;
+  clone.unknownElements = undefined;
+  clone.extraNamespaces = undefined;
+  clone.alternateContentStyle = undefined;
+  clone.clrMapOvr = undefined;
+  clone.protection = undefined;
+  if (clone.chart) {
+    clone.chart.title = undefined;
+    clone.chart.legend = undefined;
+    clone.chart.extLst = undefined;
+    if (clone.chart.plotArea) {
+      clone.chart.plotArea.axes = (clone.chart.plotArea.axes ?? []).map(stripPatchableAxisFields);
+      clone.chart.plotArea.layout = undefined;
+      clone.chart.plotArea.extLst = undefined;
+      for (const group of clone.chart.plotArea.chartTypes ?? []) {
+        group.dataLabels = undefined;
+        group.extLst = undefined;
+        // Simple leaf fields the `patchRawChartGroupSimpleFields`
+        // branch rewrites in place (see `SIMPLE_GROUP_FIELD_TAGS`).
+        // Stripping them from the baseline diff is what makes the
+        // "edit `overlap` then write" path take the fast raw-patch
+        // route instead of a full structural rebuild. Every field
+        // listed here must have a matching entry in
+        // `SIMPLE_GROUP_FIELD_TAGS` — the two are kept symmetric.
+        for (const field of SIMPLE_GROUP_FIELD_NAMES) {
+          group[field] = undefined;
+        }
+        group.series = (group.series ?? []).map((series: any) => ({
+          ...series,
+          tx: undefined,
+          spPr: undefined,
+          marker: undefined,
+          dataPoints: undefined,
+          trendlines: undefined,
+          errorBars: undefined,
+          cat: undefined,
+          val: undefined,
+          xVal: undefined,
+          yVal: undefined,
+          bubbleSize: undefined,
+          dataLabels: undefined,
+          extLst: undefined
+        }));
+      }
+    }
+  }
+  return clone;
+}
+
+function stripPatchableAxisFields(axis: any): any {
+  return {
+    ...axis,
+    scaling: undefined,
+    delete: undefined,
+    majorGridlines: undefined,
+    minorGridlines: undefined,
+    title: undefined,
+    numFmt: undefined,
+    majorTickMark: undefined,
+    minorTickMark: undefined,
+    tickLblPos: undefined,
+    spPr: undefined,
+    txPr: undefined,
+    crosses: undefined,
+    crossesAt: undefined,
+    auto: undefined,
+    lblAlgn: undefined,
+    lblOffset: undefined,
+    tickLblSkip: undefined,
+    tickMarkSkip: undefined,
+    noMultiLvlLbl: undefined,
+    crossBetween: undefined,
+    majorUnit: undefined,
+    minorUnit: undefined,
+    baseTimeUnit: undefined,
+    majorTimeUnit: undefined,
+    minorTimeUnit: undefined,
+    // `c:extLst` on an axis is always raw XML passthrough in the
+    // structural parser; freezing it out of the diff lets template
+    // edits (scaling / gridlines / title) take the fast raw-patch
+    // path when the template happens to carry c15:axisTitleExtLst or
+    // similar vendor ext markers.
+    extLst: undefined
+  };
+}
+
+function extractPatchableGroupDataLabels(model: any): any {
+  return (model.chart?.plotArea?.chartTypes ?? []).map((group: any) => group.dataLabels);
+}
+
+function buildChartSeriesRawPatchPlan(previous: any, current: any): ChartSeriesRawPatchPlan[] {
+  const previousSeries = flattenChartSeries(previous);
+  return flattenChartSeries(current).map((series, index) => {
+    const prev = previousSeries[index] ?? {};
+    return {
+      tx: !sameJson(prev.tx, series.tx),
+      spPr: !sameJson(prev.spPr, series.spPr),
+      marker: !sameJson(prev.marker, series.marker),
+      dataPoints: !sameJson(prev.dataPoints, series.dataPoints),
+      trendlines: !sameJson(prev.trendlines, series.trendlines),
+      errorBars: !sameJson(prev.errorBars, series.errorBars),
+      cat: !sameJson(prev.cat, series.cat),
+      val: !sameJson(prev.val, series.val),
+      xVal: !sameJson(prev.xVal, series.xVal),
+      yVal: !sameJson(prev.yVal, series.yVal),
+      bubbleSize: !sameJson(prev.bubbleSize, series.bubbleSize),
+      dataLabels: !sameJson(prev.dataLabels, series.dataLabels)
+    };
+  });
+}
+
+function buildChartAxisRawPatchPlan(
+  previousAxes: any[],
+  currentAxes: any[]
+): ChartAxisRawPatchPlan[] {
+  const previousById = new Map(previousAxes.map(axis => [axis.axId, axis]));
+  return currentAxes.map(axis => {
+    const prev = previousById.get(axis.axId) ?? {};
+    return {
+      scaling: !sameJson(prev.scaling, axis.scaling),
+      delete: !sameJson(prev.delete, axis.delete),
+      title: !sameJson(prev.title, axis.title),
+      numFmt: !sameJson(prev.numFmt, axis.numFmt),
+      majorGridlines: !sameJson(prev.majorGridlines, axis.majorGridlines),
+      minorGridlines: !sameJson(prev.minorGridlines, axis.minorGridlines),
+      majorTickMark: !sameJson(prev.majorTickMark, axis.majorTickMark),
+      minorTickMark: !sameJson(prev.minorTickMark, axis.minorTickMark),
+      tickLblPos: !sameJson(prev.tickLblPos, axis.tickLblPos),
+      spPr: !sameJson(prev.spPr, axis.spPr),
+      txPr: !sameJson(prev.txPr, axis.txPr),
+      crosses: !sameJson(prev.crosses, axis.crosses),
+      crossesAt: !sameJson(prev.crossesAt, axis.crossesAt),
+      auto: !sameJson(prev.auto, axis.auto),
+      lblAlgn: !sameJson(prev.lblAlgn, axis.lblAlgn),
+      lblOffset: !sameJson(prev.lblOffset, axis.lblOffset),
+      tickLblSkip: !sameJson(prev.tickLblSkip, axis.tickLblSkip),
+      tickMarkSkip: !sameJson(prev.tickMarkSkip, axis.tickMarkSkip),
+      noMultiLvlLbl: !sameJson(prev.noMultiLvlLbl, axis.noMultiLvlLbl),
+      crossBetween: !sameJson(prev.crossBetween, axis.crossBetween),
+      majorUnit: !sameJson(prev.majorUnit, axis.majorUnit),
+      minorUnit: !sameJson(prev.minorUnit, axis.minorUnit),
+      baseTimeUnit: !sameJson(prev.baseTimeUnit, axis.baseTimeUnit),
+      majorTimeUnit: !sameJson(prev.majorTimeUnit, axis.majorTimeUnit),
+      minorTimeUnit: !sameJson(prev.minorTimeUnit, axis.minorTimeUnit)
+    };
+  });
+}
+
+function flattenChartSeries(model: any): any[] {
+  return (model.chart?.plotArea?.chartTypes ?? []).flatMap((group: any) =>
+    (group.series ?? []).map((series: any) => ({
+      tx: series.tx,
+      spPr: series.spPr,
+      marker: series.marker,
+      dataPoints: series.dataPoints,
+      trendlines: series.trendlines,
+      errorBars: series.errorBars,
+      cat: series.cat,
+      val: series.val,
+      xVal: series.xVal,
+      yVal: series.yVal,
+      bubbleSize: series.bubbleSize,
+      dataLabels: series.dataLabels
+    }))
+  );
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function hasRawPatchListChanges<T extends object>(plan: RawPatchListPlan<T>): boolean {
+  return (
+    plan === true || (Array.isArray(plan) && plan.some(item => Object.values(item).some(Boolean)))
+  );
+}
+
+function getRawPatchListItem<T extends object>(
+  plan: RawPatchListPlan<T>,
+  index: number
+): T | true | false {
+  return plan === true ? true : Array.isArray(plan) ? (plan[index] ?? false) : false;
+}
+
+function rawPatchFlag<T extends object>(plan: T | true | false, key: keyof T): boolean {
+  if (plan === true) {
+    return true;
+  }
+  if (plan === false) {
+    return false;
+  }
+  return Boolean(plan[key]);
+}
+
+function buildRawChartTitleXml(text: string): string {
+  // Full text escape (strips C0 control characters beyond `\t\n\r`,
+  // encodes the five reserved entities) so injected titles can't break
+  // out of the `<a:t>` element. Matches the `escapeXml` helper used
+  // elsewhere in this module.
+  const escaped = escapeXml(text);
+  return `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escaped}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`;
+}
+
+function buildRawChartLegendXml(pos: string): string {
+  // Escape the attribute value — `pos` is typed as `LegendPosition`
+  // (a 5-member enum) but the raw-patch path can't enforce that
+  // statically, so a malicious or buggy caller could inject XML via
+  // the attribute. Narrow to the enum set so truly unexpected values
+  // fall back to the schema default `"b"` instead of being echoed
+  // through verbatim.
+  const safe = pos === "b" || pos === "l" || pos === "r" || pos === "t" || pos === "tr" ? pos : "b";
+  return `<c:legend><c:legendPos val="${safe}"/><c:overlay val="0"/></c:legend>`;
+}
+
+function buildRawChartExTitleXml(text: string): string {
+  return `<cx:title><cx:tx><cx:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(text)}</a:t></a:r></a:p></cx:rich></cx:tx><cx:overlay val="0"/></cx:title>`;
+}
+
+function buildRawChartExLegendXml(
+  legend: NonNullable<ChartExModel["chartSpace"]["chart"]["legend"]>
+): string {
+  // Delegate to the structured ChartEx writer so the raw-patch path
+  // produces a byte-identical serialisation. Previously this function
+  // hand-rolled a self-closing `<cx:legend pos="…" overlay="…"/>`,
+  // silently dropping `align`, `legendEntry*`, `spPr`, `txPr`, and
+  // `extLst` on every styled-legend round-trip. Sharing the writer
+  // guarantees parity with the non-raw path.
+  // Indentation differs from the structured writer's formatted output —
+  // the raw patcher inserts into an inline stream, so strip the
+  // leading indent that `renderChartExLegendXml` prefixes each line
+  // with. The result is semantically identical; just flattened.
+  return renderChartExLegendXml(legend)
+    .split("\n")
+    .map(line => line.replace(/^\s*/, ""))
+    .join("");
+}
+
+function buildRawChartExDataXml(chartData: ChartExData | undefined): string {
+  const parts = ["<cx:chartData>"];
+  // `cx:externalData` is a child of `cx:chartSpace` per Chart2014's
+  // `CT_ChartSpace`, NOT of `cx:chartData`. Emitted at the chartSpace
+  // level by the structured writer; nothing for us to do here.
+  for (const entry of chartData?.data ?? []) {
+    parts.push(`<cx:data id="${entry.id}">`);
+    if (entry.strDim) {
+      parts.push(buildRawChartExStringDimensionXml(entry.strDim));
+    }
+    if (entry.numDim) {
+      parts.push(buildRawChartExNumericDimensionXml(entry.numDim));
+    }
+    parts.push("</cx:data>");
+  }
+  parts.push("</cx:chartData>");
+  return parts.join("");
+}
+
+function buildRawChartExStringDimensionXml(dim: ChartExStringDimension): string {
+  const parts = [`<cx:strDim type="${escapeAttr(dim.type)}">`];
+  if (dim.formula) {
+    parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
+  }
+  for (const level of dim.levels ?? []) {
+    const ptCount = level.ptCount ?? level.points?.length ?? 0;
+    if (!level.points?.length) {
+      parts.push(`<cx:lvl ptCount="${ptCount}"/>`);
+    } else {
+      parts.push(`<cx:lvl ptCount="${ptCount}">`);
+      for (const point of level.points) {
+        parts.push(`<cx:pt idx="${point.index}">${escapeXml(String(point.value))}</cx:pt>`);
+      }
+      parts.push("</cx:lvl>");
+    }
+  }
+  parts.push("</cx:strDim>");
+  return parts.join("");
+}
+
+function buildRawChartExNumericDimensionXml(dim: ChartExNumericDimension): string {
+  const parts = [`<cx:numDim type="${escapeAttr(dim.type)}">`];
+  if (dim.formula) {
+    parts.push(`<cx:f>${escapeXml(dim.formula)}</cx:f>`);
+  }
+  for (const level of dim.levels ?? []) {
+    const ptCount = level.ptCount ?? level.points?.length ?? 0;
+    const fmt = level.formatCode ? ` formatCode="${escapeAttr(level.formatCode)}"` : "";
+    if (!level.points?.length) {
+      parts.push(`<cx:lvl ptCount="${ptCount}"${fmt}/>`);
+    } else {
+      parts.push(`<cx:lvl ptCount="${ptCount}"${fmt}>`);
+      for (const point of level.points) {
+        parts.push(`<cx:pt idx="${point.index}">${escapeXml(String(point.value))}</cx:pt>`);
+      }
+      parts.push("</cx:lvl>");
+    }
+  }
+  parts.push("</cx:numDim>");
+  return parts.join("");
+}
+
+function patchRawSeries(
+  raw: string,
+  model: any,
+  patchPlan: RawPatchListPlan<ChartSeriesRawPatchPlan>
+): string | undefined {
+  // Track the owning chart-type group for each series so doughnut
+  // series can suppress `c:dLblPos` when writing `<c:dLbls>` — Excel
+  // rejects that element on doughnut charts (see
+  // `_renderDoughnutChart` in `chart-space-xform.ts`).
+  const seriesEntries: Array<{ series: any; chartType: string | undefined }> = [];
+  for (const group of model.chart?.plotArea?.chartTypes ?? []) {
+    for (const series of group.series ?? []) {
+      seriesEntries.push({ series, chartType: group.type });
+    }
+  }
+  let index = 0;
+  return replaceXmlBlocks(raw, "c:ser", block => {
+    const entry = seriesEntries[index++];
+    const seriesPlan = getRawPatchListItem(patchPlan, index - 1);
+    return entry && seriesPlan
+      ? patchRawSeriesBlock(block, entry.series, seriesPlan, entry.chartType)
+      : block;
+  });
+}
+
+function patchRawSeriesBlock(
+  block: string,
+  series: any,
+  patchPlan: ChartSeriesRawPatchPlan | true,
+  chartType?: string
+): string | undefined {
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "tx") && series.tx) {
+    const txXml = buildRawSeriesTxXml(series.tx);
+    patched = replaceOrInsertBefore(patched, "c:tx", txXml, [
+      "c:spPr",
+      "c:cat",
+      "c:xVal",
+      "c:val",
+      "c:yVal",
+      "c:bubbleSize"
+    ]);
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "c:spPr",
+      buildRawShapePropertiesXml(series.spPr, "c"),
+      [
+        "c:marker",
+        "c:invertIfNegative",
+        "c:pictureOptions",
+        "c:dPt",
+        "c:dLbls",
+        "c:trendline",
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:shape",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "marker")) {
+    patched = patchGenericChild(
+      patched,
+      "c:marker",
+      buildRawMarkerXml(series.marker),
+      [
+        "c:dPt",
+        "c:dLbls",
+        "c:trendline",
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  for (const [tag, source] of [
+    ["c:cat", series.cat],
+    ["c:val", series.val],
+    ["c:xVal", series.xVal],
+    ["c:yVal", series.yVal],
+    ["c:bubbleSize", series.bubbleSize]
+  ] as Array<[string, any]>) {
+    if (rawPatchFlag(patchPlan, chartSeriesPatchKeyForDataTag(tag))) {
+      if (!source) {
+        patched = removeXmlBlock(patched, tag);
+        continue;
+      }
+      const dataXml = buildRawDataSourceXml(tag, source);
+      if (!dataXml) {
+        return undefined;
+      }
+      patched = replaceOrInsertBefore(patched, tag, dataXml, ["c:smooth", "c:shape", "c:extLst"]);
+    }
+  }
+  if (rawPatchFlag(patchPlan, "dataPoints")) {
+    const dataPointsXml = buildRawDataPointsXml(series.dataPoints);
+    patched = patchRepeatingChildren(
+      patched,
+      "c:dPt",
+      dataPointsXml,
+      [
+        "c:dLbls",
+        "c:trendline",
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:shape",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "trendlines")) {
+    const trendlinesXml = buildRawTrendlinesXml(series.trendlines);
+    patched = patchRepeatingChildren(
+      patched,
+      "c:trendline",
+      trendlinesXml,
+      [
+        "c:errBars",
+        "c:cat",
+        "c:xVal",
+        "c:val",
+        "c:yVal",
+        "c:bubbleSize",
+        "c:smooth",
+        "c:shape",
+        "c:extLst"
+      ],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "errorBars")) {
+    const errorBarsXml = buildRawErrorBarsXml(series.errorBars);
+    patched = patchRepeatingChildren(
+      patched,
+      "c:errBars",
+      errorBarsXml,
+      ["c:cat", "c:xVal", "c:val", "c:yVal", "c:bubbleSize", "c:smooth", "c:shape", "c:extLst"],
+      "c:ser"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataLabels")) {
+    if (series.dataLabels) {
+      patched = replaceOrInsertBefore(
+        patched,
+        "c:dLbls",
+        buildRawDataLabelsXml(series.dataLabels, { suppressDLblPos: chartType === "doughnut" }),
+        [
+          "c:trendline",
+          "c:errBars",
+          "c:cat",
+          "c:xVal",
+          "c:val",
+          "c:yVal",
+          "c:bubbleSize",
+          "c:smooth",
+          "c:shape",
+          "c:extLst"
+        ]
+      );
+    } else {
+      patched = patched.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, "");
+    }
+  }
+  return patched;
+}
+
+function chartSeriesPatchKeyForDataTag(tag: string): keyof ChartSeriesRawPatchPlan {
+  switch (tag) {
+    case "c:cat":
+      return "cat";
+    case "c:val":
+      return "val";
+    case "c:xVal":
+      return "xVal";
+    case "c:yVal":
+      return "yVal";
+    default:
+      return "bubbleSize";
+  }
+}
+
+/**
+ * Ordered child tag list for each `ChartTypeGroup` block in a classic
+ * chartN.xml, used by `replaceOrRemoveSimpleGroupField` to place a new
+ * leaf in the correct schema position. The ordering mirrors the
+ * `_renderXxxChart` functions in `chart-space-xform.ts` and is the
+ * "schema order" ECMA-376 requires — inserting `c:gapWidth` before
+ * `c:barDir` would produce XML Excel refuses to open.
+ *
+ * Tags not listed (e.g. `c:dLbls`, `c:ser`, `c:extLst`) are inserted
+ * by existing dedicated patchers. Anything in this map is a single
+ * `<c:… val="…"/>` leaf with no child elements.
+ */
+const CLASSIC_GROUP_CHILD_ORDER: readonly string[] = [
+  "c:barDir",
+  "c:grouping",
+  "c:varyColors",
+  "c:ofPieType",
+  "c:radarStyle",
+  "c:scatterStyle",
+  "c:wireframe",
+  "c:ser",
+  "c:dLbls",
+  "c:marker",
+  "c:smooth",
+  "c:dropLines",
+  "c:hiLowLines",
+  "c:upDownBars",
+  "c:bubbleScale",
+  "c:showNegBubbles",
+  "c:sizeRepresents",
+  "c:gapWidth",
+  "c:overlap",
+  "c:serLines",
+  "c:shape",
+  "c:firstSliceAng",
+  "c:holeSize",
+  "c:gapDepth",
+  "c:splitType",
+  "c:splitPos",
+  "c:custSplit",
+  "c:secondPieSize",
+  "c:axId",
+  "c:extLst"
+];
+
+/**
+ * The subset of {@link CLASSIC_GROUP_CHILD_ORDER} that
+ * `patchRawChartGroupSimpleFields` can rewrite in place. The field
+ * name on the left is the `ChartTypeGroup` model key; the right-hand
+ * value is the OOXML element name (sans `val=` attribute, which this
+ * patcher always uses). Boolean model fields are serialised as
+ * `"1"` / `"0"` to match the ECMA-376 convention.
+ *
+ * Kept in sync with `SIMPLE_GROUP_FIELD_NAMES` (used by
+ * `stripPatchableChartFields`) — every entry in this map must also be
+ * stripped from the baseline diff, otherwise a plain
+ * "previous === current after strip" check would see the mutated
+ * leaf and refuse the raw-patch plan.
+ */
+const SIMPLE_GROUP_FIELD_TAGS: Record<string, string> = {
+  barDir: "c:barDir",
+  grouping: "c:grouping",
+  varyColors: "c:varyColors",
+  gapWidth: "c:gapWidth",
+  overlap: "c:overlap",
+  firstSliceAng: "c:firstSliceAng",
+  holeSize: "c:holeSize",
+  gapDepth: "c:gapDepth",
+  scatterStyle: "c:scatterStyle",
+  radarStyle: "c:radarStyle",
+  ofPieType: "c:ofPieType",
+  splitType: "c:splitType",
+  splitPos: "c:splitPos",
+  secondPieSize: "c:secondPieSize",
+  bubbleScale: "c:bubbleScale",
+  showNegBubbles: "c:showNegBubbles",
+  sizeRepresents: "c:sizeRepresents",
+  shape: "c:shape",
+  smooth: "c:smooth",
+  wireframe: "c:wireframe"
+};
+
+const SIMPLE_GROUP_FIELD_NAMES: readonly string[] = Object.keys(SIMPLE_GROUP_FIELD_TAGS);
+
+/**
+ * Extract the simple-field projection of every chart-type group in a
+ * `ChartModel` for diffing. Produces a stable array of plain objects
+ * (one per group) keyed by field name so
+ * `sameJson(extractSimpleGroupFields(prev), extractSimpleGroupFields(curr))`
+ * answers "did any group simple field change?".
+ */
+function extractSimpleGroupFields(model: any): Array<Record<string, unknown>> {
+  const groups = model.chart?.plotArea?.chartTypes ?? [];
+  return groups.map((group: any) => {
+    const out: Record<string, unknown> = { type: group.type };
+    for (const key of SIMPLE_GROUP_FIELD_NAMES) {
+      if (group[key] !== undefined) {
+        out[key] = group[key];
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * Raw-XML patcher for the simple leaf fields of every chart-type
+ * group: `gapWidth`, `overlap`, `varyColors`, `firstSliceAng`,
+ * `holeSize`, `gapDepth`, `radarStyle`, `scatterStyle`, `ofPieType`,
+ * `smooth`, and the other `val="…"` leaves listed in
+ * {@link SIMPLE_GROUP_FIELD_TAGS}. Called by `tryPatchChartRawXml`
+ * when `plan.groupSimpleFields` is true so these common user edits
+ * (tightening bar overlap, rotating a pie, lowering bubble scale)
+ * keep the fast raw-patch path instead of rebuilding the chart XML
+ * structurally and losing any vendor extensions along the way.
+ *
+ * Returns `undefined` when a group block cannot be located or its
+ * type lacks a known tag — signalling to the caller that it should
+ * fall back to a structural rebuild.
+ */
+function patchRawChartGroupSimpleFields(raw: string, model: any): string | undefined {
+  let patched = raw;
+  for (const group of model.chart?.plotArea?.chartTypes ?? []) {
+    const tag = chartGroupTagName(group);
+    if (!tag) {
+      return undefined;
+    }
+    const range = findXmlBlock(patched, tag);
+    if (!range) {
+      return undefined;
+    }
+    const block = patched.slice(range.start, range.end);
+    // Series blocks can themselves contain elements with the same
+    // tag names (e.g. a custom series dLbls might ship with a stale
+    // `c:smooth`); mask them out while we rewrite the group-level
+    // leaves so our regex replacements don't accidentally target a
+    // series-internal element.
+    const { xml: withoutSeries, seriesBlocks } = preserveSeriesBlocks(block, xml => xml);
+    let current = withoutSeries;
+    for (const fieldName of SIMPLE_GROUP_FIELD_NAMES) {
+      const xmlTag = SIMPLE_GROUP_FIELD_TAGS[fieldName];
+      const value = (group as Record<string, unknown>)[fieldName];
+      current = replaceOrRemoveSimpleGroupField(current, xmlTag, value);
+    }
+    const restored = restoreSeriesBlocks(current, seriesBlocks);
+    patched = patched.slice(0, range.start) + restored + patched.slice(range.end);
+  }
+  return patched;
+}
+
+/**
+ * Replace, insert, or remove a `<c:xxx val="…"/>` leaf inside a
+ * chart-type group block while keeping the block's child order
+ * schema-valid (see {@link CLASSIC_GROUP_CHILD_ORDER}).
+ *
+ * - `value === undefined` → element is removed if present, left
+ *   untouched otherwise.
+ * - `value !== undefined` → element is rewritten in place when it
+ *   already exists, or inserted before the first schema-later
+ *   sibling when it does not.
+ *
+ * Booleans are serialised as `"1"` / `"0"`; numbers use their string
+ * representation; strings pass through with attribute escaping. The
+ * schema only expects these three primitive shapes for simple leaves.
+ */
+function replaceOrRemoveSimpleGroupField(block: string, tag: string, value: unknown): string {
+  const leafRegex = new RegExp(`<${escapeRegExp(tag)}(?:\\s+[^/>]*)?/>`, "g");
+  if (value === undefined) {
+    // Strip the existing leaf if present, no-op otherwise.
+    return block.replace(leafRegex, "");
+  }
+  const serialised = serialiseSimpleGroupFieldValue(value);
+  const replacement = `<${tag} val="${serialised}"/>`;
+  if (leafRegex.test(block)) {
+    return block.replace(leafRegex, replacement);
+  }
+  // Insert in schema order: find the first sibling that comes after
+  // our tag in CLASSIC_GROUP_CHILD_ORDER and that exists in the
+  // current block.
+  const tagIndex = CLASSIC_GROUP_CHILD_ORDER.indexOf(tag);
+  if (tagIndex < 0) {
+    return block; // unknown tag — do not risk corrupting the XML
+  }
+  const laterSiblings = CLASSIC_GROUP_CHILD_ORDER.slice(tagIndex + 1);
+  for (const sibling of laterSiblings) {
+    const siblingIdx = block.indexOf(`<${sibling}`);
+    if (siblingIdx >= 0) {
+      return block.slice(0, siblingIdx) + replacement + block.slice(siblingIdx);
+    }
+  }
+  // No later sibling found — insert before the closing `</…Chart>`.
+  const closeMatch = /<\/c:\w+Chart>\s*$/.exec(block);
+  if (closeMatch) {
+    const insertAt = closeMatch.index;
+    return block.slice(0, insertAt) + replacement + block.slice(insertAt);
+  }
+  return block;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function serialiseSimpleGroupFieldValue(value: unknown): string {
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+  if (typeof value === "number") {
+    // Guard against `NaN` / `Infinity` leaking into the attribute —
+    // `String(NaN) === "NaN"` produces XML Excel rejects. Callers
+    // that pass an invalid numeric should get an empty string
+    // instead; the caller removes the leaf on absence, so an empty
+    // serialise is equivalent to "don't emit this field".
+    return Number.isFinite(value) ? String(value) : "";
+  }
+  // Strings go through the canonical attribute encoder. Previously
+  // this helper hand-rolled a minimal `& " <` escape chain, which
+  // let newlines / tabs / illegal XML chars / lone surrogates
+  // through verbatim — the raw patcher then produced attribute
+  // values that (a) normalized to a single space on parse (XML 1.0
+  // §3.3.3), losing newlines, or (b) contained chars no parser
+  // accepts. `xmlEncodeAttr` strips the illegal ones and encodes
+  // CR/LF/Tab as numeric character references so round-trip preserves
+  // whitespace.
+  return xmlEncodeAttr(String(value));
+}
+
+function patchRawChartGroupDataLabels(raw: string, model: any): string | undefined {
+  let patched = raw;
+  for (const group of model.chart?.plotArea?.chartTypes ?? []) {
+    const tag = chartGroupTagName(group);
+    if (!tag) {
+      return undefined;
+    }
+    const range = findXmlBlock(patched, tag);
+    if (!range) {
+      return undefined;
+    }
+    const block = patched.slice(range.start, range.end);
+    const replacement = patchRawChartGroupDataLabelsBlock(block, group);
+    patched = patched.slice(0, range.start) + replacement + patched.slice(range.end);
+  }
+  return patched;
+}
+
+function patchRawPlotAreaLayout(raw: string, model: any): string | undefined {
+  const plotArea = model.chart?.plotArea;
+  const range = findXmlBlock(raw, "c:plotArea");
+  if (!range || !plotArea) {
+    return undefined;
+  }
+  const block = raw.slice(range.start, range.end);
+  const layoutXml = plotArea.layout ? buildRawLayoutXml(plotArea.layout) : "";
+  const patched = layoutXml
+    ? replaceOrInsertBeforeGeneric(
+        block,
+        "c:layout",
+        layoutXml,
+        [
+          "c:areaChart",
+          "c:area3DChart",
+          "c:barChart",
+          "c:bar3DChart",
+          "c:lineChart",
+          "c:line3DChart",
+          "c:pieChart",
+          "c:pie3DChart",
+          "c:doughnutChart",
+          "c:scatterChart",
+          "c:bubbleChart",
+          "c:radarChart",
+          "c:stockChart",
+          "c:surfaceChart",
+          "c:surface3DChart",
+          "c:ofPieChart",
+          "c:catAx",
+          "c:valAx",
+          "c:serAx",
+          "c:dateAx",
+          "c:spPr"
+        ],
+        "c:plotArea"
+      )
+    : removeXmlBlock(block, "c:layout");
+  return raw.slice(0, range.start) + patched + raw.slice(range.end);
+}
+
+function buildRawLayoutXml(layout: ChartLayout | undefined, namespace: "c" | "cx" = "c"): string {
+  if (!layout?.manualLayout) {
+    return `<${namespace}:layout/>`;
+  }
+  const ml = layout.manualLayout;
+  const parts = [`<${namespace}:layout><${namespace}:manualLayout>`];
+  for (const [name, value] of [
+    ["layoutTarget", ml.layoutTarget],
+    ["xMode", ml.xMode],
+    ["yMode", ml.yMode],
+    ["wMode", ml.wMode],
+    ["hMode", ml.hMode],
+    ["x", ml.x],
+    ["y", ml.y],
+    ["w", ml.w],
+    ["h", ml.h]
+  ] as const) {
+    if (value !== undefined) {
+      parts.push(`<${namespace}:${name} val="${escapeAttr(String(value))}"/>`);
+    }
+  }
+  parts.push(`</${namespace}:manualLayout></${namespace}:layout>`);
+  return parts.join("");
+}
+
+function patchRawChartGroupDataLabelsBlock(block: string, group: any): string {
+  const withoutSeriesBlocks = preserveSeriesBlocks(block, xml => xml);
+  if (group.dataLabels) {
+    return restoreSeriesBlocks(
+      replaceOrInsertBefore(
+        withoutSeriesBlocks.xml,
+        "c:dLbls",
+        buildRawDataLabelsXml(group.dataLabels, {
+          suppressDLblPos: group.type === "doughnut"
+        }),
+        [
+          "c:gapWidth",
+          "c:overlap",
+          "c:serLines",
+          "c:axId",
+          "c:firstSliceAng",
+          "c:holeSize",
+          "c:extLst"
+        ]
+      ),
+      withoutSeriesBlocks.seriesBlocks
+    );
+  }
+  const stripped = withoutSeriesBlocks.xml.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, "");
+  return restoreSeriesBlocks(stripped, withoutSeriesBlocks.seriesBlocks);
+}
+
+function chartGroupTagName(group: any): string | undefined {
+  const tagByType: Record<string, string> = {
+    bar: "c:barChart",
+    bar3D: "c:bar3DChart",
+    line: "c:lineChart",
+    line3D: "c:line3DChart",
+    pie: "c:pieChart",
+    pie3D: "c:pie3DChart",
+    doughnut: "c:doughnutChart",
+    area: "c:areaChart",
+    area3D: "c:area3DChart",
+    scatter: "c:scatterChart",
+    bubble: "c:bubbleChart",
+    radar: "c:radarChart",
+    stock: "c:stockChart",
+    surface: "c:surfaceChart",
+    surface3D: "c:surface3DChart",
+    ofPie: "c:ofPieChart"
+  };
+  return tagByType[group.type];
+}
+
+function preserveSeriesBlocks(
+  block: string,
+  transform: (xml: string) => string
+): { xml: string; seriesBlocks: string[] } {
+  const seriesBlocks: string[] = [];
+  let cursor = 0;
+  let xml = "";
+  while (cursor < block.length) {
+    const range = findXmlBlock(block, "c:ser", cursor);
+    if (!range) {
+      xml += block.slice(cursor);
+      break;
+    }
+    xml += block.slice(cursor, range.start);
+    const placeholder = `__DOCUMONSTER_SER_${seriesBlocks.length}__`;
+    seriesBlocks.push(transform(block.slice(range.start, range.end)));
+    xml += placeholder;
+    cursor = range.end;
+  }
+  return { xml, seriesBlocks };
+}
+
+function restoreSeriesBlocks(block: string, seriesBlocks: string[]): string {
+  return seriesBlocks.reduce(
+    (xml, seriesBlock, i) => xml.replace(`__DOCUMONSTER_SER_${i}__`, seriesBlock),
+    block
+  );
+}
+
+function buildRawDataLabelsXml(dataLabels: any, opts?: { suppressDLblPos?: boolean }): string {
+  const parts = ["<c:dLbls>"];
+  if (Array.isArray(dataLabels.entries)) {
+    for (const entry of dataLabels.entries) {
+      parts.push(buildRawDataLabelEntryXml(entry, opts));
+    }
+  }
+  // ECMA-376 `CT_DLbls` (§21.2.2.49) child order (confirmed against
+  // Microsoft OpenXML `DataLabels.ChildElementInfo`):
+  //   dLbl*, delete | (numFmt, spPr, txPr, dLblPos, showLegendKey,
+  //     showVal, showCatName, showSerName, showPercent,
+  //     showBubbleSize, separator, showLeaderLines, leaderLines),
+  //   extLst?.
+  // The earlier raw-builder placed every `show*` flag BEFORE
+  // `dLblPos` / `spPr` / `txPr` and `separator` AFTER
+  // `showLeaderLines` — two schema violations that Excel silently
+  // tolerates but LibreOffice strict mode refuses.
+  if (dataLabels.numFmt?.formatCode) {
+    const sourceLinked =
+      dataLabels.numFmt.sourceLinked === undefined
+        ? "1"
+        : dataLabels.numFmt.sourceLinked
+          ? "1"
+          : "0";
+    parts.push(
+      `<c:numFmt formatCode="${escapeAttr(dataLabels.numFmt.formatCode)}" sourceLinked="${sourceLinked}"/>`
+    );
+  }
+  if (dataLabels.spPr) {
+    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "c") ?? "");
+  }
+  if (dataLabels.txPr) {
+    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "c") ?? "");
+  }
+  // Doughnut charts must not emit `c:dLblPos` — Excel rejects the
+  // element on open. See `_renderDoughnutChart` in
+  // `chart-space-xform.ts` for the full rationale and bisect.
+  if (dataLabels.position !== undefined && !opts?.suppressDLblPos) {
+    parts.push(`<c:dLblPos val="${escapeAttr(String(dataLabels.position))}"/>`);
+  }
+  const flags = [
+    ["showLegendKey", dataLabels.showLegendKey],
+    ["showVal", dataLabels.showVal],
+    ["showCatName", dataLabels.showCatName],
+    ["showSerName", dataLabels.showSerName],
+    ["showPercent", dataLabels.showPercent],
+    ["showBubbleSize", dataLabels.showBubbleSize]
+  ] as const;
+  for (const [name, value] of flags) {
+    if (value !== undefined) {
+      parts.push(`<c:${name} val="${value ? "1" : "0"}"/>`);
+    }
+  }
+  if (dataLabels.separator !== undefined) {
+    parts.push(`<c:separator>${escapeXml(String(dataLabels.separator))}</c:separator>`);
+  }
+  if (dataLabels.showLeaderLines !== undefined) {
+    parts.push(`<c:showLeaderLines val="${dataLabels.showLeaderLines ? "1" : "0"}"/>`);
+  }
+  if (dataLabels.extLst) {
+    parts.push(dataLabels.extLst);
+  }
+  parts.push("</c:dLbls>");
+  return parts.join("");
+}
+
+function buildRawDataLabelEntryXml(
+  entry: DataLabelEntry,
+  opts?: { suppressDLblPos?: boolean }
+): string {
+  // ECMA-376 `CT_DLbl` (§21.2.2.47) is a `choice(delete | …)` — the
+  // two branches are mutually exclusive. Emitting `delete` alongside
+  // any of the display-flag children (layout / tx / numFmt /
+  // dLblPos / show* / separator) violates the schema; Excel's
+  // tolerance varies by build (some strip the label wholesale).
+  const parts = ["<c:dLbl>", `<c:idx val="${entry.index ?? 0}"/>`];
+  if (entry.delete) {
+    parts.push(`<c:delete val="1"/>`);
+    if (entry.extLst) {
+      parts.push(entry.extLst);
+    }
+    parts.push("</c:dLbl>");
+    return parts.join("");
+  }
+  if (entry.layout) {
+    parts.push(buildRawLayoutXml(entry.layout));
+  }
+  if (entry.rawTx) {
+    parts.push(entry.rawTx);
+  } else if (entry.text?.paragraphs?.[0]?.runs?.[0]?.text !== undefined) {
+    parts.push(
+      `<c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(String(entry.text.paragraphs[0].runs[0].text))}</a:t></a:r></a:p></c:rich></c:tx>`
+    );
+  }
+  if (entry.numFmt?.formatCode) {
+    parts.push(
+      `<c:numFmt formatCode="${escapeAttr(entry.numFmt.formatCode)}" sourceLinked="${entry.numFmt.sourceLinked ? "1" : "0"}"/>`
+    );
+  }
+  if (entry.spPr) {
+    parts.push(buildRawShapePropertiesXml(entry.spPr, "c") ?? "");
+  }
+  if (entry.txPr) {
+    parts.push(buildRawTextPropertiesXml(entry.txPr, "c") ?? "");
+  }
+  if (entry.position !== undefined && !opts?.suppressDLblPos) {
+    parts.push(`<c:dLblPos val="${escapeAttr(String(entry.position))}"/>`);
+  }
+  for (const [name, value] of [
+    ["showLegendKey", entry.showLegendKey],
+    ["showVal", entry.showVal],
+    ["showCatName", entry.showCatName],
+    ["showSerName", entry.showSerName],
+    ["showPercent", entry.showPercent],
+    ["showBubbleSize", entry.showBubbleSize]
+  ] as const) {
+    if (value !== undefined) {
+      parts.push(`<c:${name} val="${value ? "1" : "0"}"/>`);
+    }
+  }
+  if (entry.separator !== undefined) {
+    parts.push(`<c:separator>${escapeXml(String(entry.separator))}</c:separator>`);
+  }
+  if (entry.extLst) {
+    parts.push(entry.extLst);
+  }
+  parts.push("</c:dLbl>");
+  return parts.join("");
+}
+
+function patchRawAxes(
+  raw: string,
+  model: any,
+  patchPlan: RawPatchListPlan<ChartAxisRawPatchPlan>
+): string | undefined {
+  let patched = raw;
+  for (const [index, axis] of (model.chart?.plotArea?.axes ?? []).entries()) {
+    const axisPlan = getRawPatchListItem(patchPlan, index);
+    if (!axisPlan) {
+      continue;
+    }
+    const tag =
+      axis.axisType === "cat"
+        ? "c:catAx"
+        : axis.axisType === "val"
+          ? "c:valAx"
+          : axis.axisType === "date"
+            ? "c:dateAx"
+            : "c:serAx";
+    const block = findAxisBlock(patched, tag, axis.axId);
+    if (!block) {
+      return undefined;
+    }
+    const axisXml = patchRawAxisBlock(block.xml, axis, axisPlan);
+    if (!axisXml) {
+      return undefined;
+    }
+    patched = patched.slice(0, block.start) + axisXml + patched.slice(block.end);
+  }
+  return patched;
+}
+
+function patchRawAxisBlock(
+  block: string,
+  axis: any,
+  patchPlan: ChartAxisRawPatchPlan | true
+): string | undefined {
+  let patched = block;
+  const axisTag = axisTagName(axis);
+  if (rawPatchFlag(patchPlan, "scaling")) {
+    patched = patchGenericChild(
+      patched,
+      "c:scaling",
+      buildRawScalingXml(axis.scaling),
+      ["c:delete", "c:axPos"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "delete")) {
+    patched = patchBooleanLeaf(patched, "c:delete", axis.delete, ["c:axPos"], axisTag);
+  }
+  if (rawPatchFlag(patchPlan, "title")) {
+    if (axis.title) {
+      const titleText = axis.title.text?.paragraphs?.[0]?.runs?.[0]?.text;
+      if (titleText !== undefined) {
+        patched = replaceOrInsertBefore(patched, "c:title", buildRawChartTitleXml(titleText), [
+          "c:numFmt",
+          "c:majorGridlines",
+          "c:minorGridlines",
+          "c:majorUnit",
+          "c:minorUnit",
+          "c:majorTickMark",
+          "c:minorTickMark",
+          "c:tickLblPos"
+        ]);
+      }
+    } else {
+      patched = patched.replace(/<c:title>[\s\S]*?<\/c:title>/, "");
+    }
+  }
+  if (rawPatchFlag(patchPlan, "numFmt")) {
+    patched = patchGenericChild(
+      patched,
+      "c:numFmt",
+      buildRawNumFmtXml(axis.numFmt),
+      [
+        "c:majorGridlines",
+        "c:minorGridlines",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:majorTickMark",
+        "c:minorTickMark",
+        "c:tickLblPos",
+        "c:spPr",
+        "c:txPr",
+        "c:crossAx"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorGridlines")) {
+    patched = patchGridlines(
+      patched,
+      "c:majorGridlines",
+      axis.majorGridlines,
+      [
+        "c:minorGridlines",
+        "c:title",
+        "c:numFmt",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:majorTickMark",
+        "c:minorTickMark",
+        "c:tickLblPos",
+        "c:spPr",
+        "c:txPr",
+        "c:crossAx"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorGridlines")) {
+    patched = patchGridlines(
+      patched,
+      "c:minorGridlines",
+      axis.minorGridlines,
+      [
+        "c:title",
+        "c:numFmt",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:majorTickMark",
+        "c:minorTickMark",
+        "c:tickLblPos",
+        "c:spPr",
+        "c:txPr",
+        "c:crossAx"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorTickMark")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:majorTickMark",
+      axis.majorTickMark,
+      ["c:minorTickMark", "c:tickLblPos", "c:spPr", "c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorTickMark")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:minorTickMark",
+      axis.minorTickMark,
+      ["c:tickLblPos", "c:spPr", "c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "tickLblPos")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:tickLblPos",
+      axis.tickLblPos,
+      ["c:spPr", "c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "c:spPr",
+      buildRawShapePropertiesXml(axis.spPr, "c"),
+      ["c:txPr", "c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "txPr")) {
+    patched = patchGenericChild(
+      patched,
+      "c:txPr",
+      buildRawTextPropertiesXml(axis.txPr, "c"),
+      ["c:crossAx"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "crosses")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:crosses",
+      axis.crosses,
+      [
+        "c:crossesAt",
+        "c:auto",
+        "c:lblAlgn",
+        "c:lblOffset",
+        "c:tickLblSkip",
+        "c:tickMarkSkip",
+        "c:noMultiLvlLbl",
+        "c:crossBetween",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:baseTimeUnit",
+        "c:majorTimeUnit",
+        "c:minorTimeUnit",
+        "c:dispUnits",
+        "c:extLst"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "crossesAt")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:crossesAt",
+      axis.crossesAt,
+      [
+        "c:auto",
+        "c:lblAlgn",
+        "c:lblOffset",
+        "c:tickLblSkip",
+        "c:tickMarkSkip",
+        "c:noMultiLvlLbl",
+        "c:crossBetween",
+        "c:majorUnit",
+        "c:minorUnit",
+        "c:baseTimeUnit",
+        "c:majorTimeUnit",
+        "c:minorTimeUnit",
+        "c:dispUnits",
+        "c:extLst"
+      ],
+      axisTag
+    );
+  }
+  patched = patchAxisTypeSpecificLeaves(patched, axis, patchPlan);
+  return patched;
+}
+
+function axisTagName(axis: any): string {
+  return axis.axisType === "cat"
+    ? "c:catAx"
+    : axis.axisType === "val"
+      ? "c:valAx"
+      : axis.axisType === "date"
+        ? "c:dateAx"
+        : "c:serAx";
+}
+
+function patchAxisTypeSpecificLeaves(
+  block: string,
+  axis: any,
+  patchPlan: ChartAxisRawPatchPlan | true
+): string {
+  const axisTag = axisTagName(axis);
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "auto")) {
+    patched = patchBooleanLeaf(
+      patched,
+      "c:auto",
+      axis.auto,
+      [
+        "c:lblAlgn",
+        "c:lblOffset",
+        "c:tickLblSkip",
+        "c:tickMarkSkip",
+        "c:noMultiLvlLbl",
+        "c:extLst"
+      ],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "lblAlgn")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:lblAlgn",
+      axis.lblAlgn,
+      ["c:lblOffset", "c:tickLblSkip", "c:tickMarkSkip", "c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "lblOffset")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:lblOffset",
+      axis.lblOffset,
+      ["c:tickLblSkip", "c:tickMarkSkip", "c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "tickLblSkip")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:tickLblSkip",
+      axis.tickLblSkip,
+      ["c:tickMarkSkip", "c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "tickMarkSkip")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:tickMarkSkip",
+      axis.tickMarkSkip,
+      ["c:noMultiLvlLbl", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "noMultiLvlLbl")) {
+    patched = patchBooleanLeaf(
+      patched,
+      "c:noMultiLvlLbl",
+      axis.noMultiLvlLbl,
+      ["c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "crossBetween")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:crossBetween",
+      axis.crossBetween,
+      ["c:majorUnit", "c:minorUnit", "c:dispUnits", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:majorUnit",
+      axis.majorUnit,
+      ["c:minorUnit", "c:dispUnits", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:minorUnit",
+      axis.minorUnit,
+      ["c:dispUnits", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "baseTimeUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:baseTimeUnit",
+      axis.baseTimeUnit,
+      ["c:majorUnit", "c:majorTimeUnit", "c:minorUnit", "c:minorTimeUnit", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "majorTimeUnit")) {
+    patched = patchValueLeaf(
+      patched,
+      "c:majorTimeUnit",
+      axis.majorTimeUnit,
+      ["c:minorUnit", "c:minorTimeUnit", "c:extLst"],
+      axisTag
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorTimeUnit")) {
+    patched = patchValueLeaf(patched, "c:minorTimeUnit", axis.minorTimeUnit, ["c:extLst"], axisTag);
+  }
+  return patched;
+}
+
+function buildRawScalingXml(scaling: NonNullable<AxisBase["scaling"]> | undefined): string {
+  if (!scaling) {
+    return "";
+  }
+  const parts = ["<c:scaling>"];
+  // ECMA-376 `CT_Scaling` sequence is `logBase?, orientation?,
+  // max?, min?, extLst?`. Emitting children in any other order
+  // triggers a "Repaired Records" dialog when Excel opens the
+  // file and causes LibreOffice strict-mode to reject it outright.
+  if (scaling.logBase !== undefined && Number.isFinite(scaling.logBase) && scaling.logBase > 0) {
+    // `CT_LogBase` requires the value be `>= 2` per ECMA-376
+    // §21.2.3.21; `> 0` is the looser guard we use at parse time.
+    // Leave range clamping to the builder.
+    parts.push(`<c:logBase val="${scaling.logBase}"/>`);
+  }
+  if (scaling.orientation !== undefined) {
+    parts.push(`<c:orientation val="${escapeAttr(scaling.orientation)}"/>`);
+  }
+  // Numeric scaling attributes MUST be finite on the wire; the OOXML
+  // grammar requires `xsd:double` / `xsd:unsignedInt`, and writing
+  // `val="NaN"` or `val="Infinity"` produces a file Excel refuses to
+  // open. `String(NaN) === "NaN"`, so the prior direct interpolation
+  // silently passed garbage through. Guard each slot and skip
+  // non-finite values — the schema treats absence as "auto", which
+  // is closer to the author's intent than an invalid literal.
+  if (scaling.max !== undefined && Number.isFinite(scaling.max)) {
+    parts.push(`<c:max val="${scaling.max}"/>`);
+  }
+  if (scaling.min !== undefined && Number.isFinite(scaling.min)) {
+    parts.push(`<c:min val="${scaling.min}"/>`);
+  }
+  parts.push("</c:scaling>");
+  return parts.join("");
+}
+
+function buildRawNumFmtXml(
+  numFmt: { formatCode?: string; sourceLinked?: boolean } | undefined
+): string {
+  if (!numFmt?.formatCode) {
+    return "";
+  }
+  const sourceLinked = numFmt.sourceLinked === undefined ? "1" : numFmt.sourceLinked ? "1" : "0";
+  return `<c:numFmt formatCode="${escapeAttr(numFmt.formatCode)}" sourceLinked="${sourceLinked}"/>`;
+}
+
+function patchGridlines(
+  block: string,
+  tag: string,
+  spPr: ShapeProperties | undefined,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const xml = spPr ? `<${tag}>${buildRawShapePropertiesXml(spPr, "c") ?? ""}</${tag}>` : "";
+  return patchGenericChild(block, tag, xml, beforeTags, parentTag);
+}
+
+function patchValueLeaf(
+  block: string,
+  tag: string,
+  value: unknown,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const xml = value === undefined ? "" : `<${tag} val="${escapeAttr(String(value))}"/>`;
+  return patchGenericChild(block, tag, xml, beforeTags, parentTag);
+}
+
+function patchBooleanLeaf(
+  block: string,
+  tag: string,
+  value: boolean | undefined,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const xml = value === undefined ? "" : `<${tag} val="${value ? "1" : "0"}"/>`;
+  return patchGenericChild(block, tag, xml, beforeTags, parentTag);
+}
+
+function buildRawSeriesTxXml(tx: NonNullable<SeriesBase["tx"]>): string {
+  if (tx.strRef?.formula) {
+    return `<c:tx>${buildRawStrRefXml(tx.strRef)}</c:tx>`;
+  }
+  return `<c:tx><c:v>${escapeXml(String(tx.value ?? ""))}</c:v></c:tx>`;
+}
+
+function buildRawMarkerXml(marker: ChartMarker | undefined): string {
+  if (!marker) {
+    return "";
+  }
+  const parts = ["<c:marker>"];
+  if (marker.symbol) {
+    parts.push(`<c:symbol val="${escapeAttr(String(marker.symbol))}"/>`);
+  }
+  if (marker.size !== undefined) {
+    parts.push(`<c:size val="${marker.size}"/>`);
+  }
+  if (marker.spPr) {
+    parts.push(buildRawShapePropertiesXml(marker.spPr, "c") ?? "");
+  }
+  if (marker.extLst) {
+    parts.push(marker.extLst);
+  }
+  parts.push("</c:marker>");
+  return parts.join("");
+}
+
+function buildRawDataPointsXml(dataPoints: DataPoint[] | undefined): string {
+  if (!Array.isArray(dataPoints) || dataPoints.length === 0) {
+    return "";
+  }
+  return dataPoints.map(buildRawDataPointXml).join("");
+}
+
+function buildRawDataPointXml(point: DataPoint): string {
+  const parts = ["<c:dPt>", `<c:idx val="${point.index ?? 0}"/>`];
+  if (point.invertIfNegative !== undefined) {
+    parts.push(`<c:invertIfNegative val="${point.invertIfNegative ? "1" : "0"}"/>`);
+  }
+  if (point.marker) {
+    parts.push(buildRawMarkerXml(point.marker));
+  }
+  if (point.bubble3D !== undefined) {
+    parts.push(`<c:bubble3D val="${point.bubble3D ? "1" : "0"}"/>`);
+  }
+  if (point.explosion !== undefined) {
+    parts.push(`<c:explosion val="${point.explosion}"/>`);
+  }
+  if (point.spPr) {
+    parts.push(buildRawShapePropertiesXml(point.spPr, "c") ?? "");
+  }
+  if (point.extLst) {
+    parts.push(point.extLst);
+  }
+  parts.push("</c:dPt>");
+  return parts.join("");
+}
+
+function buildRawTrendlinesXml(trendlines: Trendline[] | undefined): string {
+  if (!Array.isArray(trendlines) || trendlines.length === 0) {
+    return "";
+  }
+  return trendlines.map(buildRawTrendlineXml).join("");
+}
+
+function buildRawTrendlineXml(trendline: Trendline): string {
+  const parts = ["<c:trendline>"];
+  if (trendline.name) {
+    parts.push(`<c:name>${escapeXml(String(trendline.name))}</c:name>`);
+  }
+  if (trendline.spPr) {
+    parts.push(buildRawShapePropertiesXml(trendline.spPr, "c") ?? "");
+  }
+  parts.push(`<c:trendlineType val="${escapeAttr(String(trendline.type ?? "linear"))}"/>`);
+  for (const tag of ["order", "period", "forward", "backward", "intercept"] as const) {
+    if (trendline[tag] !== undefined) {
+      parts.push(`<c:${tag} val="${trendline[tag]}"/>`);
+    }
+  }
+  if (trendline.displayRSqr !== undefined) {
+    parts.push(`<c:dispRSqr val="${trendline.displayRSqr ? "1" : "0"}"/>`);
+  }
+  if (trendline.displayEq !== undefined) {
+    parts.push(`<c:dispEq val="${trendline.displayEq ? "1" : "0"}"/>`);
+  }
+  if (trendline.trendlineLbl) {
+    parts.push(buildRawTrendlineLabelXml(trendline.trendlineLbl));
+  }
+  if (trendline.extLst) {
+    parts.push(trendline.extLst);
+  }
+  parts.push("</c:trendline>");
+  return parts.join("");
+}
+
+function buildRawTrendlineLabelXml(label: TrendlineLabel): string {
+  const parts = ["<c:trendlineLbl>"];
+  if (label.layout) {
+    parts.push(buildRawLayoutXml(label.layout));
+  }
+  if (label.rawTx) {
+    parts.push(label.rawTx);
+  } else if (label.text?.paragraphs?.[0]?.runs?.[0]?.text !== undefined) {
+    parts.push(
+      `<c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(String(label.text.paragraphs[0].runs[0].text))}</a:t></a:r></a:p></c:rich></c:tx>`
+    );
+  }
+  if (label.numFmt?.formatCode) {
+    parts.push(
+      `<c:numFmt formatCode="${escapeAttr(label.numFmt.formatCode)}" sourceLinked="${label.numFmt.sourceLinked ? "1" : "0"}"/>`
+    );
+  }
+  if (label.spPr) {
+    parts.push(buildRawShapePropertiesXml(label.spPr, "c") ?? "");
+  }
+  if (label.txPr) {
+    parts.push(buildRawTextPropertiesXml(label.txPr, "c") ?? "");
+  }
+  if (label.extLst) {
+    parts.push(label.extLst);
+  }
+  parts.push("</c:trendlineLbl>");
+  return parts.join("");
+}
+
+function buildRawErrorBarsXml(errorBars: any): string {
+  const bars = Array.isArray(errorBars) ? errorBars : errorBars ? [errorBars] : [];
+  return bars.map(buildRawErrorBarXml).join("");
+}
+
+function buildRawErrorBarXml(errorBar: any): string {
+  const parts = ["<c:errBars>"];
+  if (errorBar.errDir) {
+    parts.push(`<c:errDir val="${escapeAttr(String(errorBar.errDir))}"/>`);
+  }
+  parts.push(`<c:errBarType val="${escapeAttr(String(errorBar.barDir ?? "both"))}"/>`);
+  parts.push(`<c:errValType val="${escapeAttr(String(errorBar.errValType ?? "fixedVal"))}"/>`);
+  if (errorBar.noEndCap !== undefined) {
+    parts.push(`<c:noEndCap val="${errorBar.noEndCap ? "1" : "0"}"/>`);
+  }
+  if (errorBar.val !== undefined) {
+    parts.push(`<c:val val="${errorBar.val}"/>`);
+  }
+  if (errorBar.plus) {
+    parts.push(buildRawDataSourceXml("c:plus", errorBar.plus) ?? "");
+  }
+  if (errorBar.minus) {
+    parts.push(buildRawDataSourceXml("c:minus", errorBar.minus) ?? "");
+  }
+  if (errorBar.spPr) {
+    parts.push(buildRawShapePropertiesXml(errorBar.spPr, "c") ?? "");
+  }
+  if (errorBar.extLst) {
+    parts.push(errorBar.extLst);
+  }
+  parts.push("</c:errBars>");
+  return parts.join("");
+}
+
+function buildRawDataSourceXml(tag: string, source: any): string | undefined {
+  if (source.strRef) {
+    return `<${tag}>${buildRawStrRefXml(source.strRef)}</${tag}>`;
+  }
+  if (source.numRef) {
+    return `<${tag}>${buildRawNumRefXml(source.numRef)}</${tag}>`;
+  }
+  return undefined;
+}
+
+function buildRawNumRefXml(ref: NumberReference): string {
+  return `<c:numRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawNumCacheXml(ref.cache)}</c:numRef>`;
+}
+
+function buildRawStrRefXml(ref: StringReference): string {
+  return `<c:strRef><c:f>${escapeXml(ref.formula)}</c:f>${buildRawStrCacheXml(ref.cache)}</c:strRef>`;
+}
+
+function buildRawNumCacheXml(cache: NumberCache | undefined): string {
+  if (!cache) {
+    return "";
+  }
+  const parts = ["<c:numCache>"];
+  if (cache.formatCode) {
+    parts.push(`<c:formatCode>${escapeXml(cache.formatCode)}</c:formatCode>`);
+  }
+  if (cache.pointCount !== undefined) {
+    parts.push(`<c:ptCount val="${cache.pointCount}"/>`);
+  }
+  for (const point of cache.points ?? []) {
+    if (point.value !== null && point.value !== undefined) {
+      parts.push(`<c:pt idx="${point.index}"><c:v>${escapeXml(String(point.value))}</c:v></c:pt>`);
+    }
+  }
+  parts.push("</c:numCache>");
+  return parts.join("");
+}
+
+function buildRawStrCacheXml(cache: StringCache | undefined): string {
+  if (!cache) {
+    return "";
+  }
+  const parts = ["<c:strCache>"];
+  if (cache.pointCount !== undefined) {
+    parts.push(`<c:ptCount val="${cache.pointCount}"/>`);
+  }
+  for (const point of cache.points ?? []) {
+    parts.push(`<c:pt idx="${point.index}"><c:v>${escapeXml(String(point.value))}</c:v></c:pt>`);
+  }
+  parts.push("</c:strCache>");
+  return parts.join("");
+}
+
+function buildRawShapePropertiesXml(
+  spPr: ShapeProperties | undefined,
+  namespace: "c" | "cx"
+): string | undefined {
+  if (!spPr) {
+    return "";
+  }
+  if (spPr._rawXml) {
+    return normalizeRawNamespace(spPr._rawXml, "spPr", namespace);
+  }
+  const writer = new XmlWriter();
+  const chartNamespace = namespace;
+  writer.openNode(`${chartNamespace}:spPr`);
+  if (spPr.fill?.noFill) {
+    writer.leafNode("a:noFill");
+  } else if (spPr.fill?.solid) {
+    writer.openNode("a:solidFill");
+    writeRawColor(writer, spPr.fill.solid);
+    writer.closeNode();
+  } else if (spPr.fill?.gradient) {
+    writeRawGradientFill(writer, spPr.fill.gradient);
+  } else if (spPr.fill?.pattern) {
+    const pattern = spPr.fill.pattern;
+    writer.openNode("a:pattFill", { prst: pattern.preset });
+    if (pattern.foreground) {
+      writer.openNode("a:fgClr");
+      writeRawColor(writer, pattern.foreground);
+      writer.closeNode();
+    }
+    if (pattern.background) {
+      writer.openNode("a:bgClr");
+      writeRawColor(writer, pattern.background);
+      writer.closeNode();
+    }
+    writer.closeNode();
+  }
+  if (spPr.line) {
+    const attrs: Record<string, string> = {};
+    if (spPr.line.width) {
+      attrs.w = String(spPr.line.width);
+    }
+    if (spPr.line.cap) {
+      attrs.cap = spPr.line.cap;
+    }
+    if (spPr.line.compound) {
+      attrs.cmpd = spPr.line.compound;
+    }
+    writer.openNode("a:ln", attrs);
+    if (spPr.line.noFill) {
+      writer.leafNode("a:noFill");
+    } else if (spPr.line.color) {
+      writer.openNode("a:solidFill");
+      writeRawColor(writer, spPr.line.color);
+      writer.closeNode();
+    }
+    if (spPr.line.dash) {
+      writer.leafNode("a:prstDash", { val: spPr.line.dash });
+    }
+    if (spPr.line.join === "round") {
+      writer.leafNode("a:round");
+    } else if (spPr.line.join === "bevel") {
+      writer.leafNode("a:bevel");
+    } else if (spPr.line.join === "miter") {
+      writer.leafNode("a:miter");
+    }
+    writer.closeNode();
+  }
+  if (spPr.effectList) {
+    writeRawEffectList(writer, spPr.effectList);
+  }
+  if (spPr.scene3d) {
+    writeRawScene3D(writer, spPr.scene3d);
+  }
+  if (spPr.sp3d) {
+    writeRawSp3D(writer, spPr.sp3d);
+  }
+  writer.closeNode();
+  return writer.toString();
+}
+
+function buildRawTextPropertiesXml(
+  txPr: ChartTextProperties | string | undefined,
+  namespace: "c" | "cx"
+): string | undefined {
+  if (!txPr) {
+    return "";
+  }
+  if (typeof txPr === "string") {
+    return normalizeRawNamespace(txPr, "txPr", namespace);
+  }
+  if (txPr._rawXml) {
+    return normalizeRawNamespace(txPr._rawXml, "txPr", namespace);
+  }
+  const writer = new XmlWriter();
+  writer.openNode(`${namespace}:txPr`);
+  writer.leafNode(
+    "a:bodyPr",
+    txPr.rotation !== undefined ? { rot: String(txPr.rotation) } : undefined
+  );
+  writer.leafNode("a:lstStyle");
+  writer.openNode("a:p");
+  writer.openNode("a:pPr");
+  writeRawRunProperties(writer, txPr, "a:defRPr");
+  writer.closeNode();
+  writer.leafNode("a:endParaRPr");
+  writer.closeNode();
+  writer.closeNode();
+  return writer.toString();
+}
+
+function normalizeRawNamespace(rawXml: string, localName: string, namespace: "c" | "cx"): string {
+  return rawXml
+    .replace(new RegExp(`^<(?:c|cx):${localName}`), `<${namespace}:${localName}`)
+    .replace(new RegExp(`</(?:c|cx):${localName}>$`), `</${namespace}:${localName}>`);
+}
+
+function writeRawRunProperties(writer: XmlWriter, props: ChartTextProperties, tag: string): void {
+  const attrs: Record<string, string> = {};
+  if (props.size !== undefined) {
+    attrs.sz = String(props.size);
+  }
+  if (props.bold !== undefined) {
+    attrs.b = props.bold ? "1" : "0";
+  }
+  if (props.italic !== undefined) {
+    attrs.i = props.italic ? "1" : "0";
+  }
+  if (props.underline !== undefined) {
+    attrs.u =
+      typeof props.underline === "boolean" ? (props.underline ? "sng" : "none") : props.underline;
+  }
+  if (props.strike) {
+    attrs.strike = props.strike;
+  }
+  if (props.rotation !== undefined) {
+    attrs.rot = String(props.rotation);
+  }
+  if (props.baseline !== undefined) {
+    attrs.baseline = String(props.baseline);
+  }
+  if (props.kern !== undefined) {
+    attrs.kern = String(props.kern);
+  }
+  if (props.spacing !== undefined) {
+    attrs.spc = String(props.spacing);
+  }
+  if (props.cap) {
+    attrs.cap = props.cap;
+  }
+  if (props.lang) {
+    attrs.lang = props.lang;
+  }
+  const hasChildren = !!(
+    props.color ||
+    props.fontFamily ||
+    props.eastAsianFamily ||
+    props.complexScriptFamily
+  );
+  if (!hasChildren) {
+    writer.leafNode(tag, attrs);
+    return;
+  }
+  writer.openNode(tag, attrs);
+  if (props.color) {
+    writer.openNode("a:solidFill");
+    writeRawColor(writer, props.color);
+    writer.closeNode();
+  }
+  if (props.fontFamily) {
+    writer.leafNode("a:latin", { typeface: props.fontFamily });
+  }
+  if (props.eastAsianFamily) {
+    writer.leafNode("a:ea", { typeface: props.eastAsianFamily });
+  }
+  if (props.complexScriptFamily) {
+    writer.leafNode("a:cs", { typeface: props.complexScriptFamily });
+  }
+  writer.closeNode();
+}
+
+function writeRawColor(writer: XmlWriter, color: ChartColor): void {
+  const modifiers = buildRawColorModifiersXml(color);
+  const writeColorNode = (tag: string, val: string) => {
+    if (!modifiers) {
+      writer.leafNode(tag, { val });
+      return;
+    }
+    writer.openNode(tag, { val });
+    writer.writeRaw(modifiers);
+    writer.closeNode();
+  };
+  if (color.srgb) {
+    writeColorNode("a:srgbClr", color.srgb);
+  } else if (color.theme !== undefined) {
+    const themeNames = [
+      "dk1",
+      "lt1",
+      "dk2",
+      "lt2",
+      "accent1",
+      "accent2",
+      "accent3",
+      "accent4",
+      "accent5",
+      "accent6",
+      "hlink",
+      "folHlink"
+    ];
+    writeColorNode("a:schemeClr", themeNames[color.theme] ?? "dk1");
+  } else if (color.schemeName) {
+    // Unknown scheme colour tokens (e.g. `phClr`, vendor extensions)
+    // round-trip as `<a:schemeClr>` — keeping the element identity
+    // intact. Previously these fell through to `<a:sysClr>` via the
+    // parser, silently changing the DrawingML colour kind.
+    writeColorNode("a:schemeClr", color.schemeName);
+  } else if (color.sysClr) {
+    writeColorNode("a:sysClr", color.sysClr);
+  } else if (color.prstClr) {
+    writeColorNode("a:prstClr", color.prstClr);
+  }
+}
+
+function writeRawGradientFill(
+  writer: XmlWriter,
+  gradient: NonNullable<ChartFill["gradient"]>
+): void {
+  if (!Array.isArray(gradient.stops) || gradient.stops.length < 2) {
+    return;
+  }
+  writer.openNode("a:gradFill");
+  writer.openNode("a:gsLst");
+  for (const stop of gradient.stops) {
+    // OOXML `<a:gs pos>` is hundredths of a percent (0–100000). See
+    // the matching fixes in `chart-space-xform.ts` and
+    // `chart-ex-renderer.ts`; the previous `×1000` multiplier was
+    // 100× too small and produced gradients in Excel at wildly
+    // wrong positions.
+    const encoded = Math.max(0, Math.min(100000, Math.round(stop.position * 100000)));
+    writer.openNode("a:gs", { pos: String(encoded) });
+    writeRawColor(writer, stop.color);
+    writer.closeNode();
+  }
+  writer.closeNode();
+  if (gradient.type === "circle" || gradient.type === "rect" || gradient.type === "shape") {
+    // Preserve parsed `fillToRect` focal rectangle when present;
+    // default to Excel's centred form (all components at 50%).
+    // `CT_FillToRectangle` sides are `ST_Percentage`, which permits
+    // negative values (focal point outside the shape). Don't clamp
+    // to `[0, 100000]` — negative focal points were being lost on
+    // round-trip before this fix.
+    const rect = gradient.fillToRect;
+    const pct = (v: number | undefined, def: number): number => {
+      if (v === undefined) {
+        return def;
+      }
+      return Math.round(v * 100000);
+    };
+    writer.openNode("a:path", { path: gradient.type });
+    writer.leafNode("a:fillToRect", {
+      l: String(pct(rect?.left, 50000)),
+      t: String(pct(rect?.top, 50000)),
+      r: String(pct(rect?.right, 50000)),
+      b: String(pct(rect?.bottom, 50000))
+    });
+    writer.closeNode();
+  } else {
+    // Emit `scaled` only when the author explicitly set it; mirrors
+    // the structured ChartEx renderer (chart-ex-renderer.ts line
+    // 4782) so both paths produce the same bytes. Previously this
+    // raw writer unconditionally stamped `scaled="1"`, which
+    // overwrote a parsed `scaled="0"` on round-trip — a visible
+    // drift for gradients with the shape-independent orientation
+    // mode. The OOXML default is `false` per `CT_LinearShadeProperties`,
+    // so omitting it when absent is lossless.
+    const linAttrs: Record<string, string> = {
+      ang: String(Math.round((gradient.angle ?? 0) * 60000))
+    };
+    if (gradient.scaled !== undefined) {
+      linAttrs.scaled = gradient.scaled ? "1" : "0";
+    }
+    writer.leafNode("a:lin", linAttrs);
+  }
+  writer.closeNode();
+}
+
+function writeRawEffectList(writer: XmlWriter, effects: EffectList): void {
+  writer.openNode("a:effectLst");
+  if (effects.blur) {
+    const attrs: Record<string, string> = {};
+    if (effects.blur.radius !== undefined) {
+      attrs.rad = String(effects.blur.radius);
+    }
+    if (effects.blur.grow !== undefined) {
+      attrs.grow = effects.blur.grow ? "1" : "0";
+    }
+    writer.leafNode("a:blur", attrs);
+  }
+  if (effects.outerShadow) {
+    writeRawShadow(writer, "a:outerShdw", effects.outerShadow);
+  }
+  if (effects.innerShadow) {
+    writeRawShadow(writer, "a:innerShdw", effects.innerShadow);
+  }
+  if (effects.presetShadow) {
+    const ps = effects.presetShadow;
+    const attrs: Record<string, string> = { prst: ps.preset };
+    if (ps.distance !== undefined) {
+      attrs.dist = String(ps.distance);
+    }
+    if (ps.direction !== undefined) {
+      attrs.dir = String(ps.direction);
+    }
+    writer.openNode("a:prstShdw", attrs);
+    if (ps.color) {
+      writeRawColor(writer, ps.color);
+    }
+    writer.closeNode();
+  }
+  if (effects.glow) {
+    writer.openNode("a:glow", { rad: String(effects.glow.radius) });
+    writeRawColor(writer, effects.glow.color);
+    writer.closeNode();
+  }
+  if (effects.softEdge) {
+    writer.leafNode("a:softEdge", { rad: String(effects.softEdge.radius) });
+  }
+  if (effects.reflection) {
+    const reflection = effects.reflection;
+    const attrs: Record<string, string> = {};
+    for (const [key, value] of [
+      ["blurRad", reflection.blurRadius],
+      ["stA", reflection.startOpacity],
+      ["stPos", reflection.startPosition],
+      ["endA", reflection.endOpacity],
+      ["endPos", reflection.endPosition],
+      ["dist", reflection.distance],
+      ["dir", reflection.direction],
+      ["fadeDir", reflection.fadeDirection],
+      ["sx", reflection.scaleHorizontal],
+      ["sy", reflection.scaleVertical],
+      ["kx", reflection.skewHorizontal],
+      ["ky", reflection.skewVertical],
+      ["algn", reflection.alignment],
+      ["rotWithShape", reflection.rotateWithShape]
+    ] as const) {
+      if (value !== undefined) {
+        attrs[key] = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
+      }
+    }
+    writer.leafNode("a:reflection", attrs);
+  }
+  writer.closeNode();
+}
+
+function writeRawShadow(writer: XmlWriter, tag: string, shadow: Shadow): void {
+  const attrs: Record<string, string> = {};
+  for (const [key, value] of [
+    ["blurRad", shadow.blurRadius],
+    ["dist", shadow.distance],
+    ["dir", shadow.direction],
+    ["algn", shadow.alignment],
+    ["rotWithShape", shadow.rotateWithShape],
+    ["sx", shadow.scaleHorizontal],
+    ["sy", shadow.scaleVertical],
+    ["kx", shadow.skewHorizontal],
+    ["ky", shadow.skewVertical]
+  ] as const) {
+    if (value !== undefined) {
+      attrs[key] = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
+    }
+  }
+  writer.openNode(tag, attrs);
+  writeRawColor(writer, shadow.color);
+  writer.closeNode();
+}
+
+function writeRawScene3D(writer: XmlWriter, scene: Scene3D): void {
+  writer.openNode("a:scene3d");
+  if (scene.camera) {
+    const camera = scene.camera;
+    const attrs: Record<string, string> = { prst: camera.preset };
+    if (camera.fov !== undefined) {
+      attrs.fov = String(camera.fov);
+    }
+    if (camera.zoom !== undefined) {
+      attrs.zoom = String(camera.zoom);
+    }
+    if (camera.rotation) {
+      writer.openNode("a:camera", attrs);
+      writer.leafNode("a:rot", {
+        lat: String(camera.rotation.lat),
+        lon: String(camera.rotation.lon),
+        rev: String(camera.rotation.rev)
+      });
+      writer.closeNode();
+    } else {
+      writer.leafNode("a:camera", attrs);
+    }
+  }
+  if (scene.lightRig) {
+    const lightRig = scene.lightRig;
+    const attrs: Record<string, string> = { rig: lightRig.rig, dir: lightRig.direction };
+    if (lightRig.rotation) {
+      writer.openNode("a:lightRig", attrs);
+      writer.leafNode("a:rot", {
+        lat: String(lightRig.rotation.lat),
+        lon: String(lightRig.rotation.lon),
+        rev: String(lightRig.rotation.rev)
+      });
+      writer.closeNode();
+    } else {
+      writer.leafNode("a:lightRig", attrs);
+    }
+  }
+  writer.closeNode();
+}
+
+function writeRawSp3D(writer: XmlWriter, sp3d: ShapeProperties3D): void {
+  const attrs: Record<string, string> = {};
+  if (sp3d.z !== undefined) {
+    attrs.z = String(sp3d.z);
+  }
+  if (sp3d.extrusionHeight !== undefined) {
+    attrs.extrusionH = String(sp3d.extrusionHeight);
+  }
+  if (sp3d.contourWidth !== undefined) {
+    attrs.contourW = String(sp3d.contourWidth);
+  }
+  if (sp3d.material) {
+    attrs.prstMaterial = sp3d.material;
+  }
+  const hasChildren = !!(
+    sp3d.bevelTop ||
+    sp3d.bevelBottom ||
+    sp3d.extrusionColor ||
+    sp3d.contourColor
+  );
+  if (!hasChildren) {
+    writer.leafNode("a:sp3d", attrs);
+    return;
+  }
+  writer.openNode("a:sp3d", attrs);
+  if (sp3d.bevelTop) {
+    writeRawBevel(writer, "a:bevelT", sp3d.bevelTop);
+  }
+  if (sp3d.bevelBottom) {
+    writeRawBevel(writer, "a:bevelB", sp3d.bevelBottom);
+  }
+  if (sp3d.extrusionColor) {
+    writer.openNode("a:extrusionClr");
+    writeRawColor(writer, sp3d.extrusionColor);
+    writer.closeNode();
+  }
+  if (sp3d.contourColor) {
+    writer.openNode("a:contourClr");
+    writeRawColor(writer, sp3d.contourColor);
+    writer.closeNode();
+  }
+  writer.closeNode();
+}
+
+function writeRawBevel(writer: XmlWriter, tag: string, bevel: Bevel): void {
+  const attrs: Record<string, string> = {};
+  if (bevel.width !== undefined) {
+    attrs.w = String(bevel.width);
+  }
+  if (bevel.height !== undefined) {
+    attrs.h = String(bevel.height);
+  }
+  if (bevel.preset) {
+    attrs.prst = bevel.preset;
+  }
+  writer.leafNode(tag, attrs);
+}
+
+function buildRawColorModifiersXml(color: ChartColor): string {
+  // Each modifier must serialise as `<a:* val="N"/>` where `N` is a
+  // valid `xsd:int`. Previously the raw patcher interpolated model
+  // values directly, so `NaN` / `Infinity` / unrounded floats leaked
+  // into the attribute and Excel's strict reader rejected the file
+  // with "invalid attribute value for xs:int". The structured renderer
+  // (`renderColorModifiers` in chart-ex-renderer.ts) guards with
+  // `Number.isFinite` + `Math.round` — mirror that here so both write
+  // paths produce identical bytes, then share the helper.
+  const parts: string[] = [];
+  const emitInt = (tag: string, value: number | undefined): void => {
+    if (value === undefined || !Number.isFinite(value)) {
+      return;
+    }
+    parts.push(`<a:${tag} val="${Math.round(value)}"/>`);
+  };
+  emitInt("alpha", color.alpha);
+  // `tint` on the public `ChartColor` is a 0..1 fraction; convert to
+  // the DrawingML 0..100000 per-thousand integer here. DrawingML also
+  // permits NEGATIVE tint (shade toward black) per
+  // `CT_PositiveFixedPercentage` — the structured path preserves the
+  // sign, so we do too.
+  if (color.tint !== undefined && Number.isFinite(color.tint)) {
+    parts.push(`<a:tint val="${Math.round(color.tint * 100000)}"/>`);
+  }
+  emitInt("shade", color.shade);
+  emitInt("satMod", color.satMod);
+  emitInt("lumMod", color.lumMod);
+  emitInt("lumOff", color.lumOff);
+  return parts.join("");
+}
+
+function patchRawChartExSeries(
+  raw: string,
+  chart: any,
+  patchPlan: ChartExRawPatchPlan
+): string | undefined {
+  const seriesModels = extractChartExSeries({ chartSpace: { chart } });
+  let index = 0;
+  return replaceXmlBlocks(raw, "cx:series", block => {
+    const series = seriesModels[index++];
+    const seriesPlan = getRawPatchListItem(patchPlan.series, index - 1);
+    return series && seriesPlan ? patchRawChartExSeriesBlock(block, series, seriesPlan) : block;
+  });
+}
+
+function patchRawChartExSeriesBlock(
+  block: string,
+  series: any,
+  patchPlan: ChartExSeriesRawPatchPlan | true
+): string {
+  // Child sequence per Chart2014 `CT_Series`:
+  //
+  //   tx? → spPr? → txPr? → valueColors? → valueColorPositions? →
+  //   dataPt* → dataLabels? → dataId* → layoutPr? → axisId* → extLst?
+  //
+  // The sibling arrays below describe the elements that must come
+  // AFTER the element being inserted so `replaceOrInsertBeforeGeneric`
+  // can splice into the right position. Previous versions used
+  // sibling lists that put `dataId` before `dataLabels` / `dataPt` —
+  // reversing the schema order and producing files strict validators
+  // reject. Use the real schema order so raw-patch output matches
+  // what `renderSeries` produces for the same model.
+  const afterTx = [
+    "cx:spPr",
+    "cx:txPr",
+    "cx:valueColors",
+    "cx:valueColorPositions",
+    "cx:dataPt",
+    "cx:dataLabels",
+    "cx:dataId",
+    "cx:layoutPr",
+    "cx:axisId",
+    "cx:extLst"
+  ];
+  const afterSpPr = [
+    "cx:txPr",
+    "cx:valueColors",
+    "cx:valueColorPositions",
+    "cx:dataPt",
+    "cx:dataLabels",
+    "cx:dataId",
+    "cx:layoutPr",
+    "cx:axisId",
+    "cx:extLst"
+  ];
+  const afterDataPt = ["cx:dataLabels", "cx:dataId", "cx:layoutPr", "cx:axisId", "cx:extLst"];
+  const afterDataLabels = ["cx:dataId", "cx:layoutPr", "cx:axisId", "cx:extLst"];
+  const afterDataId = ["cx:layoutPr", "cx:axisId", "cx:extLst"];
+  const afterLayoutPr = ["cx:axisId", "cx:extLst"];
+  const afterAxisId = ["cx:extLst"];
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "hidden")) {
+    patched = patchOpeningTagBooleanAttribute(patched, "cx:series", "hidden", series.hidden);
+  }
+  if (rawPatchFlag(patchPlan, "ownerIdx")) {
+    patched = patchOpeningTagIntegerAttribute(patched, "cx:series", "ownerIdx", series.ownerIdx);
+  }
+  if (rawPatchFlag(patchPlan, "tx")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:tx",
+      buildRawChartExSeriesTxXml(series.tx),
+      afterTx,
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(series.spPr, "cx"),
+      afterSpPr,
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataPoints")) {
+    const dataPointXml = (series.dataPt ?? [])
+      .map((point: any) => {
+        const spPrXml = buildRawShapePropertiesXml(point.spPr, "cx") ?? "";
+        return `<cx:dataPt idx="${point.idx}">${spPrXml}</cx:dataPt>`;
+      })
+      .join("");
+    patched = patchRepeatingChildren(patched, "cx:dataPt", dataPointXml, afterDataPt, "cx:series");
+  }
+  if (rawPatchFlag(patchPlan, "dataLabels")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:dataLabels",
+      buildRawChartExDataLabelsXml(series.dataLabels),
+      afterDataLabels,
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "dataRefs")) {
+    const dataRefsXml = (series.dataRefs ?? [])
+      .map((ref: any) =>
+        ref.dataId !== undefined
+          ? `<cx:dataId val="${ref.dataId}"/>`
+          : ref.axisId !== undefined
+            ? `<cx:axisId val="${ref.axisId}"/>`
+            : ""
+      )
+      .join("");
+    patched = patchRepeatingChildren(patched, "cx:dataId", dataRefsXml, afterDataId, "cx:series");
+  }
+  if (rawPatchFlag(patchPlan, "layoutPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:layoutPr",
+      buildRawChartExLayoutPropertiesXml(series.layoutId, series.layoutPr),
+      afterLayoutPr,
+      "cx:series"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "axisId")) {
+    const axisIdsXml = (series.axisId ?? [])
+      .map((id: number) => `<cx:axisId val="${id}"/>`)
+      .join("");
+    patched = patchRepeatingChildren(patched, "cx:axisId", axisIdsXml, afterAxisId, "cx:series");
+  }
+  return patched;
+}
+
+function buildRawChartExSeriesTxXml(tx: NonNullable<ChartExSeries["tx"]> | undefined): string {
+  if (!tx) {
+    return "";
+  }
+  if (tx.rich) {
+    // Round-trip parity with the structured writer — ChartEx series
+    // names authored as rich text (per-run formatting, bold / colour
+    // / font-family overrides) used to be silently dropped by the raw
+    // patcher: only `tx.value` and `tx.strRef` were handled, so a
+    // mutation that preserved `tx.rich` on the model would re-emit
+    // `<cx:tx/>` without a `<cx:rich>` child, collapsing the label to
+    // an unstyled placeholder. Emit a minimal `<cx:tx><cx:rich>…`
+    // subtree carrying the paragraph / run structure. The rPr helper
+    // is a pragmatic subset (size / bold / italic / color) — features
+    // beyond that flight through the structured path, which is the
+    // default when `preferRawPatch` isn't opt-in.
+    return `<cx:tx>${buildRawChartExRichTextXml(tx.rich)}</cx:tx>`;
+  }
+  if (tx.value !== undefined) {
+    return `<cx:tx><cx:txData><cx:v>${escapeXml(String(tx.value))}</cx:v></cx:txData></cx:tx>`;
+  }
+  if (tx.strRef !== undefined) {
+    // `tx.strRef` is declared as `string | { formula: string; cached?: string }`
+    // on `ChartExSeries.tx`. The previous writer coerced via
+    // `String(tx.strRef)`, which produced the literal `"[object Object]"`
+    // for the structured form — silently corrupting the formula on every
+    // series that carried a `{ formula, cached }` pair through the raw
+    // patch path.
+    let formula: string;
+    let cached: string | undefined;
+    if (typeof tx.strRef === "string") {
+      formula = tx.strRef;
+    } else if (
+      tx.strRef &&
+      typeof tx.strRef === "object" &&
+      typeof tx.strRef.formula === "string"
+    ) {
+      formula = tx.strRef.formula;
+      cached = typeof tx.strRef.cached === "string" ? tx.strRef.cached : undefined;
+    } else {
+      // Degenerate shape (unknown form) — drop the element rather than
+      // emit `<cx:f>[object Object]</cx:f>` and corrupt the formula.
+      return "";
+    }
+    const cachedEl = cached !== undefined ? `<cx:v>${escapeXml(cached)}</cx:v>` : "";
+    return `<cx:tx><cx:txData><cx:f>${escapeXml(formula)}</cx:f>${cachedEl}</cx:txData></cx:tx>`;
+  }
+  return "";
+}
+
+/**
+ * Minimal `<cx:rich>` emitter used by the ChartEx raw patcher when a
+ * series `tx` carries a `rich` paragraph tree. Mirrors the structured
+ * renderer's output shape (`renderRichText` in `chart-ex-renderer`)
+ * for the attributes the raw patch path needs — size / bold / italic
+ * and the text colour — so round-trip parity is preserved for the
+ * common "bold label" case. Features outside this subset (mixed font
+ * families, east-Asian runs, paragraph properties) flow through the
+ * structured writer, which the mutation helper invokes by default;
+ * `preferRawPatch` callers who need the full set should stay on
+ * structural rebuilds.
+ */
+function buildRawChartExRichTextXml(rich: ChartRichText | undefined): string {
+  if (!rich || !Array.isArray(rich.paragraphs)) {
+    return "";
+  }
+  const parts: string[] = ["<cx:rich>", "<a:bodyPr/>", "<a:lstStyle/>"];
+  for (const p of rich.paragraphs) {
+    parts.push("<a:p>");
+    for (const run of p.runs ?? []) {
+      const rPr = buildRawChartExRunPropertiesXml(run.properties);
+      // Preserve significant whitespace — matches the structured
+      // writer's `xml:space="preserve"` rule (see `needsXmlSpacePreserve`).
+      const text = typeof run.text === "string" ? run.text : "";
+      const needsPreserve = /^\s|\s$|[\t\n\r]/.test(text);
+      const tAttrs = needsPreserve ? ' xml:space="preserve"' : "";
+      parts.push(`<a:r>${rPr}<a:t${tAttrs}>${escapeXml(text)}</a:t></a:r>`);
+    }
+    parts.push('<a:endParaRPr lang="en-US"/>');
+    parts.push("</a:p>");
+  }
+  parts.push("</cx:rich>");
+  return parts.join("");
+}
+
+/** Exported for its regression test: the theme-index mapping is not reachable from a public call. */
+export function buildRawChartExRunPropertiesXml(props: ChartTextProperties | undefined): string {
+  if (!props || typeof props !== "object") {
+    return "";
+  }
+  const attrs: string[] = [];
+  if (typeof props.size === "number" && Number.isFinite(props.size)) {
+    attrs.push(`sz="${props.size}"`);
+  }
+  if (props.bold !== undefined) {
+    attrs.push(`b="${props.bold ? 1 : 0}"`);
+  }
+  if (props.italic !== undefined) {
+    attrs.push(`i="${props.italic ? 1 : 0}"`);
+  }
+  // Inline colour child only — the full `<a:solidFill>` emitter is
+  // intentionally out of scope for the raw patcher (structural
+  // rebuild handles anything beyond srgbClr / theme).
+  const color = props.color;
+  let colorChild = "";
+  if (color && typeof color === "object") {
+    if (typeof color.srgb === "string") {
+      colorChild = `<a:solidFill><a:srgbClr val="${escapeAttr(color.srgb)}"/></a:solidFill>`;
+    } else if (typeof color.theme === "number") {
+      // `color.theme` is a 0-based index into the workbook's theme
+      // palette — 0..3 are bg/lt1/dk2/lt2, 4..9 are accent1..accent6,
+      // 10..11 are hlink / folHlink. The previous implementation
+      // emitted `accent${color.theme}`, which produced nonsense
+      // (`accent4` for `theme=4` instead of `accent1`; `accent0` for
+      // `theme=0` which is not even a valid DrawingML scheme slot).
+      // Route through the canonical helper shared with the
+      // structural emitters so the mapping stays in one place.
+      colorChild = `<a:solidFill><a:schemeClr val="${escapeAttr(themeIndexToName(color.theme))}"/></a:solidFill>`;
+    }
+  }
+  if (attrs.length === 0 && !colorChild) {
+    return "";
+  }
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+  return colorChild ? `<a:rPr${attrStr}>${colorChild}</a:rPr>` : `<a:rPr${attrStr}/>`;
+}
+
+function buildRawChartExLayoutPropertiesXml(layoutId: string, layoutPr: any): string {
+  if (!layoutPr) {
+    return "";
+  }
+  if (layoutPr._rawXml && !hasStructuredChartExLayoutProperties(layoutPr)) {
+    return layoutPr._rawXml;
+  }
+  const parts = ["<cx:layoutPr>"];
+  if (layoutPr.parentLabelLayout && (layoutId === "sunburst" || layoutId === "treemap")) {
+    parts.push(`<cx:parentLabelLayout val="${escapeAttr(layoutPr.parentLabelLayout)}"/>`);
+  }
+  if (layoutPr.subtotals && layoutId === "waterfall") {
+    parts.push("<cx:subtotals>");
+    for (const subtotal of layoutPr.subtotals) {
+      parts.push(`<cx:subtotal idx="${subtotal.idx}"/>`);
+    }
+    parts.push("</cx:subtotals>");
+  }
+  if (layoutId === "waterfall" && layoutPr.connectorLines !== undefined) {
+    parts.push(`<cx:connectorLines val="${layoutPr.connectorLines ? "1" : "0"}"/>`);
+  }
+  if (layoutPr.binning) {
+    const binning = layoutPr.binning;
+    const attrs = [
+      binning.intervalClosed === "l" || binning.intervalClosed === "r"
+        ? `intervalClosed="${escapeAttr(binning.intervalClosed)}"`
+        : undefined,
+      binning.underflow !== undefined && Number.isFinite(binning.underflow)
+        ? `underflow="${binning.underflow}"`
+        : undefined,
+      binning.overflow !== undefined && Number.isFinite(binning.overflow)
+        ? `overflow="${binning.overflow}"`
+        : undefined
+    ].filter((attr): attr is string => !!attr);
+    parts.push(`<cx:binning${attrs.length > 0 ? ` ${attrs.join(" ")}` : ""}>`);
+    // CT_Binning schema order: choice(auto|categories|manual)
+    // followed by optional binSize and binCount. Previously the raw
+    // patcher emitted `<cx:auto/>` then `<cx:binSize/>` then
+    // `<cx:binCount/>` then `<cx:categories/>` / `<cx:manual/>` — but
+    // `categories`/`manual` are mutually exclusive with `auto`, and
+    // emitting them after binSize/binCount puts them out of the
+    // schema sequence. The parser's priority chain at
+    // `chart-ex-parser.ts:parseLayoutProperties` resolves
+    // auto > categories > manual, so the stray trailing elements
+    // never round-tripped back anyway. Mirror the structured
+    // renderer's order: one discriminator first, then the numeric
+    // children.
+    if (binning.binType === "auto") {
+      parts.push("<cx:auto/>");
+    } else if (binning.binType === "categories") {
+      parts.push("<cx:categories/>");
+    } else if (binning.binType === "manual") {
+      parts.push("<cx:manual/>");
+    }
+    if (binning.binSize !== undefined && Number.isFinite(binning.binSize)) {
+      parts.push(`<cx:binSize val="${binning.binSize}"/>`);
+    }
+    if (binning.binCount !== undefined && Number.isFinite(binning.binCount)) {
+      parts.push(`<cx:binCount val="${binning.binCount}"/>`);
+    }
+    parts.push("</cx:binning>");
+  }
+  // `paretoLine` is only a valid child when the enclosing layout is a
+  // pareto (clusteredColumn with pareto overlay, or the standalone
+  // `paretoLine` layoutId). Emit the explicit boolean — including
+  // `false` — so round-trip of user-suppressed pareto overlays
+  // matches the structured writer. Previously `if (layoutPr.paretoLine)`
+  // silently dropped the `false` case, re-enabling the line on save.
+  if (
+    layoutPr.paretoLine !== undefined &&
+    (layoutId === "clusteredColumn" || layoutId === "paretoLine")
+  ) {
+    parts.push(`<cx:paretoLine val="${layoutPr.paretoLine ? "1" : "0"}"/>`);
+  }
+  if (layoutId === "boxWhisker") {
+    for (const [name, value] of [
+      ["quartileMethod", layoutPr.quartileMethod],
+      ["showMeanLine", layoutPr.showMeanLine],
+      ["showMeanMarker", layoutPr.showMeanMarker],
+      ["showInnerPoints", layoutPr.showInnerPoints],
+      ["showOutlierPoints", layoutPr.showOutlierPoints]
+    ] as const) {
+      if (value !== undefined) {
+        parts.push(
+          `<cx:${name} val="${typeof value === "boolean" ? (value ? "1" : "0") : escapeAttr(String(value))}"/>`
+        );
+      }
+    }
+  }
+  if (layoutId === "regionMap") {
+    for (const [name, value] of [
+      ["projection", layoutPr.projection],
+      ["regionLabels", layoutPr.regionLabels],
+      ["geoMappingLevel", layoutPr.geoMappingLevel]
+    ] as const) {
+      if (value !== undefined) {
+        parts.push(`<cx:${name} val="${escapeAttr(String(value))}"/>`);
+      }
+    }
+  }
+  if (layoutPr.extLst) {
+    parts.push(layoutPr.extLst);
+  }
+  parts.push("</cx:layoutPr>");
+  return parts.join("");
+}
+
+function hasStructuredChartExLayoutProperties(layoutPr: any): boolean {
+  // `increaseSpPr` / `decreaseSpPr` / `totalSpPr` are **preview-only**
+  // fields consumed by the SVG/PDF renderer to colour waterfall bars;
+  // Chart2014 has no schema slot for them (per-point styling lives on
+  // `<cx:dataPt>` instead). Do NOT treat setting one as a "structured
+  // mutation" — doing so would force the raw patcher onto the
+  // structured rebuild path and discard `_rawXml`, silently dropping
+  // every other property the raw bytes carried. The structured
+  // renderer (`hasStructuredLayoutProperties` in chart-ex-renderer.ts)
+  // uses the same exclusion list; keeping the two helpers in sync
+  // prevents asymmetric behaviour between raw-patch and rebuild.
+  return [
+    layoutPr.parentLabelLayout,
+    layoutPr.subtotals,
+    layoutPr.connectorLines,
+    layoutPr.binning,
+    layoutPr.paretoLine,
+    layoutPr.quartileMethod,
+    layoutPr.showMeanLine,
+    layoutPr.showMeanMarker,
+    layoutPr.showInnerPoints,
+    layoutPr.showOutlierPoints,
+    layoutPr.projection,
+    layoutPr.regionLabels,
+    layoutPr.geoMappingLevel
+  ].some(value => value !== undefined);
+}
+
+function buildRawChartExDataLabelsXml(dataLabels: any): string {
+  if (!dataLabels) {
+    return "";
+  }
+  const parts = ["<cx:dataLabels>"];
+  if (dataLabels.visibility) {
+    const attrs = [
+      dataLabels.visibility.seriesName !== undefined
+        ? `seriesName="${dataLabels.visibility.seriesName ? "1" : "0"}"`
+        : undefined,
+      dataLabels.visibility.categoryName !== undefined
+        ? `categoryName="${dataLabels.visibility.categoryName ? "1" : "0"}"`
+        : undefined,
+      dataLabels.visibility.value !== undefined
+        ? `value="${dataLabels.visibility.value ? "1" : "0"}"`
+        : undefined,
+      dataLabels.visibility.numFmt !== undefined
+        ? `numFmt="${dataLabels.visibility.numFmt ? "1" : "0"}"`
+        : undefined
+    ].filter((attr): attr is string => !!attr);
+    parts.push(`<cx:visibility ${attrs.join(" ")}/>`);
+  }
+  if (dataLabels.position) {
+    parts.push(`<cx:dataLabel pos="${escapeAttr(dataLabels.position)}"/>`);
+  }
+  if (dataLabels.separator) {
+    parts.push(`<cx:separator>${escapeXml(String(dataLabels.separator))}</cx:separator>`);
+  }
+  if (dataLabels.numFmt) {
+    parts.push(`<cx:numFmt formatCode="${escapeAttr(String(dataLabels.numFmt))}"/>`);
+  }
+  if (dataLabels.spPr) {
+    parts.push(buildRawShapePropertiesXml(dataLabels.spPr, "cx") ?? "");
+  }
+  if (dataLabels.txPr) {
+    parts.push(buildRawTextPropertiesXml(dataLabels.txPr, "cx") ?? "");
+  }
+  parts.push("</cx:dataLabels>");
+  return parts.join("");
+}
+
+function patchRawChartExAxes(
+  raw: string,
+  chart: any,
+  patchPlan: RawPatchListPlan<ChartExAxisRawPatchPlan>
+): string | undefined {
+  let patched = raw;
+  for (const [index, axis] of (chart.plotArea?.axis ?? []).entries()) {
+    const axisPlan = getRawPatchListItem(patchPlan, index);
+    if (!axisPlan) {
+      continue;
+    }
+    const range = findChartExAxisBlock(patched, axis.axisId);
+    if (!range) {
+      return undefined;
+    }
+    const axisXml = patchRawChartExAxisBlock(range.xml, axis, axisPlan);
+    patched = patched.slice(0, range.start) + axisXml + patched.slice(range.end);
+  }
+  return patched;
+}
+
+function patchRawChartExAxisBlock(
+  block: string,
+  axis: any,
+  patchPlan: ChartExAxisRawPatchPlan | true
+): string {
+  // `CT_Axis` child sequence (Chart2014):
+  //
+  //   (catScaling | valScaling) → title → units →
+  //   majorTickMarks → minorTickMarks →
+  //   majorGridlines → minorGridlines →
+  //   numFmt → txPr → spPr → extLst
+  //
+  // (The structured renderer emits `txPr` before `spPr` to match
+  // Excel's real output; some schema mirrors put spPr first, but
+  // Excel itself serialises txPr first and readers accept both. The
+  // raw patcher mirrors the structured renderer so both paths land
+  // byte-identical XML for the same model.)
+  //
+  // Sibling lists describe every element that must come AFTER the
+  // element being inserted. Older versions of the patcher used
+  // sibling arrays that put `majorTickMarks` before
+  // `title`/`valScaling`/`catScaling`, inverting the schema — strict
+  // validators rejected the output and Excel's own reader silently
+  // dropped whichever element landed out of position.
+  const afterScaling = [
+    "cx:title",
+    "cx:units",
+    "cx:majorTickMarks",
+    "cx:majorTickMark",
+    "cx:minorTickMarks",
+    "cx:minorTickMark",
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterTitle = [
+    "cx:units",
+    "cx:majorTickMarks",
+    "cx:majorTickMark",
+    "cx:minorTickMarks",
+    "cx:minorTickMark",
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterMajorTicks = [
+    "cx:minorTickMarks",
+    "cx:minorTickMark",
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterMinorTicks = [
+    "cx:majorGridlines",
+    "cx:minorGridlines",
+    "cx:numFmt",
+    "cx:txPr",
+    "cx:spPr",
+    "cx:extLst"
+  ];
+  const afterNumFmt = ["cx:txPr", "cx:spPr", "cx:extLst"];
+  const afterTxPr = ["cx:spPr", "cx:extLst"];
+  const afterSpPr = ["cx:extLst"];
+  let patched = block;
+  if (rawPatchFlag(patchPlan, "hidden")) {
+    // `CT_Axis/@hidden` is an **attribute** on the opening `<cx:axis>`
+    // tag per ECMA-376 Chart2014, not a child element. Previously
+    // this raw-patch path emitted `<cx:hidden val="1"/>` as a child,
+    // which strict validators reject. Replay the mutation as an
+    // attribute tweak on the opening tag. When `axis.hidden` is
+    // `undefined` the attribute is removed entirely; explicit `false`
+    // lands `hidden="0"` so files that carried an affirmative
+    // visibility marker round-trip byte-identically.
+    patched = patchXmlAttribute(patched, "cx:axis", "hidden", axis.hidden);
+    // Clean up any stale child `<cx:hidden/>` bytes left over from
+    // legacy output that predated the attribute rewrite — the parser
+    // accepts both forms (see `chart-ex-parser.ts:parseAxis`), so
+    // round-tripping an older file must eliminate the legacy form.
+    patched = removeXmlBlock(patched, "cx:hidden");
+  }
+  if (rawPatchFlag(patchPlan, "valScaling")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:valScaling",
+      buildRawChartExScalingXml("valScaling", axis.valScaling),
+      afterScaling,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "catScaling")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:catScaling",
+      buildRawChartExScalingXml("catScaling", axis.catScaling),
+      afterScaling,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "title")) {
+    if (axis.title) {
+      const text = axis.title.text?.paragraphs?.[0]?.runs?.[0]?.text;
+      if (text !== undefined) {
+        patched = patchGenericChild(
+          patched,
+          "cx:title",
+          buildRawChartExTitleXml(text),
+          afterTitle,
+          "cx:axis"
+        );
+      }
+    } else {
+      patched = removeXmlBlock(patched, "cx:title");
+    }
+  }
+  if (rawPatchFlag(patchPlan, "majorTickMark")) {
+    // `cx:majorTickMark` in the Chart2014 schema is the **plural**
+    // `majorTickMarks`. Earlier versions of this library emitted the
+    // classic-chart singular form; the raw patcher now always lands
+    // the plural, and strips any stale singular leftover so repeated
+    // patches don't duplicate the element.
+    patched = removeXmlBlock(patched, "cx:majorTickMark");
+    patched = patchValueLeaf(
+      patched,
+      "cx:majorTickMarks",
+      axis.majorTickMark,
+      afterMajorTicks,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "minorTickMark")) {
+    // Plural form — see `majorTickMark` note above.
+    patched = removeXmlBlock(patched, "cx:minorTickMark");
+    patched = patchValueLeaf(
+      patched,
+      "cx:minorTickMarks",
+      axis.minorTickMark,
+      afterMinorTicks,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "numFmt")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:numFmt",
+      buildRawChartExNumFmtXml(axis.numFmt),
+      afterNumFmt,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "txPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:txPr",
+      buildRawTextPropertiesXml(axis.txPr, "cx"),
+      afterTxPr,
+      "cx:axis"
+    );
+  }
+  if (rawPatchFlag(patchPlan, "spPr")) {
+    patched = patchGenericChild(
+      patched,
+      "cx:spPr",
+      buildRawShapePropertiesXml(axis.spPr, "cx"),
+      afterSpPr,
+      "cx:axis"
+    );
+  }
+  return patched;
+}
+
+function buildRawChartExNumFmtXml(numFmt: any): string {
+  if (!numFmt?.formatCode) {
+    return "";
+  }
+  const attrs = [`formatCode="${escapeAttr(numFmt.formatCode)}"`];
+  if (numFmt.sourceLinked !== undefined) {
+    attrs.push(`sourceLinked="${numFmt.sourceLinked ? "1" : "0"}"`);
+  }
+  return `<cx:numFmt ${attrs.join(" ")}/>`;
+}
+
+function buildRawChartExScalingXml(tag: "valScaling" | "catScaling", scaling: any): string {
+  if (!scaling) {
+    return "";
+  }
+  const attrs = Object.entries(scaling)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}="${escapeAttr(String(value))}"`);
+  return `<cx:${tag}${attrs.length > 0 ? ` ${attrs.join(" ")}` : ""}/>`;
+}
+
+function findChartExAxisBlock(
+  raw: string,
+  axisId: number
+): { start: number; end: number; xml: string } | undefined {
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const range = findXmlBlock(raw, "cx:axis", cursor);
+    if (!range) {
+      return undefined;
+    }
+    const xml = raw.slice(range.start, range.end);
+    if (new RegExp(`<cx:axis\\s+[^>]*id=["']${axisId}["']`).test(xml)) {
+      return { ...range, xml };
+    }
+    cursor = range.end;
+  }
+  return undefined;
+}
+
+function replaceOrInsertBefore(
+  block: string,
+  tag: string,
+  replacement: string,
+  beforeTags: string[]
+): string {
+  const range = findXmlBlock(block, tag);
+  if (range) {
+    return block.slice(0, range.start) + replacement + block.slice(range.end);
+  }
+  const insertAt = beforeTags
+    .map(t => block.indexOf(`<${t}`))
+    .filter(i => i >= 0)
+    .sort((a, b) => a - b)[0];
+  if (insertAt !== undefined) {
+    return block.slice(0, insertAt) + replacement + block.slice(insertAt);
+  }
+  const close =
+    block.lastIndexOf("</c:ser>") >= 0
+      ? block.lastIndexOf("</c:ser>")
+      : block.lastIndexOf("</c:catAx>");
+  return close >= 0 ? block.slice(0, close) + replacement + block.slice(close) : block;
+}
+
+function replaceOrInsertBeforeGeneric(
+  block: string,
+  tag: string,
+  replacement: string,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const range = findXmlBlock(block, tag);
+  if (range) {
+    return block.slice(0, range.start) + replacement + block.slice(range.end);
+  }
+  const insertAt = beforeTags
+    .map(t => block.indexOf(`<${t}`))
+    .filter(i => i >= 0)
+    .sort((a, b) => a - b)[0];
+  if (insertAt !== undefined) {
+    return block.slice(0, insertAt) + replacement + block.slice(insertAt);
+  }
+  const close = block.lastIndexOf(`</${parentTag}>`);
+  return close >= 0 ? block.slice(0, close) + replacement + block.slice(close) : block;
+}
+
+function patchGenericChild(
+  block: string,
+  tag: string,
+  replacement: string | undefined,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  if (replacement === undefined || replacement === "") {
+    return removeXmlBlock(block, tag);
+  }
+  return replaceOrInsertBeforeGeneric(block, tag, replacement, beforeTags, parentTag);
+}
+
+function patchOpeningTagBooleanAttribute(
+  block: string,
+  tag: string,
+  attr: string,
+  value: boolean | undefined
+): string {
+  const openEnd = block.indexOf(">");
+  if (openEnd < 0 || !block.startsWith(`<${tag}`)) {
+    return block;
+  }
+  const head = block
+    .slice(0, openEnd + 1)
+    .replace(new RegExp(`\\s${attr}=("[^"]*"|'[^']*')`, "g"), "");
+  if (value === undefined) {
+    return head + block.slice(openEnd + 1);
+  }
+  // Emit an explicit `val="0"` / `val="1"` for both boolean states so
+  // the raw patch path matches the structured renderer (which emits
+  // `hidden="0"` on `<cx:series>` when the author set `hidden:
+  // false`). Previously the `false` case dropped the attribute
+  // entirely — technically equivalent to the schema default, but
+  // asymmetric with the structured writer: files round-tripping
+  // through raw-patch lost an explicitly-false marker that the
+  // structural path preserved.
+  const selfClosing = head.endsWith("/>");
+  const insertion = ` ${attr}="${value ? "1" : "0"}"`;
+  const rewritten = selfClosing
+    ? head.replace(/\/>$/, `${insertion}/>`)
+    : head.replace(/>$/, `${insertion}>`);
+  return rewritten + block.slice(openEnd + 1);
+}
+
+/**
+ * Replace (or remove) a numeric attribute on the opening tag of `block`.
+ * Used to patch ChartEx series attributes such as `ownerIdx` that live on
+ * `<cx:series …>` rather than as structured children. Matches the element
+ * only when the block begins with `<{tag}` so nested tags with the same
+ * attribute name are left alone. Preserves the `/` on self-closing tags.
+ */
+function patchOpeningTagIntegerAttribute(
+  block: string,
+  tag: string,
+  attr: string,
+  value: number | undefined
+): string {
+  const openEnd = block.indexOf(">");
+  if (openEnd < 0 || !block.startsWith(`<${tag}`)) {
+    return block;
+  }
+  const head = block.slice(0, openEnd + 1);
+  const selfClosing = head.endsWith("/>");
+  const strippedHead = head.replace(new RegExp(`\\s${attr}=("[^"]*"|'[^']*')`, "g"), "");
+  if (value === undefined || !Number.isFinite(value)) {
+    return strippedHead + block.slice(openEnd + 1);
+  }
+  const insertion = ` ${attr}="${value}"`;
+  const rewritten = selfClosing
+    ? strippedHead.replace(/\/>$/, `${insertion}/>`)
+    : strippedHead.replace(/>$/, `${insertion}>`);
+  return rewritten + block.slice(openEnd + 1);
+}
+
+function patchRepeatingChildren(
+  block: string,
+  tag: string,
+  replacement: string,
+  beforeTags: string[],
+  parentTag: string
+): string {
+  const stripped = removeXmlBlocks(block, tag);
+  if (!replacement) {
+    return stripped;
+  }
+  return replaceOrInsertBeforeGeneric(stripped, tag, replacement, beforeTags, parentTag);
+}
+
+function removeXmlBlock(block: string, tag: string): string {
+  const range = findXmlBlock(block, tag);
+  return range ? block.slice(0, range.start) + block.slice(range.end) : block;
+}
+
+/**
+ * Patch a single attribute on the opening tag of `elementTag` inside
+ * the supplied `block`. Intended for raw-XML patching where the
+ * attribute, not a child element, carries the field — e.g.
+ * `CT_Axis/@hidden` in the Chart2014 schema.
+ *
+ *   - `value === undefined` removes the attribute (if present).
+ *   - `value === true | false` lands `attr="1"` / `attr="0"` — the
+ *     OOXML `xsd:boolean` lexical form.
+ *   - `value: string` lands literally (escaped).
+ *
+ * The function only mutates the **first** matching opening tag; it
+ * does not recurse into nested elements of the same name (axes in a
+ * combo-chart plotArea are iterated by the caller, each block already
+ * narrowed to a single `<cx:axis …>` opening). Returns the block
+ * unchanged when `elementTag` can't be found — callers rely on the
+ * identity comparison `patched !== block` to detect successful writes.
+ */
+function patchXmlAttribute(
+  block: string,
+  elementTag: string,
+  attrName: string,
+  value: boolean | string | undefined
+): string {
+  // Match the opening tag, allowing leading whitespace in attributes
+  // and both self-closing and regular element forms. Escape the full
+  // element name for regex safety (covers all special regex characters).
+  const escapedTag = elementTag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tagRe = new RegExp(`<${escapedTag}\\b([^>]*)(/?)>`);
+  const match = tagRe.exec(block);
+  if (!match) {
+    return block;
+  }
+  const [fullMatch, attrSegment, selfClose] = match;
+  const attrRe = new RegExp(`\\s${attrName}="[^"]*"`);
+  const stripped = attrSegment.replace(attrRe, "");
+  const serialised =
+    value === undefined
+      ? ""
+      : typeof value === "boolean"
+        ? ` ${attrName}="${value ? "1" : "0"}"`
+        : ` ${attrName}="${escapeAttr(value)}"`;
+  const rebuilt = `<${elementTag}${stripped}${serialised}${selfClose}>`;
+  if (rebuilt === fullMatch) {
+    return block;
+  }
+  return block.slice(0, match.index) + rebuilt + block.slice(match.index + fullMatch.length);
+}
+
+function removeXmlBlocks(block: string, tag: string): string {
+  let patched = block;
+  let range = findXmlBlock(patched, tag);
+  while (range) {
+    patched = patched.slice(0, range.start) + patched.slice(range.end);
+    range = findXmlBlock(patched, tag, range.start);
+  }
+  return patched;
+}
+
+function replaceXmlBlocks(
+  raw: string,
+  tag: string,
+  replace: (block: string) => string | undefined
+): string | undefined {
+  let cursor = 0;
+  let output = "";
+  while (cursor < raw.length) {
+    const range = findXmlBlock(raw, tag, cursor);
+    if (!range) {
+      output += raw.slice(cursor);
+      return output;
+    }
+    output += raw.slice(cursor, range.start);
+    const replacement = replace(raw.slice(range.start, range.end));
+    if (replacement === undefined) {
+      return undefined;
+    }
+    output += replacement;
+    cursor = range.end;
+  }
+  return output;
+}
+
+function findAxisBlock(
+  raw: string,
+  tag: string,
+  axId: number
+): { start: number; end: number; xml: string } | undefined {
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const range = findXmlBlock(raw, tag, cursor);
+    if (!range) {
+      return undefined;
+    }
+    const xml = raw.slice(range.start, range.end);
+    if (new RegExp(`<c:axId\\s+val=["']${axId}["']\\s*/>`).test(xml)) {
+      return { ...range, xml };
+    }
+    cursor = range.end;
+  }
+  return undefined;
+}
+
+/**
+ * Locate the `<tag …>…</tag>` (or self-closing `<tag …/>`) block in
+ * `raw` starting at or after `offset`. Returns `{ start, end }` on hit,
+ * `undefined` on miss.
+ *
+ * Two correctness concerns this implementation guards against:
+ *   1. **Prefix collision** — `indexOf("<tag")` matches `<tag2>` or
+ *      `<tagX>` as well as the literal `<tag>` / `<tag `/`<tag/`. We
+ *      require the character immediately after the tag name to be one
+ *      of `>`, `/`, or whitespace so `<c:chart>` can't match
+ *      `<c:chartSpace>` and `<c:ax>` can't match `<c:axId>`.
+ *   2. **Nested same-name elements** — `<c:extLst><c:ext>…<c:extLst>
+ *      …</c:extLst></c:ext></c:extLst>` used to match the inner
+ *      close. Walk open/close tokens with a depth counter to find the
+ *      matching end.
+ *
+ * Limitations: the scanner treats XML tokens lexically and will fail
+ * on same-name occurrences inside CDATA or XML comments. ChartEx XML
+ * does not use either, so this remains a safe shortcut.
+ */
+function findXmlBlock(
+  raw: string,
+  tag: string,
+  offset = 0
+): { start: number; end: number } | undefined {
+  const openToken = `<${tag}`;
+  const closeToken = `</${tag}>`;
+
+  let pos = offset;
+  let start = -1;
+  // First, find the first legitimate open tag — one whose next char is
+  // `>`, `/`, or whitespace. Prefix collisions (`<tag2>`) are silently
+  // skipped.
+  while (pos < raw.length) {
+    const candidate = raw.indexOf(openToken, pos);
+    if (candidate < 0) {
+      return undefined;
+    }
+    const nextChar = raw[candidate + openToken.length];
+    if (nextChar === ">" || nextChar === "/" || /\s/.test(nextChar ?? "")) {
+      start = candidate;
+      break;
+    }
+    pos = candidate + openToken.length;
+  }
+  if (start < 0) {
+    return undefined;
+  }
+
+  // Find the end of the open tag. `>` inside a quoted attribute would
+  // confuse this, but Chart XML attributes never contain `>`.
+  const openEnd = raw.indexOf(">", start);
+  if (openEnd < 0) {
+    return undefined;
+  }
+  if (raw[openEnd - 1] === "/") {
+    return { start, end: openEnd + 1 };
+  }
+
+  // Walk forward balancing opens and closes for this same tag name.
+  // A nested `<tag>` inside the element bumps the depth; `</tag>`
+  // decrements. When depth hits zero we've found the matching close.
+  let depth = 1;
+  let scan = openEnd + 1;
+  while (scan < raw.length && depth > 0) {
+    const nextOpen = (() => {
+      let p = scan;
+      while (p < raw.length) {
+        const c = raw.indexOf(openToken, p);
+        if (c < 0) {
+          return -1;
+        }
+        const next = raw[c + openToken.length];
+        if (next === ">" || next === "/" || /\s/.test(next ?? "")) {
+          return c;
+        }
+        p = c + openToken.length;
+      }
+      return -1;
+    })();
+    const nextClose = raw.indexOf(closeToken, scan);
+    if (nextClose < 0) {
+      return undefined;
+    }
+    if (nextOpen >= 0 && nextOpen < nextClose) {
+      // Another open of the same tag — but only count it if it's a
+      // real element (not self-closing, which shouldn't change depth).
+      const oeNext = raw.indexOf(">", nextOpen);
+      if (oeNext < 0) {
+        return undefined;
+      }
+      if (raw[oeNext - 1] !== "/") {
+        depth++;
+      }
+      scan = oeNext + 1;
+    } else {
+      depth--;
+      if (depth === 0) {
+        return { start, end: nextClose + closeToken.length };
+      }
+      scan = nextClose + closeToken.length;
+    }
+  }
+  return undefined;
+}
+
+function escapeXml(value: string): string {
+  // Route through the canonical XML encoder so every raw-patch / XML
+  // builder call site benefits from the same strict sanitisation:
+  //
+  //   - strips XML 1.0-forbidden control characters (`#x0`-`#x1F`
+  //     except `\t \n \r`, `#x7F` DEL, `#xFFFE`, `#xFFFF`);
+  //   - strips lone surrogate halves (previously `U+D800`-`U+DFFF`
+  //     outside a valid pair could leak into attribute / text
+  //     content and corrupt the output encoding);
+  //   - escapes all five XML structural entities (`< > & " '`).
+  //
+  // The previous local implementation only handled `& < >` plus a
+  // partial control-char strip. That was enough for the reserved-
+  // trio case but left `"` untouched in attribute values (callers
+  // compensated with a manual `.replace(/"/g, "&quot;")`), and
+  // lone surrogates survived — producing bytes no XML parser can
+  // reopen.
+  //
+  // Element-text call sites used to emit `"` / `'` verbatim; the
+  // new encoder produces `&quot;` / `&apos;`. Both are valid XML
+  // and round-trip identically through any parser, but byte-level
+  // diffs against the old output will show the extra entities.
+  return xmlEncode(value);
+}
+
+function escapeAttr(value: string): string {
+  // Attribute values need the extra step of escaping `\t \n \r` as
+  // numeric character references; without it, XML 1.0 §3.3.3
+  // attribute-value normalisation replaces them with a single
+  // literal space at parse time, silently losing any embedded
+  // newline / tab in (e.g.) a chart title.
+  return xmlEncodeAttr(value);
+}
+
+export async function addCharts(
+  zip: IZipWriter,
+  model: any,
+  strictTemplateMode = false
+): Promise<void> {
+  const relsXform = new RelationshipsXform();
+
+  for (const [n, chartEntry] of Object.entries(model.chartEntries || {}) as Array<
+    [string, ChartEntry]
+  >) {
+    if (shouldPassthroughChartEntry(chartEntry)) {
+      await appendToZip(zip, chartEntry.rawData, { name: chartPath(n) });
+    } else {
+      const requireRawPatch = shouldRequireChartRawPatch(chartEntry, strictTemplateMode);
+      const patched = tryPatchChartRawXml(chartEntry, requireRawPatch);
+      if (patched) {
+        await appendToZip(zip, patched, { name: chartPath(n) });
+      } else {
+        if (requireRawPatch) {
+          throw new ChartOptionsError(buildChartStrictFailureMessage(n, chartEntry.model));
+        }
+        // Render via buffered path so we can splice preserved leading
+        // XML comments (e.g. vendor provenance markers) from the
+        // original raw bytes back in front of `<c:chart>`. The SAX-
+        // backed xform parser drops `comment` events so the
+        // structured model has no memory of them.
+        const buffered = renderChartWithLeadingComments(chartEntry, new ChartSpaceXform());
+        await appendToZip(zip, buffered, { name: chartPath(n) });
+      }
+    }
+
+    // Write chart style (raw bytes)
+    if (model.chartStyles?.[n]) {
+      await appendToZip(zip, model.chartStyles[n], { name: chartStylePath(n) });
+    }
+
+    // Write chart colors (raw bytes)
+    if (model.chartColors?.[n]) {
+      await appendToZip(zip, model.chartColors[n], { name: chartColorsPath(n) });
+    }
+
+    // Build chart rels
+    const rels: any[] = [];
+
+    // Collect original rels first (excluding style/colors which we regenerate)
+    // We keep their original Ids to avoid breaking r:id references inside chart XML
+    const originalRels = model.chartRels?.[n];
+    const usedIds = new Set<string>();
+    if (Array.isArray(originalRels)) {
+      for (const rel of originalRels) {
+        if (rel.Type !== RelType.ChartStyle && rel.Type !== RelType.ChartColors) {
+          rels.push(rel);
+          usedIds.add(rel.Id);
+        }
+      }
+    }
+
+    // Fold in rels allocated during chart registration — notably the
+    // image relationships added by `resolvePendingChartImages` for
+    // `pictureFill.image`. The chart XML already embeds the `r:id`
+    // assigned during registration, so we must preserve those ids
+    // verbatim (don't rewrite) and only skip duplicates that were
+    // already round-tripped through `originalRels`.
+    const entryRels = (chartEntry as { rels?: any[] }).rels;
+    if (Array.isArray(entryRels)) {
+      for (const rel of entryRels) {
+        if (!rel?.Id || usedIds.has(rel.Id)) {
+          continue;
+        }
+        rels.push(rel);
+        usedIds.add(rel.Id);
+      }
+    }
+
+    // Allocate new rIds for style/colors that don't conflict with existing ones
+    let rIdCount = 1;
+    const nextRId = (): string => {
+      let id = `rId${rIdCount++}`;
+      while (usedIds.has(id)) {
+        id = `rId${rIdCount++}`;
+      }
+      usedIds.add(id);
+      return id;
+    };
+
+    // Add style rel if style exists
+    if (model.chartStyles?.[n]) {
+      rels.push({
+        Id: nextRId(),
+        Type: RelType.ChartStyle,
+        Target: chartStyleRelTarget(n)
+      });
+    }
+
+    // Add colors rel if colors exist
+    if (model.chartColors?.[n]) {
+      rels.push({
+        Id: nextRId(),
+        Type: RelType.ChartColors,
+        Target: chartColorsRelTarget(n)
+      });
+    }
+
+    // Write c:userShapes overlay drawing part — preserves annotation
+    // shapes attached to the chart. Bytes can come from a loaded file
+    // (captured onto `chartEntry.userShapesXml` by
+    // `reconcileChartUserShapes`) or from a programmatic call to
+    // `Chart.setUserShapesXml`. We always emit the bytes at a canonical
+    // path (`xl/drawings/chartUserShape{n}.xml`) and rewrite the rel
+    // Target accordingly so the chart XML's existing `r:id` still
+    // resolves.
+    if (chartEntry.userShapesXml) {
+      await appendToZip(zip, chartEntry.userShapesXml, {
+        name: chartUserShapesPath(n)
+      });
+      const targetPath = chartUserShapesRelTarget(n);
+      const existingRel = rels.find(r => r?.Type === RelType.ChartUserShapes);
+      if (existingRel) {
+        existingRel.Target = targetPath;
+      } else {
+        // No existing rel — allocate one, preferring the r:id the model
+        // already embeds in `<c:userShapes r:id="…"/>` so the chart XML
+        // doesn't need a rewrite.
+        const relId = chartEntry.model.userShapesRelId ?? nextRId();
+        usedIds.add(relId);
+        rels.push({ Id: relId, Type: RelType.ChartUserShapes, Target: targetPath });
+      }
+    }
+
+    // Write chart rels if any
+    if (rels.length > 0) {
+      await renderToZip(zip, chartRelsPath(n), relsXform, rels);
+    }
+  }
+}
+
+/**
+ * The `chartEx` parts a model implies, as bytes — for a container that is not a zip being streamed.
+ *
+ * **This exists because the XLSB writer had no way to reach any of it.** `addChartExEntries` appends straight
+ * into a zip, so the binary writer could not call it, wrote no `chartEx` part at all, and still emitted the
+ * drawing relationship naming one. Excel's answer was `Removed Part: /xl/drawings/drawingN.xml (Drawing
+ * shape)` — a drawing that points at nothing is not a drawing, so it discarded the whole drawing. `chartEx`
+ * is the modern chart family (waterfall, funnel, treemap, sunburst, histogram, box plot, region map), so any
+ * workbook using one was affected; five of this repository's own examples were, across 39 dangling references.
+ *
+ * Collecting into an array rather than moving the logic keeps one implementation. The alternative considered
+ * was extracting it to a shared module, which would have had to take `findXmlBlock` and `snapshotChartModel`
+ * with it — fifteen and five other callers in this file — and that is a restructuring, not a fix.
+ */
+export async function collectChartExParts(
+  model: any,
+  strictTemplateMode = false
+): Promise<{ name: string; data: Uint8Array }[]> {
+  const parts: { name: string; data: Uint8Array }[] = [];
+  const encoder = new TextEncoder();
+  // A collecting stand-in for the zip sink, with exactly the three members `appendToZip` and `renderToZip`
+  // use: `append`, `createEntry` and `waitForDrain`. `addChartExEntries` therefore stays the only place the
+  // rules about passthrough, patching, sidecars and relationship ids are written down — this reroutes where
+  // its output goes rather than restating any of it.
+  const sink = {
+    append: (data: string | Uint8Array, options: { name: string }) => {
+      parts.push({
+        name: options.name,
+        data: typeof data === "string" ? encoder.encode(data) : data
+      });
+    },
+    createEntry: (path: string) => {
+      const chunks: string[] = [];
+      return {
+        write: (chunk: string) => chunks.push(chunk),
+        end: () => parts.push({ name: path, data: encoder.encode(chunks.join("")) })
+      };
+    },
+    waitForDrain: async () => {}
+  };
+  // Takes a model rather than a workbook: `addChartExEntries` and everything it reaches work from the
+  // `model` argument alone, and the XLSB writer holds a model, not a handle.
+  await addChartExEntries(sink as never, model, strictTemplateMode);
+  return parts;
+}
+
+export async function addChartExEntries(
+  zip: IZipWriter,
+  model: any,
+  strictTemplateMode = false
+): Promise<void> {
+  const relsXform = new RelationshipsXform();
+
+  const rawEntries = model.chartExEntries || {};
+  const structured = (model.chartExStructuredEntries ?? {}) as Record<string, ChartExEntry>;
+  const written = new Set<string>();
+
+  // 1. Loaded chartEx entries — byte-preserve while clean, render structured XML once edited.
+  for (const [n, rawBytes] of Object.entries(rawEntries)) {
+    const structuredEntry = structured[n];
+    if (structuredEntry && !shouldPassthroughChartExEntry(structuredEntry)) {
+      const requireRawPatch = shouldRequireChartExRawPatch(structuredEntry, strictTemplateMode);
+      const patched = tryPatchChartExRawXml(structuredEntry, requireRawPatch);
+      if (patched) {
+        await appendToZip(zip, patched, { name: chartExPath(n) });
+      } else {
+        if (requireRawPatch) {
+          throw new ChartOptionsError(buildChartExStrictFailureMessage(n, structuredEntry.model));
+        }
+        const renderedXml = renderChartEx(stripChartExRawXml(structuredEntry.model));
+        // Splice preserved leading XML comments from original raw
+        // bytes back in front of `<cx:chart>`. The chartEx parser
+        // calls `parseXml(...)` without `{ comments: true }` so the
+        // structured model has no memory of them.
+        const originalRawXml = rawBytes
+          ? new TextDecoder().decode(rawBytes as Uint8Array)
+          : structuredEntry.model.rawXml;
+        const finalXml = spliceChartExLeadingComments(renderedXml, originalRawXml);
+        await appendToZip(zip, finalXml, {
+          name: chartExPath(n)
+        });
+      }
+    } else {
+      await appendToZip(zip, rawBytes as Uint8Array, { name: chartExPath(n) });
+    }
+    written.add(n);
+
+    // Write chartEx rels if present
+    const rels = model.chartExRels?.[n];
+    const chartExRels = buildChartExRels(n, rels, model);
+    if (chartExRels.length > 0) {
+      await renderToZip(zip, chartExRelsPath(n), relsXform, chartExRels);
+    }
+    await appendChartExSidecars(zip, model, n, structuredEntry);
+  }
+
+  // 2. Structured chartEx entries — built programmatically via addChartEx()
+  for (const [n, entry] of Object.entries(structured) as Array<[string, ChartExEntry]>) {
+    if (written.has(n)) {
+      continue;
+    }
+    // Data-ref → `_xlchart.vN.M` defined-name rewrite has already
+    // run in `prepareChartExSidecars` so the model's formulas now
+    // point at hidden names and the cached `<cx:lvl>` levels have
+    // been cleared. Force structural rebuild to pick up the
+    // mutated model (any stale `rawXml` from earlier mutations
+    // would mask the rewrite).
+    const xml = renderChartEx(entry.model, { forceStructural: true });
+    await appendToZip(zip, xml, { name: chartExPath(n) });
+    await appendChartExSidecars(zip, model, n, entry);
+    const chartExRels = buildChartExRels(n, entry.rels, model, entry);
+    if (chartExRels.length > 0) {
+      await renderToZip(zip, chartExRelsPath(n), relsXform, chartExRels);
+    }
+  }
+}
+
+async function appendChartExSidecars(
+  zip: IZipWriter,
+  model: any,
+  n: string,
+  entry?: ChartExEntry
+): Promise<void> {
+  if (entry?.model.style) {
+    await appendToZip(zip, new TextEncoder().encode(buildChartStyle(entry.model.style)), {
+      name: chartExStylePath(n)
+    });
+  } else if (model.chartExStyles?.[n]) {
+    await appendToZip(zip, model.chartExStyles[n], { name: chartExStylePath(n) });
+  }
+  if (entry?.model.colors) {
+    await appendToZip(zip, new TextEncoder().encode(buildChartColors(entry.model.colors)), {
+      name: chartExColorsPath(n)
+    });
+  } else if (model.chartExColors?.[n]) {
+    await appendToZip(zip, model.chartExColors[n], { name: chartExColorsPath(n) });
+  }
+}
+
+function buildChartExRels(
+  n: string,
+  existing: any[] | undefined,
+  model: any,
+  entry?: ChartExEntry
+): any[] {
+  const rels = Array.isArray(existing) ? [...existing] : [];
+  const usedIds = new Set(rels.map(rel => rel.Id));
+  const nextRId = (): string => {
+    let i = 1;
+    while (usedIds.has(`rId${i}`)) {
+      i++;
+    }
+    const id = `rId${i}`;
+    usedIds.add(id);
+    return id;
+  };
+  const hasStyle = !!(model.chartExStyles?.[n] || entry?.model.style);
+  const hasColors = !!(model.chartExColors?.[n] || entry?.model.colors);
+  if (hasStyle && !rels.some(rel => rel.Type === RelType.ChartStyle)) {
+    rels.push({ Id: nextRId(), Type: RelType.ChartStyle, Target: chartExStyleRelTarget(n) });
+  }
+  if (hasColors && !rels.some(rel => rel.Type === RelType.ChartColors)) {
+    rels.push({ Id: nextRId(), Type: RelType.ChartColors, Target: chartExColorsRelTarget(n) });
+  }
+  return rels;
+}
+
+export function prepareChartExSidecars(model: any): void {
+  const structured = (model.chartExStructuredEntries ?? {}) as Record<string, ChartExEntry>;
+  for (const [n, entry] of Object.entries(structured)) {
+    // Excel 2016+ requires chartEx `<cx:f>` to reference hidden
+    // `_xlchart.vN.M` defined names, NOT direct worksheet ranges.
+    // Walk the model and rewrite data refs BEFORE workbook.xml is
+    // serialised so the newly-registered defined names end up in
+    // `<definedNames>`. See `rewriteChartExDataRefsToDefinedNames`
+    // for the full rationale.
+    const chartExIndex = parseInt(n, 10);
+    if (Number.isFinite(chartExIndex) && model.definedNamesInstance) {
+      const dn = model.definedNamesInstance;
+      rewriteChartExDataRefsToDefinedNames(entry.model, chartExIndex, (name, ref) => {
+        definedNamesAddHidden(dn, ref, name);
+      });
+      // Re-materialise the array snapshot so addWorkbook picks up the
+      // new hidden `_xlchart.*` names. `definedNames` in the write
+      // model is the serialised form (array); the rewrite added
+      // entries to the live defined-names record on the workbook.
+      model.definedNames = definedNamesModel(dn);
+    }
+    if (entry.model.style && !model.chartExStyles?.[n]) {
+      model.chartExStyles ??= {};
+      model.chartExStyles[n] = new TextEncoder().encode(buildChartStyle(entry.model.style));
+    }
+    if (entry.model.colors && !model.chartExColors?.[n]) {
+      model.chartExColors ??= {};
+      model.chartExColors[n] = new TextEncoder().encode(buildChartColors(entry.model.colors));
+    }
+  }
+}

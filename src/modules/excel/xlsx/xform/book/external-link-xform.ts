@@ -5,8 +5,8 @@
  * the list of sheets inside the foreign workbook, plus an optional cache of
  * the primitive values at each referenced address. The `r:id` attribute on
  * `<externalBook>` points (via the neighbouring `_rels/externalLinkN.xml.rels`)
- * at the actual file; that resolution is handled by the writer/reader in
- * `xlsx.browser.ts`, not here.
+ * at the actual file; that resolution is handled by the reader and writer in
+ * `xlsx/read/` and `xlsx/write/`, not here.
  *
  * Schema shape:
  *
@@ -59,7 +59,7 @@ const R_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relat
 const ROOT_ATTRIBUTES = { xmlns: NAMESPACE, "xmlns:r": R_NAMESPACE };
 
 /**
- * Parsed shape of a single externalLinkN.xml part. Callers (xlsx.browser.ts)
+ * Parsed shape of a single externalLinkN.xml part. Callers (`xlsx/read/reconcile.ts`)
  * merge `rId` with the matching `workbookRels` entry to recover the model's
  * `target` / `targetMode`, since those live in the sibling `.rels` file.
  */

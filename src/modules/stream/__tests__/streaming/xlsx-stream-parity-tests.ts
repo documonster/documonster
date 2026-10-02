@@ -2,8 +2,8 @@
  * XLSX stream vs non-stream parity tests (shared)
  *
  * Goals:
- * - Output parity: `xlsx.write(stream)` output bytes === `xlsx.writeBuffer()` bytes.
- * - Input parity: parsing from stream (`xlsx.read(stream)`) matches parsing from buffer (`xlsx.load(buf)`).
+ * - Output parity: `Workbook.writeStream` output bytes === `Workbook.toBuffer` bytes.
+ * - Input parity: parsing from stream (`Workbook.readStream`) matches parsing from buffer (`Workbook.read`).
  *
  * This is about determinism/correctness, not performance.
  */
@@ -77,7 +77,7 @@ export function createXlsxStreamParityTests(getContext: () => ParityTestContext)
 
       const bufferNonStream = await Workbook.toBuffer(wb, options);
 
-      // In browser builds, `xlsx.write()` expects a StreamBuf-like sink with
+      // In browser builds, `Workbook.writeStream` expects a StreamBuf-like sink with
       // synchronous `write()`/`end()`; using StreamBuf keeps behavior consistent
       // across Node and browser.
       const stream = new StreamBuf();

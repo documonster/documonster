@@ -5,6 +5,7 @@ import {
   definedNamesGetRanges
 } from "@excel/core/defined-names";
 import { ValueType } from "@excel/core/enums";
+import { loadWorkbookModel } from "@excel/core/model-load";
 import { rowFont, rowNumFmt, rowSetFont, rowSetNumFmt, rowValues } from "@excel/core/row";
 import {
   clearThemes,
@@ -13,10 +14,8 @@ import {
   getImage,
   getWorkbookModel,
   getWorksheets,
-  getXlsxIo,
   protectWorkbook,
   setDefaultFont,
-  setWorkbookModel,
   unprotectWorkbook
 } from "@excel/core/workbook";
 import { addWorkbookImage } from "@excel/core/workbook-core";
@@ -585,7 +584,7 @@ describe("Workbook", () => {
 
       const wb2 = Workbook.create();
       Workbook.addWorksheet(wb2, "Sheet1");
-      setWorkbookModel(wb2, model);
+      loadWorkbookModel(wb2, model);
       expect(wb2.protection).toBeDefined();
       expect(wb2.protection!.lockStructure).toBe(true);
       expect(wb2.protection!.lockWindows).toBe(true);
@@ -597,9 +596,9 @@ describe("Workbook", () => {
       Workbook.addWorksheet(wb, "Sheet1");
       await protectWorkbook(wb, "test123", { lockStructure: true });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(wb2.protection).toBeDefined();
       expect(wb2.protection!.lockStructure).toBe(true);
@@ -613,9 +612,9 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(wb2.protection).toBeUndefined();
     });
@@ -657,7 +656,7 @@ describe("Workbook", () => {
 
       const wb2 = Workbook.create();
       Workbook.addWorksheet(wb2, "Sheet1");
-      setWorkbookModel(wb2, model);
+      loadWorkbookModel(wb2, model);
       expect(getDefaultFont(wb2)).toEqual({ name: "Times New Roman", size: 14 });
     });
 
@@ -667,9 +666,9 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "test");
       setDefaultFont(wb, { name: "Arial", size: 12, family: 2 });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       // After round-trip, the default font should be preserved
       expect(getDefaultFont(wb2)).toBeDefined();
@@ -685,7 +684,7 @@ describe("Workbook", () => {
       Cell.setValue(ws, "A1", "test");
       setDefaultFont(wb, { name: "Arial", size: 12 });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer as Uint8Array);
       const stylesXml = new TextDecoder().decode(entries.get("xl/styles.xml")!.data);
 
@@ -714,9 +713,9 @@ describe("Workbook", () => {
         iterateDelta: 0.01
       };
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       expect(wb2.calcProperties).toBeDefined();
       expect(wb2.calcProperties.fullCalcOnLoad).toBe(true);
@@ -729,9 +728,9 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Sheet1");
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       // **`fullCalcOnLoad` is now true by default.** This writer produces no `calcChain`, so it cannot claim
       // its cached formula results are Excel's — the flag is how a file says "recalculate these". The XLSB
@@ -757,9 +756,9 @@ describe("Workbook", () => {
       // Register a formula-based defined name
       definedNamesAddFormula(getDefinedNames(wb), "MyFormula", "OFFSET(Sheet1!$A$1,0,0,3,1)");
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       // The formula-based name should survive round-trip
       const { ranges } = definedNamesGetRanges(getDefinedNames(wb2), "MyFormula");
@@ -775,9 +774,9 @@ describe("Workbook", () => {
       definedNamesAdd(getDefinedNames(wb), "Sheet1!$A$1:$A$3", "CellRange");
       definedNamesAddFormula(getDefinedNames(wb), "FormulaName", "SUM(Sheet1!$A$1:$A$3)");
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       // Cell-reference name
       const cellRange = definedNamesGetRanges(getDefinedNames(wb2), "CellRange");
@@ -797,9 +796,9 @@ describe("Workbook", () => {
 
       definedNamesAdd(getDefinedNames(wb), "'Budget (2024)'!$A$1", "MyCell");
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
 
       const result = definedNamesGetRanges(getDefinedNames(wb2), "MyCell");
       expect(result.ranges).toHaveLength(1);

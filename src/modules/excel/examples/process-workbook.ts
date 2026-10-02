@@ -28,8 +28,7 @@ function assert(value, failMessage, passMessage) {
 }
 
 // assuming file created by testBookOut
-Workbook.getXlsxIo(wb)
-  .readFile(inputFile)
+Workbook.readFile(wb, inputFile)
   .then(() => {
     console.log("Loaded", inputFile);
 

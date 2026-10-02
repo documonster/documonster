@@ -1,4 +1,5 @@
 import { VmlDrawingXform } from "@excel/xlsx/xform/drawing/vml-drawing-xform";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { XmlWriter } from "@xml/writer";
 import { describe, expect, it } from "vitest";
 
@@ -6,7 +7,7 @@ async function parse(xml: string) {
   async function* input() {
     yield xml;
   }
-  return new VmlDrawingXform().parseStream(input());
+  return parseXformStream(new VmlDrawingXform(), input());
 }
 
 describe("VmlDrawingXform header/footer images", () => {

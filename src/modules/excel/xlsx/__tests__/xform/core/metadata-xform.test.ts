@@ -1,4 +1,5 @@
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { describe, expect, it } from "vitest";
 
 function xmlToStream(xml: string) {
@@ -83,7 +84,7 @@ describe("MetadataXform", () => {
       ].join("\n");
 
       const xform = new MetadataXform();
-      const result = await xform.parseStream(xmlToStream(xml));
+      const result = await parseXformStream(xform, xmlToStream(xml));
       expect(result).toBeDefined();
       expect(result.hasDynamicArrays).toBe(true);
     });
@@ -98,7 +99,7 @@ describe("MetadataXform", () => {
       ].join("\n");
 
       const xform = new MetadataXform();
-      const result = await xform.parseStream(xmlToStream(xml));
+      const result = await parseXformStream(xform, xmlToStream(xml));
       expect(result.hasDynamicArrays).toBe(false);
       expect(result.dynamicArrayCmIndices.size).toBe(0);
     });
@@ -123,7 +124,7 @@ describe("MetadataXform", () => {
       ].join("\n");
 
       const xform = new MetadataXform();
-      const result = await xform.parseStream(xmlToStream(xml));
+      const result = await parseXformStream(xform, xmlToStream(xml));
       expect(result.hasDynamicArrays).toBe(true);
       // cm=1 (1-indexed) should map to XLDAPR
       expect(result.dynamicArrayCmIndices.has(1)).toBe(true);
@@ -158,7 +159,7 @@ describe("MetadataXform", () => {
       ].join("\n");
 
       const xform = new MetadataXform();
-      const result = await xform.parseStream(xmlToStream(xml));
+      const result = await parseXformStream(xform, xmlToStream(xml));
       expect(result.hasDynamicArrays).toBe(true);
       // cm=1 maps to XLRICHVALUE → should NOT be in set
       expect(result.dynamicArrayCmIndices.has(1)).toBe(false);

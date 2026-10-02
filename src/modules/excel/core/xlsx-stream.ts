@@ -13,7 +13,7 @@
  * this single implementation.
  */
 import type { XlsxReadable, XlsxStreamListener, XlsxWritable } from "@excel/core/xlsx-io-types";
-import type { XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
+import type { XlsxWriteOptions } from "@excel/xlsx/types";
 import { createReadable } from "@stream";
 
 /** Options accepted by `Workbook.toStream`. */

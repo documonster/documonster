@@ -24,19 +24,15 @@ const inputFile = path.join(exampleDir, "data/table.xlsx");
 const outputFile = path.join(outDir, "template-out.xlsx");
 
 const workbook = Workbook.create();
-Workbook.getXlsxIo(workbook)
-  .readFile(inputFile)
-  .then(stream => {
+Workbook.readFile(workbook, inputFile)
+  .then(loaded => {
     const options = {
       useSharedStrings: true,
       useStyles: true
     };
 
-    // **XLSX only, and not an oversight.** This goes through `Workbook.getXlsxIo`, the streaming XLSX
-    // reader/writer pair, and the streaming writer has no binary form — `Stream.WorkbookWriter` produces XLSX
-    // and nothing else. Every other example in this directory now writes both containers; the seven streaming
-    // ones cannot until that writer gains an XLSB path, which is a capability gap rather than an example gap.
-    return Workbook.writeFile(stream, outputFile, options).then(() => {
+    // The extension picks the container: `.xlsx` here, and `.xlsb` would write the binary format.
+    return Workbook.writeFile(loaded, outputFile, options).then(() => {
       console.log(`Done. Wrote ${outputFile}`);
     });
   })

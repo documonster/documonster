@@ -107,21 +107,20 @@ import {
   resolveReachableOpaqueParts
 } from "@excel/xlsx/opaque-parts";
 import { RelType } from "@excel/xlsx/rel-type";
+import { collectChartExParts, renderChartWithLeadingComments } from "@excel/xlsx/write/charts";
+import {
+  CHARTSHEET_DRAWING_EMU,
+  renderChartsheetDrawingXml
+} from "@excel/xlsx/write/chartsheet-drawing";
 import { ChartSpaceXform } from "@excel/xlsx/xform/chart/chart-space-xform";
 import {
   renderPersonList,
   renderThreadedComments
-} from "@excel/xlsx/xform/comment/threaded-comments-xform";
+} from "@excel/xlsx/xform/comment/threaded-comments-render";
 import { AppXform } from "@excel/xlsx/xform/core/app-xform";
 import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
-import {
-  CHARTSHEET_DRAWING_EMU,
-  renderChartWithLeadingComments,
-  renderChartsheetDrawingXml,
-  XLSX
-} from "@excel/xlsx/xlsx.browser";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import { stringToUint8Array } from "@utils/binary";
 import { readFileBytes } from "@utils/fs";
@@ -1418,7 +1417,7 @@ export async function writeXlsbPackage(
     ) {
       const vmlPath = `xl/drawings/vmlDrawing${sheetIndex}.vml`;
       const vmlWriter = new XmlWriter();
-      // Loaded on demand, like the five other reaches for this xform (`xlsx.browser.ts` ×4 and the XLSB
+      // Loaded on demand, like the five other reaches for this xform (the XLSX reader and writer, twice each, and the XLSB
       // reader). A static import here made all of them ineffective — a statically imported module is
       // hoisted into the main chunk, so `await import()` of it elsewhere buys nothing and rolldown says
       // `INEFFECTIVE_DYNAMIC_IMPORT` — and charged every XLSB writer 13 kB of VML transformers for a
@@ -1465,7 +1464,7 @@ export async function writeXlsbPackage(
 
     // One `ctrlProp` part per control, each with its own relationship. Rendered by the XLSX writer's own
     // xform — a control's properties are XML in both containers. Loaded on demand for the same reason as
-    // the VML xform above: `xlsx.browser.ts` reaches for it with `await import()`, and a static import
+    // the VML xform above: the XLSX writer reaches for it with `await import()`, and a static import
     // here would make that ineffective for every consumer.
     for (const entry of controls) {
       const { CtrlPropXform } = await import("@excel/xlsx/xform/drawing/ctrl-prop-xform");
@@ -1637,7 +1636,7 @@ export async function writeXlsbPackage(
   // Assembled by the XLSX writer's own `addChartExEntries`, rerouted to collect parts instead of writing them —
   // the rules about byte-preserving a loaded chart, patching an edited one and numbering its relationships stay
   // in one place.
-  for (const part of await XLSX.collectChartExParts(model as never)) {
+  for (const part of await collectChartExParts(model as never)) {
     addPart(part.name, part.data);
   }
   if (sharedStrings) {

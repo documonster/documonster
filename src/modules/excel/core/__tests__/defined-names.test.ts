@@ -7,10 +7,10 @@ import {
   definedNamesGetRangesScoped,
   definedNamesModel,
   definedNamesRemove,
-  definedNamesSetModel,
   definedNamesSpliceColumns,
   definedNamesSpliceRows
 } from "@excel/core/defined-names";
+import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
@@ -194,7 +194,7 @@ describe("DefinedNames", () => {
   it("creates matrix from model", () => {
     const dn = createDefinedNames();
 
-    definedNamesSetModel(dn, []);
+    loadDefinedNamesModel(dn, []);
     definedNamesAdd(dn, "blort!A1", "bar");
     definedNamesRemove(dn, "blort!A1", "foo");
 
@@ -203,7 +203,7 @@ describe("DefinedNames", () => {
 
   it("skips values with invalid ranges (formulas and #REF!)", () => {
     const dn = createDefinedNames();
-    definedNamesSetModel(dn, [
+    loadDefinedNamesModel(dn, [
       { name: "eq", ranges: ['"="'] },
       { name: "ref", ranges: ["#REF!"] },
       { name: "single", ranges: ["Sheet3!$A$1"] },
@@ -243,7 +243,7 @@ describe("DefinedNames", () => {
     const model = definedNamesModel(dn1);
 
     const dn2 = createDefinedNames();
-    definedNamesSetModel(dn2, model);
+    loadDefinedNamesModel(dn2, model);
 
     expect(definedNamesGetRanges(dn2, "myName")).toEqual(definedNamesGetRanges(dn1, "myName"));
     expect(definedNamesGetRanges(dn2, "otherName")).toEqual(
@@ -281,7 +281,7 @@ describe("DefinedNames", () => {
   describe("two-phase classifier", () => {
     it("classifies sheet names with parentheses as reference, not formula", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [{ name: "MyCell", ranges: [], rawText: "'Budget (2024)'!$A$1" }]);
+      loadDefinedNamesModel(dn, [{ name: "MyCell", ranges: [], rawText: "'Budget (2024)'!$A$1" }]);
 
       // Should be in matrixMap, not formulaMap or opaqueMap
       expect(dn.matrixMap["MyCell"]).toBeDefined();
@@ -291,7 +291,7 @@ describe("DefinedNames", () => {
 
     it("classifies OFFSET formula as formula", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [
+      loadDefinedNamesModel(dn, [
         { name: "MyFormula", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }
       ]);
 
@@ -302,7 +302,7 @@ describe("DefinedNames", () => {
 
     it("classifies LAMBDA formula as formula", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [{ name: "MyLambda", ranges: [], rawText: "LAMBDA(x,y,x+y)" }]);
+      loadDefinedNamesModel(dn, [{ name: "MyLambda", ranges: [], rawText: "LAMBDA(x,y,x+y)" }]);
 
       expect(dn.formulaMap["MyLambda"]).toBe("LAMBDA(x,y,x+y)");
       expect(dn.matrixMap["MyLambda"]).toBeUndefined();
@@ -311,7 +311,7 @@ describe("DefinedNames", () => {
 
     it("classifies #REF! as opaque", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [{ name: "BadRef", ranges: [], rawText: "#REF!" }]);
+      loadDefinedNamesModel(dn, [{ name: "BadRef", ranges: [], rawText: "#REF!" }]);
 
       expect(dn.opaqueMap["BadRef"]).toBeDefined();
       expect(dn.opaqueMap["BadRef"].rawText).toBe("#REF!");
@@ -321,7 +321,7 @@ describe("DefinedNames", () => {
 
     it("classifies string literal as opaque", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [{ name: "MyStr", ranges: [], rawText: '"hello world"' }]);
+      loadDefinedNamesModel(dn, [{ name: "MyStr", ranges: [], rawText: '"hello world"' }]);
 
       expect(dn.opaqueMap["MyStr"]).toBeDefined();
       expect(dn.opaqueMap["MyStr"].rawText).toBe('"hello world"');
@@ -331,7 +331,7 @@ describe("DefinedNames", () => {
 
     it("classifies array constant as opaque", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [{ name: "MyArr", ranges: [], rawText: "{1,2;3,4}" }]);
+      loadDefinedNamesModel(dn, [{ name: "MyArr", ranges: [], rawText: "{1,2;3,4}" }]);
 
       expect(dn.opaqueMap["MyArr"]).toBeDefined();
       expect(dn.opaqueMap["MyArr"].rawText).toBe("{1,2;3,4}");
@@ -341,7 +341,7 @@ describe("DefinedNames", () => {
 
     it("classifies plain cell reference as reference", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [{ name: "SingleCell", ranges: [], rawText: "Sheet1!$A$1" }]);
+      loadDefinedNamesModel(dn, [{ name: "SingleCell", ranges: [], rawText: "Sheet1!$A$1" }]);
 
       expect(dn.matrixMap["SingleCell"]).toBeDefined();
       expect(dn.formulaMap["SingleCell"]).toBeUndefined();
@@ -350,7 +350,7 @@ describe("DefinedNames", () => {
 
     it("classifies comma-separated ranges as reference", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [
+      loadDefinedNamesModel(dn, [
         { name: "MultiRange", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }
       ]);
 
@@ -361,7 +361,7 @@ describe("DefinedNames", () => {
 
     it("preserves opaque names in model getter output", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [
+      loadDefinedNamesModel(dn, [
         { name: "Good", ranges: [], rawText: "Sheet1!$A$1" },
         { name: "BadRef", ranges: [], rawText: "#REF!" },
         { name: "MyFormula", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }
@@ -398,7 +398,7 @@ describe("DefinedNames", () => {
 
     // Inject opaque names via model setter
     const existingModel = definedNamesModel(getDefinedNames(wb));
-    definedNamesSetModel(getDefinedNames(wb), [
+    loadDefinedNamesModel(getDefinedNames(wb), [
       ...existingModel,
       { name: "OpaqueError", ranges: [], rawText: "#REF!" },
       { name: "OpaqueStr", ranges: [], rawText: '"hello"' }
@@ -422,7 +422,7 @@ describe("DefinedNames", () => {
   describe("scoped defined names", () => {
     it("should store same-name entries with different scopes independently", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [
+      loadDefinedNamesModel(dn, [
         { name: "Total", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
         {
           name: "Total",
@@ -452,7 +452,7 @@ describe("DefinedNames", () => {
 
     it("should round-trip scoped names through model getter/setter", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [
+      loadDefinedNamesModel(dn, [
         { name: "Rate", ranges: ["Sheet1!$C$1"], rawText: "Sheet1!$C$1" },
         {
           name: "Rate",
@@ -476,7 +476,7 @@ describe("DefinedNames", () => {
 
     it("should handle formula-based scoped names", () => {
       const dn = createDefinedNames();
-      definedNamesSetModel(dn, [
+      loadDefinedNamesModel(dn, [
         {
           name: "MyLambda",
           ranges: ["LAMBDA(x,x+1)"],

@@ -1,3 +1,4 @@
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { ChartsheetXform } from "@excel/xlsx/xform/sheet/chartsheet-xform";
 import { XmlWriter } from "@xml/writer";
 import { describe, expect, it } from "vitest";
@@ -6,7 +7,7 @@ async function parse(xml: string) {
   async function* input() {
     yield xml;
   }
-  return new ChartsheetXform().parseStream(input());
+  return parseXformStream(new ChartsheetXform(), input());
 }
 
 describe("ChartsheetXform header/footer", () => {

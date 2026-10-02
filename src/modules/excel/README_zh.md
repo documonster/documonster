@@ -30,7 +30,7 @@
 - **CSV 导入/导出** —— `readCsv`、`writeCsv`、`readCsvFile`、`writeCsvFile`
 - **Markdown 导入/导出** —— `readMarkdown`、`writeMarkdown`、`readMarkdownFile`、`writeMarkdownFile`
 - **PDF 导出** —— `Pdf.fromExcel()`，支持完整样式、分页、字体、加密
-- **浏览器支持** —— `xlsx.load()`、`xlsx.writeBuffer()`，无需任何 polyfill
+- **浏览器支持** —— `Workbook.read`、`Workbook.toBuffer`，无需任何 polyfill
 
 ## 快速开始
 
@@ -84,6 +84,18 @@ Worksheet.eachRow(worksheet, (row, rowNumber) => {
   console.log("Row " + rowNumber + " = " + JSON.stringify(Row.values(worksheet, rowNumber)));
 });
 ```
+
+### 浏览器打包体积
+
+写入工作簿不会加载读取工作簿的代码。只写入的导出永远用不到的部分都放在 `import()` 之后，只有被调用时才会加载：
+
+- **XLSX 读取器**（ZIP 解析、部件分发和模型合并）：第一次调用 `Workbook.read` 时加载。
+- **图表写入**：只在工作簿包含图表时加载。
+- **XLSB 读写**：只在 `{ format: "xlsb" }` 或输入是二进制格式时加载。
+- **批注、表单控件、绘图、表格、数据透视表和图表工作表**：只在工作表包含它们时加载。
+- **OOXML 自检**：只在运行时加载，即传入 `{ validate: true }`，或在 Node 的非 production 环境下默认运行。浏览器中默认关闭。
+
+请开启代码分割，让这些 chunk 保持独立；不开启时它们会被内联进同一个文件。能按成员删除命名空间中未使用部分的打包器（Rollup、rolldown、Vite、webpack、rspack）还会去掉只有你没调用的成员才需要的代码。**esbuild 会保留导入的命名空间（如 `Workbook`）的全部成员**，所以使用 esbuild 时，即使没调用，这些成员静态依赖的代码也会被打包进来；上面列出的按需加载部分仍然不会进入初始 chunk。
 
 ### 读取区域
 

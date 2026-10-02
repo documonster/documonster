@@ -1,4 +1,5 @@
 import { DrawingXform } from "@excel/xlsx/xform/drawing/drawing-xform";
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { PassThrough } from "@stream";
 import { parseSax } from "@xml/sax";
 import { XmlWriter } from "@xml/writer";
@@ -46,7 +47,7 @@ describe("AbsoluteAnchorXform", () => {
     const stream = new PassThrough();
     stream.write(xml);
     stream.end();
-    const model = await xform.parse(parseSax(stream));
+    const model = await parseXformEvents(xform, parseSax(stream));
 
     // Should have one anchor
     expect(model!.anchors).toHaveLength(1);

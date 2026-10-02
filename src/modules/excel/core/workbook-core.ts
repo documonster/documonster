@@ -51,7 +51,6 @@ import type {
 import { RelType } from "@excel/xlsx/rel-type";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import type { ChartsheetModel } from "@excel/xlsx/xform/sheet/chartsheet-xform";
-import type { XLSX } from "@excel/xlsx/xlsx.browser";
 /**
  * A user function as the workbook *stores* it.
  *
@@ -158,7 +157,6 @@ export interface WorkbookData {
   _opaqueContentTypeDefaults: Record<string, string>;
   /** Preserved parts not written back — see `WorkbookModel.opaqueDrops`. */
   _opaqueDrops: OpaqueDrop[];
-  _xlsx?: XLSX;
   userFunctions?: Map<string, WorkbookFunctionDescriptor>;
 }
 

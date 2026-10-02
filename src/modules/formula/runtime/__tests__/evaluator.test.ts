@@ -26,12 +26,9 @@
  *   - volatile function re-evaluation
  */
 
-import {
-  definedNamesAdd,
-  definedNamesAddFormula,
-  definedNamesSetModel
-} from "@excel/core/defined-names";
+import { definedNamesAdd, definedNamesAddFormula } from "@excel/core/defined-names";
 import { calculateFormulas } from "@excel/core/formula-adapter";
+import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { addTable } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
@@ -1023,7 +1020,7 @@ describe("evaluator: defined names", () => {
     Cell.setValue(ws1, "A1", 100);
     Cell.setValue(ws2, "A1", 200);
     // Global name → Sheet1!A1, Sheet1-local → Sheet2!A1
-    definedNamesSetModel(getDefinedNames(wb), [
+    loadDefinedNamesModel(getDefinedNames(wb), [
       { name: "Val", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
       {
         name: "Val",

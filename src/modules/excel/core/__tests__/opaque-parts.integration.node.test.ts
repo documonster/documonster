@@ -398,7 +398,7 @@ describe("opaque part round-trip", () => {
   it("preserves through the streaming file loader, not just the buffer one", async () => {
     // `Workbook.read` buffers the package and hands each entry's bytes to the
     // loader; `Workbook.readFile` on Node streams the ZIP and hands over a
-    // stream instead. They are two code paths through `_processDefaultEntry`,
+    // stream instead. They are two code paths through `processDefaultEntry`,
     // and only the second one has to collect the bytes itself — so a test that
     // exercises only the buffer path proves nothing about reading a file.
     const vba = Uint8Array.of(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 77);

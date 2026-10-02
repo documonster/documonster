@@ -1,5 +1,6 @@
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { TableColumnXform } from "@excel/xlsx/xform/table/table-column-xform";
 import { PassThrough } from "@stream";
 import { parseSax } from "@xml/sax";
@@ -124,7 +125,7 @@ describe("TableColumnXform", () => {
     const stream = new PassThrough();
     stream.write(xml);
     stream.end();
-    const model = (await listXform.parse(parseSax(stream))) as
+    const model = (await parseXformEvents(listXform, parseSax(stream))) as
       | { name?: string; calculatedColumnFormula?: string }[]
       | undefined;
 

@@ -17,7 +17,7 @@ import { WorkbookWriter } from "@excel/stream/workbook-writer";
 export * from "@excel/core/workbook.browser";
 
 // Cross-platform + Node-only xlsx IO (read / readFile / writeFile / toBuffer /
-// readStream / writeStream + getXlsxIo). Node binding via xlsx-io.ts.
+// readStream / writeStream). Node binding via xlsx-io.ts.
 export {
   toBuffer,
   toStream,
@@ -26,8 +26,7 @@ export {
   readFile,
   writeFile,
   readStream,
-  writeStream,
-  getXlsxIo
+  writeStream
 } from "@excel/core/xlsx-io";
 export type {
   XlsxReadable,

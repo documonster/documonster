@@ -8,8 +8,7 @@ const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 const filename = process.argv[2] ?? path.join(exampleDir, "data/table.xlsx");
 
 const workbook = Workbook.create();
-Workbook.getXlsxIo(workbook)
-  .readFile(filename)
+Workbook.readFile(workbook, filename)
   .then(() => {
     Workbook.eachSheet(workbook, worksheet => {
       console.log(

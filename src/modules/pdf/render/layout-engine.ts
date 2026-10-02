@@ -203,8 +203,8 @@ export async function layoutSheet(
  * pipeline entirely. Page dimensions come from `options.pageSize`, with
  * orientation overridden by the chartsheet's own `orientation` field
  * (Excel's chartsheet convention defaults to landscape; see the
- * `CHARTSHEET_EMU_CX/CY` constants that define the drawing canvas in
- * `xlsx.browser.ts`).
+ * `CHARTSHEET_DRAWING_EMU` constants that define the drawing canvas in
+ * `excel/xlsx/write/chartsheet-drawing.ts`).
  *
  * The returned LayoutPage has:
  *  - `cells = []` (no grid to render)

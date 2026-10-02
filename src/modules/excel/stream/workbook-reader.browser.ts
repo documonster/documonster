@@ -93,6 +93,7 @@ import type { SharedStringValue } from "@excel/utils/shared-strings";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { Readable } from "@stream";
 import { EventEmitter } from "@utils/event-emitter";
@@ -467,7 +468,7 @@ export abstract class WorkbookReaderBase<
 
   private async _parseRels(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new RelationshipsXform();
-    this.workbookRels = await xform.parseStream(iterateStream(entry));
+    this.workbookRels = await parseXformStream(xform, iterateStream(entry));
 
     // Build fast lookup for worksheet relationship ids.
     this._workbookRelIdByTarget = Object.create(null) as Record<string, string>;
@@ -481,7 +482,7 @@ export abstract class WorkbookReaderBase<
   private async _parseWorkbook(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     this._emitEntry({ type: "workbook" });
     const workbook = new WorkbookXform();
-    this.model = await workbook.parseStream(iterateStream(entry));
+    this.model = await parseXformStream(workbook, iterateStream(entry));
     this.properties = workbook.map?.workbookPr as WorkbookPropertiesXform;
 
     // Build fast lookup for sheet metadata by relationship id.
@@ -756,13 +757,13 @@ export abstract class WorkbookReaderBase<
     this._emitEntry({ type: "styles" });
     if (this.options.styles === "cache") {
       this.styles = new StylesXform();
-      await this.styles.parseStream(iterateStream(entry));
+      await parseXformStream(this.styles, iterateStream(entry));
     }
   }
 
   private async _parseMetadata(entry: IterableStreamLike<Uint8Array | string>): Promise<void> {
     const xform = new MetadataXform();
-    const result = await xform.parseStream(iterateStream(entry));
+    const result = await parseXformStream(xform, iterateStream(entry));
     if (result) {
       this.hasDynamicArrayMetadata = !!result.hasDynamicArrays;
       this.dynamicArrayCmIndices = result.dynamicArrayCmIndices;

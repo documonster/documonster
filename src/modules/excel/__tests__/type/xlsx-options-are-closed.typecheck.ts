@@ -16,7 +16,7 @@
 // reintroduced index signature makes every `@ts-expect-error` below unused and
 // therefore an error in its own right.
 
-import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
+import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
 
 // --- Declared options still compile, with their declared types. ---------------
 

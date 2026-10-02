@@ -3,10 +3,10 @@ import { ZipParser } from "@archive/unzip/zip-parser";
 import { createZip } from "@archive/zip/zip-bytes";
 import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
 import type { PivotTableModel } from "@excel/core/pivot-table";
-import { getXlsxIo } from "@excel/core/workbook";
 import { addPivotTable, addTable } from "@excel/core/worksheet";
 import { Workbook, Worksheet } from "@excel/index";
 import type { CellFormulaValue, CellValue } from "@excel/types";
+import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { PivotTableXform } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
@@ -43,7 +43,7 @@ async function buildPivotXml(
   const worksheet2 = Workbook.addWorksheet(workbook, "Pivot");
   addPivotTable(worksheet2, { sourceTable: table, ...pivotOptions });
 
-  const buffer = await getXlsxIo(workbook).writeBuffer();
+  const buffer = await Workbook.toBuffer(workbook);
   const zipData = new ZipParser(buffer as Buffer).extractAllSync();
 
   return {
@@ -1796,7 +1796,7 @@ async function parsePivotXml(xml: string) {
       yield bytes;
     }
   };
-  const model = await new PivotTableXform().parseStream(stream);
+  const model = await parseXformStream(new PivotTableXform(), stream);
   expect(model).toBeTruthy();
   return model!;
 }
@@ -1952,15 +1952,15 @@ describe("PivotTableXform - issue #238 roundtrip fidelity", () => {
       }
     });
     // Truncated mid-capture: the nested collector is left active
-    await xform
-      .parseStream(
-        stream(
-          `<pivotTableDefinition xmlns="${MAIN_NS}" name="A" cacheId="0" rowHeaderCaption="first">` +
-            '<pivotFields count="1"><pivotField showAll="0"><extLst><ext uri="{X}">'
-        )
+    await parseXformStream(
+      xform,
+      stream(
+        `<pivotTableDefinition xmlns="${MAIN_NS}" name="A" cacheId="0" rowHeaderCaption="first">` +
+          '<pivotFields count="1"><pivotField showAll="0"><extLst><ext uri="{X}">'
       )
-      .catch(() => undefined);
-    const model = await xform.parseStream(
+    ).catch(() => undefined);
+    const model = await parseXformStream(
+      xform,
       stream(
         `<pivotTableDefinition xmlns="${MAIN_NS}" name="B" cacheId="1">` +
           '<location ref="A1:B2" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>' +

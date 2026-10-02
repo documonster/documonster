@@ -2,7 +2,7 @@
  * Structural stream contracts for the public XLSX IO surface.
  *
  * Kept in its own module so both platform IO variants (`xlsx-io.ts` /
- * `xlsx-io.browser.ts`), the serializer (`xlsx/xlsx.browser.ts`), and the
+ * `xlsx-io.browser.ts`), the serializer (`xlsx/write/package.ts`), and the
  * pull-source adapter (`xlsx-stream.ts`) share one definition instead of each
  * declaring a look-alike shape — and so `core/` never has to import a type from
  * the module it is imported by.

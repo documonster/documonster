@@ -10,7 +10,6 @@ import {
   cellToCsvString
 } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
-import { getXlsxIo } from "@excel/core/workbook";
 import { getCell } from "@excel/core/worksheet";
 import { Cell, Workbook } from "@excel/index";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
@@ -80,11 +79,11 @@ describe("Checkbox Feature", () => {
       Cell.setValue(ws, "B2", { checkbox: false });
 
       // Write to buffer
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       // Read back
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Checkboxes")!;
 
       // Verify values - checkboxes should be read back as booleans
@@ -101,7 +100,7 @@ describe("Checkbox Feature", () => {
 
       Cell.setValue(ws, "A1", { checkbox: true });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       // Check that the zip contains featurePropertyBag
       const entries = await extractAll(buffer);
@@ -153,7 +152,7 @@ describe("Checkbox Feature", () => {
       Cell.setValue(ws, "A2", 123);
       Cell.setValue(ws, "A3", true); // regular boolean
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       const entries = await extractAll(buffer);
 
@@ -172,7 +171,7 @@ describe("Checkbox Feature", () => {
       Cell.setValue(ws, "A1", { checkbox: true });
       Cell.setValue(ws, "A2", { checkbox: false });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       const entries = await extractAll(buffer);
 
@@ -210,7 +209,7 @@ describe("Checkbox Feature", () => {
       // Sanity check: style is present on the cell model before serialization
       expect(cellGetModel(cell).style?.font?.bold).toBe(true);
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const styles = entries.get("xl/styles.xml");
@@ -261,7 +260,7 @@ describe("Checkbox Feature", () => {
       cell.style.alignment = testUtils.styles.namedAlignments.middleCentre;
       cell.style.numFmt = testUtils.styles.numFmts.numFmt1;
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -314,7 +313,7 @@ describe("Checkbox Feature", () => {
       cellSetValue(a2, { checkbox: true });
       a2.style = sharedStyle;
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -362,7 +361,7 @@ describe("Checkbox Feature", () => {
       cellSetValue(a2, { checkbox: false });
       a2.style.fill = testUtils.styles.fills.blueWhiteHGrad;
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -435,7 +434,7 @@ describe("Checkbox Feature", () => {
       cellSetValue(a2, { checkbox: false });
       a2.style = style;
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
       const entries = await extractAll(buffer);
 
       const sheet1 = entries.get("xl/worksheets/sheet1.xml");
@@ -491,7 +490,7 @@ describe("Checkbox Feature", () => {
       Cell.setValue(ws, "B2", true); // regular boolean
       Cell.setValue(ws, "C1", { checkbox: true });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       const entries = await extractAll(buffer);
 
@@ -499,7 +498,7 @@ describe("Checkbox Feature", () => {
 
       // Read back and verify
       const wb2 = Workbook.create();
-      await getXlsxIo(wb2).load(buffer);
+      await Workbook.read(wb2, buffer);
       const ws2 = Workbook.getWorksheet(wb2, "Mixed")!;
 
       expect(Cell.getValue(ws2, "A1")).toBe("Header");
@@ -519,7 +518,7 @@ describe("Checkbox Feature", () => {
       const ws2 = Workbook.addWorksheet(wb, "Sheet2");
       Cell.setValue(ws2, "B2", { checkbox: false });
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       const entries = await extractAll(buffer);
 
@@ -536,7 +535,7 @@ describe("Checkbox Feature", () => {
       const wb = Workbook.create();
       Workbook.addWorksheet(wb, "Empty");
 
-      const buffer = await getXlsxIo(wb).writeBuffer();
+      const buffer = await Workbook.toBuffer(wb);
 
       const entries = await extractAll(buffer);
 

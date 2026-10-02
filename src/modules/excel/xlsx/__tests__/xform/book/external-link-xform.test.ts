@@ -11,6 +11,7 @@
 
 import { testXformHelper } from "@excel/xlsx/__tests__/xform/test-xform-helper";
 import { ExternalLinkXform } from "@excel/xlsx/xform/book/external-link-xform";
+import { parseXformEvents } from "@excel/xlsx/xform/parse-xform";
 import { describe, expect, it } from "vitest";
 
 const RENDER_XMLNS =
@@ -244,7 +245,7 @@ describe("ExternalLinkXform", () => {
     const stream = new PassThrough();
     stream.write(xml);
     stream.end();
-    const model = await xform.parse(parseSax(stream));
+    const model = await parseXformEvents(xform, parseSax(stream));
 
     expect(model).toBeDefined();
     expect(model!.cachedValues).toEqual({ Second: { B2: 99 } });

@@ -246,6 +246,95 @@ function streamNs(platform?: "browser" | "node"): Scenario {
   };
 }
 
+/**
+ * What a write-only XLSX export must not load eagerly (issue #241). Each is behind an `import()` that only
+ * the code needing it reaches, or belongs to the reader alone:
+ *
+ * - the XLSX reader, behind `core/xlsx-io`'s `import()`; the XLSB reader and writer, behind
+ *   `core/workbook-format`'s. Not the whole `xlsb/` tree: `workbook-format` imports `detect` and
+ *   `model-hash` statically on purpose, so an unchanged XLSB round trip can return its source bytes
+ *   without loading the writer;
+ * - the chart writer, behind `writeXlsxPackage`'s `import()`, and with it the chart builders, the
+ *   renderers and the drawing engine they paint through;
+ * - the streaming workbook reader and writer, which are `Stream` and `Workbook.createStream*`, not
+ *   `toBuffer`;
+ * - every XML *parser*. Writing renders through xforms, which used to carry the SAX-driven parse loop as
+ *   `BaseXform` methods and so retained `@xml/sax` with every xform; that loop is `xform/parse-xform.ts`
+ *   now, which only the readers import;
+ * - defined-name classification — the formula tokenizer and parser — which only loading a model needs and
+ *   which `core/model-load.ts` binds for the loaders. While `defined-names.ts` imported it, rspack kept it
+ *   in the entry chunk;
+ * - applying a loaded model (`core/model-load.ts`, `core/worksheet-load.ts`) and what only a loaded sheet
+ *   can bring: the chart handle and form controls. rspack decides which exports of a module are used
+ *   across the whole build, so while `setWorkbookModel` and `setSheetModel` sat in `workbook.browser.ts`
+ *   and `worksheet.ts` — both in every writer's entry chunk — the lazily loaded reader's calls to them kept
+ *   their dependencies there.
+ */
+const WRITE_ONLY_FORBIDDEN = [
+  "modules/excel/xlsx/read/",
+  "modules/excel/xlsb/read/",
+  "modules/excel/xlsb/write/",
+  "modules/archive/unzip/",
+  "modules/excel/xlsx/write/charts.js",
+  "modules/excel/chart/build/",
+  "modules/excel/chart/render/",
+  "modules/excel/chart/serialize/",
+  "modules/draw/",
+  "modules/excel/stream/",
+  "modules/xml/sax.js",
+  "modules/xml/dom.js",
+  "modules/excel/xlsx/xform/parse-xform.js",
+  "modules/excel/xlsx/xform/comment/threaded-comments-parse.js",
+  "modules/excel/core/model-load.js",
+  "modules/excel/core/worksheet-load.js",
+  "modules/excel/chart/chart-handle.js",
+  "modules/excel/core/form-control.js",
+  "modules/formula/"
+];
+
+/** The reproducer from issue #241, as its reporter wrote it. */
+const ISSUE_241_REPRO = `
+const wb = Workbook.create();
+const ws = Workbook.addWorksheet(wb, "Sheet");
+Worksheet.addRow(ws, ["a"]);
+Row.setHeight(ws, 1, 24);
+Row.setFont(ws, 1, { bold: true });
+Cell.setFill(ws, 1, 1, { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } });
+Cell.setBorder(ws, 1, 1, { top: { style: "thin" } });
+Column.setWidth(ws, 1, 15);
+Worksheet.setAutoFilter(ws, { from: { row: 1, col: 1 }, to: { row: 1, col: 1 } });
+const id = Image.add(wb, { base64: "iVBORw0KGgo=", extension: "png" });
+Image.place(ws, id, { tl: { col: 0, row: 0 }, ext: { width: 50, height: 50 }, editAs: "oneCell" });
+Workbook.toBuffer(wb).then(out => console.log(out.length));
+`;
+
+function writeOnlyScenarios(): Scenario[] {
+  const entries = [
+    {
+      label: "Workbook.toBuffer",
+      imports: ["Workbook"],
+      useExpr: "console.log(Workbook.toBuffer)"
+    },
+    {
+      label: "issue #241 reproducer",
+      imports: ["Cell", "Column", "Image", "Row", "Workbook", "Worksheet"],
+      useExpr: ISSUE_241_REPRO
+    }
+  ];
+  return entries.flatMap(({ label, imports, useExpr }) =>
+    (["node", "browser"] as const).map((platform): Scenario => ({
+      name: `${platform === "browser" ? "browser " : ""}/excel: ${label} (write-only: no reader, XML parser, charts, streams or XLSB)`,
+      importFrom: `${PKG_NAME}/excel`,
+      imports,
+      useExpr,
+      mustNotInclude: WRITE_ONLY_FORBIDDEN,
+      platform,
+      lazySplit: true,
+      excludeBundlers: ["esbuild"]
+    }))
+  );
+}
+
 const scenarios: Scenario[] = [
   // ===========================================================================
   // /excel subpath — ALL 20 namespaces. Per the layer rules, excel may reach
@@ -427,6 +516,19 @@ const scenarios: Scenario[] = [
     lazySplit: true,
     excludeBundlers: ["esbuild"]
   },
+
+  // ===========================================================================
+  // /excel member-level — a write-only export (issue #241). Two entries over one
+  // forbidden list: `Workbook.toBuffer` alone, and the issue's reproducer
+  // verbatim — rows, styles, a column width, an autofilter and an image — so a
+  // dependency added to any of the members it calls is caught too, not only one
+  // added to the serializer. See `WRITE_ONLY_FORBIDDEN` for what each entry says.
+  //
+  // esbuild is excluded for both reasons other lazy scenarios give: a
+  // single-file bundle inlines every `import()`, and it keeps every member of a
+  // re-exported namespace object.
+  // ===========================================================================
+  ...writeOnlyScenarios(),
 
   // ===========================================================================
   // /formula member-level — the full-table evaluator must NOT be pulled by
@@ -689,7 +791,15 @@ function normalizePath(filePath: string): string {
  *
  *   esbuild   `// dist/esm/modules/excel/cell.js`
  *   rolldown  `//#region dist/esm/modules/excel/cell.js`
- *   rspack    `// CONCATENATED MODULE: ./dist/esm/modules/excel/cell.js`
+ *   rspack    `// CONCATENATED MODULE: ./dist/esm/modules/excel/cell.js`, and for a module it
+ *             could not scope-hoist, the factory key `"./dist/esm/modules/excel/cell.js"(…) {`
+ *
+ * The rspack factory form needs `moduleIds: "named"` (see {@link runRspack}). With rspack's
+ * production default the key is a number — `8693(…) {` — and a module that is not concatenated,
+ * typically one shared between the entry and a lazy chunk, carries no path anywhere in the output.
+ * Such modules were invisible to every rspack scenario: measured on the write-only `Workbook.toBuffer`
+ * bundle, 101 of them, `xml/sax.js` among them, so a SAX parser put back into the writer passed here
+ * while rolldown caught it.
  *
  * This is the ground-truth tree-shaking signal: a module that the bundler
  * eliminated via DCE leaves NO marker. (Parsed-module stats / metafile inputs
@@ -701,7 +811,7 @@ function normalizePath(filePath: string): string {
  * reporting only); presence/absence is what the contract checks.
  */
 const MODULE_MARKER_RE =
-  /(?:\/\/#region\s+|\/\/\s+CONCATENATED MODULE:\s+\.?\/?|\/\/\s+)(dist\/(?:esm|browser)\/[^\s*]+\.js)/g;
+  /(?:\/\/#region\s+|\/\/\s+CONCATENATED MODULE:\s+\.?\/?|\/\/\s+|^"\.?\/?)(dist\/(?:esm|browser)\/[^\s*"]+\.js)/gm;
 
 function extractContributingFromBundle(bundleText: string): ModuleEntry[] {
   const seen = new Map<string, number>();
@@ -1013,7 +1123,15 @@ function runRspack(scenario: Scenario): Promise<ScenarioResult> {
             : ["import", "default"],
         symlinks: true
       },
-      optimization: { usedExports: true, sideEffects: true, minimize: false, innerGraph: true },
+      optimization: {
+        usedExports: true,
+        sideEffects: true,
+        minimize: false,
+        innerGraph: true,
+        // Path-keyed module factories, so a module rspack could not concatenate still carries a marker —
+        // see `MODULE_MARKER_RE`. Ids affect naming only, not what is retained.
+        moduleIds: "named"
+      },
       stats: {
         all: false,
         modules: true,

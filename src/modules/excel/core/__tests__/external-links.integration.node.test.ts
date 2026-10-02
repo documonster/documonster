@@ -395,9 +395,9 @@ describe("external workbook links — end-to-end", () => {
     expect(link).toEqual(originalSnapshot);
   });
 
-  // T5: the Node streaming read path (`xlsx.read(stream)` →
-  // `loadFromZipEntries`) is a separate code path from the buffer path
-  // (`xlsx.load(buffer)` → `loadFromFiles`). Both must reconcile
+  // T5: the Node streaming read path (`Workbook.readStream` →
+  // `readXlsxEntriesInto`) is a separate code path from the buffer path
+  // (`Workbook.read` → `readXlsxFilesInto`). Both must reconcile
   // externalLinks correctly; only the buffer path was covered above.
   it("reconstructs externalLinks via the Node stream read path", async () => {
     const wb = Workbook.create();
@@ -413,7 +413,7 @@ describe("external workbook links — end-to-end", () => {
     await expectValidXlsx(buf, { label: "stream-read-path" });
 
     // Feed the bytes through a Node Readable to exercise the streaming
-    // reader path (loadFromZipEntries), not the in-memory buffer path.
+    // reader path (readXlsxEntriesInto), not the in-memory buffer path.
     const { Readable } = await import("node:stream");
     const stream = Readable.from([Buffer.from(buf)]);
 

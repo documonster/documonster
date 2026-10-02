@@ -1145,12 +1145,6 @@ class StylesXformMock extends StylesXform {
   // =========================================================================
   // Style Manager Interface
 
-  // override normal behaviour - consume and dispose
-  parseStream(stream: { autodrain(): void }): Promise<void> {
-    stream.autodrain();
-    return Promise.resolve();
-  }
-
   // add a cell's style model to the collection
   // each style property is processed and cross-referenced, etc.
   // the styleId is returned. Note: cellType is used when numFmt not defined

@@ -16,8 +16,8 @@ import type { XlsxWritable } from "@excel/core/xlsx-io-types";
  */
 import * as Workbook from "@excel/surface/workbook.browser";
 import * as Worksheet from "@excel/surface/worksheet";
-import type { IZipWriter, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
-import { XLSX } from "@excel/xlsx/xlsx.browser";
+import type { IZipWriter } from "@excel/xlsx/types";
+import { createZipWriterAdapter } from "@excel/xlsx/zip-writer";
 import { concatUint8Arrays } from "@utils/binary";
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,13 +42,6 @@ function createCollectingSink(chunks: Uint8Array[]): XlsxWritable {
   };
 }
 
-/** Reaches the adapter directly: `createZipWriter` is where the writer would get it. */
-class ExposedXlsx extends XLSX {
-  zipWriter(options?: XlsxWriteOptions["zip"]): IZipWriter {
-    return this.createZipWriter(options);
-  }
-}
-
 async function finish(zip: IZipWriter, chunks: Uint8Array[]): Promise<Uint8Array> {
   await zip.waitForDrain();
   await new Promise<void>(resolve => {
@@ -69,7 +62,7 @@ describe("XLSX entry text batching", () => {
 
     const push = vi.spyOn(ZipDeflateFile.prototype, "push");
     try {
-      const bytes = await new XLSX(workbook).writeBuffer({ validate: false });
+      const bytes = await Workbook.toBuffer(workbook, { validate: false });
       // Measured: 24,936 pushes before batching, 20 after. The bound is loose enough to survive a part being
       // added and still three orders of magnitude below the per-tag count it replaces.
       expect(push.mock.calls.length).toBeLessThan(200);
@@ -81,7 +74,7 @@ describe("XLSX entry text batching", () => {
 
   it("keeps buffered text ahead of bytes written after it", async () => {
     const chunks: Uint8Array[] = [];
-    const zip = new ExposedXlsx(Workbook.create()).zipWriter({});
+    const zip = createZipWriterAdapter({});
     zip.pipe(createCollectingSink(chunks));
 
     const entry = zip.createEntry("mixed.bin");
@@ -102,7 +95,7 @@ describe("XLSX entry text batching", () => {
 
   it("splits text that exceeds the batch size and loses nothing", async () => {
     const chunks: Uint8Array[] = [];
-    const zip = new ExposedXlsx(Workbook.create()).zipWriter({});
+    const zip = createZipWriterAdapter({});
     zip.pipe(createCollectingSink(chunks));
 
     // Multi-byte on purpose: the batch is measured in characters, so a UTF-8 boundary must never fall inside
@@ -122,7 +115,7 @@ describe("XLSX entry text batching", () => {
 
   it("refuses a write after end() instead of buffering it into the void", async () => {
     const chunks: Uint8Array[] = [];
-    const zip = new ExposedXlsx(Workbook.create()).zipWriter({});
+    const zip = createZipWriterAdapter({});
     zip.pipe(createCollectingSink(chunks));
 
     const entry = zip.createEntry("closed.xml");

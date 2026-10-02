@@ -30,7 +30,7 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **CSV import/export** — `readCsv`, `writeCsv`, `readCsvFile`, `writeCsvFile`
 - **Markdown import/export** — `readMarkdown`, `writeMarkdown`, `readMarkdownFile`, `writeMarkdownFile`
 - **PDF export** — `Pdf.fromExcel()` with full styling, pagination, fonts, encryption
-- **Browser support** — `xlsx.load()`, `xlsx.writeBuffer()`, no polyfills needed
+- **Browser support** — `Workbook.read`, `Workbook.toBuffer`, no polyfills needed
 
 ## Quick Start
 
@@ -85,6 +85,24 @@ Worksheet.eachRow(worksheet, (row, rowNumber) => {
   console.log("Row " + rowNumber + " = " + JSON.stringify(Row.values(worksheet, rowNumber)));
 });
 ```
+
+### Browser Bundle Size
+
+Writing a workbook does not load the code for reading one. The parts a write-only export never needs are
+behind `import()` and arrive only when something calls for them:
+
+- **The XLSX reader** — the ZIP parser, part dispatch and reconciliation — on the first `Workbook.read`.
+- **The chart writer** — only when the workbook has a chart.
+- **The XLSB reader and writer** — only for `{ format: "xlsb" }` or a binary input.
+- **Comments, form controls, drawings, tables, pivot tables and chartsheets** — only when a sheet has one.
+- **The OOXML self-check** — only when it runs: `{ validate: true }`, or by default on Node outside
+  production. It is off by default in a browser.
+
+Bundle with code splitting enabled so those chunks stay separate; without it they are inlined into one
+file. A bundler that drops unused members of a namespace (Rollup, rolldown, Vite, webpack, rspack) also
+leaves out whatever only the members you do not call need. **esbuild keeps every member of an imported
+namespace such as `Workbook`**, so with it the code those members reach statically is included even when
+you do not call them; the lazily loaded parts above still stay out of the initial chunk.
 
 ### Reading a Range
 

@@ -2,10 +2,10 @@ import { cellGetValue } from "@excel/core/cell";
 import {
   definedNamesAdd,
   definedNamesAddFormula,
-  definedNamesGetAllNames,
-  definedNamesSetModel
+  definedNamesGetAllNames
 } from "@excel/core/defined-names";
 import { calculateFormulas } from "@excel/core/formula-adapter";
+import { loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { addTable, findCell, setSheetName } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
@@ -2758,7 +2758,7 @@ describe("calculateFormulas", () => {
       Cell.setValue(ws2, "A1", 200);
 
       // Global "MyVal" → Sheet1!A1, Sheet1-local "MyVal" → Sheet2!A1
-      definedNamesSetModel(getDefinedNames(wb), [
+      loadDefinedNamesModel(getDefinedNames(wb), [
         { name: "MyVal", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
         {
           name: "MyVal",
@@ -2807,7 +2807,7 @@ describe("calculateFormulas", () => {
       Cell.setValue(ws1, "A1", 42);
 
       // Only a global "GlobalOnly" name, no sheet-local override
-      definedNamesSetModel(getDefinedNames(wb), [
+      loadDefinedNamesModel(getDefinedNames(wb), [
         { name: "GlobalOnly", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" }
       ]);
 
@@ -2830,7 +2830,7 @@ describe("calculateFormulas", () => {
       Cell.setValue(ws2, "A1", 20);
 
       // Global "X" = Sheet1!A1, Sheet2-local "X" = Sheet2!A1
-      definedNamesSetModel(getDefinedNames(wb), [
+      loadDefinedNamesModel(getDefinedNames(wb), [
         { name: "X", ranges: ["Sheet1!$A$1"], rawText: "Sheet1!$A$1" },
         {
           name: "X",

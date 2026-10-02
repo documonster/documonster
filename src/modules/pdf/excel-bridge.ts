@@ -1818,8 +1818,8 @@ function estimateChartPixelSize(range: PdfAnchorRange): {
 /**
  * Pixel dimensions used when rasterising a non-whitelisted ChartEx on a
  * chartsheet. Derived from Excel's own chartsheet canvas defaults
- * (A4 landscape minus default margins — see `CHARTSHEET_EMU_CX / CY`
- * in `xlsx.browser.ts`). 2× is applied by `renderChartExPng` via the
+ * (A4 landscape minus default margins — see `CHARTSHEET_DRAWING_EMU`
+ * in `excel/xlsx/write/chartsheet-drawing.ts`). 2× is applied by `renderChartExPng` via the
  * `scale` option so the PNG looks crisp at 150% zoom.
  */
 const CHARTSHEET_RASTER_PX = { width: 1280, height: 720 } as const;
@@ -1893,8 +1893,8 @@ async function convertChartsheet(
   }
 
   // Chartsheet orientation: explicit pageSetup wins. Excel's chartsheet
-  // convention is landscape when unset (the CHARTSHEET_EMU_CX/CY pair in
-  // xlsx.browser.ts is wider than tall), so we inherit that default.
+  // convention is landscape when unset (`CHARTSHEET_DRAWING_EMU` in
+  // excel/xlsx/write/chartsheet-drawing.ts is wider than tall), so we inherit that default.
   const explicitOrientation = chartsheetPageSetup(cs)?.orientation;
   const orientation: PdfChartsheetData["orientation"] =
     explicitOrientation === "portrait" || explicitOrientation === "landscape"

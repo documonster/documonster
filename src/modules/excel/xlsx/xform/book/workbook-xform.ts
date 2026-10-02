@@ -255,7 +255,7 @@ class WorkbookXform extends BaseXform {
           this.model.pivotCaches = this.map.pivotCaches.model;
         }
         // Attach parsed <externalReferences> as a list of { rId } objects.
-        // The reader in xlsx.browser.ts will later join each entry with the
+        // The reader (`xlsx/read/reconcile.ts`) will later join each entry with the
         // matching workbookRels row (to pick up the externalLink Target) and
         // the parsed externalLinkN.xml part (to pick up sheetNames / cache).
         if (this.map.externalReferences.model && this.map.externalReferences.model.length > 0) {
@@ -334,7 +334,7 @@ class WorkbookXform extends BaseXform {
     // Store reconciled chartsheets on the model
     model.chartsheetsList = chartsheetsList;
 
-    // Drop unbound worksheet parts. The reader (xlsx.browser.ts)
+    // Drop unbound worksheet parts. The reader (`xlsx/read/package.ts`)
     // collects every `xl/worksheets/sheetN.xml` it sees in the zip,
     // because zip entries arrive in arbitrary order relative to
     // workbook.xml. The authoritative `<sheets>` list is only

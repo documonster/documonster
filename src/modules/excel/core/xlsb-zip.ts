@@ -2,7 +2,7 @@
  * The streaming zip a binary package is written into.
  *
  * A one-line factory in a file of its own, and the reason is a layer rule rather than tidiness: the adapter
- * lives in `xlsx.browser.ts`, and `core/xlsb-stream.ts` must not import the XLSX module — it describes the zip
+ * lives in `xlsx/zip-writer.ts`, and `core/xlsb-stream.ts` must not import the XLSX module — it describes the zip
  * structurally so that it does not. Something has to bridge the two, and doing it here keeps that import in one
  * place instead of at every call site.
  *
@@ -20,6 +20,6 @@ import type { StreamingZipDriver } from "@excel/core/xlsb-stream";
  */
 export async function createXlsbZipWriter(): Promise<StreamingZipDriver> {
   // The module's own factory rather than the adapter class, which is deliberately not exported.
-  const { createZipWriterAdapter } = await import("@excel/xlsx/xlsx.browser");
+  const { createZipWriterAdapter } = await import("@excel/xlsx/zip-writer");
   return createZipWriterAdapter() as unknown as StreamingZipDriver;
 }

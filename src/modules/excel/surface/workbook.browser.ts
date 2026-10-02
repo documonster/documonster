@@ -36,7 +36,6 @@ export {
   removeCellStyle,
   useBuiltinCellStyle,
   getWorkbookModel as getModel,
-  setWorkbookModel as setModel,
   createStreamWriter,
   createStreamReader
 } from "@excel/core/workbook.browser";
@@ -47,10 +46,11 @@ export {
   read,
   readWithDiagnostics,
   readStream,
-  writeStream,
-  getXlsxIo
+  writeStream
 } from "@excel/core/xlsx-io";
 export type { XlsxReadable, XlsxWritable, XlsxStreamOptions } from "@excel/core/xlsx-io";
+
+export { loadWorkbookModel as setModel } from "@excel/core/model-load";
 
 /** A workbook handle (opaque to consumers). */
 export type { WorkbookData as Handle } from "@excel/core/workbook-core";

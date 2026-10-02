@@ -4,39 +4,17 @@ import type { DecodedAddress } from "@excel/types";
 import { CellMatrix } from "@excel/utils/cell-matrix";
 import type { DecodedRange } from "@excel/utils/col-cache";
 import { colCache } from "@excel/utils/col-cache";
-import { parse } from "@formula/syntax/parser";
-import { tokenize } from "@formula/syntax/tokenizer";
 
 /**
  * A formula-syntax oracle: returns `true` iff `text` parses as a formula
  * expression. Used to classify defined-name text (formula vs. opaque) when
  * loading XLSX. Consumers may inject a custom probe via
  * `createWorkbook({ formulaSyntaxProbe })` / `createDefinedNames(probe)`;
- * otherwise the built-in {@link defaultFormulaSyntaxProbe} (real
- * tokenizer + parser) is used — no install / registration step required.
+ * otherwise the caller's fallback is used — the built-in tokenizer + parser
+ * probe in `core/model-load.ts`, bound by every public entry and by the
+ * readers, so no install / registration step is required.
  */
 export type SyntaxProbe = (text: string) => boolean;
-
-/**
- * Default formula-syntax probe, backed by the real tokenizer + parser.
- *
- * This is reached only from the XLSX-load classification path
- * (`definedNamesSetModel` → `classifyDefinedName`); a consumer who merely
- * creates a workbook never calls it, so the tokenizer/parser are tree-shaken
- * out of `Workbook.create`-only bundles (verified by scripts/treeshake-verify).
- */
-export function defaultFormulaSyntaxProbe(text: string): boolean {
-  try {
-    const tokens = tokenize(text);
-    if (tokens.length === 0) {
-      return false;
-    }
-    parse(tokens);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 const rangeRegexp = /[$](\w+)[$](\d+)(:[$](\w+)[$](\d+))?/;
 
@@ -217,7 +195,7 @@ function hasUnquotedParen(s: string): boolean {
  * string is a formula. When `probe` is `null`, any such string is classified
  * as **opaque** — we have no evidence it is a formula, and leaving it opaque
  * preserves round-trip bytes via `rawText`. (In practice `definedNamesSetModel`
- * always supplies at least the built-in `defaultFormulaSyntaxProbe`.)
+ * always supplies a probe: its caller's fallback is required.)
  *
  * This function is pure: the classification of a given input depends
  * entirely on (rawText, ranges, probe) and no global state. Two calls
@@ -782,7 +760,11 @@ export function definedNamesModel(dn: DefinedNamesData): DefinedNameModel[] {
  * that arrive without `rawText` (programmatic API) fall back to inspecting
  * the existing `ranges` and `formulaExpression` fields for compatibility.
  */
-export function definedNamesSetModel(dn: DefinedNamesData, value: DefinedNameModel[]): void {
+export function definedNamesSetModel(
+  dn: DefinedNamesData,
+  value: DefinedNameModel[],
+  fallbackProbe: SyntaxProbe
+): void {
   const matrixMap = (dn.matrixMap = {} as Record<string, CellMatrix>);
   const formulaMap = (dn.formulaMap = {} as Record<string, string>);
   const localSheetIdMap = (dn.localSheetIdMap = {} as Record<string, number>);
@@ -791,9 +773,9 @@ export function definedNamesSetModel(dn: DefinedNamesData, value: DefinedNameMod
   const nameForKeyMap = (dn.nameForKey = {} as Record<string, string>);
 
   // Resolve the probe: an explicit per-instance probe always wins; otherwise
-  // use the built-in tokenizer+parser probe. No install step is involved — the
-  // probe is reached directly here (only on the XLSX-load path).
-  const probe = dn._explicitProbe ?? defaultFormulaSyntaxProbe;
+  // the caller's fallback. It is a parameter rather than an import so that the
+  // tokenizer and parser belong to whoever loads a model — see `core/model-load.ts`.
+  const probe = dn._explicitProbe ?? fallbackProbe;
 
   for (const definedName of value) {
     const sKey = storageKey(definedName.name, definedName.localSheetId);

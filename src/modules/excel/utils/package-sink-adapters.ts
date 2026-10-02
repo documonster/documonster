@@ -80,7 +80,7 @@ export class ArchiveSink implements PackageSink {
  * The subset of the streaming zip writer this sink needs.
  *
  * Named structurally rather than importing `IZipWriter`, for two reasons. It keeps `utils/` from depending on
- * `xlsx/` — `IZipWriter` is declared in `xlsx.browser.ts` — and it states exactly which four members are used,
+ * `xlsx/` — `IZipWriter` is declared in `xlsx/types.ts` — and it states exactly which four members are used,
  * so a reader can see that nothing here reaches for the emitter or the pipe.
  */
 export interface StreamingZipLike {

@@ -482,10 +482,10 @@ describe("Documonster.Excel Browser Tests", () => {
       expect(Cell.getValue(ws2, "A2")).toBe(123);
     });
 
-    // Regression test: loading files with drawings via loadFromFiles path
-    // Previously, _processDrawingEntry would fail because it tried to collect
+    // Regression test: loading files with drawings via readXlsxFilesInto path
+    // Previously, processDrawingEntry would fail because it tried to collect
     // data from an already-consumed text stream instead of using the provided rawData
-    it("should load files with embedded images via buffer (loadFromFiles path)", async () => {
+    it("should load files with embedded images via buffer (readXlsxFilesInto path)", async () => {
       // Create a workbook with an embedded image
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "with-image");
@@ -575,7 +575,7 @@ describe("Documonster.Excel Browser Tests", () => {
       // Write to buffer
       const buffer = await Workbook.toBuffer(wb);
 
-      // Load via xlsx.load() which uses loadFromFiles internally
+      // Load via Workbook.read, which uses readXlsxFilesInto internally
       const wb2 = Workbook.create();
       await Workbook.read(wb2, buffer);
 

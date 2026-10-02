@@ -55,8 +55,8 @@ export default defineConfig({
       "src/modules/word/**/__tests__/**/*.test.ts",
       // Excel in-memory suites (Workbook.toBuffer/read, styling, charts,
       // formulas, …). Tests that genuinely need the Node platform — disk I/O
-      // (`Workbook.readFile`), Node `Buffer`/streams, the `getXlsxIo` Node
-      // binding, system-font PNG rendering, the fileURLToPath-based validator
+      // (`Workbook.readFile`), Node `Buffer`/streams, the Node streaming
+      // reader, system-font PNG rendering, the fileURLToPath-based validator
       // oracle — are named `*.node.test.ts` and skipped by the exclude below.
       "src/modules/excel/**/__tests__/**/*.test.ts"
     ],

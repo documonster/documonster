@@ -7,19 +7,18 @@ import {
   writeXlsbToStream
 } from "@excel/core/workbook-format";
 /**
- * Browser xlsx IO handle accessor and the canonical public IO surface.
+ * The canonical public workbook IO surface — browser variant.
  *
- * Kept out of `workbook.browser` so the heavy `XLSX` serializer is not a static
- * dependency of the workbook record module (which would create a
- * workbook ↔ xlsx import cycle). Selected over `xlsx-io.ts` (Node) via the
- * `.browser` same-name swap at build/test time.
+ * Kept out of `workbook.browser` so the serializer is not a static dependency of
+ * the workbook record module (which would create a workbook ↔ xlsx import cycle).
+ * Selected over `xlsx-io.ts` (Node) via the `.browser` same-name swap.
  */
 import { readWorkbookWithDiagnostics } from "@excel/core/workbook-io-types";
 import type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
 import type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 import { createXlsxByteStream } from "@excel/core/xlsx-stream";
-import type { XlsxReadOptions, IParseStream } from "@excel/xlsx/xlsx.browser";
-import { XLSX } from "@excel/xlsx/xlsx.browser";
+import type { IParseStream, XlsxReadOptions } from "@excel/xlsx/types";
+import { writeXlsxBytes, writeXlsxToStream } from "@excel/xlsx/write/package";
 
 export type {
   WorkbookDiagnosticReadOptions,
@@ -35,12 +34,18 @@ import type {
   WorkbookWriteOptions
 } from "@excel/core/workbook-io-types";
 
-/** Get (or lazily create) the xlsx IO handle bound to a workbook. */
-export function getXlsxIo(wb: WorkbookData): XLSX {
-  if (!wb._xlsx) {
-    wb._xlsx = new XLSX(wb);
-  }
-  return wb._xlsx;
+/**
+ * The XLSX reader, loaded on demand — the boundary `workbook-format.ts` already draws for XLSB.
+ *
+ * What this boundary buys depends on the bundler, and it is worth being exact about. One that drops
+ * unused members of a namespace (rolldown, rspack) already leaves the reader out of a `toBuffer`-only
+ * bundle, static import or not — the reader is kept out of the *writer* by `xlsx/write/` never importing
+ * `xlsx/read/`, and `scripts/treeshake-verify.ts` asserts that. One that keeps a namespace object whole
+ * (esbuild) retains `read` with `toBuffer`, and there this `import()` is what moves the reader into a
+ * chunk fetched on first read instead of on page load. Every read entry is async, so it costs nothing.
+ */
+function loadXlsxReader() {
+  return import("@excel/xlsx/read/package");
 }
 
 // =============================================================================
@@ -57,7 +62,7 @@ export async function toBuffer(
   }
   // Inlined: the wrapper this replaced had one caller, isolated no platform difference and narrowed
   // nothing — it was a name standing in for a method call.
-  return await getXlsxIo(wb).writeBuffer(options);
+  return await writeXlsxBytes(wb, options);
 }
 
 /** Read xlsx bytes into a workbook (mutates and returns `wb`). */
@@ -71,7 +76,7 @@ export async function read(
   if (format === "xlsb" && bytes) {
     return readXlsbInto(wb, bytes, undefined, options);
   }
-  return getXlsxIo(wb).load(bytes ?? data, options);
+  return (await loadXlsxReader()).readXlsxInto(wb, bytes ?? data, options);
 }
 
 /**
@@ -96,12 +101,13 @@ export async function readWithDiagnostics(
 }
 
 /** Read a workbook from a parse stream (mutates and returns `wb`). */
-export function readStream(
+export async function readStream(
   wb: WorkbookData,
   stream: IParseStream,
   options?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  return getXlsxIo(wb).read(stream, options);
+  const { readXlsxStreamInto } = await import("@excel/xlsx/read/stream");
+  return readXlsxStreamInto(wb, stream as never, options);
 }
 
 /**
@@ -154,7 +160,7 @@ export async function writeStream(
     await writeXlsbToStream(wb, stream, options);
     return;
   }
-  await getXlsxIo(wb).write(stream, options);
+  await writeXlsxToStream(wb, stream, options);
 }
 
 /**
@@ -207,11 +213,13 @@ export function toStream(
     // happens to run.
     return createXlsxByteStream(sink => writeXlsbToStream(wb, sink, options), options);
   }
-  const io = getXlsxIo(wb);
-  return createXlsxByteStream((sink, writeOptions) => io.write(sink, writeOptions), options);
+  return createXlsxByteStream(
+    (sink, writeOptions) => writeXlsxToStream(wb, sink, writeOptions),
+    options
+  );
 }
 
 export type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
-export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/xlsx.browser";
+export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
 export type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 export type { WorkbookFormat } from "@excel/core/workbook-format";

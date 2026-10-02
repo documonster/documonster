@@ -17,12 +17,8 @@ import {
 } from "@excel/core/cell";
 import { definedNamesGetRanges, definedNamesModel } from "@excel/core/defined-names";
 import { ValueType } from "@excel/core/enums";
-import {
-  getDefinedNames,
-  getWorkbookModel,
-  getWorksheets,
-  setWorkbookModel
-} from "@excel/core/workbook";
+import { loadWorkbookModel } from "@excel/core/model-load";
+import { getDefinedNames, getWorkbookModel, getWorksheets } from "@excel/core/workbook";
 import type { CsvOptions } from "@excel/core/workbook";
 import { addWorkbookImage } from "@excel/core/workbook-core";
 import {
@@ -504,7 +500,7 @@ describe("Workbook", () => {
             ranges: []
           }
         ];
-        setWorkbookModel(wb, workbookModel);
+        loadWorkbookModel(wb, workbookModel);
 
         const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "empty Print_Area ranges" });
@@ -1107,7 +1103,7 @@ describe("Workbook", () => {
         m.definedNames = [
           { name: "_xlnm.Print_Area", localSheetId: 0, ranges: [], rawText: "'S'!$A$1" }
         ];
-        setWorkbookModel(wb, m);
+        loadWorkbookModel(wb, m);
         const buffer = await Workbook.toBuffer(wb);
         await expectValidXlsx(buffer, { label: "bare-cell OOXML" });
 
