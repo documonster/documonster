@@ -618,3 +618,19 @@ describe("Markdown defaults come from the converted document", () => {
     expect(rPr?.size).toBe(24);
   });
 });
+
+describe("standalone HTML comments", () => {
+  it("skips a comment closed by `--!>` as well as `-->`", async () => {
+    for (const close of ["-->", "--!>"]) {
+      const body = await mdBody(`para\n\n<!-- note ${close}\n\nnext`);
+      expect(body).toHaveLength(2);
+      expect(JSON.stringify(body)).not.toContain("note");
+    }
+  });
+
+  it("keeps text that sits between two comments on one line", async () => {
+    const body = await mdBody("<!-- a --> kept <!-- b -->");
+    expect(body).toHaveLength(1);
+    expect(JSON.stringify(body)).toContain("kept");
+  });
+});

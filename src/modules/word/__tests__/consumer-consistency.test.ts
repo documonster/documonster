@@ -21,6 +21,8 @@ import type {
   RunProperties,
   StyleDef
 } from "@word/types";
+import { parseXml, textContent, walk } from "@xml/dom";
+import type { XmlElement } from "@xml/types";
 import { describe, expect, it } from "vitest";
 
 const REV = { author: "A", id: 1 };
@@ -85,15 +87,29 @@ function semanticText(blocks: Views["semantic"]): string {
     .join("");
 }
 
+/**
+ * Text of a markup string, read by a real parser rather than by deleting
+ * tag-shaped substrings: a regex cannot know where a tag ends (a `>` inside an
+ * attribute value) and leaves entities undecoded.
+ */
+function markupText(markup: string): string {
+  return textContent(parseXml(`<root>${markup}</root>`).root);
+}
+
 function odtBodyText(xml: string): string {
-  const body = xml.slice(xml.indexOf("<office:text>"));
-  return body.replace(/<[^>]+>/g, "");
+  let body: XmlElement | undefined;
+  walk(parseXml(xml).root, el => {
+    if (el.name === "office:text") {
+      body ??= el;
+    }
+  });
+  return body ? textContent(body) : "";
 }
 
 async function texts(d: DocxDocument): Promise<string[]> {
   const v = await views(d);
   return [
-    v.html.replace(/<[^>]+>/g, "").replace(/\s+/g, ""),
+    markupText(v.html).replace(/\s+/g, ""),
     v.md.trim(),
     semanticText(v.semantic),
     odtBodyText(v.odt)

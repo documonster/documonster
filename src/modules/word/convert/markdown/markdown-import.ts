@@ -655,7 +655,10 @@ function parseMarkdownBlocks(lines: string[], start: number, end: number): Block
 
     // A standalone HTML comment carries no content; it is how CommonMark
     // separates two adjacent lists, so it must not become a paragraph.
-    if (/^\s*<!--.*-->\s*$/.test(line)) {
+    // HTML also closes a comment with `--!>`, so accept both terminators. The
+    // body may not contain a terminator: `<!-- a --> text <!-- b -->` is two
+    // comments around content, and treating it as one would drop the text.
+    if (/^\s*<!--(?:(?!--!?>)[\s\S])*--!?>\s*$/.test(line)) {
       i++;
       continue;
     }
