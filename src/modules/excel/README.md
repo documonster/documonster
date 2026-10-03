@@ -1026,7 +1026,7 @@ Preserved inbound relationships are re-emitted on the package root, on `xl/workb
 
 ### Oracle And Corpus Testing
 
-The repository includes optional harnesses for real-application validation. They are disabled by default because they require external binaries or private fixture corpora — with one exception: the chart round-trip tests open their workbooks in LibreOffice automatically when it is installed. Each open takes seconds; set `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=0` to skip them.
+The repository includes optional harnesses for real-application validation. They are disabled by default because they require external binaries or private fixture corpora. LibreOffice is not used just because it is installed; set the variables below to opt in.
 
 Every generated workbook in these harnesses also runs an OOXML package audit before external conversion. The audit checks required part content types, relationship targets, duplicate relationship IDs, chart/ChartEx/drawing/chartsheet structure, ChartEx data/axis references, and ChartEx external-data relationship IDs so common Excel "repaired records" issues fail early in CI. When an enabled Office/LibreOffice open-validation command logs repair/corruption/error text, the test treats it as a hard validation failure.
 
@@ -2734,29 +2734,36 @@ Row.eachCell(ws, 1, cell => {
 });
 ```
 
-`Cell.find` is the fourth source of a handle, and the only reader that does not
-create what it looks at:
+`Cell.find` is the fourth source of a handle. It returns `undefined` for a cell
+that does not exist, and creates nothing:
 
 ```typescript
 const cell = Cell.find(ws, "B7"); // CellData | undefined
 const value = cell ? Cell.view(cell).value : null;
 ```
 
-Every other reader — `Cell.getValue`, `Cell.getFont`, … — resolves its address
-through `getCell`, which **materialises** the row and the cell when they do not
-exist. That is what you want when writing, but it means reading a cell far out in
-a sparse sheet leaves rows behind and moves `Worksheet.rowCount`:
+The value readers create nothing either. `Cell.getValue`, `getText`,
+`getDisplayText`, `getType`, `getFormula`, `getResult`, `getNumFmt`,
+`getHyperlink`, `getNote`, `getNames`, `getValidation`, `isMerged` and the date
+readers answer for a missing cell exactly as for an empty one, so reading a sparse
+sheet leaves it, and the file it saves to, untouched:
 
 ```typescript
-Cell.getValue(ws, "A1000"); // creates 1000 rows
-Worksheet.rowCount(ws); // 1000
-
-Cell.find(ws, "A1000"); // undefined; sheet untouched
+Cell.getValue(ws, "A1000"); // null
+Worksheet.rowCount(ws); // unchanged
 ```
 
-Use `find` when the question is whether a cell is there at all. To read a whole
-region without materialising anything, use `Range.getValues` / `Worksheet.toAoa`;
-for one column, `Column.values` / `Column.getValues`.
+The style-facet readers — `getStyle`, `getFont`, `getAlignment`, `getBorder`,
+`getFill`, `getProtection` — plus `getModel` and `getMergeMaster` **do** create the
+cell, because what they return is live and meant to be edited in place
+(`Cell.getStyle(ws, "B2").font = { bold: true }`); there is nothing to edit until
+the cell exists. Use `find` when the question is whether a cell is there at all.
+To read a whole region, `Range.getValues` / `Worksheet.toAoa`; for one column,
+`Column.values` / `Column.getValues`.
+
+For a whole-sheet survey — header rows, first data values, totals and where formulas are — see
+[`inspect-sheet.ts`](examples/inspect-sheet.ts). It takes header rows from tables and auto-filters where
+the file declares them, and labels every guess as one.
 
 Every type the public API speaks is exported from `documonster/excel` under its
 **declared** name — the same name TypeScript prints in errors and hovers. There

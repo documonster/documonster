@@ -357,6 +357,83 @@ describe("Worksheet", () => {
       const table3 = Table.get(ws3, "CalcTable");
       expect(table3.table.columns[1].calculatedColumnFormula).toBe("[Value]*2");
     });
+
+    it("keeps the totals row's cached results through a load", async () => {
+      // The results are `<v>` values in the sheet; the table part cannot hold them. Loading rebuilt the totals
+      // cells from the table model, so every cached total read back as a formula with no result.
+      const wb1 = Workbook.create();
+      Table.add(Workbook.addWorksheet(wb1, "S"), {
+        name: "Totals",
+        ref: "A1",
+        headerRow: true,
+        totalsRow: true,
+        columns: [
+          { name: "Item", totalsRowLabel: "Total" },
+          { name: "Qty", totalsRowFunction: "sum", totalsRowResult: 8 },
+          { name: "Note", totalsRowFunction: "count", totalsRowResult: 1 }
+        ],
+        rows: [
+          ["a", 3, "x"],
+          ["b", 5, null]
+        ]
+      });
+
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, await Workbook.toBuffer(wb1));
+      const ws2 = Workbook.getWorksheet(wb2, "S")!;
+      expect(Cell.getValue(ws2, "B4")).toEqual({ formula: "SUBTOTAL(109,Totals[Qty])", result: 8 });
+      expect(Cell.getResult(ws2, "C4")).toBe(1);
+      expect(Cell.getValue(ws2, "A4")).toBe("Total");
+
+      // …and a second round trip keeps them too.
+      const wb3 = Workbook.create();
+      await Workbook.read(wb3, await Workbook.toBuffer(wb2));
+      expect(Cell.getResult(Workbook.getWorksheet(wb3, "S")!, "B4")).toBe(8);
+    });
+
+    it("Table.add never adopts a result cached in the sheet, even under the same formula", () => {
+      // A cached value is evidence about the data a *file* held. A table the caller builds brings its own
+      // rows, so an old result in the same cell — formula identical — would be a wrong total: 8, not 100.
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "S");
+      Cell.setValue(ws, "B4", { formula: "SUBTOTAL(109,Totals[Qty])", result: 8 });
+      Cell.setValue(ws, "C4", { formula: "1+1", result: 2 });
+      Table.add(ws, {
+        name: "Totals",
+        ref: "A1:C4",
+        headerRow: true,
+        totalsRow: true,
+        columns: [
+          { name: "Item" },
+          { name: "Qty", totalsRowFunction: "sum" },
+          { name: "Note", totalsRowFunction: "count" }
+        ],
+        rows: [
+          ["a", 50, "x"],
+          ["b", 50, "y"]
+        ]
+      });
+      expect(Cell.getValue(ws, "B4")).toEqual({ formula: "SUBTOTAL(109,Totals[Qty])" });
+      expect(Cell.getValue(ws, "C4")).toEqual({ formula: "SUBTOTAL(103,Totals[Note])" });
+    });
+
+    it("keeps the totals row's cached results through an XLSB load", async () => {
+      const wb1 = Workbook.create();
+      Table.add(Workbook.addWorksheet(wb1, "S"), {
+        name: "Totals",
+        ref: "A1",
+        headerRow: true,
+        totalsRow: true,
+        columns: [{ name: "Item" }, { name: "Qty", totalsRowFunction: "sum", totalsRowResult: 8 }],
+        rows: [
+          ["a", 3],
+          ["b", 5]
+        ]
+      });
+      const wb2 = Workbook.create();
+      await Workbook.read(wb2, await Workbook.toBuffer(wb1, { format: "xlsb" }));
+      expect(Cell.getResult(Workbook.getWorksheet(wb2, "S")!, "B4")).toBe(8);
+    });
   });
 
   // ========================================================================

@@ -10,7 +10,7 @@ import { rowCreate } from "@excel/core/row";
 // that never references a chart API gets the entire chart implementation
 // tree-shaken out by the bundler — no host registry / install step required.
 import type { TableData, TableModel } from "@excel/core/table";
-import { createTable, tableSetModel } from "@excel/core/table";
+import { adoptLoadedTotals, createTable, tableSetModel } from "@excel/core/table";
 /**
  * Applying a worksheet model — the load half of `getSheetModel` / `setSheetModel`.
  *
@@ -96,6 +96,8 @@ export function setSheetModel(ws: WorksheetData, value: WorksheetModel): void {
   }
   ws.sheetProtection = value.sheetProtection;
   ws.tables = value.tables.reduce((tables: { [key: string]: TableData }, table: TableModel) => {
+    // The cells were applied above, so the totals row's cached results are there to carry over.
+    adoptLoadedTotals(ws, table, table.tableRef ?? table.ref);
     const t = createTable(ws, table);
     tableSetModel(t, table);
     tables[table.name] = t;

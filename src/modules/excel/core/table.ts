@@ -1,7 +1,13 @@
 import type { CellData } from "@excel/core/cell";
-import { cellGetValue, cellSetValue, setFacetShared } from "@excel/core/cell";
+import {
+  cellFormula,
+  cellGetValue,
+  cellResult,
+  cellSetValue,
+  setFacetShared
+} from "@excel/core/cell";
 import { sharedCellFacet } from "@excel/core/style-sharing";
-import { getRow, getSheetWorkbook, rowGetCell } from "@excel/core/worksheet-core";
+import { findCell, getRow, getSheetWorkbook, rowGetCell } from "@excel/core/worksheet-core";
 import type { WorksheetData as Worksheet } from "@excel/core/worksheet-core";
 import { TableError } from "@excel/errors";
 import type {
@@ -195,6 +201,44 @@ const SUBTOTAL_FUNCTIONS: Record<string, number> = {
   var: 110,
   sum: 109
 };
+
+/**
+ * Carry the totals row's cached results from the loaded sheet into a table model — **for a reader only**.
+ *
+ * The results are `<v>` values in the sheet's cells; the table part has nowhere to keep them, and
+ * {@link createTable} rewrites the totals cells from the model. A reader that does not call this loses
+ * every cached total on load.
+ *
+ * It belongs to the load path and nowhere else. A cached value is evidence about the data the *file*
+ * held; a table a caller builds with `Table.add` brings its own rows, and an old result sitting in the
+ * same cell — even under an identical formula — says nothing about them.
+ *
+ * `range` is the table's full extent (header and totals included). Only a result cached under the exact
+ * formula this table writes is taken, and a result the model already carries wins.
+ */
+export function adoptLoadedTotals(worksheet: Worksheet, table: TableModel, range: string): void {
+  if (table.totalsRow !== true) {
+    return;
+  }
+  const decoded = colCache.decode(range);
+  if (!("dimensions" in decoded)) {
+    return;
+  }
+  const t: TableData = { worksheet, table };
+  table.columns.forEach((column, j) => {
+    if (j === 0 || column.totalsRowResult !== undefined) {
+      return;
+    }
+    const cell = findCell(worksheet, decoded.bottom, decoded.left + j);
+    if (!cell) {
+      return;
+    }
+    const result = cellResult(cell);
+    if (result !== undefined && cellFormula(cell) === tableGetFormula(t, column)) {
+      column.totalsRowResult = result;
+    }
+  });
+}
 
 /** Create a table bound to a worksheet, validating + storing on-sheet if a model is given. */
 export function createTable(worksheet: Worksheet, table?: TableModel): TableData {

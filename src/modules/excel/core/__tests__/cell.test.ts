@@ -415,6 +415,49 @@ describe("Cell", () => {
     expect(cellFormula(c1)).toBe("B1+1");
   });
 
+  it("renders a formula's cached result as the text the plain value would have", () => {
+    // `result ? result.toString() : ""` dropped falsy results and printed an error as "[object Object]".
+    const cases: [unknown, string, string][] = [
+      // [result, text, display text]
+      [0, "0", "0"],
+      [false, "false", "FALSE"],
+      ["", "", ""],
+      [{ error: "#DIV/0!" }, "#DIV/0!", "#DIV/0!"],
+      [undefined, "", ""]
+    ];
+    for (const [result, text, display] of cases) {
+      const own = sheetMock.getCell("A1");
+      cellSetValue(own, { formula: "X", result } as never);
+      expect(cellToString(own)).toBe(text);
+      expect(cellDisplayText(own)).toBe(display);
+
+      // A shared clone reads its result through the same value class.
+      const master = sheetMock.getCell("B1");
+      const clone = sheetMock.getCell("B2");
+      cellSetValue(master, { formula: "A1", result: 1 });
+      cellSetValue(clone, { sharedFormula: "B1", result } as never);
+      expect(cellToString(clone)).toBe(text);
+      expect(cellDisplayText(clone)).toBe(display);
+    }
+
+    const errorCell = sheetMock.getCell("C1");
+    cellSetValue(errorCell, { formula: "1/0", result: { error: "#DIV/0!" } });
+    expect(cellToCsvString(errorCell)).toBe("#DIV/0!");
+    // A shared clone is number-formatted like its master; it used to show the raw result.
+    const percent = sheetMock.getCell("D1");
+    const percentClone = sheetMock.getCell("D2");
+    cellSetValue(percent, { formula: "A1", result: 0.5 });
+    cellSetValue(percentClone, { sharedFormula: "D1", result: 0.25 });
+    cellSetNumFmt(percent, "0%");
+    cellSetNumFmt(percentClone, "0%");
+    expect(cellDisplayText(percent)).toBe("50%");
+    expect(cellDisplayText(percentClone)).toBe("25%");
+
+    const zeroCell = sheetMock.getCell("C2");
+    cellSetValue(zeroCell, { formula: "1-1", result: 0 });
+    expect(cellToCsvString(zeroCell)).toBe("0");
+  });
+
   it("escapes dangerous html", () => {
     const a1 = sheetMock.getCell("A1");
 

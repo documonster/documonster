@@ -1688,12 +1688,33 @@ class FormulaValue {
     return this._translatedFormula;
   }
   toCsvString(): string {
-    return `${this.model.result ?? ""}`;
+    return formulaResultText(this.model.result, true);
   }
   release(): void {}
   toString(): string {
-    return this.model.result ? this.model.result.toString() : "";
+    return formulaResultText(this.model.result, false);
   }
+}
+
+/**
+ * A formula's cached result as text — the same text the result would have as a plain cell value.
+ *
+ * Written out rather than `result ? result.toString() : ""`, which had two bugs: a falsy result (`0`,
+ * `false`) read as no result at all, and an error result is an object, so it read `"[object Object]"`
+ * where a stored error reads its code. A `Date` renders as {@link DateValue} renders one: ISO for CSV,
+ * `Date#toString` otherwise.
+ */
+function formulaResultText(result: FormulaResult | undefined, csv: boolean): string {
+  if (result === undefined || result === null) {
+    return "";
+  }
+  if (result instanceof Date) {
+    return csv ? result.toISOString() : result.toString();
+  }
+  if (typeof result === "object") {
+    return result.error;
+  }
+  return String(result);
 }
 
 class SharedStringValue {

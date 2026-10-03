@@ -23,7 +23,7 @@ import { definedNamesAdd } from "@excel/core/defined-names";
 import { loadWorkbookModel } from "@excel/core/model-load";
 import type { OpaqueSourceRelationship } from "@excel/core/opaque-part";
 import { applyPrintName, isPrintName, type PrintSetup } from "@excel/core/print-names";
-import { createTable, tableSetModel, type TableModel } from "@excel/core/table";
+import { adoptLoadedTotals, createTable, tableSetModel, type TableModel } from "@excel/core/table";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
   addWorkbookImage,
@@ -993,6 +993,8 @@ async function readInto(
       // the workbook so a second table cannot take it. Assigning the array put an array where a record
       // belonged and `setModel` then threw reading `.name` off an index.
       for (const model of found as TableModel[]) {
+        // `ref` is the full range here — the XLSB reader has no separate `tableRef`.
+        adoptLoadedTotals(worksheet, model, model.tableRef ?? model.ref);
         const handle = createTable(worksheet, model);
         tableSetModel(handle, model);
         (worksheet.tables as Record<string, unknown>)[model.name] = handle;

@@ -454,6 +454,56 @@ export function findCell(ws: WorksheetData, r: number | string, c?: number): Cel
   return row ? rowFindCell(row, address.col) : undefined;
 }
 
+/**
+ * The existing cell at a reference, or `undefined` — resolved the way {@link getCell} resolves it, with
+ * the same errors for a malformed reference, but **without creating** anything.
+ *
+ * This is what a public reader resolves through. `getCell` materialises the row and the cell, so a read
+ * through it widened `rowCount`, `<dimension>` and, in a styled row or column, wrote a styled empty cell
+ * into the saved file (see `core/__tests__/read-side-effects.test.ts`).
+ *
+ * Validation matches `getCell` exactly, including its leniency: both decode the reference with
+ * `colCache.getAddress`, and `getCell` validates the *decoded* address only when it has to create a cell
+ * (in `cellCreate`). So this validates only on a miss, and a reference that decodes to an existing cell
+ * is accepted by both — strict validation of the raw string would be a separate, wider change. The hit
+ * path therefore allocates nothing and checks nothing beyond the decode.
+ */
+export function locateCell(
+  ws: WorksheetData,
+  r: number | string,
+  c?: number
+): CellData | undefined {
+  const decoded = colCache.getAddress(r, c);
+  const cell = ws._rows[decoded.row - 1]?.cells[decoded.col - 1];
+  if (cell === undefined) {
+    colCache.validateAddress(decoded.address);
+  }
+  return cell;
+}
+
+/**
+ * The fully-qualified address of a reference, validated like {@link getCell} — for a reader that answers
+ * from the address alone (defined names, validation rules, an absent cell's inherited format).
+ */
+export function resolveAddress(ws: WorksheetData, r: number | string, c?: number): DecodedAddress {
+  const decoded = colCache.getAddress(r, c);
+  colCache.validateAddress(decoded.address);
+  return { sheetName: ws._name, address: decoded.address, row: decoded.row, col: decoded.col };
+}
+
+/**
+ * The number format an empty cell at `(row, col)` would inherit if it were
+ * created — the row's, else the column's — read without creating the row, the
+ * column record or the cell. Mirrors the `numFmt` precedence in `mergeCellStyle`.
+ */
+export function inheritedNumFmt(
+  ws: WorksheetData,
+  row: number,
+  col: number
+): Style["numFmt"] | undefined {
+  return ws._rows[row - 1]?.style.numFmt || ws._columns[col - 1]?.style.numFmt || undefined;
+}
+
 export function getCell(ws: WorksheetData, r: number | string, c?: number): CellData {
   const address = colCache.getAddress(r, c);
   const row = getRow(ws, address.row);

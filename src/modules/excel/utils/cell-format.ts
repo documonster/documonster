@@ -1235,9 +1235,10 @@ export function getCellDisplayText(cell: CellLike, dateFormat?: string): string 
     return formatCellValue(value, fmt, dateFormat);
   }
 
-  // Formula type — use the result value
-  if (typeof value === "object" && "formula" in value) {
-    const result = (value as { formula: string; result?: unknown }).result;
+  // Formula type — use the result value. A shared-formula clone carries `sharedFormula` and no `formula`,
+  // and is formatted exactly like the cell that defines it.
+  if (typeof value === "object" && ("formula" in value || "sharedFormula" in value)) {
+    const result = (value as { result?: unknown }).result;
     if (result == null) {
       return "";
     }

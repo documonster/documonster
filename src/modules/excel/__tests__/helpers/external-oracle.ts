@@ -249,15 +249,15 @@ async function resolveExecutable(
 }
 
 /**
- * Convenience wrapper that runs LibreOffice's `--convert-to xlsx`
- * round-trip in auto mode: if `LIBREOFFICE_BIN` (or `soffice` /
- * `libreoffice` on PATH) is discoverable the validation runs and
- * `expect(exitCode).toBe(0)` passes; otherwise the result reports
- * `available: false` and callers should `expect(skipped).toBeTruthy()`.
+ * Runs LibreOffice's `--convert-to xlsx` round-trip as an open-validation gate,
+ * **only when opted in** with `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=1`.
+ * Otherwise the result reports `skipped` and callers should
+ * `expect(skipped).toBeTruthy()`.
  *
- * Used by the synthetic chart corpus tests so the open-validation gate
- * runs by default for everyone with LibreOffice installed, without
- * forcing an explicit env-var opt-in or breaking minimal CI environments.
+ * Off by default: each open takes seconds and depends on a locally installed
+ * office suite, so a plain `pnpm test` must not run it just because `soffice`
+ * happens to be on PATH. The dedicated CI job sets the flag, which is where the
+ * gate is enforced.
  */
 export async function runLibreOfficeOpenValidationAuto(
   input: Uint8Array,
@@ -274,9 +274,7 @@ export async function runLibreOfficeOpenValidationAuto(
     ],
     input,
     inputName,
-    // `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=0` turns the automatic run off: each open takes seconds, so a local loop
-    // that is not about chart output can skip it. Any other value, or none, keeps the default.
-    autoMode: process.env.DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION !== "0"
+    autoMode: false
   });
 }
 

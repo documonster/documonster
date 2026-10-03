@@ -995,7 +995,7 @@ for (const drop of drops) {
 
 ### Oracle 与语料库测试
 
-该仓库包含用于真实应用验证的可选测试框架。它们默认禁用，因为需要外部二进制文件或私有的固定语料库——只有一个例外：装了 LibreOffice 时，图表往返测试会自动用它打开生成的工作簿。每次打开要几秒，设置 `DOCUMONSTER_LIBREOFFICE_OPEN_VALIDATION=0` 可以跳过。
+该仓库包含用于真实应用验证的可选测试框架。它们默认禁用，因为需要外部二进制文件或私有的固定语料库。即使本机装了 LibreOffice 也不会自动运行，需要显式设置下面的环境变量开启。
 
 这些测试框架中每一个生成的工作簿在外部转换前还会运行一次 OOXML 包审计。该审计检查必需的部件内容类型、关系目标、重复的关系 ID、chart/ChartEx/drawing/chartsheet 结构、ChartEx 数据/坐标轴引用以及 ChartEx 外部数据关系 ID，从而让常见的 Excel"已修复记录"问题在 CI 中尽早失败。当已启用的 Office/LibreOffice 打开验证命令记录了修复/损坏/错误文本时，测试会将其视为硬性验证失败。
 
@@ -2452,26 +2452,32 @@ Row.eachCell(ws, 1, cell => {
 });
 ```
 
-`Cell.find` 是句柄的第四个来源，也是唯一一个**不会创建**所查对象的读取方式：
+`Cell.find` 是句柄的第四个来源。单元格不存在时返回 `undefined`，不会创建任何东西：
 
 ```typescript
 const cell = Cell.find(ws, "B7"); // CellData | undefined
 const value = cell ? Cell.view(cell).value : null;
 ```
 
-其余所有读取方式 —— `Cell.getValue`、`Cell.getFont` 等 —— 都通过 `getCell` 解析地址，
-而它在行与单元格不存在时会把它们**创建出来**。写入时这正是你想要的，但这意味着读取稀疏
-工作表中一个很远的单元格会留下一堆行，并改变 `Worksheet.rowCount`：
+读取值的函数同样不会创建任何东西。`Cell.getValue`、`getText`、`getDisplayText`、
+`getType`、`getFormula`、`getResult`、`getNumFmt`、`getHyperlink`、`getNote`、
+`getNames`、`getValidation`、`isMerged` 以及日期相关的读取函数，对不存在的单元格
+返回的结果与空单元格完全相同，因此读取稀疏工作表不会改动它，也不会改变保存出的文件：
 
 ```typescript
-Cell.getValue(ws, "A1000"); // 创建了 1000 行
-Worksheet.rowCount(ws); // 1000
-
-Cell.find(ws, "A1000"); // undefined；工作表未被改动
+Cell.getValue(ws, "A1000"); // null
+Worksheet.rowCount(ws); // 不变
 ```
 
-当问题是"这个单元格到底存不存在"时用 `find`。要在不创建任何东西的前提下读取整个区域，
-用 `Range.getValues` / `Worksheet.toAoa`；只读一列则用 `Column.values` / `Column.getValues`。
+样式读取函数 —— `getStyle`、`getFont`、`getAlignment`、`getBorder`、`getFill`、
+`getProtection` —— 以及 `getModel` 和 `getMergeMaster` **会**创建单元格，因为它们返回的
+是可以就地修改的活对象（`Cell.getStyle(ws, "B2").font = { bold: true }`），单元格不存在
+就没有东西可改。要判断单元格是否存在，用 `find`。要读取整个区域，用 `Range.getValues` /
+`Worksheet.toAoa`；只读一列则用 `Column.values` / `Column.getValues`。
+
+如果要概览整张工作表（表头行、首行数据、合计行、公式位置），参见
+[`inspect-sheet.ts`](examples/inspect-sheet.ts)。它优先使用文件中表格和自动筛选声明的表头行，
+凡是推测出来的结果都会标明来源。
 
 公开 API 涉及的每一个类型都以**声明处的名字**从 `documonster/excel` 导出——也就是
 TypeScript 在报错和悬浮提示里显示的那个名字。没有别名要记，也不需要绕路：可以直接

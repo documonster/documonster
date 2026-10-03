@@ -13,7 +13,17 @@
  * to. Every case below is a read, so every case must be a no-op.
  */
 import { captureFormulaSnapshot } from "@excel/core/formula-capture";
-import { Anchor, Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import {
+  Anchor,
+  Cell,
+  Column,
+  DataValidation,
+  DefinedNames,
+  Row,
+  ValueType,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 /**
@@ -224,6 +234,113 @@ describe("reads do not mutate the workbook", () => {
       const { wb, ws } = styledSheet();
       Worksheet.spliceRows(ws, 2, 1);
       await expectNoMutation(wb, () => void captureFormulaSnapshot(wb));
+    });
+  });
+
+  describe("Cell value readers", () => {
+    // B is a styled column and row 3 a styled row, so a cell created at B3, B10 or
+    // E3 would carry a style and be written out — the case that changed the bytes.
+    const absent = ["B3", "B10", "E3", "Z100"] as const;
+
+    it("answer for a missing cell as for an empty one, without creating it", async () => {
+      const { wb, ws } = styledSheet();
+      await expectNoMutation(wb, () => {
+        for (const a of absent) {
+          expect(Cell.getValue(ws, a)).toBeNull();
+          expect(Cell.getText(ws, a)).toBe("");
+          expect(Cell.getDisplayText(ws, a)).toBe("");
+          expect(Cell.getType(ws, a)).toBe(ValueType.Null);
+          expect(Cell.getEffectiveType(ws, a)).toBe(ValueType.Null);
+          expect(Cell.getFormula(ws, a)).toBeUndefined();
+          expect(Cell.getResult(ws, a)).toBeUndefined();
+          expect(Cell.getDateParts(ws, a)).toBeUndefined();
+          expect(Cell.getDateKind(ws, a)).toBeUndefined();
+          expect(Cell.getTemporal(ws, a)).toBeUndefined();
+          expect(Cell.isMerged(ws, a)).toBe(false);
+          expect(Cell.getHyperlink(ws, a)).toBeUndefined();
+          expect(Cell.getNote(ws, a)).toBeUndefined();
+          expect(Cell.getComment(ws, a)).toBeUndefined();
+          expect(Cell.getNames(ws, a)).toEqual([]);
+          expect(Cell.getValidation(ws, a)).toBeUndefined();
+          expect(Cell.find(ws, a)).toBeUndefined();
+        }
+      });
+    });
+
+    it("the (row, col) form is just as inert", async () => {
+      const { wb, ws } = styledSheet();
+      await expectNoMutation(wb, () => {
+        expect(Cell.getValue(ws, 10, 2)).toBeNull();
+        expect(Cell.getText(ws, 3, 5)).toBe("");
+        expect(Cell.getNumFmt(ws, 10, 2)).toBe("0.00%");
+        expect(Cell.getTemporal(ws, 10, 2)).toBeUndefined();
+        expect(Cell.getFullAddress(ws, 10, 2)).toEqual({
+          sheetName: "S",
+          address: "B10",
+          row: 10,
+          col: 2
+        });
+      });
+    });
+
+    it("report the number format a missing cell would inherit", async () => {
+      const { wb, ws } = styledSheet();
+      Row.setStyle(ws, 7, { numFmt: "0.0" });
+      await expectNoMutation(wb, () => {
+        expect(Cell.getNumFmt(ws, "B10")).toBe("0.00%"); // column
+        expect(Cell.getNumFmt(ws, "B7")).toBe("0.0"); // row wins, as in mergeCellStyle
+        expect(Cell.getNumFmt(ws, "E10")).toBeUndefined();
+      });
+      // …and it is the format the cell really gets once it exists.
+      Cell.setValue(ws, "B10", 0.5);
+      Cell.setValue(ws, "B7", 0.5);
+      expect(Cell.getNumFmt(ws, "B10")).toBe("0.00%");
+      expect(Cell.getNumFmt(ws, "B7")).toBe("0.0");
+    });
+
+    it("read address-keyed metadata for a missing cell", async () => {
+      const { wb, ws } = styledSheet();
+      DefinedNames.add(Workbook.getDefinedNames(wb), "S!$E$1:$E$9", "inputs");
+      DataValidation.add(ws.dataValidations, "E1:E9", {
+        type: "whole",
+        operator: "between",
+        formulae: [1, 9]
+      });
+      await expectNoMutation(wb, () => {
+        expect(Cell.getNames(ws, "E5")).toEqual(["inputs"]);
+        expect(Cell.getValidation(ws, "E5")).toMatchObject({ type: "whole" });
+        expect(Cell.getFullAddress(ws, "E5")).toEqual({
+          sheetName: "S",
+          address: "E5",
+          row: 5,
+          col: 5
+        });
+      });
+    });
+
+    it("reject a malformed reference exactly as a writer does", () => {
+      const { ws } = styledSheet();
+      for (const bad of ["a1", "1", "A", ""]) {
+        expect(() => Cell.setValue(ws, bad, 1)).toThrow();
+        expect(() => Cell.getValue(ws, bad)).toThrow();
+        expect(() => Cell.find(ws, bad)).toThrow();
+      }
+      expect(() => Cell.getValue(ws, "XFE1")).toThrow();
+    });
+
+    it("still read existing cells", () => {
+      const { ws } = styledSheet();
+      expect(Cell.getValue(ws, "C4")).toBe(4);
+      expect(Cell.getText(ws, 1, 1)).toBe("h1");
+      expect(Cell.getType(ws, "A2")).toBe(ValueType.Number);
+    });
+
+    it("style-facet readers still create the cell, because their result is edited in place", () => {
+      const { ws } = styledSheet();
+      expect(Cell.find(ws, "D9")).toBeUndefined();
+      Cell.getStyle(ws, "D9").font = { bold: true };
+      expect(Cell.find(ws, "D9")).toBeDefined();
+      expect(Cell.getFont(ws, "D9")).toEqual({ bold: true });
     });
   });
 

@@ -30,20 +30,17 @@ import {
   cellSetDateParts,
   cellBorder,
   cellComment,
-  cellDataValidation,
   cellDisplayText,
   cellEffectiveType,
   cellFill,
   cellFont,
   cellFormula,
-  cellFullAddress,
   cellGetModel,
   cellOwnStyle,
   cellGetValue,
   cellHyperlink,
   cellIsMerged,
   cellMaster,
-  cellNames,
   cellNote,
   cellNumFmt,
   cellProtection,
@@ -69,11 +66,19 @@ import {
   cellType,
   cellView
 } from "@excel/core/cell";
-import type { ValueType } from "@excel/core/enums";
+import { dataValidationFind } from "@excel/core/data-validations";
+import { definedNamesGetNamesEx } from "@excel/core/defined-names";
+import { ValueType } from "@excel/core/enums";
 import type { NoteData } from "@excel/core/note";
 import type { TemporalKind, TemporalPlainValue } from "@excel/core/temporal";
 import { getCellStyle } from "@excel/core/workbook-core";
-import { findCell, getCell, getSheetWorkbook } from "@excel/core/worksheet-core";
+import {
+  getCell,
+  getSheetWorkbook,
+  inheritedNumFmt,
+  locateCell,
+  resolveAddress
+} from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { ExcelError } from "@excel/errors";
 import type {
@@ -104,6 +109,35 @@ export type Sheet = WorksheetData;
  */
 function target(ws: Sheet, addr: string | number, col: number | undefined, argc: number): CellData {
   return argc >= 3 ? getCell(ws, addr, col) : getCell(ws, addr);
+}
+
+/**
+ * {@link target} for a reader that answers with a value: resolves the same overload pair and fails on the
+ * same malformed references, but never creates the row or the cell — `undefined` when nothing is there,
+ * and the reader answers as for an empty cell.
+ *
+ * A read must not change what the workbook saves — materialising widened `rowCount` and `<dimension>`,
+ * and in a styled row or column wrote a styled empty cell into the file. The style-facet readers are the
+ * deliberate exception: they hand back the live facet object for the caller to edit in place
+ * (`Cell.getStyle(ws, "B2").font = …`), and there is nothing to edit until the cell exists.
+ */
+function peek(
+  ws: Sheet,
+  addr: string | number,
+  col: number | undefined,
+  argc: number
+): CellData | undefined {
+  return argc >= 3 ? locateCell(ws, addr, col) : locateCell(ws, addr);
+}
+
+/** The overload pair resolved to an address, for a reader that answers from the address alone. */
+function addressOf(
+  ws: Sheet,
+  addr: string | number,
+  col: number | undefined,
+  argc: number
+): DecodedAddress {
+  return argc >= 3 ? resolveAddress(ws, addr, col) : resolveAddress(ws, addr);
 }
 
 /**
@@ -146,7 +180,8 @@ export function getValue(ws: Sheet, addr: string): CellValueType;
 /** Read a cell value by 1-based (row, col). */
 export function getValue(ws: Sheet, row: number, col: number): CellValueType;
 export function getValue(ws: Sheet, addr: string | number, col?: number): CellValueType {
-  return cellGetValue(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellGetValue(cell) : null;
 }
 /** Set a cell value by "A1" address. */
 export function setValue(ws: Sheet, addr: string, value: CellValueInputType): void;
@@ -196,7 +231,8 @@ export function getDateParts(
   addr: string | number,
   col?: number
 ): ExcelDateTimeParts | undefined {
-  return cellGetDateParts(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellGetDateParts(cell) : undefined;
 }
 
 /**
@@ -273,7 +309,8 @@ export function getDateKind(
   addr: string | number,
   col?: number
 ): DateFormatKind | undefined {
-  return cellDateKind(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellDateKind(cell) : undefined;
 }
 
 /**
@@ -320,9 +357,9 @@ export function getTemporal(
   colOrKind?: number | TemporalKind,
   kind?: TemporalKind
 ): TemporalPlainValue | undefined {
-  return typeof colOrKind === "number"
-    ? cellGetTemporal(getCell(ws, addr as number, colOrKind), kind)
-    : cellGetTemporal(getCell(ws, addr as string), colOrKind);
+  const cell =
+    typeof colOrKind === "number" ? locateCell(ws, addr, colOrKind) : locateCell(ws, addr);
+  return cell ? cellGetTemporal(cell, typeof colOrKind === "number" ? kind : colOrKind) : undefined;
 }
 
 /** Read a cell's text by `"A1"` address. */
@@ -330,28 +367,32 @@ export function getText(ws: Sheet, addr: string): string;
 /** Read a cell's text by 1-based (row, col). */
 export function getText(ws: Sheet, row: number, col: number): string;
 export function getText(ws: Sheet, addr: string | number, col?: number): string {
-  return cellText(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellText(cell) : "";
 }
 /** Read a cell's display text by `"A1"` address. */
 export function getDisplayText(ws: Sheet, addr: string): string;
 /** Read a cell's display text by 1-based (row, col). */
 export function getDisplayText(ws: Sheet, row: number, col: number): string;
 export function getDisplayText(ws: Sheet, addr: string | number, col?: number): string {
-  return cellDisplayText(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellDisplayText(cell) : "";
 }
 /** Read a cell's value kind by `"A1"` address. */
 export function getType(ws: Sheet, addr: string): ValueType;
 /** Read a cell's value kind by 1-based (row, col). */
 export function getType(ws: Sheet, row: number, col: number): ValueType;
 export function getType(ws: Sheet, addr: string | number, col?: number): ValueType {
-  return cellType(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellType(cell) : ValueType.Null;
 }
 /** Read a cell's effective value kind by `"A1"` address. */
 export function getEffectiveType(ws: Sheet, addr: string): ValueType;
 /** Read a cell's effective value kind by 1-based (row, col). */
 export function getEffectiveType(ws: Sheet, row: number, col: number): ValueType;
 export function getEffectiveType(ws: Sheet, addr: string | number, col?: number): ValueType {
-  return cellEffectiveType(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellEffectiveType(cell) : ValueType.Null;
 }
 
 // --- formula ---
@@ -361,7 +402,8 @@ export function getFormula(ws: Sheet, addr: string): string | undefined;
 /** Read a cell's formula by 1-based (row, col). */
 export function getFormula(ws: Sheet, row: number, col: number): string | undefined;
 export function getFormula(ws: Sheet, addr: string | number, col?: number): string | undefined {
-  return cellFormula(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellFormula(cell) : undefined;
 }
 /** Read a formula cell's cached result by `"A1"` address. */
 export function getResult(ws: Sheet, addr: string): FormulaResult | undefined;
@@ -372,7 +414,8 @@ export function getResult(
   addr: string | number,
   col?: number
 ): FormulaResult | undefined {
-  return cellResult(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellResult(cell) : undefined;
 }
 
 // --- style ---
@@ -439,7 +482,8 @@ export function isMerged(ws: Sheet, addr: string): boolean;
 /** Test whether a cell is merged by 1-based (row, col). */
 export function isMerged(ws: Sheet, row: number, col: number): boolean;
 export function isMerged(ws: Sheet, addr: string | number, col?: number): boolean {
-  return cellIsMerged(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellIsMerged(cell) : false;
 }
 /** Read the master cell of a merge by `"A1"` address. */
 export function getMergeMaster(ws: Sheet, addr: string): CellData;
@@ -456,7 +500,8 @@ export function getHyperlink(ws: Sheet, addr: string): string | undefined;
 /** Read a cell's hyperlink by 1-based (row, col). */
 export function getHyperlink(ws: Sheet, row: number, col: number): string | undefined;
 export function getHyperlink(ws: Sheet, addr: string | number, col?: number): string | undefined {
-  return cellHyperlink(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellHyperlink(cell) : undefined;
 }
 
 // --- note ---
@@ -470,7 +515,8 @@ export function getNote(
   addr: string | number,
   col?: number
 ): string | NoteConfig | undefined {
-  return cellNote(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellNote(cell) : undefined;
 }
 /** Set a cell's note by `"A1"` address. */
 export function setNote(ws: Sheet, addr: string, note: string | NoteConfig): void;
@@ -499,7 +545,9 @@ export function getNames(ws: Sheet, addr: string): string[];
 /** Read the defined names covering a cell by 1-based (row, col). */
 export function getNames(ws: Sheet, row: number, col: number): string[];
 export function getNames(ws: Sheet, addr: string | number, col?: number): string[] {
-  return cellNames(target(ws, addr, col, arguments.length));
+  // Defined names live on the workbook, keyed by address; the cell itself holds none.
+  const address = addressOf(ws, addr, col, arguments.length);
+  return definedNamesGetNamesEx(getSheetWorkbook(ws)._definedNames, address);
 }
 /** Add a defined name to a cell by `"A1"` address. */
 export function addName(ws: Sheet, addr: string, name: string): void;
@@ -572,7 +620,9 @@ export function getValidation(
   addr: string | number,
   col?: number
 ): DataValidationRule | undefined {
-  return cellDataValidation(target(ws, addr, col, arguments.length));
+  // Validation rules live on the sheet, keyed by address; the cell itself holds none.
+  const address = addressOf(ws, addr, col, arguments.length);
+  return dataValidationFind(ws.dataValidations, address.address);
 }
 /** Set a cell's validation rule by `"A1"` address. */
 export function setValidation(ws: Sheet, addr: string, value: DataValidationRule): void;
@@ -665,7 +715,12 @@ export function getNumFmt(
   addr: string | number,
   col?: number
 ): string | NumFmt | undefined {
-  return cellNumFmt(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  if (cell) {
+    return cellNumFmt(cell);
+  }
+  const { row, col: column } = addressOf(ws, addr, col, arguments.length);
+  return inheritedNumFmt(ws, row, column);
 }
 /** Set a cell's number format by `"A1"` address. */
 export function setNumFmt(ws: Sheet, addr: string, value: string | undefined): void;
@@ -829,7 +884,8 @@ export function getComment(ws: Sheet, addr: string): NoteData | undefined;
 /** Read a cell's comment by 1-based (row, col). */
 export function getComment(ws: Sheet, row: number, col: number): NoteData | undefined;
 export function getComment(ws: Sheet, addr: string | number, col?: number): NoteData | undefined {
-  return cellComment(target(ws, addr, col, arguments.length));
+  const cell = peek(ws, addr, col, arguments.length);
+  return cell ? cellComment(cell) : undefined;
 }
 /** Set a cell's comment by `"A1"` address. */
 export function setComment(
@@ -891,7 +947,7 @@ export function getFullAddress(ws: Sheet, addr: string): DecodedAddress;
 /** The cell's fully-qualified address by 1-based (row, col). */
 export function getFullAddress(ws: Sheet, row: number, col: number): DecodedAddress;
 export function getFullAddress(ws: Sheet, addr: string | number, col?: number): DecodedAddress {
-  return cellFullAddress(target(ws, addr, col, arguments.length));
+  return addressOf(ws, addr, col, arguments.length);
 }
 
 // --- cell handles ---
@@ -900,13 +956,13 @@ export function getFullAddress(ws: Sheet, addr: string | number, col?: number): 
  * Look up a cell **without creating it** — `undefined` if the sheet has no cell
  * at that address.
  *
- * Every other reader in this namespace resolves its address through `getCell`,
- * which *materialises* the row and the cell if they do not exist yet. That is
- * the right default for writing, but it means `Cell.getValue(ws, "ZZ1000")`
- * leaves a thousand rows behind and moves `Worksheet.rowCount`. Use `find` when
- * the question is whether a cell is there at all — probing a sparse sheet,
- * walking the ghost cells of a spilled dynamic array, or reading a range whose
- * extent is not known.
+ * The value readers — `getValue`, `getText`, `getFormula`, `getNumFmt`, … — do
+ * not create anything either, and answer for a missing cell as for an empty one.
+ * Use `find` when the question is whether a cell is there at all — probing a
+ * sparse sheet, walking the ghost cells of a spilled dynamic array, or telling an
+ * absent cell from an empty one. The style-facet readers (`getStyle`, `getFont`,
+ * …), `getModel` and `getMergeMaster` still create the cell, because what they
+ * return is live and meant to be edited in place.
  *
  * Read the returned handle with {@link view} and write it with the `Stream`
  * handle operations. Once `find` has proved the cell exists, addressing it again
@@ -932,7 +988,7 @@ export function find(ws: Sheet, addr: string | number, col?: number): CellData |
   // `(ws, "A1", 99)`; a JavaScript caller that gets past them lands on the
   // (row, col) path and resolves some other address, exactly as every other
   // reader in this namespace does.
-  return arguments.length >= 3 ? findCell(ws, addr, col) : findCell(ws, addr);
+  return peek(ws, addr, col, arguments.length);
 }
 
 /**

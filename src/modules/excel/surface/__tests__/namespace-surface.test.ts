@@ -215,8 +215,12 @@ describe("documonster/excel namespace surface", () => {
     // The probe left the sheet alone — the whole point of `find`.
     expect(Excel.Worksheet.rowCount(ws)).toBe(1);
 
-    // Contrast: every other reader resolves through `getCell`, which creates.
-    Excel.Cell.getValue(ws, "B50");
+    // The value readers are just as inert…
+    expect(Excel.Cell.getValue(ws, "B50")).toBeNull();
+    expect(Excel.Worksheet.rowCount(ws)).toBe(1);
+
+    // …while a style-facet reader creates the cell, because its result is live.
+    Excel.Cell.getStyle(ws, "B50");
     expect(Excel.Worksheet.rowCount(ws)).toBe(50);
   });
 
