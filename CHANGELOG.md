@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/documonster/documonster/compare/v0.19.0...v0.20.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* output changes wherever the previous behaviour was wrong — Word -> PDF pagination, page numbers and paper sizes; list numbers in every converter; bold/italic resolved through styles; hidden text omitted. getHeadings/splitDocument follow the shared heading rule (Title excluded). PdfEditor.save()/sign() throw PdfSignatureInvalidationError on signed documents unless { invalidateSignatures: true }. PDF limit hits throw PdfLimitExceededError instead of returning partial results. XLSX reads default to at most 10,000 ZIP entries and 2 GiB uncompressed (pass Infinity to lift). EntrySizeMismatchError.actual may be undefined. Invalid limit options throw RangeError.
+* **excel:** value readers no longer materialise cells, so reading no longer changes rowCount or the written file; Cell.find now throws on a malformed reference instead of returning undefined.
+
+### Bug Fixes
+
+* **excel:** Make value readers side-effect free and fix formula result text ([4cfab68](https://github.com/documonster/documonster/commit/4cfab68b8323e77858313277051327df5580e246))
+* Match Word's semantics across outputs, harden readers, encrypt incremental PDF saves ([6f75710](https://github.com/documonster/documonster/commit/6f75710a6d562d3abcb82a499fbcc4ab02897bec))
+* **word:** Recognise HTML comments correctly in Markdown import ([3889052](https://github.com/documonster/documonster/commit/3889052fb9f1a74b619eede47b7ce7287af4687f))
+
 ## [0.19.0](https://github.com/documonster/documonster/compare/v0.18.2...v0.19.0) (2026-10-02)
 
 
