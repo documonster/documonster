@@ -131,6 +131,11 @@ const EMPTY_U8 = new Uint8Array(0);
 export interface StreamingDocxOptions {
   /** Compression level (0-9). Default: 6. */
   readonly compressionLevel?: number;
+  /**
+   * Timestamp stamped on every ZIP entry. Defaults to `coreProperties.modified`,
+   * then `coreProperties.created`, then the current time.
+   */
+  readonly modTime?: Date;
   /** Progress callback interval: report after every N elements. Default: 1000. */
   readonly chunkSize?: number;
   /** Section properties for the final section. */
@@ -645,7 +650,10 @@ export class StreamingDocxWriter {
 
     // Create the document.xml ZIP entry and stream
     const level = this._options.compressionLevel ?? 6;
-    this._documentZipFile = new ZipDeflate(PartPath.Document, { level });
+    this._documentZipFile = new ZipDeflate(PartPath.Document, {
+      level,
+      modTime: this._entryModTime()
+    });
     this._zip.add(this._documentZipFile);
 
     this._documentStream = new StreamBuf({ bufSize: 65536 });
@@ -1103,12 +1111,19 @@ export class StreamingDocxWriter {
   // Private: Auxiliary parts
   // ===========================================================================
 
+  /** ZIP entry timestamp; see {@link StreamingDocxOptions.modTime}. */
+  private _entryModTime(): Date | undefined {
+    const { modTime, coreProperties } = this._options;
+    return modTime ?? coreProperties?.modified ?? coreProperties?.created;
+  }
+
   private async _addAuxiliaryParts(): Promise<void> {
     const level = this._options.compressionLevel ?? 6;
+    const modTime = this._entryModTime();
 
     // Helper: add a complete XML file to the ZIP
     const addFile = (path: string, data: Uint8Array, compressionLevel = level): void => {
-      const file = new ZipDeflate(path, { level: compressionLevel });
+      const file = new ZipDeflate(path, { level: compressionLevel, modTime });
       this._zip.add(file);
       this._trackCompression(file.push(data, true));
     };

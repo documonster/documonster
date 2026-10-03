@@ -9,7 +9,6 @@
  * {@link toPlainObject} from `./dom` instead.
  */
 
-import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
 import type { ResolvedOptions } from "@xml/to-object-shared";
@@ -79,12 +78,11 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
     { obj: syntheticObj, text: "", hasChildren: false, hasAttributes: false, name: "" }
   ];
 
-  let error: XmlParseError | undefined;
-
+  // The result is discarded on any error, so stop at the first one instead of
+  // building the rest of the tree: `fail()` rethrows out of `write()`. This is
+  // also what makes `maxDepth` / `maxEntityExpansions` bound the work done.
   parser.on("error", err => {
-    if (!error) {
-      error = err instanceof XmlParseError ? err : new XmlParseError(err.message);
-    }
+    throw err instanceof XmlParseError ? err : new XmlParseError(err.message);
   });
 
   parser.on("opentag", tag => {
@@ -142,10 +140,6 @@ function parseXmlToObject(xml: string, options?: ParseXmlToObjectOptions): Recor
 
   parser.write(xml);
   parser.close();
-
-  if (error) {
-    throw toError(error);
-  }
 
   // The synthetic root's obj should contain exactly one key (the document root).
   return syntheticObj;

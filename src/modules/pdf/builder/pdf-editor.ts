@@ -49,7 +49,8 @@ import type { PdfResourceDict } from "@pdf/builder/resource-merger";
 import { PdfDict, pdfRef, pdfString, pdfHexString, pdfNumber } from "@pdf/core/pdf-object";
 import type { PdfContentStream } from "@pdf/core/pdf-stream";
 import { PdfWriter, buildIncremental } from "@pdf/core/pdf-writer";
-import { PdfStructureError } from "@pdf/errors";
+import type { IncrementalObject } from "@pdf/core/pdf-writer";
+import { PdfSignatureInvalidationError, PdfStructureError } from "@pdf/errors";
 import { FontManager } from "@pdf/font/font-manager";
 import { parseTtf } from "@pdf/font/ttf-parser";
 import { extractFormFields } from "@pdf/reader/form-extractor";
@@ -57,13 +58,7 @@ import type { PdfFormField } from "@pdf/reader/form-extractor";
 import { extractMetadata } from "@pdf/reader/metadata-reader";
 import { initDecryption, isEncrypted } from "@pdf/reader/pdf-decrypt";
 import { PdfDocument } from "@pdf/reader/pdf-document";
-import {
-  isPdfArray,
-  isPdfRef,
-  dictGetName,
-  dictGetNumber,
-  decodePdfStringBytes
-} from "@pdf/reader/pdf-parser";
+import { isPdfArray, isPdfRef, dictGetName, decodePdfStringBytes } from "@pdf/reader/pdf-parser";
 import type { PdfDictValue, PdfObject, PdfRef } from "@pdf/reader/pdf-parser";
 import { alphaGsName } from "@pdf/render/page-renderer";
 
@@ -76,6 +71,21 @@ export interface LoadOptions {
   /** Password for encrypted PDFs. */
   password?: string;
 }
+
+/** Options for {@link PdfEditor.save} and {@link PdfEditor.saveIncremental}. */
+export interface EditorSaveOptions {
+  /**
+   * Permit output that breaks a digital signature already in the document.
+   * Without it, an operation that would do so throws
+   * `PdfSignatureInvalidationError` instead of silently producing a file
+   * whose signatures no longer verify.
+   * @default false
+   */
+  invalidateSignatures?: boolean;
+}
+
+/** Options for {@link PdfEditor.sign}. */
+export interface EditorSignOptions extends PdfSignatureOptions, EditorSaveOptions {}
 
 // =============================================================================
 // PdfEditorPage
@@ -259,6 +269,7 @@ export class PdfEditor {
   /** @internal - Rotation overrides for original pages: index → degrees (0/90/180/270) */
   private _rotationOverrides = new Map<number, number>();
   private _signaturePlaceholder: string | null = null;
+  private _hasSignatures: boolean | undefined;
   /** @internal - Writer reference during save(), for deep-clone */
   private _writerForSave: PdfWriter | null = null;
   /** @internal - Cache of cloned indirect refs: "objNum:gen" → new objNum in writer */
@@ -267,16 +278,19 @@ export class PdfEditor {
   private constructor(data: Uint8Array, password: string) {
     this._doc = new PdfDocument(data);
     this._password = password;
-    this._overlayResourcePrefix = this._chooseOverlayResourcePrefix();
-    this._fontManager = new FontManager(undefined, this._overlayResourcePrefix);
 
-    // Handle encryption
+    // Handle encryption before anything resolves an object: resolved objects
+    // and parsed object streams are cached, so one read first would stay
+    // undecrypted for the editor's lifetime.
     if (isEncrypted(this._doc)) {
       const success = initDecryption(this._doc, password);
       if (!success) {
         throw new PdfStructureError("Failed to decrypt PDF: incorrect password");
       }
     }
+
+    this._overlayResourcePrefix = this._chooseOverlayResourcePrefix();
+    this._fontManager = new FontManager(undefined, this._overlayResourcePrefix);
 
     // Initialize page proxies
     const pagesInfo = this._doc.getPagesWithObjInfo();
@@ -296,6 +310,7 @@ export class PdfEditor {
         )
       );
     }
+    this._doc.throwIfLimitExceeded();
   }
 
   /**
@@ -307,6 +322,24 @@ export class PdfEditor {
    */
   static load(data: Uint8Array, options?: LoadOptions): PdfEditor {
     return new PdfEditor(data, options?.password ?? "");
+  }
+
+  /**
+   * Whether the loaded document already carries a digital signature: a
+   * signature field (/FT /Sig, directly or inherited from a parent field)
+   * whose value is a signature dictionary with /ByteRange and /Contents.
+   * The /SigFlags SignaturesExist bit alone does not count.
+   *
+   * A full rewrite ({@link save}) invalidates such signatures. An
+   * incremental update ({@link saveIncremental}) leaves the signed byte
+   * range intact, so the signature still verifies over the revision it
+   * covers — but certification (DocMDP) and field-lock (FieldMDP)
+   * permissions are **not** evaluated: an update a certifying signature
+   * forbids is still written, and a validator may report it.
+   */
+  get hasSignatures(): boolean {
+    this._hasSignatures ??= this._detectSignatures();
+    return this._hasSignatures;
   }
 
   /** Number of existing pages. */
@@ -526,6 +559,7 @@ export class PdfEditor {
       });
     }
 
+    sourceDoc.throwIfLimitExceeded();
     return this;
   }
 
@@ -542,7 +576,8 @@ export class PdfEditor {
    *
    * @returns The modified PDF as Uint8Array
    */
-  async save(): Promise<Uint8Array> {
+  async save(options?: EditorSaveOptions): Promise<Uint8Array> {
+    this._guardSignatures(options, "save() rewrites the whole file");
     // Rebuild the PDF (not incremental update — simpler and more reliable)
     const writer = new PdfWriter();
     this._writerForSave = writer;
@@ -929,9 +964,13 @@ export class PdfEditor {
       title: originalMeta.title || undefined,
       author: originalMeta.author || undefined,
       subject: originalMeta.subject || undefined,
-      creator: originalMeta.creator || "documonster"
+      creator: originalMeta.creator || "documonster",
+      // Keep the document's own creation date rather than stamping the
+      // time of the edit, which also keeps re-saves reproducible.
+      creationDate: originalMeta.creationDate ?? undefined
     });
 
+    this._throwIfLimitExceeded();
     return writer.build();
   }
 
@@ -944,30 +983,36 @@ export class PdfEditor {
    * content and produces smaller output.
    *
    * Falls back to {@link save} (full rebuild) if structural changes are
-   * present (new pages, copied pages, or removed pages).
+   * present (new pages, copied pages, removed pages, or rotation changes).
+   * On a signed document that fallback throws
+   * `PdfSignatureInvalidationError` unless `invalidateSignatures` is set.
+   *
+   * Files whose cross-reference data is a stream are updated with an xref
+   * stream, as ISO 32000-2 §7.5.8 expects. Hybrid-reference files (a classic
+   * trailer with `/XRefStm`) get a classic section whose `/Prev` names the
+   * original trailer; readers reach the compressed objects through that
+   * trailer's `/XRefStm` (ISO 32000-1 §7.5.8.4).
+   *
+   * If the reader had to reconstruct the cross-reference data
+   * (`PdfDocument.xrefRecovered` — a wrong or damaged `startxref`), there is
+   * no reliable section to chain `/Prev` to, so this also falls back to
+   * {@link save}, with the same signature guard.
    *
    * @returns The modified PDF as Uint8Array
    */
-  async saveIncremental(): Promise<Uint8Array> {
+  async saveIncremental(options?: EditorSaveOptions): Promise<Uint8Array> {
     // Fall back to full rebuild if structural changes are present
     if (
       this._newPages.length > 0 ||
       this._copiedPages.length > 0 ||
-      this._removedPageIndices.size > 0
+      this._removedPageIndices.size > 0 ||
+      this._rotationOverrides.size > 0
     ) {
-      return this.save();
-    }
-
-    // Fall back to full rebuild if rotation overrides are present
-    if (this._rotationOverrides.size > 0) {
-      return this.save();
-    }
-
-    // Fall back to full rebuild for xref-stream PDFs (no "trailer" keyword)
-    const tailBytes = this._doc.data.subarray(Math.max(0, this._doc.data.length - 1024));
-    const tailStr = new TextDecoder().decode(tailBytes);
-    if (!tailStr.includes("trailer")) {
-      return this.save();
+      this._guardSignatures(
+        options,
+        "saveIncremental() must fall back to a full rewrite for page additions, removals or rotations"
+      );
+      return this.save({ invalidateSignatures: true });
     }
 
     // Check if there are any modifications at all
@@ -979,10 +1024,20 @@ export class PdfEditor {
       return this._doc.data;
     }
 
+    // A reconstructed xref means the file's own startxref chain is broken:
+    // an update appended to it would point /Prev at a damaged section.
+    if (this._doc.xrefRecovered || this._doc.startxrefOffset === null) {
+      this._guardSignatures(
+        options,
+        "saveIncremental() must fall back to a full rewrite because the cross-reference data was recovered"
+      );
+      return this.save({ invalidateSignatures: true });
+    }
+
     this._isIncrementalSave = true;
     this._fontManager.beginBuild();
     try {
-      return await this._buildIncrementalUpdate();
+      return await this._buildIncrementalUpdate(options);
     } finally {
       this._fontManager.endBuild();
       this._isIncrementalSave = false;
@@ -992,13 +1047,12 @@ export class PdfEditor {
   }
 
   /** @internal — Core incremental update logic, separated for try/finally cleanup. */
-  private async _buildIncrementalUpdate(): Promise<Uint8Array> {
+  private async _buildIncrementalUpdate(options?: EditorSaveOptions): Promise<Uint8Array> {
     // Determine the next available object number from the original PDF's /Size
-    const originalSize = dictGetNumber(this._doc.trailer, "Size") ?? 1;
-    let nextObjNum = originalSize;
+    let nextObjNum = this._doc.objectNumberBound;
 
-    // Collect modified objects: objNum → serialized content
-    const modifiedObjects = new Map<number, string | { dict: PdfDict; data: Uint8Array }>();
+    // Collect modified objects: objNum → generation and serialized content
+    const modifiedObjects = new Map<number, IncrementalObject>();
 
     // Check what kinds of modifications exist
     const hasOverlays = this._pages.some(p => p._hasOverlay());
@@ -1036,11 +1090,11 @@ export class PdfEditor {
         if (obj.streamData) {
           // Parse the remapped content back into a PdfDict for stream objects
           modifiedObjects.set(newObjNum, {
-            dict: PdfDict.fromRawString(remappedContent),
-            data: obj.streamData
+            gen: 0,
+            body: { dict: PdfDict.fromRawString(remappedContent), data: obj.streamData }
           });
         } else {
-          modifiedObjects.set(newObjNum, remappedContent);
+          modifiedObjects.set(newObjNum, { gen: 0, body: remappedContent });
         }
       }
 
@@ -1053,12 +1107,18 @@ export class PdfEditor {
 
     for (let i = 0; i < pagesInfo.length; i++) {
       const editorPage = this._pages[i];
-      const { dict: pageDict, objNum: pageObjNum } = pagesInfo[i];
+      const { dict: pageDict, objNum: pageObjNum, gen: pageGen } = pagesInfo[i];
 
       if (pageObjNum === 0) {
         // Can't do incremental update without knowing the page object number.
-        // Fall back to full rebuild (finally block handles cleanup).
-        return this.save();
+        // Fall back to full rebuild (finally block handles cleanup), under
+        // the same signature guard as every other fallback.
+        this._guardSignatures(
+          options,
+          "saveIncremental() must fall back to a full rewrite for a page without an object number"
+        );
+        this._isIncrementalSave = false;
+        return this.save({ invalidateSignatures: true });
       }
 
       const pageHasOverlay = editorPage._hasOverlay();
@@ -1091,8 +1151,8 @@ export class PdfEditor {
         const overlayStreamData = editorPage._overlay._stream.toUint8Array();
         const overlayObjNum = nextObjNum++;
         modifiedObjects.set(overlayObjNum, {
-          dict: new PdfDict(),
-          data: overlayStreamData
+          gen: 0,
+          body: { dict: new PdfDict(), data: overlayStreamData }
         });
 
         // Build the new /Contents array: original refs + overlay ref
@@ -1114,10 +1174,10 @@ export class PdfEditor {
           const imgName = `${this._overlayResourcePrefix}Im${imgIdx + 1}`;
           const imgObjNum = nextObjNum++;
           imageObjMap.set(imgName, imgObjNum);
-          modifiedObjects.set(
-            imgObjNum,
-            this._buildImageXObjectForIncremental(img.data, img.format)
-          );
+          modifiedObjects.set(imgObjNum, {
+            gen: 0,
+            body: this._buildImageXObjectForIncremental(img.data, img.format)
+          });
         }
 
         // Build overlay resource string
@@ -1136,7 +1196,7 @@ export class PdfEditor {
         const mergedResources = this._mergeResourceStrings(originalResources, overlayStr);
         // Write merged resources as a new object
         const resourcesObjNum = nextObjNum++;
-        modifiedObjects.set(resourcesObjNum, mergedResources || "<< >>");
+        modifiedObjects.set(resourcesObjNum, { gen: 0, body: mergedResources || "<< >>" });
         updatedPageDict.set("Resources", pdfRef(resourcesObjNum));
       }
 
@@ -1147,20 +1207,32 @@ export class PdfEditor {
         if (annotsResult.annotRefs.length > 0) {
           updatedPageDict.set(
             "Annots",
-            `[${annotsResult.annotRefs.map(r => pdfRef(r)).join(" ")}]`
+            `[${annotsResult.annotRefs.map(r => pdfRef(r.objNum, r.gen)).join(" ")}]`
           );
         }
       }
 
-      // Write the updated page dict as a modified object (same object number as original)
-      modifiedObjects.set(pageObjNum, updatedPageDict.toString());
+      // Write the updated page dict as a modified object (same object number
+      // and generation as the original, which every /Kids entry refers to)
+      modifiedObjects.set(pageObjNum, { gen: pageGen, body: updatedPageDict.toString() });
     }
 
+    this._throwIfLimitExceeded();
     if (modifiedObjects.size === 0) {
       return this._doc.data;
     }
 
-    return buildIncremental(this._doc.data, modifiedObjects, new Map());
+    const prevXrefOffset = this._doc.startxrefOffset;
+    if (prevXrefOffset === null) {
+      throw new PdfStructureError("saveIncremental(): the original startxref offset is unknown");
+    }
+    return buildIncremental(this._doc.data, modifiedObjects, this._serializeTrailerEntries(), {
+      xrefStream: this._doc.trailer.get("Type") === "XRef",
+      prevXrefOffset,
+      // An encrypted file's appended objects are encrypted with its own handler.
+      encrypt: this._doc.encryptFn ?? undefined,
+      encryptMetadata: this._doc.encryptMetadata
+    });
   }
 
   /**
@@ -1394,9 +1466,9 @@ export class PdfEditor {
    */
   private _buildIncrementalAnnots(
     pageDict: PdfDictValue,
-    modifiedObjects: Map<number, string | { dict: PdfDict; data: Uint8Array }>,
+    modifiedObjects: Map<number, IncrementalObject>,
     nextObjNum: number
-  ): { annotRefs: number[]; nextObjNum: number } {
+  ): { annotRefs: Array<{ objNum: number; gen: number }>; nextObjNum: number } {
     const annotsObj = pageDict.get("Annots");
     if (!annotsObj) {
       return { annotRefs: [], nextObjNum };
@@ -1407,14 +1479,14 @@ export class PdfEditor {
       return { annotRefs: [], nextObjNum };
     }
 
-    const annotRefs: number[] = [];
+    const annotRefs: Array<{ objNum: number; gen: number }> = [];
 
     for (const annotRef of annotsResolved) {
       const annotDict = this._doc.derefDict(annotRef);
       if (!annotDict) {
         // Keep original ref if we can't resolve
         if (isPdfRef(annotRef)) {
-          annotRefs.push(annotRef.objNum);
+          annotRefs.push(annotRef);
         }
         continue;
       }
@@ -1426,24 +1498,31 @@ export class PdfEditor {
         const newValue = fieldName ? this._formFieldUpdates.get(fieldName) : undefined;
 
         if (newValue !== undefined) {
-          // Rewrite the annotation at its original object number
-          const annotObjNum = isPdfRef(annotRef) ? annotRef.objNum : nextObjNum++;
-          const newDict = this._buildModifiedWidgetDict(annotDict, newValue);
-          modifiedObjects.set(annotObjNum, newDict);
-          annotRefs.push(annotObjNum);
+          // Rewrite the annotation at its original object number and generation
+          const target = isPdfRef(annotRef) ? annotRef : { objNum: nextObjNum++, gen: 0 };
+          // The appearance stream is an object of this update, numbered in
+          // the original file's space — not in the scratch writer's, whose
+          // numbers collide with the original objects.
+          const newDict = this._buildModifiedWidgetDict(annotDict, newValue, (dict, data) => {
+            const apObjNum = nextObjNum++;
+            modifiedObjects.set(apObjNum, { gen: 0, body: { dict, data } });
+            return apObjNum;
+          });
+          modifiedObjects.set(target.objNum, { gen: target.gen, body: newDict });
+          annotRefs.push(target);
           continue;
         }
       }
 
       // Keep original annotation reference
       if (isPdfRef(annotRef)) {
-        annotRefs.push(annotRef.objNum);
+        annotRefs.push(annotRef);
       } else {
         // Inline annotation — write as new object
         const annotObjNum = nextObjNum++;
         const serialized = this._serializeAnnotDict(annotDict);
-        modifiedObjects.set(annotObjNum, serialized);
-        annotRefs.push(annotObjNum);
+        modifiedObjects.set(annotObjNum, { gen: 0, body: serialized });
+        annotRefs.push({ objNum: annotObjNum, gen: 0 });
       }
     }
 
@@ -1481,7 +1560,9 @@ export class PdfEditor {
    * Sign this PDF with a digital signature.
    *
    * Performs a full save with an embedded PKCS#7 signature placeholder,
-   * then fills in the real CMS SignedData.
+   * then fills in the real CMS SignedData. Because the save is a full
+   * rewrite, signing an already-signed document throws
+   * `PdfSignatureInvalidationError` unless `invalidateSignatures` is set.
    *
    * @param options - Certificate, private key, and optional signer metadata
    * @returns The signed PDF as Uint8Array
@@ -1497,7 +1578,11 @@ export class PdfEditor {
    * });
    * ```
    */
-  async sign(options: PdfSignatureOptions): Promise<Uint8Array> {
+  async sign(options: EditorSignOptions): Promise<Uint8Array> {
+    // The signature is applied through a full rewrite, which breaks any
+    // signature already present.
+    this._guardSignatures(options, "sign() rewrites the whole file");
+
     // **Load-bearing, despite rolldown calling it `INEFFECTIVE_DYNAMIC_IMPORT`.** That warning is
     // about the module not moving into a chunk of its own, which it cannot: `surface/pdf.ts`
     // statically re-exports `sign`, `verifySignature`, `buildSignatureDictPlaceholder` and
@@ -1519,12 +1604,108 @@ export class PdfEditor {
     this._signaturePlaceholder = dictString;
     let pdfWithPlaceholder: Uint8Array;
     try {
-      pdfWithPlaceholder = await this.save();
+      pdfWithPlaceholder = await this.save({ invalidateSignatures: true });
     } finally {
       this._signaturePlaceholder = null;
     }
 
     return signPdf(pdfWithPlaceholder, options.certificate, options.privateKey);
+  }
+
+  /**
+   * @internal - Throw the first resource limit hit while reading this document
+   * or a document pages were copied from. Reads during a save tolerate
+   * malformed objects (see the `catch` blocks above), so a limit hit is
+   * recorded on the document rather than thrown where it happened.
+   */
+  private _throwIfLimitExceeded(): void {
+    this._doc.throwIfLimitExceeded();
+    for (const copied of this._copiedPages) {
+      copied.sourceDoc.throwIfLimitExceeded();
+    }
+  }
+
+  /** @internal - Throw when the document is signed and the caller has not opted in. */
+  private _guardSignatures(options: EditorSaveOptions | undefined, reason: string): void {
+    if (this.hasSignatures && !options?.invalidateSignatures) {
+      throw new PdfSignatureInvalidationError(
+        `The document is digitally signed and ${reason}, which would invalidate its signatures. ` +
+          "Pass { invalidateSignatures: true } to proceed anyway."
+      );
+    }
+  }
+
+  /**
+   * @internal - A field counts as a signature only when it is (or inherits
+   * being) /FT /Sig and its /V is a signature dictionary with /ByteRange and
+   * /Contents. /SigFlags alone is a hint a producer may leave set after the
+   * signature is removed, so it is not evidence.
+   */
+  private _detectSignatures(): boolean {
+    const root = this._doc.deref(this._doc.trailer.get("Root") ?? null);
+    if (!(root instanceof Map)) {
+      return false;
+    }
+    const acroForm = this._doc.deref(root.get("AcroForm") ?? null);
+    if (!(acroForm instanceof Map)) {
+      return false;
+    }
+    const visited = new Set<string>();
+    // Each entry carries the /FT inherited from its ancestors (ISO 32000-2 §12.7.4.1).
+    const stack: Array<{ item: PdfObject; inheritedFt: string | undefined }> = [];
+    const fields = this._doc.deref(acroForm.get("Fields") ?? null);
+    // Push element by element: spreading an untrusted, unbounded array into
+    // an argument list overflows the call stack.
+    if (isPdfArray(fields)) {
+      for (const f of fields) {
+        stack.push({ item: f, inheritedFt: undefined });
+      }
+    }
+    while (stack.length > 0) {
+      const { item, inheritedFt } = stack.pop()!;
+      if (isPdfRef(item)) {
+        const key = `${item.objNum}:${item.gen}`;
+        if (visited.has(key)) {
+          continue;
+        }
+        visited.add(key);
+      }
+      const field = this._doc.deref(item);
+      if (!(field instanceof Map)) {
+        continue;
+      }
+      const ft = dictGetName(field, "FT") ?? inheritedFt;
+      if (ft === "Sig") {
+        const value = this._doc.deref(field.get("V") ?? null);
+        if (value instanceof Map && value.has("ByteRange") && value.has("Contents")) {
+          return true;
+        }
+      }
+      const kids = this._doc.deref(field.get("Kids") ?? null);
+      if (isPdfArray(kids)) {
+        for (const kid of kids) {
+          stack.push({ item: kid, inheritedFt: ft });
+        }
+      }
+    }
+    return false;
+  }
+
+  /** @internal - Serialize the trailer entries an incremental update must repeat. */
+  private _serializeTrailerEntries(): Map<string, string> {
+    const entries = new Map<string, string>();
+    // /ID is repeated verbatim: ISO 32000-2 §14.4 requires ID[0] to stay
+    // the file's permanent identifier, and keeping ID[1] is permitted.
+    for (const key of ["Root", "Info", "Encrypt", "ID"]) {
+      const value = this._doc.trailer.get(key);
+      if (value !== undefined && value !== null) {
+        entries.set(key, this._serializeOriginalValue(value));
+      }
+    }
+    // /Size decides where the update's own xref stream object is numbered;
+    // without it that number could collide with an existing object.
+    entries.set("Size", String(this._doc.objectNumberBound));
+    return entries;
   }
 
   /** @internal - Collect decoded content stream bytes from a page dict. */
@@ -1873,13 +2054,27 @@ export class PdfEditor {
   }
 
   /** @internal */
-  private _buildModifiedWidgetDict(originalDict: PdfDictValue, newValue: string): string {
+  private _buildModifiedWidgetDict(
+    originalDict: PdfDictValue,
+    newValue: string,
+    addAppearanceStream?: (dict: PdfDict, data: Uint8Array) => number
+  ): string {
     // Determine the field type (/FT) — may be directly on the widget or inherited from parent
     const fieldType = this._resolveFieldType(originalDict);
 
     // For text fields, generate an appearance stream instead of stripping /AP
-    if (fieldType === "Tx" && this._writerForSave) {
-      return this._buildTextFieldWidgetDict(originalDict, newValue);
+    if (fieldType === "Tx" && (addAppearanceStream || this._writerForSave)) {
+      return this._buildTextFieldWidgetDict(
+        originalDict,
+        newValue,
+        addAppearanceStream ??
+          ((dict, data) => {
+            const writer = this._writerForSave!;
+            const objNum = writer.allocObject();
+            writer.addStreamObject(objNum, dict, data, { compress: false });
+            return objNum;
+          })
+      );
     }
 
     // For non-text fields, fall back to stripping /AP (force viewer to regenerate)
@@ -1906,9 +2101,11 @@ export class PdfEditor {
    * appearance stream. The stream renders the field value so it is visible
    * in all viewers, even those that ignore /NeedAppearances.
    */
-  private _buildTextFieldWidgetDict(originalDict: PdfDictValue, newValue: string): string {
-    const writer = this._writerForSave!;
-
+  private _buildTextFieldWidgetDict(
+    originalDict: PdfDictValue,
+    newValue: string,
+    addAppearanceStream: (dict: PdfDict, data: Uint8Array) => number
+  ): string {
     // Extract the widget Rect for sizing the appearance
     const rect = this._resolveWidgetRect(originalDict);
 
@@ -1929,13 +2126,12 @@ export class PdfEditor {
     });
 
     // Write the appearance stream as a Form XObject indirect object
-    const apObjNum = writer.allocObject();
     const apDict = new PdfDict()
       .set("Type", "/XObject")
       .set("Subtype", "/Form")
       .set("BBox", buildAppearanceBBox(rect))
       .set("Resources", resources);
-    writer.addStreamObject(apObjNum, apDict, stream, { compress: false });
+    const apObjNum = addAppearanceStream(apDict, stream);
 
     // Build the widget dict
     const parts: string[] = ["<<"];

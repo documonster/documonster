@@ -9,6 +9,7 @@
 import type { Mutable } from "@word/core/internal-utils";
 import { parseParagraphProperties } from "@word/reader/paragraph-section-parsers";
 import { attrInt, attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import { parseRunProperties, parseShading } from "@word/reader/properties-parsers";
 import { parseTableBorders, parseTableProperties } from "@word/reader/table-properties-parsers";
 import type {
@@ -18,10 +19,12 @@ import type {
   TableRowProperties,
   TableStyleConditionalFormat
 } from "@word/types";
-import { parseXml } from "@xml/dom";
 
-export function parseStyles(xmlStr: string): { docDefaults?: DocDefaults; styles: StyleDef[] } {
-  const doc = parseXml(xmlStr);
+export function parseStyles(
+  xmlStr: string,
+  maxDepth?: number
+): { docDefaults?: DocDefaults; styles: StyleDef[] } {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   let docDefaults: DocDefaults | undefined;
   const styles: StyleDef[] = [];

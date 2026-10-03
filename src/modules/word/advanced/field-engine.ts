@@ -14,14 +14,26 @@ import { extractParagraphText, isRun } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
 import { layoutDocument } from "@word/layout/layout";
+import { resolveHeadingLevel } from "@word/query/heading";
+import {
+  collectSectionProperties,
+  displayedPageNumbers,
+  formatPageField,
+  type PageSectionSlot,
+  parsePageField
+} from "@word/query/page-field";
+import { indexStyles } from "@word/query/style-resolve";
+import type { StyleIndex } from "@word/query/style-resolve";
 import type {
   BodyContent,
   BookmarkStart,
   DocxDocument,
   FieldContent,
+  PageNumberFormat,
   Paragraph,
   ParagraphChild,
   Run,
+  SectionProperties,
   RunContent,
   StyleDef,
   Table,
@@ -536,6 +548,7 @@ function isBookmarkStart(child: ParagraphChild): child is BookmarkStart {
 function collectHeadings(doc: DocxDocument, layout: LayoutResult): HeadingEntry[] {
   const headings: HeadingEntry[] = [];
   const { contentPages } = layout;
+  const styles = indexStyles(doc);
 
   // Walk body twice to track the enclosing top-level body index. First pass:
   // record outer index per top-level block, then traverse its subtree.
@@ -544,7 +557,7 @@ function collectHeadings(doc: DocxDocument, layout: LayoutResult): HeadingEntry[
     const fallbackPage = contentPages[i] ?? 1;
     walkBlocks([item] as BodyContent[], {
       enterParagraph(para) {
-        const level = getHeadingLevel(para, doc.styles);
+        const level = getHeadingLevel(doc, para, styles);
         if (level !== null) {
           headings.push({
             text: extractParagraphText(para),
@@ -559,46 +572,18 @@ function collectHeadings(doc: DocxDocument, layout: LayoutResult): HeadingEntry[
   return headings;
 }
 
-/** Determine if a paragraph is a heading and return its level (1-9), or null. */
-function getHeadingLevel(para: Paragraph, styles?: DocxDocument["styles"]): number | null {
-  const props = para.properties;
-
-  // Check outlineLevel directly on paragraph
-  if (props?.outlineLevel != null && props.outlineLevel >= 0 && props.outlineLevel <= 8) {
-    return props.outlineLevel + 1; // outlineLevel is 0-based, heading level is 1-based
-  }
-
-  // Check style name
-  const styleId = props?.style;
-  if (styleId) {
-    // Direct pattern match: Heading1, Heading2, etc.
-    const headingMatch = /^[Hh]eading(\d)$/.exec(styleId);
-    if (headingMatch) {
-      return parseInt(headingMatch[1], 10);
-    }
-
-    // Look up in styles array
-    if (styles) {
-      const styleDef = styles.find(s => s.styleId === styleId);
-      if (styleDef) {
-        // Check style name pattern
-        const nameMatch = /^[Hh]eading\s*(\d)$/.exec(styleDef.name);
-        if (nameMatch) {
-          return parseInt(nameMatch[1], 10);
-        }
-        // Check outlineLevel on style
-        if (
-          styleDef.outlineLevel != null &&
-          styleDef.outlineLevel >= 0 &&
-          styleDef.outlineLevel <= 8
-        ) {
-          return styleDef.outlineLevel + 1;
-        }
-      }
-    }
-  }
-
-  return null;
+/**
+ * A paragraph's TOC level (1-9), or null when it is not an outline entry.
+ *
+ * The heading rule is `resolveHeadingLevel`, shared with every converter and
+ * the page layout, so a TOC lists exactly the paragraphs those render as
+ * headings — including a custom style that inherits an outline level through
+ * `basedOn`. The one exception is the built-in Title style: converters show it
+ * as a heading, but it has no outline level, so Word's `TOC \o` omits it.
+ */
+function getHeadingLevel(doc: DocxDocument, para: Paragraph, styles: StyleIndex): number | null {
+  const heading = resolveHeadingLevel(doc, para, styles);
+  return heading && heading.kind === "heading" ? heading.level : null;
 }
 
 // =============================================================================
@@ -1226,7 +1211,7 @@ function updateBody(
       }
       newBody.push(result.paragraph);
     } else if (item.type === "tableOfContents" && opts.updateToc) {
-      const headings = collectHeadingsFromLayout(body, layout);
+      const headings = collectHeadingsFromLayout(doc, body, layout);
       const updated = updateTocContent(item, headings);
       if (updated !== item) {
         changed = true;
@@ -1346,11 +1331,13 @@ function updateTableFields(
 
 /** Collect headings directly from body with layout info (avoiding a second layout pass). */
 function collectHeadingsFromLayout(
+  doc: DocxDocument,
   body: readonly BodyContent[],
   layout: LayoutResult
 ): HeadingEntry[] {
   const headings: HeadingEntry[] = [];
   const { contentPages } = layout;
+  const styles = indexStyles(doc);
 
   for (let i = 0; i < body.length; i++) {
     const item = body[i];
@@ -1358,7 +1345,7 @@ function collectHeadingsFromLayout(
       continue;
     }
 
-    const level = getHeadingLevelSimple(item);
+    const level = getHeadingLevel(doc, item, styles);
     if (level !== null) {
       headings.push({
         text: extractParagraphText(item),
@@ -1369,25 +1356,6 @@ function collectHeadingsFromLayout(
   }
 
   return headings;
-}
-
-/** Simple heading level detection without full style lookup. */
-function getHeadingLevelSimple(para: Paragraph): number | null {
-  const props = para.properties;
-
-  if (props?.outlineLevel != null && props.outlineLevel >= 0 && props.outlineLevel <= 8) {
-    return props.outlineLevel + 1;
-  }
-
-  const styleId = props?.style;
-  if (styleId) {
-    const match = /^[Hh]eading(\d)$/.exec(styleId);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
-  }
-
-  return null;
 }
 
 // =============================================================================
@@ -1551,6 +1519,69 @@ function updateRunFields(
 // Field Value Computation
 // =============================================================================
 
+/**
+ * A page-number field's text for `n`, honouring its `\\*` format switch and,
+ * for `PAGE`, the section's `w:pgNumType w:fmt` (shared with the layout's
+ * headers and footers). Falls back to the plain number when the instruction
+ * carries a switch the shared formatter does not handle.
+ */
+function pageFieldText(
+  field: FieldContent,
+  n: number,
+  sectionFormat: PageNumberFormat | undefined
+): string {
+  const parsed = parsePageField(field.instruction);
+  return (parsed && formatPageField(parsed, n, sectionFormat)) ?? String(n);
+}
+
+/** What `PAGE` needs from one estimated layout, computed once per layout. */
+interface EstimatedPageNumbering {
+  /** The number `PAGE` shows on each page (index 0 is page 1). */
+  readonly shown: readonly number[];
+  /** `collectSectionProperties(doc)`, indexed like `layout.contentSections`. */
+  readonly sections: readonly (SectionProperties | undefined)[];
+}
+
+/**
+ * The number `PAGE` shows on each page of the estimated layout, by the same
+ * rule the page layout applies to headers and footers
+ * (`displayedPageNumbers`). A page takes the section of the first body item
+ * that lands on it; a page no item starts on continues the previous one's.
+ */
+function estimatedPageNumbering(layout: LayoutResult, doc: DocxDocument): EstimatedPageNumbering {
+  const cached = pageNumberingCache.get(layout);
+  if (cached) {
+    return cached;
+  }
+  const firstSection: (number | undefined)[] = [];
+  for (let i = 0; i < layout.contentPages.length; i++) {
+    const page = layout.contentPages[i];
+    if (page !== undefined && page >= 1 && firstSection[page - 1] === undefined) {
+      firstSection[page - 1] = layout.contentSections[i];
+    }
+  }
+  const slots: PageSectionSlot[] = [];
+  for (let p = 0; p < layout.pageCount; p++) {
+    const previous = slots[p - 1];
+    const sectionIndex = firstSection[p] ?? previous?.sectionIndex ?? 0;
+    const pageInSection =
+      previous !== undefined && previous.sectionIndex === sectionIndex
+        ? previous.pageInSection + 1
+        : 1;
+    slots.push({ sectionIndex, pageInSection });
+  }
+  const sections = collectSectionProperties(doc);
+  const result = { shown: displayedPageNumbers(slots, sections), sections };
+  pageNumberingCache.set(layout, result);
+  return result;
+}
+
+/**
+ * Per estimated layout, so a document with many `PAGE` fields computes it
+ * once. A layout is produced from one document snapshot, so it is a safe key.
+ */
+const pageNumberingCache = new WeakMap<LayoutResult, EstimatedPageNumbering>();
+
 function computeFieldValue(
   field: FieldContent,
   bodyIndex: number,
@@ -1572,7 +1603,11 @@ function computeFieldValue(
         return field;
       }
       const page = layout.contentPages[bodyIndex] ?? 1;
-      const value = String(page);
+      const sectionIdx = layout.contentSections[bodyIndex] ?? 0;
+      const { shown: displayed, sections } = estimatedPageNumbering(layout, doc);
+      const numbering = sections[sectionIdx]?.pageNumbering;
+      const shown = displayed[page - 1] ?? page;
+      const value = pageFieldText(field, shown, numbering?.format);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1583,7 +1618,7 @@ function computeFieldValue(
       if (!opts.updatePageFields) {
         return field;
       }
-      const value = String(layout.pageCount);
+      const value = pageFieldText(field, layout.pageCount, undefined);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1596,7 +1631,7 @@ function computeFieldValue(
       }
       const sectionIdx = layout.contentSections[bodyIndex] ?? 0;
       const pages = layout.sectionPageCounts[sectionIdx] ?? 1;
-      const value = String(pages);
+      const value = pageFieldText(field, pages, undefined);
       if (field.cachedValue === value) {
         return field;
       }

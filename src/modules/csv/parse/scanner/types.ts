@@ -242,4 +242,10 @@ export interface Scanner {
    * Useful for error recovery or debugging.
    */
   getBuffer(): string;
+
+  /**
+   * Number of UTF-16 code units fed but not yet consumed by a completed row.
+   * Unlike {@link getBuffer} this never copies the buffered data.
+   */
+  pendingLength(): number;
 }

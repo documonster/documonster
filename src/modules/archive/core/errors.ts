@@ -112,14 +112,20 @@ export class EntrySizeMismatchError extends ArchiveError {
   constructor(
     public readonly path: string,
     public readonly expected: number,
-    public readonly actual: number,
+    /**
+     * Bytes produced. `undefined` when the inflater was stopped at the
+     * declared size, so no count beyond it exists.
+     */
+    public readonly actual: number | undefined,
     public readonly reason: EntrySizeMismatchReason,
     options?: BaseErrorOptions
   ) {
     const msg =
-      reason === "too-many-bytes"
-        ? `Entry "${path}" produced more bytes than declared: expected ${expected}, got at least ${actual}`
-        : `Entry "${path}" produced fewer bytes than declared: expected ${expected}, got ${actual}`;
+      reason === "too-few-bytes"
+        ? `Entry "${path}" produced fewer bytes than declared: expected ${expected}, got ${actual}`
+        : actual === undefined
+          ? `Entry "${path}" exceeds its declared ${expected} bytes`
+          : `Entry "${path}" produced more bytes than declared: expected ${expected}, got at least ${actual}`;
     super(msg, options);
   }
 
@@ -135,6 +141,44 @@ export class EntrySizeMismatchError extends ArchiveError {
    */
   isCorruption(): boolean {
     return this.reason === "too-few-bytes";
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Limit Errors
+// -----------------------------------------------------------------------------
+
+/**
+ * Which configured bound an {@link ArchiveLimitError} reports.
+ *
+ * - `maxOutputLength`: one decompression would produce more than its bound.
+ *   Decompression stops as soon as the bound is crossed, so the full (possibly
+ *   enormous) output is never materialised.
+ * - `maxTotalUncompressedSize`: a bulk extraction would produce more in total.
+ * - `maxEntries`: the central directory declares more entries than allowed;
+ *   rejected before any entry record is allocated.
+ */
+export type ArchiveLimit = "maxOutputLength" | "maxTotalUncompressedSize" | "maxEntries";
+
+/**
+ * Error thrown when decompressing or extracting would exceed a configured limit.
+ */
+export class ArchiveLimitError extends ArchiveError {
+  override name = "ArchiveLimitError";
+
+  constructor(
+    public readonly limit: ArchiveLimit,
+    public readonly allowed: number,
+    options?: BaseErrorOptions
+  ) {
+    super(
+      limit === "maxOutputLength"
+        ? `Decompressed output exceeds maxOutputLength (${allowed} bytes)`
+        : limit === "maxEntries"
+          ? `Archive entry count exceeds maxEntries (${allowed})`
+          : `Archive uncompressed size exceeds maxTotalUncompressedSize (${allowed} bytes)`,
+      options
+    );
   }
 }
 

@@ -15,6 +15,7 @@ import { crc32, crc32Finalize, crc32Update } from "@archive/compression/crc32";
 import { createInflateStream } from "@archive/compression/streaming-compress";
 import {
   ArchiveError,
+  ArchiveLimitError,
   Crc32MismatchError,
   DecryptionError,
   EntrySizeMismatchError,
@@ -62,15 +63,70 @@ export interface ExtractCoreOptions {
    * @default true
    */
   validateEntrySizes?: boolean;
+  /**
+   * Largest entry that may be inflated into memory, in bytes, where an entry
+   * has to be buffered whole (AES). Default: 512 MiB.
+   */
+  maxEntrySize?: number;
 }
 
 /**
  * Maximum allowed uncompressed entry size for non-streaming extraction (512 MB).
- * This is a pre-decompression check based on the declared size in the ZIP metadata.
- * It prevents memory exhaustion from archives that declare very large output sizes.
+ *
+ * Enforced twice: against the *declared* size before anything is inflated, and
+ * as the inflater's output bound, so an entry that lies about its size is
+ * stopped as soon as it overruns rather than after it has been materialised.
  * The streaming extraction path (processEntryDataStream) has its own byte-level checks.
  */
 const DEFAULT_MAX_ENTRY_SIZE = 512 * 1024 * 1024;
+
+/** How one entry is inflated into memory: its output bound and how a hit is reported. */
+interface EntryInflation {
+  entry: ZipEntryRecord;
+  validateEntrySizes: boolean;
+  bound: number;
+}
+
+/**
+ * Reject an entry whose declared size exceeds `maxEntrySize`, and fix the
+ * output bound to inflate it under.
+ *
+ * With size validation on, the bound is the declared size exactly: any byte
+ * past it already makes the entry invalid, so there is no reason to produce
+ * it. With validation off the declared size is not trusted for anything, and
+ * `maxEntrySize` alone bounds the in-memory result.
+ */
+function planEntryInflation(
+  entry: ZipEntryRecord,
+  validateEntrySizes: boolean,
+  maxEntrySize: number
+): EntryInflation {
+  if (validateEntrySizes && entry.uncompressedSize > maxEntrySize) {
+    throw new FileTooLargeError(
+      entry.path,
+      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
+        `which exceeds the maximum allowed size of ${maxEntrySize} bytes. ` +
+        "Use the streaming API for large entries."
+    );
+  }
+  const bound = validateEntrySizes ? entry.uncompressedSize : maxEntrySize;
+  return { entry, validateEntrySizes, bound };
+}
+
+/**
+ * Translate an inflater limit hit into the error that names the entry.
+ */
+function translateOutputLimit(err: unknown, plan: EntryInflation): unknown {
+  if (!(err instanceof ArchiveLimitError)) {
+    return err;
+  }
+  const { entry, bound } = plan;
+  return plan.validateEntrySizes
+    ? new EntrySizeMismatchError(entry.path, entry.uncompressedSize, undefined, "too-many-bytes", {
+        cause: err
+      })
+    : new FileTooLargeError(entry.path, `inflates beyond ${bound} bytes`, { cause: err });
+}
 
 /**
  * Process compressed (and possibly encrypted) entry data to get the final content.
@@ -82,6 +138,7 @@ const DEFAULT_MAX_ENTRY_SIZE = 512 * 1024 * 1024;
  * @param password - Optional password for decryption
  * @param checkCrc32 - Whether to validate CRC32 checksum (default: false)
  * @param validateEntrySizes - Whether to validate decompressed size matches declared size (default: true)
+ * @param maxEntrySize - Largest entry that may be inflated into memory (default: 512 MiB)
  * @returns Decompressed entry content
  */
 export async function processEntryData(
@@ -89,22 +146,14 @@ export async function processEntryData(
   compressedData: Uint8Array,
   password?: string | Uint8Array,
   checkCrc32 = false,
-  validateEntrySizes = true
+  validateEntrySizes = true,
+  maxEntrySize = DEFAULT_MAX_ENTRY_SIZE
 ): Promise<Uint8Array> {
   let result: Uint8Array;
 
-  // Pre-decompression size check: reject entries whose *declared* uncompressed size
-  // exceeds the limit. This catches archives that honestly declare very large entries
-  // but does NOT protect against ZIP bombs that lie about their size (for that, use
-  // the streaming path processEntryDataStream which validates actual output bytes).
-  if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
-    throw new FileTooLargeError(
-      entry.path,
-      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
-        `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
-        "Use the streaming API for large entries."
-    );
-  }
+  // Rejects an over-large declared size up front, and bounds the inflater so an
+  // entry that lies about its size stops as soon as it overruns.
+  const plan = planEntryInflation(entry, validateEntrySizes, maxEntrySize);
 
   // Handle encrypted entries
   if (entry.isEncrypted) {
@@ -123,7 +172,7 @@ export async function processEntryData(
       result = await decompressData(
         decrypted,
         entry.originalCompressionMethod ?? COMPRESSION_STORE,
-        entry.path
+        plan
       );
     } else if (entry.encryptionMethod === "zipcrypto") {
       // ZipCrypto decryption
@@ -132,13 +181,13 @@ export async function processEntryData(
         throw new DecryptionError(entry.path);
       }
 
-      result = await decompressData(decrypted, entry.compressionMethod, entry.path);
+      result = await decompressData(decrypted, entry.compressionMethod, plan);
     } else {
       throw new DecryptionError(entry.path, "Unsupported encryption method");
     }
   } else {
     // Non-encrypted entry
-    result = await decompressData(compressedData, entry.compressionMethod, entry.path);
+    result = await decompressData(compressedData, entry.compressionMethod, plan);
   }
 
   // Validate entry size (ZIP bomb protection)
@@ -173,6 +222,7 @@ export async function processEntryData(
  * @param compressedData - Raw compressed (and possibly encrypted) data from the ZIP
  * @param password - Optional password for decryption
  * @param validateEntrySizes - Whether to validate decompressed size matches declared size (default: true)
+ * @param maxEntrySize - Largest entry that may be inflated into memory (default: 512 MiB)
  * @returns Decompressed entry content
  * @throws Error if the entry uses AES encryption
  */
@@ -180,19 +230,13 @@ export function processEntryDataSync(
   entry: ZipEntryRecord,
   compressedData: Uint8Array,
   password?: string | Uint8Array,
-  validateEntrySizes = true
+  validateEntrySizes = true,
+  maxEntrySize = DEFAULT_MAX_ENTRY_SIZE
 ): Uint8Array {
   let result: Uint8Array;
 
-  // Pre-decompression size check (same as async version)
-  if (validateEntrySizes && entry.uncompressedSize > DEFAULT_MAX_ENTRY_SIZE) {
-    throw new FileTooLargeError(
-      entry.path,
-      `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
-        `which exceeds the maximum allowed size of ${DEFAULT_MAX_ENTRY_SIZE} bytes. ` +
-        "Use the streaming API for large entries."
-    );
-  }
+  // Same up-front check and inflater bound as the async version.
+  const plan = planEntryInflation(entry, validateEntrySizes, maxEntrySize);
 
   // Handle encrypted entries
   if (entry.isEncrypted) {
@@ -212,7 +256,7 @@ export function processEntryDataSync(
         throw new DecryptionError(entry.path);
       }
 
-      result = decompressDataSync(decrypted, entry.compressionMethod, entry.path);
+      result = decompressDataSync(decrypted, entry.compressionMethod, plan);
 
       // Always verify CRC32 for ZipCrypto because header verification only checks 1 byte
       // (1/256 false positive rate with wrong password per ZIP spec)
@@ -225,7 +269,7 @@ export function processEntryDataSync(
     }
   } else {
     // Non-encrypted entry
-    result = decompressDataSync(compressedData, entry.compressionMethod, entry.path);
+    result = decompressDataSync(compressedData, entry.compressionMethod, plan);
   }
 
   // Validate entry size (ZIP bomb protection)
@@ -238,18 +282,23 @@ export function processEntryDataSync(
 }
 
 /**
- * Decompress data based on compression method (async).
+ * Decompress an entry's data based on compression method (async), under the
+ * entry's output bound.
  */
 async function decompressData(
   data: Uint8Array,
   compressionMethod: number,
-  path: string
+  plan: EntryInflation
 ): Promise<Uint8Array> {
   if (compressionMethod === COMPRESSION_STORE) {
     return data;
   }
   if (compressionMethod === COMPRESSION_DEFLATE) {
-    return decompress(data);
+    try {
+      return await decompress(data, { maxOutputLength: plan.bound });
+    } catch (err) {
+      throw translateOutputLimit(err, plan);
+    }
   }
   throw new UnsupportedCompressionError(compressionMethod);
 }
@@ -559,7 +608,13 @@ export function processEntryDataStream(
   compressedData: AsyncIterable<Uint8Array>,
   options: ExtractCoreOptions & { signal?: AbortSignal } = {}
 ): AsyncIterable<Uint8Array> {
-  const { password, checkCrc32 = false, validateEntrySizes = true, signal } = options;
+  const {
+    password,
+    checkCrc32 = false,
+    validateEntrySizes = true,
+    maxEntrySize = DEFAULT_MAX_ENTRY_SIZE,
+    signal
+  } = options;
 
   async function* run(): AsyncIterable<Uint8Array> {
     throwIfAborted(signal);
@@ -575,11 +630,13 @@ export function processEntryDataStream(
       }
 
       if (entry.encryptionMethod === "aes" && entry.aesKeyStrength) {
+        // Reject an over-large declared size before buffering the ciphertext.
+        const plan = planEntryInflation(entry, validateEntrySizes, maxEntrySize);
         // AES requires full ciphertext to verify HMAC.
         const encrypted = await collect(compressedData);
         const decrypted = await aesDecrypt(encrypted, password, entry.aesKeyStrength);
         const method = entry.originalCompressionMethod ?? COMPRESSION_STORE;
-        const out = await decompressData(decrypted, method, entry.path);
+        const out = await decompressData(decrypted, method, plan);
 
         // Validate size for AES entries (already fully buffered)
         if (validateEntrySizes && out.length !== entry.uncompressedSize) {
@@ -627,7 +684,8 @@ export function processEntryDataStream(
         encrypted,
         password,
         checkCrc32,
-        validateEntrySizes
+        validateEntrySizes,
+        maxEntrySize
       );
 
       if (out.length) {
@@ -662,14 +720,23 @@ export function processEntryDataStream(
 }
 
 /**
- * Decompress data based on compression method (sync).
+ * Decompress an entry's data based on compression method (sync), under the
+ * entry's output bound.
  */
-function decompressDataSync(data: Uint8Array, compressionMethod: number, path: string): Uint8Array {
+function decompressDataSync(
+  data: Uint8Array,
+  compressionMethod: number,
+  plan: EntryInflation
+): Uint8Array {
   if (compressionMethod === COMPRESSION_STORE) {
     return data;
   }
   if (compressionMethod === COMPRESSION_DEFLATE) {
-    return decompressSync(data);
+    try {
+      return decompressSync(data, { maxOutputLength: plan.bound });
+    } catch (err) {
+      throw translateOutputLimit(err, plan);
+    }
   }
   throw new UnsupportedCompressionError(compressionMethod);
 }

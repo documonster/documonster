@@ -15,6 +15,7 @@ import {
   serializeElement,
   sidToHashAlgorithm
 } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import type {
   CompatFlag,
   CompatSetting,
@@ -22,10 +23,9 @@ import type {
   HyphenationSettings,
   ProtectionType
 } from "@word/types";
-import { parseXml } from "@xml/dom";
 
-export function parseSettingsXml(xmlStr: string): DocumentSettings {
-  const doc = parseXml(xmlStr);
+export function parseSettingsXml(xmlStr: string, maxDepth?: number): DocumentSettings {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const settings: Mutable<DocumentSettings> = {};
 

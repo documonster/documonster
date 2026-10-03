@@ -9,6 +9,7 @@
  * with filesystem-specific features (filename input + temp-file buffering).
  */
 
+import { FileTooLargeError } from "@archive/core/errors";
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
 import { ExcelFileError } from "@excel/errors";
@@ -95,8 +96,9 @@ import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { Readable } from "@stream";
+import { Readable, Transform } from "@stream";
 import { EventEmitter } from "@utils/event-emitter";
+import { assertLimitOption } from "@utils/limits";
 import { decodeOoxmlEscape } from "@utils/utils";
 import { SaxParser, saxStream } from "@xml/sax";
 import type { SaxTag } from "@xml/types";
@@ -208,6 +210,42 @@ export interface WorkbookReaderOptions {
    * @default 256MB (268435456)
    */
   maxBufferedWorksheetBytes?: number;
+  /**
+   * Largest part, in bytes, the reader holds in memory: the workbook, styles,
+   * shared strings, metadata and relationship parts it caches. Worksheets are
+   * streamed and not subject to it. A streamed ZIP may not declare sizes up
+   * front, so the bytes are counted as they inflate and the read fails with
+   * `FileTooLargeError` the moment a part exceeds it — the same per-part
+   * bound the buffered reader applies.
+   * @default 512 MiB (536870912)
+   */
+  maxEntrySize?: number;
+}
+
+/**
+ * `entry`'s bytes, failing with `FileTooLargeError` as soon as more than
+ * `limit` arrive — before a hostile part can be held in memory.
+ */
+function boundedPart(entry: ZipEntry, limit: number): Transform {
+  let seen = 0;
+  const bounded = new Transform({
+    transform(
+      chunk: Uint8Array | string,
+      _encoding: unknown,
+      callback: (err?: Error | null, data?: unknown) => void
+    ) {
+      seen += chunk.length;
+      if (seen > limit) {
+        callback(
+          new FileTooLargeError(entry.path, `holds more than ${limit} bytes (maxEntrySize)`)
+        );
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+  entry.on("error", (err: Error) => bounded.destroy(err));
+  return entry.pipe(bounded);
 }
 
 /** Constructor type for WorksheetReader/HyperlinkReader */
@@ -260,6 +298,7 @@ export abstract class WorkbookReaderBase<
 
   /** Maximum bytes to buffer for worksheets waiting on prerequisites. Default: 256 MB. */
   protected _maxBufferedBytes: number;
+  protected _maxEntrySize: number;
   /** Running total of bytes buffered for waiting worksheets. */
   protected _totalBufferedBytes = 0;
 
@@ -304,6 +343,8 @@ export abstract class WorkbookReaderBase<
     this.WorksheetReaderClass = WorksheetReaderClass;
     this.HyperlinkReaderClass = HyperlinkReaderClass;
     this._maxBufferedBytes = options.maxBufferedWorksheetBytes ?? 256 * 1024 * 1024;
+    assertLimitOption("maxEntrySize", options.maxEntrySize);
+    this._maxEntrySize = options.maxEntrySize ?? 512 * 1024 * 1024;
 
     this.options = {
       worksheets: "emit",
@@ -958,21 +999,23 @@ export abstract class WorkbookReaderBase<
         case OOXML_PATHS.rootRels:
           break;
         case OOXML_PATHS.xlWorkbookRels:
-          await this._parseRels(entry);
+          await this._parseRels(boundedPart(entry, this._maxEntrySize));
           break;
         case OOXML_PATHS.xlWorkbook:
-          await this._parseWorkbook(entry);
+          await this._parseWorkbook(boundedPart(entry, this._maxEntrySize));
           break;
         case OOXML_PATHS.xlSharedStrings:
-          for await (const item of this._parseSharedStrings(entry)) {
+          for await (const item of this._parseSharedStrings(
+            boundedPart(entry, this._maxEntrySize)
+          )) {
             yield { eventType: "shared-strings", value: item };
           }
           break;
         case OOXML_PATHS.xlStyles:
-          await this._parseStyles(entry);
+          await this._parseStyles(boundedPart(entry, this._maxEntrySize));
           break;
         case OOXML_PATHS.xlMetadata:
-          await this._parseMetadata(entry);
+          await this._parseMetadata(boundedPart(entry, this._maxEntrySize));
           break;
         // **The binary package's three prerequisite parts.**
         //
@@ -982,19 +1025,19 @@ export abstract class WorkbookReaderBase<
         // problem in both containers, and were already solved here for one of them.
         default:
           if (normalizedPath.toLowerCase() === "xl/_rels/workbook.bin.rels") {
-            await this._parseRels(entry);
+            await this._parseRels(boundedPart(entry, this._maxEntrySize));
             continue;
           }
 
           switch (xlsbPartKind(normalizedPath)) {
             case "workbook":
-              await this._parseXlsbWorkbook(entry);
+              await this._parseXlsbWorkbook(boundedPart(entry, this._maxEntrySize));
               continue;
             case "sharedStrings":
-              await this._parseXlsbSharedStrings(entry);
+              await this._parseXlsbSharedStrings(boundedPart(entry, this._maxEntrySize));
               continue;
             case "styles":
-              await this._parseXlsbStyles(entry);
+              await this._parseXlsbStyles(boundedPart(entry, this._maxEntrySize));
               continue;
             default:
               break;
@@ -1033,7 +1076,10 @@ export abstract class WorkbookReaderBase<
 
           sheetNo = getWorksheetNoFromWorksheetRelsPath(normalizedPath)?.toString();
           if (sheetNo) {
-            yield* this._parseHyperlinks(iterateStream(entry), sheetNo);
+            yield* this._parseHyperlinks(
+              iterateStream(boundedPart(entry, this._maxEntrySize)),
+              sheetNo
+            );
             continue;
           }
           break;

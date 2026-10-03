@@ -182,6 +182,19 @@ export async function readXlsxInto(
 }
 
 /**
+ * Document-level container defaults. The archive library leaves both bounds
+ * unbounded because what a process can afford is host-dependent; a workbook is
+ * a narrower thing. A part count of 10,000 mirrors the Word reader's
+ * `maxPartCount` and is far above real workbooks (each sheet adds ~2–6 parts:
+ * sheet XML, rels, drawing, comments, table), which reach the low hundreds.
+ * 2 GiB total sits above what Excel itself can open — sheet XML compresses
+ * ~10:1, so this admits a ~200 MB `.xlsx` — while rejecting the many-entries
+ * bombs a per-entry bound alone lets through. Pass `Infinity` to lift either.
+ */
+const XLSX_DEFAULT_MAX_ENTRIES = 10_000;
+const XLSX_DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024;
+
+/**
  * Internal: Load from Uint8Array buffer
  */
 export async function readXlsxBytesInto(
@@ -189,7 +202,12 @@ export async function readXlsxBytesInto(
   buffer: Uint8Array,
   options?: XlsxReadOptions
 ): Promise<Workbook> {
-  const parser = new ZipParser(buffer);
+  const parser = new ZipParser(buffer, {
+    ...options?.zip,
+    maxEntries: options?.zip?.maxEntries ?? XLSX_DEFAULT_MAX_ENTRIES,
+    maxTotalUncompressedSize:
+      options?.zip?.maxTotalUncompressedSize ?? XLSX_DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE
+  });
   const filesMap = await parser.extractAll();
 
   // Convert Map to Record for readXlsxFilesInto

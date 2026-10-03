@@ -6,6 +6,9 @@
  */
 
 import { isRun } from "@word/core/text-utils";
+import { resolveHeadingLevel } from "@word/query/heading";
+import { indexStyles } from "@word/query/style-resolve";
+import type { StyleIndex } from "@word/query/style-resolve";
 import type { DocxDocument, BodyContent, Paragraph, ParagraphChild } from "@word/types";
 
 // =============================================================================
@@ -19,7 +22,10 @@ export interface SplitOptions {
    *
    * - `"section"` — split at every section break (paragraph with `sectionProperties`).
    * - `"pageBreak"` — split at every explicit page break (run with `breakType: "page"`).
-   * - `"heading"` — split at every Heading 1 paragraph (or `headingLevel`).
+   * - `"heading"` — split at every Heading 1 paragraph (or `headingLevel`),
+   *   detected by the shared heading rule (effective outline level through
+   *   `basedOn`, `w:outlineLvl` 9 = body text, built-in `HeadingN` styles as
+   *   fallback). The `Title` style is not an outline heading and never splits.
    *
    * Default: `"section"`.
    */
@@ -56,7 +62,10 @@ export function splitDocument(doc: DocxDocument, options?: SplitOptions): DocxDo
     preserveSharedParts: options?.preserveSharedParts ?? true
   };
 
-  const segments = splitBody(doc.body as readonly BodyContent[], opts);
+  const segments = splitBody(doc.body as readonly BodyContent[], opts, {
+    doc,
+    styles: indexStyles(doc)
+  });
 
   if (segments.length === 0) {
     return [doc];
@@ -73,12 +82,16 @@ export function splitDocument(doc: DocxDocument, options?: SplitOptions): DocxDo
  * Split the body into segments based on the split criteria.
  * Returns an array of segments; each segment is an array of body content blocks.
  */
-function splitBody(body: readonly BodyContent[], opts: Required<SplitOptions>): BodyContent[][] {
+function splitBody(
+  body: readonly BodyContent[],
+  opts: Required<SplitOptions>,
+  ctx: HeadingContext
+): BodyContent[][] {
   const segments: BodyContent[][] = [];
   let current: BodyContent[] = [];
 
   for (const block of body) {
-    if (shouldSplitBefore(block, opts)) {
+    if (shouldSplitBefore(block, opts, ctx)) {
       // Heading-based split or pageBreakBefore: start a new segment BEFORE this block
       if (current.length > 0) {
         segments.push(current);
@@ -100,12 +113,16 @@ function splitBody(body: readonly BodyContent[], opts: Required<SplitOptions>): 
   return segments;
 }
 
-function shouldSplitBefore(block: BodyContent, opts: Required<SplitOptions>): boolean {
+function shouldSplitBefore(
+  block: BodyContent,
+  opts: Required<SplitOptions>,
+  ctx: HeadingContext
+): boolean {
   if (block.type !== "paragraph") {
     return false;
   }
   if (opts.by === "heading") {
-    return isHeadingLevel(block, opts.headingLevel);
+    return isHeadingLevel(block, opts.headingLevel, ctx);
   }
   if (opts.by === "pageBreak") {
     // pageBreakBefore semantically means "this paragraph starts on a new page".
@@ -128,28 +145,16 @@ function shouldSplitAfter(block: BodyContent, opts: Required<SplitOptions>): boo
   return false;
 }
 
-function isHeadingLevel(para: Paragraph, level: number): boolean {
-  const props = para.properties;
-  // outlineLevel mirrors getHeadings()'s detection: outlineLevel 0 == H1,
-  // outlineLevel 1 == H2, etc. Levels >= 9 mean "body text" and should not
-  // qualify as headings.
-  if (props?.outlineLevel !== undefined && props.outlineLevel < 9) {
-    if (props.outlineLevel + 1 === level) {
-      return true;
-    }
-  }
-  const style = props?.style;
-  if (!style) {
-    return false;
-  }
-  // Common heading style IDs: "Heading1", "heading 1", "Heading%i", etc.
-  const target = String(level);
-  const normalized = style.replace(/\s+/g, "").toLowerCase();
-  return (
-    normalized === `heading${target}` ||
-    normalized === `h${target}` ||
-    normalized === `title${target}`
-  );
+function isHeadingLevel(para: Paragraph, level: number, ctx: HeadingContext): boolean {
+  // Same rule as getHeadings() and the TOC: effective outline level through
+  // the basedOn chain (9 = body text); Title is not an outline heading.
+  const heading = resolveHeadingLevel(ctx.doc, para, ctx.styles);
+  return heading?.kind === "heading" && heading.level === level;
+}
+
+interface HeadingContext {
+  readonly doc: DocxDocument;
+  readonly styles: StyleIndex;
 }
 
 function paragraphHasExplicitPageBreakRun(para: Paragraph): boolean {

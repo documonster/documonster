@@ -10,8 +10,10 @@
  *   - Margins:   1 in on all sides (1440 twips)
  */
 
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
-  ParagraphProperties,
+  Paragraph,
+  Run,
   RunProperties,
   Table,
   TableCellProperties,
@@ -148,28 +150,6 @@ export function resolveCellMarginsTwips(
 // =============================================================================
 
 /**
- * The heading level a paragraph presents as, or 0 for body text.
- *
- * `w:outlineLvl` is authoritative; a `w:pStyle` named `Heading N` is the fallback
- * for a document whose styles table is absent or incomplete.
- */
-export function getHeadingLevel(props: ParagraphProperties | undefined): number {
-  if (!props) {
-    return 0;
-  }
-  if (props.outlineLevel !== undefined && props.outlineLevel >= 0 && props.outlineLevel <= 5) {
-    return props.outlineLevel + 1;
-  }
-  if (props.style) {
-    const match = /^[Hh]eading\s*(\d)$/i.exec(props.style);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
-  }
-  return 0;
-}
-
-/**
  * How much larger than body text a heading of this level is drawn.
  *
  * Applied **only** when the style supplies no concrete `w:sz` — a document with a
@@ -206,10 +186,15 @@ export function getHeadingFontScale(level: number): number {
  * The single expression both passes use, so neither can forget the `w:sz` opt-out.
  */
 export function resolveHeadingScale(
-  paragraphProps: ParagraphProperties | undefined,
+  styles: StyleResolver,
+  para: Paragraph,
   styleRunSize: number | null | undefined
 ): number {
-  return styleRunSize != null ? 1 : getHeadingFontScale(getHeadingLevel(paragraphProps));
+  if (styleRunSize != null) {
+    return 1;
+  }
+  const heading = styles.heading(para);
+  return heading ? getHeadingFontScale(heading.level) : 1;
 }
 
 /**
@@ -262,6 +247,25 @@ export function mergeRunProperties(
     return { ...merged, font: { ...a, ...b } };
   }
   return merged;
+}
+
+/**
+ * A run's effective formatting for layout: document defaults → paragraph style
+ * (`inherited`) → character style chain → direct properties. Both layout passes
+ * use this, so they agree on every run's size, face and visibility
+ * (`isHiddenRun` of the result).
+ *
+ * A run without a character style takes the cheap merge; with one, the full
+ * `resolveRunStyle` precedence (including toggle properties) applies.
+ */
+export function layoutRunProperties(
+  styles: StyleResolver,
+  run: Run,
+  inherited: RunProperties | undefined
+): RunProperties | undefined {
+  return run.properties?.style
+    ? styles.run(run, inherited).runProperties
+    : mergeRunProperties(inherited, run.properties);
 }
 
 // =============================================================================

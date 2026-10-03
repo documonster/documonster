@@ -23,7 +23,8 @@ import {
   styledFontVariant
 } from "@utils/font-metrics";
 import { ommlToMathML } from "@word/advanced/math-convert";
-import { extractMathText, isHyperlink, isRun } from "@word/core/text-utils";
+import { extractMathText, isHyperlink, symbolText } from "@word/core/text-utils";
+import { walkBlocks } from "@word/core/walker";
 import { layoutDocument } from "@word/layout/layout";
 import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
 import {
@@ -33,6 +34,7 @@ import {
   DEFAULT_PAGE_WIDTH_TWIPS,
   FIT_EPSILON_PT,
   LINE_HEIGHT_FACTOR,
+  layoutRunProperties,
   mergeRunProperties,
   minimumRowHeightPt,
   resolveColumnWidthsTwips,
@@ -66,13 +68,22 @@ import type {
   PageGeometry
 } from "@word/layout/layout-model";
 import { resolveWordLineMetrics } from "@word/layout/line-metrics";
+import { finalViewRun, finalViewRuns, isHiddenRun } from "@word/query/final-view";
+import { createNumberingCounter, placeholderFormat } from "@word/query/numbering-counter";
 import {
-  resolveRunStyle,
-  resolveShadingFill,
-  resolveStyle,
-  resolveTableCellFill
-} from "@word/query/style-resolve";
+  collectSectionProperties,
+  formatListCounter,
+  formatPageField,
+  nextDisplayedPage,
+  openSection,
+  type PageSectionSlot,
+  parsePageField,
+  sectionPageCounts
+} from "@word/query/page-field";
+import { resolveShadingFill } from "@word/query/style-resolve";
 import type { StyleResolveContext } from "@word/query/style-resolve";
+import { createStyleResolver } from "@word/query/style-resolver";
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   AltChunk,
   BodyContent,
@@ -90,9 +101,9 @@ import type {
   OpaqueDrawing,
   Paragraph,
   ParagraphBorders,
-  ParagraphChild,
+  FieldContent,
   ParagraphProperties,
-  NumberFormat,
+  PageNumberFormat,
   Run,
   SectionProperties,
   StructuredDocumentTag,
@@ -166,7 +177,8 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
   // context so that every `layoutParagraph` call — including those reached
   // through tables, text boxes, SDTs, footnotes, etc. — can render markers
   // without threading the map through every container function.
-  const listMarkers = computeListMarkers(doc);
+  const styles = createStyleResolver(doc);
+  const listMarkers = computeListMarkers(doc, styles);
   // The previous values are restored rather than cleared. Layout is
   // synchronous, but it is not un-reentrant: a caller's `measureText` callback
   // can lay out another document (to size a caption, say), and clearing the
@@ -175,18 +187,21 @@ export function layoutDocumentFull(doc: DocxDocument, options?: FullLayoutOption
   // paragraph. `layout.ts` already saves and restores; this now matches.
   const previousListMarkers = activeListMarkers;
   const previousDoc = activeDoc;
+  const previousStyles = activeStyles;
   const previousContextualSpacing = activeContextualSpacing;
   activeListMarkers = listMarkers;
   activeDoc = doc;
+  activeStyles = styles;
   // `w:contextualSpacing` needs each paragraph's *siblings*, which no single
   // `layoutParagraph` call can see. Resolved once here for the same reason and
   // through the same mechanism as the list markers.
-  activeContextualSpacing = computeContextualSpacing(doc);
+  activeContextualSpacing = computeContextualSpacing(doc, styles);
   try {
     return layoutDocumentFullInner(doc, options, layoutResult, listMarkers);
   } finally {
     activeListMarkers = previousListMarkers;
     activeDoc = previousDoc;
+    activeStyles = previousStyles;
     activeContextualSpacing = previousContextualSpacing;
   }
 }
@@ -205,6 +220,60 @@ let activeContextualSpacing: ReadonlyMap<Paragraph, ContextualSpacing> | undefin
  */
 let activeDoc: DocxDocument | undefined;
 
+/** Style resolution bound to `activeDoc`, same lifetime. */
+let activeStyles: StyleResolver | undefined;
+
+/**
+ * Page facts the page-number fields of a header or footer read while it is laid
+ * out, or `undefined` outside that pass (fields then show their cached result).
+ * Same single-slot reasoning as `activeDoc`.
+ *
+ * `numPages` / `sectionPages` are only known once every page exists, so the
+ * first pass leaves them unset and headers and footers that need them are laid
+ * out again at the end (see `relayoutPageTotals`). Without that, `PAGE` would
+ * be live while `NUMPAGES` kept its stale cache — "Page 3 of 1".
+ *
+ * A slot rather than a parameter because the fields are reached through the
+ * body layout's own container functions (`layoutParagraph` →
+ * `collectParagraphSegments` → `pushRunSegments`, and `layoutTable` → cells →
+ * nested tables, SDTs and text boxes), none of which otherwise know about pages.
+ */
+interface PageFieldValues {
+  /** Number `PAGE` shows; see `displayedPageNumbers`. */
+  readonly page: number;
+  /** `w:pgNumType w:fmt` of the page's section. */
+  readonly format: PageNumberFormat | undefined;
+  /** Physical pages in the document (`NUMPAGES`). */
+  readonly numPages?: number;
+  /** Pages in the page's section (`SECTIONPAGES`). */
+  readonly sectionPages?: number;
+}
+
+let activePageFields: PageFieldValues | undefined;
+
+/** The page facts for one page's header and footer. */
+function pageFieldValues(
+  slot: PageSlot,
+  totals?: { readonly numPages: number; readonly sectionPages: number }
+): PageFieldValues {
+  return {
+    page: slot.displayedPage,
+    format: slot.props?.pageNumbering?.format,
+    ...totals
+  };
+}
+
+/** Run `fn` with page-number fields resolving against `values`. */
+function withPageFields<T>(values: PageFieldValues | undefined, fn: () => T): T {
+  const previous = activePageFields;
+  activePageFields = values;
+  try {
+    return fn();
+  } finally {
+    activePageFields = previous;
+  }
+}
+
 function layoutDocumentFullInner(
   doc: DocxDocument,
   options: FullLayoutOptions | undefined,
@@ -216,12 +285,18 @@ function layoutDocumentFullInner(
   // (a later page may still have room thanks to less body content
   // or fewer of its own newly-introduced notes).
   const pages: LayoutPage[] = [];
+  // Per page, in order: where it sits among the sections and the number `PAGE`
+  // shows on it. Headers and footers that need page totals are laid out again
+  // from this once every page exists (see `relayoutPageTotals`).
+  const slots: PageSlot[] = [];
   let pendingFootnoteIds: readonly number[] = [];
   // Blocks the previous page could not hold. Pass 2 measures for real, so it —
   // not the estimating paginator — decides what fits; see `BuildPageResult`.
   let carried: readonly CarriedBlock[] = [];
   // Where the flow has got to in `doc.body`; see `FlowCursor`.
   const flow: FlowCursor = { nextItem: 0 };
+  // Image lookup depends only on `doc.images`; build it once for every page.
+  const imageMap = buildImageMap(doc.images);
 
   // Each section brings its own paper size, margins and headers, so every page
   // has to know which one it belongs to and how far into it it is (`titlePage`
@@ -232,6 +307,22 @@ function layoutDocumentFullInner(
   let sectionIndex = doc.body.length > 0 ? sectionOf(0) : sectionPropsList.length - 1;
   let pageInSection = 1;
 
+  /** The next page's slot, with its displayed number continuing the last one. */
+  const slotFor = (index: number, inSection: number): PageSlot => {
+    const previous = slots.at(-1);
+    const slot = { sectionIndex: index, pageInSection: inSection };
+    return {
+      ...slot,
+      props: sectionPropsList[index],
+      displayedPage: nextDisplayedPage(
+        previous,
+        previous?.displayedPage ?? 0,
+        slot,
+        sectionPropsList
+      )
+    };
+  };
+
   // Emit pages until the body is exhausted and nothing is left carried. Every
   // iteration either advances `flow.nextItem` or places part of a carried block
   // (a page that starts empty always places at least one line or row — see
@@ -239,6 +330,7 @@ function layoutDocumentFullInner(
   // degenerate geometry with no usable content height at all.
   const maxPages = 20_000;
   do {
+    const slot = slotFor(sectionIndex, pageInSection);
     const result = buildPage(
       doc,
       pages.length + 1,
@@ -248,9 +340,11 @@ function layoutDocumentFullInner(
       listMarkers,
       carried,
       flow,
-      { index: sectionIndex, props: sectionPropsList[sectionIndex], pageInSection }
+      slot,
+      imageMap
     );
     pages.push(result.page);
+    slots.push(slot);
     pendingFootnoteIds = result.deferredFootnoteIds;
     if (result.page.content.length === 0 && carried.length > 0) {
       // Nothing could be placed at all — stop rather than loop forever.
@@ -266,31 +360,27 @@ function layoutDocumentFullInner(
         ? sectionOf(flow.nextItem)
         : sectionIndex;
     if (nextSection !== sectionIndex) {
-      // The closing section's break type decides the parity the next one starts
-      // on; Word inserts a blank page to reach it.
-      const boundary = sectionBoundary(
-        sectionPropsList[sectionIndex],
-        sectionPropsList[nextSection]
-      );
       sectionIndex = nextSection;
       pageInSection = 1;
-      const nextPageNumber = pages.length + 1;
-      const wrongParity =
-        (boundary.parity === "odd" && nextPageNumber % 2 === 0) ||
-        (boundary.parity === "even" && nextPageNumber % 2 === 1);
-      if (wrongParity && pages.length < maxPages) {
+      // An odd/even-page break that lands on the wrong parity gets a blank page
+      // when the section continues numbering (see `openSection`).
+      const shown = slots.at(-1)?.displayedPage ?? 0;
+      if (openSection(shown, sectionPropsList[sectionIndex]).blankPage && pages.length < maxPages) {
+        const blankSlot = slotFor(sectionIndex, 0);
         const blank = buildPage(
           doc,
-          nextPageNumber,
+          pages.length + 1,
           layoutResult,
           options,
           [],
           listMarkers,
           [],
           undefined,
-          { index: sectionIndex, props: sectionPropsList[sectionIndex], pageInSection: 0 }
+          blankSlot,
+          imageMap
         );
         pages.push(blank.page);
+        slots.push(blankSlot);
       }
     } else {
       pageInSection++;
@@ -300,19 +390,27 @@ function layoutDocumentFullInner(
   // Notes still queued after the body runs out get pages of their own, until the
   // queue drains. One extra page is not enough: three notes each nearly a page
   // tall put the first on the body page, the second on the extra page, and
-  // dropped the third entirely.
+  // dropped the third entirely. Such a page continues the last body page's
+  // section — its geometry, headers and numbering.
   while (pendingFootnoteIds.length > 0 && pages.length > 0 && pages.length < maxPages) {
+    const last = slots[slots.length - 1];
+    const slot = slotFor(last.sectionIndex, last.pageInSection + 1);
     const overflowResult = buildPage(
       doc,
       pages.length + 1,
       layoutResult,
       options,
       pendingFootnoteIds,
-      listMarkers
+      listMarkers,
       // No flow cursor and no carried content: this page hosts only the
       // deferred footnote queue.
+      [],
+      undefined,
+      slot,
+      imageMap
     );
     pages.push(overflowResult.page);
+    slots.push(slot);
     const remaining = overflowResult.deferredFootnoteIds;
     if (remaining.length >= pendingFootnoteIds.length) {
       // A note taller than a whole page can never shrink the queue; it is laid
@@ -321,6 +419,8 @@ function layoutDocumentFullInner(
     }
     pendingFootnoteIds = remaining;
   }
+
+  relayoutPageTotals(doc, pages, slots, options, imageMap);
 
   // Bookmark pages and section-break page indices have to describe the pages
   // that were actually produced, not the estimate's. Both are remapped through
@@ -340,6 +440,73 @@ function layoutDocumentFullInner(
     bookmarkPages: remapBookmarkPages(pages, layoutResult),
     sectionBreaks: computeSectionBreaks(layoutResult, itemPage)
   };
+}
+
+/**
+ * Where one page sits among the sections, and the number `PAGE` shows on it.
+ * Plain data, so headers and footers can be laid out again from it once page
+ * totals are known.
+ */
+interface PageSlot extends PageSectionSlot {
+  /** The section's properties (`undefined` when the document declares none). */
+  readonly props: SectionProperties | undefined;
+  /** The number `PAGE` shows; see `displayedPageNumbers`. */
+  readonly displayedPage: number;
+}
+
+/**
+ * Lay out again the headers and footers of a document whose page-number
+ * fields need totals (`NUMPAGES`, `SECTIONPAGES`), now that every page exists.
+ * `PAGE` alone is already right after the first pass.
+ *
+ * A header or footer band has fixed geometry, so this replaces only the bands
+ * and cannot change pagination. Documents without such fields skip it.
+ */
+function relayoutPageTotals(
+  doc: DocxDocument,
+  pages: LayoutPage[],
+  slots: readonly PageSlot[],
+  options: FullLayoutOptions | undefined,
+  imageMap: ReadonlyMap<string, ImageDef>
+): void {
+  if (!headerFootersUsePageTotals(doc)) {
+    return;
+  }
+  const sectionPages = sectionPageCounts(slots);
+  for (let i = 0; i < pages.length; i++) {
+    const slot = slots[i];
+    const geometry = computePageGeometry(slot.props, options?.pageGeometry);
+    const totals = {
+      numPages: pages.length,
+      sectionPages: sectionPages.get(slot.sectionIndex) ?? pages.length
+    };
+    const header = layoutHeader(doc, slot, geometry, options, imageMap, totals);
+    const footer = layoutFooter(doc, slot, geometry, options, imageMap, totals);
+    const { header: _h, footer: _f, ...rest } = pages[i];
+    pages[i] = {
+      ...rest,
+      ...(header.length > 0 ? { header } : {}),
+      ...(footer.length > 0 ? { footer } : {})
+    };
+  }
+}
+
+/** Whether any header or footer holds a field that reads page totals. */
+function headerFootersUsePageTotals(doc: DocxDocument): boolean {
+  const parts = [...(doc.headers?.values() ?? []), ...(doc.footers?.values() ?? [])];
+  return parts.some(part => {
+    let found = false;
+    walkBlocks(part.content.children, {
+      visitRunContent(content) {
+        if (content.type === "field") {
+          const name = parsePageField(content.instruction)?.name;
+          found ||= name === "NUMPAGES" || name === "SECTIONPAGES";
+        }
+      },
+      enterParagraph: () => (found ? "stop" : undefined)
+    });
+    return found;
+  });
 }
 
 /**
@@ -823,40 +990,19 @@ function countRepeatedHeaderRows(table: Table): number {
 }
 
 /**
- * Every section's properties, indexed by the section numbers `layout.ts` reports
- * in `contentSections`.
+ * Whether the boundary into section `next` starts a new page.
  *
- * ECMA-376 stores a section's setup on the *last* paragraph of that section; the
- * final section's lives on `doc.sectionProperties`. Pass 2 used only the final
- * one for the whole document, so a document with sections rendered every page at
- * the last section's paper size and margins, and never broke where a section
- * boundary demanded it.
+ * The break type lives on the sectPr of the section being *opened* — a
+ * section's `w:type` says how that section starts (ECMA-376 §17.6.22), which
+ * Word's output confirms; `layout.ts` paginates by the same rule. `continuous`
+ * keeps the following content on the same page unless the paper size changes,
+ * which forces one regardless. Odd/even parity is decided by `openSection`.
  */
-function collectSectionProperties(doc: DocxDocument): (SectionProperties | undefined)[] {
-  const sections: (SectionProperties | undefined)[] = [];
-  for (const item of doc.body) {
-    if (item.type === "paragraph" && item.properties?.sectionProperties) {
-      sections.push(item.properties.sectionProperties);
-    }
-  }
-  // The trailing section is the one described by the document-level properties.
-  sections.push(doc.sectionProperties);
-  return sections;
-}
-
-/**
- * How the boundary between two sections behaves.
- *
- * The break type lives on the sectPr of the section being *closed*, which is the
- * convention `layout.ts` already paginates by — the two passes have to agree or
- * they disagree about the page count. `continuous` keeps the following content on
- * the same page unless the paper size changes, which forces one regardless.
- */
-function sectionBoundary(
+function sectionStartsPage(
   closing: SectionProperties | undefined,
   next: SectionProperties | undefined
-): { readonly startsPage: boolean; readonly parity: "odd" | "even" | undefined } {
-  const breakType = closing?.breakType ?? "nextPage";
+): boolean {
+  const breakType = next?.breakType ?? "nextPage";
   if (breakType === "continuous") {
     const sameWidth =
       (closing?.pageSize?.width ?? DEFAULT_PAGE_WIDTH_TWIPS) ===
@@ -864,12 +1010,9 @@ function sectionBoundary(
     const sameHeight =
       (closing?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS) ===
       (next?.pageSize?.height ?? DEFAULT_PAGE_HEIGHT_TWIPS);
-    return { startsPage: !(sameWidth && sameHeight), parity: undefined };
+    return !(sameWidth && sameHeight);
   }
-  return {
-    startsPage: true,
-    parity: breakType === "oddPage" ? "odd" : breakType === "evenPage" ? "even" : undefined
-  };
+  return true;
 }
 
 /** The properties of section `index`, or the document's when out of range. */
@@ -884,19 +1027,15 @@ function buildPage(
   layout: LayoutResult,
   options: FullLayoutOptions | undefined,
   pendingFootnoteIds: readonly number[],
-  listMarkers?: ReadonlyMap<Paragraph, ListMarker>,
-  carriedIn: readonly CarriedBlock[] = [],
-  flow?: FlowCursor,
-  section?: {
-    readonly index: number;
-    readonly props: SectionProperties | undefined;
-    readonly pageInSection: number;
-  }
+  listMarkers: ReadonlyMap<Paragraph, ListMarker> | undefined,
+  carriedIn: readonly CarriedBlock[],
+  flow: FlowCursor | undefined,
+  slot: PageSlot,
+  imageMap: ReadonlyMap<string, ImageDef>
 ): BuildPageResult {
-  const sectionProps = section ? section.props : doc.sectionProperties;
+  const sectionProps = slot.props;
   const geometry = computePageGeometry(sectionProps, options?.pageGeometry);
   const content: PageContent[] = [];
-  const imageMap = buildImageMap(doc.images);
   /**
    * Footnote ids referenced from the raw `BodyContent` items assigned
    * to this page, collected as we iterate so the order is the
@@ -1084,10 +1223,10 @@ function buildPage(
   /** A body item's effective `w:keepNext` — "do not end a page on me". */
   const keepsWithNext = (index: number): boolean => {
     const item = doc.body[index];
-    if (!item || item.type !== "paragraph" || !activeDoc) {
+    if (!item || item.type !== "paragraph" || !activeStyles) {
       return false;
     }
-    return resolveStyle(activeDoc, item).paragraphProperties.keepNext === true;
+    return activeStyles.paragraph(item).paragraphProperties.keepNext === true;
   };
 
   for (let i = startItem; i < doc.body.length; i++) {
@@ -1103,10 +1242,9 @@ function buildPage(
       // A section boundary ends the page when the section being closed says so,
       // because the next section may use different paper, margins and headers.
       if (
-        section !== undefined &&
-        layout.contentSections[i] !== section.index &&
+        layout.contentSections[i] !== slot.sectionIndex &&
         (content.length > 0 || placedItems > 0) &&
-        sectionBoundary(section.props, sectionPropsOf(doc, layout.contentSections[i])).startsPage
+        sectionStartsPage(slot.props, sectionPropsOf(doc, layout.contentSections[i]))
       ) {
         break;
       }
@@ -1376,24 +1514,8 @@ function buildPage(
     }
   }
 
-  const header = layoutHeader(
-    doc,
-    pageNumber,
-    section?.pageInSection ?? pageNumber,
-    sectionProps,
-    geometry,
-    options,
-    imageMap
-  );
-  const footer = layoutFooter(
-    doc,
-    pageNumber,
-    section?.pageInSection ?? pageNumber,
-    sectionProps,
-    geometry,
-    options,
-    imageMap
-  );
+  const header = layoutHeader(doc, slot, geometry, options, imageMap);
+  const footer = layoutFooter(doc, slot, geometry, options, imageMap);
 
   // Compute the absolute (page-y) lower edge of body content so the
   // footnote layout knows how much vertical room is actually free.
@@ -1653,36 +1775,10 @@ function collectFootnoteRefsFromBody(item: BodyContent, out: number[]): void {
 }
 
 function collectFootnoteRefsFromParagraph(para: Paragraph, out: number[]): void {
-  for (const child of para.children) {
-    if ("type" in child && child.type === "hyperlink") {
-      collectFootnoteRefsFromHyperlink(child, out);
-    } else if (!("type" in child) || child.type === undefined) {
-      // Plain Run (no `type` discriminator).
-      collectFootnoteRefsFromRun(child as Run, out);
-    } else if (
-      child.type === "insertedRun" ||
-      child.type === "deletedRun" ||
-      child.type === "movedFromRun" ||
-      child.type === "movedToRun"
-    ) {
-      // Tracked-change wrappers carry a single `run` (singular) per
-      // ECMA-376 — see `InsertedRun.run`, `DeletedRun.run`, etc.
-      collectFootnoteRefsFromRun(child.run, out);
-    }
-    // BookmarkStart / BookmarkEnd / Comment* / MoveRangeMarker /
-    // CustomXmlTrackingMarker carry no runnable text — nothing to
-    // collect.
-  }
-}
-
-function collectFootnoteRefsFromHyperlink(
-  link: { readonly children: readonly ParagraphChild[] },
-  out: number[]
-): void {
-  for (const child of link.children) {
-    if (!("type" in child) || child.type === undefined) {
-      collectFootnoteRefsFromRun(child as Run, out);
-    }
+  // Only references the final view draws: a note whose reference was deleted
+  // (or moved away) has nothing in the text pointing at it.
+  for (const run of finalViewRuns(para.children)) {
+    collectFootnoteRefsFromRun(run, out);
   }
 }
 
@@ -1701,7 +1797,8 @@ function collectFootnoteRefsFromRun(run: Run, out: number[]): void {
  * Resolve which header reference to use for a given page within a
  * section, per ECMA-376 §17.10:
  *
- *  - `titlePage === true` and `pageNumber === 1` → the `"first"` reference
+ *  - `titlePage === true` and `pageInSection === 1` → the `"first"` reference
+ *    (a parity blank page, `pageInSection` 0, never takes it)
  *  - `evenAndOddHeaders === true` (settings) and even page number → `"even"`
  *  - otherwise → the `"default"` reference
  *
@@ -1710,7 +1807,7 @@ function collectFootnoteRefsFromRun(run: Run, out: number[]): void {
  */
 function pickHeaderFooterRef(
   refs: readonly { readonly type: string; readonly rId: string }[],
-  pageNumber: number,
+  displayedPage: number,
   pageInSection: number,
   titlePage: boolean,
   evenAndOdd: boolean
@@ -1719,15 +1816,15 @@ function pickHeaderFooterRef(
     refs.find(r => r.type === t);
 
   // `titlePage` is per section — its "first" header belongs to the first page of
-  // *that* section. Even/odd is per document, since it follows the printed page
-  // number.
+  // *that* section. Even/odd follows the *displayed* page number, as Word does:
+  // a section restarting at 2 opens on an even header.
   if (titlePage && pageInSection === 1) {
     const first = find("first");
     if (first) {
       return first;
     }
   }
-  if (evenAndOdd && pageNumber % 2 === 0) {
+  if (evenAndOdd && displayedPage % 2 === 0) {
     const even = find("even");
     if (even) {
       return even;
@@ -1752,22 +1849,29 @@ function pickHeaderFooterRef(
  */
 function layoutHeader(
   doc: DocxDocument,
-  pageNumber: number,
-  pageInSection: number,
-  sectionProps: SectionProperties | undefined,
+  slot: PageSlot,
   geometry: PageGeometry,
   options: FullLayoutOptions | undefined,
-  imageMap: ReadonlyMap<string, ImageDef>
+  imageMap: ReadonlyMap<string, ImageDef>,
+  totals?: { readonly numPages: number; readonly sectionPages: number }
 ): (LayoutParagraph | LayoutTable)[] {
+  const sectionProps = slot.props;
   const refs = sectionProps?.headers;
-  if (!refs || refs.length === 0) {
+  // Word prints the blank page of an odd/even-page break bare.
+  if (!refs || refs.length === 0 || slot.pageInSection === 0) {
     return [];
   }
   // `titlePage` picks the "first" reference on the first page *of its section*,
   // not of the document.
   const titlePage = sectionProps?.titlePage === true;
   const evenAndOdd = doc.settings?.evenAndOddHeaders === true;
-  const ref = pickHeaderFooterRef(refs, pageNumber, pageInSection, titlePage, evenAndOdd);
+  const ref = pickHeaderFooterRef(
+    refs,
+    slot.displayedPage,
+    slot.pageInSection,
+    titlePage,
+    evenAndOdd
+  );
   if (!ref) {
     return [];
   }
@@ -1776,31 +1880,34 @@ function layoutHeader(
     return [];
   }
   const headerOffsetPt = geometry.headerOffset;
-  return layoutHeaderFooterChildren(
-    part.content.children,
-    headerOffsetPt,
-    geometry,
-    options,
-    imageMap
+  return withPageFields(pageFieldValues(slot, totals), () =>
+    layoutHeaderFooterChildren(part.content.children, headerOffsetPt, geometry, options, imageMap)
   );
 }
 
 function layoutFooter(
   doc: DocxDocument,
-  pageNumber: number,
-  pageInSection: number,
-  sectionProps: SectionProperties | undefined,
+  slot: PageSlot,
   geometry: PageGeometry,
   options: FullLayoutOptions | undefined,
-  imageMap: ReadonlyMap<string, ImageDef>
+  imageMap: ReadonlyMap<string, ImageDef>,
+  totals?: { readonly numPages: number; readonly sectionPages: number }
 ): (LayoutParagraph | LayoutTable)[] {
+  const sectionProps = slot.props;
   const refs = sectionProps?.footers;
-  if (!refs || refs.length === 0) {
+  // Word prints the blank page of an odd/even-page break bare.
+  if (!refs || refs.length === 0 || slot.pageInSection === 0) {
     return [];
   }
   const titlePage = sectionProps?.titlePage === true;
   const evenAndOdd = doc.settings?.evenAndOddHeaders === true;
-  const ref = pickHeaderFooterRef(refs, pageNumber, pageInSection, titlePage, evenAndOdd);
+  const ref = pickHeaderFooterRef(
+    refs,
+    slot.displayedPage,
+    slot.pageInSection,
+    titlePage,
+    evenAndOdd
+  );
   if (!ref) {
     return [];
   }
@@ -1814,12 +1921,8 @@ function layoutFooter(
   // page top). Renderers consume both bands with the same
   // "treat layout-y as page-y" rule.
   const footerOffsetPt = geometry.height - geometry.footerOffset;
-  return layoutHeaderFooterChildren(
-    part.content.children,
-    footerOffsetPt,
-    geometry,
-    options,
-    imageMap
+  return withPageFields(pageFieldValues(slot, totals), () =>
+    layoutHeaderFooterChildren(part.content.children, footerOffsetPt, geometry, options, imageMap)
   );
 }
 
@@ -1929,18 +2032,6 @@ interface ListMarker {
   readonly indentPt: number;
 }
 
-/**
- * Resolve list markers for every numbered / bulleted paragraph in the
- * document, in reading order, so ordered-list counters increment correctly
- * across paragraphs (and reset when a lower level reappears). Returns a map
- * keyed by the paragraph object.
- *
- * Markers are derived from `paragraph.properties.numbering` → the matching
- * `NumberingInstance` → its `AbstractNumbering` level definition. Bullet
- * levels emit their symbol; ordered levels emit a counter formatted per the
- * level's `NumberFormat` (decimal / lower-upper letter / lower-upper roman),
- * falling back to decimal for formats we don't render numerically.
- */
 /** What a paragraph's neighbours change about its own spacing and decoration. */
 interface ContextualSpacing {
   /** Suppress space-before (`w:contextualSpacing`, same style above). */
@@ -1968,7 +2059,10 @@ interface ContextualSpacing {
  * footnote forms its own run of paragraphs, and a non-paragraph block (a nested
  * table, an image frame) between two paragraphs breaks the run.
  */
-function computeContextualSpacing(doc: DocxDocument): Map<Paragraph, ContextualSpacing> {
+function computeContextualSpacing(
+  doc: DocxDocument,
+  styles: StyleResolver
+): Map<Paragraph, ContextualSpacing> {
   const out = new Map<Paragraph, ContextualSpacing>();
 
   /**
@@ -1981,7 +2075,7 @@ function computeContextualSpacing(doc: DocxDocument): Map<Paragraph, ContextualS
     if (!item || item.type !== "paragraph") {
       return "";
     }
-    const effective = resolveStyle(doc, item).paragraphProperties;
+    const effective = styles.paragraph(item).paragraphProperties;
     const borders = resolveParagraphBorders(effective.borders);
     const fill = resolveShadingFill(effective.shading);
     if (!borders && !fill) {
@@ -2009,7 +2103,7 @@ function computeContextualSpacing(doc: DocxDocument): Map<Paragraph, ContextualS
 
       // Contextual spacing: the flag is inheritable (that is how
       // `ListParagraph` carries it) and compares by style identity.
-      const effective = resolveStyle(doc, item).paragraphProperties;
+      const effective = styles.paragraph(item).paragraphProperties;
       const styleId = item.properties?.style;
       const sameStyle = (other: (typeof items)[number] | undefined): boolean =>
         other?.type === "paragraph" && other.properties?.style === styleId;
@@ -2037,73 +2131,37 @@ function computeContextualSpacing(doc: DocxDocument): Map<Paragraph, ContextualS
   return out;
 }
 
-function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
+/**
+ * Resolve list markers for every numbered / bulleted paragraph in the
+ * document, in reading order (descending into tables), keyed by paragraph.
+ *
+ * Which paragraphs are list items, which level definition applies and what
+ * number each item shows come from the shared numbering counter — the same
+ * rules the HTML, Markdown and semantic converters use — so a list resumed
+ * after an interrupting paragraph continues its count here too, as in Word.
+ * Only presentation is decided here: the marker text (the level's `%N`
+ * template, each placeholder formatted per its own level), the bullet glyph
+ * and the indent.
+ */
+function computeListMarkers(doc: DocxDocument, styles: StyleResolver): Map<Paragraph, ListMarker> {
   const markers = new Map<Paragraph, ListMarker>();
-  const instances = doc.numberingInstances;
-  const abstracts = doc.abstractNumberings;
-  if (!instances || !abstracts || instances.length === 0 || abstracts.length === 0) {
+  if (!doc.numberingInstances?.length || !doc.abstractNumberings?.length) {
     return markers;
   }
-
-  const instById = new Map(instances.map(n => [n.numId, n]));
-  const absById = new Map(abstracts.map(a => [a.abstractNumId, a]));
-
-  // Per (numId) counters, one slot per level. Counters reset at deeper
-  // levels when a shallower level advances.
-  const counters = new Map<number, (number | undefined)[]>();
-  // numIds whose list was interrupted by non-list content since their last
-  // item; the next item with that numId restarts its numbering. This makes
-  // two visually separate ordered lists (sharing a numId, separated by a
-  // plain paragraph) each start at 1 — matching user expectation rather than
-  // running a single continuous sequence.
-  const interrupted = new Set<number>();
-  // numIds seen at least once, so we know which to mark interrupted.
-  const seenNumIds = new Set<number>();
-
-  // Flatten paragraphs into document reading order (descending into tables),
-  // so list continuity is judged across the whole body, not per-cell.
-  const orderedParagraphs: Paragraph[] = [];
-  const walk = (items: readonly BodyContent[] | readonly (Paragraph | Table)[]): void => {
-    for (const item of items) {
-      if (item.type === "paragraph") {
-        orderedParagraphs.push(item);
-      } else if (item.type === "table") {
-        for (const row of item.rows) {
-          for (const cell of row.cells) {
-            walk(cell.content);
-          }
-        }
-      }
-    }
-  };
+  const counter = createNumberingCounter(doc);
 
   const resolveParagraphMarker = (para: Paragraph): void => {
-    const numbering = para.properties?.numbering;
+    const numbering = styles.numbering(para);
     if (!numbering) {
-      // Non-list paragraph: any list seen so far is now interrupted, so a
-      // later paragraph reusing the same numId restarts its sequence.
-      for (const id of seenNumIds) {
-        interrupted.add(id);
-      }
       return;
     }
-    const inst = instById.get(numbering.numId);
-    if (!inst) {
-      return;
-    }
-    const abs = absById.get(inst.abstractNumId);
-    if (!abs) {
-      return;
-    }
-    const level = numbering.level ?? 0;
-    const levelDef =
-      inst.overrides?.find(o => o.level === level)?.levelDef ??
-      abs.levels.find(l => l.level === level);
+    const { numId, level } = numbering;
+    const levelDef = counter.levelDef(numId, level);
     if (!levelDef) {
       return;
     }
+    const value = counter.next(numId, level);
 
-    seenNumIds.add(numbering.numId);
     // Indent: prefer the numbering level's own `w:lvl/w:pPr/w:ind`, which is
     // where Word records a list's real geometry (and where any customised
     // list puts it). Only fall back to the conventional half inch per level
@@ -2116,49 +2174,36 @@ function computeListMarkers(doc: DocxDocument): Map<Paragraph, ListMarker> {
       // code points (e.g. U+F0B7 ·, U+F0A7 ▪) that PDF standard fonts can't
       // render. Normalize the common ones to WinAnsi-renderable equivalents;
       // fall back to a round bullet when empty or unknown.
-      const symbol = normalizeBulletGlyph(levelDef.text);
-      markers.set(para, { text: `${symbol}  `, indentPt });
-      // A bullet item does not clear the interruption flag for ordered
-      // siblings, but it is itself a list item — keep it out of `interrupted`.
-      interrupted.delete(numbering.numId);
+      markers.set(para, { text: `${normalizeBulletGlyph(levelDef.text)}  `, indentPt });
       return;
     }
 
-    // Ordered list: advance this level's counter and reset deeper levels.
-    let levelCounts = counters.get(numbering.numId);
-    if (!levelCounts) {
-      levelCounts = [];
-      counters.set(numbering.numId, levelCounts);
-    }
-    // If this numId's run was interrupted by non-list content, restart it.
-    if (interrupted.has(numbering.numId)) {
-      levelCounts.length = 0;
-      interrupted.delete(numbering.numId);
-    }
-    const startOverride = inst.overrides?.find(o => o.level === level)?.startOverride;
-    const start = startOverride ?? levelDef.start ?? 1;
-    if (levelCounts[level] === undefined) {
-      levelCounts[level] = start;
-    } else {
-      levelCounts[level]! += 1;
-    }
-    // Reset any deeper levels.
-    for (let l = level + 1; l < levelCounts.length; l++) {
-      levelCounts[l] = undefined;
-    }
-
-    const counter = levelCounts[level]!;
-    const numeral = formatListCounter(counter, levelDef.format);
-    // Honour the level's `text` template (e.g. "%1.") when present; else
-    // fall back to "<n>.".
-    const text = levelDef.text ? levelDef.text.replace(/%\d+/g, numeral) : `${numeral}.`;
+    // `%N` names level N-1's current number, formatted per that level, so a
+    // multi-level template such as "%1.%2." reads "2.3." rather than "3.3.".
+    const text = levelDef.text
+      ? levelDef.text.replace(/%([1-9])/g, (_, digit: string) => {
+          const ref = Number(digit) - 1;
+          const shown = ref === level ? value : counter.current(numId, ref);
+          return formatListCounter(shown, placeholderFormat(counter, numId, levelDef, ref));
+        })
+      : `${formatListCounter(value, placeholderFormat(counter, numId, levelDef, level))}.`;
     markers.set(para, { text: `${text}  `, indentPt });
   };
 
+  const walk = (items: readonly BodyContent[] | readonly (Paragraph | Table)[]): void => {
+    for (const item of items) {
+      if (item.type === "paragraph") {
+        resolveParagraphMarker(item);
+      } else if (item.type === "table") {
+        for (const row of item.rows) {
+          for (const cell of row.cells) {
+            walk(cell.content);
+          }
+        }
+      }
+    }
+  };
   walk(doc.body);
-  for (const para of orderedParagraphs) {
-    resolveParagraphMarker(para);
-  }
   return markers;
 }
 
@@ -2205,68 +2250,6 @@ function normalizeBulletGlyph(text: string | undefined): string {
   }
 }
 
-/** Format an ordered-list counter per its OOXML number format. */
-function formatListCounter(n: number, format: NumberFormat): string {
-  switch (format) {
-    case "lowerLetter":
-      return toAlpha(n).toLowerCase();
-    case "upperLetter":
-      return toAlpha(n).toUpperCase();
-    case "lowerRoman":
-      return toRoman(n).toLowerCase();
-    case "upperRoman":
-      return toRoman(n).toUpperCase();
-    case "decimalZero":
-      return n < 10 ? `0${n}` : String(n);
-    default:
-      // decimal and any non-numeric/locale formats we don't render.
-      return String(n);
-  }
-}
-
-/** 1 → "A", 26 → "Z", 27 → "AA" (spreadsheet-style alpha). */
-function toAlpha(n: number): string {
-  let s = "";
-  let v = n;
-  while (v > 0) {
-    const rem = (v - 1) % 26;
-    s = String.fromCharCode(65 + rem) + s;
-    v = Math.floor((v - 1) / 26);
-  }
-  return s || "A";
-}
-
-/** Convert a positive integer to a Roman numeral (uppercase). */
-function toRoman(n: number): string {
-  if (n <= 0) {
-    return String(n);
-  }
-  const table: [number, string][] = [
-    [1000, "M"],
-    [900, "CM"],
-    [500, "D"],
-    [400, "CD"],
-    [100, "C"],
-    [90, "XC"],
-    [50, "L"],
-    [40, "XL"],
-    [10, "X"],
-    [9, "IX"],
-    [5, "V"],
-    [4, "IV"],
-    [1, "I"]
-  ];
-  let v = n;
-  let s = "";
-  for (const [val, sym] of table) {
-    while (v >= val) {
-      s += sym;
-      v -= val;
-    }
-  }
-  return s;
-}
-
 function layoutParagraph(
   para: Paragraph,
   startY: number,
@@ -2287,11 +2270,10 @@ function layoutParagraph(
   // `styleContext` carries the paragraph's position inside a table when there
   // is one, which is what lets a table style's conditional formats (header row,
   // banded rows, corner cells) reach the cell's text.
-  const resolved = activeDoc ? resolveStyle(activeDoc, para, styleContext) : undefined;
+  const resolved = activeStyles?.paragraph(para, styleContext);
   const styleRunProps = resolved?.runProperties;
   // `resolveStyle` strips `style` from the merged result (it is the selector,
-  // not an inherited value); put it back so the heading-level heuristic can
-  // still recognise a "Heading2" style name.
+  // not an inherited value); put it back for consumers that read the selector.
   const effective: ParagraphProperties | undefined = resolved
     ? props?.style
       ? { ...resolved.paragraphProperties, style: props.style }
@@ -2301,7 +2283,9 @@ function layoutParagraph(
   // When the style supplies a concrete font size we honour it; only when it
   // does not do we fall back to the heuristic heading scale so headings stay
   // distinct in documents lacking a styles table.
-  const headingScale = resolveHeadingScale(effective, styleRunProps?.size);
+  const headingScale = activeStyles
+    ? resolveHeadingScale(activeStyles, para, styleRunProps?.size)
+    : 1;
 
   // Space before. `w:contextualSpacing` drops it when the paragraph above uses
   // the same style (see `computeContextualSpacing`).
@@ -2920,8 +2904,8 @@ function layoutTable(
       // through the shared helper so this and the SVG renderer paint the same
       // colour — the field exists on `LayoutTableCell` and both renderers draw
       // it, but nothing ever filled it in, so every table came out white.
-      const backgroundColor = activeDoc
-        ? resolveTableCellFill(activeDoc, table, cell, {
+      const backgroundColor = activeStyles
+        ? activeStyles.tableCellFill(table, cell, {
             rowIndex: ri,
             colIndex: startCol,
             totalRows,
@@ -3203,12 +3187,25 @@ function collectParagraphSegments(
   styleRunProps: Run["properties"] | undefined
 ): ParagraphSegment[] {
   const segments: ParagraphSegment[] = [];
+  const pushVisible = (run: Run) => {
+    const properties = activeStyles
+      ? layoutRunProperties(activeStyles, run, styleRunProps)
+      : mergeRunProperties(styleRunProps, run.properties);
+    // Hidden text (`w:vanish`, directly or through a style) takes no space and
+    // draws nothing — the converters omit it too.
+    if (!isHiddenRun(properties)) {
+      pushRunSegments(run, segments, properties);
+    }
+  };
   for (const child of para.children) {
-    if (isRun(child)) {
-      pushRunSegments(child, segments, effectiveRunProps(child, styleRunProps));
+    const run = finalViewRun(child);
+    if (run) {
+      // Plain runs and the inserted / moved-to side of a revision; deleted and
+      // moved-from text is absent from the final view.
+      pushVisible(run);
     } else if (isHyperlink(child)) {
-      for (const run of child.children) {
-        pushRunSegments(run, segments, effectiveRunProps(run, styleRunProps));
+      for (const inner of finalViewRuns(child.children)) {
+        pushVisible(inner);
       }
     } else if ("type" in child && child.type === "bookmarkStart" && "name" in child) {
       // An empty marker segment: it draws nothing, but it records the position so
@@ -3220,36 +3217,12 @@ function collectParagraphSegments(
 }
 
 /**
- * A run's effective formatting: document defaults → paragraph style → the
- * run's own character style chain (`w:rStyle`) → its direct properties.
- *
- * `resolveRunStyle` implements exactly that precedence. Consulting only the
- * paragraph style made every *character* style invisible to layout — Word's
- * `Strong`, `Emphasis`, `Hyperlink` and `Code Char` among them — so a `Strong`
- * run was measured and drawn at body weight, and a run whose font size came
- * from a character style was measured with the wrong metrics and given a line
- * box sized for body text.
- *
- * The `run.properties.style` guard keeps the common case (no character style)
- * on the cheap object-spread path.
- */
-function effectiveRunProps(
-  run: Run,
-  styleRunProps: Run["properties"] | undefined
-): Run["properties"] {
-  if (activeDoc && run.properties?.style) {
-    return resolveRunStyle(activeDoc, run, styleRunProps).runProperties;
-  }
-  return mergeRunProperties(styleRunProps, run.properties);
-}
-
-/**
  * Emit `ParagraphSegment` tokens for a single run, preserving the
  * relative order of text fragments and inline images. Consecutive
  * text-bearing entries are coalesced into one `TextSegment` so the
  * wrap engine sees fewer atoms.
  *
- * `properties` is the run's *effective* formatting (see `effectiveRunProps`),
+ * `properties` is the run's *effective* formatting (see `layoutRunProperties`),
  * not `run.properties` — every segment must carry the resolved values so
  * measurement, line height and drawing all agree.
  */
@@ -3274,6 +3247,12 @@ function pushRunSegments(run: Run, out: ParagraphSegment[], properties: Run["pro
     } else if (item.type === "image") {
       flush();
       out.push({ type: "image", content: item, properties });
+    } else if (item.type === "symbol") {
+      // `w:sym`: the character itself, drawn with the run's font. A symbol font
+      // code in the private-use area draws whatever the embedded face maps it to.
+      pending += symbolText(item);
+    } else if (item.type === "field") {
+      pending += fieldDisplayText(item);
     } else if (item.type === "footnoteRef" || item.type === "endnoteRef") {
       // The reference mark itself. Without it a note printed at the foot of the
       // page with nothing in the text pointing at it — and, because the mark was
@@ -3287,6 +3266,31 @@ function pushRunSegments(run: Run, out: ParagraphSegment[], properties: Run["pro
     }
   }
   flush();
+}
+
+/**
+ * The text a field shows. Page-number fields (`PAGE`, `NUMPAGES`,
+ * `SECTIONPAGES`) are computed while a header or footer is laid out (see
+ * `activePageFields`); every other field — and these outside that pass, or
+ * before the totals they need are known — shows its cached result, as the
+ * converters do.
+ */
+function fieldDisplayText(field: FieldContent): string {
+  const values = activePageFields;
+  if (values) {
+    const parsed = parsePageField(field.instruction);
+    const n =
+      parsed?.name === "PAGE"
+        ? values.page
+        : parsed?.name === "NUMPAGES"
+          ? values.numPages
+          : values.sectionPages;
+    const text = parsed && n !== undefined ? formatPageField(parsed, n, values.format) : undefined;
+    if (text !== undefined) {
+      return text;
+    }
+  }
+  return field.cachedValue ?? "";
 }
 
 /**

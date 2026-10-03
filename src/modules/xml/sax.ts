@@ -16,6 +16,7 @@
 
 import { toError } from "@utils/errors";
 import { XmlParseError } from "@xml/errors";
+import type { XmlParseLimit } from "@xml/errors";
 import type { InvalidCharHandling, SaxEvent, SaxHandlers, SaxOptions, SaxTag } from "@xml/types";
 
 // =============================================================================
@@ -355,16 +356,17 @@ class SaxParser {
   // Error Handling
   // ===========================================================================
 
-  private makeError(message: string): XmlParseError {
+  private makeError(message: string, limit?: XmlParseLimit): XmlParseError {
     return new XmlParseError(message, {
       line: this.trackPosition ? this.line : undefined,
       column: this.trackPosition ? this.column : undefined,
-      fileName: this.fileName
+      fileName: this.fileName,
+      limit
     });
   }
 
-  fail(message: string): this {
-    const err = this.makeError(message);
+  fail(message: string, limit?: XmlParseLimit): this {
+    const err = this.makeError(message, limit);
     if (this._handlers.error) {
       this._handlers.error(err);
     } else {
@@ -1857,7 +1859,8 @@ class SaxParser {
           this._entityExpansionCount++;
           if (this._entityExpansionCount > this.maxEntityExpansions) {
             this.fail(
-              `entity expansion limit (${this.maxEntityExpansions}) exceeded — possible XML bomb`
+              `entity expansion limit (${this.maxEntityExpansions}) exceeded — possible XML bomb`,
+              "entityExpansions"
             );
             return "";
           }
@@ -2057,7 +2060,7 @@ class SaxParser {
     // Security: warn on nesting depth exceeded but continue processing
     // so that close tags still match (prevents infinite error loops)
     if (this.maxDepth > 0 && this.tags.length >= this.maxDepth) {
-      this.fail(`maximum element nesting depth (${this.maxDepth}) exceeded`);
+      this.fail(`maximum element nesting depth (${this.maxDepth}) exceeded`, "depth");
     }
 
     this._handlers.opentag?.(tag);
@@ -2077,7 +2080,7 @@ class SaxParser {
 
     // Security: warn on nesting depth exceeded but continue processing
     if (this.maxDepth > 0 && this.tags.length >= this.maxDepth) {
-      this.fail(`maximum element nesting depth (${this.maxDepth}) exceeded`);
+      this.fail(`maximum element nesting depth (${this.maxDepth}) exceeded`, "depth");
     }
 
     this._handlers.opentag?.(tag);

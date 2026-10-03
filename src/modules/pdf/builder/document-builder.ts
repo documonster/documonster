@@ -283,6 +283,13 @@ export interface DocumentMetadata {
   author?: string;
   subject?: string;
   creator?: string;
+  /**
+   * Written as /CreationDate (and the XMP create date for PDF/A). Defaults to
+   * the time of `build()`; supply a fixed date for byte-reproducible output.
+   */
+  creationDate?: Date;
+  /** Written as /ModDate (and the XMP modify date for PDF/A). */
+  modDate?: Date;
 }
 
 /** Document-wide options. Fonts are compiled before any page text is drawn. */
@@ -2139,7 +2146,9 @@ export class PdfDocumentBuilder {
       snapshot.metadata.title ||
       snapshot.metadata.author ||
       snapshot.metadata.subject ||
-      snapshot.metadata.creator
+      snapshot.metadata.creator ||
+      snapshot.metadata.creationDate ||
+      snapshot.metadata.modDate
     ) {
       writer.addInfoDict(snapshot.metadata);
     }

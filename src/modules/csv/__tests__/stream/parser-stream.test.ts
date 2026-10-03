@@ -794,6 +794,69 @@ describe("parseCsvRows - Streaming Options", () => {
       }
     }).rejects.toThrow("Row exceeds the maximum size of 20 bytes");
   });
+
+  it.each([false, true])(
+    "fails early on an unterminated row instead of buffering it (fastMode: %s)",
+    async fastMode => {
+      let fed = 0;
+      async function* endless() {
+        // An unclosed quote (or, in fast mode, a line that never ends) never completes a row.
+        yield fastMode ? "a,b\nxxxx" : 'a,b\n"open';
+        while (fed < 10_000) {
+          fed++;
+          yield "x".repeat(64);
+        }
+      }
+      const error = await (async () => {
+        for await (const _row of Csv.parseRows(endless(), { maxRowBytes: 100, fastMode })) {
+          // consume
+        }
+      })().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(CsvError);
+      expect((error as Error).message).toBe("Row exceeds the maximum size of 100 bytes");
+      expect(fed).toBeLessThan(10);
+    }
+  );
+
+  it.each([false, true])(
+    "emits the complete rows of a chunk before failing on its oversized tail (fastMode: %s)",
+    async fastMode => {
+      const rows: unknown[] = [];
+      const error = await (async () => {
+        for await (const row of Csv.parseRows(
+          (async function* () {
+            yield `a,b\nc,d\n${fastMode ? "" : '"'}${"x".repeat(200)}`;
+          })(),
+          { maxRowBytes: 100, fastMode }
+        )) {
+          rows.push(row);
+        }
+      })().catch((e: unknown) => e);
+      expect(rows).toEqual([
+        ["a", "b"],
+        ["c", "d"]
+      ]);
+      expect(error).toBeInstanceOf(CsvError);
+    }
+  );
+
+  it("keeps a row whose line ending straddles chunks at the limit", async () => {
+    const rows: string[][] = [];
+    for await (const row of Csv.parseRows(
+      (async function* () {
+        yield "abcdefg\r";
+        yield "\nxy";
+      })(),
+      { maxRowBytes: 7 }
+    )) {
+      rows.push(row as string[]);
+    }
+    expect(rows).toEqual([["abcdefg"], ["xy"]]);
+  });
+
+  it("throws CsvError from the sync parser", () => {
+    expect(() => Csv.parse("short\nthis_is_too_long", { maxRowBytes: 8 })).toThrow(CsvError);
+  });
 });
 
 // =============================================================================

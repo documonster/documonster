@@ -866,6 +866,15 @@ export interface PdfExportOptions {
   creator?: string;
 
   /**
+   * Written as /CreationDate. Defaults to the time of export; supply a fixed
+   * date for byte-reproducible output.
+   */
+  creationDate?: Date;
+
+  /** Written as /ModDate when given. */
+  modDate?: Date;
+
+  /**
    * Legacy single-font shortcut for TrueType font file (.ttf) data.
    * When provided, all text rendering uses this font. Prefer {@link fonts} for
    * named families, style faces, TrueType Collections, and fallback.

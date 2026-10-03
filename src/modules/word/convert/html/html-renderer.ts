@@ -8,12 +8,18 @@
 
 import { resolveThemeColor } from "@word/core/color-utils";
 import { bytesToBase64, sanitizeUrl } from "@word/core/internal-utils";
-import { extractMathText, isRun } from "@word/core/text-utils";
+import { extractMathText, isRun, symbolText } from "@word/core/text-utils";
+import { isHiddenRun } from "@word/query/final-view";
+import { createNumberingCounter } from "@word/query/numbering-counter";
+import type { NumberingCounter } from "@word/query/numbering-counter";
+import { createStyleResolver } from "@word/query/style-resolver";
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   DocxDocument,
   Paragraph,
   Run,
   RunContent,
+  RunProperties,
   ParagraphChild,
   Table,
   TableCell,
@@ -93,6 +99,10 @@ interface RenderState {
   warnings: string[];
   /** Current list state per numId. */
   listStack: Array<{ numId: number; level: number; format: string }>;
+  /** Style resolution bound to `doc` for this render. */
+  readonly styles: StyleResolver;
+  /** Real number of each list item, per numbering instance and level. */
+  readonly numbering: NumberingCounter;
   /** HTML output buffer. */
   html: string[];
   /** Footnote numbering state. */
@@ -106,6 +116,28 @@ interface RenderState {
   activeCommentIds: Set<number>;
   /** Collected aside comments to render at the end of the document. */
   asideComments: Array<{ id: number; def: CommentDef }>;
+  /** Run properties the paragraph being rendered passes down to its runs. */
+  paragraphRunProperties?: RunProperties;
+  /**
+   * Document-default run formatting (`w:docDefaults`), written once on the
+   * document container rather than on every run.
+   */
+  readonly runDefaults: RunDefaultsCss;
+  /**
+   * Whether the container's font size reaches a block's runs unchanged —
+   * false inside tables (quirks-mode tables reset font size) and the
+   * notes/comments asides (scaled by the stylesheet). The font family is
+   * inherited everywhere: neither the stylesheet nor the user agent sets one.
+   */
+  defaultSizeInherited: boolean;
+  /** The defaults the paragraph being rendered lets its runs omit. */
+  omittedRunDefaults: RunDefaultsCss;
+}
+
+/** CSS declarations for the document-default font and size. */
+interface RunDefaultsCss {
+  readonly fontFamily?: string;
+  readonly fontSize?: string;
 }
 
 /**
@@ -155,13 +187,18 @@ export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): Ht
     rIdToImage: new Map(),
     warnings: [],
     listStack: [],
+    styles: createStyleResolver(doc),
+    numbering: createNumberingCounter(doc),
     html: [],
     footnoteRefs: new Map(),
     endnoteRefs: new Map(),
     styleMap: resolvedStyleMap,
     commentMap,
     activeCommentIds: new Set(),
-    asideComments: []
+    asideComments: [],
+    runDefaults: runDefaultsCss(doc),
+    defaultSizeInherited: true,
+    omittedRunDefaults: {}
   };
 
   // Build image map
@@ -191,7 +228,11 @@ export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): Ht
     state.html.push("<body>");
   }
 
-  state.html.push(`<div class="${opts.classPrefix}document">`);
+  const containerStyles = [state.runDefaults.fontFamily, state.runDefaults.fontSize].filter(
+    (d): d is string => d !== undefined
+  );
+  const containerStyle = containerStyles.length > 0 ? ` style="${containerStyles.join(";")}"` : "";
+  state.html.push(`<div class="${opts.classPrefix}document"${containerStyle}>`);
 
   // Render default header
   if (doc.headers && doc.headers.size > 0) {
@@ -224,6 +265,10 @@ export function renderToHtml(doc: DocxDocument, options?: HtmlRenderOptions): Ht
       state.html.push("</footer>");
     }
   }
+
+  // The asides below are scaled by the stylesheet, so their runs carry the
+  // defaults themselves.
+  state.defaultSizeInherited = false;
 
   // Footnotes
   if (opts.includeNotes && doc.footnotes && doc.footnotes.length > 0) {
@@ -409,12 +454,18 @@ function renderParagraph(state: RenderState, para: Paragraph): void {
   const prefix = state.options.classPrefix;
 
   // Check if this is a list item
-  if (props?.numbering) {
-    const listInfo = getListInfo(state.doc, props.numbering.numId, props.numbering.level);
-    if (listInfo) {
-      openListIfNeeded(state, props.numbering.numId, props.numbering.level, listInfo.format);
+  const numRef = state.styles.numbering(para);
+  if (numRef) {
+    const levelDef = state.numbering.levelDef(numRef.numId, numRef.level);
+    if (levelDef) {
+      // Every item advances its instance's count (bullets included, so the
+      // levels beneath restart), so a list reopened after an interruption
+      // starts where Word's numbering stands.
+      const advanced = state.numbering.next(numRef.numId, numRef.level);
+      const value = levelDef.format === "bullet" ? undefined : advanced;
+      openListIfNeeded(state, numRef.numId, numRef.level, levelDef.format, value);
       state.html.push(`<li>`);
-      renderParagraphInline(state, para);
+      renderParagraphInline(state, para, inheritedRunDefaults(state, true));
       state.html.push("</li>");
       return;
     }
@@ -443,24 +494,10 @@ function renderParagraph(state: RenderState, para: Paragraph): void {
 
   // If no styleMap hit, determine tag based on style/outline (default logic)
   if (!styleMapHit) {
-    if (props?.style) {
-      const styleId = props.style.toLowerCase();
-      if (styleId === "heading1" || styleId === "heading 1" || styleId === "title") {
-        tag = "h1";
-      } else if (styleId === "heading2" || styleId === "heading 2") {
-        tag = "h2";
-      } else if (styleId === "heading3" || styleId === "heading 3") {
-        tag = "h3";
-      } else if (styleId === "heading4" || styleId === "heading 4") {
-        tag = "h4";
-      } else if (styleId === "heading5" || styleId === "heading 5") {
-        tag = "h5";
-      } else if (styleId === "heading6" || styleId === "heading 6") {
-        tag = "h6";
-      }
-    }
-    if (props?.outlineLevel !== undefined && props.outlineLevel >= 0 && props.outlineLevel < 6) {
-      tag = `h${props.outlineLevel + 1}`;
+    // Title renders as <h1>; levels 7–9 have no HTML element and clamp to <h6>.
+    const heading = state.styles.heading(para);
+    if (heading) {
+      tag = `h${Math.min(heading.level, 6)}`;
     }
   }
 
@@ -543,14 +580,35 @@ function renderParagraph(state: RenderState, para: Paragraph): void {
   }
 
   state.html.push(`<${tag}${classAttr}${styleAttr}>`);
-  renderParagraphInline(state, para);
+  // A styleMap class may set either property, so its runs keep both; a
+  // heading is sized by the user agent, so its runs keep the size.
+  renderParagraphInline(state, para, styleMapHit ? {} : inheritedRunDefaults(state, tag === "p"));
   state.html.push(`</${tag}>`);
 }
 
-function renderParagraphInline(state: RenderState, para: Paragraph): void {
+/**
+ * The document defaults a block's runs may leave to the container: always the
+ * family, and the size where `sizeInherited` holds for the block's element.
+ */
+function inheritedRunDefaults(state: RenderState, sizeInherited: boolean): RunDefaultsCss {
+  const { fontFamily, fontSize } = state.runDefaults;
+  return sizeInherited && state.defaultSizeInherited ? { fontFamily, fontSize } : { fontFamily };
+}
+
+function renderParagraphInline(
+  state: RenderState,
+  para: Paragraph,
+  omittedRunDefaults: RunDefaultsCss
+): void {
+  const outer = state.paragraphRunProperties;
+  const outerOmitted = state.omittedRunDefaults;
+  state.paragraphRunProperties = state.styles.paragraph(para).runProperties;
+  state.omittedRunDefaults = omittedRunDefaults;
   for (const child of para.children) {
     renderParagraphChild(state, child);
   }
+  state.paragraphRunProperties = outer;
+  state.omittedRunDefaults = outerOmitted;
 }
 
 function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
@@ -591,7 +649,7 @@ function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
         }
         return;
       case "insertedRun":
-        if (state.options.includeRevisions || state.options.includeComments) {
+        if (state.options.includeRevisions) {
           state.html.push(
             `<ins data-author="${escapeHtml(child.revision.author)}" data-date="${escapeHtml(child.revision.date ?? "")}">`
           );
@@ -603,7 +661,7 @@ function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
         }
         return;
       case "deletedRun":
-        if (state.options.includeRevisions || state.options.includeComments) {
+        if (state.options.includeRevisions) {
           state.html.push(
             `<del data-author="${escapeHtml(child.revision.author)}" data-date="${escapeHtml(child.revision.date ?? "")}">`
           );
@@ -613,14 +671,14 @@ function renderParagraphChild(state: RenderState, child: ParagraphChild): void {
         // When revisions are not shown, deleted content is simply omitted
         return;
       case "movedFromRun":
-        if (state.options.includeRevisions || state.options.includeComments) {
+        if (state.options.includeRevisions) {
           state.html.push(`<del class="${state.options.classPrefix}move-from">`);
           renderRun(state, child.run);
           state.html.push("</del>");
         }
         return;
       case "movedToRun":
-        if (state.options.includeRevisions || state.options.includeComments) {
+        if (state.options.includeRevisions) {
           state.html.push(`<ins class="${state.options.classPrefix}move-to">`);
           renderRun(state, child.run);
           state.html.push("</ins>");
@@ -665,7 +723,15 @@ function renderHyperlinkHtml(state: RenderState, link: Hyperlink): void {
 // =============================================================================
 
 function renderRun(state: RenderState, run: Run): void {
-  const rPr = run.properties;
+  // Formatting inherited from the paragraph and character styles is resolved
+  // and inlined: the stylesheet carries no per-document style rules, so a
+  // style's bold would otherwise be lost.
+  const rPr = state.styles.run(run, state.paragraphRunProperties).runProperties;
+  // Hidden text is not part of the rendered document; omitting it (rather than
+  // display:none) keeps it out of the output entirely.
+  if (isHiddenRun(rPr)) {
+    return;
+  }
 
   // Build tag stack based on formatting
   const tags: string[] = [];
@@ -710,20 +776,16 @@ function renderRun(state: RenderState, run: Run): void {
     if (rPr.shading?.fill) {
       styles.push(`background-color:#${rPr.shading.fill}`);
     }
-    if (rPr.size !== undefined) {
-      // size is half-points
-      styles.push(`font-size:${rPr.size / 2}pt`);
+    // A value equal to the document default is inherited from the container
+    // where that is guaranteed, instead of being repeated on every run.
+    const omit = state.omittedRunDefaults;
+    const fontSize = fontSizeCss(rPr);
+    if (fontSize !== undefined && fontSize !== omit.fontSize) {
+      styles.push(fontSize);
     }
-    if (rPr.font) {
-      const fontName =
-        typeof rPr.font === "string" ? rPr.font : (rPr.font.ascii ?? rPr.font.eastAsia);
-      if (fontName) {
-        // The value is interpolated into a `style="..."` attribute, so
-        // wrap font names containing whitespace or punctuation in
-        // single quotes — embedding double quotes here would close the
-        // surrounding HTML attribute and produce invalid markup.
-        styles.push(`font-family:'${fontName.replace(/'/g, "")}'`);
-      }
+    const fontFamily = fontFamilyCss(rPr);
+    if (fontFamily !== undefined && fontFamily !== omit.fontFamily) {
+      styles.push(fontFamily);
     }
     if (rPr.doubleStrike) {
       styles.push("text-decoration:line-through;text-decoration-style:double");
@@ -739,9 +801,6 @@ function renderRun(state: RenderState, run: Run): void {
     }
     if (rPr.imprint) {
       styles.push("text-shadow:1px 1px 0 rgba(255,255,255,0.6), -1px -1px 0 rgba(0,0,0,0.3)");
-    }
-    if (rPr.vanish) {
-      styles.push("display:none");
     }
     if (rPr.spacing !== undefined) {
       styles.push(`letter-spacing:${rPr.spacing / 20}pt`);
@@ -818,15 +877,9 @@ function renderRunContentHtml(state: RenderState, content: RunContent): void {
       state.html.push("\u00AD");
       break;
     case "symbol":
-      // Convert hex char code to Unicode
-      try {
-        const code = parseInt(content.char, 16);
-        state.html.push(
-          `<span style="font-family:'${escapeHtml(content.font).replace(/&#39;/g, "")}'">${String.fromCodePoint(code)}</span>`
-        );
-      } catch {
-        state.html.push(escapeHtml(content.char));
-      }
+      state.html.push(
+        `<span style="font-family:'${escapeHtml(content.font).replace(/&#39;/g, "")}'">${escapeHtml(symbolText(content))}</span>`
+      );
       break;
     case "footnoteRef": {
       const num = state.footnoteRefs.size + 1;
@@ -904,6 +957,16 @@ function renderFloatingImageHtml(state: RenderState, img: FloatingImage): void {
 // =============================================================================
 
 function renderTable(state: RenderState, table: Table): void {
+  const inherited = state.defaultSizeInherited;
+  state.defaultSizeInherited = false;
+  try {
+    renderTableContent(state, table);
+  } finally {
+    state.defaultSizeInherited = inherited;
+  }
+}
+
+function renderTableContent(state: RenderState, table: Table): void {
   const prefix = state.options.classPrefix;
   state.html.push(
     `<table class="${prefix}table" border="1" style="border-collapse:collapse;width:100%">`
@@ -1134,27 +1197,13 @@ function renderSdtHtml(state: RenderState, sdt: StructuredDocumentTag): void {
 // List Management
 // =============================================================================
 
-function getListInfo(
-  doc: DocxDocument,
+function openListIfNeeded(
+  state: RenderState,
   numId: number,
-  level: number
-): { format: string } | undefined {
-  const instance = doc.numberingInstances?.find(n => n.numId === numId);
-  if (!instance) {
-    return undefined;
-  }
-  const abstractNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
-  if (!abstractNum) {
-    return undefined;
-  }
-  const levelDef = abstractNum.levels.find(l => l.level === level);
-  if (!levelDef) {
-    return undefined;
-  }
-  return { format: levelDef.format };
-}
-
-function openListIfNeeded(state: RenderState, numId: number, level: number, format: string): void {
+  level: number,
+  format: string,
+  start?: number
+): void {
   // Close lists that are too deep
   while (state.listStack.length > 0) {
     const top = state.listStack[state.listStack.length - 1];
@@ -1176,7 +1225,13 @@ function openListIfNeeded(state: RenderState, numId: number, level: number, form
       const newLevel =
         state.listStack.length === 0 ? 0 : state.listStack[state.listStack.length - 1].level + 1;
       const tag = format === "bullet" ? "ul" : "ol";
-      state.html.push(`<${tag}>`);
+      // Only the target level carries the item's number; any intermediate
+      // level opened to reach it has no item of its own.
+      const startAttr =
+        tag === "ol" && newLevel === level && start !== undefined && start !== 1
+          ? ` start="${start}"`
+          : "";
+      state.html.push(`<${tag}${startAttr}>`);
       state.listStack.push({ numId, level: newLevel, format });
     }
   }
@@ -1328,6 +1383,27 @@ function parseStyleMapping(mapping: string): { tag: string; className: string } 
     return { tag: "", className: mapping.slice(1) };
   }
   return { tag: mapping.slice(0, dotIdx), className: mapping.slice(dotIdx + 1) };
+}
+
+function runDefaultsCss(doc: DocxDocument): RunDefaultsCss {
+  const defaults = doc.docDefaults?.runProperties;
+  return defaults ? { fontFamily: fontFamilyCss(defaults), fontSize: fontSizeCss(defaults) } : {};
+}
+
+function fontSizeCss(rPr: RunProperties): string | undefined {
+  // size is half-points
+  return rPr.size !== undefined ? `font-size:${rPr.size / 2}pt` : undefined;
+}
+
+function fontFamilyCss(rPr: RunProperties): string | undefined {
+  if (!rPr.font) {
+    return undefined;
+  }
+  const fontName = typeof rPr.font === "string" ? rPr.font : (rPr.font.ascii ?? rPr.font.eastAsia);
+  // The value is interpolated into a `style="..."` attribute, so wrap font
+  // names containing whitespace or punctuation in single quotes — embedding
+  // double quotes here would close the surrounding HTML attribute.
+  return fontName ? `font-family:'${fontName.replace(/'/g, "")}'` : undefined;
 }
 
 function generateCss(prefix: string): string {

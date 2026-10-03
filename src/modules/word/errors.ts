@@ -95,20 +95,20 @@ export class DocxDecryptionError extends DocxError {
 
 /**
  * Error thrown when an input package exceeds a declared resource limit (e.g.
- * total package size, single part size, number of parts). Used to defend
+ * total package size, single part size, number of parts, XML nesting depth). Used to defend
  * against ZIP bombs and runaway memory usage.
  */
 export class DocxLimitExceededError extends DocxParseError {
   override name = "DocxLimitExceededError";
   /** Limit category that was exceeded. */
-  readonly limit: "packageSize" | "partSize" | "partCount";
+  readonly limit: "packageSize" | "partSize" | "partCount" | "xmlDepth";
   /** Configured maximum. */
   readonly maximum: number;
   /** Actual measured value (or the value that would have been reached). */
   readonly actual: number;
 
   constructor(
-    limit: "packageSize" | "partSize" | "partCount",
+    limit: "packageSize" | "partSize" | "partCount" | "xmlDepth",
     maximum: number,
     actual: number,
     detail?: string

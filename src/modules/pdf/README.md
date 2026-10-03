@@ -407,6 +407,31 @@ const result = await editor.save();
 const incremental = await editor.saveIncremental(); // preserves original bytes
 ```
 
+On a signed document (`editor.hasSignatures`), `save()`, `sign()` and a
+`saveIncremental()` that must fall back to a full rewrite throw
+`PdfSignatureInvalidationError` unless you pass `{ invalidateSignatures: true }`.
+(The builder's `doc.setMetadata({ creationDate, modDate })` and the export options of the
+same names fix the dates for reproducible output; the editor keeps the original /CreationDate.)
+
+A document counts as signed when a signature field (`/FT /Sig`, possibly
+inherited from a parent field) has a value with `/ByteRange` and `/Contents`;
+`/SigFlags` alone does not. `saveIncremental()` leaves the signed byte range
+intact, but certification (DocMDP) and FieldMDP permissions are **not**
+evaluated — an update a certifying signature forbids is still written.
+
+Encrypted documents: `saveIncremental()` encrypts the appended objects with the
+file's own security handler (RC4, AES-128 or AES-256 R5/R6), so the result opens
+with the same passwords; `save()` writes a **decrypted** copy without `/Encrypt`.
+
+Cross-reference chains: the update's `/Prev` is the `startxref` offset the reader
+actually parsed. Files whose latest section is an xref stream get an xref-stream
+update; hybrid-reference files (classic trailer with `/XRefStm`) get a classic
+section chained to that trailer, so objects listed only in the `/XRefStm` stream stay
+reachable (ISO 32000-1 §7.5.8.4). If the cross-reference data had to be
+reconstructed (`PdfDocument.xrefRecovered` — e.g. a wrong or damaged `startxref`),
+there is no reliable section to chain onto, so `saveIncremental()` falls back to a
+full `save()` — subject to the same signature guard.
+
 ### Digital Signatures
 
 ```typescript
@@ -569,8 +594,13 @@ interface ReadPdfOptions {
   extractFormFields?: boolean; // Extract form fields (default: true)
   extractBookmarks?: boolean; // Extract bookmarks/outlines (default: true)
   extractTables?: boolean; // Extract tables via heuristics (default: false)
+  maxDecodedBytes?: number; // Per-stream decode ceiling (default: 256 MiB)
 }
 ```
+
+Hitting `maxDecodedBytes`, the /Filter chain limit (16) or the object nesting limit throws
+`PdfLimitExceededError` (a `PdfStructureError`) from `Pdf.read`; it is never
+downgraded to a page warning, so a result is never silently truncated.
 
 ### Reader Result
 

@@ -11,9 +11,9 @@
  * @see PDF 2.0 (ISO 32000-2), §7.6 - Encryption
  */
 
-import { pdfMd5, pdfSha256 } from "@pdf/core/pdf-kdf";
+import { pdfMd5, pdfSha256, pdfSha384, pdfSha512 } from "@pdf/core/pdf-kdf";
 import { PdfStructureError } from "@pdf/errors";
-import type { PdfDocument } from "@pdf/reader/pdf-document";
+import type { PdfCryptKind, PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfDictValue } from "@pdf/reader/pdf-parser";
 import {
   dictGetNumber,
@@ -23,7 +23,14 @@ import {
   dictGetBool
 } from "@pdf/reader/pdf-parser";
 import { concatUint8Arrays } from "@utils/binary";
-import { rc4, aesCbcDecrypt, aesCbcDecryptRaw } from "@utils/crypto";
+import {
+  rc4,
+  aesCbcDecrypt,
+  aesCbcDecryptRaw,
+  aesCbcEncrypt,
+  aesCbcEncryptRaw,
+  randomBytes
+} from "@utils/crypto";
 
 // =============================================================================
 // Constants
@@ -87,8 +94,10 @@ export function initDecryption(doc: PdfDocument, password = ""): boolean {
     return initDecryptionV5(doc, encryptDict, password, r, oValue, uValue, permissions, fileId);
   }
 
-  // Determine if we should use AES
-  const useAes = v === 4 && isAesCryptFilter(encryptDict);
+  // V4 names a crypt filter for strings and one for streams; either may be
+  // /Identity. Resolve them before the password so a malformed /CF fails loudly.
+  const stringMethod = cryptFilterMethod(encryptDict, v, "StrF");
+  const streamMethod = cryptFilterMethod(encryptDict, v, "StmF");
 
   // Try user password first, then owner password
   let encryptionKey = tryUserPassword(
@@ -137,14 +146,13 @@ export function initDecryption(doc: PdfDocument, password = ""): boolean {
     return false; // Password incorrect
   }
 
-  // Set up decryption function
-  const finalKey = encryptionKey;
-  if (useAes) {
-    doc.decryptFn = (data, objNum, gen) => decryptAes128(data, objNum, gen, finalKey);
-  } else {
-    doc.decryptFn = (data, objNum, gen) => decryptRc4PerObject(data, objNum, gen, finalKey);
-  }
-
+  installSecurityHandler(
+    doc,
+    createCipher(stringMethod, encryptionKey),
+    createCipher(streamMethod, encryptionKey),
+    // /EncryptMetadata is only defined from V4 on (ISO 32000-1 Table 20).
+    v >= 4 ? encryptMetadata : true
+  );
   return true;
 }
 
@@ -173,13 +181,7 @@ function initDecryptionV5(
   _permissions: number,
   _fileId: Uint8Array
 ): boolean {
-  if (revision === 6) {
-    throw new PdfStructureError(
-      "R=6 (PDF 2.0 extension) requires SHA-384/SHA-512 which is not yet supported"
-    );
-  }
-
-  if (revision !== 5) {
+  if (revision !== 5 && revision !== 6) {
     throw new PdfStructureError(`Unsupported revision ${revision} for V=5 encryption`);
   }
 
@@ -199,20 +201,25 @@ function initDecryptionV5(
   const passwordBytes = truncatePassword(password);
 
   // Try user password (Algorithm 2.A step a - user)
-  let encryptionKey = tryUserPasswordV5(passwordBytes, uValue, ueValue);
+  // R=5 hashes once with SHA-256; R=6 uses Algorithm 2.B.
+  const kdf: PasswordHash =
+    revision === 6
+      ? hashR6
+      : (pwd, salt, udata) => pdfSha256(concatUint8Arrays([pwd, salt, udata]));
+  let encryptionKey = tryUserPasswordV5(passwordBytes, uValue, ueValue, kdf);
 
   if (!encryptionKey) {
     // Try owner password (Algorithm 2.A step a - owner)
-    encryptionKey = tryOwnerPasswordV5(passwordBytes, oValue, oeValue, uValue);
+    encryptionKey = tryOwnerPasswordV5(passwordBytes, oValue, oeValue, uValue, kdf);
   }
 
   if (!encryptionKey) {
     // Try empty password
     if (password !== "") {
       const emptyBytes = new Uint8Array(0);
-      encryptionKey = tryUserPasswordV5(emptyBytes, uValue, ueValue);
+      encryptionKey = tryUserPasswordV5(emptyBytes, uValue, ueValue, kdf);
       if (!encryptionKey) {
-        encryptionKey = tryOwnerPasswordV5(emptyBytes, oValue, oeValue, uValue);
+        encryptionKey = tryOwnerPasswordV5(emptyBytes, oValue, oeValue, uValue, kdf);
       }
     }
   }
@@ -221,10 +228,14 @@ function initDecryptionV5(
     return false;
   }
 
-  // V=5 always uses AES-256 with the file encryption key directly (no per-object key derivation)
-  const finalKey = encryptionKey;
-  doc.decryptFn = (data, _objNum, _gen) => decryptAes256Direct(data, finalKey);
-
+  // V=5 uses AES-256 with the file encryption key directly (no per-object
+  // key derivation), through whichever crypt filters /StrF and /StmF name.
+  installSecurityHandler(
+    doc,
+    createCipher(cryptFilterMethod(encryptDict, 5, "StrF"), encryptionKey),
+    createCipher(cryptFilterMethod(encryptDict, 5, "StmF"), encryptionKey),
+    readEncryptMetadata(encryptDict)
+  );
   return true;
 }
 
@@ -244,7 +255,8 @@ function truncatePassword(password: string): Uint8Array {
 function tryUserPasswordV5(
   passwordBytes: Uint8Array,
   uValue: Uint8Array,
-  ueValue: Uint8Array
+  ueValue: Uint8Array,
+  kdf: PasswordHash
 ): Uint8Array | null {
   // U = hash(32) + validation salt(8) + key salt(8)
   const uHash = uValue.subarray(0, 32);
@@ -252,16 +264,14 @@ function tryUserPasswordV5(
   const uKeySalt = uValue.subarray(40, 48);
 
   // Validate: SHA-256(password + validation salt) == first 32 bytes of U
-  const validateInput = concatUint8Arrays([passwordBytes, uValidationSalt]);
-  const computedHash = pdfSha256(validateInput);
+  const computedHash = kdf(passwordBytes, uValidationSalt, EMPTY);
 
   if (!arraysEqual(computedHash, uHash)) {
     return null;
   }
 
   // Derive key: SHA-256(password + key salt) => use as AES-256 key to decrypt UE
-  const keyInput = concatUint8Arrays([passwordBytes, uKeySalt]);
-  const keyHash = pdfSha256(keyInput);
+  const keyHash = kdf(passwordBytes, uKeySalt, EMPTY);
 
   // Decrypt UE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
@@ -277,7 +287,8 @@ function tryOwnerPasswordV5(
   passwordBytes: Uint8Array,
   oValue: Uint8Array,
   oeValue: Uint8Array,
-  uValue: Uint8Array
+  uValue: Uint8Array,
+  kdf: PasswordHash
 ): Uint8Array | null {
   // O = hash(32) + validation salt(8) + key salt(8)
   const oHash = oValue.subarray(0, 32);
@@ -286,20 +297,51 @@ function tryOwnerPasswordV5(
   const u48 = uValue.subarray(0, 48);
 
   // Validate: SHA-256(password + validation salt + U(0..47)) == first 32 bytes of O
-  const validateInput = concatUint8Arrays([passwordBytes, oValidationSalt, u48]);
-  const computedHash = pdfSha256(validateInput);
+  const computedHash = kdf(passwordBytes, oValidationSalt, u48);
 
   if (!arraysEqual(computedHash, oHash)) {
     return null;
   }
 
   // Derive key: SHA-256(password + key salt + U(0..47))
-  const keyInput = concatUint8Arrays([passwordBytes, oKeySalt, u48]);
-  const keyHash = pdfSha256(keyInput);
+  const keyHash = kdf(passwordBytes, oKeySalt, u48);
 
   // Decrypt OE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
   return aesCbcDecryptRaw(oeValue.subarray(0, 32), keyHash, zeroIv);
+}
+
+/** Password hash of Algorithm 2.A: `hash(password, salt, userData)`. */
+type PasswordHash = (password: Uint8Array, salt: Uint8Array, userData: Uint8Array) => Uint8Array;
+
+const EMPTY = new Uint8Array(0);
+
+/**
+ * Algorithm 2.B (ISO 32000-2 §7.6.4.3.4), the R=6 password hash: SHA-256 of
+ * the input, then at least 64 rounds that AES-128-CBC encrypt 64 copies of
+ * `password ‖ K ‖ userData` under K and rehash with SHA-256/384/512 chosen by
+ * the first 16 bytes of the result mod 3.
+ */
+function hashR6(password: Uint8Array, salt: Uint8Array, userData: Uint8Array): Uint8Array {
+  let k = pdfSha256(concatUint8Arrays([password, salt, userData]));
+  for (let round = 0; ; round++) {
+    const unit = concatUint8Arrays([password, k, userData]);
+    const k1 = new Uint8Array(unit.length * 64);
+    for (let i = 0; i < 64; i++) {
+      k1.set(unit, i * unit.length);
+    }
+    const e = aesCbcEncryptRaw(k1, k.subarray(0, 16), k.subarray(16, 32));
+    let sum = 0;
+    for (let i = 0; i < 16; i++) {
+      sum += e[i];
+    }
+    const pick = sum % 3;
+    k = pick === 0 ? pdfSha256(e) : pick === 1 ? pdfSha384(e) : pdfSha512(e);
+    if (round >= 63 && e[e.length - 1] <= round - 31) {
+      break;
+    }
+  }
+  return k.subarray(0, 32);
 }
 
 /**
@@ -491,30 +533,42 @@ function deriveUserPasswordFromOwner(
 // =============================================================================
 
 /**
- * Decrypt data using RC4 with per-object key derivation.
- * Per-object key = MD5(encryptionKey + objNum(3LE) + genNum(2LE)), truncated to min(n+5, 16).
+ * Per-object key (Algorithm 1, ISO 32000-1 §7.6.2): MD5 of the file key, the
+ * object number (3 bytes LE), the generation (2 bytes LE) and, for AES, the
+ * salt "sAlT"; truncated to min(n + 5, 16) bytes.
  */
+function objectKey(
+  encryptionKey: Uint8Array,
+  objectNumber: number,
+  generation: number,
+  aes: boolean
+): Uint8Array {
+  const n = encryptionKey.length;
+  const keyInput = new Uint8Array(n + 5 + (aes ? 4 : 0));
+  keyInput.set(encryptionKey);
+  keyInput[n] = objectNumber & 0xff;
+  keyInput[n + 1] = (objectNumber >> 8) & 0xff;
+  keyInput[n + 2] = (objectNumber >> 16) & 0xff;
+  keyInput[n + 3] = generation & 0xff;
+  keyInput[n + 4] = (generation >> 8) & 0xff;
+  if (aes) {
+    keyInput.set([0x73, 0x41, 0x6c, 0x54], n + 5); // "sAlT"
+  }
+  return pdfMd5(keyInput).subarray(0, Math.min(n + 5, 16));
+}
+
+/** Decrypt data using RC4 with the per-object key. */
 function decryptRc4PerObject(
   data: Uint8Array,
   objectNumber: number,
   generation: number,
   encryptionKey: Uint8Array
 ): Uint8Array {
-  const keyInput = new Uint8Array(encryptionKey.length + 5);
-  keyInput.set(encryptionKey);
-  keyInput[encryptionKey.length] = objectNumber & 0xff;
-  keyInput[encryptionKey.length + 1] = (objectNumber >> 8) & 0xff;
-  keyInput[encryptionKey.length + 2] = (objectNumber >> 16) & 0xff;
-  keyInput[encryptionKey.length + 3] = generation & 0xff;
-  keyInput[encryptionKey.length + 4] = (generation >> 8) & 0xff;
-
-  const objKey = pdfMd5(keyInput);
-  const keyLen = Math.min(encryptionKey.length + 5, 16);
-  return rc4(objKey.subarray(0, keyLen), data);
+  return rc4(objectKey(encryptionKey, objectNumber, generation, false), data);
 }
 
 /**
- * Decrypt data using AES-128-CBC.
+ * Decrypt data using AES-128-CBC with the per-object key.
  * Per PDF spec, the first 16 bytes of the data are the IV.
  */
 function decryptAes128(
@@ -526,34 +580,18 @@ function decryptAes128(
   if (data.length < 16) {
     return data;
   }
-
-  // Compute per-object key: MD5(encryptionKey + objNum(3LE) + genNum(2LE) + "sAlT")
-  const keyInput = new Uint8Array(encryptionKey.length + 5 + 4);
-  keyInput.set(encryptionKey);
-  keyInput[encryptionKey.length] = objectNumber & 0xff;
-  keyInput[encryptionKey.length + 1] = (objectNumber >> 8) & 0xff;
-  keyInput[encryptionKey.length + 2] = (objectNumber >> 16) & 0xff;
-  keyInput[encryptionKey.length + 3] = generation & 0xff;
-  keyInput[encryptionKey.length + 4] = (generation >> 8) & 0xff;
-  // AES salt
-  keyInput[encryptionKey.length + 5] = 0x73; // s
-  keyInput[encryptionKey.length + 6] = 0x41; // A
-  keyInput[encryptionKey.length + 7] = 0x6c; // l
-  keyInput[encryptionKey.length + 8] = 0x54; // T
-
-  const objKey = pdfMd5(keyInput);
-  const keyLen = Math.min(encryptionKey.length + 5, 16);
-  const aesKey = objKey.subarray(0, keyLen);
-
-  // Extract IV (first 16 bytes) and ciphertext
   const iv = data.subarray(0, 16);
   const ciphertext = data.subarray(16);
-
   if (ciphertext.length === 0 || ciphertext.length % 16 !== 0) {
     return data;
   }
+  return aesCbcDecrypt(ciphertext, objectKey(encryptionKey, objectNumber, generation, true), iv);
+}
 
-  return aesCbcDecrypt(ciphertext, aesKey, iv);
+/** AES-CBC with PKCS#7 padding and a random IV prepended, as PDF stores it. */
+function aesCbcEncryptWithIv(data: Uint8Array, key: Uint8Array): Uint8Array {
+  const iv = randomBytes(16);
+  return concatUint8Arrays([iv, aesCbcEncrypt(data, key, iv)]);
 }
 
 // =============================================================================
@@ -609,19 +647,89 @@ function readEncryptMetadata(encryptDict: PdfDictValue): boolean {
   return true;
 }
 
+// =============================================================================
+// Crypt filters (ISO 32000-1 §7.6.5)
+// =============================================================================
+
+/** How one class of data (strings or streams) is encrypted. */
+type CryptMethod = "identity" | "rc4" | "aesv2" | "aesv3";
+
+/** Per-object encryption in both directions; `undefined` means Identity. */
+interface Cipher {
+  decrypt(data: Uint8Array, objNum: number, gen: number): Uint8Array;
+  encrypt(data: Uint8Array, objNum: number, gen: number): Uint8Array;
+}
+
 /**
- * Check if V4 encryption uses AES (vs RC4).
+ * Resolve the crypt filter `/StrF` or `/StmF` names to its method. Before V4
+ * there are no crypt filters and everything is RC4. From V4 on an absent
+ * entry means `/Identity` (Table 20), and a named filter is looked up in
+ * `/CF` (Table 25), where `/CFM /None` also leaves the data as it is.
  */
-function isAesCryptFilter(encryptDict: PdfDictValue): boolean {
+function cryptFilterMethod(
+  encryptDict: PdfDictValue,
+  v: number,
+  entry: "StrF" | "StmF"
+): CryptMethod {
+  if (v < 4) {
+    return "rc4";
+  }
+  const name = dictGetName(encryptDict, entry) ?? "Identity";
+  if (name === "Identity") {
+    return "identity";
+  }
   const cf = encryptDict.get("CF");
-  if (!cf || !(cf instanceof Map)) {
-    return false;
+  const filter = cf instanceof Map ? cf.get(name) : undefined;
+  if (!(filter instanceof Map)) {
+    throw new PdfStructureError(`/${entry} names crypt filter /${name}, which /CF does not define`);
   }
-  // Check StdCF filter
-  const stdCF = cf.get("StdCF");
-  if (!stdCF || !(stdCF instanceof Map)) {
-    return false;
+  const cfm = filter.get("CFM") ?? "None";
+  switch (cfm) {
+    case "None":
+      return "identity";
+    case "V2":
+      return "rc4";
+    case "AESV2":
+      return "aesv2";
+    case "AESV3":
+      return "aesv3";
+    default:
+      throw new PdfStructureError(`Unsupported crypt filter method: ${String(cfm)}`);
   }
-  const cfm = stdCF.get("CFM");
-  return cfm === "AESV2";
+}
+
+function createCipher(method: CryptMethod, key: Uint8Array): Cipher | undefined {
+  switch (method) {
+    case "identity":
+      return undefined;
+    case "rc4": {
+      // RC4 is its own inverse.
+      const apply = (data: Uint8Array, objNum: number, gen: number): Uint8Array =>
+        decryptRc4PerObject(data, objNum, gen, key);
+      return { decrypt: apply, encrypt: apply };
+    }
+    case "aesv2":
+      return {
+        decrypt: (data, objNum, gen) => decryptAes128(data, objNum, gen, key),
+        encrypt: (data, objNum, gen) => aesCbcEncryptWithIv(data, objectKey(key, objNum, gen, true))
+      };
+    case "aesv3":
+      return {
+        decrypt: data => decryptAes256Direct(data, key),
+        encrypt: data => aesCbcEncryptWithIv(data, key)
+      };
+  }
+}
+
+/** Install the document's security handler: Identity filters pass data through. */
+function installSecurityHandler(
+  doc: PdfDocument,
+  strings: Cipher | undefined,
+  streams: Cipher | undefined,
+  encryptMetadata: boolean
+): void {
+  const pick = (kind: PdfCryptKind): Cipher | undefined => (kind === "string" ? strings : streams);
+  doc.decryptFn = (data, objNum, gen, kind) => pick(kind)?.decrypt(data, objNum, gen) ?? data;
+  doc.encryptFn = (data, objNum, gen, kind) => pick(kind)?.encrypt(data, objNum, gen) ?? data;
+  doc.encryptMetadata = encryptMetadata;
 }

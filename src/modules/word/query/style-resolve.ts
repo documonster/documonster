@@ -16,6 +16,7 @@ import type {
   TableCell,
   TableLook,
   NumberingLevel,
+  NumberingRef,
   TableProperties,
   TableStyleConditionalFormat,
   TableStyleConditionType
@@ -57,6 +58,22 @@ export interface ResolvedParagraphStyle {
 // =============================================================================
 
 /**
+ * Styles by `styleId`. Build once with {@link indexStyles} and pass it to the
+ * resolvers below to skip re-indexing `doc.styles` on every call. The index is
+ * a snapshot: rebuild it after editing the document's styles.
+ */
+export type StyleIndex = ReadonlyMap<string, StyleDef>;
+
+/** Index `doc.styles` by `styleId` (later duplicates win, as before). */
+export function indexStyles(doc: DocxDocument): StyleIndex {
+  const map = new Map<string, StyleDef>();
+  for (const s of doc.styles ?? []) {
+    map.set(s.styleId, s);
+  }
+  return map;
+}
+
+/**
  * Resolve the effective (computed) style for a paragraph by walking the style inheritance chain.
  *
  * Merges properties from the document defaults → base style chain → table conditional formats → paragraph's own properties.
@@ -64,19 +81,16 @@ export interface ResolvedParagraphStyle {
  * @param doc - The document containing styles and defaults.
  * @param para - The paragraph to resolve styles for.
  * @param context - Optional context providing table position for conditional format overlay.
+ * @param styles - Optional prebuilt {@link indexStyles} index, reused across calls.
  * @returns The fully resolved paragraph style with all inherited properties merged.
  */
 export function resolveStyle(
   doc: DocxDocument,
   para: Paragraph,
-  context?: StyleResolveContext
+  context?: StyleResolveContext,
+  styles?: StyleIndex
 ): ResolvedParagraphStyle {
-  const styleMap = new Map<string, StyleDef>();
-  if (doc.styles) {
-    for (const s of doc.styles) {
-      styleMap.set(s.styleId, s);
-    }
-  }
+  const styleMap = styles ?? indexStyles(doc);
 
   // Walk the chain from paragraph's style to root
   const chain: string[] = [];
@@ -106,6 +120,13 @@ export function resolveStyle(
     }
   }
 
+  // Toggle properties combine per *level* of the hierarchy, not per merge
+  // step (see TOGGLE_RUN_PROPERTY_KEYS), so the paragraph-style level and the
+  // table-style level are each collected on their own as well as merged.
+  const docDefaultRProps: Record<string, unknown> = mergedRProps;
+  let paragraphStyleLevel: Record<string, unknown> = {};
+  let tableStyleLevel: Record<string, unknown> = {};
+
   // Apply style chain (from base to most specific)
   for (let i = chain.length - 1; i >= 0; i--) {
     const def = styleMap.get(chain[i]);
@@ -117,6 +138,7 @@ export function resolveStyle(
     }
     if (def.runProperties) {
       mergedRProps = mergeProperties(mergedRProps, def.runProperties);
+      paragraphStyleLevel = mergeProperties(paragraphStyleLevel, def.runProperties);
     }
     // Linked styles: if a paragraph style links to a character style, merge its runProperties.
     // The linked character style's runProperties layer on top of the paragraph style's own
@@ -125,6 +147,7 @@ export function resolveStyle(
       const linkedDef = styleMap.get(def.link);
       if (linkedDef?.type === "character" && linkedDef.runProperties) {
         mergedRProps = mergeProperties(mergedRProps, linkedDef.runProperties);
+        paragraphStyleLevel = mergeProperties(paragraphStyleLevel, linkedDef.runProperties);
       }
     }
   }
@@ -154,10 +177,13 @@ export function resolveStyle(
         }
         if (cond.runProperties) {
           mergedRProps = mergeProperties(mergedRProps, cond.runProperties);
+          tableStyleLevel = mergeProperties(tableStyleLevel, cond.runProperties);
         }
       }
     }
   }
+
+  applyToggleLevels(mergedRProps, docDefaultRProps, [paragraphStyleLevel, tableStyleLevel]);
 
   // Apply paragraph's own properties (most specific)
   if (para.properties) {
@@ -399,15 +425,13 @@ export function resolveTableCellStyle(
   tableStyleId: string | undefined,
   look: TableLook | undefined,
   position: TableCellPosition,
-  bandSize?: { readonly row?: number; readonly column?: number }
+  bandSize?: { readonly row?: number; readonly column?: number },
+  styles?: StyleIndex
 ): ResolvedTableCellStyle {
   if (!tableStyleId || !doc.styles) {
     return {};
   }
-  const styleMap = new Map<string, StyleDef>();
-  for (const s of doc.styles) {
-    styleMap.set(s.styleId, s);
-  }
+  const styleMap = styles ?? indexStyles(doc);
 
   // Style chain, most specific first.
   const chain: StyleDef[] = [];
@@ -477,7 +501,8 @@ export function resolveTableCellFill(
   doc: DocxDocument,
   table: Table,
   cell: TableCell,
-  position: TableCellPosition
+  position: TableCellPosition,
+  styles?: StyleIndex
 ): string | undefined {
   // Direct formatting wins even when it paints nothing: `w:shd w:val="clear"
   // w:fill="auto"` is exactly how Word records "this cell has no shading",
@@ -495,7 +520,8 @@ export function resolveTableCellFill(
     table.properties?.style,
     table.properties?.look,
     position,
-    { row: table.properties?.rowBandSize, column: table.properties?.colBandSize }
+    { row: table.properties?.rowBandSize, column: table.properties?.colBandSize },
+    styles
   ).shading;
   return resolveShadingFill(fromStyle);
 }
@@ -601,6 +627,74 @@ export function resolveShadingFill(shading: Shading | undefined): string | undef
 // Extended Style Resolution APIs
 // =============================================================================
 
+/**
+ * Toggle properties (ECMA-376 Part 1 §17.7.3): `b`, `bCs`, `caps`, `emboss`,
+ * `i`, `iCs`, `imprint`, `outline`, `shadow`, `smallCaps`, `strike`, `vanish`.
+ * `dstrike` is not one — its element definition (§17.3.2.9) does not call it a
+ * toggle property, unlike `strike` (§17.3.2.37) and `vanish` (§17.3.2.41).
+ *
+ * Rules, from §17.7.3 as clarified by Microsoft's implementer notes
+ * ([MS-OI29500] "Part 1 Section 17.7.3, Toggle Properties",
+ * https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oi29500/f7130225-2368-48f3-acae-a9d278d0fb25):
+ *
+ * - Direct run formatting is absolute and never toggles.
+ * - The *levels* of the style hierarchy are the table style, the paragraph
+ *   style and the character style. Within one level the `basedOn` chain is
+ *   ordinary inheritance: a derived style that does not set the property
+ *   inherits its base's value, and a nearer setting overrides (note c: a
+ *   paragraph style that does not set bold, based on one that sets it true, is
+ *   bold). A paragraph style's linked character style belongs to its level.
+ * - A level that sets nothing takes the document default (note b).
+ * - Across levels the values toggle. With a `false` document default the result
+ *   is true iff an odd number of levels are true; with a `true` default, Word
+ *   makes it true iff an even number of levels are false (note a). Both are
+ *   "the default, flipped once per level whose value differs from it" — which is
+ *   {@link applyToggleLevels}.
+ */
+const TOGGLE_RUN_PROPERTY_KEYS = [
+  "bold",
+  "boldCs",
+  "italic",
+  "italicCs",
+  "caps",
+  "smallCaps",
+  "strike",
+  "outline",
+  "shadow",
+  "emboss",
+  "imprint",
+  "vanish"
+] as const satisfies readonly (keyof RunProperties)[];
+
+/**
+ * Overwrite each toggle property in `target` with the §17.7.3 combination of
+ * `defaults` and the style `levels` (see {@link TOGGLE_RUN_PROPERTY_KEYS}).
+ * Keys no input sets are left as `target` has them.
+ */
+function applyToggleLevels(
+  target: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+  levels: readonly Record<string, unknown>[]
+): void {
+  for (const key of TOGGLE_RUN_PROPERTY_KEYS) {
+    const base = defaults[key] === true;
+    let value = base;
+    let specified = typeof defaults[key] === "boolean";
+    for (const level of levels) {
+      const own = level[key];
+      if (typeof own === "boolean") {
+        specified = true;
+        if (own !== base) {
+          value = !value;
+        }
+      }
+    }
+    if (specified) {
+      target[key] = value;
+    }
+  }
+}
+
 /** Resolved run style with full inheritance chain. */
 export interface ResolvedRunStyle {
   /** Style chain (most specific → base). */
@@ -616,7 +710,11 @@ export interface ResolvedRunStyle {
  * Resolution order (low → high specificity):
  * 1. Document defaults
  * 2. Paragraph's resolved style (if `paragraphRunProperties` provided)
- * 3. Run's character style chain (if `run.properties.style` is set)
+ * 3. Run's character style chain (if `run.properties.style` is set);
+ *    toggle properties combine with layers 1–2 per §17.7.3 — see
+ *    `TOGGLE_RUN_PROPERTY_KEYS`. `paragraphRunProperties` must therefore come
+ *    from {@link resolveStyle}, which has already combined the paragraph- and
+ *    table-style levels.
  * 4. Run's own direct properties
  *
  * @param doc - The document containing styles.
@@ -624,19 +722,16 @@ export interface ResolvedRunStyle {
  * @param paragraphRunProperties - Optional inherited run properties from the
  *   parent paragraph's resolved style. Pass `resolveStyle(doc, para).runProperties`
  *   to layer the paragraph style on top of doc defaults.
+ * @param styles - Optional prebuilt {@link indexStyles} index, reused across calls.
  * @returns The fully resolved run style.
  */
 export function resolveRunStyle(
   doc: DocxDocument,
   run: Run,
-  paragraphRunProperties?: RunProperties
+  paragraphRunProperties?: RunProperties,
+  styles?: StyleIndex
 ): ResolvedRunStyle {
-  const styleMap = new Map<string, StyleDef>();
-  if (doc.styles) {
-    for (const s of doc.styles) {
-      styleMap.set(s.styleId, s);
-    }
-  }
+  const styleMap = styles ?? indexStyles(doc);
 
   // Build chain from run's character style
   const chain: string[] = [];
@@ -664,12 +759,28 @@ export function resolveRunStyle(
     merged = mergeProperties(merged, paragraphRunProperties);
   }
 
-  // 3. Run's character style chain (base → specific)
+  // 3. Run's character style chain (base → specific): one level of the
+  // hierarchy. Within it a nearer style overrides; against the levels below,
+  // toggle properties flip (see TOGGLE_RUN_PROPERTY_KEYS).
+  let characterStyle: Record<string, unknown> = {};
   for (let i = chain.length - 1; i >= 0; i--) {
     const def = styleMap.get(chain[i]);
     if (def?.runProperties) {
-      merged = mergeProperties(merged, def.runProperties);
+      characterStyle = mergeProperties(characterStyle, def.runProperties);
     }
+  }
+  const inherited = merged;
+  merged = mergeProperties(merged, characterStyle);
+  const defaults = doc.docDefaults?.runProperties ?? {};
+  for (const key of TOGGLE_RUN_PROPERTY_KEYS) {
+    const own = characterStyle[key];
+    if (typeof own !== "boolean") {
+      continue;
+    }
+    const base = defaults[key] === true;
+    const inheritedValue = inherited[key];
+    const below = typeof inheritedValue === "boolean" ? inheritedValue : base;
+    merged[key] = own === base ? below : !below;
   }
 
   // 4. Run's own direct properties (highest priority)
@@ -688,6 +799,8 @@ export function resolveRunStyle(
 export interface ResolvedNumberingLevel {
   /** The level index (0-8). */
   readonly level: number;
+  /** Start value (with any `w:startOverride` applied). */
+  readonly start?: number;
   /** Number format. */
   readonly format?: string;
   /** Level text template (e.g. `"%1."`). */
@@ -701,47 +814,114 @@ export interface ResolvedNumberingLevel {
 }
 
 /**
- * Resolve the numbering level for a paragraph that has a numbering reference.
+ * Resolve the numbering level definition that is in effect for `numId` +
+ * `level` (the `w:num` instance and `w:ilvl`).
  *
- * Walks: paragraph.numbering → numberingInstances → abstractNumberings → level definition.
- * Also applies `LevelOverride` if present.
+ * Walks `w:num` → `w:abstractNum` → `w:lvl`, then applies the instance's
+ * `w:lvlOverride` for that level: a replacement `w:lvl` supersedes the
+ * abstract definition, and `w:startOverride` replaces its start value. This is
+ * the single place numbering is looked up — every converter goes through it,
+ * so a list restarted or re-typed by an override renders the same everywhere.
  *
  * @param doc - The document.
- * @param para - The paragraph (must have `numbering` set).
+ * @param numId - Numbering instance ID. `0` means "no numbering".
+ * @param level - Level index (0-8).
+ * @returns The effective level, or undefined if it cannot be resolved.
+ */
+export function resolveNumberingLevelDef(
+  doc: DocxDocument,
+  numId: number,
+  level: number
+): NumberingLevel | undefined {
+  if (numId === 0) {
+    return undefined;
+  }
+  const instance = doc.numberingInstances?.find(n => n.numId === numId);
+  if (!instance) {
+    return undefined;
+  }
+  const override = instance.overrides?.find(o => o.level === level);
+  let levelDef: NumberingLevel | undefined = override?.levelDef;
+  if (!levelDef) {
+    const absNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
+    levelDef = absNum?.levels.find(l => l.level === level);
+  }
+  if (!levelDef) {
+    return undefined;
+  }
+  if (override?.startOverride !== undefined) {
+    return { ...levelDef, start: override.startOverride };
+  }
+  return levelDef;
+}
+
+/**
+ * Resolve the effective numbering reference (`w:numPr`) of a paragraph.
+ *
+ * Direct paragraph numbering wins; otherwise the paragraph style chain
+ * (`w:pStyle` → `basedOn` …) is searched for the nearest `w:numPr`. A
+ * `numId` of `0` at whichever level supplies it means "no numbering" and
+ * cancels anything inherited, so it resolves to undefined.
+ *
+ * @param doc - The document.
+ * @param para - The paragraph.
+ * @param styles - Optional prebuilt {@link indexStyles} index, reused across calls.
+ * @returns The effective numbering reference, or undefined when not a list item.
+ */
+export function resolveParagraphNumbering(
+  doc: DocxDocument,
+  para: Paragraph,
+  styles?: StyleIndex
+): NumberingRef | undefined {
+  const direct = para.properties?.numbering;
+  if (direct) {
+    return direct.numId === 0 ? undefined : direct;
+  }
+  let current = para.properties?.style;
+  if (!current || !doc.styles) {
+    return undefined;
+  }
+  const styleMap = styles ?? indexStyles(doc);
+  const visited = new Set<string>();
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const def = styleMap.get(current);
+    const numbering = def?.paragraphProperties?.numbering;
+    if (numbering) {
+      return numbering.numId === 0 ? undefined : numbering;
+    }
+    current = def?.basedOn;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the numbering level for a paragraph.
+ *
+ * Uses the paragraph's effective numbering ({@link resolveParagraphNumbering})
+ * and the effective level definition ({@link resolveNumberingLevelDef}), so
+ * style-inherited numbering and `w:lvlOverride` are both honoured.
+ *
+ * @param doc - The document.
+ * @param para - The paragraph.
  * @returns The resolved level, or undefined if no numbering or level not found.
  */
 export function resolveNumberingLevel(
   doc: DocxDocument,
   para: Paragraph
 ): ResolvedNumberingLevel | undefined {
-  const numRef = para.properties?.numbering;
+  const numRef = resolveParagraphNumbering(doc, para);
   if (!numRef) {
     return undefined;
   }
-
-  // Find numbering instance
-  const instance = doc.numberingInstances?.find(n => n.numId === numRef.numId);
-  if (!instance) {
-    return undefined;
-  }
-
-  // Check for level override first
-  const override = instance.overrides?.find(o => o.level === numRef.level);
-  let levelDef: NumberingLevel | undefined;
-  if (override?.levelDef) {
-    levelDef = override.levelDef;
-  } else {
-    // Walk to abstract numbering
-    const absNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
-    levelDef = absNum?.levels.find(l => l.level === numRef.level);
-  }
-
+  const levelDef = resolveNumberingLevelDef(doc, numRef.numId, numRef.level);
   if (!levelDef) {
     return undefined;
   }
 
   return {
     level: levelDef.level,
+    start: levelDef.start,
     format: levelDef.format,
     text: levelDef.text,
     justification: levelDef.justification,
@@ -761,19 +941,15 @@ export function resolveNumberingLevel(
  */
 export function resolveTableStyle(
   doc: DocxDocument,
-  tableStyleId: string
+  tableStyleId: string,
+  styles?: StyleIndex
 ): {
   chain: string[];
   paragraphProperties: ParagraphProperties;
   runProperties: RunProperties;
   tableProperties?: TableProperties;
 } {
-  const styleMap = new Map<string, StyleDef>();
-  if (doc.styles) {
-    for (const s of doc.styles) {
-      styleMap.set(s.styleId, s);
-    }
-  }
+  const styleMap = styles ?? indexStyles(doc);
 
   const chain: string[] = [];
   let current: string | undefined = tableStyleId;

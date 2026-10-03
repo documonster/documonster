@@ -219,6 +219,13 @@ export interface PackageDocxOptions {
   /** ZIP compression level (0-9). Default: backend-specific (typically 6). */
   readonly compressionLevel?: number;
   /**
+   * Timestamp stamped on every ZIP entry. Defaults to the document's
+   * `coreProperties.modified`, then `coreProperties.created`, then the current
+   * time — so a document with dated core properties packages to identical bytes
+   * on every save, as the XLSX writer does with the workbook's dates.
+   */
+  readonly modTime?: Date;
+  /**
    * Security policy controlling rawXmlPolicy, OLE/signature handling, etc.
    * Defaults to {@link DEFAULT_SECURITY_POLICY}.
    */
@@ -354,7 +361,10 @@ async function _packageDocxInner(
   doc: DocxDocument,
   options: PackageDocxOptions
 ): Promise<Uint8Array> {
-  const archive = zip({ level: options.compressionLevel ?? 6 });
+  const archive = zip({
+    level: options.compressionLevel ?? 6,
+    modTime: options.modTime ?? doc.coreProperties?.modified ?? doc.coreProperties?.created
+  });
   const securityPolicy = resolveSecurityPolicy(options.securityPolicy);
   const rawXmlPolicy = securityPolicy.rawXmlPolicy;
 

@@ -40,12 +40,11 @@ describe("sections", () => {
     margins: { top: 720, bottom: 720, left: 720, right: 720 }
   };
 
+  // A section's `w:type` says how *that* section starts (verified against
+  // Word), so the break type goes on the second — the opening — section.
   const twoSections = (breakType: SectionProperties["breakType"], trailing = LANDSCAPE) => ({
-    body: [
-      para("section one", { sectionProperties: { ...LETTER, breakType } }),
-      para("section two")
-    ],
-    sectionProperties: trailing
+    body: [para("section one", { sectionProperties: LETTER }), para("section two")],
+    sectionProperties: { ...trailing, breakType }
   });
 
   it("gives each section its own page geometry", () => {

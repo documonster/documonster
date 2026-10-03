@@ -6,7 +6,12 @@
  * footnotes, code spans, horizontal rules, and more.
  */
 
-import { extractMathText, isRun } from "@word/core/text-utils";
+import { extractMathText, isRun, symbolText } from "@word/core/text-utils";
+import { finalViewRun, isHiddenRun } from "@word/query/final-view";
+import { createNumberingCounter } from "@word/query/numbering-counter";
+import type { NumberingCounter } from "@word/query/numbering-counter";
+import { createStyleResolver } from "@word/query/style-resolver";
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   DocxDocument,
   BodyContent,
@@ -17,8 +22,7 @@ import type {
   Table,
   TextBox,
   Hyperlink,
-  InsertedRun,
-  MovedToRun,
+  RunProperties,
   TextContent,
   MathBlock,
   StructuredDocumentTag
@@ -53,7 +57,11 @@ export function renderToMarkdown(doc: DocxDocument, options?: MarkdownRenderOpti
     options: opts,
     lines: [],
     footnotes: [],
-    footnoteCounter: 0
+    footnoteCounter: 0,
+    styles: createStyleResolver(doc),
+    numbering: createNumberingCounter(doc),
+    openLists: [],
+    listIndents: []
   };
 
   for (const item of doc.body) {
@@ -81,6 +89,29 @@ interface MdRenderState {
   readonly lines: string[];
   readonly footnotes: string[];
   footnoteCounter: number;
+  /** Style resolution bound to `doc` for this render. */
+  readonly styles: StyleResolver;
+  /** Real number of each list item, per numbering instance and level. */
+  readonly numbering: NumberingCounter;
+  /**
+   * The numbering instance of the Markdown list currently open at each
+   * level, so an adjacent item from a different instance is split off into
+   * a list of its own instead of being merged by CommonMark.
+   */
+  openLists: number[];
+  /**
+   * Content column of the item open at each level. CommonMark nests a list
+   * only when it is indented to its parent item's content, which for "10. "
+   * is four columns, not two.
+   */
+  listIndents: number[];
+  /** Run properties the paragraph being rendered passes down to its runs. */
+  paragraphRunProperties?: RunProperties;
+  /**
+   * In a heading, the formatting its style already gives every run. The `#`
+   * marker conveys it, so emphasis is emitted only where a run differs.
+   */
+  headingRunProperties?: RunProperties;
 }
 
 // =============================================================================
@@ -96,7 +127,11 @@ function renderBlock(state: MdRenderState, item: BodyContent): void {
   // different ordering (- vs 1.) since GFM otherwise merges them.
   const prev = state.lines.length > 0 ? state.lines[state.lines.length - 1] : "";
   const prevIsList = /^(\s*)([-*+]|\d+[.)])\s/.test(prev);
-  const currentIsList = item.type === "paragraph" && isListItemParagraph(state.doc, item);
+  const currentIsList = item.type === "paragraph" && state.styles.numbering(item) !== undefined;
+  if (!currentIsList) {
+    state.openLists = [];
+    state.listIndents = [];
+  }
   if (prev !== "" && prevIsList) {
     if (!currentIsList) {
       state.lines.push("");
@@ -106,9 +141,9 @@ function renderBlock(state: MdRenderState, item: BodyContent): void {
       // a blank line so GFM doesn't merge them into one mixed list.
       const prevIsBullet = /^(\s*)[-*+]\s/.test(prev);
       const prevIsOrdered = /^(\s*)\d+[.)]\s/.test(prev);
-      const numRef = item.properties?.numbering;
+      const numRef = state.styles.numbering(item);
       if (numRef) {
-        const format = getListFormat(state.doc, numRef.numId, numRef.level);
+        const format = state.numbering.levelDef(numRef.numId, numRef.level)?.format ?? "bullet";
         const currentIsBullet = format === "bullet";
         if ((prevIsBullet && !currentIsBullet) || (prevIsOrdered && currentIsBullet)) {
           state.lines.push("");
@@ -169,11 +204,13 @@ function renderParagraph(state: MdRenderState, para: Paragraph): void {
   }
 
   // Determine heading level
-  const headingLevel = getHeadingLevel(props?.style, props?.outlineLevel);
+  // Title renders as `#`; levels 7–9 have no Markdown marker and clamp to `######`.
+  const heading = state.styles.heading(para);
+  const headingLevel = heading ? Math.min(heading.level, 6) : 0;
 
   // Check for blockquote style
   if (isBlockquoteStyle(props?.style)) {
-    const text = renderInlineChildren(state, para.children);
+    const text = renderParagraphText(state, para);
     if (text.trim()) {
       state.lines.push("> " + text.trim());
     } else {
@@ -184,8 +221,8 @@ function renderParagraph(state: MdRenderState, para: Paragraph): void {
   }
 
   // Check for code block style
-  if (isCodeBlockStyle(props?.style) || isEntireParagraphMonospace(para)) {
-    const text = renderPlainInlineChildren(para.children);
+  if (isCodeBlockStyle(props?.style) || isEntireParagraphMonospace(state, para)) {
+    const text = renderPlainInlineChildren(state, para);
     state.lines.push("```");
     state.lines.push(text);
     state.lines.push("```");
@@ -194,9 +231,9 @@ function renderParagraph(state: MdRenderState, para: Paragraph): void {
   }
 
   // Check for list
-  const numRef = props?.numbering;
+  const numRef = state.styles.numbering(para);
 
-  const text = renderInlineChildren(state, para.children);
+  const text = renderParagraphText(state, para, headingLevel > 0);
 
   // Skip empty non-heading paragraphs
   if (!text.trim() && headingLevel === 0 && !numRef) {
@@ -219,9 +256,33 @@ function renderParagraph(state: MdRenderState, para: Paragraph): void {
   }
 
   if (numRef) {
-    const indent = "  ".repeat(numRef.level);
-    const format = getListFormat(state.doc, numRef.numId, numRef.level);
-    const bullet = format === "bullet" ? "-" : "1.";
+    const level = numRef.level;
+    const indent = " ".repeat(level === 0 ? 0 : (state.listIndents[level - 1] ?? 2 * level));
+    const levelDef = state.numbering.levelDef(numRef.numId, numRef.level);
+    let bullet = "-";
+    // Every item advances its instance's count, bullets included, so the
+    // levels beneath it restart.
+    const advanced = levelDef ? state.numbering.next(numRef.numId, numRef.level) : 0;
+    if (levelDef && levelDef.format !== "bullet") {
+      // CommonMark takes an ordered list's start from its first marker, so
+      // every item carries its real number: an item resuming an instance
+      // after an interruption then opens a list that starts where Word's
+      // count stands (e.g. "3.").
+      bullet = `${advanced}.`;
+      const open = state.openLists[numRef.level];
+      if (open !== undefined && open !== numRef.numId) {
+        // A different instance directly after an open list would be merged
+        // into it. An HTML comment is the CommonMark idiom for ending a list.
+        if (state.lines[state.lines.length - 1] !== "") {
+          state.lines.push("");
+        }
+        state.lines.push(`${indent}<!-- -->`, "");
+      }
+    }
+    state.openLists = state.openLists.slice(0, level);
+    state.openLists[level] = numRef.numId;
+    state.listIndents = state.listIndents.slice(0, level);
+    state.listIndents[level] = indent.length + bullet.length + 1;
     state.lines.push(`${indent}${bullet} ${text.trim()}`);
     return;
   }
@@ -243,7 +304,7 @@ function renderTable(state: MdRenderState, table: Table): void {
       const cellParts: string[] = [];
       for (const block of cell.content) {
         if (block.type === "paragraph") {
-          cellParts.push(renderInlineChildren(state, block.children).trim());
+          cellParts.push(renderParagraphText(state, block).trim());
         }
       }
       // Escape pipe characters to prevent table structure corruption.
@@ -313,7 +374,7 @@ function renderTable(state: MdRenderState, table: Table): void {
 
 function renderTextBox(state: MdRenderState, textBox: TextBox): void {
   for (const p of textBox.content) {
-    const text = renderInlineChildren(state, p.children);
+    const text = renderParagraphText(state, p);
     if (text.trim()) {
       state.lines.push("> " + text.trim());
     }
@@ -343,36 +404,28 @@ function renderSdt(state: MdRenderState, sdt: StructuredDocumentTag): void {
 // Inline rendering
 // =============================================================================
 
+/** Render a paragraph's inline content with its style's run properties in scope. */
+function renderParagraphText(state: MdRenderState, para: Paragraph, isHeading = false): string {
+  const outer = state.paragraphRunProperties;
+  const outerHeading = state.headingRunProperties;
+  const paragraphRunProperties = state.styles.paragraph(para).runProperties;
+  state.paragraphRunProperties = paragraphRunProperties;
+  state.headingRunProperties = isHeading ? paragraphRunProperties : undefined;
+  const text = renderInlineChildren(state, para.children);
+  state.paragraphRunProperties = outer;
+  state.headingRunProperties = outerHeading;
+  return text;
+}
+
 function renderInlineChildren(state: MdRenderState, children: readonly ParagraphChild[]): string {
   let result = "";
   for (const child of children) {
-    if ("type" in child) {
-      switch (child.type) {
-        case "hyperlink":
-          result += renderHyperlink(state, child as Hyperlink);
-          break;
-        case "bookmarkStart":
-        case "bookmarkEnd":
-        case "commentRangeStart":
-        case "commentRangeEnd":
-        case "commentReference":
-          break;
-        case "insertedRun":
-          result += renderRun(state, (child as InsertedRun).run);
-          break;
-        case "deletedRun":
-          // Skip deleted content in markdown
-          break;
-        case "movedFromRun":
-          break;
-        case "movedToRun":
-          result += renderRun(state, (child as MovedToRun).run);
-          break;
-        default:
-          break;
-      }
-    } else if (isRun(child)) {
-      result += renderRun(state, child);
+    // Final view: inserted / moved-to text shown, deleted / moved-from hidden.
+    const run = finalViewRun(child);
+    if (run) {
+      result += renderRun(state, run);
+    } else if ("type" in child && child.type === "hyperlink") {
+      result += renderHyperlink(state, child);
     }
   }
   return result;
@@ -388,6 +441,10 @@ function renderHyperlink(state: MdRenderState, link: Hyperlink): string {
 }
 
 function renderRun(state: MdRenderState, run: Run): string {
+  const props = state.styles.run(run, state.paragraphRunProperties).runProperties;
+  if (isHiddenRun(props)) {
+    return "";
+  }
   let text = "";
   for (const content of run.content) {
     text += renderRunContent(state, content);
@@ -397,26 +454,25 @@ function renderRun(state: MdRenderState, run: Run): string {
     return "";
   }
 
-  const props = run.properties;
-  if (!props) {
-    return text;
-  }
-
   // Check for monospace font → inline code
   if (isMonospaceFont(props.font)) {
     return "`" + text + "`";
   }
 
   // Apply formatting cumulatively (supports combinations like bold+strike)
+  const base = state.headingRunProperties;
+  const strike = props.strike === true && base?.strike !== true;
+  const bold = props.bold === true && base?.bold !== true;
+  const italic = props.italic === true && base?.italic !== true;
   let result = text;
-  if (props.strike) {
+  if (strike) {
     result = `~~${result}~~`;
   }
-  if (props.bold && props.italic) {
+  if (bold && italic) {
     result = `***${result}***`;
-  } else if (props.bold) {
+  } else if (bold) {
     result = `**${result}**`;
-  } else if (props.italic) {
+  } else if (italic) {
     result = `*${result}*`;
   }
 
@@ -446,12 +502,7 @@ function renderRunContent(state: MdRenderState, content: RunContent): string {
     case "softHyphen":
       return "";
     case "symbol":
-      try {
-        const code = parseInt(content.char, 16);
-        return String.fromCodePoint(code);
-      } catch {
-        return content.char;
-      }
+      return symbolText(content);
     case "footnoteRef":
       if (state.options.includeNotes) {
         state.footnoteCounter++;
@@ -492,55 +543,6 @@ function renderRunContent(state: MdRenderState, content: RunContent): string {
 // =============================================================================
 // Helpers
 // =============================================================================
-
-function getHeadingLevel(style: string | undefined, outlineLevel: number | undefined): number {
-  if (style) {
-    const styleId = style.toLowerCase();
-    if (styleId === "heading1" || styleId === "heading 1" || styleId === "title") {
-      return 1;
-    }
-    if (styleId === "heading2" || styleId === "heading 2") {
-      return 2;
-    }
-    if (styleId === "heading3" || styleId === "heading 3") {
-      return 3;
-    }
-    if (styleId === "heading4" || styleId === "heading 4") {
-      return 4;
-    }
-    if (styleId === "heading5" || styleId === "heading 5") {
-      return 5;
-    }
-    if (styleId === "heading6" || styleId === "heading 6") {
-      return 6;
-    }
-    // Generic heading pattern
-    const match = /^heading\s*(\d)$/i.exec(styleId);
-    if (match) {
-      return Math.min(parseInt(match[1], 10), 6);
-    }
-  }
-  if (outlineLevel !== undefined && outlineLevel >= 0 && outlineLevel < 6) {
-    return outlineLevel + 1;
-  }
-  return 0;
-}
-
-function getListFormat(doc: DocxDocument, numId: number, level: number): string {
-  const instance = doc.numberingInstances?.find(n => n.numId === numId);
-  if (!instance) {
-    return "bullet";
-  }
-  const abstractNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
-  if (!abstractNum) {
-    return "bullet";
-  }
-  const levelDef = abstractNum.levels.find(l => l.level === level);
-  if (!levelDef) {
-    return "bullet";
-  }
-  return levelDef.format;
-}
 
 function isMonospaceFont(font: unknown): boolean {
   if (!font) {
@@ -597,18 +599,12 @@ function isBlockquoteStyle(style: string | undefined): boolean {
 }
 
 /**
- * Whether a body-level Paragraph would render as a Markdown list item.
- * Used by renderBlock to decide whether to inject a blank-line separator
- * between adjacent block types — list items stack tightly, but a list
- * must be followed by a blank line before any other block-level element.
+ * Check if the entire paragraph uses a monospace font (all runs), judged on
+ * the runs' resolved properties — the same view `renderRun` uses, so a font
+ * inherited from a character or paragraph style counts.
  */
-function isListItemParagraph(doc: DocxDocument, para: Paragraph): boolean {
-  void doc;
-  return para.properties?.numbering !== undefined;
-}
-
-/** Check if the entire paragraph uses a monospace font (all runs). */
-function isEntireParagraphMonospace(para: Paragraph): boolean {
+function isEntireParagraphMonospace(state: MdRenderState, para: Paragraph): boolean {
+  const paragraphRunProperties = state.styles.paragraph(para).runProperties;
   const runs: Run[] = [];
   for (const child of para.children) {
     if (isRun(child)) {
@@ -619,7 +615,7 @@ function isEntireParagraphMonospace(para: Paragraph): boolean {
     return false;
   }
   for (const run of runs) {
-    if (!run.properties?.font || !isMonospaceFont(run.properties.font)) {
+    if (!isMonospaceFont(state.styles.run(run, paragraphRunProperties).runProperties.font)) {
       return false;
     }
   }
@@ -627,17 +623,13 @@ function isEntireParagraphMonospace(para: Paragraph): boolean {
 }
 
 /** Render paragraph children as plain text (no markdown formatting). */
-function renderPlainInlineChildren(children: readonly ParagraphChild[]): string {
+function renderPlainInlineChildren(state: MdRenderState, para: Paragraph): string {
+  const paragraphRunProperties = state.styles.paragraph(para).runProperties;
   let result = "";
-  for (const child of children) {
-    if ("type" in child) {
-      if (child.type === "insertedRun") {
-        result += renderPlainRun((child as InsertedRun).run);
-      } else if (child.type === "movedToRun") {
-        result += renderPlainRun((child as MovedToRun).run);
-      }
-    } else if (isRun(child)) {
-      result += renderPlainRun(child);
+  for (const child of para.children) {
+    const run = finalViewRun(child);
+    if (run && !isHiddenRun(state.styles.run(run, paragraphRunProperties).runProperties)) {
+      result += renderPlainRun(run);
     }
   }
   return result;
@@ -706,7 +698,7 @@ function getFootnoteText(state: MdRenderState, noteId: number): string {
   const parts: string[] = [];
   for (const p of note.content) {
     if (p.type === "paragraph") {
-      parts.push(renderInlineChildren(state, p.children).trim());
+      parts.push(renderParagraphText(state, p).trim());
     }
   }
   return parts.join(" ");
@@ -720,7 +712,7 @@ function getEndnoteText(state: MdRenderState, noteId: number): string {
   const parts: string[] = [];
   for (const p of note.content) {
     if (p.type === "paragraph") {
-      parts.push(renderInlineChildren(state, p.children).trim());
+      parts.push(renderParagraphText(state, p).trim());
     }
   }
   return parts.join(" ");

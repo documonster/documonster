@@ -18,3 +18,13 @@ export function pdfMd5(input: Uint8Array): Uint8Array {
 export function pdfSha256(input: Uint8Array): Uint8Array {
   return new Uint8Array(crypto.hash("sha256", input, "buffer"));
 }
+
+/** SHA-384 for PDF key derivation — ISO 32000-2 Algorithm 2.B. */
+export function pdfSha384(input: Uint8Array): Uint8Array {
+  return new Uint8Array(crypto.hash("sha384", input, "buffer"));
+}
+
+/** SHA-512 for PDF key derivation — ISO 32000-2 Algorithm 2.B. */
+export function pdfSha512(input: Uint8Array): Uint8Array {
+  return new Uint8Array(crypto.hash("sha512", input, "buffer"));
+}

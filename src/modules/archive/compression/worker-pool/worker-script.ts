@@ -33,22 +33,38 @@ const hasDeflateRaw = (() => {
 
 const EMPTY_UINT8ARRAY = new Uint8Array(0);
 
+/** Output exceeded the task's maxOutputLength; reported to the pool as \`limit\`. */
+class LimitError extends Error {
+  constructor(limit) {
+    super('Decompressed output exceeds maxOutputLength (' + limit + ' bytes)');
+    this.limit = limit;
+  }
+}
+
 /**
  * Process data through a TransformStream (compress or decompress)
  */
-async function processWithStream(stream, data) {
+async function processWithStream(stream, data, maxOutputLength) {
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
 
   // Start reading output
   let firstChunk = null;
   let chunks = null;
+  let produced = 0;
   const readPromise = (async () => {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value) {
         continue;
+      }
+      produced += value.length;
+      if (maxOutputLength !== undefined && produced > maxOutputLength) {
+        // Stop pulling so nothing past the bound is produced or buffered.
+        const limitError = new LimitError(maxOutputLength);
+        reader.cancel(limitError).catch(() => {});
+        throw limitError;
       }
       if (firstChunk === null) {
         firstChunk = value;
@@ -60,12 +76,19 @@ async function processWithStream(stream, data) {
     }
   })();
 
-  // Write input and close
-  await writer.write(data);
-  await writer.close();
+  // Write input and close. Once the reader has failed the writes reject
+  // too; the read's verdict is the one to report.
+  const read = readPromise.then(() => null, err => err);
+  try {
+    await writer.write(data);
+    await writer.close();
+  } catch (err) {
+    throw (await read) ?? err;
+  }
 
   // Wait for all output
-  await readPromise;
+  const readError = await read;
+  if (readError) throw readError;
 
   // Fast path for common cases
   if (firstChunk === null) return EMPTY_UINT8ARRAY;
@@ -122,6 +145,7 @@ function postError(taskId, err, startTime) {
     type: 'error',
     taskId,
     error,
+    limit: err instanceof LimitError ? err.limit : undefined,
     duration
   });
 }
@@ -275,7 +299,7 @@ self.onmessage = async function(event) {
 
   // Handle task request
   if (msg.type === 'task') {
-    const { taskId, taskType, data } = msg;
+    const { taskId, taskType, data, maxOutputLength } = msg;
     const startTime = performance.now();
 
     try {
@@ -295,7 +319,11 @@ self.onmessage = async function(event) {
           throw new Error('Unknown task type: ' + taskType);
       }
 
-      const result = await processWithStream(stream, data);
+      const result = await processWithStream(
+        stream,
+        data,
+        taskType === 'inflate' ? maxOutputLength : undefined
+      );
 
       // Transfer the result buffer for zero-copy
       postResult(taskId, result, startTime);

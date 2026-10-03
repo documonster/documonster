@@ -134,6 +134,14 @@ export interface ReadPdfOptions {
    * @default false
    */
   extractTables?: boolean;
+
+  /**
+   * Largest output, in bytes, a single stream filter may produce before the
+   * read is aborted with a `PdfLimitExceededError`. Guards against decompression
+   * bombs.
+   * @default 268435456 (256 MiB)
+   */
+  maxDecodedBytes?: number;
 }
 
 /**
@@ -199,6 +207,9 @@ export async function readPdf(data: Uint8Array, options?: ReadPdfOptions): Promi
   for (let i = 0; i < pageIndicesToProcess.length; i++) {
     const pageIdx = pageIndicesToProcess[i];
     pages.push(processPage(pagesInfo[pageIdx].dict, pageIdx, doc, opts));
+    // Page extraction tolerates malformed content, so a limit hit inside it is
+    // recorded rather than thrown; stop before starting the next page.
+    doc.throwIfLimitExceeded();
     if (i < pageIndicesToProcess.length - 1) {
       await yieldToEventLoop();
     }
@@ -247,7 +258,7 @@ function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
     extractTables: options?.extractTables ?? false
   };
 
-  const doc = new PdfDocument(data);
+  const doc = new PdfDocument(data, options?.maxDecodedBytes);
 
   if (isEncrypted(doc)) {
     const success = initDecryption(doc, opts.password);
@@ -261,6 +272,7 @@ function prepareRead(data: Uint8Array, options?: ReadPdfOptions): PreparedRead {
   const pageIndicesToProcess = opts.pages
     ? opts.pages.map(p => p - 1).filter(p => p >= 0 && p < pagesInfo.length)
     : Array.from({ length: pagesInfo.length }, (_, i) => i);
+  doc.throwIfLimitExceeded();
 
   return { doc, opts, metadata, pagesInfo, pageIndicesToProcess };
 }
@@ -371,6 +383,10 @@ function finalizeRead(
       // Non-fatal — just return empty
     }
   }
+
+  // Extraction tolerates malformed objects, so a resource limit hit anywhere
+  // above was recorded rather than thrown; refuse the truncated result here.
+  doc.throwIfLimitExceeded();
 
   return { text: allText, pages, metadata, formFields, bookmarks };
 }

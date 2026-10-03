@@ -65,3 +65,4 @@ export * as Xml from "@xml/surface/xml";
 // =============================================================================
 
 export { XmlError, XmlParseError, XmlWriteError, isXmlError, isXmlParseError } from "@xml/errors";
+export type { XmlParseLimit } from "@xml/errors";

@@ -9,7 +9,6 @@
  * This is intended for small-to-medium XML where tree access is convenient.
  */
 
-import { toError } from "@utils/errors";
 import { isForbiddenKey } from "@utils/object";
 import { XmlParseError } from "@xml/errors";
 import { SaxParser } from "@xml/sax";
@@ -107,12 +106,11 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
   const syntheticRoot = createElement("__root__", {});
   const stack: XmlElement[] = [syntheticRoot];
   let declaration: Record<string, string> | undefined;
-  let error: XmlParseError | undefined;
-
+  // The result is discarded on any error, so stop at the first one instead of
+  // building the rest of the tree: `fail()` rethrows out of `write()`. This is
+  // also what makes `maxDepth` / `maxEntityExpansions` bound the work done.
   parser.on("error", err => {
-    if (!error) {
-      error = err instanceof XmlParseError ? err : new XmlParseError(err.message);
-    }
+    throw err instanceof XmlParseError ? err : new XmlParseError(err.message);
   });
 
   parser.on("opentag", tag => {
@@ -187,10 +185,6 @@ function parseXml(xml: string, options?: XmlParseOptions): XmlDocument {
 
   parser.write(xml);
   parser.close();
-
-  if (error) {
-    throw toError(error);
-  }
 
   // Extract the real root from the synthetic container
   const roots = syntheticRoot.children.filter((n): n is XmlElement => n.type === "element");

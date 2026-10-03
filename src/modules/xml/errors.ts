@@ -20,6 +20,9 @@ export class XmlError extends BaseError {
 // Parse Errors
 // =============================================================================
 
+/** Resource limit that stopped a parse — see {@link XmlParseError.limit}. */
+export type XmlParseLimit = "depth" | "entityExpansions";
+
 /**
  * Error thrown during XML parsing (SAX or DOM).
  */
@@ -28,10 +31,16 @@ export class XmlParseError extends XmlError {
   readonly line?: number;
   readonly column?: number;
   readonly fileName?: string;
+  /**
+   * Set when parsing stopped because a configured resource limit was hit
+   * (`maxDepth` or `maxEntityExpansions`) rather than because the input is
+   * malformed, so callers can react to it without matching the message.
+   */
+  readonly limit?: XmlParseLimit;
 
   constructor(
     message: string,
-    context?: { line?: number; column?: number; fileName?: string },
+    context?: { line?: number; column?: number; fileName?: string; limit?: XmlParseLimit },
     options?: BaseErrorOptions
   ) {
     const parts: string[] = [];
@@ -46,6 +55,7 @@ export class XmlParseError extends XmlError {
     this.line = context?.line;
     this.column = context?.column;
     this.fileName = context?.fileName;
+    this.limit = context?.limit;
   }
 }
 

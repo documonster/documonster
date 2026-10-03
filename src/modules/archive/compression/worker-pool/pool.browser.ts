@@ -33,7 +33,7 @@ import {
   getWorkerBlobUrl,
   releaseWorkerBlobUrl
 } from "@archive/compression/worker-pool/worker-script";
-import { ArchiveError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };
 export { hasWorkerSupport };
@@ -54,6 +54,7 @@ interface PendingTask {
   taskType: WorkerTaskType;
   data: Uint8Array;
   level?: number;
+  maxOutputLength?: number;
   priority: TaskPriority;
   priorityValue: number;
   resolve: (result: TaskResult) => void;
@@ -261,7 +262,7 @@ export class WorkerPool {
   async execute(
     taskType: WorkerTaskType,
     data: Uint8Array,
-    options?: TaskOptions & { level?: number }
+    options?: TaskOptions & { level?: number; maxOutputLength?: number }
   ): Promise<TaskResult> {
     if (this._terminated) {
       throw new ArchiveError("Worker pool has been terminated");
@@ -286,6 +287,7 @@ export class WorkerPool {
         taskType,
         data,
         level: options?.level,
+        maxOutputLength: options?.maxOutputLength,
         priority,
         priorityValue,
         resolve,
@@ -524,7 +526,8 @@ export class WorkerPool {
       taskId: task.taskId,
       taskType: task.taskType,
       data,
-      level: task.level
+      level: task.level,
+      maxOutputLength: task.maxOutputLength
     };
 
     // Use transferables for zero-copy
@@ -660,7 +663,13 @@ export class WorkerPool {
           });
         } else {
           this._failedTasks++;
-          task.reject(new Error(message.error ?? "Unknown worker error"));
+          // An Error does not survive postMessage with its class, so a limit
+          // hit travels as the bound and is rebuilt as the archive's own error.
+          task.reject(
+            message.limit !== undefined
+              ? new ArchiveLimitError("maxOutputLength", message.limit)
+              : new Error(message.error ?? "Unknown worker error")
+          );
         }
 
         this._workerBecameIdle(poolWorker);
@@ -1109,7 +1118,7 @@ export async function deflateWithPool(
  */
 export async function inflateWithPool(
   data: Uint8Array,
-  options?: TaskOptions
+  options?: TaskOptions & { maxOutputLength?: number }
 ): Promise<Uint8Array> {
   const result = await getDefaultWorkerPool().execute("inflate", data, options);
   return result.data;

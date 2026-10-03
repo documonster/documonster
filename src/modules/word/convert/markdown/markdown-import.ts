@@ -395,6 +395,8 @@ interface ConversionState {
   nextNumId: number;
   bulletNumId: number | undefined;
   orderedNumId: number | undefined;
+  /** Levels at which the shared ordered instance has already numbered a list. */
+  orderedLevelsUsed: Set<number>;
   /** Emitted footnote definitions, in first-reference order. */
   footnotes: FootnoteDef[];
   /** Embedded inline images. */
@@ -417,6 +419,7 @@ function createState(): ConversionState {
     nextNumId: 1,
     bulletNumId: undefined,
     orderedNumId: undefined,
+    orderedLevelsUsed: new Set(),
     footnotes: [],
     images: [],
     footnoteDefinitions: new Map(),
@@ -457,12 +460,11 @@ function extractFootnoteDefinitions(lines: string[]): {
     const fenceMatch = lines[i].match(/^(`{3,}|~{3,})/);
     if (fenceMatch) {
       const fence = fenceMatch[1];
-      const closeRe = new RegExp(`^${fence[0]}{${fence.length},}$`);
       contentLines.push(lines[i]);
       i++;
       while (i < lines.length) {
         contentLines.push(lines[i]);
-        const isClose = closeRe.test(lines[i].trim());
+        const isClose = isClosingFence(lines[i].trim(), fence);
         i++;
         if (isClose) {
           break;
@@ -529,6 +531,19 @@ function resolveFootnoteId(label: string, state: ConversionState): number {
 // Block Parser
 // =============================================================================
 
+/** CommonMark: a closing fence repeats the opening fence's character, at least as many times. */
+function isClosingFence(trimmed: string, fence: string): boolean {
+  if (trimmed.length < fence.length) {
+    return false;
+  }
+  for (let k = 0; k < trimmed.length; k++) {
+    if (trimmed[k] !== fence[0]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function parseMarkdownBlocks(lines: string[], start: number, end: number): Block[] {
   const blocks: Block[] = [];
   let i = start;
@@ -552,10 +567,7 @@ function parseMarkdownBlocks(lines: string[], start: number, end: number): Block
       while (i < end) {
         const trimmed = lines[i].trim();
         // CommonMark: closing fence must use same char and be at least as long
-        if (
-          trimmed.length >= fence.length &&
-          new RegExp(`^${fence[0]}{${fence.length},}$`).test(trimmed)
-        ) {
+        if (isClosingFence(trimmed, fence)) {
           i++;
           break;
         }
@@ -638,6 +650,13 @@ function parseMarkdownBlocks(lines: string[], start: number, end: number): Block
       const result = parseTable(lines, i, end);
       blocks.push(result.block);
       i = result.nextIndex;
+      continue;
+    }
+
+    // A standalone HTML comment carries no content; it is how CommonMark
+    // separates two adjacent lists, so it must not become a paragraph.
+    if (/^\s*<!--.*-->\s*$/.test(line)) {
+      i++;
       continue;
     }
 
@@ -1852,10 +1871,21 @@ async function convertList(
   // Ordered lists with a non-default `start` need their own numbering
   // instance so the override actually takes effect — sharing one numId
   // across all lists would force every list to start at the same number.
-  const numId =
-    block.ordered && block.start !== 1
-      ? createOrderedNumberingWithStart(block.start, state)
-      : getOrCreateNumbering(block.ordered, state);
+  // So does any later ordered list at a level the shared instance has
+  // already numbered: Word continues an instance's count across
+  // interruptions, and a nested list only restarts when an item of the
+  // *same* instance advances above it — a bullet parent belongs to another
+  // instance and resets nothing. Every Markdown list is a list of its own, so
+  // it must not inherit a count from an earlier one.
+  let numId: number;
+  if (block.ordered && (block.start !== 1 || state.orderedLevelsUsed.has(parentLevel))) {
+    numId = createOrderedNumberingWithStart(block.start, parentLevel, state);
+  } else {
+    numId = getOrCreateNumbering(block.ordered, state);
+    if (block.ordered) {
+      state.orderedLevelsUsed.add(parentLevel);
+    }
+  }
   const result: BodyContent[] = [];
 
   for (const item of block.items) {
@@ -2593,12 +2623,16 @@ function getOrCreateNumbering(ordered: boolean, state: ConversionState): number 
 }
 
 /**
- * Create a fresh ordered numbering instance with a startOverride at level 0.
+ * Create a fresh ordered numbering instance with a startOverride at `level`.
  * Re-uses the shared ordered abstract numbering (creating it on demand) so
  * we don't duplicate the level definitions for every numbered list that has
  * a non-default starting number.
  */
-function createOrderedNumberingWithStart(start: number, state: ConversionState): number {
+function createOrderedNumberingWithStart(
+  start: number,
+  level: number,
+  state: ConversionState
+): number {
   // Ensure the shared ordered abstract numbering exists.
   const baseNumId = getOrCreateNumbering(true, state);
   const baseInstance = state.numberingInstances.find(n => n.numId === baseNumId);
@@ -2610,7 +2644,7 @@ function createOrderedNumberingWithStart(start: number, state: ConversionState):
   state.numberingInstances.push({
     numId,
     abstractNumId,
-    overrides: [{ level: 0, startOverride: start }]
+    overrides: [{ level, startOverride: start }]
   });
 
   return numId;

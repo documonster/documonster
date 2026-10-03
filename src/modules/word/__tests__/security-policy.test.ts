@@ -7,6 +7,9 @@
  * public policy API honest about what is and isn't implemented.
  */
 
+import { extractAll } from "@archive/unzip/extract";
+import { createZip } from "@archive/zip/zip-bytes";
+import { DocxLimitExceededError } from "@word/errors";
 import { describe, it, expect } from "vitest";
 
 import { Document, Io, Security } from "../index";
@@ -80,5 +83,69 @@ describe("WordSecurityPolicy: preserveVbaProject", () => {
 
     const lenient = await Io.read(bytes);
     expect(lenient.vbaProject).toBeDefined();
+  });
+});
+
+describe("WordSecurityPolicy: maxXmlDepth", () => {
+  /** Rebuild a minimal package with `part` replaced by `xml`. */
+  async function withPart(part: string, xml: string): Promise<Uint8Array> {
+    const h = Document.create();
+    Document.addParagraph(h, "hello");
+    const files = await extractAll(await Io.package(Document.build(h)));
+    const entries = [...files].map(([name, entry]) => ({ name, data: entry.data }));
+    const data = new TextEncoder().encode(xml);
+    const existing = entries.find(e => e.name === part);
+    if (existing) {
+      existing.data = data;
+    } else {
+      entries.push({ name: part, data });
+    }
+    return createZip(entries);
+  }
+
+  function nestedBody(depth: number): string {
+    // w:document > w:body > w:sdt > w:sdtContent > … > w:p
+    const open = "<w:sdt><w:sdtContent>".repeat(depth);
+    const close = "</w:sdtContent></w:sdt>".repeat(depth);
+    return (
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:body>${open}<w:p><w:r><w:t>x</w:t></w:r></w:p>${close}</w:body></w:document>`
+    );
+  }
+
+  it("raises DocxLimitExceededError when document.xml nests beyond the policy", async () => {
+    const bytes = await withPart("word/document.xml", nestedBody(30));
+    const error = await Io.read(bytes, { securityPolicy: { maxXmlDepth: 40 } }).catch(
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(DocxLimitExceededError);
+    expect((error as DocxLimitExceededError).limit).toBe("xmlDepth");
+    expect((error as DocxLimitExceededError).maximum).toBe(40);
+  });
+
+  it("reads the same document under a policy that allows its depth", async () => {
+    const bytes = await withPart("word/document.xml", nestedBody(30));
+    await expect(Io.read(bytes, { securityPolicy: { maxXmlDepth: 200 } })).resolves.toBeDefined();
+  });
+
+  it("strict preset is tighter than the default", async () => {
+    const bytes = await withPart("word/document.xml", nestedBody(80));
+    await expect(Io.read(bytes)).resolves.toBeDefined();
+    await expect(
+      Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY })
+    ).rejects.toBeInstanceOf(DocxLimitExceededError);
+  });
+
+  it("is not swallowed by best-effort parsing of auxiliary parts", async () => {
+    const deep =
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      "<w:x>".repeat(50) +
+      "</w:x>".repeat(50) +
+      "</w:styles>";
+    const bytes = await withPart("word/styles.xml", deep);
+    await expect(Io.read(bytes, { securityPolicy: { maxXmlDepth: 20 } })).rejects.toBeInstanceOf(
+      DocxLimitExceededError
+    );
   });
 });

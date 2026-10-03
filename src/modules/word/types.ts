@@ -2640,7 +2640,11 @@ export interface NumberingLevel {
   readonly suffix?: LevelSuffix;
   /** Legal numbering style (override all lower levels to decimal). */
   readonly isLegalNumberingStyle?: boolean;
-  /** Restart after which level (-1 = never, 0 = level 0 restarts this). */
+  /**
+   * `w:lvlRestart`, as written (1-based): restart only when a level at or
+   * above level `n` appears; `0` = never restart. Absent = restart after any
+   * shallower level.
+   */
   readonly restartAfterLevel?: number;
   /** Picture bullet ID (references w:numPicBullet in numbering.xml). */
   readonly picBulletId?: number;

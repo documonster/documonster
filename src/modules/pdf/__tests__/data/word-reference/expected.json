@@ -1,0 +1,268 @@
+{
+  "blank": [
+    {
+      "height": 792,
+      "text": "11=GPSaegp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "12=GPSaegp",
+      "width": 612
+    }
+  ],
+  "blank5": [
+    {
+      "height": 792,
+      "text": "11=GPSaegp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "25=GPSaegp",
+      "width": 612
+    }
+  ],
+  "blankn": [
+    {
+      "height": 792,
+      "text": "//1113=GPSaegp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//1233=GPSaegp",
+      "width": 612
+    }
+  ],
+  "cont": [
+    {
+      "height": 792,
+      "text": "//11112=?GPSSaaaeeeggmpps",
+      "width": 612
+    }
+  ],
+  "evenblank": [
+    {
+      "height": 792,
+      "text": "//11112=GPSp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//1222=GPSaegp",
+      "width": 612
+    }
+  ],
+  "evenn": [
+    {
+      "height": 792,
+      "text": "//1112=GPSaegp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//1222=GPSaegp",
+      "width": 612
+    }
+  ],
+  "evenodd": [
+    {
+      "height": 792,
+      "text": "1EEFNOOPTV",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "2DDFOOOPT",
+      "width": 612
+    }
+  ],
+  "gen": [
+    {
+      "height": 792,
+      "text": "......1122aaaabbbdeeeeehlnnooopttttwwxy•",
+      "width": 612
+    }
+  ],
+  "merge-continuous": [
+    {
+      "height": 792,
+      "text": "ABCCDDOO",
+      "width": 612
+    },
+    {
+      "height": 612,
+      "text": "CCDO",
+      "width": 792
+    }
+  ],
+  "merge-nextPage": [
+    {
+      "height": 792,
+      "text": "ACDO",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "BCDO",
+      "width": 612
+    },
+    {
+      "height": 612,
+      "text": "CCDO",
+      "width": 792
+    }
+  ],
+  "merge-oddPage": [
+    {
+      "height": 792,
+      "text": "ACDO",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "BCDO",
+      "width": 612
+    },
+    {
+      "height": 612,
+      "text": "",
+      "width": 792
+    },
+    {
+      "height": 612,
+      "text": "CCDO",
+      "width": 792
+    }
+  ],
+  "num": [
+    {
+      "height": 792,
+      "text": "-----------------..........0011111112223345789=AABCCDEFGGHPaaaaaaaaaabddddeeeeeeegggghiiiiiiilllllmmmmnnnnnnnnnnooooorrrrrrrssuuuuuvvvvvy",
+      "width": 612
+    }
+  ],
+  "num2": [
+    {
+      "height": 792,
+      "text": "))----------------------.............011111111111222444556666789=GIIIIPXXaaaaaaabbbbbbcddeeeefffgggghiiijklllmmmmmmmmmmmmmmnnnnnnnnnnnnnnnnopssssstuuuuuuuuuuuuuuuuuuv",
+      "width": 612
+    }
+  ],
+  "orient": [
+    {
+      "height": 792,
+      "text": "EINORT",
+      "width": 612
+    }
+  ],
+  "s2": [
+    {
+      "height": 792,
+      "text": "//1112=GPSaegp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//1223=GPSaegp",
+      "width": 612
+    }
+  ],
+  "s3": [
+    {
+      "height": 792,
+      "text": "//11126=GPSp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//12226=GPSp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//12236=GPSp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//22246=GPSp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//11366=GPSp",
+      "width": 612
+    }
+  ],
+  "tog": [
+    {
+      "bold": {
+        "Kcb": true,
+        "Kcb2chain": true,
+        "Kdirectoff": false,
+        "Kpb": true,
+        "Kpb2chain": true,
+        "Kpbcb": false,
+        "Kpbcbcb2": false,
+        "Kpbcbdirect": true,
+        "Kpbcboff": true,
+        "Kpboffchain": false,
+        "Kpicinon": false,
+        "Kpvcv": false
+      },
+      "height": 792,
+      "text": "222KKKKKKKKKKKKaaabbbbbbbbbbbbbbccccccccccccccddeeffffffhhhiiiiiiinnnnnooooppppppppprrttvv",
+      "width": 612
+    }
+  ],
+  "togdef": [
+    {
+      "bold": {
+        "Kcb": true,
+        "Kcb2chain": true,
+        "Kdirectoff": false,
+        "Kpb": true,
+        "Kpb2chain": true,
+        "Kpbcb": true,
+        "Kpbcbcb2": true,
+        "Kpbcbdirect": true,
+        "Kpbcboff": false,
+        "Kpboffchain": false,
+        "Kpicinon": true,
+        "Kpvcv": true
+      },
+      "height": 792,
+      "text": "222KKKKKKKKKKKKaaabbbbbbbbbbbbbbccccccccccccccddeeffffffhhhiiiiiiinnnnnooooppppppppprrttvv",
+      "width": 612
+    }
+  ],
+  "typefirst": [
+    {
+      "height": 792,
+      "text": "//1112=GPSaegp",
+      "width": 612
+    },
+    {
+      "height": 792,
+      "text": "//1222=GPSaegp",
+      "width": 612
+    }
+  ]
+}

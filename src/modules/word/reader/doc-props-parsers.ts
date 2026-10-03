@@ -10,6 +10,7 @@
 
 import type { Mutable } from "@word/core/internal-utils";
 import { attrVal, findChildNs, findChildrenNs } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import type {
   AppProperties,
   CoreProperties,
@@ -17,14 +18,14 @@ import type {
   CustomPropertyValue,
   FontDef
 } from "@word/types";
-import { findChild, parseXml, textContent } from "@xml/dom";
+import { findChild, textContent } from "@xml/dom";
 
 // =============================================================================
 // Core Properties Parser
 // =============================================================================
 
-function parseCoreProps(xmlStr: string): CoreProperties {
-  const doc = parseXml(xmlStr);
+function parseCoreProps(xmlStr: string, maxDepth?: number): CoreProperties {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const props: Mutable<CoreProperties> & Record<string, unknown> = {};
 
@@ -72,8 +73,8 @@ function parseCoreProps(xmlStr: string): CoreProperties {
 // App Properties Parser
 // =============================================================================
 
-function parseAppProps(xmlStr: string): AppProperties {
-  const doc = parseXml(xmlStr);
+function parseAppProps(xmlStr: string, maxDepth?: number): AppProperties {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const props: Mutable<AppProperties> & Record<string, unknown> = {};
 
@@ -107,8 +108,8 @@ function parseAppProps(xmlStr: string): AppProperties {
 // Custom Properties Parser
 // =============================================================================
 
-function parseCustomPropsXml(xmlStr: string): CustomProperty[] {
-  const doc = parseXml(xmlStr);
+function parseCustomPropsXml(xmlStr: string, maxDepth?: number): CustomProperty[] {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const props: CustomProperty[] = [];
 
@@ -153,8 +154,8 @@ function parseCustomPropsXml(xmlStr: string): CustomProperty[] {
 // Font Table Parser
 // =============================================================================
 
-function parseFontTableXml(xmlStr: string): FontDef[] {
-  const doc = parseXml(xmlStr);
+function parseFontTableXml(xmlStr: string, maxDepth?: number): FontDef[] {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const fonts: FontDef[] = [];
 

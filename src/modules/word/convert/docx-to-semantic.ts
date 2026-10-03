@@ -31,7 +31,12 @@ import type {
   SemanticTableRow
 } from "@word/convert/conversion-ir";
 import { createConversionContext } from "@word/convert/conversion-ir";
-import { extractMathText, isRun } from "@word/core/text-utils";
+import { extractMathText, symbolText } from "@word/core/text-utils";
+import { finalViewRun, isHiddenRun } from "@word/query/final-view";
+import { createNumberingCounter } from "@word/query/numbering-counter";
+import type { NumberingCounter } from "@word/query/numbering-counter";
+import { createStyleResolver } from "@word/query/style-resolver";
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   AltChunk,
   BodyContent,
@@ -46,13 +51,22 @@ import type {
   MathBlock,
   OpaqueDrawing,
   Paragraph,
-  ParagraphChild,
   Run,
   RunContent,
   RunProperties,
   Table
 } from "@word/types";
 import { EMU_PER_INCH } from "@word/units";
+
+/**
+ * Per-conversion state: the public context plus the style resolver and the
+ * numbering counter, so a list resumed after an interrupting block (in the
+ * body, a table cell or a note) continues Word's count for that instance.
+ */
+interface DocxConversionContext extends ConversionContext {
+  readonly styles: StyleResolver;
+  readonly numbering: NumberingCounter;
+}
 
 // =============================================================================
 // Public API
@@ -79,7 +93,14 @@ export function docxToSemantic(
   doc: DocxDocument,
   options?: DocxToSemanticOptions
 ): { document: SemanticDocument; context: ConversionContext } {
-  const ctx = createConversionContext();
+  // The public context is returned as-is; the resolver and numbering counter
+  // are conversion internals and must not ride along on the returned object.
+  const context = createConversionContext();
+  const ctx: DocxConversionContext = {
+    ...context,
+    styles: createStyleResolver(doc),
+    numbering: createNumberingCounter(doc)
+  };
   const opts: Required<DocxToSemanticOptions> = {
     includeFootnotes: options?.includeFootnotes ?? true,
     includeEndnotes: options?.includeEndnotes ?? true,
@@ -150,7 +171,7 @@ export function docxToSemantic(
     }
   };
 
-  return { document, context: ctx };
+  return { document, context };
 }
 
 // =============================================================================
@@ -160,7 +181,7 @@ export function docxToSemantic(
 function convertBodyContent(
   body: readonly BodyContent[],
   doc: DocxDocument,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticBlock[] {
   const blocks: SemanticBlock[] = [];
@@ -175,11 +196,11 @@ function convertBodyContent(
         // level. This is what turns Word numbering into real <ul>/<ol> in
         // HTML and `-`/`1.` markers in Markdown when downstream renderers
         // consume the IR.
-        if (isListItemParagraph(item)) {
+        if (isListItemParagraph(item, ctx)) {
           let end = bodyIndex;
           while (end < body.length) {
             const next = body[end];
-            if (next.type !== "paragraph" || !isListItemParagraph(next)) {
+            if (next.type !== "paragraph" || !isListItemParagraph(next, ctx)) {
               break;
             }
             end++;
@@ -370,34 +391,16 @@ function convertBodyContent(
 // =============================================================================
 
 /**
- * Whether a body paragraph should render as a list item: it carries a
- * numbering reference and is not itself a heading (a numbered heading stays a
- * heading, mirroring the markdown/html renderers).
+ * Whether a body paragraph should render as a list item: it carries an
+ * effective numbering reference (direct or inherited from its paragraph
+ * style; `numId` 0 cancels it) and is not itself a heading (a numbered
+ * heading stays a heading, mirroring the markdown/html renderers).
  */
-function isListItemParagraph(item: BodyContent): boolean {
+function isListItemParagraph(item: BodyContent, ctx: DocxConversionContext): boolean {
   if (item.type !== "paragraph") {
     return false;
   }
-  return item.properties?.numbering !== undefined && detectHeadingLevel(item) === null;
-}
-
-/**
- * Resolve a numbering reference to its number format string (e.g. "decimal",
- * "bullet"). Mirrors the lookup in the markdown/html renderers so the three
- * surfaces classify ordered vs. unordered lists identically. Defaults to
- * "bullet" when the numbering definition can't be resolved.
- */
-function getNumberingFormat(doc: DocxDocument, numId: number, level: number): string {
-  const instance = doc.numberingInstances?.find(n => n.numId === numId);
-  if (!instance) {
-    return "bullet";
-  }
-  const abstractNum = doc.abstractNumberings?.find(a => a.abstractNumId === instance.abstractNumId);
-  if (!abstractNum) {
-    return "bullet";
-  }
-  const levelDef = abstractNum.levels.find(l => l.level === level);
-  return levelDef?.format ?? "bullet";
+  return ctx.styles.numbering(item) !== undefined && detectHeadingLevel(ctx, item) === null;
 }
 
 /** A number format other than "bullet"/"none" denotes an ordered list. */
@@ -415,7 +418,7 @@ function isOrderedFormat(format: string): boolean {
 function buildListBlocks(
   paras: readonly Paragraph[],
   doc: DocxDocument,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticBlock[] {
   const { blocks } = buildListLevel(paras, 0, 0, doc, ctx, imageMap);
@@ -433,24 +436,30 @@ function buildListLevel(
   start: number,
   level: number,
   doc: DocxDocument,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): { blocks: SemanticBlock[]; next: number } {
   const blocks: SemanticBlock[] = [];
   let i = start;
   let currentOrdered: boolean | null = null;
+  let currentStart: number | undefined;
+  let currentNumId: number | undefined;
   let items: SemanticListItem[] = [];
 
   const flush = (): void => {
     if (items.length > 0 && currentOrdered !== null) {
-      blocks.push({ type: "list", ordered: currentOrdered, items });
+      blocks.push(
+        currentStart !== undefined && currentStart !== 1
+          ? { type: "list", ordered: currentOrdered, start: currentStart, items }
+          : { type: "list", ordered: currentOrdered, items }
+      );
       items = [];
     }
   };
 
   while (i < paras.length) {
     const para = paras[i];
-    const num = para.properties?.numbering;
+    const num = ctx.styles.numbering(para);
     // Defensive: callers only pass list-item paragraphs, but guard anyway.
     if (!num) {
       break;
@@ -480,17 +489,25 @@ function buildListLevel(
     }
 
     // num.level === level
-    const format = getNumberingFormat(doc, num.numId, num.level);
-    const ordered = isOrderedFormat(format);
+    const levelDef = ctx.numbering.levelDef(num.numId, num.level);
+    const ordered = isOrderedFormat(levelDef?.format ?? "bullet");
+    // Bullets advance the count too: an item at this level restarts the
+    // deeper levels beneath it whatever its marker.
+    const advanced = ctx.numbering.next(num.numId, num.level);
+    const value = ordered ? advanced : undefined;
     if (currentOrdered === null) {
       currentOrdered = ordered;
-    } else if (ordered !== currentOrdered) {
-      // Ordered/unordered switch at the same level → start a new sibling list.
+      currentStart = value;
+    } else if (ordered !== currentOrdered || (ordered && num.numId !== currentNumId)) {
+      // An ordered/unordered switch, or a different numbering instance, at
+      // the same level → start a new sibling list.
       flush();
       currentOrdered = ordered;
+      currentStart = value;
     }
+    currentNumId = num.numId;
 
-    const children = convertParagraphChildren(para.children, doc, ctx, imageMap);
+    const children = convertParagraphChildren(para, doc, ctx, imageMap);
     items.push({ children });
     i++;
   }
@@ -506,13 +523,13 @@ function buildListLevel(
 function convertParagraph(
   para: Paragraph,
   doc: DocxDocument,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticBlock {
   // Detect heading
-  const headingLevel = detectHeadingLevel(para);
+  const headingLevel = detectHeadingLevel(ctx, para);
   if (headingLevel !== null) {
-    const children = convertParagraphChildren(para.children, doc, ctx, imageMap);
+    const children = convertParagraphChildren(para, doc, ctx, imageMap);
     return {
       type: "heading",
       level: headingLevel as 1 | 2 | 3 | 4 | 5 | 6,
@@ -520,7 +537,7 @@ function convertParagraph(
     };
   }
 
-  const children = convertParagraphChildren(para.children, doc, ctx, imageMap);
+  const children = convertParagraphChildren(para, doc, ctx, imageMap);
 
   // Convert paragraph style
   const style = convertParagraphStyle(para.properties);
@@ -528,29 +545,13 @@ function convertParagraph(
   return { type: "paragraph", children, style };
 }
 
-function detectHeadingLevel(para: Paragraph): number | null {
-  const props = para.properties;
-  if (!props) {
-    return null;
-  }
-
-  // Check outlineLevel
-  if (props.outlineLevel !== undefined && props.outlineLevel >= 0 && props.outlineLevel <= 5) {
-    return props.outlineLevel + 1;
-  }
-
-  // Check style name
-  if (props.style) {
-    const match = /^[Hh]eading\s*(\d)$/i.exec(props.style);
-    if (match) {
-      const level = parseInt(match[1], 10);
-      if (level >= 1 && level <= 6) {
-        return level;
-      }
-    }
-  }
-
-  return null;
+/**
+ * Heading level per the shared rule (`resolveHeadingLevel`). Title is a level-1
+ * heading; the IR has six levels, so 7–9 clamp to 6.
+ */
+function detectHeadingLevel(ctx: DocxConversionContext, para: Paragraph): number | null {
+  const heading = ctx.styles.heading(para);
+  return heading ? Math.min(heading.level, 6) : null;
 }
 
 function convertParagraphStyle(props: Paragraph["properties"]): SemanticParagraphStyle | undefined {
@@ -605,37 +606,39 @@ function convertAlignment(
 // =============================================================================
 
 function convertParagraphChildren(
-  children: readonly ParagraphChild[],
+  para: Paragraph,
   doc: DocxDocument,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticInline[] {
+  const paragraphRunProperties = ctx.styles.paragraph(para).runProperties;
   const inlines: SemanticInline[] = [];
+  const convert = (run: Run): SemanticInline[] =>
+    convertRun(run, paragraphRunProperties, ctx, imageMap);
 
-  for (const child of children) {
-    if ("type" in child) {
-      const typed = child as { type: string };
-      if (typed.type === "hyperlink") {
-        const hl = child as Hyperlink;
-        const linkChildren: SemanticInline[] = [];
-        for (const run of hl.children) {
-          linkChildren.push(...convertRun(run, ctx, imageMap));
-        }
-        inlines.push({
-          type: "link",
-          href: hl.url ?? hl.anchor ?? "",
-          children: linkChildren
-        });
-        continue;
-      }
-      // Skip other typed children (bookmark, comment range, etc.)
+  for (const child of para.children) {
+    // Final view: inserted / moved-to text shown, deleted / moved-from hidden.
+    const run = finalViewRun(child);
+    if (run) {
+      inlines.push(...convert(run));
       continue;
     }
-
-    // Default: treat as Run
-    if (isRun(child)) {
-      inlines.push(...convertRun(child, ctx, imageMap));
+    if ("type" in child && child.type === "hyperlink") {
+      const hl: Hyperlink = child;
+      const linkChildren: SemanticInline[] = [];
+      for (const linkChild of hl.children) {
+        const inner = finalViewRun(linkChild);
+        if (inner) {
+          linkChildren.push(...convert(inner));
+        }
+      }
+      inlines.push({
+        type: "link",
+        href: hl.url ?? hl.anchor ?? "",
+        children: linkChildren
+      });
     }
+    // Other typed children (bookmarks, comment ranges, …) carry no content.
   }
 
   return inlines;
@@ -643,11 +646,16 @@ function convertParagraphChildren(
 
 function convertRun(
   run: Run,
-  ctx: ConversionContext,
+  paragraphRunProperties: RunProperties,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticInline[] {
+  const props = ctx.styles.run(run, paragraphRunProperties).runProperties;
+  if (isHiddenRun(props)) {
+    return [];
+  }
   const inlines: SemanticInline[] = [];
-  const format = resolveRunFormatting(run.properties);
+  const format = resolveRunFormatting(props);
 
   for (const content of run.content) {
     const inline = convertRunContent(content, format, ctx, imageMap);
@@ -662,7 +670,7 @@ function convertRun(
 function convertRunContent(
   content: RunContent,
   format: ResolvedFormatting | undefined,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticInline | null {
   switch (content.type) {
@@ -698,7 +706,7 @@ function convertRunContent(
       }
       return null;
     case "symbol":
-      return { type: "text", text: content.char ?? "", format };
+      return { type: "text", text: symbolText(content), format };
     default:
       return null;
   }
@@ -713,10 +721,15 @@ function resolveRunFormatting(props: RunProperties | undefined): ResolvedFormatt
     return undefined;
   }
 
+  const underlineStyle =
+    typeof props.underline === "object" ? props.underline.style : props.underline;
   const format: ResolvedFormatting = {
     bold: props.bold || undefined,
     italic: props.italic || undefined,
-    underline: props.underline !== undefined ? true : undefined,
+    underline:
+      underlineStyle !== undefined && underlineStyle !== false && underlineStyle !== "none"
+        ? true
+        : undefined,
     strikethrough: props.strike || undefined,
     superscript: props.vertAlign === "superscript" || undefined,
     subscript: props.vertAlign === "subscript" || undefined,
@@ -753,7 +766,7 @@ function resolveRunFormatting(props: RunProperties | undefined): ResolvedFormatt
 function convertTable(
   table: Table,
   doc: DocxDocument,
-  ctx: ConversionContext,
+  ctx: DocxConversionContext,
   imageMap: Map<string, { data: Uint8Array; mimeType: string; fileName: string }>
 ): SemanticBlock {
   const rows: SemanticTableRow[] = [];

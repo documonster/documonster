@@ -15,6 +15,7 @@ import {
   findChildrenNs,
   serializeElement
 } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import { parseRunProperties } from "@word/reader/properties-parsers";
 import type {
   AbstractNumbering,
@@ -24,15 +25,18 @@ import type {
   NumPicBullet
 } from "@word/types";
 import { ptToEmu } from "@word/units";
-import { findChild, parseXml } from "@xml/dom";
+import { findChild } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
-export function parseNumberingXml(xmlStr: string): {
+export function parseNumberingXml(
+  xmlStr: string,
+  maxDepth?: number
+): {
   abstractNums: AbstractNumbering[];
   instances: NumberingInstance[];
   numPicBullets: NumPicBullet[];
 } {
-  const doc = parseXml(xmlStr);
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const abstractNums: AbstractNumbering[] = [];
   const instances: NumberingInstance[] = [];

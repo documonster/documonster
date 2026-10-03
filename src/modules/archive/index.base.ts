@@ -137,6 +137,8 @@ export {
   FileTooLargeError,
   UnsupportedCompressionError,
   EntrySizeMismatchError,
+  ArchiveLimitError,
   // Error types
-  type EntrySizeMismatchReason
+  type EntrySizeMismatchReason,
+  type ArchiveLimit
 } from "@archive/core/errors";

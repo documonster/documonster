@@ -10,10 +10,10 @@
 
 import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, findChildrenNs } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import type { ReaderContext } from "@word/reader/reader-context";
 import { createFieldState } from "@word/reader/reader-context";
 import type { CommentDef, Paragraph } from "@word/types";
-import { parseXml } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
 /** Parse `word/comments.xml` into a list of CommentDef. */
@@ -27,7 +27,7 @@ export function parseCommentsXml(
   const savedField = ctx.field;
   ctx.field = createFieldState();
   try {
-    const doc = parseXml(xmlStr);
+    const doc = parsePartXml(xmlStr, ctx.securityPolicy.maxXmlDepth);
     const root = doc.root;
     const comments: CommentDef[] = [];
 
@@ -72,10 +72,11 @@ export function parseCommentsXml(
  * `CommentDef.parentId` once both parts have been parsed.
  */
 export function parseCommentsExtendedXml(
-  xmlStr: string
+  xmlStr: string,
+  maxDepth?: number
 ): Map<string, { done?: boolean; parentId?: string }> {
   const map = new Map<string, { done?: boolean; parentId?: string }>();
-  const doc = parseXml(xmlStr);
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   for (const child of root.children) {
     if (child.type !== "element") {

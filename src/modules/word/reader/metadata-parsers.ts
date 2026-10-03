@@ -11,16 +11,16 @@
 
 import type { Mutable } from "@word/core/internal-utils";
 import { attrInt, attrVal, findChildNs } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import type { PersonInfo, WebSettings } from "@word/types";
-import { parseXml } from "@xml/dom";
 
 // Backward-compatible re-exports.
 export { parseThemeXml } from "@word/reader/theme-parser";
 export { parseSettingsXml } from "@word/reader/settings-parser";
 
 /** Parse word/webSettings.xml. */
-export function parseWebSettings(xmlStr: string): WebSettings {
-  const doc = parseXml(xmlStr);
+export function parseWebSettings(xmlStr: string, maxDepth?: number): WebSettings {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const ws: Mutable<WebSettings> & Record<string, unknown> = {};
 
@@ -56,8 +56,8 @@ export function parseWebSettings(xmlStr: string): WebSettings {
 }
 
 /** Parse word/people.xml. */
-export function parsePeople(xmlStr: string): PersonInfo[] {
-  const doc = parseXml(xmlStr);
+export function parsePeople(xmlStr: string, maxDepth?: number): PersonInfo[] {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
   const people: PersonInfo[] = [];
   for (const personEl of root.children) {

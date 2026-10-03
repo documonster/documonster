@@ -10,7 +10,7 @@
  */
 
 import { ByteQueue } from "@archive/core/byte-queue";
-import { ArchiveError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
 
 /**
  * Compression options
@@ -69,6 +69,16 @@ export interface CompressOptions {
    * Note: This option is ignored in Node.js.
    */
   signal?: AbortSignal;
+
+  /**
+   * Decompression only: maximum number of output bytes to produce.
+   *
+   * Decompression stops as soon as the output would exceed this bound and a
+   * `ArchiveLimitError` is thrown, so a small payload that inflates to
+   * gigabytes (a "decompression bomb") never gets materialised. Ignored by
+   * compression. Default: unbounded.
+   */
+  maxOutputLength?: number;
 }
 
 /**
@@ -181,7 +191,8 @@ export function hasDeflateRawWebStreams(): boolean {
 }
 
 export async function streamToUint8Array(
-  reader: ReadableStreamDefaultReader<Uint8Array>
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  maxOutputLength?: number
 ): Promise<Uint8Array> {
   const out = new ByteQueue();
 
@@ -189,6 +200,11 @@ export async function streamToUint8Array(
     const { done, value } = await reader.read();
     if (done) {
       break;
+    }
+    if (maxOutputLength !== undefined && out.length + value.length > maxOutputLength) {
+      // Stop pulling: the transform is cancelled by the caller, so nothing
+      // beyond this chunk is ever produced or buffered.
+      throw new ArchiveLimitError("maxOutputLength", maxOutputLength);
     }
     out.append(value);
   }
@@ -198,7 +214,8 @@ export async function streamToUint8Array(
 
 export async function transformWithStream(
   data: Uint8Array,
-  stream: CompressionStream | DecompressionStream
+  stream: CompressionStream | DecompressionStream,
+  maxOutputLength?: number
 ): Promise<Uint8Array> {
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
@@ -215,9 +232,18 @@ export async function transformWithStream(
   // though the caller had caught the failure and recovered via the pure-JS
   // fallback. A promise with both handlers already attached can never become
   // one, so abandoning it is safe on every path below.
-  const read = streamToUint8Array(reader).then(
+  const read = streamToUint8Array(reader, maxOutputLength).then(
     value => ({ ok: true as const, value }),
-    (error: unknown) => ({ ok: false as const, error })
+    (error: unknown) => {
+      // A limit hit leaves the transform mid-flight; cancel it so the
+      // pending write settles and no further output is produced.
+      if (error instanceof ArchiveLimitError) {
+        reader.cancel(error).catch(() => {
+          // ignore
+        });
+      }
+      return { ok: false as const, error };
+    }
   );
 
   try {
@@ -277,9 +303,12 @@ export async function compressWithStream(data: Uint8Array): Promise<Uint8Array> 
  * @param data - Compressed data (deflate-raw format)
  * @returns Decompressed data
  */
-export async function decompressWithStream(data: Uint8Array): Promise<Uint8Array> {
+export async function decompressWithStream(
+  data: Uint8Array,
+  maxOutputLength?: number
+): Promise<Uint8Array> {
   const ds = new DecompressionStream("deflate-raw");
-  return transformWithStream(data, ds);
+  return transformWithStream(data, ds, maxOutputLength);
 }
 
 // =============================================================================

@@ -108,7 +108,7 @@ describe("renderToMarkdown — lists", () => {
     } as DocxDocument;
     const md = renderToMarkdown(doc);
     expect(md).toContain("1. First");
-    expect(md).toContain("1. Second");
+    expect(md).toContain("2. Second");
   });
 
   it("indents nested list items by two spaces per level", () => {

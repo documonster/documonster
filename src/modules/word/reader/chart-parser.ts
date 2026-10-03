@@ -7,11 +7,13 @@
  */
 
 import type { Mutable } from "@word/core/internal-utils";
+import { DocxLimitExceededError } from "@word/errors";
 import {
   findChildLocal as findChartChild,
   findChildrenLocal as findAllChartChildren,
   localName
 } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import type {
   BodyContent,
   Chart,
@@ -33,7 +35,7 @@ import type {
   Emu,
   OpaqueDrawing
 } from "@word/types";
-import { parseXml, textContent } from "@xml/dom";
+import { textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
 // =============================================================================
@@ -180,11 +182,15 @@ function resolveChartType(
 }
 
 /** Parse a chart part XML string into a Chart object. */
-function parseChartXml(xmlStr: string): Chart | undefined {
-  let doc: ReturnType<typeof parseXml>;
+function parseChartXml(xmlStr: string, maxDepth?: number): Chart | undefined {
+  let doc: ReturnType<typeof parsePartXml>;
   try {
-    doc = parseXml(xmlStr);
-  } catch {
+    doc = parsePartXml(xmlStr, maxDepth);
+  } catch (error) {
+    // A resource limit is a verdict on the package, not a malformed chart.
+    if (error instanceof DocxLimitExceededError) {
+      throw error;
+    }
     return undefined;
   }
 
@@ -718,11 +724,15 @@ function extractSolidFillColor(spPrEl: XmlElement): string | undefined {
  * Parse a ChartEx XML string (cx:chartSpace) into structured ChartExData.
  * Returns undefined if parsing fails or the structure is unrecognizable.
  */
-function parseChartExXml(xmlStr: string): ChartExData | undefined {
-  let doc: ReturnType<typeof parseXml>;
+function parseChartExXml(xmlStr: string, maxDepth?: number): ChartExData | undefined {
+  let doc: ReturnType<typeof parsePartXml>;
   try {
-    doc = parseXml(xmlStr);
-  } catch {
+    doc = parsePartXml(xmlStr, maxDepth);
+  } catch (error) {
+    // A resource limit is a verdict on the package, not a malformed chart.
+    if (error instanceof DocxLimitExceededError) {
+      throw error;
+    }
     return undefined;
   }
 

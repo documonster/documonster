@@ -605,6 +605,45 @@ describe("docxToPdf — flow layout fidelity", () => {
     expect(markers).toEqual(["1.", "2.", "1.", "2."]);
   });
 
+  it("gives each addNumberedList call its own instance with an explicit restart", () => {
+    // The restart must be in the document itself, not inferred by the layout:
+    // Word continues an instance's count across an interruption, so two calls
+    // sharing one instance would read 1, 2, 3, 4 in Word.
+    const h = Document.create();
+    Document.addNumberedList(h, ["one", "two"]);
+    Document.addParagraph(h, "an interrupting paragraph");
+    Document.addNumberedList(h, ["alpha", "beta"]);
+    const doc = Document.build(h);
+    const numIds = doc.body.flatMap(b =>
+      b.type === "paragraph" && b.properties?.numbering ? [b.properties.numbering.numId] : []
+    );
+    expect(new Set(numIds).size).toBe(2);
+    for (const numId of new Set(numIds)) {
+      const instance = doc.numberingInstances?.find(n => n.numId === numId);
+      expect(instance?.overrides).toEqual([{ level: 0, startOverride: 1 }]);
+    }
+  });
+
+  it("continues one instance across an interrupting paragraph, as Word does", () => {
+    const h = Document.create();
+    Document.useDefaultStyles(h);
+    Document.addNumberedList(h, ["one", "two"]);
+    const built = Document.build(h);
+    const numId = built.body.find(
+      (b): b is Extract<typeof b, { type: "paragraph" }> =>
+        b.type === "paragraph" && b.properties?.numbering !== undefined
+    )!.properties!.numbering!.numId;
+    Document.addParagraph(h, "an interrupting paragraph");
+    Document.addParagraphElement(
+      h,
+      Build.paragraph([Build.text("three")], { numbering: { numId, level: 0 } })
+    );
+    const markers = allTextRuns(Document.build(h))
+      .map(r => r.text.trim())
+      .filter(t => /^\d+\.$/.test(t));
+    expect(markers).toEqual(["1.", "2.", "3."]);
+  });
+
   it("renders list markers for a list inside a table cell", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);

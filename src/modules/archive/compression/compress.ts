@@ -6,10 +6,12 @@
  * - gzip: GZIP format (for tar.gz, HTTP compression)
  */
 
+import { kMaxLength } from "buffer";
 import { promisify } from "util";
 import * as nodeZlib from "zlib";
 
 import { DEFAULT_COMPRESS_LEVEL } from "@archive/core/defaults";
+import { ArchiveLimitError } from "@archive/core/errors";
 import { uint8ArrayToNodeBufferView } from "@utils/binary";
 
 // Re-export shared types and utilities
@@ -66,13 +68,15 @@ const deflateRawAsync = promisify(nodeZlib.deflateRaw) as (
 ) => Promise<Buffer>;
 
 const inflateRawAsync = promisify(nodeZlib.inflateRaw) as (
-  input: nodeZlib.InputType
+  input: nodeZlib.InputType,
+  options?: nodeZlib.ZlibOptions
 ) => Promise<Buffer>;
 
 import {
   resolveCompressThresholdBytes,
   detectCompressionFormat
 } from "@archive/compression/compress.base";
+import { assertLimitOption } from "@utils/limits";
 
 /**
  * Compress data using Node.js native zlib
@@ -130,35 +134,92 @@ export function compressSync(data: Uint8Array, options: CompressOptions = {}): U
 }
 
 /**
+ * zlib options for an optional output bound. zlib rejects a bound below 1, so
+ * a zero bound is requested as 1 and {@link inflateBounded} rejects any output.
+ */
+function boundOptions(maxOutputLength: number | undefined): nodeZlib.ZlibOptions | undefined {
+  // Every decompressing entry point resolves its bound here first.
+  assertLimitOption("maxOutputLength", maxOutputLength);
+  return maxOutputLength === undefined
+    ? undefined
+    : { maxOutputLength: Math.max(1, Math.min(maxOutputLength, kMaxLength)) };
+}
+
+/**
+ * Settle a zlib inflate run with {@link boundOptions}: zlib stops as soon as
+ * the inflater crosses the bound and throws `ERR_BUFFER_TOO_LARGE`, which
+ * becomes the archive's own error.
+ */
+function inflateBounded(inflate: () => Buffer, maxOutputLength: number | undefined): Uint8Array {
+  let out: Buffer;
+  try {
+    out = inflate();
+  } catch (err) {
+    if (
+      maxOutputLength !== undefined &&
+      (err as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE"
+    ) {
+      throw new ArchiveLimitError("maxOutputLength", maxOutputLength, { cause: err });
+    }
+    throw err;
+  }
+  if (maxOutputLength !== undefined && out.byteLength > maxOutputLength) {
+    throw new ArchiveLimitError("maxOutputLength", maxOutputLength);
+  }
+  return bufferToUint8Array(out);
+}
+
+/** {@link inflateBounded} for a run settled on the thread pool. */
+async function inflateBoundedAsync(
+  pending: Promise<Buffer>,
+  maxOutputLength: number | undefined
+): Promise<Uint8Array> {
+  const settled = await pending.then(
+    out => () => out,
+    (err: unknown) => (): Buffer => {
+      throw err;
+    }
+  );
+  return inflateBounded(settled, maxOutputLength);
+}
+
+/**
  * Decompress data using Node.js native zlib
  *
  * @param data - Compressed data (deflate-raw format)
+ * @param options - `maxOutputLength` bounds the output; inflation stops early
+ *   with an `ArchiveLimitError` when it is exceeded
  * @returns Decompressed data
  */
 export async function decompress(
   data: Uint8Array,
   options: CompressOptions = {}
 ): Promise<Uint8Array> {
-  const thresholdBytes = resolveCompressThresholdBytes(options);
   const input = uint8ArrayToBuffer(data);
+  const { maxOutputLength } = options;
+  const zlibOptions = boundOptions(maxOutputLength);
 
   // Small-input fast path: avoid threadpool overhead.
-  if (data.byteLength <= thresholdBytes) {
-    return bufferToUint8Array(nodeZlib.inflateRawSync(input));
+  if (data.byteLength <= resolveCompressThresholdBytes(options)) {
+    return inflateBounded(() => nodeZlib.inflateRawSync(input, zlibOptions), maxOutputLength);
   }
-
-  return bufferToUint8Array(await inflateRawAsync(input));
+  return inflateBoundedAsync(inflateRawAsync(input, zlibOptions), maxOutputLength);
 }
 
 /**
  * Decompress data synchronously using Node.js zlib
  *
  * @param data - Compressed data (deflate-raw format)
+ * @param options - `maxOutputLength` bounds the output (see {@link decompress})
  * @returns Decompressed data
  */
-export function decompressSync(data: Uint8Array): Uint8Array {
+export function decompressSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const input = uint8ArrayToBuffer(data);
-  return bufferToUint8Array(nodeZlib.inflateRawSync(input));
+  const { maxOutputLength } = options;
+  return inflateBounded(
+    () => nodeZlib.inflateRawSync(input, boundOptions(maxOutputLength)),
+    maxOutputLength
+  );
 }
 
 // =============================================================================
@@ -170,7 +231,10 @@ const gzipAsync = promisify(nodeZlib.gzip) as (
   options?: nodeZlib.ZlibOptions
 ) => Promise<Buffer>;
 
-const gunzipAsync = promisify(nodeZlib.gunzip) as (input: nodeZlib.InputType) => Promise<Buffer>;
+const gunzipAsync = promisify(nodeZlib.gunzip) as (
+  input: nodeZlib.InputType,
+  options?: nodeZlib.ZlibOptions
+) => Promise<Buffer>;
 
 /**
  * Compress data with gzip
@@ -196,12 +260,15 @@ export async function gunzip(data: Uint8Array, options: CompressOptions = {}): P
   const thresholdBytes = resolveCompressThresholdBytes(options);
   const input = uint8ArrayToBuffer(data);
 
+  const { maxOutputLength } = options;
+  const zlibOptions = boundOptions(maxOutputLength);
+
   // Small-input fast path
   if (data.byteLength <= thresholdBytes) {
-    return bufferToUint8Array(nodeZlib.gunzipSync(input));
+    return inflateBounded(() => nodeZlib.gunzipSync(input, zlibOptions), maxOutputLength);
   }
 
-  return bufferToUint8Array(await gunzipAsync(input));
+  return inflateBoundedAsync(gunzipAsync(input, zlibOptions), maxOutputLength);
 }
 
 /**
@@ -217,9 +284,13 @@ export function gzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8
 /**
  * Decompress gzip data (sync)
  */
-export function gunzipSync(data: Uint8Array): Uint8Array {
+export function gunzipSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const input = uint8ArrayToBuffer(data);
-  return bufferToUint8Array(nodeZlib.gunzipSync(input));
+  const { maxOutputLength } = options;
+  return inflateBounded(
+    () => nodeZlib.gunzipSync(input, boundOptions(maxOutputLength)),
+    maxOutputLength
+  );
 }
 
 // =============================================================================
@@ -231,7 +302,10 @@ const zlibAsync = promisify(nodeZlib.deflate) as (
   options?: nodeZlib.ZlibOptions
 ) => Promise<Buffer>;
 
-const unzlibAsync = promisify(nodeZlib.inflate) as (input: nodeZlib.InputType) => Promise<Buffer>;
+const unzlibAsync = promisify(nodeZlib.inflate) as (
+  input: nodeZlib.InputType,
+  options?: nodeZlib.ZlibOptions
+) => Promise<Buffer>;
 
 /**
  * Compress data with Zlib wrapper (RFC 1950)
@@ -260,12 +334,15 @@ export async function unzlib(data: Uint8Array, options: CompressOptions = {}): P
   const thresholdBytes = resolveCompressThresholdBytes(options);
   const input = uint8ArrayToBuffer(data);
 
+  const { maxOutputLength } = options;
+  const zlibOptions = boundOptions(maxOutputLength);
+
   // Small-input fast path
   if (data.byteLength <= thresholdBytes) {
-    return bufferToUint8Array(nodeZlib.inflateSync(input));
+    return inflateBounded(() => nodeZlib.inflateSync(input, zlibOptions), maxOutputLength);
   }
 
-  return bufferToUint8Array(await unzlibAsync(input));
+  return inflateBoundedAsync(unzlibAsync(input, zlibOptions), maxOutputLength);
 }
 
 /**
@@ -280,10 +357,16 @@ export function zlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8
 
 /**
  * Decompress Zlib data (sync)
+ *
+ * @param options - `maxOutputLength` bounds the output (see {@link decompress})
  */
-export function unzlibSync(data: Uint8Array): Uint8Array {
+export function unzlibSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const input = uint8ArrayToBuffer(data);
-  return bufferToUint8Array(nodeZlib.inflateSync(input));
+  const { maxOutputLength } = options;
+  return inflateBounded(
+    () => nodeZlib.inflateSync(input, boundOptions(maxOutputLength)),
+    maxOutputLength
+  );
 }
 
 // =============================================================================
@@ -323,15 +406,15 @@ export async function decompressAuto(
 /**
  * Decompress data synchronously, automatically detecting the format
  */
-export function decompressAutoSync(data: Uint8Array): Uint8Array {
+export function decompressAutoSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const format = detectCompressionFormat(data);
 
   switch (format) {
     case "gzip":
-      return gunzipSync(data);
+      return gunzipSync(data, options);
     case "zlib":
-      return unzlibSync(data);
+      return unzlibSync(data, options);
     case "deflate-raw":
-      return decompressSync(data);
+      return decompressSync(data, options);
   }
 }

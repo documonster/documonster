@@ -5,7 +5,7 @@
  * Used by both `ZipParser` (in-memory) and `RemoteZipReader` (random-access).
  */
 
-import { ArchiveError, EocdNotFoundError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitError, EocdNotFoundError } from "@archive/core/errors";
 import type { ZipStringEncoding, ZipStringCodec } from "@archive/core/text";
 import { decodeZipPath, decodeZipComment, resolveZipStringCodec } from "@archive/core/text";
 import type { AesKeyStrength } from "@archive/crypto/aes";
@@ -16,6 +16,7 @@ import { parseZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
 import {
   CENTRAL_DIR_HEADER_SIG,
   COMPRESSION_AES,
+  ZIP_CENTRAL_DIR_HEADER_FIXED_SIZE,
   UINT16_MAX,
   UINT32_MAX,
   ZIP64_END_OF_CENTRAL_DIR_LOCATOR_SIG,
@@ -99,6 +100,13 @@ export interface CentralDirectoryParseOptions {
 
   /** Optional string encoding for legacy (non-UTF8) names/comments. */
   encoding?: ZipStringEncoding;
+
+  /**
+   * Most entries the central directory may declare (`ArchiveLimitError`,
+   * limit `"maxEntries"`). Checked before any entry record is allocated.
+   * Unbounded by default.
+   */
+  maxEntries?: number;
 }
 
 // -----------------------------------------------------------------------------
@@ -445,6 +453,22 @@ export function parseCentralDirectoryAt(
 
   if (totalEntries === 0) {
     return [];
+  }
+
+  // Every record is at least 46 bytes, so a count the buffer cannot hold is a
+  // lie — reject it before sizing an array from it.
+  if (totalEntries * ZIP_CENTRAL_DIR_HEADER_FIXED_SIZE > data.length - offset) {
+    throw new ArchiveError(
+      `Central Directory declares ${totalEntries} entries, more than its ${data.length - offset} bytes can hold`
+    );
+  }
+
+  // The 46-byte check only proves the count is *possible*; a genuine central
+  // directory of many tiny entries still costs one JS object (plus path
+  // strings and extra-field maps) per record, so the count needs its own bound.
+  const maxEntries = options.maxEntries ?? Infinity;
+  if (totalEntries > maxEntries) {
+    throw new ArchiveLimitError("maxEntries", maxEntries);
   }
 
   const entries: ZipEntryRecord[] = new Array(totalEntries);

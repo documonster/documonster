@@ -80,16 +80,8 @@ describe("mergeDocuments", () => {
     const doc2 = createDoc(["Second"]);
     const result = Io.merge([doc1, doc2], { sectionBreak: "continuous" });
 
-    // Verify the section break paragraph has correct section properties
-    let hasContinuous = false;
-    for (const block of result.body) {
-      if (block.type === "paragraph" && block.properties?.sectionProperties) {
-        if (block.properties.sectionProperties.breakType === "continuous") {
-          hasContinuous = true;
-        }
-      }
-    }
-    expect(hasContinuous).toBe(true);
+    // The break opens the second document's section.
+    expect(result.sectionProperties?.breakType).toBe("continuous");
   });
 
   it("uses 'nextPage' section break by default", () => {
@@ -97,15 +89,7 @@ describe("mergeDocuments", () => {
     const doc2 = createDoc(["Second"]);
     const result = Io.merge([doc1, doc2]);
 
-    let hasNextPage = false;
-    for (const block of result.body) {
-      if (block.type === "paragraph" && block.properties?.sectionProperties) {
-        if (block.properties.sectionProperties.breakType === "nextPage") {
-          hasNextPage = true;
-        }
-      }
-    }
-    expect(hasNextPage).toBe(true);
+    expect(result.sectionProperties?.breakType).toBe("nextPage");
   });
 
   it("preserves styles from first document", () => {
@@ -334,5 +318,55 @@ describe("mergeDocuments", () => {
 
     const doc2BodyPara = merged.body[merged.body.length - 1] as any;
     expect(doc2BodyPara.children[0].content[0].id).toBe(fn2.id);
+  });
+});
+
+describe("mergeDocuments — section breaks (matches Word)", () => {
+  const A4 = { pageSize: { width: 11906, height: 16838 } };
+  const LANDSCAPE = { pageSize: { width: 15840, height: 12240 } };
+
+  it("puts the break on the section it opens and keeps each document's page setup", () => {
+    const result = Io.merge(
+      [
+        createDoc(["First"], { sectionProperties: A4 }),
+        createDoc(["Second"], { sectionProperties: LANDSCAPE })
+      ],
+      { sectionBreak: "oddPage" }
+    );
+    const closing = result.body[0];
+    expect(closing.type === "paragraph" && closing.properties?.sectionProperties).toEqual(A4);
+    // The second document's own section opens with the break.
+    expect(result.sectionProperties).toEqual({ ...LANDSCAPE, breakType: "oddPage" });
+  });
+
+  it("opens an appended document's first inner section with the break", () => {
+    const inner = createDoc(["S1", "S2"], { sectionProperties: LANDSCAPE });
+    const withBreak = {
+      ...inner,
+      body: [{ ...inner.body[0], properties: { sectionProperties: A4 } }, inner.body[1]]
+    } as DocxDocument;
+    const result = Io.merge([createDoc(["Base"]), withBreak], { sectionBreak: "evenPage" });
+    const sects = result.body.flatMap(b =>
+      b.type === "paragraph" && b.properties?.sectionProperties
+        ? [b.properties.sectionProperties]
+        : []
+    );
+    expect(sects).toEqual([{}, { ...A4, breakType: "evenPage" }]);
+    expect(result.sectionProperties).toEqual(LANDSCAPE);
+  });
+
+  it("adds a carrier paragraph when the body ends with a section-closing paragraph", () => {
+    const ending = createDoc(["Only"]);
+    const closed = {
+      ...ending,
+      body: [{ ...ending.body[0], properties: { sectionProperties: A4 } }],
+      sectionProperties: LANDSCAPE
+    } as DocxDocument;
+    const result = Io.merge([closed, createDoc(["Next"])]);
+    expect(result.body).toHaveLength(3);
+    const carrier = result.body[1];
+    expect(carrier.type === "paragraph" && carrier.properties?.sectionProperties).toEqual(
+      LANDSCAPE
+    );
   });
 });

@@ -201,10 +201,16 @@ export function writePdfAMetadata(
     author?: string;
     subject?: string;
     creator?: string;
+    creationDate?: Date;
+    modDate?: Date;
   }
 ): number {
-  const now = new Date();
-  const isoDate = now.toISOString().replace(/\.\d{3}Z$/, "Z");
+  // Must match the Info dictionary's /CreationDate and /ModDate (PDF/A-1
+  // §6.7.3), so both derive from the same caller-supplied dates.
+  const toXmpDate = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+  const created = metadata.creationDate ?? new Date();
+  const isoDate = toXmpDate(created);
+  const modIsoDate = toXmpDate(metadata.modDate ?? created);
 
   const title = xmlEncode(metadata.title ?? "");
   const author = xmlEncode(metadata.author ?? "");
@@ -232,7 +238,7 @@ export function writePdfAMetadata(
     "  </dc:description>",
     "  <xmp:CreatorTool>" + creator + "</xmp:CreatorTool>",
     "  <xmp:CreateDate>" + isoDate + "</xmp:CreateDate>",
-    "  <xmp:ModifyDate>" + isoDate + "</xmp:ModifyDate>",
+    "  <xmp:ModifyDate>" + modIsoDate + "</xmp:ModifyDate>",
     "  <pdf:Producer>" + producer + "</pdf:Producer>",
     "  <pdfaid:part>1</pdfaid:part>",
     "  <pdfaid:conformance>B</pdfaid:conformance>",

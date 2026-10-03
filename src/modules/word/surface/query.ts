@@ -32,11 +32,13 @@ export {
   rejectRevision
 } from "@word/query/revisions";
 export {
+  indexStyles,
   resolveStyle,
   resolveRunStyle,
   resolveNumberingLevel,
   resolveTableStyle
 } from "@word/query/style-resolve";
+export type { StyleIndex } from "@word/query/style-resolve";
 export { getCompatibilityMode, setCompatibilityMode } from "@word/query/compat";
 export { resolveDataBindings } from "@word/query/data-binding";
 export { extractFormFields, fillFormFields } from "@word/query/form-fields";

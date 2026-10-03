@@ -890,7 +890,9 @@ function buildFinalPdf(
     title: documentOptions.title || workbook.title || undefined,
     author: documentOptions.author || workbook.creator || undefined,
     subject: documentOptions.subject || workbook.subject || undefined,
-    creator: documentOptions.creator
+    creator: documentOptions.creator,
+    creationDate: options?.creationDate,
+    modDate: options?.modDate
   });
 
   // --- Step 8: Enable encryption if requested ---

@@ -399,7 +399,8 @@ export type {
   StyleResolveContext,
   ResolvedParagraphStyle,
   ResolvedRunStyle,
-  ResolvedNumberingLevel
+  ResolvedNumberingLevel,
+  StyleIndex
 } from "@word/query/style-resolve";
 
 /** @stability stable */

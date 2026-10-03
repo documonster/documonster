@@ -6,6 +6,7 @@
  */
 
 import { getUtf8ByteLength } from "@csv/constants";
+import { CsvError } from "@csv/errors";
 import type { ParseConfig } from "@csv/parse/config";
 import { resolveParseConfig, toScannerConfig } from "@csv/parse/config";
 import { filterValidHeaders } from "@csv/parse/helpers";
@@ -138,7 +139,7 @@ export function* parseFastMode(
     if (config.maxRowBytes !== undefined) {
       const lineBytes = getUtf8ByteLength(line);
       if (lineBytes > config.maxRowBytes) {
-        throw new Error(`Row exceeds the maximum size of ${config.maxRowBytes} bytes`);
+        throw new CsvError(`Row exceeds the maximum size of ${config.maxRowBytes} bytes`);
       }
     }
 
@@ -274,7 +275,7 @@ export function* parseWithScanner(
       const rawRow = input.slice(scanResult.rawStart, rawEndPos);
       const rowBytes = getUtf8ByteLength(rawRow);
       if (rowBytes > config.maxRowBytes) {
-        throw new Error(`Row exceeds the maximum size of ${config.maxRowBytes} bytes`);
+        throw new CsvError(`Row exceeds the maximum size of ${config.maxRowBytes} bytes`);
       }
     }
 

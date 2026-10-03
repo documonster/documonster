@@ -8,6 +8,7 @@
 import { DEFAULT_OFFICE_THEME } from "@utils/theme-colors";
 import type { Mutable } from "@word/core/internal-utils";
 import { findChildNs, serializeElement } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import type {
   DocumentTheme,
   ThemeColorName,
@@ -15,7 +16,7 @@ import type {
   ThemeFontScheme,
   ThemeFormatScheme
 } from "@word/types";
-import { findChild, parseXml } from "@xml/dom";
+import { findChild } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
 const THEME_COLOR_NAMES: ThemeColorName[] = [
@@ -33,8 +34,8 @@ const THEME_COLOR_NAMES: ThemeColorName[] = [
   "folHlink"
 ];
 
-export function parseThemeXml(xmlStr: string): DocumentTheme {
-  const doc = parseXml(xmlStr);
+export function parseThemeXml(xmlStr: string, maxDepth?: number): DocumentTheme {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const root = doc.root;
 
   // Find a:themeElements

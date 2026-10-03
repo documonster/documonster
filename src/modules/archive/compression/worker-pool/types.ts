@@ -25,6 +25,8 @@ export type WorkerRequestMessage =
       data: Uint8Array;
       /** Compression level (for deflate) */
       level?: number;
+      /** Output bound (for inflate); exceeding it fails with `limit` set */
+      maxOutputLength?: number;
     }
   | {
       /** Streaming task start */
@@ -97,6 +99,8 @@ export type WorkerResponseMessage =
       type: "error";
       taskId: number;
       error?: string;
+      /** Set when the task failed because output exceeded this `maxOutputLength` */
+      limit?: number;
       duration?: number;
     };
 

@@ -35,6 +35,7 @@ import type {
   NumberingRef,
   Paragraph,
   ParagraphProperties,
+  SectionProperties,
   StructuredDocumentTag,
   Table,
   TableCell,
@@ -100,6 +101,8 @@ export function mergeDocuments(
 
   const base = documents[0];
   const breakType = options?.sectionBreak ?? "nextPage";
+  /** The final section of the content merged so far, still open. */
+  let previousFinal: SectionProperties | undefined = base.sectionProperties;
   const mergedBody: BodyContent[] = [...base.body];
 
   const mergedImages: ImageDef[] = base.images ? [...base.images] : [];
@@ -118,31 +121,25 @@ export function mergeDocuments(
   for (let i = 1; i < documents.length; i++) {
     const doc = documents[i];
 
-    // Mark a section break BEFORE appending the next document. In OOXML a
-    // section break is carried by the `sectPr` of the LAST paragraph of the
-    // preceding section — NOT by an extra empty paragraph. Appending an empty
-    // <w:p> with only a sectPr makes Word render a stray blank line / blank
-    // page. So we attach the break to the last paragraph already in the body;
-    // only if the body currently ends with a non-paragraph block (e.g. a
-    // table, which cannot carry a sectPr directly) do we fall back to a
-    // minimal carrier paragraph.
+    // Close the section in progress with the page setup it actually has —
+    // the previous document's final section. In OOXML a section's properties
+    // ride on the `sectPr` of its LAST paragraph, so they go onto the body's
+    // last paragraph; a body that ends with a table, or whose last paragraph
+    // already closes an earlier section, gets a minimal carrier paragraph
+    // (an empty <w:p> renders as a blank line, so it is the fallback only).
+    const closing: SectionProperties = previousFinal ?? {};
     const lastBlock = mergedBody[mergedBody.length - 1];
-    if (lastBlock && lastBlock.type === "paragraph") {
-      const para = lastBlock as Paragraph;
+    if (lastBlock?.type === "paragraph" && !lastBlock.properties?.sectionProperties) {
       mergedBody[mergedBody.length - 1] = {
-        ...para,
-        properties: {
-          ...para.properties,
-          sectionProperties: { ...para.properties?.sectionProperties, breakType }
-        }
+        ...lastBlock,
+        properties: { ...lastBlock.properties, sectionProperties: closing }
       };
     } else {
-      const sectionBreakPara: Paragraph = {
+      mergedBody.push({
         type: "paragraph",
-        properties: { sectionProperties: { breakType } },
+        properties: { sectionProperties: closing },
         children: []
-      };
-      mergedBody.push(sectionBreakPara);
+      });
     }
 
     // Compute id remappings BEFORE cloning the body so we can rewrite refs
@@ -163,7 +160,30 @@ export function mergeDocuments(
 
     // Deep-clone body and rewrite refs as needed.
     const cloned = doc.body.map(b => cloneBlockWithRemap(b, remap));
-    mergedBody.push(...cloned);
+
+    // The break goes on the section it *opens*: a section's `w:type` says how
+    // that section starts (ECMA-376 §17.6.22), which Word's output confirms.
+    // That is the appended document's first section — its first paragraph
+    // `sectPr`, or its final section when it has no inner breaks.
+    const firstInner = cloned.findIndex(
+      b => b.type === "paragraph" && b.properties?.sectionProperties !== undefined
+    );
+    if (firstInner >= 0) {
+      const para = cloned[firstInner] as Paragraph;
+      cloned[firstInner] = {
+        ...para,
+        properties: {
+          ...para.properties,
+          sectionProperties: { ...para.properties!.sectionProperties, breakType }
+        }
+      };
+      previousFinal = doc.sectionProperties;
+    } else {
+      previousFinal = { ...doc.sectionProperties, breakType };
+    }
+    for (const block of cloned) {
+      mergedBody.push(block);
+    }
 
     // Merge styles (avoid duplicates by styleId)
     if (doc.styles) {
@@ -186,8 +206,8 @@ export function mergeDocuments(
     footnotes: mergedFootnotes.length > 0 ? mergedFootnotes : undefined,
     endnotes: mergedEndnotes.length > 0 ? mergedEndnotes : undefined,
     comments: mergedComments.length > 0 ? mergedComments : undefined,
-    // Use the final document's section properties (page layout) if available
-    sectionProperties: documents[documents.length - 1].sectionProperties ?? base.sectionProperties
+    // The last document's final section, opened by the requested break.
+    sectionProperties: previousFinal
   };
 }
 

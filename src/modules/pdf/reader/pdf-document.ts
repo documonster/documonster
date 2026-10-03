@@ -11,7 +11,7 @@
  * @see PDF Reference 1.7, §3.4 - File Structure
  */
 
-import { PdfStructureError } from "@pdf/errors";
+import { PdfLimitExceededError, PdfStructureError } from "@pdf/errors";
 import {
   parseObject,
   isPdfDict,
@@ -27,6 +27,7 @@ import {
 import type { PdfObject, PdfDictValue, PdfRef, PdfStream } from "@pdf/reader/pdf-parser";
 import { PdfTokenizer, TokenType } from "@pdf/reader/pdf-tokenizer";
 import { decodeStreamFilters } from "@pdf/reader/stream-filters";
+import { assertLimitOption } from "@utils/limits";
 
 // =============================================================================
 // Module-level cached TextEncoder
@@ -69,21 +70,145 @@ interface ResolvedObject {
  * Reads the cross-reference table and trailer on construction,
  * then resolves individual objects on demand with caching.
  */
+/** Which crypt filter applies to a piece of data (ISO 32000-1 §7.6.5). */
+export type PdfCryptKind = "string" | "stream";
+
+/** Per-object encryption or decryption of a string or stream. */
+export type PdfCryptFn = (
+  data: Uint8Array,
+  objNum: number,
+  gen: number,
+  kind: PdfCryptKind
+) => Uint8Array;
+
+/** One member of an object stream: its object number and parsed value. */
+interface ObjStmMember {
+  objNum: number;
+  obj: PdfObject | null;
+}
+
 export class PdfDocument {
   private tokenizer: PdfTokenizer;
   private xref: Map<number, XrefEntry> = new Map();
   private cache: Map<string, PdfObject> = new Map();
   // Parsed object streams (keyed by the object-stream's object number). Kept
   // separate from `cache` because the value is a Map, not a `PdfObject`.
-  private objStmCache: Map<number, Map<number, PdfObject>> = new Map();
+  // Each entry is the stream's members in index order; a member that failed
+  // to parse keeps its slot (as `null`) so later indices stay aligned.
+  private objStmCache: Map<number, ObjStmMember[]> = new Map();
   declare readonly trailer: PdfDictValue;
 
-  /** Encryption handler (set externally after decryption is initialized) */
-  decryptFn: ((data: Uint8Array, objNum: number, gen: number) => Uint8Array) | null = null;
+  /**
+   * Encryption handler (set externally after decryption is initialized).
+   * `kind` selects the crypt filter: `/StrF` for strings, `/StmF` for streams
+   * (ISO 32000-1 §7.6.5); an `/Identity` filter returns the data unchanged.
+   */
+  decryptFn: PdfCryptFn | null = null;
+  /**
+   * Inverse of {@link decryptFn}, set alongside it: encrypts a string or stream
+   * belonging to object `objNum gen` with the document's own security handler,
+   * so an incremental update can append objects the original /Encrypt covers.
+   */
+  encryptFn: PdfCryptFn | null = null;
+  /**
+   * `false` when the file's `/EncryptMetadata` is false: metadata streams
+   * (`/Type /Metadata`) are then stored in the clear and must be neither
+   * decrypted nor encrypted.
+   */
+  encryptMetadata = true;
 
-  constructor(data: Uint8Array) {
+  /** Most bytes one stream filter may produce; `undefined` for the default. */
+  private readonly maxDecodedBytes: number | undefined;
+
+  /**
+   * The first resource limit (nesting depth, decoded size, filter chain) hit
+   * while reading, if any. Many readers deliberately tolerate a malformed
+   * object and carry on, which would turn a limit hit into a silently
+   * truncated result; recording it here lets each entry point refuse the
+   * whole read once, instead of every tolerant `catch` having to rethrow it.
+   *
+   * Once set, the document is poisoned: every later parse, decode or object
+   * resolution throws it immediately, so a tolerant loop over pages or objects
+   * fails at its next operation instead of doing more work on a hostile file.
+   */
+  limitError: PdfLimitExceededError | null = null;
+
+  /**
+   * `true` when the cross-reference data could not be read from the
+   * `startxref` chain and was rebuilt by scanning the file for `N G obj`
+   * headers. The object map is then a best guess and the file's own
+   * `startxref` names a broken section, so nothing may be chained onto it
+   * with `/Prev` — an incremental update must become a full rewrite.
+   */
+  xrefRecovered = false;
+
+  /**
+   * The offset the file's last `startxref` names — the section an
+   * incremental update's `/Prev` must point at. `null` when it could not be
+   * read (see {@link xrefRecovered}).
+   */
+  startxrefOffset: number | null = null;
+
+  constructor(data: Uint8Array, maxDecodedBytes?: number) {
+    assertLimitOption("maxDecodedBytes", maxDecodedBytes);
+    this.maxDecodedBytes = maxDecodedBytes;
     this.tokenizer = new PdfTokenizer(data);
-    this.trailer = this.parseFileStructure();
+    try {
+      this.trailer = this.parseFileStructure();
+    } catch (err) {
+      // A limit hit swallowed during recovery outranks the error it led to.
+      throw this.limitError ?? err;
+    }
+    this.throwIfLimitExceeded();
+  }
+
+  /**
+   * One more than the highest object number the cross-reference data knows
+   * about, or the trailer's /Size if that is larger. A new object numbered at
+   * or above this cannot collide with an existing one even when /Size
+   * understates the file.
+   */
+  get objectNumberBound(): number {
+    let bound = dictGetNumber(this.trailer, "Size") ?? 1;
+    for (const objNum of this.xref.keys()) {
+      if (objNum + 1 > bound) {
+        bound = objNum + 1;
+      }
+    }
+    return bound;
+  }
+
+  /** Throw the recorded {@link limitError}, if any. */
+  throwIfLimitExceeded(): void {
+    if (this.limitError) {
+      throw this.limitError;
+    }
+  }
+
+  /** Remember the first limit hit, then rethrow whatever was thrown. */
+  private recordLimit(err: unknown): never {
+    if (err instanceof PdfLimitExceededError) {
+      this.limitError ??= err;
+    }
+    throw err;
+  }
+
+  private parse(tokenizer: PdfTokenizer): PdfObject {
+    this.throwIfLimitExceeded();
+    try {
+      return parseObject(tokenizer);
+    } catch (err) {
+      return this.recordLimit(err);
+    }
+  }
+
+  private decode(data: Uint8Array, dict: PdfDictValue): Uint8Array {
+    this.throwIfLimitExceeded();
+    try {
+      return decodeStreamFilters(data, dict, this.maxDecodedBytes);
+    } catch (err) {
+      return this.recordLimit(err);
+    }
   }
 
   /** Get the underlying raw data */
@@ -98,9 +223,14 @@ export class PdfDocument {
   private parseFileStructure(): PdfDictValue {
     try {
       const startxrefOffset = this.findStartxref();
-      return this.parseXrefChain(startxrefOffset);
+      const trailer = this.parseXrefChain(startxrefOffset);
+      this.startxrefOffset = startxrefOffset;
+      return trailer;
     } catch {
+      this.throwIfLimitExceeded();
       // If normal xref parsing fails, attempt full-file reconstruction
+      this.xrefRecovered = true;
+      this.startxrefOffset = null;
       return this.reconstructXref();
     }
   }
@@ -167,6 +297,16 @@ export class PdfDocument {
       if (firstToken.type === TokenType.Keyword && firstToken.strValue === "xref") {
         // Traditional xref table
         const trailer = this.parseTraditionalXref();
+        // Hybrid-reference file (ISO 32000-1 §7.5.8.4): objects missing from
+        // this table — typically those in object streams — are listed in the
+        // cross-reference stream /XRefStm names. It is searched after this
+        // section's table and before /Prev; first entry wins, so parsing it
+        // now gives exactly that order. Its own dictionary is not a trailer.
+        const xrefStm = dictGetNumber(trailer, "XRefStm");
+        if (xrefStm !== undefined && !visited.has(xrefStm)) {
+          visited.add(xrefStm);
+          this.parseXrefStream(xrefStm);
+        }
         if (!trailerDict) {
           trailerDict = trailer;
         } else {
@@ -254,7 +394,7 @@ export class PdfDocument {
 
     // Parse the trailer dictionary
     this.tokenizer.skipWhitespaceAndComments();
-    const trailerObj = parseObject(this.tokenizer);
+    const trailerObj = this.parse(this.tokenizer);
     if (!isPdfDict(trailerObj)) {
       throw new PdfStructureError("Expected dictionary after 'trailer' keyword");
     }
@@ -267,7 +407,7 @@ export class PdfDocument {
    */
   private parseXrefStream(offset: number): PdfDictValue {
     this.tokenizer.pos = offset;
-    const obj = parseObject(this.tokenizer);
+    const obj = this.parse(this.tokenizer);
 
     if (!isPdfStream(obj)) {
       throw new PdfStructureError("Expected xref stream object");
@@ -280,7 +420,7 @@ export class PdfDocument {
     }
 
     // Decode the stream data
-    const streamData = decodeStreamFilters(obj.data, dict);
+    const streamData = this.decode(obj.data, dict);
 
     // Parse W array: [fieldSizeType, fieldSizeOffset, fieldSizeGen]
     const wArray = dictGetArray(dict, "W");
@@ -409,9 +549,9 @@ export class PdfDocument {
           const objNum = parseInt(objNumStr, 10);
           const gen = parseInt(genStr, 10);
 
-          if (!this.xref.has(objNum)) {
-            this.xref.set(objNum, { offset: savedPos, gen, type: 1 });
-          }
+          // Last definition wins: an incremental update appends a newer
+          // version of an object after the one it replaces.
+          this.xref.set(objNum, { offset: savedPos, gen, type: 1 });
         }
       }
 
@@ -422,54 +562,125 @@ export class PdfDocument {
       throw new PdfStructureError("Could not reconstruct xref: no objects found");
     }
 
-    // Try to find a trailer dictionary by scanning for "trailer" keyword
-    const trailerKeyword = _encoder.encode("trailer");
-    const trailerPos = this.tokenizer.findSequenceBackward(trailerKeyword);
-
-    if (trailerPos >= 0) {
-      this.tokenizer.pos = trailerPos + trailerKeyword.length;
-      this.tokenizer.skipWhitespaceAndComments();
+    // Parse every object found directly, once: object streams, cross-reference
+    // stream dictionaries (the trailer of a file with no classic one) and a
+    // catalog are all needed below. In file order, so "last wins" holds.
+    const direct = [...this.xref].sort((a, b) => a[1].offset - b[1].offset);
+    const objStms: number[] = [];
+    let xrefStmDict: PdfDictValue | null = null;
+    let directCatalog: PdfRef | null = null;
+    for (const [objNum, entry] of direct) {
+      let obj: PdfObject;
       try {
-        const trailerObj = parseObject(this.tokenizer);
-        if (isPdfDict(trailerObj)) {
-          return trailerObj;
-        }
+        this.tokenizer.pos = entry.offset;
+        obj = this.parse(this.tokenizer);
       } catch {
-        // Fall through to synthetic trailer
+        this.throwIfLimitExceeded();
+        continue; // Skip unparseable objects
       }
+      const dict = isPdfStream(obj) ? obj.dict : isPdfDict(obj) ? obj : null;
+      const type = dict ? dictGetName(dict, "Type") : undefined;
+      if (type === "Catalog") {
+        directCatalog ??= { type: "ref", objNum, gen: entry.gen };
+      } else if (isPdfStream(obj) && type === "ObjStm") {
+        objStms.push(objNum);
+      } else if (isPdfStream(obj) && type === "XRef" && obj.dict.has("Root")) {
+        xrefStmDict = obj.dict;
+      }
+    }
+
+    // Prefer a classic trailer, then the last cross-reference stream's
+    // dictionary (which plays the trailer's role, §7.5.8.2).
+    let trailer = this.findClassicTrailer();
+    if (!trailer && xrefStmDict) {
+      trailer = new Map();
+      for (const key of ["Root", "Info", "ID", "Encrypt"]) {
+        const value = xrefStmDict.get(key);
+        if (value !== undefined) {
+          trailer.set(key, value);
+        }
+      }
+    }
+
+    // Register the members of every object stream as compressed entries, as
+    // pdf.js and qpdf do; otherwise a damaged file whose pages live in object
+    // streams loses them. Precedence follows qpdf's reconstruction, which
+    // never lets a compressed entry replace one found as `N G obj` in the
+    // file: a direct object wins over any compressed copy, wherever it sits.
+    // Between two object streams holding the same number, the later one in
+    // the file wins, matching "last definition wins" above.
+    //
+    // An encrypted file's object streams cannot be decoded yet (the security
+    // handler is installed after construction), and garbage decoded from
+    // ciphertext could register bogus numbers, so they are skipped there.
+    if (!trailer?.has("Encrypt")) {
+      for (const stmNum of objStms) {
+        const members = this.getObjectStreamMembers(stmNum);
+        members?.forEach(({ objNum }, index) => {
+          const existing = this.xref.get(objNum);
+          if (!existing || existing.type === 2) {
+            this.xref.set(objNum, { offset: stmNum, gen: index, type: 2 });
+          }
+        });
+      }
+    }
+
+    if (trailer?.has("Root")) {
+      if (!trailer.has("Size")) {
+        trailer.set("Size", this.objectNumberBoundOf(this.xref));
+      }
+      return trailer;
     }
 
     // Build a synthetic trailer by finding the Root catalog
-    const syntheticTrailer: PdfDictValue = new Map();
-    syntheticTrailer.set("Size", this.xref.size);
-
-    // Scan resolved objects to find the catalog (the one with /Type /Catalog)
-    for (const [objNum, entry] of this.xref) {
-      if (entry.type !== 1) {
-        continue;
-      }
-      try {
-        this.tokenizer.pos = entry.offset;
-        const obj = parseObject(this.tokenizer);
-        if (isPdfDict(obj)) {
-          const typeVal = dictGetName(obj, "Type");
-          if (typeVal === "Catalog") {
-            syntheticTrailer.set("Root", { type: "ref", objNum, gen: entry.gen } as PdfRef);
-            break;
-          }
-        } else if (isPdfStream(obj)) {
-          const typeVal = dictGetName(obj.dict, "Type");
-          if (typeVal === "Catalog") {
-            syntheticTrailer.set("Root", { type: "ref", objNum, gen: entry.gen } as PdfRef);
-            break;
-          }
+    const syntheticTrailer: PdfDictValue = trailer ?? new Map();
+    syntheticTrailer.set("Size", this.objectNumberBoundOf(this.xref));
+    let root = directCatalog;
+    if (!root) {
+      // The catalog may itself be compressed.
+      for (const [objNum, entry] of this.xref) {
+        if (entry.type !== 2) {
+          continue;
         }
-      } catch {
-        // Skip unparseable objects
+        const obj = this.resolve(objNum, 0);
+        if (isPdfDict(obj) && dictGetName(obj, "Type") === "Catalog") {
+          root = { type: "ref", objNum, gen: 0 };
+          break;
+        }
       }
+    }
+    if (root) {
+      syntheticTrailer.set("Root", root);
     }
 
     return syntheticTrailer;
+  }
+
+  /** One more than the highest object number in `xref`. */
+  private objectNumberBoundOf(xref: Map<number, XrefEntry>): number {
+    let bound = 1;
+    for (const objNum of xref.keys()) {
+      bound = Math.max(bound, objNum + 1);
+    }
+    return bound;
+  }
+
+  /** The dictionary after the last `trailer` keyword in the file, if any. */
+  private findClassicTrailer(): PdfDictValue | null {
+    const trailerKeyword = _encoder.encode("trailer");
+    const trailerPos = this.tokenizer.findSequenceBackward(trailerKeyword);
+    if (trailerPos < 0) {
+      return null;
+    }
+    this.tokenizer.pos = trailerPos + trailerKeyword.length;
+    this.tokenizer.skipWhitespaceAndComments();
+    try {
+      const trailerObj = this.parse(this.tokenizer);
+      return isPdfDict(trailerObj) ? trailerObj : null;
+    } catch {
+      this.throwIfLimitExceeded();
+      return null;
+    }
   }
 
   /**
@@ -493,6 +704,7 @@ export class PdfDocument {
    * Returns null if the object doesn't exist.
    */
   resolve(objNum: number, gen = 0): PdfObject | null {
+    this.throwIfLimitExceeded();
     const cacheKey = `${objNum}:${gen}`;
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey)!;
@@ -513,8 +725,10 @@ export class PdfDocument {
       obj = this.parseCompressedObject(entry.offset, entry.gen);
     }
 
-    // Decrypt string values within the resolved object (V1-V4 per-object encryption)
-    if (obj !== null && this.decryptFn) {
+    // Decrypt string values within the resolved object. Only an indirect
+    // object's own strings are encrypted: an object stream is encrypted as a
+    // whole, and the strings inside it are not encrypted again (§7.5.7).
+    if (obj !== null && entry.type === 1 && this.decryptFn) {
       obj = this.decryptObjectStrings(obj, objNum, entry.gen);
     }
 
@@ -542,6 +756,7 @@ export class PdfDocument {
    * If the input is not a PdfRef, returns it as-is.
    */
   deref(obj: PdfObject | null | undefined): PdfObject | null {
+    this.throwIfLimitExceeded();
     if (obj === null || obj === undefined) {
       return null;
     }
@@ -619,14 +834,15 @@ export class PdfDocument {
    * the correct objNum/gen for the stream's containing object.
    */
   getStreamData(stream: PdfStream, objNum = 0, gen = 0): Uint8Array {
+    this.throwIfLimitExceeded();
     let data = stream.data;
 
     // Decrypt stream data if encryption is active
-    if (this.decryptFn) {
-      data = this.decryptFn(data, objNum, gen);
+    if (this.decryptFn && this.isStreamEncrypted(stream.dict)) {
+      data = this.decryptFn(data, objNum, gen, "stream");
     }
 
-    return decodeStreamFilters(data, stream.dict);
+    return this.decode(data, stream.dict);
   }
 
   /**
@@ -634,9 +850,29 @@ export class PdfDocument {
    */
   decryptString(bytes: Uint8Array, objNum: number, gen: number): Uint8Array {
     if (this.decryptFn) {
-      return this.decryptFn(bytes, objNum, gen);
+      return this.decryptFn(bytes, objNum, gen, "string");
     }
     return bytes;
+  }
+
+  /**
+   * Whether a stream's data went through the security handler: not a
+   * metadata stream when `/EncryptMetadata` is false (§7.6.3.2), and not a
+   * stream whose own `/Crypt` filter selects `/Identity` (§7.4.10).
+   */
+  private isStreamEncrypted(dict: PdfDictValue): boolean {
+    if (!this.encryptMetadata && dictGetName(dict, "Type") === "Metadata") {
+      return false;
+    }
+    const filter = dict.get("Filter");
+    const first = Array.isArray(filter) ? filter[0] : filter;
+    if (first === "Crypt") {
+      const parms = dict.get("DecodeParms");
+      const firstParms = Array.isArray(parms) ? parms[0] : parms;
+      const name = firstParms instanceof Map ? firstParms.get("Name") : undefined;
+      return name !== undefined && name !== "Identity";
+    }
+    return true;
   }
 
   /**
@@ -660,7 +896,7 @@ export class PdfDocument {
 
     // Decrypt Uint8Array string values
     if (obj instanceof Uint8Array) {
-      return this.decryptFn!(obj, objNum, gen);
+      return this.decryptFn!(obj, objNum, gen, "string");
     }
 
     // Recurse into dictionaries
@@ -792,9 +1028,10 @@ export class PdfDocument {
   private parseObjectAt(offset: number, objNum: number, _gen: number): PdfObject | null {
     this.tokenizer.pos = offset;
     try {
-      const obj = parseObject(this.tokenizer);
+      const obj = this.parse(this.tokenizer);
       return obj;
     } catch {
+      this.throwIfLimitExceeded();
       return null;
     }
   }
@@ -805,46 +1042,44 @@ export class PdfDocument {
    * @param index - The index of the object within the stream
    */
   private parseCompressedObject(objStmNum: number, index: number): PdfObject | null {
-    // Resolve the object stream itself (must be type 1 — not recursive)
-    let stmObjects: Map<number, PdfObject> | undefined;
+    return this.getObjectStreamMembers(objStmNum)?.[index]?.obj ?? null;
+  }
 
-    if (this.objStmCache.has(objStmNum)) {
-      stmObjects = this.objStmCache.get(objStmNum);
-    } else {
-      stmObjects = this.parseObjectStream(objStmNum) ?? undefined;
-      if (stmObjects) {
-        this.objStmCache.set(objStmNum, stmObjects);
+  /** The members of object stream `objStmNum`, parsed once and cached. */
+  private getObjectStreamMembers(objStmNum: number): ObjStmMember[] | null {
+    let members = this.objStmCache.get(objStmNum);
+    if (!members) {
+      members = this.parseObjectStream(objStmNum) ?? undefined;
+      if (!members) {
+        return null;
       }
+      this.objStmCache.set(objStmNum, members);
     }
-
-    if (!stmObjects) {
-      return null;
-    }
-
-    // The index field in the xref is the index within the object stream
-    // We need to find the object by its index position
-    let i = 0;
-    for (const [, value] of stmObjects) {
-      if (i === index) {
-        return value;
-      }
-      i++;
-    }
-    return null;
+    return members;
   }
 
   /**
-   * Parse all objects from an object stream.
-   * @returns Map of object number → object value
+   * Parse all objects from an object stream, in index order.
+   *
+   * The header is untrusted: /N and /First are clamped to the decoded data,
+   * reading stops at the first pair that is not two non-negative integers,
+   * and a member whose offset falls outside the data is kept as `null` so the
+   * indices of the members after it stay correct.
    */
-  private parseObjectStream(objStmNum: number): Map<number, PdfObject> | null {
+  private parseObjectStream(objStmNum: number): ObjStmMember[] | null {
     const entry = this.xref.get(objStmNum);
     if (!entry || entry.type !== 1) {
       return null;
     }
 
     this.tokenizer.pos = entry.offset;
-    const stmObj = parseObject(this.tokenizer);
+    let stmObj: PdfObject;
+    try {
+      stmObj = this.parse(this.tokenizer);
+    } catch {
+      this.throwIfLimitExceeded();
+      return null;
+    }
     if (!isPdfStream(stmObj)) {
       return null;
     }
@@ -855,31 +1090,39 @@ export class PdfDocument {
 
     // Decode stream data (pass objStmNum/gen for correct decryption)
     const streamData = this.getStreamData(stmObj, objStmNum, entry.gen);
+    if (!Number.isInteger(first) || first < 0 || first > streamData.length) {
+      return null;
+    }
 
-    // Parse the N pairs of (objNum offset) before 'first'
-    const headerTokenizer = new PdfTokenizer(streamData);
-    const pairs: Array<[number, number]> = [];
-    for (let i = 0; i < n; i++) {
+    // Parse the N pairs of (objNum offset) before 'first'. Each pair takes at
+    // least four bytes ("1 0 "), which bounds a bogus /N by the data itself.
+    const count = Number.isInteger(n) && n > 0 ? Math.min(n, Math.ceil(first / 4)) : 0;
+    const headerTokenizer = new PdfTokenizer(streamData.subarray(0, first));
+    const members: ObjStmMember[] = [];
+    for (let i = 0; i < count; i++) {
       const numTok = headerTokenizer.next();
       const offTok = headerTokenizer.next();
-      if (numTok.type === TokenType.Number && offTok.type === TokenType.Number) {
-        pairs.push([numTok.numValue!, offTok.numValue!]);
+      if (numTok.type !== TokenType.Number || offTok.type !== TokenType.Number) {
+        break;
       }
+      const objectNumber = numTok.numValue!;
+      const relOffset = offTok.numValue!;
+      if (!Number.isInteger(objectNumber) || objectNumber <= 0 || !Number.isInteger(relOffset)) {
+        break;
+      }
+      let obj: PdfObject | null = null;
+      if (relOffset >= 0 && first + relOffset < streamData.length) {
+        try {
+          obj = this.parse(new PdfTokenizer(streamData, first + relOffset));
+        } catch {
+          this.throwIfLimitExceeded();
+          // Keep the slot: an unparseable member must not shift the others.
+        }
+      }
+      members.push({ objNum: objectNumber, obj });
     }
 
-    // Parse each object
-    const result = new Map<number, PdfObject>();
-    for (const [objectNumber, relOffset] of pairs) {
-      const objTokenizer = new PdfTokenizer(streamData, first + relOffset);
-      try {
-        const obj = parseObject(objTokenizer);
-        result.set(objectNumber, obj);
-      } catch {
-        // Skip unparseable objects
-      }
-    }
-
-    return result;
+    return members;
   }
 
   /**

@@ -7,7 +7,7 @@
  * @see PDF Reference 1.7, Chapter 3 - Objects
  */
 
-import { PdfStructureError } from "@pdf/errors";
+import { PdfLimitExceededError, PdfStructureError } from "@pdf/errors";
 import { TokenType } from "@pdf/reader/pdf-tokenizer";
 import type { Token, PdfTokenizer } from "@pdf/reader/pdf-tokenizer";
 
@@ -205,15 +205,27 @@ const PDF_DOC_ENCODING: Record<number, number> = {
  * Handles all PDF object types including dictionaries (with possible streams),
  * arrays, strings, numbers, names, booleans, null, and indirect references.
  */
-export function parseObject(tokenizer: PdfTokenizer): PdfObject {
+export function parseObject(tokenizer: PdfTokenizer, depth = 0): PdfObject {
   const token = tokenizer.next();
-  return parseObjectFromToken(tokenizer, token);
+  return parseObjectFromToken(tokenizer, token, depth);
 }
+
+/**
+ * Deepest permitted nesting of arrays and dictionaries.
+ *
+ * Parsing is recursive, so without a bound `[[[[…` repeated a hundred
+ * thousand times overflows the call stack. Real documents nest a handful of
+ * levels (a page tree is walked iteratively, not parsed nested); 512 leaves
+ * two orders of magnitude of headroom while keeping the deepest recursion
+ * (~3 frames per level) far below the smallest default stack of any target
+ * engine.
+ */
+const MAX_PDF_NESTING_DEPTH = 512;
 
 /**
  * Parse a PDF object given the first token has already been consumed.
  */
-export function parseObjectFromToken(tokenizer: PdfTokenizer, token: Token): PdfObject {
+export function parseObjectFromToken(tokenizer: PdfTokenizer, token: Token, depth = 0): PdfObject {
   switch (token.type) {
     case TokenType.Number: {
       // Could be: number, or start of indirect ref (N gen R) or indirect obj (N gen obj)
@@ -232,7 +244,7 @@ export function parseObjectFromToken(tokenizer: PdfTokenizer, token: Token): Pdf
 
         if (next2.type === TokenType.Keyword && next2.strValue === "obj") {
           // Indirect object definition: N gen obj ... endobj
-          const obj = parseObject(tokenizer);
+          const obj = parseObject(tokenizer, depth);
           // Check if it's a stream
           if (isPdfDict(obj)) {
             tokenizer.skipWhitespaceAndComments();
@@ -286,10 +298,10 @@ export function parseObjectFromToken(tokenizer: PdfTokenizer, token: Token): Pdf
       return null;
 
     case TokenType.DictBegin:
-      return parseDictionary(tokenizer);
+      return parseDictionary(tokenizer, enterNesting(depth, token));
 
     case TokenType.ArrayBegin:
-      return parseArray(tokenizer);
+      return parseArray(tokenizer, enterNesting(depth, token));
 
     case TokenType.EOF:
       throw new PdfStructureError("Unexpected end of input while parsing PDF object");
@@ -304,7 +316,17 @@ export function parseObjectFromToken(tokenizer: PdfTokenizer, token: Token): Pdf
 /**
  * Parse a PDF dictionary (after the `<<` token has been consumed).
  */
-function parseDictionary(tokenizer: PdfTokenizer): PdfDictValue {
+function enterNesting(depth: number, token: Token): number {
+  const next = depth + 1;
+  if (next > MAX_PDF_NESTING_DEPTH) {
+    throw new PdfLimitExceededError(
+      `PDF objects nested deeper than ${MAX_PDF_NESTING_DEPTH} levels at offset ${token.offset}`
+    );
+  }
+  return next;
+}
+
+function parseDictionary(tokenizer: PdfTokenizer, depth: number): PdfDictValue {
   const dict: PdfDictValue = new Map();
 
   while (true) {
@@ -321,7 +343,7 @@ function parseDictionary(tokenizer: PdfTokenizer): PdfDictValue {
     }
 
     const key = keyToken.strValue!;
-    const value = parseObject(tokenizer);
+    const value = parseObject(tokenizer, depth);
     dict.set(key, value);
   }
 
@@ -331,7 +353,7 @@ function parseDictionary(tokenizer: PdfTokenizer): PdfDictValue {
 /**
  * Parse a PDF array (after the `[` token has been consumed).
  */
-function parseArray(tokenizer: PdfTokenizer): PdfArrayValue {
+function parseArray(tokenizer: PdfTokenizer, depth: number): PdfArrayValue {
   const arr: PdfArrayValue = [];
 
   while (true) {
@@ -342,7 +364,7 @@ function parseArray(tokenizer: PdfTokenizer): PdfArrayValue {
     if (token.type === TokenType.EOF) {
       throw new PdfStructureError("Unexpected EOF in array");
     }
-    arr.push(parseObjectFromToken(tokenizer, token));
+    arr.push(parseObjectFromToken(tokenizer, token, depth));
   }
 
   return arr;

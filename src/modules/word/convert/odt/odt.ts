@@ -17,8 +17,12 @@
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
 import { sanitizeUrl, utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
-import { isRun } from "@word/core/text-utils";
+import { isRun, symbolText } from "@word/core/text-utils";
 import { DocxParseError } from "@word/errors";
+import { finalViewRun, isHiddenRun } from "@word/query/final-view";
+import { resolveNumberingLevelDef } from "@word/query/style-resolve";
+import { createStyleResolver } from "@word/query/style-resolver";
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   DocxDocument,
   AbstractNumbering,
@@ -724,13 +728,26 @@ function parseList(
   const listStyleName = nsAttr(el, "text", "style-name");
   // The outermost list determines the numId; nested lists inherit it so a
   // single multi-level list resolves to one numbering definition. Only the
-  // top-level list (no parent numId) consults its own style name.
-  const numId = parentNumId ?? registry.numIdFor(listStyleName);
+  // top-level list (no parent numId) consults its own style name. ODF
+  // restarts every new top-level list unless it says it continues one.
+  let numId =
+    parentNumId ??
+    registry.numIdForList(
+      listStyleName,
+      nsAttr(el, "text", "continue-numbering") === "true" ||
+        nsAttr(el, "text", "continue-list") !== undefined
+    );
   const paragraphs: Paragraph[] = [];
   const level = parentLevel;
 
   const items = findNsChildren(el, "text", "list-item");
   for (const item of items) {
+    // `text:start-value` on an item restarts the count there; the remaining
+    // items (and their sub-lists) continue from it.
+    const itemStart = parsePositiveInt(nsAttr(item, "text", "start-value"));
+    if (itemStart !== undefined) {
+      numId = registry.restartAt(numId, level, itemStart);
+    }
     for (const child of item.children) {
       if (child.type !== "element") {
         continue;
@@ -1088,6 +1105,8 @@ interface OdfListLevel {
   readonly format: NumberFormat;
   /** Bullet glyph (bullet format) or empty for numbered levels. */
   readonly bulletChar?: string;
+  /** `text:start-value` of a numbered level; ODF's default is 1. */
+  readonly start?: number;
 }
 
 /**
@@ -1113,8 +1132,10 @@ function parseOdfListStyle(el: XmlElement): Map<number, OdfListLevel> {
         bulletChar: nsAttr(child, "text", "bullet-char") ?? ODT_BULLET_CHARS[level] ?? "•"
       });
     } else if (local === "list-level-style-number") {
+      const start = parsePositiveInt(nsAttr(child, "text", "start-value"));
       levels.set(level, {
-        format: odfNumFormatToDocx(nsAttr(child, "style", "num-format"))
+        format: odfNumFormatToDocx(nsAttr(child, "style", "num-format")),
+        ...(start !== undefined ? { start } : {})
       });
     }
   }
@@ -1166,6 +1187,10 @@ class OdtNumberingRegistry {
   private readonly numIdByStyle = new Map<string, number>();
   // The format chosen at each level for a given numId (level 0..8).
   private readonly levelsByNumId = new Map<number, Map<number, OdfListLevel>>();
+  // The instance a continuing list of each style resumes.
+  private readonly currentByStyle = new Map<string, number>();
+  // Restarted instances sharing a style's definition (abstractNumId = base).
+  private readonly extraInstances: NumberingInstance[] = [];
   private nextNumId = 1;
 
   constructor(listStyles: Map<string, Map<number, OdfListLevel>>) {
@@ -1181,7 +1206,55 @@ class OdtNumberingRegistry {
     }
     const numId = this.nextNumId++;
     this.numIdByStyle.set(key, numId);
+    this.currentByStyle.set(key, numId);
     this.levelsByNumId.set(numId, this.listStyles.get(key) ?? new Map());
+    return numId;
+  }
+
+  /**
+   * The numId for a top-level `text:list`. The first list of a style uses
+   * the style's own instance; a later one continues the style's current
+   * instance only when `continues`, and otherwise gets a fresh instance that
+   * restarts level 0 — Word would otherwise carry the count on.
+   */
+  numIdForList(styleName: string | undefined, continues: boolean): number {
+    const key = styleName ?? "";
+    const current = this.currentByStyle.get(key);
+    if (current === undefined) {
+      return this.numIdFor(styleName);
+    }
+    if (continues) {
+      return current;
+    }
+    const base = this.numIdByStyle.get(key)!;
+    const start = this.levelsByNumId.get(base)?.get(0)?.start ?? 1;
+    return this.addInstance(base, key, 0, start);
+  }
+
+  /** A fresh instance of `numId`'s definition restarting `level` at `start`. */
+  restartAt(numId: number, level: number, start: number): number {
+    const abstractNumId = this.abstractOf(numId);
+    let key = "";
+    for (const [k, base] of this.numIdByStyle) {
+      if (base === abstractNumId) {
+        key = k;
+      }
+    }
+    return this.addInstance(abstractNumId, key, level, start);
+  }
+
+  private abstractOf(numId: number): number {
+    return this.extraInstances.find(n => n.numId === numId)?.abstractNumId ?? numId;
+  }
+
+  private addInstance(abstractNumId: number, key: string, level: number, start: number): number {
+    const numId = this.nextNumId++;
+    this.extraInstances.push({
+      numId,
+      abstractNumId,
+      overrides: [{ level, startOverride: start }]
+    });
+    this.currentByStyle.set(key, numId);
     return numId;
   }
 
@@ -1190,7 +1263,8 @@ class OdtNumberingRegistry {
    * abstract numbering covers at least the deepest level actually referenced
    * even when the ODF list-style omitted some levels.
    */
-  noteLevel(numId: number, level: number): void {
+  noteLevel(instanceNumId: number, level: number): void {
+    const numId = this.abstractOf(instanceNumId);
     let levels = this.levelsByNumId.get(numId);
     if (!levels) {
       levels = new Map();
@@ -1230,8 +1304,17 @@ class OdtNumberingRegistry {
       abstractNumberings.push({ abstractNumId: numId, levels });
       numberingInstances.push({ numId, abstractNumId: numId });
     }
+    numberingInstances.push(...this.extraInstances);
     return { abstractNumberings, numberingInstances };
   }
+}
+
+/** Parse a non-negative integer attribute, or undefined when absent/invalid. */
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (value === undefined || !/^\s*\d+\s*$/.test(value)) {
+    return undefined;
+  }
+  return parseInt(value, 10);
 }
 
 /** Build a single docx NumberingLevel from a parsed ODF level. */
@@ -1253,7 +1336,7 @@ function makeNumberingLevel(level: number, info: OdfListLevel): NumberingLevel {
     format: info.format,
     // Word level text uses %N placeholders; "%<level+1>." renders "1." etc.
     text: `%${level + 1}.`,
-    start: 1,
+    start: info.start ?? 1,
     paragraphProperties: { indent },
     suffix: tabSuffix
   };
@@ -1269,44 +1352,45 @@ function listStyleNameForNumId(numId: number): string {
 }
 
 /** Collect every distinct numId referenced by list paragraphs in the body. */
-function collectListNumIds(blocks: readonly BodyContent[], out: Set<number>): void {
+function collectListNumIds(
+  styles: StyleResolver,
+  blocks: readonly BodyContent[],
+  out: Set<number>
+): void {
   for (const block of blocks) {
     if (block.type === "paragraph") {
-      const numId = block.properties?.numbering?.numId;
+      const numId = styles.numbering(block)?.numId;
       if (typeof numId === "number") {
         out.add(numId);
       }
     } else if (block.type === "table") {
       for (const row of block.rows) {
         for (const cell of row.cells) {
-          collectListNumIds(cell.content as readonly BodyContent[], out);
+          collectListNumIds(styles, cell.content as readonly BodyContent[], out);
         }
       }
     }
   }
 }
 
+/** Effective format and start value of one list level. */
+interface OdtListLevel {
+  readonly format: NumberFormat;
+  readonly start?: number;
+}
+
 /**
- * Resolve the per-level NumberFormat for a numId from the document's numbering
- * definitions. Follows numId → numberingInstance → abstractNumbering → levels.
- * Levels missing a definition default to bullet so a marker is still emitted.
+ * Resolve the effective definition of each of the nine levels of a numId
+ * (`w:lvlOverride` and `w:startOverride` applied). Levels missing a
+ * definition default to bullet so a marker is still emitted.
  */
-function resolveNumIdLevelFormats(doc: DocxDocument, numId: number): NumberFormat[] {
-  const formats: NumberFormat[] = new Array(9).fill("bullet");
-  const inst = doc.numberingInstances?.find(n => n.numId === numId);
-  const abstractId = inst?.abstractNumId;
-  const abstract =
-    abstractId !== undefined
-      ? doc.abstractNumberings?.find(a => a.abstractNumId === abstractId)
-      : undefined;
-  if (abstract) {
-    for (const lvl of abstract.levels) {
-      if (lvl.level >= 0 && lvl.level < 9) {
-        formats[lvl.level] = lvl.format;
-      }
-    }
+function resolveNumIdLevels(doc: DocxDocument, numId: number): OdtListLevel[] {
+  const levels: OdtListLevel[] = [];
+  for (let idx = 0; idx < 9; idx++) {
+    const def = resolveNumberingLevelDef(doc, numId, idx);
+    levels.push(def ? { format: def.format, start: def.start } : { format: "bullet" });
   }
-  return formats;
+  return levels;
 }
 
 // =============================================================================
@@ -1708,6 +1792,8 @@ export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
  * Maps a deterministic key derived from RunProperties to an auto style name.
  */
 interface OdtWriteContext {
+  /** Style resolution bound to the document being written. */
+  readonly styles: StyleResolver;
   /** Map from run properties key → auto style name */
   readonly runStyleMap: Map<string, string>;
   /** Map from auto style name → RunProperties (for writing styles later) */
@@ -1731,18 +1817,35 @@ interface OdtWriteContext {
   readonly imagePathByRId: Map<string, string>;
   /** Same as `imagePathByRId` but keyed by `image.fileName` for legacy lookups. */
   readonly imagePathByFileName: Map<string, string>;
+  /**
+   * numIds already written as a `text:list`. Word continues an instance's
+   * count across an interruption while ODF restarts every new list, so a
+   * list resuming one of these is marked `text:continue-numbering`.
+   */
+  readonly writtenListNumIds: Set<number>;
+  /**
+   * Resolved run properties of the paragraph being written. Formatting itself
+   * is carried by ODF style inheritance; this is consulted only to drop hidden
+   * text, which must not reach the output whichever level set it.
+   */
+  paragraphRunProperties?: RunProperties;
 }
 
 /** Create a new write context. */
-function createWriteContext(imageMap?: {
-  byRId: Map<string, string>;
-  byFileName: Map<string, string>;
-}): OdtWriteContext {
+function createWriteContext(
+  doc: DocxDocument,
+  imageMap?: {
+    byRId: Map<string, string>;
+    byFileName: Map<string, string>;
+  }
+): OdtWriteContext {
   return {
+    styles: createStyleResolver(doc),
     runStyleMap: new Map(),
     runStyleProps: new Map(),
     nextRunStyleId: 1,
     bookmarkNames: new Map(),
+    writtenListNumIds: new Set(),
     imagePathByRId: imageMap?.byRId ?? new Map(),
     imagePathByFileName: imageMap?.byFileName ?? new Map()
   };
@@ -1754,6 +1857,9 @@ function createWriteContext(imageMap?: {
  */
 function runPropsKey(props: RunProperties): string {
   const parts: string[] = [];
+  if (props.style) {
+    parts.push(`cs:${props.style}`);
+  }
   if (props.font) {
     const fontName = typeof props.font === "string" ? props.font : props.font.ascii;
     if (fontName) {
@@ -1812,7 +1918,7 @@ function generateContentXml(
   imageMap?: { byRId: Map<string, string>; byFileName: Map<string, string> }
 ): string {
   // First pass: write body to collect automatic run styles
-  const ctx = createWriteContext(imageMap);
+  const ctx = createWriteContext(doc, imageMap);
   const bodyWriter = new XmlWriter();
   bodyWriter.openNode("office:body");
   bodyWriter.openNode("office:text");
@@ -1855,7 +1961,10 @@ function writeCollectedRunStyles(w: XmlWriter, ctx: OdtWriteContext): void {
   for (const [styleName, props] of ctx.runStyleProps) {
     w.openNode("style:style", {
       "style:name": styleName,
-      "style:family": "text"
+      "style:family": "text",
+      // The character style stays a reference, so its formatting is inherited
+      // the ODF way instead of being lost.
+      ...(props.style ? { "style:parent-style-name": props.style } : {})
     });
     writeTextPropertiesOdf(w, props);
     w.closeNode();
@@ -1875,9 +1984,9 @@ function writeAutoStyles(w: XmlWriter, doc: DocxDocument): void {
   // bullet vs numbered (and multi-level mixes) round-trip with the correct
   // markers. Numbers are sorted for deterministic output.
   const numIds = new Set<number>();
-  collectListNumIds(doc.body, numIds);
+  collectListNumIds(createStyleResolver(doc), doc.body, numIds);
   for (const numId of [...numIds].sort((a, b) => a - b)) {
-    writeListStyleDef(w, numId, resolveNumIdLevelFormats(doc, numId));
+    writeListStyleDef(w, numId, resolveNumIdLevels(doc, numId));
   }
 }
 
@@ -1890,11 +1999,12 @@ function writeAutoStyles(w: XmlWriter, doc: DocxDocument): void {
  * LibreOffice) the right markers and letting the reader recover the format on
  * the way back in.
  */
-function writeListStyleDef(w: XmlWriter, numId: number, formats: readonly NumberFormat[]): void {
+function writeListStyleDef(w: XmlWriter, numId: number, levels: readonly OdtListLevel[]): void {
   w.openNode("text:list-style", { "style:name": listStyleNameForNumId(numId) });
   for (let idx = 0; idx < 9; idx++) {
     const level = idx + 1; // ODF list levels are 1-based.
-    const format = formats[idx] ?? "bullet";
+    const format = levels[idx]?.format ?? "bullet";
+    const start = levels[idx]?.start;
     if (format === "bullet") {
       w.openNode("text:list-level-style-bullet", {
         "text:level": String(level),
@@ -1904,7 +2014,8 @@ function writeListStyleDef(w: XmlWriter, numId: number, formats: readonly Number
       w.openNode("text:list-level-style-number", {
         "text:level": String(level),
         "style:num-format": numberFormatToOdf(format),
-        "style:num-suffix": "."
+        "style:num-suffix": ".",
+        ...(start !== undefined && start !== 1 ? { "text:start-value": String(start) } : {})
       });
     }
     w.openNode("style:list-level-properties", {
@@ -2077,13 +2188,13 @@ function alignmentToOdf(alignment: Alignment): string {
  * writer must round-trip them as `text:list` structures rather than bare
  * `text:p` (which would silently drop the list semantics).
  */
-function isListParagraph(block: BodyContent): block is Paragraph {
-  return block.type === "paragraph" && block.properties?.numbering !== undefined;
+function isListParagraph(block: BodyContent, styles: StyleResolver): block is Paragraph {
+  return block.type === "paragraph" && styles.numbering(block) !== undefined;
 }
 
 /** numId of a list paragraph (falls back to 1 if somehow absent). */
-function paragraphNumId(block: BodyContent): number {
-  return block.type === "paragraph" ? (block.properties?.numbering?.numId ?? 1) : 1;
+function paragraphNumId(block: BodyContent, styles: StyleResolver): number {
+  return block.type === "paragraph" ? (styles.numbering(block)?.numId ?? 1) : 1;
 }
 
 /**
@@ -2108,14 +2219,14 @@ function writeBlocks(
   let i = 0;
   while (i < blocks.length) {
     const block = blocks[i];
-    if (isListParagraph(block)) {
+    if (isListParagraph(block, ctx.styles)) {
       // Consume the maximal run of consecutive list paragraphs sharing numId.
-      const numId = paragraphNumId(block);
+      const numId = paragraphNumId(block, ctx.styles);
       let j = i;
       while (
         j < blocks.length &&
-        isListParagraph(blocks[j]) &&
-        paragraphNumId(blocks[j]) === numId
+        isListParagraph(blocks[j], ctx.styles) &&
+        paragraphNumId(blocks[j], ctx.styles) === numId
       ) {
         j++;
       }
@@ -2151,9 +2262,14 @@ function writeListGroup(
   // `itemOpen[d]` is true when a `text:list-item` is open inside the list at
   // depth `d` (0-based). Its length equals the number of open `text:list`s.
   const itemOpen: boolean[] = [];
+  const resumes = ctx.writtenListNumIds.has(numId);
+  ctx.writtenListNumIds.add(numId);
 
   const openList = (): void => {
-    w.openNode("text:list", { "text:style-name": styleName });
+    w.openNode("text:list", {
+      "text:style-name": styleName,
+      ...(resumes && itemOpen.length === 0 ? { "text:continue-numbering": "true" } : {})
+    });
     itemOpen.push(false);
   };
   const closeList = (): void => {
@@ -2166,7 +2282,7 @@ function writeListGroup(
   };
 
   for (const para of paras) {
-    const level = Math.max(0, para.properties?.numbering?.level ?? 0);
+    const level = Math.max(0, ctx.styles.numbering(para)?.level ?? 0);
     const wantLists = level + 1;
 
     // Close lists until we are at or below the desired depth.
@@ -2248,12 +2364,12 @@ function writeParagraph(
   imagePaths: string[],
   ctx: OdtWriteContext
 ): void {
-  const isHeading =
-    para.properties?.outlineLevel !== undefined && para.properties.outlineLevel >= 0;
+  // Shared heading rule; Title is level 1, and ODF keeps all nine levels.
+  const heading = ctx.styles.heading(para);
   const styleName = para.properties?.style;
 
-  if (isHeading) {
-    const level = (para.properties!.outlineLevel ?? 0) + 1;
+  if (heading) {
+    const level = heading.level;
     w.openNode("text:h", {
       ...(styleName ? { "text:style-name": styleName } : {}),
       "text:outline-level": String(level)
@@ -2264,9 +2380,12 @@ function writeParagraph(
     });
   }
 
+  const outer = ctx.paragraphRunProperties;
+  ctx.paragraphRunProperties = ctx.styles.paragraph(para).runProperties;
   for (const child of para.children) {
     writeParagraphChild(w, child, doc, imagePaths, ctx);
   }
+  ctx.paragraphRunProperties = outer;
 
   w.closeNode();
 }
@@ -2279,8 +2398,13 @@ function writeParagraphChild(
   imagePaths: string[],
   ctx: OdtWriteContext
 ): void {
+  // Final view: inserted / moved-to text shown, deleted / moved-from hidden.
+  const run = finalViewRun(child);
+  if (run) {
+    writeRun(w, run, doc, imagePaths, ctx);
+    return;
+  }
   if (isRun(child)) {
-    writeRun(w, child, doc, imagePaths, ctx);
     return;
   }
 
@@ -2328,12 +2452,6 @@ function writeParagraphChild(
       }
       break;
     }
-    case "insertedRun":
-      writeRun(w, child.run, doc, imagePaths, ctx);
-      break;
-    case "deletedRun":
-      // Deleted runs are typically not shown in the output
-      break;
     default:
       // Other paragraph children (comments, etc.) — skip
       break;
@@ -2348,6 +2466,9 @@ function writeRun(
   imagePaths: string[],
   ctx: OdtWriteContext
 ): void {
+  if (isHiddenRun(ctx.styles.run(run, ctx.paragraphRunProperties).runProperties)) {
+    return;
+  }
   const hasProps = run.properties && Object.keys(run.properties).length > 0;
 
   if (hasProps) {
@@ -2433,8 +2554,18 @@ function writeRunContent(
     case "softHyphen":
       w.writeText("\u00AD");
       break;
+    case "symbol":
+      w.writeText(symbolText(content));
+      break;
+    case "field":
+      // The cached result is what the document displays; a live text:field
+      // mapping is not attempted, but the text must not be lost.
+      if (content.cachedValue) {
+        writeOdfText(w, content.cachedValue);
+      }
+      break;
     default:
-      // Other content types (field, footnoteRef, etc.) — skip for now
+      // Other content types (footnoteRef, etc.) — skip for now
       break;
   }
 }

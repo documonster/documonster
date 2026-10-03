@@ -6,10 +6,10 @@
  */
 
 import { STRICT_TO_TRANSITIONAL_REL } from "@word/constants";
+import { parsePartXml } from "@word/reader/part-xml";
 import type { WordSecurityPolicy } from "@word/security/policy";
 import { DEFAULT_SECURITY_POLICY } from "@word/security/policy";
 import type { FormField, RunProperties } from "@word/types";
-import { parseXml } from "@xml/dom";
 
 /**
  * A parsed OPC relationship entry (from a .rels part).
@@ -94,8 +94,8 @@ export function createReaderContext(securityPolicy?: Required<WordSecurityPolicy
  * Normalizes ISO 29500 Strict relationship types to Transitional equivalents
  * via `STRICT_TO_TRANSITIONAL_REL`.
  */
-export function parseRelationships(xmlStr: string): ParsedRelationship[] {
-  const doc = parseXml(xmlStr);
+export function parseRelationships(xmlStr: string, maxDepth?: number): ParsedRelationship[] {
+  const doc = parsePartXml(xmlStr, maxDepth);
   const rels: ParsedRelationship[] = [];
 
   for (const child of doc.root.children) {

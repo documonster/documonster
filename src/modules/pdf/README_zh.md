@@ -407,6 +407,23 @@ const result = await editor.save();
 const incremental = await editor.saveIncremental(); // 保留原始字节
 ```
 
+对已签名文档(`editor.hasSignatures`),`save()`、`sign()` 以及需要回退为完整重写的
+`saveIncremental()` 会抛出 `PdfSignatureInvalidationError`,除非传入 `{ invalidateSignatures: true }`。
+(构建器的 `doc.setMetadata({ creationDate, modDate })` 及同名导出选项可固定日期以获得可复现的输出;编辑器保留原 /CreationDate。)
+
+仅当签名域(`/FT /Sig`,可继承自父域)的值含 `/ByteRange` 与 `/Contents` 时才视为已签名;
+单独的 `/SigFlags` 不算。`saveIncremental()` 保留原签名字节范围,但**不会**评估认证签名
+(DocMDP)与 FieldMDP 权限——认证签名禁止的修改仍会被写入。
+
+加密文档:`saveIncremental()` 用文件原有的安全处理器(RC4、AES-128 或 AES-256 R5/R6)
+加密追加的对象,结果仍用原密码打开;`save()` 会写出**已解密**、不含 `/Encrypt` 的副本。
+
+交叉引用链:更新段的 `/Prev` 取读取器实际解析的 `startxref` 偏移。最新段为 xref 流的文件以
+xref 流追加;混合引用文件(经典 trailer 含 `/XRefStm`)追加经典段并链接到该 trailer,
+仅列于 `/XRefStm` 流中的对象仍可访问(ISO 32000-1 §7.5.8.4)。若交叉引用数据是重建的
+(`PdfDocument.xrefRecovered`,如 `startxref` 错误或损坏),没有可靠的段可供链接,
+`saveIncremental()` 会回退为完整 `save()`——同样受签名保护约束。
+
 ### 数字签名
 
 ```typescript
@@ -567,8 +584,12 @@ interface ReadPdfOptions {
   extractFormFields?: boolean; // 提取表单字段(默认:true)
   extractBookmarks?: boolean; // 提取书签/大纲(默认:true)
   extractTables?: boolean; // 通过启发式提取表格(默认:false)
+  maxDecodedBytes?: number; // 单个流解码上限(默认:256 MiB)
 }
 ```
+
+超出 `maxDecodedBytes`、/Filter 链长度上限(16)或对象嵌套上限时,`Pdf.read` 抛出
+`PdfLimitExceededError`(`PdfStructureError` 子类),不会降级为页面警告,结果不会被静默截断。
 
 ### 读取结果
 

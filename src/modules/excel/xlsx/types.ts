@@ -77,6 +77,23 @@ export interface XlsxReadOptions {
    * contain corrupted or unsupported elements you want to ignore.
    */
   ignoreNodes?: string[];
+  /**
+   * Limits applied while unpacking the XLSX container, to decline decompression
+   * bombs. By default each part may inflate to 512 MiB, all parts together to
+   * 2 GiB, and the package may hold 10,000 parts; set them lower when reading
+   * untrusted uploads, or `Infinity` to lift one.
+   */
+  zip?: XlsxZipReadLimits;
+}
+
+/** Container limits for {@link XlsxReadOptions.zip}. */
+export interface XlsxZipReadLimits {
+  /** Largest uncompressed size of one part, in bytes. */
+  maxEntrySize?: number;
+  /** Largest combined uncompressed size of all parts, in bytes. @default 2 GiB */
+  maxTotalUncompressedSize?: number;
+  /** Most parts (ZIP entries) the package may contain. @default 10000 */
+  maxEntries?: number;
 }
 
 export interface ZipWriterOptions {

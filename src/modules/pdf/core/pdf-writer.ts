@@ -189,6 +189,10 @@ export class PdfWriter {
     author?: string;
     subject?: string;
     creator?: string;
+    /** Written as /CreationDate. Defaults to the current time. */
+    creationDate?: Date;
+    /** Written as /ModDate when given. */
+    modDate?: Date;
   }): number {
     const objNum = this.allocObject();
     const dict = new PdfDict();
@@ -206,7 +210,10 @@ export class PdfWriter {
       dict.set("Creator", pdfString(options.creator));
     }
     dict.set("Producer", pdfString("documonster"));
-    dict.set("CreationDate", pdfDate(new Date()));
+    dict.set("CreationDate", pdfDate(options.creationDate ?? new Date()));
+    if (options.modDate) {
+      dict.set("ModDate", pdfDate(options.modDate));
+    }
 
     this.addObject(objNum, dict);
     this.infoRef = objNum;
@@ -337,11 +344,9 @@ export class PdfWriter {
       // Encrypt string literals in object content (if encryption enabled)
       let content = obj.content;
       if (this.encryption && obj.objectNumber !== encryptObjNum) {
-        content = encryptStringsInContent(
-          content,
-          obj.objectNumber,
-          0,
-          this.encryption.encryptionKey
+        const key = this.encryption.encryptionKey;
+        content = encryptStringsInContent(content, data =>
+          encryptData(data, obj.objectNumber, 0, key)
         );
       }
 
@@ -512,9 +517,7 @@ export class PdfWriter {
  */
 function encryptStringsInContent(
   content: string,
-  objectNumber: number,
-  generation: number,
-  encryptionKey: Uint8Array
+  encrypt: (data: Uint8Array) => Uint8Array
 ): string {
   const encoder = new TextEncoder();
   const result: string[] = [];
@@ -557,8 +560,13 @@ function encryptStringsInContent(
 
       // Unescape the PDF string to get raw bytes
       const unescaped = unescapePdfString(inner);
-      const rawBytes = encoder.encode(unescaped);
-      const encrypted = encryptData(rawBytes, objectNumber, generation, encryptionKey);
+      // A literal string is bytes: octal escapes and Latin-1 characters stand
+      // for single bytes. Only text outside that range — which an unencrypted
+      // write would emit as UTF-8 — is encoded as UTF-8 here too.
+      const rawBytes = /[\u0100-\uffff]/.test(unescaped)
+        ? encoder.encode(unescaped)
+        : Uint8Array.from(unescaped, ch => ch.charCodeAt(0));
+      const encrypted = encrypt(rawBytes);
       result.push(pdfHexString(encrypted));
     } else if (content[i] === "<" && content[i + 1] === "<") {
       // Dict delimiter << — emit both chars and skip
@@ -581,17 +589,14 @@ function encryptStringsInContent(
       }
 
       // Decode hex to raw bytes
+      // An empty string is encrypted too: under AES it becomes an IV and a
+      // padding block, which is what a reader expects to strip.
       const cleanHex = hex.replace(/\s/g, "");
-      if (cleanHex.length === 0) {
-        result.push("<>");
-        continue;
-      }
       const rawBytes = new Uint8Array(Math.ceil(cleanHex.length / 2));
       for (let h = 0; h < rawBytes.length; h++) {
         rawBytes[h] = parseInt(cleanHex.substring(h * 2, h * 2 + 2).padEnd(2, "0"), 16);
       }
-      const encrypted = encryptData(rawBytes, objectNumber, generation, encryptionKey);
-      result.push(pdfHexString(encrypted));
+      result.push(pdfHexString(encrypt(rawBytes)));
     } else {
       result.push(content[i]);
       i++;
@@ -636,7 +641,31 @@ function unescapePdfString(value: string): string {
       case "\\":
         result += "\\";
         break;
+      case "b":
+        result += "\b";
+        break;
+      case "f":
+        result += "\f";
+        break;
+      case "\r":
+        // Line continuation: backslash + EOL contributes nothing
+        if (value[i + 2] === "\n") {
+          i++;
+        }
+        break;
+      case "\n":
+        break;
       default:
+        if (next >= "0" && next <= "7") {
+          // \ddd — one to three octal digits, one byte (high-order overflow ignored)
+          let end = i + 1;
+          while (end < i + 4 && value[end] >= "0" && value[end] <= "7") {
+            end++;
+          }
+          result += String.fromCharCode(parseInt(value.slice(i + 1, end), 8) & 0xff);
+          i = end - 1;
+          continue;
+        }
         result += next;
         break;
     }
@@ -650,6 +679,24 @@ function unescapePdfString(value: string): string {
 // Incremental Update
 // =============================================================================
 
+/** The body of an object written by {@link buildIncremental}. */
+export type IncrementalBody = string | { dict: PdfDict; data: Uint8Array };
+
+/**
+ * One object of an incremental update. `gen` must be the generation the
+ * object already has when it replaces an existing one — references elsewhere
+ * in the file name it as `objNum gen R` — and 0 for a new object.
+ */
+export interface IncrementalObject {
+  gen: number;
+  body: IncrementalBody;
+}
+
+/** Whether a serialized stream dictionary declares `/Type /Metadata`. */
+function isMetadataStreamDict(dictText: string): boolean {
+  return /\/Type\s*\/Metadata(?![^\s/<>[\]()%{}])/.test(dictText);
+}
+
 /**
  * Build an incremental update that appends new/modified objects to an
  * existing PDF without rewriting the original bytes.
@@ -659,42 +706,82 @@ function unescapePdfString(value: string): string {
  * readers can follow the chain of incremental updates.
  *
  * @param originalData - The original, unmodified PDF bytes (preserved byte-for-byte)
- * @param modifiedObjects - Map of object number → serialized content.
- *   Values are either a plain string (for non-stream objects) or
- *   `{ dict, data }` for stream objects.
- * @param newTrailerEntries - Additional/override entries for the new trailer.
- *   Keys like `/Root`, `/Info`, `/Encrypt`, `/ID` are preserved from the
- *   original trailer by default but can be overridden here.
+ * @param objects - Object number → object to append
+ * @param trailerEntries - Serialized entries the new trailer repeats from the
+ *   original (Root, Info, Encrypt, ID). `Size` is required: it is the original
+ *   object-number bound, and the new /Size is derived from it.
+ * @param options.xrefStream - Write the cross-reference section as an xref
+ *   stream rather than a classic table, as ISO 32000-2 §7.5.8 expects when
+ *   the original file's latest section is a stream.
  *
  * @see ISO 32000-2:2020, §7.5.6 — Incremental Updates
  */
 export function buildIncremental(
   originalData: Uint8Array,
-  modifiedObjects: Map<number, string | { dict: PdfDict; data: Uint8Array }>,
-  newTrailerEntries: Map<string, string>
+  objects: Map<number, IncrementalObject>,
+  trailerEntries: Map<string, string>,
+  options: {
+    xrefStream: boolean;
+    /**
+     * Offset of the original file's latest cross-reference section — the
+     * `startxref` value the reader actually parsed (`PdfDocument.startxrefOffset`).
+     * Becomes the update's `/Prev`. Taken from the reader rather than
+     * re-scanned here so both agree on which section the update chains to.
+     */
+    prevXrefOffset: number;
+    /**
+     * The original file's security handler (`PdfDocument.encryptFn`). When
+     * given, every appended object's strings and stream data are encrypted
+     * with it, as the file's /Encrypt requires; the update's own xref stream
+     * stays in the clear (ISO 32000-1 §7.5.8.2). `kind` selects the file's
+     * string or stream crypt filter; an Identity filter returns data as-is.
+     */
+    encrypt?: (
+      data: Uint8Array,
+      objNum: number,
+      gen: number,
+      kind: "string" | "stream"
+    ) => Uint8Array;
+    /**
+     * The file's `/EncryptMetadata`. When `false`, an appended metadata
+     * stream (`/Type /Metadata`) keeps its data in the clear (§7.6.3.2).
+     * Default: true.
+     */
+    encryptMetadata?: boolean;
+  }
 ): Uint8Array {
-  if (modifiedObjects.size === 0) {
+  if (objects.size === 0) {
     return originalData;
   }
 
   const encoder = new TextEncoder();
 
-  // --- Locate the original startxref offset ---
-  const oldXrefOffset = findOriginalXrefOffset(originalData);
-
-  // --- Extract original trailer entries we want to preserve ---
-  const originalTrailerEntries = extractOriginalTrailerEntries(originalData);
+  const oldXrefOffset = options.prevXrefOffset;
+  if (
+    !Number.isInteger(oldXrefOffset) ||
+    oldXrefOffset < 0 ||
+    oldXrefOffset >= originalData.length
+  ) {
+    throw new PdfStructureError(`buildIncremental: invalid /Prev offset ${oldXrefOffset}`);
+  }
 
   // --- Determine /Size for the new trailer ---
   // /Size must be one more than the highest object number across original + new
-  const originalSize = originalTrailerEntries.get("Size") ?? "0";
+  const originalSize = trailerEntries.get("Size");
+  if (originalSize === undefined) {
+    // Without it a new object (or the xref stream) could be given the number
+    // of an object the file already uses, shadowing it for every reader.
+    throw new PdfStructureError("buildIncremental: the original /Size is required");
+  }
   let maxObjNum = parseInt(originalSize, 10) - 1;
-  for (const objNum of modifiedObjects.keys()) {
+  for (const objNum of objects.keys()) {
     if (objNum > maxObjNum) {
       maxObjNum = objNum;
     }
   }
-  const newSize = maxObjNum + 1;
+  // An xref stream is itself an object, numbered after everything else
+  const xrefStreamObjNum = maxObjNum + 1;
+  const newSize = options.xrefStream ? xrefStreamObjNum + 1 : maxObjNum + 1;
 
   // --- Build the appended body ---
   const chunks: Uint8Array[] = [];
@@ -705,28 +792,43 @@ export function buildIncremental(
   chunks.push(separator);
   byteOffset += separator.length;
 
-  // Sort modified objects by object number for deterministic output
-  const sortedObjects = [...modifiedObjects.entries()].sort((a, b) => a[0] - b[0]);
+  // Sorted by object number: deterministic output, and the xref rows below
+  // can be grouped into subsections in a single pass.
+  const sortedObjects = [...objects.entries()].sort((a, b) => a[0] - b[0]);
 
-  // Track offsets for the xref entries
-  const objectOffsets = new Map<number, number>();
+  type XrefRow = { offset: number; gen: number };
+  const subsections: Array<{ start: number; rows: XrefRow[] }> = [];
+  const addRow = (objNum: number, row: XrefRow): void => {
+    const last = subsections[subsections.length - 1];
+    if (last && objNum === last.start + last.rows.length) {
+      last.rows.push(row);
+    } else {
+      subsections.push({ start: objNum, rows: [row] });
+    }
+  };
 
-  for (const [objNum, content] of sortedObjects) {
-    objectOffsets.set(objNum, byteOffset);
+  for (const [objNum, { gen, body }] of sortedObjects) {
+    addRow(objNum, { offset: byteOffset, gen });
 
-    const objHeader = encoder.encode(`${objNum} 0 obj\n`);
+    const objHeader = encoder.encode(`${objNum} ${gen} obj\n`);
     chunks.push(objHeader);
     byteOffset += objHeader.length;
 
-    if (typeof content === "string") {
+    const encrypt = options.encrypt;
+    const encryptString = encrypt
+      ? (data: Uint8Array): Uint8Array => encrypt(data, objNum, gen, "string")
+      : undefined;
+
+    if (typeof body === "string") {
       // Non-stream object
-      const contentBytes = encoder.encode(content + "\n");
+      const text = encryptString ? encryptStringsInContent(body, encryptString) : body;
+      const contentBytes = encoder.encode(text + "\n");
       chunks.push(contentBytes);
       byteOffset += contentBytes.length;
     } else {
       // Stream object: dict + stream data
-      let streamData = content.data;
-      const dict = content.dict;
+      let streamData = body.data;
+      const dict = body.dict;
 
       // Compress if beneficial and not already filtered
       if (streamData.length > 256 && !dict.toString().includes("/Filter")) {
@@ -737,9 +839,18 @@ export function buildIncremental(
         }
       }
 
+      const dictText = dict.toString();
+      const clearMetadata = options.encryptMetadata === false && isMetadataStreamDict(dictText);
+      if (encrypt && !clearMetadata) {
+        streamData = encrypt(streamData, objNum, gen, "stream");
+      }
       dict.set("Length", pdfNumber(streamData.length));
 
-      const dictBytes = encoder.encode(dict.toString() + "\n");
+      const finalDictText = dict.toString();
+      const dictBytes = encoder.encode(
+        (encryptString ? encryptStringsInContent(finalDictText, encryptString) : finalDictText) +
+          "\n"
+      );
       chunks.push(dictBytes);
       byteOffset += dictBytes.length;
 
@@ -763,31 +874,71 @@ export function buildIncremental(
   // --- Build the new xref section ---
   const xrefOffset = byteOffset;
 
-  // Group consecutive object numbers into subsections
-  const objNums = [...objectOffsets.keys()].sort((a, b) => a - b);
-  const subsections: Array<{ start: number; entries: Array<{ objNum: number; offset: number }> }> =
-    [];
-
-  for (const objNum of objNums) {
-    const last = subsections[subsections.length - 1];
-    if (last && objNum === last.start + last.entries.length) {
-      // Consecutive — extend current subsection
-      last.entries.push({ objNum, offset: objectOffsets.get(objNum)! });
-    } else {
-      // New subsection
-      subsections.push({
-        start: objNum,
-        entries: [{ objNum, offset: objectOffsets.get(objNum)! }]
-      });
+  // Trailer keys repeated from the original; /Size is the recomputed one
+  const trailerKeys: Array<[string, string]> = [];
+  for (const [key, value] of trailerEntries) {
+    if (key !== "Size") {
+      trailerKeys.push([key, value]);
     }
+  }
+
+  if (options.xrefStream) {
+    // ISO 32000-2 §7.5.8: an update to a file whose cross-reference data is a
+    // stream is itself written as a cross-reference stream, so readers that
+    // follow /Prev see one consistent kind of section. Its own number is the
+    // highest, so it extends or follows the last subsection.
+    addRow(xrefStreamObjNum, { offset: xrefOffset, gen: 0 });
+
+    let offsetWidth = 1;
+    while (offsetWidth < 8 && xrefOffset >= 2 ** (8 * offsetWidth)) {
+      offsetWidth++;
+    }
+    let genWidth = 1;
+    for (const sub of subsections) {
+      for (const row of sub.rows) {
+        if (row.gen > 0xff) {
+          genWidth = 2;
+        }
+      }
+    }
+    const rowWidth = 1 + offsetWidth + genWidth;
+    const rowCount = subsections.reduce((n, sub) => n + sub.rows.length, 0);
+    const rows = new Uint8Array(rowCount * rowWidth);
+    const writeBE = (at: number, width: number, value: number): void => {
+      for (let b = width - 1; b >= 0; b--) {
+        rows[at + b] = value % 256;
+        value = Math.floor(value / 256);
+      }
+    };
+    let pos = 0;
+    for (const sub of subsections) {
+      for (const row of sub.rows) {
+        rows[pos] = 1; // type 1: in-use, uncompressed
+        writeBE(pos + 1, offsetWidth, row.offset);
+        writeBE(pos + 1 + offsetWidth, genWidth, row.gen);
+        pos += rowWidth;
+      }
+    }
+
+    let dictStr = `<< /Type /XRef /Size ${newSize}`;
+    dictStr += ` /Index [${subsections.map(sub => `${sub.start} ${sub.rows.length}`).join(" ")}]`;
+    dictStr += ` /W [1 ${offsetWidth} ${genWidth}]`;
+    for (const [key, value] of trailerKeys) {
+      dictStr += ` /${key} ${value}`;
+    }
+    dictStr += ` /Prev ${oldXrefOffset} /Length ${rows.length} >>`;
+
+    chunks.push(encoder.encode(`${xrefStreamObjNum} 0 obj\n${dictStr}\nstream\n`));
+    chunks.push(rows);
+    chunks.push(encoder.encode(`\nendstream\nendobj\nstartxref\n${xrefOffset}\n%%EOF\n`));
+    return concatUint8Arrays([originalData, ...chunks]);
   }
 
   let xrefStr = "xref\n";
   for (const sub of subsections) {
-    xrefStr += `${sub.start} ${sub.entries.length}\n`;
-    for (const entry of sub.entries) {
-      const offsetStr = entry.offset.toString().padStart(10, "0");
-      xrefStr += `${offsetStr} 00000 n \n`;
+    xrefStr += `${sub.start} ${sub.rows.length}\n`;
+    for (const row of sub.rows) {
+      xrefStr += `${String(row.offset).padStart(10, "0")} ${String(row.gen).padStart(5, "0")} n \n`;
     }
   }
 
@@ -797,21 +948,7 @@ export function buildIncremental(
   // --- Build the new trailer ---
   let trailerStr = "trailer\n<<\n";
   trailerStr += `/Size ${newSize}\n`;
-
-  // Preserve original trailer keys: Root, Info, Encrypt, ID
-  for (const key of ["Root", "Info", "Encrypt", "ID"]) {
-    if (newTrailerEntries.has(key)) {
-      trailerStr += `/${key} ${newTrailerEntries.get(key)!}\n`;
-    } else if (originalTrailerEntries.has(key)) {
-      trailerStr += `/${key} ${originalTrailerEntries.get(key)!}\n`;
-    }
-  }
-
-  // Add any extra new trailer entries not already handled
-  for (const [key, value] of newTrailerEntries) {
-    if (key === "Root" || key === "Info" || key === "Encrypt" || key === "ID" || key === "Size") {
-      continue; // Already handled above
-    }
+  for (const [key, value] of trailerKeys) {
     trailerStr += `/${key} ${value}\n`;
   }
 
@@ -827,93 +964,4 @@ export function buildIncremental(
 
   // --- Concatenate: originalData + appended chunks ---
   return concatUint8Arrays([originalData, ...chunks]);
-}
-
-/**
- * Find the xref offset stored after the last `startxref` keyword in the PDF.
- */
-function findOriginalXrefOffset(data: Uint8Array): number {
-  // Scan backward from the end to find "startxref"
-  const keyword = "startxref";
-  const decoder = new TextDecoder("latin1");
-
-  // Search in the last 1024 bytes (%%EOF + startxref are typically near the end)
-  const searchStart = Math.max(0, data.length - 1024);
-  const tail = decoder.decode(data.subarray(searchStart));
-
-  const idx = tail.lastIndexOf(keyword);
-  if (idx < 0) {
-    throw new PdfStructureError("Could not find startxref in original PDF");
-  }
-
-  // Extract the number after "startxref"
-  const afterKeyword = tail.substring(idx + keyword.length).trim();
-  const match = afterKeyword.match(/^(\d+)/);
-  if (!match) {
-    throw new PdfStructureError("Invalid startxref offset in original PDF");
-  }
-
-  return parseInt(match[1], 10);
-}
-
-/**
- * Extract key trailer entries from the original PDF as serialized strings.
- * This is a lightweight scan — it doesn't fully parse the trailer, just
- * extracts the values we need for preservation.
- */
-function extractOriginalTrailerEntries(data: Uint8Array): Map<string, string> {
-  const entries = new Map<string, string>();
-  const decoder = new TextDecoder("latin1");
-
-  // Find the last "trailer" keyword — scan backward
-  const text = decoder.decode(data);
-
-  // Find the last trailer dict. For PDFs with incremental updates,
-  // we want the most recent (last) trailer.
-  const trailerIdx = text.lastIndexOf("trailer");
-  if (trailerIdx < 0) {
-    // Could be an xref stream PDF — no traditional trailer
-    return entries;
-  }
-
-  // Find the << >> dict after "trailer"
-  const afterTrailer = text.substring(trailerIdx + 7);
-  const dictStart = afterTrailer.indexOf("<<");
-  if (dictStart < 0) {
-    return entries;
-  }
-
-  // Find the matching >>
-  let depth = 0;
-  let dictEnd = -1;
-  for (let i = dictStart; i < afterTrailer.length - 1; i++) {
-    if (afterTrailer[i] === "<" && afterTrailer[i + 1] === "<") {
-      depth++;
-      i++;
-    } else if (afterTrailer[i] === ">" && afterTrailer[i + 1] === ">") {
-      depth--;
-      i++;
-      if (depth === 0) {
-        dictEnd = i + 1;
-        break;
-      }
-    }
-  }
-
-  if (dictEnd < 0) {
-    return entries;
-  }
-
-  const dictStr = afterTrailer.substring(dictStart, dictEnd);
-
-  // Extract known keys with a simple regex-based approach
-  for (const key of ["Root", "Info", "Encrypt", "ID", "Size"]) {
-    const keyPattern = new RegExp(`/${key}\\s+(.+?)(?=\\s*/[A-Z]|\\s*>>)`, "s");
-    const match = dictStr.match(keyPattern);
-    if (match) {
-      entries.set(key, match[1].trim());
-    }
-  }
-
-  return entries;
 }

@@ -6,6 +6,7 @@
  */
 
 import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "@csv/constants";
+import { CsvError } from "@csv/errors";
 // Import shared core functionality from parse/
 import type { ParseConfig } from "@csv/parse/config";
 import { createParseConfig, toScannerConfig } from "@csv/parse/config";
@@ -565,6 +566,42 @@ export class CsvParserStream extends Transform {
   }
 
   /**
+   * Fail early when the unfinished row already exceeds `maxRowBytes`.
+   *
+   * The completed-row check alone cannot bound memory: an unclosed quote (or a line that never
+   * ends) is never completed, so it would be buffered forever. Every UTF-16 code unit encodes
+   * to at least one UTF-8 byte, so a pending length above the limit proves the row is too
+   * large without measuring it — reading `.length` does not flatten the appended rope. Two
+   * code units of slack cover a line ending that has only partly arrived.
+   */
+  private pendingRowLimitError(pendingLength: number): CsvError | null {
+    const limit = this.parseConfig.maxRowBytes;
+    if (limit === undefined || pendingLength <= limit + 2) {
+      return null;
+    }
+    return new CsvError(`Row exceeds the maximum size of ${limit} bytes`);
+  }
+
+  /**
+   * Emit the rows this chunk completed, then fail if the unfinished row left behind is
+   * already over the limit. The completed rows go out first: they are valid, and the
+   * error belongs to the row after them. `callback` is called exactly once.
+   */
+  private finishChunk(
+    rows: Row[],
+    pendingLength: number,
+    callback: (error?: Error | null) => void
+  ): void {
+    const limitError = this.pendingRowLimitError(pendingLength);
+    if (!limitError) {
+      this.processPendingRows(rows, callback);
+      return;
+    }
+    // A consumer that aborted from its chunk callback asked for no more rows, not an error.
+    this.processPendingRows(rows, err => callback(err ?? (this.chunkAborted ? null : limitError)));
+  }
+
+  /**
    * Reset info state for next row (used when skipping rows or after processing)
    */
   private processBuffer(callback: (error?: Error | null) => void): void {
@@ -625,7 +662,7 @@ export class CsvParserStream extends Transform {
 
     // Scanner internally tracks unconsumed data - no need to reset
     // It will continue from where it left off on the next feed()
-    this.processPendingRows(pendingRows, callback);
+    this.finishChunk(pendingRows, this.scanner.pendingLength(), callback);
   }
 
   /**
@@ -868,13 +905,18 @@ export class CsvParserStream extends Transform {
     // Nothing has arrived that could end a line, so the buffer is left alone entirely —
     // touching it would flatten the rope built by appending. See fastModeLineEndPending.
     if (!this.fastModeLineEndPending) {
-      callback();
+      callback(this.pendingRowLimitError(this.buffer.length));
       return;
     }
 
     const completeEnd = this.getFastModeCompleteDataEnd(this.buffer);
     // If no complete line, wait for more data
     if (completeEnd === -1) {
+      const limitError = this.pendingRowLimitError(this.buffer.length);
+      if (limitError) {
+        callback(limitError);
+        return;
+      }
       // The buffer stays, so record that it holds no line ending and spare the next
       // chunk from searching it again. Backing off by one character short of the
       // longest line ending keeps a line ending that straddles the mark reachable —
@@ -935,7 +977,7 @@ export class CsvParserStream extends Transform {
       }
     }
 
-    this.processPendingRows(pendingRows, callback);
+    this.finishChunk(pendingRows, this.buffer.length, callback);
   }
 
   private buildRow(rawRow: string[], info?: RecordInfo): Row {
@@ -1080,7 +1122,7 @@ export class CsvParserStream extends Transform {
       const rawBytes = getUtf8ByteLength(raw);
       if (rawBytes > this.parseConfig.maxRowBytes) {
         callback(
-          new Error(`Row exceeds the maximum size of ${this.parseConfig.maxRowBytes} bytes`)
+          new CsvError(`Row exceeds the maximum size of ${this.parseConfig.maxRowBytes} bytes`)
         );
         return "error";
       }

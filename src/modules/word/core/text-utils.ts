@@ -13,7 +13,8 @@ import type {
   MathContent,
   Hyperlink,
   InsertedRun,
-  MovedToRun
+  MovedToRun,
+  SymbolContent
 } from "@word/types";
 
 // =============================================================================
@@ -67,6 +68,16 @@ export function extractRunText(run: Run): string {
     }
   }
   return text;
+}
+
+/**
+ * The character a `w:sym` stands for. `w:char` is a hexadecimal code point
+ * (often in the Private Use Area of a symbol font); an unparseable code yields
+ * an empty string rather than the raw hex digits.
+ */
+export function symbolText(symbol: SymbolContent): string {
+  const code = /^[0-9a-f]+$/i.test(symbol.char) ? parseInt(symbol.char, 16) : NaN;
+  return Number.isInteger(code) && code <= 0x10ffff ? String.fromCodePoint(code) : "";
 }
 
 // =============================================================================

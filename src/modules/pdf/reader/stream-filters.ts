@@ -16,7 +16,9 @@
 
 import { unzlibSync } from "@archive/compression/compress";
 import { inflateRaw } from "@archive/compression/deflate-fallback";
+import { ArchiveLimitError } from "@archive/core/errors";
 import { undoPngFilters } from "@pdf/core/png-filters";
+import { PdfLimitExceededError } from "@pdf/errors";
 import type { PdfDictValue } from "@pdf/reader/pdf-parser";
 import { dictGetNumber, isPdfDict, isPdfArray } from "@pdf/reader/pdf-parser";
 
@@ -25,9 +27,40 @@ import { dictGetNumber, isPdfDict, isPdfArray } from "@pdf/reader/pdf-parser";
 // =============================================================================
 
 /**
- * Decode stream data by applying the filter chain from the stream dictionary.
+ * Default ceiling on the decoded size of a single stream: 256 MiB.
+ *
+ * Large enough for any realistic page content or image (a 8000×8000 RGBA
+ * raster is 244 MiB), small enough that a few-KB "zip bomb" stream cannot
+ * exhaust the heap of a browser tab or a default Node process.
  */
-export function decodeStreamFilters(data: Uint8Array, dict: PdfDictValue): Uint8Array {
+const DEFAULT_MAX_DECODED_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Ceiling on the number of filters in one /Filter array.
+ *
+ * Real producers use one or two (e.g. `[/ASCII85Decode /FlateDecode]`);
+ * a long chain only serves to multiply decode work.
+ *
+ * This bounds repeated work (CPU), not memory. The byte limit applies to each
+ * filter's output separately, so it alone would let a stream run hundreds of
+ * passes that each stay under it — e.g. an ASCIIHex/ASCII85 chain re-expanding
+ * the data at every step. The two limits are independent and neither covers
+ * the other.
+ */
+const MAX_FILTER_CHAIN = 16;
+
+/**
+ * Decode stream data by applying the filter chain from the stream dictionary.
+ *
+ * @param maxBytes - Most bytes any single filter in the chain may produce.
+ * @throws PdfLimitExceededError when a filter's output exceeds `maxBytes`
+ * or the chain is longer than {@link MAX_FILTER_CHAIN}.
+ */
+export function decodeStreamFilters(
+  data: Uint8Array,
+  dict: PdfDictValue,
+  maxBytes = DEFAULT_MAX_DECODED_BYTES
+): Uint8Array {
   const filter = dict.get("Filter");
   if (filter === undefined || filter === null) {
     return data;
@@ -38,10 +71,15 @@ export function decodeStreamFilters(data: Uint8Array, dict: PdfDictValue): Uint8
   if (typeof filter === "string") {
     // Single filter
     const parms = isPdfDict(decodeParms) ? decodeParms : undefined;
-    return applyFilter(data, filter, parms);
+    return applyFilter(data, filter, parms, maxBytes);
   }
 
   if (isPdfArray(filter)) {
+    if (filter.length > MAX_FILTER_CHAIN) {
+      throw new PdfLimitExceededError(
+        `Stream filter chain has ${filter.length} filters; the limit is ${MAX_FILTER_CHAIN}`
+      );
+    }
     // Filter chain — apply in order
     let result = data;
     const parmsArray = isPdfArray(decodeParms) ? decodeParms : [];
@@ -49,7 +87,7 @@ export function decodeStreamFilters(data: Uint8Array, dict: PdfDictValue): Uint8
       const filterName = filter[i] as string;
       const parm = parmsArray[i];
       const parmDict = isPdfDict(parm) ? parm : undefined;
-      result = applyFilter(result, filterName, parmDict);
+      result = applyFilter(result, filterName, parmDict, maxBytes);
     }
     return result;
   }
@@ -57,27 +95,78 @@ export function decodeStreamFilters(data: Uint8Array, dict: PdfDictValue): Uint8
   return data;
 }
 
+function decodedTooLarge(filter: string, maxBytes: number): PdfLimitExceededError {
+  return new PdfLimitExceededError(
+    `Decoded ${filter} stream exceeds the limit of ${maxBytes} bytes (maxDecodedBytes)`
+  );
+}
+
+/**
+ * Output buffer for a decoder whose output size is not known up front. It
+ * grows geometrically, never past `maxBytes`, and throws the limit error
+ * before a write would cross it — so a hostile stream costs at most
+ * `maxBytes`, not the 8× of a boxed `number[]`.
+ */
+interface BoundedOutput {
+  /** Reserve `count` bytes and return the offset to write them at. */
+  reserve(count: number): number;
+  /** The live buffer; re-read after every `reserve`, which may replace it. */
+  readonly buffer: Uint8Array;
+  /** The bytes written so far. */
+  result(): Uint8Array;
+}
+
+function createBoundedOutput(filter: string, maxBytes: number, initial: number): BoundedOutput {
+  let buffer = new Uint8Array(Math.min(Math.max(initial, 64), maxBytes));
+  let length = 0;
+  return {
+    reserve(count: number): number {
+      const required = length + count;
+      if (required > maxBytes) {
+        throw decodedTooLarge(filter, maxBytes);
+      }
+      if (required > buffer.length) {
+        const grown = new Uint8Array(Math.min(Math.max(required, buffer.length * 2), maxBytes));
+        grown.set(buffer.subarray(0, length));
+        buffer = grown;
+      }
+      const at = length;
+      length = required;
+      return at;
+    },
+    get buffer() {
+      return buffer;
+    },
+    result: () => buffer.subarray(0, length)
+  };
+}
+
 // =============================================================================
 // Filter Application
 // =============================================================================
 
-function applyFilter(data: Uint8Array, filterName: string, parms?: PdfDictValue): Uint8Array {
+function applyFilter(
+  data: Uint8Array,
+  filterName: string,
+  parms: PdfDictValue | undefined,
+  maxBytes: number
+): Uint8Array {
   switch (filterName) {
     case "FlateDecode":
     case "Fl":
-      return decodeFlateDecode(data, parms);
+      return decodeFlateDecode(data, parms, maxBytes);
     case "ASCII85Decode":
     case "A85":
-      return decodeAscii85(data);
+      return decodeAscii85(data, maxBytes);
     case "ASCIIHexDecode":
     case "AHx":
-      return decodeAsciiHex(data);
+      return decodeAsciiHex(data, maxBytes);
     case "LZWDecode":
     case "LZW":
-      return decodeLzw(data, parms);
+      return decodeLzw(data, parms, maxBytes);
     case "RunLengthDecode":
     case "RL":
-      return decodeRunLength(data);
+      return decodeRunLength(data, maxBytes);
     case "DCTDecode":
     case "DCT":
       // JPEG data — return as-is (used for image XObjects)
@@ -105,20 +194,33 @@ function applyFilter(data: Uint8Array, filterName: string, parms?: PdfDictValue)
 // FlateDecode
 // =============================================================================
 
-function decodeFlateDecode(data: Uint8Array, parms?: PdfDictValue): Uint8Array {
+function decodeFlateDecode(
+  data: Uint8Array,
+  parms: PdfDictValue | undefined,
+  maxBytes: number
+): Uint8Array {
   if (data.length === 0) {
     return data;
   }
 
+  // The bound is handed to the inflater so a hostile stream stops as soon as
+  // it crosses it, instead of being fully materialised and measured after.
+  const bounded = { maxOutputLength: maxBytes };
   let decompressed: Uint8Array;
   try {
     // Try zlib (RFC 1950) first — has 2-byte header
-    decompressed = unzlibSync(data);
-  } catch {
+    decompressed = unzlibSync(data, bounded);
+  } catch (zlibErr) {
+    if (zlibErr instanceof ArchiveLimitError) {
+      throw decodedTooLarge("FlateDecode", maxBytes);
+    }
     try {
       // Fall back to raw deflate
-      decompressed = inflateRaw(data);
-    } catch {
+      decompressed = inflateRaw(data, maxBytes);
+    } catch (rawErr) {
+      if (rawErr instanceof ArchiveLimitError) {
+        throw decodedTooLarge("FlateDecode", maxBytes);
+      }
       // Last resort: return as-is
       return data;
     }
@@ -212,15 +314,22 @@ function undoPngPredictor(
 // ASCII85Decode
 // =============================================================================
 
-function decodeAscii85(data: Uint8Array): Uint8Array {
-  const output: number[] = [];
+function isPdfWhitespace(b: number): boolean {
+  return b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d || b === 0x0c || b === 0x00;
+}
+
+function decodeAscii85(data: Uint8Array, maxBytes: number): Uint8Array {
+  // Every input byte yields at most 4 output bytes ('z' → 4 zeros; a 5-char
+  // group → 4 bytes), so 4n bounds the output; the limit bounds it further.
+  const output = new Uint8Array(Math.min(4 * data.length, maxBytes + 4));
+  let outLen = 0;
+  const group = [0, 0, 0, 0, 0];
   let i = 0;
 
   while (i < data.length) {
     const b = data[i];
 
-    // Skip whitespace
-    if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d || b === 0x0c) {
+    if (isPdfWhitespace(b)) {
       i++;
       continue;
     }
@@ -230,70 +339,61 @@ function decodeAscii85(data: Uint8Array): Uint8Array {
       break;
     }
 
-    // Special 'z' character = four zero bytes
+    // Special 'z' character = four zero bytes (array is zero-initialised)
     if (b === 0x7a) {
-      output.push(0, 0, 0, 0);
+      if (outLen + 4 > maxBytes) {
+        throw decodedTooLarge("ASCII85Decode", maxBytes);
+      }
+      outLen += 4;
       i++;
       continue;
     }
 
     // Decode 5-character group into 4 bytes
-    const group: number[] = [];
-    while (group.length < 5 && i < data.length) {
+    let count = 0;
+    while (count < 5 && i < data.length) {
       const c = data[i];
       if (c === 0x7e) {
         break; // EOD
       }
-      if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d || c === 0x0c) {
-        i++;
-        continue;
-      }
-      if (c < 0x21 || c > 0x75) {
-        i++;
-        continue; // Invalid — skip
-      }
-      group.push(c - 0x21);
       i++;
+      if (c < 0x21 || c > 0x75) {
+        continue; // Whitespace or invalid — skip
+      }
+      group[count++] = c - 0x21;
     }
 
-    if (group.length === 0) {
+    if (count === 0) {
       break;
     }
 
     // Pad short final group with 'u' (84) values
-    const numBytes = group.length - 1;
-    while (group.length < 5) {
-      group.push(84);
+    const numBytes = count - 1;
+    for (let k = count; k < 5; k++) {
+      group[k] = 84;
     }
 
-    const value =
-      group[0] * 85 * 85 * 85 * 85 +
-      group[1] * 85 * 85 * 85 +
-      group[2] * 85 * 85 +
-      group[3] * 85 +
-      group[4];
+    if (outLen + numBytes > maxBytes) {
+      throw decodedTooLarge("ASCII85Decode", maxBytes);
+    }
 
-    const bytes = [
-      (value >>> 24) & 0xff,
-      (value >>> 16) & 0xff,
-      (value >>> 8) & 0xff,
-      value & 0xff
-    ];
-
+    const value = (((group[0] * 85 + group[1]) * 85 + group[2]) * 85 + group[3]) * 85 + group[4];
     for (let j = 0; j < numBytes; j++) {
-      output.push(bytes[j]);
+      output[outLen++] = (value >>> (24 - 8 * j)) & 0xff;
     }
   }
 
-  return new Uint8Array(output);
+  return output.subarray(0, outLen);
 }
 
 // =============================================================================
 // ASCIIHexDecode
 // =============================================================================
 
-function decodeAsciiHex(data: Uint8Array): Uint8Array {
-  const output: number[] = [];
+function decodeAsciiHex(data: Uint8Array, maxBytes: number): Uint8Array {
+  // Two hex digits per byte, plus one for an odd trailing digit: ceil(n/2).
+  const output = new Uint8Array(Math.min(Math.ceil(data.length / 2), maxBytes + 1));
+  let outLen = 0;
   let highNibble = -1;
 
   for (let i = 0; i < data.length; i++) {
@@ -304,11 +404,6 @@ function decodeAsciiHex(data: Uint8Array): Uint8Array {
       break;
     }
 
-    // Skip whitespace
-    if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d || b === 0x0c) {
-      continue;
-    }
-
     let val: number;
     if (b >= 0x30 && b <= 0x39) {
       val = b - 0x30;
@@ -317,32 +412,42 @@ function decodeAsciiHex(data: Uint8Array): Uint8Array {
     } else if (b >= 0x61 && b <= 0x66) {
       val = b - 0x61 + 10;
     } else {
-      continue;
+      continue; // Whitespace or invalid — skip
     }
 
     if (highNibble < 0) {
       highNibble = val;
     } else {
-      output.push((highNibble << 4) | val);
+      if (outLen >= maxBytes) {
+        throw decodedTooLarge("ASCIIHexDecode", maxBytes);
+      }
+      output[outLen++] = (highNibble << 4) | val;
       highNibble = -1;
     }
   }
 
   // Odd digit — pad with 0
   if (highNibble >= 0) {
-    output.push(highNibble << 4);
+    if (outLen >= maxBytes) {
+      throw decodedTooLarge("ASCIIHexDecode", maxBytes);
+    }
+    output[outLen++] = highNibble << 4;
   }
 
-  return new Uint8Array(output);
+  return output.subarray(0, outLen);
 }
 
 // =============================================================================
 // LZWDecode
 // =============================================================================
 
-function decodeLzw(data: Uint8Array, parms?: PdfDictValue): Uint8Array {
+function decodeLzw(
+  data: Uint8Array,
+  parms: PdfDictValue | undefined,
+  maxBytes: number
+): Uint8Array {
   const earlyChange = parms ? (dictGetNumber(parms, "EarlyChange") ?? 1) : 1;
-  const output: number[] = [];
+  const output = createBoundedOutput("LZWDecode", maxBytes, data.length * 4);
 
   // LZW bit reader
   let bitPos = 0;
@@ -408,9 +513,7 @@ function decodeLzw(data: Uint8Array, parms?: PdfDictValue): Uint8Array {
       break;
     }
 
-    for (let i = 0; i < entry.length; i++) {
-      output.push(entry[i]);
-    }
+    output.buffer.set(entry, output.reserve(entry.length));
 
     // Add new entry to table
     if (prevEntry !== null) {
@@ -430,7 +533,7 @@ function decodeLzw(data: Uint8Array, parms?: PdfDictValue): Uint8Array {
     prevEntry = entry;
   }
 
-  let result: Uint8Array = new Uint8Array(output);
+  let result = output.result();
 
   // Apply predictor if specified
   if (parms) {
@@ -447,8 +550,8 @@ function decodeLzw(data: Uint8Array, parms?: PdfDictValue): Uint8Array {
 // RunLengthDecode
 // =============================================================================
 
-function decodeRunLength(data: Uint8Array): Uint8Array {
-  const output: number[] = [];
+function decodeRunLength(data: Uint8Array, maxBytes: number): Uint8Array {
+  const output = createBoundedOutput("RunLengthDecode", maxBytes, data.length * 2);
   let i = 0;
 
   while (i < data.length) {
@@ -462,23 +565,20 @@ function decodeRunLength(data: Uint8Array): Uint8Array {
 
     if (length < 128) {
       // Copy (length + 1) literal bytes
-      const count = length + 1;
-      for (let j = 0; j < count && i < data.length; j++) {
-        output.push(data[i]);
-        i++;
-      }
+      // A truncated final run copies what is there
+      const literal = data.subarray(i, i + length + 1);
+      output.buffer.set(literal, output.reserve(literal.length));
+      i += literal.length;
     } else {
       // Repeat next byte (257 - length) times
-      const count = 257 - length;
       if (i < data.length) {
-        const byte = data[i];
+        const count = 257 - length;
+        const at = output.reserve(count);
+        output.buffer.fill(data[i], at, at + count);
         i++;
-        for (let j = 0; j < count; j++) {
-          output.push(byte);
-        }
       }
     }
   }
 
-  return new Uint8Array(output);
+  return output.result();
 }

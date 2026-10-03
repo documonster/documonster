@@ -61,6 +61,7 @@ import {
   resolvePartPath,
   resolveRelTarget
 } from "@word/reader/parse-utils";
+import { parsePartXml } from "@word/reader/part-xml";
 import {
   parseRunProperties,
   parseShading,
@@ -137,7 +138,7 @@ import type {
   ChartExContent,
   DocxDocumentType
 } from "@word/types";
-import { parseXml, findChild, textContent } from "@xml/dom";
+import { findChild, textContent } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
 // =============================================================================
@@ -1641,7 +1642,7 @@ function parseNotesXml(
   const savedField = ctx.field;
   ctx.field = createFieldState();
   try {
-    const doc = parseXml(xmlStr);
+    const doc = parsePartXml(xmlStr, ctx.securityPolicy.maxXmlDepth);
     const root = doc.root;
     const notes: { id: number; type?: NoteType; content: Paragraph[] }[] = [];
 
@@ -1700,7 +1701,7 @@ function parseNotesXml(
 // =============================================================================
 
 function parseHeaderFooterXml(xmlStr: string, ctx: ReaderContext): HeaderFooterContent {
-  return parseHeaderFooterRoot(parseXml(xmlStr).root, ctx);
+  return parseHeaderFooterRoot(parsePartXml(xmlStr, ctx.securityPolicy.maxXmlDepth).root, ctx);
 }
 
 function parseHeaderFooterRoot(root: XmlElement, ctx: ReaderContext): HeaderFooterContent {
@@ -1915,7 +1916,7 @@ function parseDocumentXml(
   sectionProperties?: SectionProperties;
   background?: DocumentBackground;
 } {
-  const doc = parseXml(xmlStr);
+  const doc = parsePartXml(xmlStr, ctx.securityPolicy.maxXmlDepth);
   const root = doc.root;
 
   // Parse background
@@ -2225,7 +2226,16 @@ async function _readDocxInner(
     entries.set(path, data);
   }
 
+  return readDocxEntries(entries, policy);
+}
+
+/** Build the document model from unzipped entries. */
+function readDocxEntries(
+  entries: Map<string, Uint8Array>,
+  policy: Required<WordSecurityPolicy>
+): DocxDocument {
   const decoder = utf8Decoder;
+  const depth = policy.maxXmlDepth;
   const consumedPaths = new Set<string>(["[Content_Types].xml"]);
 
   // Best-effort parse for non-critical parts (settings, numbering, styles,
@@ -2235,7 +2245,11 @@ async function _readDocxInner(
   const tryParse = <T>(fn: () => T): T | undefined => {
     try {
       return fn();
-    } catch {
+    } catch (error) {
+      // A resource limit is a verdict on the package, not a malformed part.
+      if (error instanceof DocxLimitExceededError) {
+        throw error;
+      }
       return undefined;
     }
   };
@@ -2245,7 +2259,7 @@ async function _readDocxInner(
   const contentTypeOverrides = new Map<string, string>();
   const contentTypeDefaults = new Map<string, string>();
   if (contentTypesXml) {
-    const ctDoc = parseXml(decoder.decode(contentTypesXml));
+    const ctDoc = parsePartXml(decoder.decode(contentTypesXml), depth);
     for (const child of ctDoc.root.children) {
       if (child.type !== "element") {
         continue;
@@ -2280,7 +2294,7 @@ async function _readDocxInner(
   let documentPartPath = "word/document.xml";
   const packageRelsXmlEarly = getText("_rels/.rels");
   if (packageRelsXmlEarly) {
-    const pkgRelsEarly = parseRelationships(packageRelsXmlEarly);
+    const pkgRelsEarly = parseRelationships(packageRelsXmlEarly, depth);
     for (const rel of pkgRelsEarly) {
       if (rel.type === RelType.OfficeDocument) {
         let target = rel.target;
@@ -2295,7 +2309,7 @@ async function _readDocxInner(
 
   const docRelsPath = getPartRelsPath(documentPartPath);
   const docRelsXml = getText(docRelsPath);
-  const docRels = docRelsXml ? parseRelationships(docRelsXml) : [];
+  const docRels = docRelsXml ? parseRelationships(docRelsXml, depth) : [];
   const _relMap = new Map(docRels.map(r => [r.id, r]));
 
   // Create reader context for this parse session (replaces module-level _session)
@@ -2313,14 +2327,14 @@ async function _readDocxInner(
   const stylesPath =
     resolveRelTarget(docRels, RelType.Styles, documentPartPath) ?? "word/styles.xml";
   const stylesXml = getText(stylesPath);
-  const stylesResult = stylesXml ? tryParse(() => parseStyles(stylesXml)) : undefined;
+  const stylesResult = stylesXml ? tryParse(() => parseStyles(stylesXml, depth)) : undefined;
 
   // Parse numbering
   const numberingPath =
     resolveRelTarget(docRels, RelType.Numbering, documentPartPath) ?? "word/numbering.xml";
   const numberingXml = getText(numberingPath);
   const numberingResult = numberingXml
-    ? tryParse(() => parseNumberingXml(numberingXml))
+    ? tryParse(() => parseNumberingXml(numberingXml, depth))
     : undefined;
 
   // Parse footnotes/endnotes — swap ctx.relMap to the notes part's own
@@ -2336,7 +2350,7 @@ async function _readDocxInner(
     const footnotesRelsXml = getText(footnotesRelsPath);
     const savedRelMap = ctx.relMap;
     if (footnotesRelsXml) {
-      const footnotesRels = parseRelationships(footnotesRelsXml);
+      const footnotesRels = parseRelationships(footnotesRelsXml, depth);
       ctx.relMap = new Map(footnotesRels.map(r => [r.id, r]));
       consumedPaths.add(footnotesRelsPath);
     } else {
@@ -2355,7 +2369,7 @@ async function _readDocxInner(
     const endnotesRelsXml = getText(endnotesRelsPath);
     const savedRelMap = ctx.relMap;
     if (endnotesRelsXml) {
-      const endnotesRels = parseRelationships(endnotesRelsXml);
+      const endnotesRels = parseRelationships(endnotesRelsXml, depth);
       ctx.relMap = new Map(endnotesRels.map(r => [r.id, r]));
       consumedPaths.add(endnotesRelsPath);
     } else {
@@ -2381,7 +2395,7 @@ async function _readDocxInner(
         const headerRelsXml = getText(headerRelsPath);
         const savedRelMap = ctx.relMap;
         if (headerRelsXml) {
-          const headerRels = parseRelationships(headerRelsXml);
+          const headerRels = parseRelationships(headerRelsXml, depth);
           const headerRelMap = new Map(headerRels.map(r => [r.id, r]));
           ctx.relMap = headerRelMap;
           consumedPaths.add(headerRelsPath);
@@ -2390,7 +2404,7 @@ async function _readDocxInner(
         }
         try {
           // Parse XML once, re-use for both header content and watermark detection
-          const headerRoot = parseXml(xml).root;
+          const headerRoot = parsePartXml(xml, depth).root;
           headers.set(rel.id, { content: parseHeaderFooterRoot(headerRoot, ctx), rId: rel.id });
           if (!watermark) {
             watermark = detectWatermarkFromRoot(headerRoot);
@@ -2410,7 +2424,7 @@ async function _readDocxInner(
         const footerRelsXml = getText(footerRelsPath);
         const savedRelMap = ctx.relMap;
         if (footerRelsXml) {
-          const footerRels = parseRelationships(footerRelsXml);
+          const footerRels = parseRelationships(footerRelsXml, depth);
           const footerRelMap = new Map(footerRels.map(r => [r.id, r]));
           ctx.relMap = footerRelMap;
           consumedPaths.add(footerRelsPath);
@@ -2431,24 +2445,26 @@ async function _readDocxInner(
   const settingsPath =
     resolveRelTarget(docRels, RelType.Settings, documentPartPath) ?? "word/settings.xml";
   const settingsXml = getText(settingsPath);
-  const settings = settingsXml ? tryParse(() => parseSettingsXml(settingsXml)) : undefined;
+  const settings = settingsXml ? tryParse(() => parseSettingsXml(settingsXml, depth)) : undefined;
 
   // Parse web settings
   const webSettingsPath =
     resolveRelTarget(docRels, RelType.WebSettings, documentPartPath) ?? "word/webSettings.xml";
   const webSettingsXml = getText(webSettingsPath);
-  const webSettings = webSettingsXml ? tryParse(() => parseWebSettings(webSettingsXml)) : undefined;
+  const webSettings = webSettingsXml
+    ? tryParse(() => parseWebSettings(webSettingsXml, depth))
+    : undefined;
 
   // Parse people
   const peoplePath =
     resolveRelTarget(docRels, RelType.People, documentPartPath) ?? "word/people.xml";
   const peopleXml = getText(peoplePath);
-  const people = peopleXml ? tryParse(() => parsePeople(peopleXml)) : undefined;
+  const people = peopleXml ? tryParse(() => parsePeople(peopleXml, depth)) : undefined;
 
   // Parse thumbnail (from package rels — reuse already-parsed rels)
   let thumbnail: DocxDocument["thumbnail"];
   if (packageRelsXmlEarly) {
-    const pkgRels = parseRelationships(packageRelsXmlEarly);
+    const pkgRels = parseRelationships(packageRelsXmlEarly, depth);
     for (const rel of pkgRels) {
       if (rel.type.endsWith("/thumbnail")) {
         // Target in package rels is relative to package root; may include or exclude leading slash
@@ -2482,13 +2498,13 @@ async function _readDocxInner(
   const fontTablePath =
     resolveRelTarget(docRels, RelType.FontTable, documentPartPath) ?? "word/fontTable.xml";
   const fontTableXml = getText(fontTablePath);
-  const fonts = fontTableXml ? tryParse(() => parseFontTableXml(fontTableXml)) : undefined;
+  const fonts = fontTableXml ? tryParse(() => parseFontTableXml(fontTableXml, depth)) : undefined;
 
   // Parse embedded fonts
   let embeddedFonts: EmbeddedFont[] | undefined;
   const fontTableRelsXml = getText("word/_rels/fontTable.xml.rels");
   if (fontTableRelsXml && fonts) {
-    const fontRels = parseRelationships(fontTableRelsXml);
+    const fontRels = parseRelationships(fontTableRelsXml, depth);
     const efs: EmbeddedFont[] = [];
     // Build rId → { key } map from font table
     const rIdToKey = new Map<string, string>();
@@ -2556,7 +2572,7 @@ async function _readDocxInner(
         consumedPaths.add(propsPath);
         const propsXml = getText(propsPath);
         if (propsXml) {
-          const propsDoc = parseXml(propsXml);
+          const propsDoc = parsePartXml(propsXml, depth);
           const dsItemEl = propsDoc.root;
           const id = dsItemEl.attributes["ds:itemID"];
           if (id) {
@@ -2593,11 +2609,13 @@ async function _readDocxInner(
 
   // Parse core properties
   const corePropsXml = getText("docProps/core.xml");
-  const coreProperties = corePropsXml ? tryParse(() => parseCoreProps(corePropsXml)) : undefined;
+  const coreProperties = corePropsXml
+    ? tryParse(() => parseCoreProps(corePropsXml, depth))
+    : undefined;
 
   // Parse app properties
   const appPropsXml = getText("docProps/app.xml");
-  const appProperties = appPropsXml ? tryParse(() => parseAppProps(appPropsXml)) : undefined;
+  const appProperties = appPropsXml ? tryParse(() => parseAppProps(appPropsXml, depth)) : undefined;
 
   // Parse comments — switch ctx.relMap to comments.xml.rels so any
   // hyperlinks/images referenced from inside comment paragraphs resolve
@@ -2609,7 +2627,7 @@ async function _readDocxInner(
     const commentsRelsXml = getText(commentsRelsPath);
     const savedRelMap = ctx.relMap;
     if (commentsRelsXml) {
-      const commentsRels = parseRelationships(commentsRelsXml);
+      const commentsRels = parseRelationships(commentsRelsXml, depth);
       ctx.relMap = new Map(commentsRels.map(r => [r.id, r]));
       consumedPaths.add(commentsRelsPath);
     } else {
@@ -2622,7 +2640,7 @@ async function _readDocxInner(
   // Merge in commentsExtended.xml data if present
   const commentsExtXml = getText("word/commentsExtended.xml");
   if (commentsExtXml && comments) {
-    const extMap = tryParse(() => parseCommentsExtendedXml(commentsExtXml));
+    const extMap = tryParse(() => parseCommentsExtendedXml(commentsExtXml, depth));
     if (extMap) {
       comments = comments.map(c => {
         const firstPara = c.content[0];
@@ -2645,14 +2663,14 @@ async function _readDocxInner(
   // Parse custom properties
   const customPropsXml = getText("docProps/custom.xml");
   const customProperties = customPropsXml
-    ? tryParse(() => parseCustomPropsXml(customPropsXml))
+    ? tryParse(() => parseCustomPropsXml(customPropsXml, depth))
     : undefined;
 
   // Parse theme
   const themePath =
     resolveRelTarget(docRels, RelType.Theme, documentPartPath) ?? "word/theme/theme1.xml";
   const themeXml = getText(themePath);
-  const theme = themeXml ? tryParse(() => parseThemeXml(themeXml)) : undefined;
+  const theme = themeXml ? tryParse(() => parseThemeXml(themeXml, depth)) : undefined;
 
   // Collect images from main document relationships
   const images: ImageDef[] = [];
@@ -2694,7 +2712,7 @@ async function _readDocxInner(
     if (!partRelsXml) {
       continue;
     }
-    const partRels = parseRelationships(decoder.decode(partRelsXml));
+    const partRels = parseRelationships(decoder.decode(partRelsXml), depth);
     for (const pRel of partRels) {
       if (pRel.type !== RelType.Image) {
         continue;
@@ -2740,7 +2758,7 @@ async function _readDocxInner(
       consumedPaths.add(chartPath);
       const chartXml = getText(chartPath);
       if (chartXml) {
-        const chart = tryParse(() => parseChartXml(chartXml));
+        const chart = tryParse(() => parseChartXml(chartXml, depth));
         if (chart) {
           chartRIdToChart.set(rel.id, chart);
         }
@@ -2761,7 +2779,7 @@ async function _readDocxInner(
       consumedPaths.add(chartExPath);
       const chartExXml = getText(chartExPath);
       if (chartExXml) {
-        const data = tryParse(() => parseChartExXml(chartExXml));
+        const data = tryParse(() => parseChartExXml(chartExXml, depth));
         const content: ChartExContent = {
           type: "chartEx",
           chartExXml,
@@ -2981,7 +2999,7 @@ async function _readDocxInner(
     const partRelsData = entries.get(partRelsPath);
     let relationships: OpaqueRelationship[] | undefined;
     if (partRelsData) {
-      const rels = parseRelationships(decoder.decode(partRelsData));
+      const rels = parseRelationships(decoder.decode(partRelsData), depth);
       relationships = rels.map(r => ({
         id: r.id,
         type: r.type,

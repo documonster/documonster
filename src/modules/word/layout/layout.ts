@@ -27,23 +27,26 @@ import {
   isFullWidthCodePoint,
   styledFontVariant
 } from "@utils/font-metrics";
-import { isHyperlink, isRun } from "@word/core/text-utils";
+import { symbolText } from "@word/core/text-utils";
 import {
   DEFAULT_FONT_SIZE_HALF_PT,
   DEFAULT_PAGE_HEIGHT_TWIPS,
   DEFAULT_PAGE_MARGIN_TWIPS,
   DEFAULT_PAGE_WIDTH_TWIPS,
   LINE_HEIGHT_FACTOR,
+  layoutRunProperties,
   SCRIPT_BASELINE_SHIFT_FACTOR,
   SCRIPT_FONT_SIZE_RATIO,
-  mergeRunProperties,
   minimumRowHeightPt,
   resolveCellMarginsTwips,
   resolveColumnWidthsTwips,
   resolveHeadingScale
 } from "@word/layout/layout-constants";
 import { resolveWordLineMetrics } from "@word/layout/line-metrics";
-import { resolveRunStyle, resolveStyle } from "@word/query/style-resolve";
+import { finalViewRuns, isHiddenRun } from "@word/query/final-view";
+import { openSection } from "@word/query/page-field";
+import { createStyleResolver } from "@word/query/style-resolver";
+import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   BodyContent,
   DocxDocument,
@@ -56,7 +59,6 @@ import type {
   ParagraphProperties,
   Run,
   RunProperties,
-  SectionBreakType,
   SectionColumns,
   SectionProperties,
   Table
@@ -179,6 +181,14 @@ interface ResolvedParagraph {
   readonly properties: ParagraphProperties | undefined;
   /** Run properties a run inherits when it declares none of its own. */
   readonly runProperties: RunProperties | undefined;
+  /** The runs the final view draws (hidden text dropped), with their effective properties. */
+  readonly runs: readonly LayoutRun[];
+}
+
+/** A visible run and its effective properties (`layoutRunProperties`). */
+interface LayoutRun {
+  readonly run: Run;
+  readonly props: RunProperties | undefined;
 }
 
 /**
@@ -188,22 +198,26 @@ interface ResolvedParagraph {
  * paragraphs through tables, footnotes and text boxes, and threading `doc`
  * through every one of those signatures buys nothing. Layout is fully
  * synchronous (no `await`), so a single shared slot is safe. The cache makes
- * the per-paragraph `resolveStyle` (which builds a style map on each call)
- * a once-per-paragraph cost.
+ * style resolution and the visible-run walk a once-per-paragraph cost.
  */
 let activeStyleCache: Map<Paragraph, ResolvedParagraph> | undefined;
-/** Memoised {@link effectiveRunProperties}, same lifetime as `activeStyleCache`. */
-let activeRunPropsCache: WeakMap<Run, RunProperties | undefined> | undefined;
-let activeDoc: DocxDocument | undefined;
+let activeStyles: StyleResolver | undefined;
 
-/** Effective properties for `para`, or the raw ones when no document is active. */
+/** Effective properties and visible runs for `para` in the active layout. */
 function resolved(para: Paragraph): ResolvedParagraph {
-  if (!activeDoc || !activeStyleCache) {
-    return { properties: para.properties, runProperties: undefined };
-  }
-  let hit = activeStyleCache.get(para);
+  const styles = activeStyles!;
+  const cache = activeStyleCache!;
+  let hit = cache.get(para);
   if (!hit) {
-    const style = resolveStyle(activeDoc, para);
+    const style = styles.paragraph(para);
+    const runProperties = style.runProperties;
+    const runs: LayoutRun[] = [];
+    for (const run of finalViewRuns(para.children)) {
+      const props = layoutRunProperties(styles, run, runProperties);
+      if (!isHiddenRun(props)) {
+        runs.push({ run, props });
+      }
+    }
     // `resolveStyle` drops `style` from the merged result (it is the selector,
     // not an inherited value). Keep it so callers can still recognise a
     // "Heading2" style name.
@@ -211,9 +225,10 @@ function resolved(para: Paragraph): ResolvedParagraph {
       properties: para.properties?.style
         ? { ...style.paragraphProperties, style: para.properties.style }
         : style.paragraphProperties,
-      runProperties: style.runProperties
+      runProperties,
+      runs
     };
-    activeStyleCache.set(para, hit);
+    cache.set(para, hit);
   }
   return hit;
 }
@@ -341,9 +356,7 @@ function scaledCharWidth(
  * The Latin and East Asian typefaces a run draws with.
  *
  * Takes the merged properties rather than the raw run so a caller that has
- * already resolved them — every caller does, to read the size and the
- * bold/italic flags — does not pay for a second `resolveRunStyle`, which
- * rebuilds a style map each time.
+ * already resolved them (every caller does) does not resolve them twice.
  *
  * `w:rFonts` names them separately and this pass read `w:ascii` only, so a run
  * carrying `w:eastAsia="宋体"` was measured against the Latin face — the
@@ -454,24 +467,6 @@ function measureRunMetricsByScript(
     : { ascent, descent };
 }
 
-/** Same character-style/direct-formatting merge the positioned pass uses. */
-function effectiveRunProperties(run: Run, inherited?: RunProperties): RunProperties | undefined {
-  // A run's inherited properties come from its own paragraph, so they are fixed
-  // for a given run within one call — the result can be memoised. Three
-  // consumers ask for it per run (largest size, text width, line extents), and
-  // `resolveRunStyle` rebuilds a style map on every call.
-  const cache = activeRunPropsCache;
-  if (cache?.has(run)) {
-    return cache.get(run);
-  }
-  const merged =
-    activeDoc && run.properties?.style
-      ? resolveRunStyle(activeDoc, run, inherited).runProperties
-      : mergeRunProperties(inherited, run.properties);
-  cache?.set(run, merged);
-  return merged;
-}
-
 /** Plain text content of a run. */
 function getRunText(run: Run): string {
   let text = "";
@@ -484,7 +479,12 @@ function getRunText(run: Run): string {
         text += "    "; // a tab counts as roughly 4 characters
         break;
       case "symbol":
-        text += " ";
+        text += symbolText(item);
+        break;
+      case "field":
+        // The cached result is what the positioned pass draws (bar a `PAGE`
+        // field in a header, which the paginator never measures).
+        text += item.cachedValue ?? "";
         break;
       case "noBreakHyphen":
       case "softHyphen":
@@ -531,7 +531,7 @@ function getEffectiveTextWidth(text: string): number {
  * Splits text at word boundaries (spaces, hyphens, CJK characters) and places
  * words on lines greedily. Accounts for tab stops at their actual positions.
  *
- * @param children - Paragraph children (runs and hyperlinks)
+ * @param runs - The paragraph's visible runs
  * @param firstLineWidth - Available width for the first line (twips)
  * @param subsequentWidth - Available width for subsequent lines (twips)
  * @param averageCharWidth - Average character width (twips)
@@ -539,14 +539,14 @@ function getEffectiveTextWidth(text: string): number {
  * @returns Number of lines the paragraph occupies
  */
 function computeLineCountWordBased(
-  children: readonly ParagraphChild[],
+  runs: readonly LayoutRun[],
   firstLineWidth: number,
   subsequentWidth: number,
   averageCharWidth: number,
-  tabStops?: readonly number[]
+  tabStops: readonly number[] | undefined
 ): number {
   // Collect all tokens (words, spaces, tabs, images) from all runs
-  const tokens = collectTokens(children);
+  const tokens = collectTokens(runs);
   if (tokens.length === 0) {
     return 1;
   }
@@ -611,17 +611,11 @@ type LayoutToken = WordToken | TabToken | BreakToken | ImageToken;
  * Collect tokens from paragraph children for line-breaking.
  * Splits text at break opportunities (spaces, after hyphens, between CJK chars).
  */
-function collectTokens(children: readonly ParagraphChild[]): LayoutToken[] {
+function collectTokens(runs: readonly LayoutRun[]): LayoutToken[] {
   const tokens: LayoutToken[] = [];
 
-  for (const child of children) {
-    if (isRun(child)) {
-      collectRunTokens(child, tokens);
-    } else if (isHyperlink(child)) {
-      for (const run of child.children) {
-        collectRunTokens(run, tokens);
-      }
-    }
+  for (const { run } of runs) {
+    collectRunTokens(run, tokens);
   }
 
   return tokens;
@@ -652,8 +646,19 @@ function collectRunTokens(run: Run, tokens: LayoutToken[]): void {
         tokens.push({ type: "image", width: w });
         break;
       }
-      case "symbol":
-        tokens.push({ type: "word", width: 1 });
+      case "symbol": {
+        const text = symbolText(item);
+        if (text.length > 0) {
+          tokens.push({ type: "word", width: getEffectiveTextWidth(text) });
+        }
+        break;
+      }
+      case "field":
+        for (const word of splitIntoWords(item.cachedValue ?? "")) {
+          if (word.length > 0) {
+            tokens.push({ type: "word", width: getEffectiveTextWidth(word) });
+          }
+        }
         break;
       case "noBreakHyphen":
         tokens.push({ type: "word", width: 1 });
@@ -763,18 +768,16 @@ function computeParagraphLineWidths(
  * Check if a paragraph has an inline image that contributes line height.
  * Returns the maximum image height in twips found in the paragraph, or 0.
  */
-function getInlineImageMaxHeight(children: readonly ParagraphChild[]): number {
+function getInlineImageMaxHeight(runs: readonly LayoutRun[]): number {
   let maxHeight = 0;
-  for (const child of children) {
-    if (isRun(child)) {
-      for (const item of child.content) {
-        if (item.type === "image") {
-          const img = item as { type: "image"; height?: number };
-          if (img.height) {
-            const h = emuToTwips(img.height);
-            if (h > maxHeight) {
-              maxHeight = h;
-            }
+  for (const { run } of runs) {
+    for (const item of run.content) {
+      if (item.type === "image") {
+        const img = item as { type: "image"; height?: number };
+        if (img.height) {
+          const h = emuToTwips(img.height);
+          if (h > maxHeight) {
+            maxHeight = h;
           }
         }
       }
@@ -786,14 +789,12 @@ function getInlineImageMaxHeight(children: readonly ParagraphChild[]): number {
 /**
  * Count footnote/endnote references in a paragraph.
  */
-function countFootnoteRefs(children: readonly ParagraphChild[]): number {
+function countFootnoteRefs(runs: readonly LayoutRun[]): number {
   let count = 0;
-  for (const child of children) {
-    if (isRun(child)) {
-      for (const item of child.content) {
-        if (item.type === "footnoteRef" || item.type === "endnoteRef") {
-          count++;
-        }
+  for (const { run } of runs) {
+    for (const item of run.content) {
+      if (item.type === "footnoteRef" || item.type === "endnoteRef") {
+        count++;
       }
     }
   }
@@ -803,27 +804,14 @@ function countFootnoteRefs(children: readonly ParagraphChild[]): number {
 /**
  * Count hard line break elements in a paragraph (type "break" without breakType "page"/"column").
  */
-function countBreakElements(children: readonly ParagraphChild[]): number {
+function countBreakElements(runs: readonly LayoutRun[]): number {
   let count = 0;
-  for (const child of children) {
-    if (isRun(child)) {
-      for (const item of child.content) {
-        if (item.type === "break") {
-          const breakType = (item as { breakType?: string }).breakType;
-          if (!breakType || breakType === "textWrapping") {
-            count++;
-          }
-        }
-      }
-    } else if (isHyperlink(child)) {
-      for (const run of child.children) {
-        for (const item of run.content) {
-          if (item.type === "break") {
-            const breakType = (item as { breakType?: string }).breakType;
-            if (!breakType || breakType === "textWrapping") {
-              count++;
-            }
-          }
+  for (const { run } of runs) {
+    for (const item of run.content) {
+      if (item.type === "break") {
+        const breakType = (item as { breakType?: string }).breakType;
+        if (!breakType || breakType === "textWrapping") {
+          count++;
         }
       }
     }
@@ -836,7 +824,7 @@ function countBreakElements(children: readonly ParagraphChild[]): number {
  * Each run is measured with its own font and size, then summed.
  */
 function measureParagraphTextWidth(
-  children: readonly ParagraphChild[],
+  runs: readonly LayoutRun[],
   defaultFontSize: number,
   measureFn: (
     text: string,
@@ -845,27 +833,14 @@ function measureParagraphTextWidth(
     bold?: boolean,
     italic?: boolean
   ) => number,
-  inheritedFont?: string,
-  inheritedProps?: RunProperties
+  inheritedFont?: string
 ): number {
   let totalWidth = 0;
-  for (const child of children) {
-    if (isRun(child)) {
-      const text = getRunText(child);
-      if (text.length > 0) {
-        const props = effectiveRunProperties(child, inheritedProps);
-        const fontSize = getRunLayoutFontSizePt(props, defaultFontSize);
-        totalWidth += measureRunByScript(text, props, inheritedFont, fontSize, measureFn);
-      }
-    } else if (isHyperlink(child)) {
-      for (const run of child.children) {
-        const text = getRunText(run);
-        if (text.length > 0) {
-          const props = effectiveRunProperties(run, inheritedProps);
-          const fontSize = getRunLayoutFontSizePt(props, defaultFontSize);
-          totalWidth += measureRunByScript(text, props, inheritedFont, fontSize, measureFn);
-        }
-      }
+  for (const { run, props } of runs) {
+    const text = getRunText(run);
+    if (text.length > 0) {
+      const fontSize = getRunLayoutFontSizePt(props, defaultFontSize);
+      totalWidth += measureRunByScript(text, props, inheritedFont, fontSize, measureFn);
     }
   }
   return totalWidth;
@@ -873,27 +848,15 @@ function measureParagraphTextWidth(
 
 /** The largest run font size in a paragraph. */
 function getMaxRunFontSize(
-  children: readonly ParagraphChild[],
+  runs: readonly LayoutRun[],
   defaultFontSize: number,
-  inheritedProps?: RunProperties,
   emptyParagraphSize = defaultFontSize
 ): number {
   let maxSize = 0;
-  for (const child of children) {
-    if (isRun(child)) {
-      const size =
-        getRunLayoutFontSizePt(effectiveRunProperties(child, inheritedProps), defaultFontSize) * 2;
-      if (size > maxSize) {
-        maxSize = size;
-      }
-    } else if (isHyperlink(child)) {
-      for (const run of child.children) {
-        const size =
-          getRunLayoutFontSizePt(effectiveRunProperties(run, inheritedProps), defaultFontSize) * 2;
-        if (size > maxSize) {
-          maxSize = size;
-        }
-      }
+  for (const { props } of runs) {
+    const size = getRunLayoutFontSizePt(props, defaultFontSize) * 2;
+    if (size > maxSize) {
+      maxSize = size;
     }
   }
   // No run to measure: the paragraph mark's own size decides the line box.
@@ -912,13 +875,11 @@ function getRunLayoutFontSizePt(
 }
 
 /** Whether any run in the paragraph contains a page break. */
-function hasPageBreakInRuns(children: readonly ParagraphChild[]): boolean {
-  for (const child of children) {
-    if (isRun(child)) {
-      for (const item of child.content) {
-        if (item.type === "break" && (item as { breakType?: string }).breakType === "page") {
-          return true;
-        }
+function hasPageBreakInRuns(runs: readonly LayoutRun[]): boolean {
+  for (const { run } of runs) {
+    for (const item of run.content) {
+      if (item.type === "break" && (item as { breakType?: string }).breakType === "page") {
+        return true;
       }
     }
   }
@@ -933,12 +894,9 @@ function hasPageBreakInRuns(children: readonly ParagraphChild[]): boolean {
  * already on. Treating any break as a break-before moved the whole paragraph and
  * carried that leading text onto the wrong page.
  */
-function hasLeadingPageBreak(children: readonly ParagraphChild[]): boolean {
-  for (const child of children) {
-    if (!isRun(child)) {
-      continue;
-    }
-    for (const item of child.content) {
+function hasLeadingPageBreak(runs: readonly LayoutRun[]): boolean {
+  for (const { run } of runs) {
+    for (const item of run.content) {
       if (item.type === "break") {
         if ((item as { breakType?: string }).breakType === "page") {
           return true;
@@ -956,13 +914,11 @@ function hasLeadingPageBreak(children: readonly ParagraphChild[]): boolean {
 }
 
 /** Whether any run in the paragraph contains a column break. */
-function hasColumnBreakInRuns(children: readonly ParagraphChild[]): boolean {
-  for (const child of children) {
-    if (isRun(child)) {
-      for (const item of child.content) {
-        if (item.type === "break" && (item as { breakType?: string }).breakType === "column") {
-          return true;
-        }
+function hasColumnBreakInRuns(runs: readonly LayoutRun[]): boolean {
+  for (const { run } of runs) {
+    for (const item of run.content) {
+      if (item.type === "break" && (item as { breakType?: string }).breakType === "column") {
+        return true;
       }
     }
   }
@@ -1021,14 +977,13 @@ function estimateParagraphHeight(
   // paginated to two, which is the number `NUMPAGES`, `PAGE`, TOC entries and
   // `PAGEREF` are all resolved from. Same expression as the positioned pass, from
   // `layout-constants`.
-  const headingScale = resolveHeadingScale(props, res.runProperties?.size);
+  const headingScale = resolveHeadingScale(activeStyles!, para, res.runProperties?.size);
 
   // Paragraph font size — a run that declares no size of its own inherits it
   // from the style chain.
   const fontSize = getMaxRunFontSize(
-    para.children,
+    res.runs,
     inheritedSize,
-    res.runProperties,
     paragraphMarkFontSize(props, inheritedSize)
   );
 
@@ -1040,12 +995,11 @@ function estimateParagraphHeight(
   const lineHeight = computeLineHeight(spacing, fontSize) * headingScale;
 
   // Check if inline images increase the effective line height
-  const imgMaxHeight = getInlineImageMaxHeight(para.children);
+  const imgMaxHeight = getInlineImageMaxHeight(res.runs);
   const effectiveLineHeight = estimateParagraphLineHeight(
-    para.children,
+    res.runs,
     inheritedSize,
     inheritedFont,
-    res.runProperties,
     lineHeight,
     imgMaxHeight,
     spacing?.lineRule === "exact",
@@ -1058,28 +1012,21 @@ function estimateParagraphHeight(
     // Precise measurement: first and subsequent lines can have different widths.
     const [firstLineW, subsequentW] = computeParagraphLineWidths(props, availableWidth);
     const textWidthPt = measureParagraphTextWidth(
-      para.children,
+      res.runs,
       inheritedSize,
       measureTextFn,
-      inheritedFont,
-      res.runProperties
+      inheritedFont
     );
     const textWidthTwips = textWidthPt * 20; // 1pt = 20 twips
 
     // Count hard line breaks in the paragraph
-    const breakCount = countBreakElements(para.children);
+    const breakCount = countBreakElements(res.runs);
 
     if (breakCount > 0) {
       // If there are hard breaks, use word-based line counting for accuracy
       const charWidth = scaledCharWidth(averageCharWidth, fontSize, defaultFontSize);
       const tabStops = props?.tabs?.map(t => t.position).filter((p): p is number => p != null);
-      lineCount = computeLineCountWordBased(
-        para.children,
-        firstLineW,
-        subsequentW,
-        charWidth,
-        tabStops
-      );
+      lineCount = computeLineCountWordBased(res.runs, firstLineW, subsequentW, charWidth, tabStops);
     } else if (textWidthTwips <= firstLineW) {
       lineCount = 1;
     } else {
@@ -1095,13 +1042,7 @@ function estimateParagraphHeight(
     // Extract tab stop positions from paragraph properties
     const tabStops = props?.tabs?.map(t => t.position).filter((p): p is number => p != null);
 
-    lineCount = computeLineCountWordBased(
-      para.children,
-      firstLineW,
-      subsequentW,
-      charWidth,
-      tabStops
-    );
+    lineCount = computeLineCountWordBased(res.runs, firstLineW, subsequentW, charWidth, tabStops);
   }
 
   return spaceBefore + lineCount * effectiveLineHeight + spaceAfter;
@@ -1117,10 +1058,9 @@ function estimateParagraphHeight(
  * keep-with-next and table pagination require.
  */
 function estimateParagraphLineHeight(
-  children: readonly ParagraphChild[],
+  runs: readonly LayoutRun[],
   inheritedSizeHalfPt: number,
   inheritedFont: string | undefined,
-  inheritedProps: RunProperties | undefined,
   nominalHeightTwips: number,
   imageHeightTwips: number,
   exact: boolean,
@@ -1128,9 +1068,8 @@ function estimateParagraphLineHeight(
 ): number {
   let ascent = 0;
   let descent = 0;
-  const visitRun = (run: Run) => {
+  for (const { run, props } of runs) {
     const text = getRunText(run);
-    const props = effectiveRunProperties(run, inheritedProps);
     const fontSize = getRunLayoutFontSizePt(props, inheritedSizeHalfPt);
     const metrics = measureRunMetricsByScript(
       text,
@@ -1151,13 +1090,6 @@ function estimateParagraphLineHeight(
           : 0;
     ascent = Math.max(ascent, metrics.ascent + shift);
     descent = Math.min(descent, metrics.descent + shift);
-  };
-  for (const child of children) {
-    if (isRun(child)) {
-      visitRun(child);
-    } else if (isHyperlink(child)) {
-      child.children.forEach(visitRun);
-    }
   }
   const metrics = resolveWordLineMetrics({
     nominalHeight: nominalHeightTwips / 20,
@@ -1364,18 +1296,15 @@ function collectBookmarks(
 export function layoutDocument(doc: DocxDocument, options?: LayoutOptions): LayoutResult {
   // Paginating must see the same effective properties the renderer sees, so
   // style resolution is active for the whole call. See `resolved`.
-  const previousDoc = activeDoc;
+  const previousStyles = activeStyles;
   const previousCache = activeStyleCache;
-  const previousRunProps = activeRunPropsCache;
-  activeDoc = doc;
+  activeStyles = createStyleResolver(doc);
   activeStyleCache = new Map();
-  activeRunPropsCache = new WeakMap();
   try {
     return layoutDocumentInner(doc, options);
   } finally {
-    activeDoc = previousDoc;
+    activeStyles = previousStyles;
     activeStyleCache = previousCache;
-    activeRunPropsCache = previousRunProps;
   }
 }
 
@@ -1401,6 +1330,9 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
   let currentPage = 1; // 1-based page number
   let currentSection = 0; // 0-based section index
   let sectionStartPage = 1; // first page of the current section
+  // The number `PAGE` shows on the current page; parity of odd/even breaks is
+  // judged on it (see `openSection`).
+  let shownPage = (findFirstSectionProps(body) ?? doc.sectionProperties)?.pageNumbering?.start ?? 1;
   let currentY = 0; // Y offset on the current page (twips from content-area top)
 
   // Multi-column state
@@ -1432,6 +1364,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
   /** Start a new page. */
   function newPage(): void {
     currentPage++;
+    shownPage++;
     currentY = 0;
     currentColumn = 0;
   }
@@ -1446,35 +1379,27 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
     }
   }
 
-  /** Start a new section. */
-  function newSection(
-    breakType: SectionBreakType,
-    nextSectionProps: SectionProperties | undefined
-  ): void {
+  /**
+   * Start a new section. Its own `w:type` decides the break and its numbering
+   * decides parity — see `openSection`, shared with the page layout.
+   */
+  function newSection(nextSectionProps: SectionProperties | undefined): void {
     // Record the page count of the section being closed.
     sectionPageCounts.push(currentPage - sectionStartPage + 1);
 
     currentSection++;
     const nextProps = nextSectionProps ?? doc.sectionProperties;
 
-    switch (breakType) {
+    switch (nextProps?.breakType ?? "nextPage") {
       case "nextPage":
-        newPage();
-        break;
-      case "evenPage": {
-        // Skip to the next even page.
-        newPage();
-        if (currentPage % 2 !== 0) {
-          newPage();
-        }
-        break;
-      }
+      case "evenPage":
       case "oddPage": {
-        // Skip to the next odd page.
+        const opening = openSection(shownPage, nextProps);
         newPage();
-        if (currentPage % 2 !== 1) {
+        if (opening.blankPage) {
           newPage();
         }
+        shownPage = opening.firstShown;
         break;
       }
       case "continuous": {
@@ -1647,7 +1572,14 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
         // Note: the paragraph carrying sectionProperties is the LAST paragraph of
         // its section, and those properties define that section's page setup.
         if (props?.sectionProperties) {
-          // Lay out the paragraph itself first.
+          // Lay out the paragraph itself first — after its own page break, if it
+          // asks for one: closing a section does not cancel `w:pageBreakBefore`.
+          const breaksBefore =
+            resolved(para).properties?.pageBreakBefore === true ||
+            hasLeadingPageBreak(resolved(para).runs);
+          if (breaksBefore && currentY > 0) {
+            newPage();
+          }
           const paraHeight = estimateParagraphHeight(
             para,
             effectiveWidth,
@@ -1660,11 +1592,10 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
           handleParagraphLayout(para, paraHeight, i, body);
           contentPages.push(currentPage);
           contentSections.push(currentSection);
-          forcedBreakBefore.push(false);
+          forcedBreakBefore.push(breaksBefore);
 
           // Then open the next section.
-          const nextSP = findNextSectionProps(body, i + 1) ?? doc.sectionProperties;
-          newSection(props.sectionProperties.breakType ?? "nextPage", nextSP);
+          newSection(findNextSectionProps(body, i + 1) ?? doc.sectionProperties);
           break;
         }
 
@@ -1675,17 +1606,18 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
         // paragraph; an internal break is handled by splitting it (see
         // `hasLeadingPageBreak`).
         const wantsPageBreak =
-          resolved(para).properties?.pageBreakBefore === true || hasLeadingPageBreak(para.children);
+          resolved(para).properties?.pageBreakBefore === true ||
+          hasLeadingPageBreak(resolved(para).runs);
         if (wantsPageBreak && currentY > 0) {
           newPage();
         }
         // An internal break still consumes the rest of the page, which the
         // height estimate has to allow for or the paginator will under-count
         // pages badly on break-heavy documents.
-        const hasInternalPageBreak = !wantsPageBreak && hasPageBreakInRuns(para.children);
+        const hasInternalPageBreak = !wantsPageBreak && hasPageBreakInRuns(resolved(para).runs);
 
         // column break: advance to the next column in a multi-column layout.
-        if (hasColumnBreakInRuns(para.children) && currentY > 0) {
+        if (hasColumnBreakInRuns(resolved(para).runs) && currentY > 0) {
           nextColumn();
         }
 
@@ -1785,9 +1717,8 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
     const inheritedSize = inheritedFontSize(res, defaultFontSize);
     const inheritedFont = inheritedFontName(res);
     const fontSize = getMaxRunFontSize(
-      para.children,
+      res.runs,
       inheritedSize,
-      undefined,
       paragraphMarkFontSize(props, inheritedSize)
     );
     const lineHeight = computeLineHeight(spacing, fontSize);
@@ -1797,7 +1728,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
     if (measureTextFn) {
       const [firstLineW, subsequentW] = computeParagraphLineWidths(props, effectiveWidth);
       const textWidthPt = measureParagraphTextWidth(
-        para.children,
+        res.runs,
         inheritedSize,
         measureTextFn,
         inheritedFont
@@ -1805,14 +1736,14 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
       const textWidthTwips = textWidthPt * 20;
 
       // Count hard line breaks in the paragraph
-      const breakCount = countBreakElements(para.children);
+      const breakCount = countBreakElements(res.runs);
 
       if (breakCount > 0) {
         // If there are hard breaks, use word-based line counting for accuracy
         const charWidth = scaledCharWidth(averageCharWidth, fontSize, defaultFontSize);
         const tabStops = props?.tabs?.map(t => t.position).filter((p): p is number => p != null);
         lineCount = computeLineCountWordBased(
-          para.children,
+          res.runs,
           firstLineW,
           subsequentW,
           charWidth,
@@ -1828,13 +1759,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
       const charWidth = scaledCharWidth(averageCharWidth, fontSize, defaultFontSize);
       const tabStops = props?.tabs?.map(t => t.position).filter((p): p is number => p != null);
 
-      lineCount = computeLineCountWordBased(
-        para.children,
-        firstLineW,
-        subsequentW,
-        charWidth,
-        tabStops
-      );
+      lineCount = computeLineCountWordBased(res.runs, firstLineW, subsequentW, charWidth, tabStops);
     }
 
     // Contextual spacing: collapse space between paragraphs with same style
@@ -1946,7 +1871,7 @@ function layoutDocumentInner(doc: DocxDocument, options?: LayoutOptions): Layout
    * Each footnote reference in a paragraph adds to the page's footnote area.
    */
   function reserveFootnoteSpace(para: Paragraph): void {
-    const fnCount = countFootnoteRefs(para.children);
+    const fnCount = countFootnoteRefs(resolved(para).runs);
     if (fnCount > 0) {
       // Add footnote separator once per page (tracked implicitly by adding space)
       const fnSpace = FOOTNOTE_SEPARATOR_HEIGHT + fnCount * FOOTNOTE_ENTRY_HEIGHT;

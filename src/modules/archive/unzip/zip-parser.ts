@@ -5,7 +5,7 @@
  */
 
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { FileTooLargeError } from "@archive/core/errors";
+import { ArchiveLimitError, FileTooLargeError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import {
   processEntryData,
@@ -14,6 +14,7 @@ import {
 } from "@archive/unzip/zip-extract-core";
 import type { ZipEntryRecord } from "@archive/zip-spec/zip-entry-info";
 import { parseZipArchiveFromBuffer } from "@archive/zip-spec/zip-parser-core";
+import { assertLimitOption } from "@utils/limits";
 
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -51,6 +52,32 @@ export interface ZipParseOptions {
 
   /** Password for encrypted entries */
   password?: string | Uint8Array;
+
+  /**
+   * Largest uncompressed size, in bytes, of a single entry extracted into memory.
+   * An entry declaring more is rejected before inflation; an entry that inflates
+   * past its declared size is stopped at that size (`EntrySizeMismatchError`).
+   * @default 536870912 (512 MiB)
+   */
+  maxEntrySize?: number;
+
+  /**
+   * Largest combined uncompressed size, in bytes, that `extractAll` /
+   * `extractAllSync` / `forEach` may produce (`ArchiveLimitError`). Each entry is
+   * already bounded by `maxEntrySize`; this bounds many entries together.
+   *
+   * Unbounded by default: what a process can afford to hold depends on the
+   * host, so no fixed default would be a real guarantee. Set it when reading
+   * untrusted archives.
+   */
+  maxTotalUncompressedSize?: number;
+
+  /**
+   * Most entries the archive may contain (`ArchiveLimitError`, limit
+   * `"maxEntries"`), checked before entry records are allocated. Unbounded by
+   * default; a 46-byte-per-record sanity check only rules out impossible counts.
+   */
+  maxEntries?: number;
 }
 
 /**
@@ -67,7 +94,8 @@ interface ZipArchiveParseResult {
 function parseZipArchive(data: Uint8Array, options: ZipParseOptions = {}): ZipArchiveParseResult {
   return parseZipArchiveFromBuffer(data, {
     decodeStrings: options.decodeStrings,
-    encoding: options.encoding
+    encoding: options.encoding,
+    maxEntries: options.maxEntries
   });
 }
 
@@ -77,6 +105,8 @@ function parseZipArchive(data: Uint8Array, options: ZipParseOptions = {}): ZipAr
 export interface ExtractOptions {
   /** Password for encrypted entries */
   password?: string | Uint8Array;
+  /** See {@link ZipParseOptions.maxEntrySize}. */
+  maxEntrySize?: number;
 }
 
 /**
@@ -94,7 +124,14 @@ async function extractEntryData(
   assertEntryExtractableInMemory(entry);
 
   const compressedData = readEntryCompressedData(data, entry);
-  return processEntryData(entry, compressedData, options.password);
+  return processEntryData(
+    entry,
+    compressedData,
+    options.password,
+    false,
+    true,
+    options.maxEntrySize
+  );
 }
 
 /**
@@ -112,7 +149,7 @@ function extractEntryDataSync(
   assertEntryExtractableInMemory(entry);
 
   const compressedData = readEntryCompressedData(data, entry);
-  return processEntryDataSync(entry, compressedData, options.password);
+  return processEntryDataSync(entry, compressedData, options.password, true, options.maxEntrySize);
 }
 
 /**
@@ -124,14 +161,37 @@ export class ZipParser {
   private entryMap: Map<string, ZipEntryRecord>;
   private password?: string | Uint8Array;
   private archiveComment: string;
+  private maxEntrySize: number | undefined;
+  private maxTotalUncompressedSize: number;
 
   constructor(data: Uint8Array | ArrayBuffer, options: ZipParseOptions = {}) {
+    assertLimitOption("maxEntrySize", options.maxEntrySize);
+    assertLimitOption("maxTotalUncompressedSize", options.maxTotalUncompressedSize);
     this.data = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
     const result = parseZipArchive(this.data, options);
     this.entries = result.entries;
     this.archiveComment = result.comment;
     this.entryMap = new Map(this.entries.map(e => [e.path, e]));
     this.password = options.password;
+    this.maxEntrySize = options.maxEntrySize;
+    this.maxTotalUncompressedSize = options.maxTotalUncompressedSize ?? Infinity;
+  }
+
+  /**
+   * Reject a bulk extraction whose declared sizes exceed the total limit.
+   * Each entry is inflated under a bound of its declared size, so the declared
+   * sum is an upper bound on what extraction can actually produce.
+   */
+  private assertTotalWithinLimit(): void {
+    let total = 0;
+    for (const entry of this.entries) {
+      if (entry.type !== "directory") {
+        total += entry.uncompressedSize;
+      }
+    }
+    if (total > this.maxTotalUncompressedSize) {
+      throw new ArchiveLimitError("maxTotalUncompressedSize", this.maxTotalUncompressedSize);
+    }
   }
 
   /**
@@ -261,7 +321,10 @@ export class ZipParser {
     if (!entry) {
       return null;
     }
-    return extractEntryData(this.data, entry, { password: password ?? this.password });
+    return extractEntryData(this.data, entry, {
+      password: password ?? this.password,
+      maxEntrySize: this.maxEntrySize
+    });
   }
 
   /**
@@ -278,7 +341,10 @@ export class ZipParser {
     if (!entry) {
       return null;
     }
-    return extractEntryDataSync(this.data, entry, { password: password ?? this.password });
+    return extractEntryDataSync(this.data, entry, {
+      password: password ?? this.password,
+      maxEntrySize: this.maxEntrySize
+    });
   }
 
   /**
@@ -288,8 +354,12 @@ export class ZipParser {
   async extractAll(password?: string | Uint8Array): Promise<Map<string, Uint8Array>> {
     const result = new Map<string, Uint8Array>();
     const pw = password ?? this.password;
+    this.assertTotalWithinLimit();
     for (const entry of this.entries) {
-      const data = await extractEntryData(this.data, entry, { password: pw });
+      const data = await extractEntryData(this.data, entry, {
+        password: pw,
+        maxEntrySize: this.maxEntrySize
+      });
       result.set(entry.path, data);
     }
     return result;
@@ -307,8 +377,12 @@ export class ZipParser {
   extractAllSync(password?: string | Uint8Array): Record<string, Uint8Array> {
     const result: Record<string, Uint8Array> = {};
     const pw = password ?? this.password;
+    this.assertTotalWithinLimit();
     for (const entry of this.entries) {
-      result[entry.path] = extractEntryDataSync(this.data, entry, { password: pw });
+      result[entry.path] = extractEntryDataSync(this.data, entry, {
+        password: pw,
+        maxEntrySize: this.maxEntrySize
+      });
     }
     return result;
   }
@@ -326,11 +400,24 @@ export class ZipParser {
     password?: string | Uint8Array
   ): Promise<void> {
     const pw = password ?? this.password;
+    let produced = 0;
     for (const entry of this.entries) {
       let dataPromise: Promise<Uint8Array> | null = null;
       const getData = () => {
         if (!dataPromise) {
-          dataPromise = extractEntryData(this.data, entry, { password: pw });
+          dataPromise = extractEntryData(this.data, entry, {
+            password: pw,
+            maxEntrySize: this.maxEntrySize
+          }).then(bytes => {
+            produced += bytes.length;
+            if (produced > this.maxTotalUncompressedSize) {
+              throw new ArchiveLimitError(
+                "maxTotalUncompressedSize",
+                this.maxTotalUncompressedSize
+              );
+            }
+            return bytes;
+          });
         }
         return dataPromise;
       };

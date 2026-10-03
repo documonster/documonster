@@ -379,13 +379,15 @@ describe("mergeDocuments", () => {
     const doc1: DocxDocument = { body: [Build.textParagraph("A")] };
     const doc2: DocxDocument = { body: [Build.textParagraph("B")] };
     const merged = Io.merge([doc1, doc2], { sectionBreak: "continuous" });
-    // A section break is carried by the sectPr of the LAST paragraph of the
-    // preceding section — not by an extra empty paragraph (which would render
-    // as a stray blank line / blank page in Word). So the body stays at 2
-    // paragraphs: "A" (now carrying the break) and "B".
+    // A section's properties are carried by the sectPr of its LAST paragraph —
+    // not by an extra empty paragraph (which would render as a stray blank
+    // line / blank page in Word). So the body stays at 2 paragraphs: "A"
+    // closes the first section, and the break type belongs to the section it
+    // opens (the second document's, here the final one).
     expect(merged.body.length).toBe(2);
     const firstPara = merged.body[0] as Paragraph;
-    expect(firstPara.properties?.sectionProperties?.breakType).toBe("continuous");
+    expect(firstPara.properties?.sectionProperties).toBeDefined();
+    expect(merged.sectionProperties?.breakType).toBe("continuous");
     // The break paragraph must still hold its original content.
     const secondPara = merged.body[1] as Paragraph;
     expect(secondPara.properties?.sectionProperties).toBeUndefined();

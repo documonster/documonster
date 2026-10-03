@@ -163,6 +163,7 @@ export const ARCHIVE_BROWSER_EXPORTS = [
   "EocdNotFoundError",
   "Crc32MismatchError",
   "EntrySizeMismatchError",
+  "ArchiveLimitError",
   "DecryptionError",
   "PasswordRequiredError",
   "RangeNotSupportedError",

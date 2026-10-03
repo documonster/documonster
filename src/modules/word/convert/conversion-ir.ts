@@ -81,6 +81,8 @@ export type SemanticBlock =
   | {
       readonly type: "list";
       readonly ordered: boolean;
+      /** First number of an ordered list, when it is not 1 (e.g. `w:startOverride`). */
+      readonly start?: number;
       readonly items: readonly SemanticListItem[];
     }
   | {

@@ -1932,28 +1932,27 @@ describe("PdfEditor — saveIncremental", () => {
   });
 
   it("should update form field values incrementally", async () => {
-    // Hand-craft a PDF with a text form field
-    const src = [
-      "%PDF-1.4",
-      "1 0 obj << /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >> endobj",
-      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
-      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >> endobj",
-      "4 0 obj << /Length 0 >> stream",
-      "endstream endobj",
-      "5 0 obj << /Type /Annot /Subtype /Widget /FT /Tx /T (username) /V (old) /Rect [72 700 200 720] >> endobj",
-      "xref",
-      "0 6",
-      "0000000000 65535 f ",
-      "0000000009 00000 n ",
-      "0000000100 00000 n ",
-      "0000000157 00000 n ",
-      "0000000280 00000 n ",
-      "0000000330 00000 n ",
-      "trailer << /Size 6 /Root 1 0 R >>",
-      "startxref",
-      "460",
-      "%%EOF"
-    ].join("\n");
+    // Hand-craft a PDF with a text form field. The xref offsets are computed:
+    // a wrong startxref would force recovery and, rightly, a full rewrite.
+    const bodies = [
+      "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] >> >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Annots [5 0 R] >>",
+      "<< /Length 0 >> stream\nendstream",
+      "<< /Type /Annot /Subtype /Widget /FT /Tx /T (username) /V (old) /Rect [72 700 200 720] >>"
+    ];
+    let src = "%PDF-1.4\n";
+    const offsets: number[] = [];
+    bodies.forEach((body, i) => {
+      offsets.push(src.length);
+      src += `${i + 1} 0 obj ${body} endobj\n`;
+    });
+    const xrefAt = src.length;
+    src += "xref\n0 6\n0000000000 65535 f \n";
+    for (const offset of offsets) {
+      src += `${String(offset).padStart(10, "0")} 00000 n \n`;
+    }
+    src += `trailer << /Size 6 /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF`;
     const originalPdf = new TextEncoder().encode(src);
 
     const editor = Pdf.Editor.load(originalPdf);

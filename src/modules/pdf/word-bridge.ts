@@ -43,7 +43,7 @@ import type { RenderLayoutOptions } from "@pdf/word-layout-to-pdf";
 import { renderLayoutDocumentToPdf } from "@pdf/word-layout-to-pdf";
 import { addCjkLanguageEvidence, concludeCjkLanguage, createCjkLanguageEvidence } from "@utils/cjk";
 import type { CjkLanguage, CjkLanguageEvidence } from "@utils/cjk";
-import { twipsToPt } from "@utils/units";
+import { symbolText } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type { FullLayoutOptions, PageGeometryOverride } from "@word/layout/layout-full";
 import { layoutDocumentFull, predictBulletGlyphs } from "@word/layout/layout-full";
@@ -176,7 +176,7 @@ export async function docxToPdf(
   // 1. Resolve effective page geometry. Section properties win unless the
   //    caller explicitly overrode an axis. Margins are independent: the
   //    section's margins are applied unless the caller overrode them.
-  const layoutOptions = mapToLayoutOptions(doc, options);
+  const layoutOptions = mapToLayoutOptions(options);
   const withFontMetrics = (manager: FontManager): FullLayoutOptions => ({
     ...layoutOptions,
     measureText: (text, fontName, fontSize, bold = false, italic = false) => {
@@ -394,7 +394,10 @@ function predictNonWinAnsiCodePoints(doc: DocxDocument): {
       if (content.type === "text") {
         addText(content.text);
       } else if (content.type === "symbol") {
-        addText(content.char);
+        // `char` is the hex code, not the character — predict what is drawn.
+        addText(symbolText(content));
+      } else if (content.type === "field" && content.cachedValue) {
+        addText(content.cachedValue);
       }
     }
   });
@@ -500,68 +503,25 @@ function collectLayoutNonWinAnsiCodePoints(layout: LayoutDocument): {
 // =============================================================================
 
 /**
- * Resolve the effective page geometry from `DocxToPdfOptions`. Caller-
- * supplied overrides win; otherwise the document's section properties
- * provide the value (with `pageSize.orientation === "landscape"`
- * triggering the conventional width/height swap when sectPr supplies
- * portrait-oriented numbers); otherwise the layout engine's defaults
- * (US Letter, 1-inch margins) take over.
+ * Map the caller's page-geometry overrides from `DocxToPdfOptions`.
  *
- * `headerMargin` / `footerMargin` are forwarded to the layout engine
- * as header / footer band offsets (ECMA-376 `pgMar.header` /
- * `pgMar.footer`). When omitted, the section's own header / footer
- * margins apply; when neither exists the engine default of 36pt (0.5")
- * is used.
+ * Only explicit options are forwarded. The page size and margins of each page
+ * otherwise come from *its own* section, which the layout engine reads per
+ * section; seeding the override from the document's final section forced that
+ * section's paper onto every page of a multi-section document. `w:pgSz` is
+ * taken literally — Word ignores `w:orient` when drawing the page, so no
+ * orientation swap is applied (checked against Word's PDF export).
  */
-function mapToLayoutOptions(
-  doc: DocxDocument,
-  options: DocxToPdfOptions | undefined
-): FullLayoutOptions {
-  const sectProps = doc.sectionProperties;
-
-  // Section page size, applying the orientation swap so a landscape
-  // sectPr written with portrait numerics still ends up wide.
-  let sectionPageWidthPt: number | undefined;
-  let sectionPageHeightPt: number | undefined;
-  if (sectProps?.pageSize) {
-    sectionPageWidthPt = twipsToPt(sectProps.pageSize.width);
-    sectionPageHeightPt = twipsToPt(sectProps.pageSize.height);
-    if (sectProps.pageSize.orientation === "landscape") {
-      [sectionPageWidthPt, sectionPageHeightPt] = [sectionPageHeightPt, sectionPageWidthPt];
-    }
-  }
-
-  const sectionMarginTopPt =
-    sectProps?.margins?.top != null ? twipsToPt(sectProps.margins.top) : undefined;
-  const sectionMarginBottomPt =
-    sectProps?.margins?.bottom != null ? twipsToPt(sectProps.margins.bottom) : undefined;
-  const sectionMarginLeftPt =
-    sectProps?.margins?.left != null ? twipsToPt(sectProps.margins.left) : undefined;
-  const sectionMarginRightPt =
-    sectProps?.margins?.right != null ? twipsToPt(sectProps.margins.right) : undefined;
-
+function mapToLayoutOptions(options: DocxToPdfOptions | undefined): FullLayoutOptions {
   const pageGeometry: PageGeometryOverride = {
-    pageWidth: options?.pageWidth ?? sectionPageWidthPt,
-    pageHeight: options?.pageHeight ?? sectionPageHeightPt,
-    marginTop: options?.marginTop ?? sectionMarginTopPt,
-    marginBottom: options?.marginBottom ?? sectionMarginBottomPt,
-    marginLeft: options?.marginLeft ?? sectionMarginLeftPt,
-    marginRight: options?.marginRight ?? sectionMarginRightPt,
-    // Header / footer offsets: only forward an explicit caller value.
-    // Leaving these undefined lets the layout engine fall back to the
-    // section's `pgMar.header` / `pgMar.footer` (then the 36pt default).
+    pageWidth: options?.pageWidth,
+    pageHeight: options?.pageHeight,
+    marginTop: options?.marginTop,
+    marginBottom: options?.marginBottom,
+    marginLeft: options?.marginLeft,
+    marginRight: options?.marginRight,
     headerMargin: options?.headerMargin,
     footerMargin: options?.footerMargin
   };
-
-  const layoutOpts: Mutable<FullLayoutOptions> = {};
-  // Only attach pageGeometry when at least one axis is actually
-  // overridden; otherwise the layout engine should apply its
-  // section-property fallbacks unchanged.
-  if (Object.values(pageGeometry).some(v => v !== undefined)) {
-    layoutOpts.pageGeometry = pageGeometry;
-  }
-  return layoutOpts;
+  return Object.values(pageGeometry).some(v => v !== undefined) ? { pageGeometry } : {};
 }
-
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };

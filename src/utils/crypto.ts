@@ -31,6 +31,22 @@ export function sha256(input: Uint8Array): Uint8Array {
   return new Uint8Array(crypto.hash("sha256", input, "buffer"));
 }
 
+/**
+ * SHA-384 hash function (FIPS 180-4).
+ * @returns 48-byte digest
+ */
+export function sha384(input: Uint8Array): Uint8Array {
+  return new Uint8Array(crypto.hash("sha384", input, "buffer"));
+}
+
+/**
+ * SHA-512 hash function (FIPS 180-4).
+ * @returns 64-byte digest
+ */
+export function sha512(input: Uint8Array): Uint8Array {
+  return new Uint8Array(crypto.hash("sha512", input, "buffer"));
+}
+
 // =============================================================================
 // Generic hash
 // =============================================================================

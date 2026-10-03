@@ -515,7 +515,21 @@ export function addNumberedList(
     });
   }
 
-  const numId = _ensureNumberingInstance(s, numAbsId);
+  // Each call is a list of its own. Word counts per numbering instance and
+  // continues across interruptions — even across instances that share an
+  // abstract definition — so reusing one instance numbered a second list on
+  // from the first (1, 2, … 3, 4). A fresh instance whose `w:startOverride`
+  // restates the level's start makes the restart explicit in the file, so
+  // Word, the layout and every converter number it from the start.
+  const numId = s.nextNumId++;
+  const start = s.abstractNumberings
+    .find(a => a.abstractNumId === numAbsId)
+    ?.levels.find(l => l.level === level)?.start;
+  s.numberingInstances.push({
+    numId,
+    abstractNumId: numAbsId,
+    overrides: [{ level, startOverride: start ?? 1 }]
+  });
 
   for (const item of items) {
     if (typeof item === "string") {

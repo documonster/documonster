@@ -7,6 +7,8 @@
 import { extractParagraphText } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type { DocxVisitor } from "@word/core/walker";
+import { resolveHeadingLevel } from "@word/query/heading";
+import { indexStyles } from "@word/query/style-resolve";
 import type {
   DocxDocument,
   Paragraph,
@@ -120,29 +122,29 @@ export function countWords(doc: DocxDocument): number {
 /**
  * Extract the heading outline from a document.
  *
- * Matches paragraphs whose style is `Heading1` through `Heading9` (case-insensitive),
- * or whose `outlineLevel` property is set (0-8).
+ * Uses the same rule as the converters, layout and the TOC field
+ * ({@link resolveHeadingLevel}): the paragraph's effective outline level —
+ * direct `w:outlineLvl`, else inherited through the style's `basedOn` chain,
+ * with level 9 meaning body text — falling back to the built-in
+ * `Heading1`…`Heading9` styles only when nothing in the chain sets one.
+ *
+ * The built-in `Title` style is not part of the outline and is excluded, as
+ * Word's own TOC (`\o`) excludes it.
  */
 export function getHeadings(doc: DocxDocument): DocumentHeading[] {
   const out: DocumentHeading[] = [];
+  const styles = indexStyles(doc);
   doc.body.forEach((block, i) => {
     if (block.type !== "paragraph") {
       return;
     }
-    const style = block.properties?.style;
-    const styleMatch = style ? /^Heading\s*(\d)$/i.exec(style) : null;
-    let level: number | undefined;
-    if (styleMatch) {
-      level = parseInt(styleMatch[1], 10);
-    } else if (block.properties?.outlineLevel !== undefined && block.properties.outlineLevel < 9) {
-      level = block.properties.outlineLevel + 1;
-    }
-    if (level !== undefined && level >= 1 && level <= 9) {
+    const heading = resolveHeadingLevel(doc, block, styles);
+    if (heading?.kind === "heading") {
       out.push({
-        level,
+        level: heading.level,
         text: paragraphText(block),
         paragraphIndex: i,
-        style
+        style: block.properties?.style
       });
     }
   });

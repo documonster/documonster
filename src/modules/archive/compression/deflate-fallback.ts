@@ -11,8 +11,9 @@
  * - Chrome < 103
  */
 
-import { ArchiveError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
 import { concatUint8Arrays } from "@utils/binary";
+import { assertLimitOption } from "@utils/limits";
 
 // ============================================================================
 // DEFLATE Decompression (Full implementation)
@@ -234,20 +235,29 @@ class BitReader {
  * Decompress DEFLATE data (raw format, no zlib header)
  *
  * @param data - Compressed data in deflate-raw format
+ * @param maxOutputLength - Optional output bound; decoding stops with a
+ *   `ArchiveLimitError` before the output buffer grows past it
  * @returns Decompressed data
  */
-export function inflateRaw(data: Uint8Array): Uint8Array {
+export function inflateRaw(data: Uint8Array, maxOutputLength?: number): Uint8Array {
   const reader = new BitReader(data);
   // Output accumulator. DEFLATE has no length prefix, so we grow a typed array
   // geometrically instead of pushing into a `number[]` (which boxes every byte
   // at ~8x the memory and forces a final full copy). Seed with a heuristic
   // based on the compressed size; deflate ratios on OOXML/text are commonly
   // 3-5x, so 4x is a reasonable starting capacity that avoids most regrowths.
-  let output = new Uint8Array(Math.max(64, data.length * 4));
+  assertLimitOption("maxOutputLength", maxOutputLength);
+  const limit = maxOutputLength ?? Infinity;
+  // Never larger than the bound; with a positive bound never empty, so the
+  // doubling below always makes progress (a zero bound throws before growing).
+  let output = new Uint8Array(Math.min(Math.max(64, data.length * 4), limit));
   let outLen = 0;
 
   const ensureCapacity = (additional: number): void => {
     const required = outLen + additional;
+    if (required > limit) {
+      throw new ArchiveLimitError("maxOutputLength", limit);
+    }
     if (required <= output.length) {
       return;
     }
@@ -255,6 +265,7 @@ export function inflateRaw(data: Uint8Array): Uint8Array {
     while (capacity < required) {
       capacity *= 2;
     }
+    capacity = Math.min(capacity, limit);
     const grown = new Uint8Array(capacity);
     grown.set(output.subarray(0, outLen));
     output = grown;

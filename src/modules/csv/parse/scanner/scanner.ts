@@ -1222,6 +1222,10 @@ export function createScanner(config?: Partial<ScannerConfig>): Scanner {
 
     getBuffer(): string {
       return state.buffer.slice(state.position);
+    },
+
+    pendingLength(): number {
+      return state.buffer.length - state.position;
     }
   };
 }

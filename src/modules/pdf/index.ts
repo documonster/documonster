@@ -128,7 +128,7 @@ export type {
   RadioGroupOptions,
   PdfSignatureOptions
 } from "@pdf/builder/document-builder";
-export type { LoadOptions } from "@pdf/builder/pdf-editor";
+export type { LoadOptions, EditorSaveOptions, EditorSignOptions } from "@pdf/builder/pdf-editor";
 /** What `page.getContentStream()` returns. */
 export type { PdfContentStream } from "@pdf/core/pdf-stream";
 
@@ -158,4 +158,12 @@ export type {
 export { createPdfDrawSurface } from "@pdf/render/draw-surface";
 export type { DrawSurfaceRect, PdfClipTarget, PdfDrawPage } from "@pdf/render/draw-surface";
 
-export { PdfError, PdfRenderError, PdfFontError, PdfStructureError, isPdfError } from "@pdf/errors";
+export {
+  PdfError,
+  PdfRenderError,
+  PdfFontError,
+  PdfStructureError,
+  PdfLimitExceededError,
+  PdfSignatureInvalidationError,
+  isPdfError
+} from "@pdf/errors";
