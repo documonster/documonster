@@ -481,6 +481,55 @@ describe("DEFLATE Fallback", () => {
   });
 
   describe("interoperability with Node.js zlib", () => {
+    /**
+     * zlib rejects an incomplete Huffman code ("invalid literal/lengths set"), and so does every browser's
+     * DecompressionStream. The length limiting that caps codes at 15 bits used to leave the code incomplete whenever
+     * the tree came out deeper than that — a worksheet of a few MB was enough — and only this library's own lenient
+     * inflater could read the result back. Fibonacci-weighted bytes force the deepest trees there are.
+     */
+    it("produces codes zlib accepts when the Huffman tree is deeper than 15 bits", () => {
+      const fibonacci = [1, 1];
+      while (fibonacci.length < 40) {
+        fibonacci.push(fibonacci[fibonacci.length - 1] + fibonacci[fibonacci.length - 2]);
+      }
+      let seed = 7;
+      const random = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32;
+      const inputs: Uint8Array[] = [];
+      for (const symbols of [20, 30, 40]) {
+        const total = fibonacci.slice(0, symbols).reduce((a, b) => a + b, 0);
+        const scale = 400_000 / total;
+        const bytes: number[] = [];
+        fibonacci.slice(0, symbols).forEach((weight, symbol) => {
+          for (let k = Math.max(1, Math.round(weight * scale)); k > 0; k--) {
+            bytes.push(symbol * 6);
+          }
+        });
+        for (let i = bytes.length - 1; i > 0; i--) {
+          const j = Math.floor(random() * (i + 1));
+          [bytes[i], bytes[j]] = [bytes[j], bytes[i]];
+        }
+        inputs.push(Uint8Array.from(bytes));
+      }
+      // A worksheet: long repeated runs, which also stretches the length and distance trees.
+      inputs.push(
+        new TextEncoder().encode(
+          Array.from(
+            { length: 60_000 },
+            (_, i) => `<row r="${i}"><c r="A${i}" t="s"><v>${i % 997}</v></c></row>`
+          ).join("")
+        )
+      );
+      for (const input of inputs) {
+        for (const level of [1, 6, 9]) {
+          const compressed = deflateRawCompressed(input, level);
+          expect(Buffer.compare(inflateRawSync(compressed), Buffer.from(input))).toBe(0);
+          const deflater = new SyncDeflater(level);
+          const streamed = Buffer.concat([deflater.write(input), deflater.finish()]);
+          expect(Buffer.compare(inflateRawSync(streamed), Buffer.from(input))).toBe(0);
+        }
+      }
+    });
+
     it("should decompress zlib output correctly for various data sizes", () => {
       const sizes = [1, 10, 100, 1000, 10000, 50000];
 

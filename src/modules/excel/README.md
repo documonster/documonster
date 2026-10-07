@@ -2401,7 +2401,7 @@ for await (const worksheet of reader) {
 A streamed cell is read by the same code as `Workbook.read`, so rich text, formula results of every type, `t="d"`
 dates and dynamic arrays come out as they do when loading. `<row r>` and `<c r>` may be omitted, as ECMA-376 allows; a
 missing one follows the previous row or cell, and a present one that is not a valid reference to its own row is an
-error in both readers. Three differences come from reading forward:
+error in both readers. Four differences come from reading forward:
 
 - **A shared formula's cells carry their formula text.** A loaded cell derives it from the group's master on demand;
   a stream has released the master by then, so each cell is given `formula` (slid to its own address) alongside
@@ -2409,6 +2409,8 @@ error in both readers. Three differences come from reading forward:
 - **Hyperlinks arrive with the end of the sheet, not on the cell.** `<hyperlinks>` follows `<sheetData>`, so the rows
   have been emitted before any link is known, and attaching them would mean holding the whole sheet. With
   `hyperlinks: "cache"`, read them from the worksheet once its rows are done (see below).
+- **Each worksheet is read before the next one arrives.** Breaking out of a sheet's rows skips the rest of it, and a
+  worksheet kept and read after the loop has moved past it throws rather than returning nothing.
 - **A shared-formula cell that precedes its group's master is an error.** Its formula is only known once the master
   is read, and by then the cell has been emitted. `Workbook.read` handles such a file.
 

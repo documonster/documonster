@@ -815,81 +815,46 @@ function buildCodeLengths(freqs: Uint32Array, maxBits: number): Uint8Array {
   }
   extractDepths(root, 0);
 
-  // --- Length limiting using the zlib bl_count redistribution algorithm ---
-  // Count code lengths at each bit depth
+  // --- Length limiting (zlib's gen_bitlen overflow handling) ---
+  //
+  // A Huffman tree over 286 symbols can be deeper than DEFLATE's 15 bits. Clamping the deep leaves to `maxBits`
+  // over-subscribes the code; it is then repaired one unit at a time by turning a leaf at the deepest length below
+  // `maxBits` into a node with two children one level down, and removing one leaf at `maxBits`. That keeps the number
+  // of leaves and lowers the Kraft sum by exactly one, so the code ends exactly complete — which zlib requires: an
+  // incomplete literal/length code is "invalid literal/lengths set", and every browser's DecompressionStream is zlib.
+  // The previous repair overshot and padded with phantom codes, which took real symbols' places and left the code
+  // incomplete: only this library's lenient inflater could read it back.
   const blCount = new Uint16Array(maxBits + 1);
-
   for (let i = 0; i < n; i++) {
     if (codeLens[i] > 0) {
-      if (codeLens[i] > maxBits) {
-        blCount[maxBits]++;
-        codeLens[i] = maxBits;
-      } else {
-        blCount[codeLens[i]]++;
-      }
+      blCount[Math.min(codeLens[i], maxBits)]++;
     }
   }
-
-  // Check Kraft inequality: sum of 2^(maxBits - len) must equal 2^maxBits
+  const target = 1 << maxBits;
   let kraft = 0;
   for (let bits = 1; bits <= maxBits; bits++) {
     kraft += blCount[bits] << (maxBits - bits);
   }
-  const target = 1 << maxBits;
-
   if (kraft === target) {
-    return codeLens; // Already valid
+    return codeLens;
   }
-
-  // Redistribute to satisfy Kraft's inequality.
-  // Strategy: move symbols from shorter lengths to maxBits until balanced.
-  // Each symbol moved from length `bits` to `maxBits` reduces kraft by
-  // (2^(maxBits-bits) - 1) — we remove a large weight and add a weight of 1.
   while (kraft > target) {
-    // Find a code length < maxBits that has symbols we can push down.
-    // Start from maxBits-1 to minimize the damage per move.
     let bits = maxBits - 1;
-    while (bits > 0 && blCount[bits] === 0) {
+    while (blCount[bits] === 0) {
       bits--;
     }
-    if (bits === 0) {
-      break; // Can't redistribute further
-    }
-    // Move one symbol from length `bits` to length `maxBits`
     blCount[bits]--;
-    blCount[maxBits]++;
-    // Kraft change: removed 2^(maxBits-bits), added 2^0 = 1
-    kraft -= (1 << (maxBits - bits)) - 1;
+    blCount[bits + 1] += 2;
+    blCount[maxBits]--;
+    kraft--;
   }
 
-  // If kraft < target (under-allocated), add dummy codes at maxBits.
-  // This can happen when we overshoot during redistribution.
-  while (kraft < target) {
-    blCount[maxBits]++;
-    kraft++;
-  }
-
-  // Reassign code lengths to symbols (preserve relative order: longer
-  // codes go to less frequent symbols, matching the Huffman property).
-  // Sort symbols by their original code length (longest first), then by
-  // frequency (rarest first) for same length.
-  const symbolsByLen: Array<{ sym: number; origLen: number; freq: number }> = [];
-  for (let i = 0; i < n; i++) {
-    if (codeLens[i] > 0) {
-      symbolsByLen.push({ sym: i, origLen: codeLens[i], freq: freqs[i] });
-    }
-  }
-  symbolsByLen.sort((a, b) => b.origLen - a.origLen || a.freq - b.freq);
-
-  // Assign new lengths from the bl_count distribution
-  codeLens.fill(0);
-  let symIdx = 0;
+  // Hand the lengths out again, longest to the rarest symbols, as the Huffman tree would have.
+  const bySymbolRarity = activeSymbols.slice().sort((a, b) => a.freq - b.freq || b.sym - a.sym);
+  let next = 0;
   for (let bits = maxBits; bits >= 1; bits--) {
     for (let count = blCount[bits]; count > 0; count--) {
-      if (symIdx < symbolsByLen.length) {
-        codeLens[symbolsByLen[symIdx].sym] = bits;
-        symIdx++;
-      }
+      codeLens[bySymbolRarity[next++].sym] = bits;
     }
   }
 

@@ -12,7 +12,7 @@
 import { FileTooLargeError } from "@archive/core/errors";
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
-import { ExcelFileError } from "@excel/errors";
+import { ExcelFileError, ExcelStreamStateError } from "@excel/errors";
 import type { Hyperlink } from "@excel/stream/hyperlink-reader";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
@@ -199,6 +199,14 @@ interface ReadableCrossPlatform {
 export interface WorkbookReaderOptions {
   worksheets?: "emit" | "ignore";
   sharedStrings?: "cache" | "emit" | "ignore";
+  /**
+   * What to do with each worksheet's hyperlink relationships.
+   *
+   * `"ignore"` (the default) skips them. `"cache"` reads them, so a worksheet reader's `hyperlinks` can be resolved
+   * through `getHyperlinkTarget`. `"emit"` raises a `hyperlinks` event carrying a `HyperlinkReader`: `read()` reads it
+   * after the listeners have run, and iterating the workbook reads it for you. A caller of `parse()` must `read()` it
+   * before asking for the next event, as with a worksheet.
+   */
   hyperlinks?: "cache" | "emit" | "ignore";
   styles?: "cache" | "ignore";
   entries?: "emit" | "ignore";
@@ -246,6 +254,82 @@ function boundedPart(entry: ZipEntry, limit: number): Transform {
   });
   entry.on("error", (err: Error) => bounded.destroy(err));
   return entry.pipe(bounded);
+}
+
+/**
+ * A part handed to a reader the caller drives.
+ *
+ * The caller is done with it when they ask for the next event, and its source is released then: a ZIP entry has to be
+ * consumed before the archive can move to the next one, and a spooled sheet's file is deleted. Reading a part only
+ * after moving past it never worked — the read stalled — so a reader whose part was released unread says so instead.
+ */
+export interface HandedOutPart {
+  readonly chunks: AsyncIterable<Uint8Array | string>;
+  /**
+   * Called when the caller asks for the next event. Says what is left: nothing, the whole part (never started), or
+   * the rest of it (left early with a `break`).
+   */
+  finish(): "nothing" | "all" | "rest";
+  /** Read and discard whatever is left, through the same iterator the reader used. */
+  drain(): Promise<void>;
+}
+
+export function handOut(source: AsyncIterable<Uint8Array | string>, what: string): HandedOutPart {
+  let state: "unread" | "reading" | "done" | "left" | "skipped" = "unread";
+  const iterator = source[Symbol.asyncIterator]();
+  async function* chunks(): AsyncGenerator<Uint8Array | string> {
+    if (state === "skipped") {
+      throw new ExcelStreamStateError(
+        `read ${what}`,
+        "the workbook reader had already moved past it; read each part before asking for the next"
+      );
+    }
+    state = "reading";
+    try {
+      // Not `yield* source`: a caller leaving early must not close the underlying iterator, because what it has not
+      // read still has to be drained through it — see `drain`.
+      for (let next = await iterator.next(); !next.done; next = await iterator.next()) {
+        yield next.value;
+      }
+      state = "done";
+    } finally {
+      if (state !== "done") {
+        state = "left";
+      }
+    }
+  }
+  return {
+    chunks: chunks(),
+    finish() {
+      if (state === "unread") {
+        state = "skipped";
+        return "all";
+      }
+      return state === "left" ? "rest" : "nothing";
+    },
+    async drain() {
+      while (!(await iterator.next()).done) {
+        // discarded
+      }
+    }
+  };
+}
+
+/** Let the archive move past a ZIP part the caller did not read to the end. */
+async function releasePart(
+  entry: ZipEntry,
+  part: HandedOutPart,
+  viaStream: boolean
+): Promise<void> {
+  const left = part.finish();
+  if (left === "all" && !viaStream) {
+    // Untouched: the unzipper can skip its compressed bytes without inflating them, as for any part not asked for.
+    entry.autodrain();
+  } else if (left !== "nothing") {
+    // Partly read, or behind a stream that already holds some of it: read the rest through the reader's own iterator,
+    // the path a full read takes, rather than switching the entry to a skip half-way.
+    await part.drain();
+  }
 }
 
 /** Constructor type for WorksheetReader/HyperlinkReader */
@@ -456,7 +540,9 @@ export abstract class WorkbookReaderBase<
             await (value as TWorksheetReader & { read(): Promise<void> }).read();
             break;
           case "hyperlinks":
+            // Read here as a worksheet is: the archive cannot move past the part until it has been consumed.
             this.emit(eventType, value);
+            await (value as THyperlinkReader & { read(): Promise<void> }).read();
             break;
         }
       }
@@ -471,6 +557,10 @@ export abstract class WorkbookReaderBase<
     for await (const { eventType, value } of this.parse()) {
       if (eventType === "worksheet") {
         yield value as TWorksheetReader;
+      } else if (eventType === "hyperlinks") {
+        // This iterator yields worksheets only, so nothing else can consume the part, and the archive cannot move
+        // past it until something does.
+        await (value as THyperlinkReader & { read(): Promise<void> }).read();
       }
     }
   }
@@ -991,6 +1081,7 @@ export abstract class WorkbookReaderBase<
     });
     stream.pipe(zip);
 
+    const emitWorksheets = this.options.worksheets === "emit";
     for await (const entry of iterateStream(zip)) {
       let sheetNo;
       const normalizedPath = normalizeZipPath(entry.path);
@@ -1043,20 +1134,26 @@ export abstract class WorkbookReaderBase<
               break;
           }
 
-          sheetNo = getXlsbWorksheetNo(normalizedPath)?.toString();
+          // A part the caller has not asked for is not opened at all: it falls through to `autodrain`. One that is handed
+          // out is drained once the caller moves past it — see `handOut`.
+          sheetNo = emitWorksheets ? getXlsbWorksheetNo(normalizedPath)?.toString() : undefined;
           if (sheetNo) {
             // The same prerequisite test the XML branch makes, for the same reason: a cell record holds an index into
             // the shared-string table rather than a string, so a sheet that arrives first has to be spooled and come
             // back later. `_storeWaitingWorksheet` is shared.
             if (this._xlsbSharedStrings !== undefined && !!this._xlsbWorkbook) {
-              yield* this._parseXlsbWorksheet(iterateStream(entry), sheetNo);
+              const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
+              yield* this._parseXlsbWorksheet(part.chunks, sheetNo);
+              await releasePart(entry, part, false);
               continue;
             }
             yield { eventType: "waiting-worksheet", sheetNo, entry };
             continue;
           }
 
-          sheetNo = getWorksheetNoFromWorksheetPath(normalizedPath)?.toString();
+          sheetNo = emitWorksheets
+            ? getWorksheetNoFromWorksheetPath(normalizedPath)?.toString()
+            : undefined;
           if (sheetNo) {
             // Performance: only wait for sharedStrings when they are actually needed.
             // Also require workbook.xml to be parsed so worksheet name, id, and state
@@ -1066,7 +1163,9 @@ export abstract class WorkbookReaderBase<
               !!this.model &&
               (this.options.sharedStrings !== "cache" || !!this.sharedStrings);
             if (hasPrerequisites) {
-              yield* this._parseWorksheet(iterateStream(entry), sheetNo);
+              const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
+              yield* this._parseWorksheet(part.chunks, sheetNo);
+              await releasePart(entry, part, false);
               continue;
             } else {
               yield { eventType: "waiting-worksheet", sheetNo, entry };
@@ -1075,11 +1174,14 @@ export abstract class WorkbookReaderBase<
           }
 
           sheetNo = getWorksheetNoFromWorksheetRelsPath(normalizedPath)?.toString();
-          if (sheetNo) {
-            yield* this._parseHyperlinks(
-              iterateStream(boundedPart(entry, this._maxEntrySize)),
-              sheetNo
-            );
+          if (
+            sheetNo &&
+            (this.options.hyperlinks === "cache" || this.options.hyperlinks === "emit")
+          ) {
+            const source = boundedPart(entry, this._maxEntrySize);
+            const part = handOut(iterateStream(source), `the hyperlinks of sheet ${sheetNo}`);
+            yield* this._parseHyperlinks(part.chunks, sheetNo);
+            await releasePart(entry, part, true);
             continue;
           }
           break;
@@ -1157,14 +1259,18 @@ class WorkbookReader extends WorkbookReaderBase<
     waitingWorksheets: WaitingWorksheet[]
   ): AsyncIterableIterator<WorksheetReadyEvent<WorksheetReader>> {
     for (const ws of waitingWorksheets) {
-      const iterator = (async function* () {
-        for (const chunk of ws.data) {
-          yield chunk;
-        }
-      })();
+      const part = handOut(
+        (async function* () {
+          yield* ws.data;
+        })(),
+        `worksheet ${ws.sheetNo}`
+      );
       yield* ws.isXlsb
-        ? this._parseXlsbWorksheet(iterator, ws.sheetNo)
-        : this._parseWorksheet(iterator, ws.sheetNo);
+        ? this._parseXlsbWorksheet(part.chunks, ws.sheetNo)
+        : this._parseWorksheet(part.chunks, ws.sheetNo);
+      // Released as the Node variant's spool file is, so a sheet read out of order fails the same way on both.
+      part.finish();
+      ws.data.length = 0;
     }
   }
 }

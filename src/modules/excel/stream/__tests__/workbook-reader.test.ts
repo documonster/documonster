@@ -1,3 +1,5 @@
+import { zip } from "@archive/create-archive";
+import { extractAll } from "@archive/unzip/extract";
 import { cellGetValue } from "@excel/core/cell";
 import type { RowData } from "@excel/core/row";
 import { rowCellCount } from "@excel/core/row";
@@ -5,6 +7,7 @@ import type { WorkbookData } from "@excel/core/workbook-core";
 import { rowGetCell } from "@excel/core/worksheet";
 import { Cell, Workbook, Worksheet } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
+import type { WorkbookReaderOptions } from "@excel/stream/workbook-reader.browser";
 import { describe, it, expect } from "vitest";
 
 // =============================================================================
@@ -692,5 +695,148 @@ describe("WorkbookReader", () => {
       expect(dynamicFormula).toBeDefined();
       expect(dynamicFormula.isDynamicArray).toBe(true);
     });
+  });
+});
+
+/**
+ * The archive cannot move to its next entry until the current one has been consumed. A part the reader opened and
+ * nobody read stopped the whole read, silently — with the default options, on any sheet with a few thousand
+ * hyperlinks. Each case below stalled before the fix: the unread data has to be more than the stream buffers hold.
+ */
+describe("WorkbookReader never stalls on a part left unread", () => {
+  /** Two sheets of `rows` x `cols`, a hyperlink on every row, as `Workbook.toBuffer` lays the package out. */
+  async function twoSheets(rows: number, cols: number): Promise<Uint8Array> {
+    const wb = Workbook.create();
+    for (const name of ["First", "Second"]) {
+      const ws = Workbook.addWorksheet(wb, name);
+      for (let row = 1; row <= rows; row++) {
+        Cell.setValue(ws, row, 1, {
+          text: `${name}${row}`,
+          hyperlink: `https://example.com/${row}`
+        });
+        for (let col = 2; col <= cols; col++) {
+          Cell.setValue(ws, row, col, row);
+        }
+      }
+    }
+    return Workbook.toBuffer(wb);
+  }
+
+  /**
+   * The same package laid out as Excel writes one — worksheets after the shared strings, so each streams straight
+   * through instead of being spooled, and the reader is handed the live archive entry.
+   */
+  async function excelOrdered(buffer: Uint8Array): Promise<Uint8Array> {
+    const entries = [...(await extractAll(buffer))].filter(([, file]) => file.type !== "directory");
+    const rank = (name: string) =>
+      /worksheets\/_rels/.test(name) ? 2 : /worksheets\//.test(name) ? 1 : 0;
+    entries.sort((a, b) => rank(a[0]) - rank(b[0]));
+    const archive = zip();
+    for (const [name, file] of entries) {
+      archive.add(name, file.data);
+    }
+    return archive.bytes();
+  }
+
+  const ROWS = 5000;
+  const expectedSum = (ROWS * (ROWS + 1)) / 2;
+  /** Built once: each is a second or two to write, and no test changes it. */
+  const fixtures = new Map<string, Promise<Uint8Array>>();
+  function fixture(key: string, build: () => Promise<Uint8Array>): Promise<Uint8Array> {
+    let built = fixtures.get(key);
+    if (built === undefined) {
+      built = build();
+      fixtures.set(key, built);
+    }
+    return built;
+  }
+  const small = () => fixture("small", () => twoSheets(ROWS, 2));
+  const smallExcelOrder = () => fixture("small-excel", async () => excelOrdered(await small()));
+
+  /** Sum of every row's second cell, per sheet. */
+  async function sums(buffer: Uint8Array, options: WorkbookReaderOptions): Promise<number[]> {
+    const result: number[] = [];
+    for await (const ws of new WorkbookReader(buffer, options)) {
+      let sum = 0;
+      for await (const row of ws) {
+        sum += cellGetValue(rowGetCell(row as RowData, 2)) as number;
+      }
+      result.push(sum);
+    }
+    return result;
+  }
+
+  it.each<WorkbookReaderOptions>([
+    {},
+    { hyperlinks: "ignore" },
+    { hyperlinks: "cache" },
+    { hyperlinks: "emit" }
+  ])(
+    "reads every sheet with %j",
+    async options => {
+      expect(await sums(await small(), options)).toEqual([expectedSum, expectedSum]);
+    },
+    20_000
+  );
+
+  it("reads emitted hyperlinks through read()", async () => {
+    const reader = new WorkbookReader(await small(), { hyperlinks: "emit" });
+    let links = 0;
+    let rows = 0;
+    reader.on("hyperlinks", (hyperlinks: { on(event: "hyperlink", fn: () => void): void }) =>
+      hyperlinks.on("hyperlink", () => links++)
+    );
+    reader.on("worksheet", (ws: { on(event: "row", fn: () => void): void }) =>
+      ws.on("row", () => rows++)
+    );
+    await reader.read();
+    expect([rows, links]).toEqual([2 * ROWS, 2 * ROWS]);
+  }, 20_000);
+
+  it.each([
+    ["as written", small],
+    ["in Excel's order", smallExcelOrder]
+  ])(
+    "skips worksheets with worksheets: 'ignore', %s",
+    async (_order, load) => {
+      const reader = new WorkbookReader(await load(), { worksheets: "ignore" });
+      const events: string[] = [];
+      for await (const event of reader.parse()) {
+        events.push(event.eventType);
+      }
+      expect(events).not.toContain("worksheet");
+    },
+    20_000
+  );
+
+  it("drains the rest of a sheet left early, and reads the next one whole", async () => {
+    const rows = 3000;
+    let firstRows = 0;
+    let secondSum = 0;
+    for await (const ws of new WorkbookReader(await excelOrdered(await twoSheets(rows, 100)), {})) {
+      for await (const row of ws) {
+        if (ws.name === "First") {
+          firstRows++;
+          break;
+        }
+        secondSum += cellGetValue(rowGetCell(row as RowData, 2)) as number;
+      }
+    }
+    expect(firstRows).toBe(1);
+    expect(secondSum).toBe((rows * (rows + 1)) / 2);
+  }, 30_000);
+
+  it("says so when a sheet is read after the reader moved past it, rather than stalling", async () => {
+    const wb = Workbook.create();
+    Cell.setValue(Workbook.addWorksheet(wb, "Small"), "A1", 42);
+    const sheets: AsyncIterable<unknown>[] = [];
+    for await (const ws of new WorkbookReader(await Workbook.toBuffer(wb), {})) {
+      sheets.push(ws);
+    }
+    await expect(async () => {
+      for await (const _row of sheets[0]) {
+        // unreachable
+      }
+    }).rejects.toThrow("moved past it");
   });
 });

@@ -15,7 +15,8 @@ import type {
 } from "@excel/stream/workbook-reader.browser";
 import {
   WorkbookReaderBase,
-  WorkbookReaderOptionsSchema
+  WorkbookReaderOptionsSchema,
+  handOut
 } from "@excel/stream/workbook-reader.browser";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
 import { iterateStream } from "@excel/utils/iterate-stream";
@@ -138,11 +139,14 @@ class WorkbookReader extends WorkbookReaderBase<
     for (const ws of waitingWorksheets) {
       await ws.writePromise;
       const fileStream = createReadStream(ws.path);
+      const part = handOut(iterateStream<Uint8Array>(fileStream), `worksheet ${ws.sheetNo}`);
       try {
         yield* ws.isXlsb
-          ? this._parseXlsbWorksheet(iterateStream(fileStream), ws.sheetNo)
-          : this._parseWorksheet(iterateStream(fileStream), ws.sheetNo);
+          ? this._parseXlsbWorksheet(part.chunks, ws.sheetNo)
+          : this._parseWorksheet(part.chunks, ws.sheetNo);
       } finally {
+        // The file goes away now, so a reader not yet read must say so if it is read later rather than wait forever.
+        part.finish();
         fileStream.close();
         ws.cleanup();
       }
