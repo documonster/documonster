@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { extractAll } from "@archive/unzip/extract";
 import { Cell, Workbook } from "@excel";
 import { rowGetModel } from "@excel/core/row";
-import { streamBiffRecords } from "@excel/stream/xlsb-record-stream";
+import { streamBiffRecordBatches, streamBiffRecords } from "@excel/stream/xlsb-record-stream";
 import { streamXlsbRows } from "@excel/stream/xlsb-worksheet-reader";
 import { iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { readSharedStrings } from "@excel/xlsb/read/parts";
@@ -130,6 +130,30 @@ describe("the record frame decoder", () => {
     // decoding would pass at 4 KiB and fail here. Every intermediate size is a different split of the same records.
     expect(await streamed(size)).toEqual(buffered());
   });
+
+  it.each([4096, 97, 7, 1])(
+    "keeps every record intact when the source reuses its buffer, at %i-byte chunks",
+    async size => {
+      // Records are handed out a chunk at a time, as views into a buffer. They must survive the source overwriting its
+      // own chunk for the next read, which is what a pooled reader does — so the decoder has to own what it hands out.
+      async function* reusing(): AsyncIterable<Uint8Array> {
+        const scratch = new Uint8Array(size);
+        for (let offset = 0; offset < sheet.length; offset += size) {
+          const piece = sheet.subarray(offset, Math.min(offset + size, sheet.length));
+          scratch.set(piece);
+          yield scratch.subarray(0, piece.length);
+          scratch.fill(0xee);
+        }
+      }
+      const kept: Uint8Array[] = [];
+      for await (const batch of streamBiffRecordBatches(reusing(), "s")) {
+        kept.push(...batch.map(record => record.payload));
+      }
+      const reference = [...iterateInterpretableRecords(sheet, "s")].map(entry => entry.payload);
+      expect(kept.length).toBe(reference.length);
+      kept.forEach((payload, index) => expect([...payload]).toEqual([...reference[index]!]));
+    }
+  );
 
   it("rejects a truncated tail rather than dropping it", async () => {
     // Silently discarding an incomplete record would turn a corrupt part into a short sheet, which reads as data loss

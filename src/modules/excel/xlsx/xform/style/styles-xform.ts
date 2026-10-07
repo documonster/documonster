@@ -145,6 +145,17 @@ const _allStyleFacetsAreKeyed: Exclude<keyof Style, KeyedStyleFacet> extends nev
   : ["unkeyed Style facet(s)", Exclude<keyof Style, KeyedStyleFacet>] = true;
 void _allStyleFacetsAreKeyed;
 
+/** The key of an empty style model, per cell type — the string the fast path below would build, built once. */
+const TYPE_KEYS: string[] = [];
+
+/** Whether a style model has no keys at all, without allocating the key array `Object.keys` would. */
+function isEmptyStyleModel(model: Partial<Style>): boolean {
+  for (const _key in model) {
+    return false;
+  }
+  return true;
+}
+
 /** Absent facet marker. Keeps a literal `null` in a key unambiguous — see below. */
 const ABSENT = 0;
 
@@ -177,6 +188,10 @@ const ABSENT = 0;
  * never correctness, because `_addStyle` still deduplicates by rendered XML.
  */
 function styleModelKey(model: Partial<Style>, type: number): string | undefined {
+  // An unstyled cell — almost every cell of a large sheet — has an empty style object, whose key is just its type.
+  if (isEmptyStyleModel(model)) {
+    return (TYPE_KEYS[type] ??= `${type}`);
+  }
   const { numFmt, font, border, fill, alignment, protection, styleName } = model;
   // Truthiness, not `!== undefined`, to mirror `addStyleModel`'s own
   // `if (model.numFmt)`: a falsy numFmt (a JS caller's `null`, an empty string)

@@ -282,7 +282,7 @@
   },
   "scripts": {
     "analyze:browser": "node scripts/clean.ts dist && node --input-type=module -e \"import { execSync } from 'node:child_process'; process.env.ANALYZE='true'; execSync('rolldown -c rolldown.config.ts', { stdio: 'inherit' });\"",
-    "benchmark": "node scripts/clean.ts dist && pnpm build && node --expose-gc scripts/benchmark.ts",
+    "benchmark": "node scripts/clean.ts dist && pnpm build:esm && node --expose-gc scripts/benchmark.ts",
     "benchmark:formula": "pnpm build && node --expose-gc benchmark/formula-benchmark.mjs",
     "benchmark:xlsb": "node --expose-gc --import @oxc-node/core/register benchmark/xlsb-benchmark.ts",
     "benchmark:xlsb-scale": "node --expose-gc --import @oxc-node/core/register benchmark/xlsb-streaming-scale.ts",

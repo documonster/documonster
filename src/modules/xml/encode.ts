@@ -31,6 +31,10 @@ export {
  */
 const INVALID_NAME_CHARS = /[\s<>"'/=&]/;
 
+/** Names that have passed {@link validateXmlName}, so the common ones are tested once. */
+const VALID_NAMES = new Set<string>();
+const VALID_NAMES_CAP = 4096;
+
 /**
  * Validate an XML element or attribute name against injection attacks.
  *
@@ -43,6 +47,19 @@ const INVALID_NAME_CHARS = /[\s<>"'/=&]/;
  * tables). It is a focused security check to prevent markup injection.
  */
 export function validateXmlName(name: string): void {
+  // A writer names the same few elements and attributes over and over — `c`, `r`, `s`, `t`, `v` for every cell of a
+  // sheet — so a name that has passed once is not tested again. Capped, so names a caller invents cannot grow it
+  // without bound; past the cap a name is simply checked every time, as before.
+  if (VALID_NAMES.has(name)) {
+    return;
+  }
+  checkXmlName(name);
+  if (VALID_NAMES.size < VALID_NAMES_CAP) {
+    VALID_NAMES.add(name);
+  }
+}
+
+function checkXmlName(name: string): void {
   if (!name) {
     throw new XmlError("XML name must not be empty");
   }

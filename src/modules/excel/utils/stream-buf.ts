@@ -214,6 +214,14 @@ class StreamBuf extends EventEmitter {
   private encoding: string | null;
   private pipes: PipeDestination[];
   private _ended: boolean;
+  /**
+   * Strings written in batch mode to a `data` listener, not yet emitted. Joined and encoded once per `bufSize`
+   * characters rather than once per write: the streaming worksheet writer writes one string per row, and encoding,
+   * emitting and handing each to the ZIP layer on its own cost more than the rows took to render. Flushed before any
+   * other write and at `pause()`/`end()`, so the bytes and their order are exactly those of an unbatched stream.
+   */
+  private _pendingText: string[] = [];
+  private _pendingChars = 0;
   // Native WritableStream support
   private _writableStreamWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private _asyncWriteQueue: Promise<void> = Promise.resolve();
@@ -327,6 +335,36 @@ class StreamBuf extends EventEmitter {
       );
     }
 
+    if (
+      this.batch &&
+      typeof data === "string" &&
+      !this.pipes.length &&
+      !this.paused &&
+      !this._writableStreamWriter &&
+      this.listenerCount("data") > 0
+    ) {
+      // Joining must not change the bytes: encoded one write at a time, a surrogate pair split across two writes
+      // becomes two U+FFFD; joined first, it would become the character. So a write that starts with a low surrogate
+      // is never joined to what came before it.
+      const first = data.charCodeAt(0);
+      if (first >= 0xdc00 && first <= 0xdfff) {
+        this._flushPendingText();
+      }
+      this._pendingText.push(data);
+      this._pendingChars += data.length;
+      const last = data.charCodeAt(data.length - 1);
+      if (last >= 0xd800 && last <= 0xdbff) {
+        // …and one that ends with a high surrogate is never joined to what follows.
+        this._flushPendingText();
+      }
+      if (this._pendingChars >= this.bufSize) {
+        this._flushPendingText();
+      }
+      callback();
+      return true;
+    }
+    this._flushPendingText();
+
     // Handle piping and buffering
     if (this.pipes.length) {
       if (this.batch) {
@@ -343,6 +381,27 @@ class StreamBuf extends EventEmitter {
         queueMicrotask(() => callback!());
       }
     } else {
+      this._deliver(chunk);
+      callback();
+    }
+
+    return true;
+  }
+
+  /** Emit the batched strings as one chunk. */
+  private _flushPendingText(): void {
+    if (this._pendingText.length === 0) {
+      return;
+    }
+    const text = this._pendingText.length === 1 ? this._pendingText[0] : this._pendingText.join("");
+    this._pendingText = [];
+    this._pendingChars = 0;
+    this._deliver(new StringChunk(text));
+  }
+
+  /** Hand a chunk to the `data` listeners or the native writer, or keep it if nobody is listening. */
+  private _deliver(chunk: Chunk): void {
+    {
       const chunkBuffer = chunk.toBuffer();
 
       // Track whether the data has been delivered to a consumer.
@@ -372,11 +431,7 @@ class StreamBuf extends EventEmitter {
         this._writeToBuffers(chunk);
         this.emit("readable");
       }
-
-      callback();
     }
-
-    return true;
   }
 
   /**
@@ -420,6 +475,7 @@ class StreamBuf extends EventEmitter {
         return;
       }
 
+      this._flushPendingText();
       this._ended = true;
       this._flush();
       this.pipes.forEach((pipe: PipeDestination) => {
@@ -496,9 +552,32 @@ class StreamBuf extends EventEmitter {
   }
 
   /**
+   * Text batched for the `data` listeners belongs to the listeners attached when it was written, so it is delivered
+   * before one of them is removed — otherwise removing the last listener would leave it to be buffered instead.
+   */
+  override off(event: string | symbol, listener: (...args: any[]) => void): this {
+    if (event === "data") {
+      this._flushPendingText();
+    }
+    return super.off(event, listener);
+  }
+
+  override removeListener(event: string | symbol, listener: (...args: any[]) => void): this {
+    return this.off(event, listener);
+  }
+
+  override removeAllListeners(event?: string | symbol): this {
+    if (event === undefined || event === "data") {
+      this._flushPendingText();
+    }
+    return super.removeAllListeners(event);
+  }
+
+  /**
    * Pause the stream
    */
   pause(): void {
+    this._flushPendingText();
     this.paused = true;
   }
 

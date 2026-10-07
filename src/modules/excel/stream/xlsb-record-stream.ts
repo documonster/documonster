@@ -48,26 +48,55 @@ export async function* streamBiffRecords(
   chunks: AsyncIterable<Uint8Array>,
   part: string
 ): AsyncIterableIterator<StreamedRecord> {
-  let carry: Uint8Array = new Uint8Array(0);
+  for await (const batch of streamBiffRecordBatches(chunks, part)) {
+    yield* batch;
+  }
+}
+
+/**
+ * {@link streamBiffRecords}, one array per input chunk instead of one step per record.
+ *
+ * A worksheet is millions of records — usually one per cell — and an async generator step is a promise round trip,
+ * which is what made those steps the largest single cost of a streamed XLSB read. A chunk's records are framed in one
+ * synchronous pass and handed over together; the caller still drives the stream chunk by chunk.
+ *
+ * Each record's payload is a view of a buffer this function owns and never writes to again, so a record stays valid
+ * after the next chunk arrives, however the source treats its own buffers.
+ */
+export async function* streamBiffRecordBatches(
+  chunks: AsyncIterable<Uint8Array>,
+  part: string
+): AsyncIterableIterator<StreamedRecord[]> {
+  let carry: Uint8Array = EMPTY;
   for await (const chunk of chunks) {
-    carry = concat(carry, Uint8Array.from(chunk));
+    if (chunk.length === 0) {
+      continue;
+    }
+    // Copied, because a source may reuse its chunk buffer and a record handed out must stay valid; joined to the
+    // unfinished tail in the same copy when there is one.
+    const buffer = concat(carry, chunk);
+    const records: StreamedRecord[] = [];
     let consumed = 0;
     for (;;) {
-      const framed = frame(carry, consumed, part);
+      const framed = frame(buffer, consumed, part);
       if (framed === undefined) {
         break;
       }
       consumed = framed.next;
-      yield framed.record;
+      records.push(framed.record);
     }
-    // Only the unconsumed tail is kept. Copying it rather than holding a view of the whole chunk is what keeps a
-    // sheet from pinning every buffer it was delivered in.
-    carry = consumed === 0 ? carry : carry.slice(consumed);
+    // Only the unconsumed tail is kept, copied, so a sheet does not pin every buffer it was delivered in.
+    carry = consumed === buffer.length ? EMPTY : buffer.slice(consumed);
+    if (records.length > 0) {
+      yield records;
+    }
   }
   if (carry.length > 0) {
     throw new XlsbParseError(part, `${carry.length} trailing byte(s) do not form a record`);
   }
 }
+
+const EMPTY = new Uint8Array(0);
 
 /**
  * The record starting at `offset`, or `undefined` when the buffer does not hold all of it yet.
@@ -137,11 +166,8 @@ function varUInt(
   return { value, next: offset };
 }
 
-/** `left` followed by `right`, avoiding a copy when `left` is empty — the common case after a clean chunk. */
+/** `left` followed by `right`, in a new buffer. */
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
-  if (left.length === 0) {
-    return right;
-  }
   const joined = new Uint8Array(left.length + right.length);
   joined.set(left, 0);
   joined.set(right, left.length);

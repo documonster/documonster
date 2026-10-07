@@ -14,20 +14,35 @@ const BORDER_EDGES = ["top", "left", "bottom", "right", "diagonal"] as const;
 /** The facets of a style that own mutable sub-objects and therefore need copying. */
 const COPIED_FACETS = ["font", "alignment", "protection", "border", "fill"] as const;
 
-function oneDepthCopy(obj: StyleObject, nestKeys: string[]): StyleObject {
-  return {
-    ...obj,
-    ...nestKeys.reduce((memo: StyleObject, key: string) => {
-      if (obj[key]) {
-        memo[key] = { ...obj[key] };
-      }
-      return memo;
-    }, {})
-  };
+/**
+ * Copy `obj` and each of its `nestKeys` sub-objects one level down.
+ *
+ * Written as one spread and direct assignments: this runs for every styled cell a streamed sheet yields, and the
+ * `reduce` into a second object that was then spread again built three objects per call to say what one does. The
+ * result is the same — every nested key already exists on the copy, so assigning it keeps its position.
+ */
+function oneDepthCopy(obj: StyleObject, nestKeys: readonly string[]): StyleObject {
+  const copied: StyleObject = { ...obj };
+  for (let i = 0; i < nestKeys.length; i++) {
+    const key = nestKeys[i];
+    if (obj[key]) {
+      copied[key] = { ...obj[key] };
+    }
+  }
+  return copied;
 }
 
+const COLOR_KEYS = ["color"] as const;
+const FILL_KEYS = ["fgColor", "bgColor", "center"] as const;
+
+/** Whether `obj` has no own enumerable key — without allocating the key array `Object.keys` would. */
 function isEmptyObj(obj: StyleObject): boolean {
-  return Object.keys(obj).length === 0;
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -58,7 +73,7 @@ function copyStyleFacet<T>(key: string, value: T): T {
   const facet = value as unknown as StyleObject;
   switch (key) {
     case "font":
-      return oneDepthCopy(facet, ["color"]) as unknown as T;
+      return oneDepthCopy(facet, COLOR_KEYS) as unknown as T;
     case "alignment":
     case "protection":
       return { ...facet } as unknown as T;
@@ -76,16 +91,16 @@ function copyBorder(border: StyleObject): StyleObject {
   const copied: StyleObject = { ...border };
   for (const edge of BORDER_EDGES) {
     if (border[edge]) {
-      copied[edge] = oneDepthCopy(border[edge], ["color"]);
+      copied[edge] = oneDepthCopy(border[edge], COLOR_KEYS);
     }
   }
   return copied;
 }
 
 function copyFill(fill: StyleObject): StyleObject {
-  const copied = oneDepthCopy(fill, ["fgColor", "bgColor", "center"]);
+  const copied = oneDepthCopy(fill, FILL_KEYS);
   if (fill.stops) {
-    copied.stops = fill.stops.map((s: StyleObject) => oneDepthCopy(s, ["color"]));
+    copied.stops = fill.stops.map((s: StyleObject) => oneDepthCopy(s, COLOR_KEYS));
   }
   return copied;
 }

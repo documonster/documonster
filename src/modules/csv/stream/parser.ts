@@ -1072,7 +1072,13 @@ export class CsvParserStream extends Transform {
     // Fast mode already split this record by its configured `lineEnding`; with a custom
     // separator, CR and LF in `raw` are ordinary content and must not alter `line`,
     // skipLines or toLine.
-    if (raw !== undefined && !this.parseConfig.fastMode) {
+    if (
+      raw !== undefined &&
+      !this.parseConfig.fastMode &&
+      // A row holds a line break only inside a quoted field, which almost none do: a native search rules it out
+      // without walking every character of every row in script.
+      (raw.indexOf("\n") !== -1 || raw.indexOf("\r") !== -1)
+    ) {
       let newlines = 1;
       for (let i = 0; i < raw.length; i++) {
         const ch = raw.charCodeAt(i);

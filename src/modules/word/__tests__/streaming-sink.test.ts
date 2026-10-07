@@ -353,3 +353,105 @@ describe("StreamingDocxWriter — sink mode", () => {
     expect(bytesBeforeFinalize).toBeGreaterThan(totalBytes * 0.5);
   }, 120_000);
 });
+
+/**
+ * `document.xml` is collected and handed to the compressor in 64 KB pieces, not one per element. What has been
+ * collected must still reach the compressor before `addAsync` waits on the sink — or a small element's bytes would
+ * sit in memory while the caller is told it was written — and before the part is closed.
+ */
+describe("StreamingDocxWriter document.xml collection", () => {
+  it("hands a short element to the compressor before addAsync resolves", async () => {
+    const pushed: number[] = [];
+    const originalPush = ZipDeflate.prototype.push;
+    const pushSpy = vi.spyOn(ZipDeflate.prototype, "push").mockImplementation(function (
+      this: ZipDeflate,
+      data: Uint8Array,
+      final?: boolean,
+      callback?: (err?: Error | null) => void
+    ) {
+      pushed.push(data.length);
+      return originalPush.call(this, data, final, callback);
+    });
+    try {
+      const writer = Streaming.createDocxStream({ sink: new WritableStream<Uint8Array>() });
+      const before = pushed.reduce((a, b) => a + b, 0);
+      await writer.addAsync(Build.textParagraph("short"));
+      const after = pushed.reduce((a, b) => a + b, 0);
+      // The header and the paragraph: well under the 64 KB batch, so only the flush can have sent them.
+      expect(after - before).toBeGreaterThan("<w:p><w:r><w:t>short</w:t></w:r></w:p>".length);
+      await writer.finalize();
+    } finally {
+      pushSpy.mockRestore();
+    }
+  });
+
+  it("writes every element when none of them fills a batch", async () => {
+    const writer = Streaming.createDocxStream();
+    for (let i = 0; i < 3; i++) {
+      writer.addText(`para-${i}`);
+    }
+    const entries = await extractAll(await writer.finalize());
+    const xml = new TextDecoder().decode(entries.get(PartPath.Document)!.data);
+    expect(xml).toContain("para-0");
+    expect(xml).toContain("para-2");
+    expect(xml.endsWith("</w:document>")).toBe(true);
+  });
+
+  it("produces the same document.xml whether batches fill or not", async () => {
+    const texts = Array.from({ length: 4000 }, (_, i) => `row ${i} 日本語 😀 <&>`);
+    const sync = Streaming.createDocxStream();
+    for (const text of texts) {
+      sync.addText(text);
+    }
+    const chunks: Uint8Array[] = [];
+    const sinked = Streaming.createDocxStream({
+      sink: new WritableStream<Uint8Array>({ write: chunk => void chunks.push(chunk) })
+    });
+    for (const text of texts) {
+      await sinked.addAsync(Build.textParagraph(text));
+    }
+    await sinked.finalize();
+    const joined = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let offset = 0;
+    for (const chunk of chunks) {
+      joined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const decode = async (bytes: Uint8Array) =>
+      new TextDecoder().decode((await extractAll(bytes)).get(PartPath.Document)!.data);
+    expect(await decode(joined)).toBe(await decode(await sync.finalize()));
+  });
+});
+
+describe("StreamingDocxWriter reset with collected XML", () => {
+  async function documentXml(bytes: Uint8Array): Promise<string> {
+    return new TextDecoder().decode((await extractAll(bytes)).get(PartPath.Document)!.data);
+  }
+
+  it("does not carry XML collected before reset() into the next document", async () => {
+    const writer = Streaming.createDocxStream();
+    writer.addText("OLD-CONTENT");
+    writer.reset();
+    writer.addText("NEW-CONTENT");
+    const xml = await documentXml(await writer.finalize());
+    expect(xml).not.toContain("OLD-CONTENT");
+    expect(xml).toContain("NEW-CONTENT");
+    expect(xml.split("<w:document").length - 1).toBe(1);
+  });
+
+  it("writes the same document after reset() as a fresh writer does", async () => {
+    const reused = Streaming.createDocxStream();
+    reused.addText("first document");
+    await reused.finalize();
+    reused.reset();
+    const fresh = Streaming.createDocxStream();
+    for (const writer of [reused, fresh]) {
+      for (let i = 0; i < 50; i++) {
+        writer.addText(`line ${i}`);
+      }
+    }
+    expect(await documentXml(await reused.finalize())).toBe(
+      await documentXml(await fresh.finalize())
+    );
+  });
+});

@@ -222,12 +222,13 @@ export class SyncDeflater implements SyncDeflaterLike {
   }
 
   private _flushBatch(final: boolean): Uint8Array {
-    let input: Buffer;
+    let input: Uint8Array;
 
     if (this._pending.length === 0) {
-      input = Buffer.alloc(0);
+      input = new Uint8Array(0);
     } else if (this._pending.length === 1) {
-      input = Buffer.from(this._pending[0]);
+      // zlib reads a `Uint8Array` as it is; copying it into a `Buffer` first only cost a second pass over the batch.
+      input = this._pending[0];
     } else {
       input = Buffer.concat(this._pending);
     }

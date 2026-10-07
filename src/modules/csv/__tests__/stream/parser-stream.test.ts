@@ -1256,6 +1256,23 @@ describe("CsvParserStream - Chunk-Boundary Scan Complexity", () => {
     ]);
   });
 
+  it("counts the lines a quoted field spans, and only those, in info.line", async () => {
+    const parser = new CsvParserStream({ info: true });
+    const collected = collectRows(parser);
+    Readable.from(['a,b\n"two\nlines",x\n"three\r\nlines\rhere",y\nlast,z\n']).pipe(parser);
+
+    const rows = await collected;
+    // Line breaks inside a quoted value are normalised to LF, as the synchronous parser does.
+    expect(rows.map(row => row.record[0])).toEqual([
+      "a",
+      "two\nlines",
+      "three\nlines\nhere",
+      "last"
+    ]);
+    // Each row starts on the line after the previous one ends: 1, 2 (spans 2–3), 4 (spans 4–6), 7.
+    expect(rows.map(row => row.info.line)).toEqual([1, 2, 4, 7]);
+  });
+
   it("does not count CR or LF content as lines with a custom lineEnding", async () => {
     const parser = new CsvParserStream({
       fastMode: true,

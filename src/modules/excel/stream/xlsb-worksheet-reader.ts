@@ -35,7 +35,7 @@ import type { RowData } from "@excel/core/row";
 import { rowCreate } from "@excel/core/row";
 import type { WorksheetData } from "@excel/core/worksheet";
 import { rowSetModel } from "@excel/core/worksheet-core";
-import { streamBiffRecords } from "@excel/stream/xlsb-record-stream";
+import { streamBiffRecordBatches } from "@excel/stream/xlsb-record-stream";
 import { encodeCol } from "@excel/utils/address";
 import { errorTextOf } from "@excel/xlsb/error-values";
 import { BinaryReader } from "@utils/binary";
@@ -91,38 +91,42 @@ export async function* streamXlsbRows(
     return row;
   };
 
-  for await (const record of streamBiffRecords(chunks, part)) {
-    switch (record.name) {
-      case "BrtBeginSheetData":
-        inSheetData = true;
-        continue;
-      case "BrtEndSheetData": {
-        // Everything after this is sheet-level: merges, conditional formats, page setup. A forward reader has already
-        // emitted its rows, so there is nothing left to attach them to — see the note at the top of this file.
-        const last = flush();
-        if (last !== undefined) {
-          yield last;
+  // Records arrive a chunk at a time; rows are still yielded one by one, so the caller sees the same sequence.
+  for await (const batch of streamBiffRecordBatches(chunks, part)) {
+    for (let index = 0; index < batch.length; index++) {
+      const record = batch[index]!;
+      switch (record.name) {
+        case "BrtBeginSheetData":
+          inSheetData = true;
+          continue;
+        case "BrtEndSheetData": {
+          // Everything after this is sheet-level: merges, conditional formats, page setup. A forward reader has already
+          // emitted its rows, so there is nothing left to attach them to — see the note at the top of this file.
+          const last = flush();
+          if (last !== undefined) {
+            yield last;
+          }
+          inSheetData = false;
+          continue;
         }
-        inSheetData = false;
+        default:
+          break;
+      }
+      if (!inSheetData) {
         continue;
       }
-      default:
-        break;
-    }
-    if (!inSheetData) {
-      continue;
-    }
-    if (record.name === "BrtRowHdr") {
-      const previous = flush();
-      if (previous !== undefined) {
-        yield previous;
+      if (record.name === "BrtRowHdr") {
+        const previous = flush();
+        if (previous !== undefined) {
+          yield previous;
+        }
+        currentRow = new BinaryReader(record.payload, 0, part).readUint32();
+        continue;
       }
-      currentRow = new BinaryReader(record.payload, 0, part).readUint32();
-      continue;
-    }
-    const cell = decodeCell(record, context, part);
-    if (cell !== undefined) {
-      cells.push(cell);
+      const cell = decodeCell(record, context, part);
+      if (cell !== undefined) {
+        cells.push(cell);
+      }
     }
   }
   const trailing = flush();

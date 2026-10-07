@@ -20,7 +20,7 @@ import type { Duplex, PassThrough, Transform } from "@stream";
  * Creates an InflateRaw stream using Node.js native zlib.
  */
 function createInflateRaw(): Transform {
-  return zlib.createInflateRaw();
+  return zlib.createInflateRaw({ chunkSize: 64 * 1024 });
 }
 
 export type { CrxHeader, EntryProps, EntryVars, ParseOptions } from "@archive/unzip/parser-core";

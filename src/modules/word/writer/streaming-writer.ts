@@ -119,6 +119,9 @@ import { xmlEncodeAttr } from "@xml/encode";
 import { XmlWriter } from "@xml/writer";
 
 // Per-instance StringBuf is created in the constructor (see _xmlBuffer field below).
+
+/** How much `document.xml` is collected before it is handed to the compressor — see `_write`. */
+const XML_FLUSH_BYTES = 65536;
 // Previously this was a module-level singleton which caused data races with concurrent instances.
 
 const EMPTY_U8 = new Uint8Array(0);
@@ -281,7 +284,13 @@ export class StreamingDocxWriter {
    */
   private _pendingDrain: Promise<void> = Promise.resolve();
   /** Completion of every ZipDeflate push registered so far. */
-  private _pendingCompression: Promise<void> = Promise.resolve();
+  /**
+   * Compression pushes not yet settled. A set rather than a chain: chaining every push onto the last with
+   * `Promise.all(...).then(...)` built two promises per element written — for a 200k-paragraph document most of the
+   * writer's own time and a fifth of it in garbage collection — while a push that has already settled, which is every
+   * push on the synchronous compression path, has nothing left to wait for.
+   */
+  private _pendingCompression = new Set<Promise<void>>();
   /**
    * Resolves when the `Zip` archive emits its terminal callback (`final`).
    * In the browser the deflate pipeline (CompressionStream) is asynchronous,
@@ -442,6 +451,7 @@ export class StreamingDocxWriter {
   async addAsync(element: BodyContent): Promise<this> {
     this.add(element);
     if (this._sinkAdapter) {
+      this._flushXml();
       // ZipDeflate batches small inputs. A non-final empty push flushes that
       // batch into the compressor without ending document.xml.
       this._trackCompression(this._documentZipFile.push(EMPTY_U8));
@@ -593,7 +603,10 @@ export class StreamingDocxWriter {
     this._outputChunks = [];
     this._streamError = null;
     this._pendingDrain = Promise.resolve();
-    this._pendingCompression = Promise.resolve();
+    this._pendingCompression.clear();
+    // XML collected for the previous document's `document.xml` belongs to that document: it was never written, and
+    // must not be written into the next one.
+    this._xmlBuffer.reset();
     if (this._options.sink && !this._sinkAdapter) {
       this._sinkAdapter = new SinkAdapter(this._options.sink);
     }
@@ -673,12 +686,16 @@ export class StreamingDocxWriter {
         this._streamError = err instanceof Error ? err : new Error(String(err));
       }
     });
-    this._pendingCompression = Promise.all([this._pendingCompression, tracked]).then(() => {});
+    this._pendingCompression.add(tracked);
+    void tracked.then(() => this._pendingCompression.delete(tracked));
     return tracked;
   }
 
   private async _awaitOutputBoundary(message: string): Promise<void> {
-    await this._pendingCompression;
+    // Pushes made while waiting are waited for too, as the chain did.
+    while (this._pendingCompression.size > 0) {
+      await Promise.all(this._pendingCompression);
+    }
     // Compression callbacks enqueue sink writes synchronously. Capture the
     // drain only after compression completes so browser output is included.
     await this._pendingDrain;
@@ -689,10 +706,24 @@ export class StreamingDocxWriter {
     }
   }
 
+  /**
+   * Append XML to `document.xml`. Collected and handed to the compressor 64 KB at a time rather than once per
+   * element: each hand-off copied the element's bytes out and pushed them through the ZIP layer on their own, which
+   * for short paragraphs cost more than rendering them. {@link _flushXml} sends what is collected; it runs before
+   * `document.xml` is closed and before `addAsync` waits on the sink, so the bytes and their order are unchanged.
+   */
   private _write(text: string): void {
-    this._xmlBuffer.reset();
     this._xmlBuffer.addText(text);
-    this._documentStream.write(this._xmlBuffer);
+    if (this._xmlBuffer.length >= XML_FLUSH_BYTES) {
+      this._flushXml();
+    }
+  }
+
+  private _flushXml(): void {
+    if (this._xmlBuffer.length > 0) {
+      this._documentStream.write(this._xmlBuffer);
+      this._xmlBuffer.reset();
+    }
   }
 
   // ===========================================================================
@@ -1701,6 +1732,9 @@ export class StreamingDocxWriter {
       }
       stream.once("zipped", () => resolve());
       stream.once("error", (err: Error) => reject(err));
+      if (stream === this._documentStream) {
+        this._flushXml();
+      }
       stream.end();
     });
   }
