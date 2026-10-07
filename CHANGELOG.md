@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.1](https://github.com/documonster/documonster/compare/v0.20.0...v0.20.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **excel,archive:** Stop the streaming reader stalling, and write zlib-valid deflate in the browser ([02a19fe](https://github.com/documonster/documonster/commit/02a19feb309f4a1e9aa3b8fea3b07113fab9f236))
+
+
+### Performance Improvements
+
+* **excel,word,csv,archive,xml:** Cut avoidable work from the streaming paths ([5932b8e](https://github.com/documonster/documonster/commit/5932b8e47d2e7fd0e3ce8d2fe3baeecbad9e8e2b))
+
 ## [0.20.0](https://github.com/documonster/documonster/compare/v0.19.0...v0.20.0) (2026-10-03)
 
 
