@@ -223,8 +223,8 @@ export function splitFormatSections(fmt: string): string[] {
 /** Reusable regex — no capture groups, so safe for `test()`. */
 const DATE_FMT_RE = /[ymdhMsb]/;
 
-/** Strips bracket expressions `[...]` and quoted literals `"..."` from a format string. */
-const STRIP_BRACKETS_QUOTES_RE = /\[[^\]]*\]|"[^"]*"/g;
+/** Ignore literal text and spacing/fill characters when detecting date tokens. */
+const STRIP_FORMAT_LITERALS_RE = /\\.|"[^"]*"|\[[^\]]*\]|_.|\*./g;
 
 /** Cache for isDateFmt results — typically only 5-20 unique formats per workbook,
  *  but each may be tested hundreds of thousands of times during reconcile. */
@@ -243,9 +243,8 @@ export function isDateFmt(fmt: string | null | undefined): boolean {
   // legitimately appear in later sections as a text fallback (e.g. "mm/dd/yyyy;@").
   const firstSection = splitFormatSections(fmt)[0];
 
-  // Strip bracket expressions [...] (locale/color tags) and quoted literals "..."
-  // before any further checks so that characters inside them are ignored.
-  const clean = firstSection.replace(STRIP_BRACKETS_QUOTES_RE, "");
+  // Literal units such as \\M must not turn numeric values into dates.
+  const clean = firstSection.replace(STRIP_FORMAT_LITERALS_RE, "");
 
   // "@" in the cleaned section means it's a text format, not a date format.
   let result: boolean;

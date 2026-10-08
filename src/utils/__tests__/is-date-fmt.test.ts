@@ -128,6 +128,28 @@ describe("isDateFmt", () => {
     });
   });
 
+  describe("literal units and layout characters", () => {
+    it.each([
+      "\\$0.0,,\\M",
+      '$0.0,,"M"',
+      "0.0\\m",
+      "0.0\\s",
+      '0" days"',
+      "0_m",
+      "0*m",
+      "[Green]\\$0.0,,\\M;[Red](\\$0.0,,\\M)"
+    ])("keeps %s numeric", fmt => {
+      expect(isDateFmt(fmt)).toBe(false);
+    });
+
+    it.each(["yyyy\\-mm\\-dd", 'yyyy-mm-dd" days"', "hh:mm:ss_s"])(
+      "still recognizes date/time tokens in %s",
+      fmt => {
+        expect(isDateFmt(fmt)).toBe(true);
+      }
+    );
+  });
+
   describe("pure text format", () => {
     it("returns false for @", () => {
       expect(isDateFmt("@")).toBe(false);

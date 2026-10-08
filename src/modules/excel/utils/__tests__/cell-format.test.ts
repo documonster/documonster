@@ -124,6 +124,34 @@ describe("cell-format", () => {
       });
     });
 
+    describe("Literal units", () => {
+      it.each(["\\$0.0,,\\M", '$0.0,,"M"'])("formats millions with %s", fmt => {
+        expect(format(fmt, 5000000000)).toBe("$5000.0M");
+        expect(format(fmt, 1000000)).toBe("$1.0M");
+        expect(format(fmt, 0)).toBe("$0.0M");
+        expect(format(fmt, -1000000)).toBe("$-1.0M");
+      });
+
+      it.each([
+        ["0.0\\m", "12.0m"],
+        ["0.0\\s", "12.0s"],
+        ['0" days"', "12 days"],
+        ["0_m", "12 "],
+        ["0*m", "12"]
+      ])("formats %s as a number", (fmt, expected) => {
+        expect(format(fmt, 12)).toBe(expected);
+      });
+
+      it("selects colored positive and negative sections before detecting dates", () => {
+        expect(format("[Green]\\$0.0,,\\M;[Red](\\$0.0,,\\M)", 1000000)).toBe("$1.0M");
+        expect(format("[Green]\\$0.0,,\\M;[Red](\\$0.0,,\\M)", -1000000)).toBe("($1.0M)");
+      });
+
+      it("still formats dates with escaped separators", () => {
+        expect(format("yyyy\\-mm\\-dd", 45952)).toBe("2025-10-22");
+      });
+    });
+
     describe("Leading zeros", () => {
       it("should pad with leading zeros", () => {
         expect(format("00000", 123)).toBe("00123");

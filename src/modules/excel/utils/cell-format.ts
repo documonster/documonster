@@ -184,8 +184,8 @@ function isGeneral(fmt: string): boolean {
  * Check if format is a date format
  */
 function isDateFormat(fmt: string): boolean {
-  // Remove color codes and conditions
-  const cleaned = fmt.replace(/\[[^\]]*\]/g, "");
+  // Literal units and spacing/fill characters are not date tokens.
+  const cleaned = fmt.replace(/\\.|"[^"]*"|\[[^\]]*\]|_.|\*./g, "");
   // Check for date/time tokens (but not if it's just a number format with brackets)
   return /[ymdhs]/i.test(cleaned) && !/^[#0.,E%$\s()\-+]+$/i.test(cleaned);
 }
@@ -961,7 +961,8 @@ export function format(fmt: string, val: number | string | boolean): string {
   // Process _ and * placeholders
   cleanFmt = processPlaceholders(cleanFmt);
 
-  // Process quoted text
+  // Detect dates while escapes and quotes still distinguish literal units from tokens.
+  const dateFormat = isDateFormat(cleanFmt);
   cleanFmt = processQuotedText(cleanFmt);
 
   // Check for elapsed time format [h]:mm:ss, [m]:ss, [s]
@@ -970,7 +971,7 @@ export function format(fmt: string, val: number | string | boolean): string {
   }
 
   // Check if this is a date format
-  if (isDateFormat(cleanFmt)) {
+  if (dateFormat) {
     return formatDate(numVal, cleanFmt);
   }
 
