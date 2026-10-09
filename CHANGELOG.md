@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.2](https://github.com/documonster/documonster/compare/v0.20.1...v0.20.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **excel,formula,pdf:** Read number formats with one tokenizer and render them with one renderer ([#247](https://github.com/documonster/documonster/issues/247)) ([dbceaea](https://github.com/documonster/documonster/commit/dbceaea9f748a6c9eaad560510c294fd10e05fee))
+* **excel:** Preserve numeric values with literal number formats ([#245](https://github.com/documonster/documonster/issues/245)) ([6a3255a](https://github.com/documonster/documonster/commit/6a3255a095e5f9168bb576c6db0bbb2562103bda))
+
 ## [0.20.1](https://github.com/documonster/documonster/compare/v0.20.0...v0.20.1) (2026-10-07)
 
 
