@@ -42,6 +42,7 @@ import { anchorCol, anchorRow } from "@excel/core/anchor";
 import {
   cellCol,
   cellComment,
+  cellDate1904,
   cellGetValue,
   cellHyperlink,
   cellResult,
@@ -1182,7 +1183,7 @@ function rawCellDisplayText(cell: CellData): string {
         if (typeof result === "object" && "error" in result) {
           return result.error;
         }
-        return formatCellValueSafe(result, cell.style?.numFmt);
+        return formatCellValueSafe(result, cell.style?.numFmt, cellDate1904(cell));
       }
       return cellText(cell) ?? "";
     }
@@ -1191,19 +1192,20 @@ function rawCellDisplayText(cell: CellData): string {
       if (value === null || value === undefined) {
         return "";
       }
-      return formatCellValueSafe(value, cell.style?.numFmt);
+      return formatCellValueSafe(value, cell.style?.numFmt, cellDate1904(cell));
     }
   }
 }
 
 function formatCellValueSafe(
   value: unknown,
-  numFmt: string | { formatCode: string } | undefined
+  numFmt: string | { formatCode: string } | undefined,
+  date1904: boolean
 ): string {
   const fmt = typeof numFmt === "string" ? numFmt : numFmt?.formatCode;
   if (fmt && (typeof value === "number" || value instanceof Date || typeof value === "boolean")) {
     try {
-      return formatCellValue(value, fmt);
+      return formatCellValue(value, fmt, undefined, date1904);
     } catch {
       // Fall through to default
     }

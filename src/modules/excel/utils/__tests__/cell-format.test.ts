@@ -1,4 +1,10 @@
-import { format, cellFormat } from "@excel/utils/cell-format";
+import {
+  dateFormatKind,
+  format,
+  isDateDisplayFormat,
+  isTimeOnlyFormat
+} from "@excel/utils/cell-format";
+import { isDateFmt, isGeneralFormat } from "@utils/number-format";
 import { describe, it, expect } from "vitest";
 
 describe("cell-format", () => {
@@ -129,7 +135,8 @@ describe("cell-format", () => {
         expect(format(fmt, 5000000000)).toBe("$5000.0M");
         expect(format(fmt, 1000000)).toBe("$1.0M");
         expect(format(fmt, 0)).toBe("$0.0M");
-        expect(format(fmt, -1000000)).toBe("$-1.0M");
+        // Excel puts the minus sign in front of the whole value, currency symbol included.
+        expect(format(fmt, -1000000)).toBe("-$1.0M");
       });
 
       it.each([
@@ -184,16 +191,17 @@ describe("cell-format", () => {
     describe("Fraction format", () => {
       it("should format as fraction with fixed denominator", () => {
         expect(format("# ?/8", 1.5)).toBe("1 4/8");
-        expect(format("# ?/4", 0.25)).toBe("1/4");
+        expect(format("# ?/4", 0.25)).toBe(" 1/4");
       });
 
       it("should format as fraction with variable denominator", () => {
         expect(format("# ?/?", 1.5)).toBe("1 1/2");
-        expect(format("# ??/??", 0.333)).toBe("1/3");
+        // `?` keeps its width as a space, which is what lines fractions up in a column.
+        expect(format("# ??/??", 0.333)).toBe("  1/3 ");
       });
 
-      it("should handle whole numbers", () => {
-        expect(format("# ?/?", 5)).toBe("5");
+      it("should blank the fraction of a whole number to its width", () => {
+        expect(format("# ?/?", 5)).toBe("5    ");
       });
     });
 
@@ -269,11 +277,12 @@ describe("cell-format", () => {
       it("should strip trailing zeros in decimal part", () => {
         expect(format("#.##", 1.5)).toBe("1.5");
         expect(format("#.##", 1.23)).toBe("1.23");
-        expect(format("#.##", 1)).toBe("1");
+        // Excel keeps the decimal point even when every digit after it is suppressed.
+        expect(format("#.##", 1)).toBe("1.");
       });
 
-      it("should produce empty string for #.## with zero", () => {
-        expect(format("#.##", 0)).toBe("");
+      it("should leave only the decimal point for #.## with zero", () => {
+        expect(format("#.##", 0)).toBe(".");
       });
 
       it("should handle mixed # and 0 in decimal part", () => {
@@ -283,8 +292,8 @@ describe("cell-format", () => {
       });
 
       it("should handle 0.## (required integer, optional decimals)", () => {
-        expect(format("0.##", 0)).toBe("0");
-        expect(format("0.##", 1)).toBe("1");
+        expect(format("0.##", 0)).toBe("0.");
+        expect(format("0.##", 1)).toBe("1.");
         expect(format("0.##", 1.5)).toBe("1.5");
         expect(format("0.##", 1.23)).toBe("1.23");
       });
@@ -311,56 +320,31 @@ describe("cell-format", () => {
     });
   });
 
-  describe("isDateFormat", () => {
+  describe("isDateFmt", () => {
     it("should detect date formats", () => {
-      expect(cellFormat.isDateFormat("yyyy-mm-dd")).toBe(true);
-      expect(cellFormat.isDateFormat("m/d/yy")).toBe(true);
-      expect(cellFormat.isDateFormat("dd/mm/yyyy")).toBe(true);
-      expect(cellFormat.isDateFormat("h:mm:ss")).toBe(true);
+      expect(isDateFmt("yyyy-mm-dd")).toBe(true);
+      expect(isDateFmt("m/d/yy")).toBe(true);
+      expect(isDateFmt("dd/mm/yyyy")).toBe(true);
+      expect(isDateFmt("h:mm:ss")).toBe(true);
     });
 
     it("should not detect number formats as date", () => {
-      expect(cellFormat.isDateFormat("0.00")).toBe(false);
-      expect(cellFormat.isDateFormat("#,##0")).toBe(false);
-      expect(cellFormat.isDateFormat("0%")).toBe(false);
+      expect(isDateFmt("0.00")).toBe(false);
+      expect(isDateFmt("#,##0")).toBe(false);
+      expect(isDateFmt("0%")).toBe(false);
     });
   });
 
   describe("isGeneral", () => {
     it("should detect General format", () => {
-      expect(cellFormat.isGeneral("General")).toBe(true);
-      expect(cellFormat.isGeneral("GENERAL")).toBe(true);
-      expect(cellFormat.isGeneral("general")).toBe(true);
+      expect(isGeneralFormat("General")).toBe(true);
+      expect(isGeneralFormat("GENERAL")).toBe(true);
+      expect(isGeneralFormat("general")).toBe(true);
     });
 
     it("should not detect other formats as General", () => {
-      expect(cellFormat.isGeneral("0.00")).toBe(false);
-      expect(cellFormat.isGeneral("General Text")).toBe(false);
-    });
-  });
-
-  describe("getFormat", () => {
-    it("should return format string for known numFmtId", () => {
-      expect(cellFormat.getFormat(0)).toBe("General");
-      expect(cellFormat.getFormat(1)).toBe("0");
-      expect(cellFormat.getFormat(2)).toBe("0.00");
-      expect(cellFormat.getFormat(9)).toBe("0%");
-      // numFmtId 14 is "mm-dd-yy" per ECMA-376 § 18.8.30 (locale-dependent
-      // substitution is an Excel runtime concern, not a spec mapping).
-      expect(cellFormat.getFormat(14)).toBe("mm-dd-yy");
-    });
-
-    it("should return General for unknown numFmtId", () => {
-      expect(cellFormat.getFormat(999)).toBe("General");
-    });
-
-    it("should handle default mapping for certain numFmtIds", () => {
-      // 5-8 map to 37-40
-      expect(cellFormat.getFormat(5)).toBe("#,##0 ;(#,##0)");
-      // 27-31 map to 14
-      expect(cellFormat.getFormat(27)).toBe("mm-dd-yy");
-      // 59-62 map to 1-4
-      expect(cellFormat.getFormat(59)).toBe("0");
+      expect(isGeneralFormat("0.00")).toBe(false);
+      expect(isGeneralFormat("General Text")).toBe(false);
     });
   });
 
@@ -388,14 +372,23 @@ describe("cell-format", () => {
   });
 
   describe("Accounting formats", () => {
-    it("should format accounting format 41", () => {
-      const fmt = cellFormat.getFormat(41);
-      expect(fmt).toContain("#,##0");
+    // Built-in 44: padding, a fill, a quoted dash and `?` placeholders in one format.
+    const accounting = '_($* #,##0.00_);_($* (#,##0.00);_($* "-"??_);_(@_)';
+
+    it("pads positive values on both sides", () => {
+      expect(format(accounting, 1234.5)).toBe(" $1,234.50 ");
     });
 
-    it("should format accounting format 44", () => {
-      const fmt = cellFormat.getFormat(44);
-      expect(fmt).toContain("$");
+    it("wraps negative values in the negative section's parentheses", () => {
+      expect(format(accounting, -1234.5)).toBe(" $(1,234.50)");
+    });
+
+    it("shows the quoted dash for zero", () => {
+      expect(format(accounting, 0)).toBe(" $-   ");
+    });
+
+    it("formats text through the fourth section", () => {
+      expect(format(accounting, "n/a")).toBe(" n/a ");
     });
   });
 
@@ -418,9 +411,9 @@ describe("cell-format", () => {
       expect(format("[$-804]#,##0", 1234)).toBe("1,234");
     });
 
-    it("should strip currency locale codes", () => {
-      // Currency symbol with locale is stripped, only the format remains
-      expect(format("[$€-407]#,##0.00", 1234.56)).toBe("1,234.56");
+    it("should show the currency symbol of a currency locale code", () => {
+      // `[$€-407]` is a euro sign in German formatting; only the locale id after `-` is silent.
+      expect(format("[$€-407]#,##0.00", 1234.56)).toBe("€1,234.56");
     });
   });
 
@@ -502,5 +495,33 @@ describe("cell-format", () => {
       const serial = (23 * 3600 + 32) / 86400;
       expect(format("h:mm:ss AM/PM", serial)).toBe("11:00:32 PM");
     });
+  });
+});
+
+describe("date-kind classification", () => {
+  // These read the same tokens the renderer and the readers do, so a literal is a literal here too.
+  it.each(["0_m", "0*m", "\\$0.0,,\\M", '0" mins"', "0.0\\m"])("%s is not a date", fmt => {
+    expect(isDateDisplayFormat(fmt)).toBe(false);
+    expect(isTimeOnlyFormat(fmt)).toBe(false);
+    expect(dateFormatKind(fmt)).toBe("unknown");
+  });
+
+  it.each(["0_h", "0*s", "0\\h"])("%s is not a time", fmt => {
+    expect(isTimeOnlyFormat(fmt)).toBe(false);
+  });
+
+  it.each([
+    ["yyyy-mm-dd", "date"],
+    ["mmm h", "dateTime"],
+    ["yyyy-mm-dd hh:mm", "dateTime"],
+    ["h:mm", "time"],
+    ["mm:ss", "time"],
+    ["[h]:mm:ss", "duration"],
+    ["[Red]General", "unknown"],
+    [";;;dd", "unknown"],
+    // A text format shows a number as text; the readers keep it a number, so it has no date kind.
+    ["yyyy@", "unknown"]
+  ])("%s is %s", (fmt, kind) => {
+    expect(dateFormatKind(fmt)).toBe(kind);
   });
 });

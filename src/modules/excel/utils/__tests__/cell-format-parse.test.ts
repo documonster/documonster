@@ -197,3 +197,63 @@ describe("cell-format-parse", () => {
     });
   });
 });
+
+describe("parseValueByFormat — shared tokenizer", () => {
+  it("does not read an escaped or quoted unit as a field", () => {
+    expect(parseValueByFormat("\\$0.0,,\\M", "$5.0M")).toBeUndefined();
+    expect(parseValueByFormat('0" mins"', "5 mins")).toBeUndefined();
+    expect(parseValueByFormat("0_m", "5 ")).toBeUndefined();
+  });
+
+  it("does not split on a semicolon inside a bracket tag", () => {
+    expect(parseValueByFormat("[$;-409]dd/mm/yyyy;@", "09/07/2026")).toEqual(utcDate(2026, 7, 9));
+  });
+
+  it("reads a weekday name as a field rather than two day numbers", () => {
+    expect(parseValueByFormat("dddd, mmmm d, yyyy", "Thursday, July 9, 2026")).toEqual(
+      utcDate(2026, 7, 9)
+    );
+    expect(parseValueByFormat("ddd d mmm yyyy", "Blursday 9 Jul 2026")).toBeUndefined();
+    // A word that merely starts like a name is not one.
+    expect(parseValueByFormat("dddd, mmmm d, yyyy", "Monkeys, July 9, 2026")).toBeUndefined();
+    expect(parseValueByFormat("d mmmm yyyy", "9 Julyyy 2026")).toBeUndefined();
+    expect(parseValueByFormat("ddd d mmm yyyy", "Thu 9 Jul 2026")).toEqual(utcDate(2026, 7, 9));
+  });
+
+  it("reads fractional elapsed seconds", () => {
+    expect(parseValueByFormat("[s].00", "1.50")).toBeCloseTo(1.5 / 86400, 12);
+    expect(parseValueByFormat("[ss].00", "3735.80")).toBeCloseTo(3735.8 / 86400, 12);
+  });
+
+  it("keeps the last fraction of a second on its own day", () => {
+    expect(parseValueByFormat("yyyy-mm-dd hh:mm:ss.0000", "2024-01-15 23:59:59.9999")).toEqual(
+      new Date(Date.UTC(2024, 0, 15, 23, 59, 59, 999))
+    );
+    // However many nines are typed: converting them through a double first rounded up to the next second.
+    expect(
+      parseValueByFormat("yyyy-mm-dd hh:mm:ss.000", "2024-01-15 23:59:59.99999999999999999")
+    ).toEqual(new Date(Date.UTC(2024, 0, 15, 23, 59, 59, 999)));
+    expect(parseValueByFormat("hh:mm:ss.0000", "23:59:59.9999")).toBeCloseTo(
+      (86400 - 0.0001) / 86400,
+      12
+    );
+  });
+
+  it("reads fractional seconds", () => {
+    expect(parseValueByFormat("hh:mm:ss.00", "00:00:01.50")).toBeCloseTo(1.5 / 86400, 12);
+    expect(parseValueByFormat("yyyy-mm-dd hh:mm:ss.000", "2026-07-09 12:00:00.250")).toEqual(
+      new Date(Date.UTC(2026, 6, 9, 12, 0, 0, 250))
+    );
+  });
+
+  it("leaves input under a text format as text", () => {
+    expect(parseValueByFormat("yyyy-mm-dd@", "2024-01-15")).toBeUndefined();
+    expect(parseValueByFormat("[h]@", "36")).toBeUndefined();
+    // Only the first section speaks: a text fallback section does not make a date format text.
+    expect(parseValueByFormat("yyyy-mm-dd;@", "2024-01-15")).toEqual(utcDate(2024, 1, 15));
+  });
+
+  it("resolves m to a minute after an hour across a quoted literal", () => {
+    expect(parseValueByFormat('h "h" mm', "1 h 30")).toBeCloseTo(1.5 / 24, 12);
+  });
+});

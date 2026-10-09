@@ -435,6 +435,7 @@ export interface MeasurableCell {
   readonly value: unknown;
   readonly numFmt: string | NumFmt | undefined;
   readonly text: string;
+  readonly date1904?: boolean;
   readonly effectiveType: ValueType;
   readonly font: Partial<Font> | undefined;
   readonly alignment: Partial<Alignment> | undefined;

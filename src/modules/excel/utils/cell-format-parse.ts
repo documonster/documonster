@@ -3,10 +3,10 @@
  * fraction-of-day number, driven entirely by the *target cell's own* `numFmt`
  * — not by guessing the shape of the input string.
  *
- * This is the inverse of the render-direction logic in `cell-format.ts`
- * (`formatDate`, `isDateDisplayFormat`, `isTimeOnlyFormat`): instead of turning
- * a value into display text per a format, it turns display text back into a
- * value per that same format.
+ * This is the inverse of `@utils/number-format-render`: instead of turning a
+ * value into display text per a format, it turns display text back into a
+ * value per that same format. Both read the format through the one tokenizer
+ * in `@utils/number-format`, so a literal on one side is a literal on the other.
  *
  * ## How it works (and why it is not a heuristic)
  *
@@ -26,30 +26,29 @@
  * patch per newly-discovered format shape.
  */
 
-const MONTHS_LONG = [
-  "january",
-  "february",
-  "march",
-  "april",
-  "may",
-  "june",
-  "july",
-  "august",
-  "september",
-  "october",
-  "november",
-  "december"
-];
+import {
+  DAY_NAMES,
+  MONTH_NAMES,
+  numberFormatFacets,
+  splitFormatSections,
+  tokenizeFormatSection
+} from "@utils/number-format";
+
+const MONTHS_LONG = MONTH_NAMES.map(m => m.toLowerCase());
 const MONTHS_SHORT = MONTHS_LONG.map(m => m.slice(0, 3));
+const WEEKDAYS = DAY_NAMES.map(d => d.toLowerCase());
+const WEEKDAYS_SHORT = WEEKDAYS.map(d => d.slice(0, 3));
 
 type FieldRole =
   | "year2"
   | "year4"
   | "month"
   | "day"
+  | "weekday"
   | "hour"
   | "minute"
   | "second"
+  | "secondFraction"
   | "ampm"
   | "ampmShort"
   | "elapsedHour"
@@ -72,7 +71,7 @@ type Segment = FieldSegment | LiteralSegment;
 
 /** A field consumes letters (names, AM/PM) rather than digits. */
 function isAlphaField(role: FieldRole): boolean {
-  return role === "month" || role === "ampm" || role === "ampmShort";
+  return role === "month" || role === "weekday" || role === "ampm" || role === "ampmShort";
 }
 
 /**
@@ -84,188 +83,121 @@ const OMITTABLE_TRAILING_ROLES: ReadonlySet<FieldRole> = new Set([
   "hour",
   "minute",
   "second",
+  "secondFraction",
   "ampm",
   "ampmShort"
 ]);
 
 /**
- * Take the first (positive) of a format's up-to-four `;`-separated sections,
- * honouring quoted spans and backslash escapes so a `;` inside a literal does
- * not split the section.
- */
-function firstSection(fmt: string): string {
-  let quoted = false;
-  for (let i = 0; i < fmt.length; i++) {
-    const ch = fmt[i];
-    if (ch === "\\") {
-      i++;
-    } else if (ch === '"') {
-      quoted = !quoted;
-    } else if (ch === ";" && !quoted) {
-      return fmt.slice(0, i);
-    }
-  }
-  return fmt;
-}
-
-// Sticky (`y`) so it only matches at the exact cursor, and case-insensitive
-// (`i`) because Excel format tokens are case-insensitive (`YYYY-MM-DD`,
-// `AM/PM`, `am/pm`, `A/P` are all valid and mean the same thing).
-const TOKEN_RE = /yyyy|yy|mmmmm|mmmm|mmm|AM\/PM|A\/P|\[h+\]|\[m+\]|\[s+\]|mm|m|dd|d|hh|h|ss|s/iy;
-
-/**
- * Compile a format section into ordered field/literal segments. Consecutive
- * literal characters coalesce into one literal segment; `mm`/`m` is resolved to
- * month vs. minute by adjacency to an hour (before) or second (after) field,
- * matching the render side's `resolveMonthOrMinute`.
+ * Compile a format's first section into ordered field/literal segments.
+ *
+ * The section is read by the shared number-format tokenizer, the same one that renders it and that
+ * decides on load whether a serial is a date — so a character is a field here exactly when it is a
+ * code there, and `m`/`mm` is a month or a minute by the same positional rule. Consecutive literal
+ * characters coalesce into one literal segment.
  */
 export function compileFormat(fmt: string): Segment[] {
-  const section = firstSection(fmt);
+  const tokens = tokenizeFormatSection(splitFormatSections(fmt)[0]);
   const segments: Segment[] = [];
-  // Indices (into `segments`) of month/minute placeholders awaiting resolution.
-  const ambiguous: number[] = [];
 
   let literal = "";
-  let literalHasLetters = false;
-  const flushLiteral = () => {
+  const flushLiteral = (): void => {
     if (literal.length > 0) {
-      segments.push({ kind: "literal", hasLetters: literalHasLetters });
+      segments.push({ kind: "literal", hasLetters: /\p{L}/u.test(literal) });
       literal = "";
-      literalHasLetters = false;
     }
   };
-  const pushLiteralChar = (ch: string) => {
-    literal += ch;
-    if (/[A-Za-z]/.test(ch)) {
-      literalHasLetters = true;
-    }
-  };
-  const pushField = (role: FieldRole) => {
+  const pushField = (role: FieldRole): void => {
     flushLiteral();
     segments.push({ kind: "field", role });
   };
 
-  for (let i = 0; i < section.length;) {
-    const ch = section[i];
-
-    // Quoted literal span.
-    if (ch === '"') {
-      const end = section.indexOf('"', i + 1);
-      const inner = section.slice(i + 1, end === -1 ? section.length : end);
-      for (const c of inner) {
-        pushLiteralChar(c);
-      }
-      i = end === -1 ? section.length : end + 1;
-      continue;
+  for (const token of tokens) {
+    switch (token.kind) {
+      case "date":
+        switch (token.part) {
+          case "year":
+            pushField(token.width <= 2 ? "year2" : "year4");
+            break;
+          case "month":
+            pushField("month");
+            break;
+          case "day":
+            pushField(token.width <= 2 ? "day" : "weekday");
+            break;
+          case "hour":
+            pushField("hour");
+            break;
+          case "minute":
+            pushField("minute");
+            break;
+          case "second":
+            pushField("second");
+            break;
+        }
+        break;
+      case "elapsed":
+        pushField(
+          token.unit === "h"
+            ? "elapsedHour"
+            : token.unit === "m"
+              ? "elapsedMinute"
+              : "elapsedSecond"
+        );
+        break;
+      case "numeral":
+        literal += token.text;
+        break;
+      case "ampm":
+        pushField(token.short ? "ampmShort" : "ampm");
+        break;
+      case "literal":
+        literal += token.text;
+        break;
+      case "locale":
+        literal += token.symbol;
+        break;
+      case "pad":
+        literal += " ";
+        break;
+      case "digit":
+        literal += token.char;
+        break;
+      case "decimal":
+        literal += ".";
+        break;
+      case "thousands":
+        literal += ",";
+        break;
+      case "percent":
+        literal += "%";
+        break;
+      case "slash":
+        literal += "/";
+        break;
+      default:
+        // Fill, colour, condition and other bracket tags are display-only.
+        break;
     }
-    // Backslash escape — next char is a literal.
-    if (ch === "\\" && i + 1 < section.length) {
-      pushLiteralChar(section[i + 1]);
-      i += 2;
-      continue;
+    // `ss.00` and `[ss].00`: the tokenizer has already attached the decimal places to the seconds code.
+    if ((token.kind === "date" || token.kind === "elapsed") && token.fraction > 0) {
+      pushField("secondFraction");
     }
-    // Bracketed span: elapsed-time ([h]/[mm]/[s]) is a field; anything else
-    // ([Red], [$-409], locale/condition) is display-only — skip entirely.
-    if (ch === "[") {
-      const end = section.indexOf("]", i + 1);
-      const body = section.slice(i + 1, end === -1 ? section.length : end);
-      const head = body[0]?.toLowerCase();
-      if (/^h+$/i.test(body)) {
-        pushField("elapsedHour");
-      } else if (/^m+$/i.test(body)) {
-        pushField("elapsedMinute");
-      } else if (/^s+$/i.test(body)) {
-        pushField("elapsedSecond");
-      }
-      void head;
-      i = end === -1 ? section.length : end + 1;
-      continue;
-    }
-
-    // Date/time token?
-    TOKEN_RE.lastIndex = i;
-    const m = TOKEN_RE.exec(section);
-    if (m && m.index === i) {
-      const raw = m[0].toLowerCase();
-      switch (raw) {
-        case "yyyy":
-          pushField("year4");
-          break;
-        case "yy":
-          pushField("year2");
-          break;
-        case "mmmmm":
-        case "mmmm":
-        case "mmm":
-          pushField("month");
-          break;
-        case "dd":
-        case "d":
-          pushField("day");
-          break;
-        case "hh":
-        case "h":
-          pushField("hour");
-          break;
-        case "ss":
-        case "s":
-          pushField("second");
-          break;
-        case "am/pm":
-          pushField("ampm");
-          break;
-        case "a/p":
-          pushField("ampmShort");
-          break;
-        case "mm":
-        case "m":
-          // Provisionally month; resolved after the whole scan.
-          flushLiteral();
-          ambiguous.push(segments.length);
-          segments.push({ kind: "field", role: "month" });
-          break;
-      }
-      i += m[0].length;
-      continue;
-    }
-
-    // Anything else is a literal separator character.
-    pushLiteralChar(ch);
-    i++;
   }
   flushLiteral();
-
-  // Resolve each ambiguous m/mm: it is a minute if the nearest field before it
-  // is an hour, or the nearest field after it is a second (mirroring the
-  // render-side adjacency rule).
-  const fieldRoleAt = (segIndex: number, dir: -1 | 1): FieldRole | undefined => {
-    for (let k = segIndex + dir; k >= 0 && k < segments.length; k += dir) {
-      const seg = segments[k];
-      if (seg.kind === "field") {
-        return seg.role;
-      }
-    }
-    return undefined;
-  };
-  for (const idx of ambiguous) {
-    const before = fieldRoleAt(idx, -1);
-    const after = fieldRoleAt(idx, 1);
-    if (before === "hour" || before === "elapsedHour" || after === "second") {
-      (segments[idx] as FieldSegment).role = "minute";
-    }
-  }
-
   return segments;
 }
 
-function monthIndexFromName(word: string): number | undefined {
+/** A full name or its three-letter abbreviation — not any word that happens to start like one. */
+function nameIndex(word: string, full: readonly string[], short: readonly string[]): number {
   const lower = word.toLowerCase();
-  const fullIdx = MONTHS_LONG.indexOf(lower);
-  if (fullIdx !== -1) {
-    return fullIdx;
-  }
-  const shortIdx = MONTHS_SHORT.indexOf(lower.slice(0, 3));
-  return shortIdx !== -1 ? shortIdx : undefined;
+  const fullIdx = full.indexOf(lower);
+  return fullIdx !== -1 ? fullIdx : short.indexOf(lower);
+}
+
+function monthIndexFromName(word: string): number | undefined {
+  const idx = nameIndex(word, MONTHS_LONG, MONTHS_SHORT);
+  return idx !== -1 ? idx : undefined;
 }
 
 export interface ParsedDateTime {
@@ -275,6 +207,8 @@ export interface ParsedDateTime {
   hour?: number;
   minute?: number;
   second?: number;
+  /** The digits typed after the seconds' decimal point. */
+  secondFraction?: string;
   elapsedSeconds?: number;
 }
 
@@ -295,6 +229,7 @@ function hasTimeField(segments: Segment[]): boolean {
       (s.role === "hour" ||
         s.role === "minute" ||
         s.role === "second" ||
+        s.role === "secondFraction" ||
         s.role === "elapsedHour" ||
         s.role === "elapsedMinute" ||
         s.role === "elapsedSecond")
@@ -362,7 +297,12 @@ function matchSegments(segments: Segment[], input: string): ParsedDateTime | und
         return remainingAreOptional(segments, s) ? finalize() : undefined;
       }
       const word = lm[0];
-      if (seg.role === "month") {
+      if (seg.role === "weekday") {
+        // A weekday name is redundant with the date it sits beside; it must only be a real one.
+        if (nameIndex(word, WEEKDAYS, WEEKDAYS_SHORT) === -1) {
+          return undefined;
+        }
+      } else if (seg.role === "month") {
         const idx = monthIndexFromName(word);
         if (idx === undefined) {
           return undefined;
@@ -391,6 +331,9 @@ function matchSegments(segments: Segment[], input: string): ParsedDateTime | und
     switch (seg.role) {
       case "year4":
         result.year = num;
+        break;
+      case "secondFraction":
+        result.secondFraction = digits;
         break;
       case "year2":
         // The `yy` token only controls display width; a typed 4-digit year is
@@ -470,7 +413,8 @@ function matchSegments(segments: Segment[], input: string): ParsedDateTime | und
  * meaning or the input does not conform to it.
  */
 export function parseValueByFormat(fmt: string, input: string): Date | number | undefined {
-  if (input.trim() === "") {
+  // A text format (`yyyy-mm-dd@`) keeps what is typed as text, as the readers keep its values numbers.
+  if (input.trim() === "" || numberFormatFacets(fmt).text) {
     return undefined;
   }
   const segments = compileFormat(fmt);
@@ -490,7 +434,8 @@ export function parseValueByFormat(fmt: string, input: string): Date | number | 
     const h = parsed.hour ?? 0;
     const m = parsed.minute ?? 0;
     const s = parsed.second ?? 0;
-    return ((parsed.elapsedSeconds ?? 0) + h * 3600 + m * 60 + s) / 86400;
+    const fraction = Number("0." + (parsed.secondFraction ?? "0"));
+    return ((parsed.elapsedSeconds ?? 0) + h * 3600 + m * 60 + s + fraction) / 86400;
   }
 
   if (parsed.year === undefined || parsed.month === undefined || parsed.day === undefined) {
@@ -503,7 +448,10 @@ export function parseValueByFormat(fmt: string, input: string): Date | number | 
       parsed.day,
       parsed.hour ?? 0,
       parsed.minute ?? 0,
-      parsed.second ?? 0
+      parsed.second ?? 0,
+      // A `Date` holds whole milliseconds: take the first three typed digits, so .9999… stays on its
+      // second however many nines follow — converting through a double first rounded it up to 1.
+      Number((parsed.secondFraction ?? "").slice(0, 3).padEnd(3, "0"))
     )
   );
   // Reject overflowed components (e.g. day 31 in a 30-day month) rather than

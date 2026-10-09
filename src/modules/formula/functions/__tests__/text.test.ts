@@ -2358,8 +2358,8 @@ describe("TEXT deep coverage — number format codes", () => {
     expect(asString(fnTEXT([rvNumber(42), rvString("0000")]))).toBe("0042");
   });
   it("TEXT '####.##' trims trailing insignificant digits", () => {
-    // Current implementation emits "12.50" — '#' still emits the rounded digit.
-    expect(asString(fnTEXT([rvNumber(12.5), rvString("####.##")]))).toBe("12.50");
+    // `#` is an optional digit: a trailing zero under it is not shown.
+    expect(asString(fnTEXT([rvNumber(12.5), rvString("####.##")]))).toBe("12.5");
   });
 });
 
@@ -2368,12 +2368,13 @@ describe("TEXT deep coverage — fraction format", () => {
     expect(asString(fnTEXT([rvNumber(3.25), rvString("# ?/?")]))).toBe("3 1/4");
   });
   it("TEXT '# ??/??' two-digit fraction (approximation)", () => {
-    // 3.14159 ≈ 3 14/99 (best two-digit approximation ≤99)
-    expect(asString(fnTEXT([rvNumber(3.14159), rvString("# ??/??")]))).toBe("3 14/99");
+    // Excel shows the last continued-fraction convergent within two digits: 1/7, not the closer 14/99.
+    expect(asString(fnTEXT([rvNumber(3.14159), rvString("# ??/??")]))).toBe("3  1/7 ");
   });
   it("TEXT '# ?/?' of integer drops fraction spot", () => {
-    // Engine emits the whole number with 6 trailing spaces (padded area).
-    expect(asString(fnTEXT([rvNumber(5), rvString("# ?/?")]))).toBe("5      ");
+    // The fraction ` ?/?` is blanked to its own width — four characters — so whole numbers and
+    // fractions line up, exactly as the cell would display it.
+    expect(asString(fnTEXT([rvNumber(5), rvString("# ?/?")]))).toBe("5    ");
   });
   it("TEXT '# ?/?' of negative fraction", () => {
     expect(asString(fnTEXT([rvNumber(-3.25), rvString("# ?/?")]))).toBe("-3 1/4");
@@ -3441,5 +3442,67 @@ describe("ENCODEURL", () => {
 
   it("coerces numbers to strings first", () => {
     expect(asString(fnENCODEURL([rvNumber(42)]))).toBe("42");
+  });
+});
+
+describe("TEXT shares the cell display renderer", () => {
+  // TEXT used to carry its own copy of the number-format renderer, and the two disagreed on
+  // literals. These are the cases where they did.
+  it("does not read a quoted or escaped unit as a date code", () => {
+    expect(asString(fnTEXT([rvNumber(5e9), rvString('$0.0,,"M"')]))).toBe("$5000.0M");
+    expect(asString(fnTEXT([rvNumber(5e9), rvString("\\$0.0,,\\M")]))).toBe("$5000.0M");
+    expect(asString(fnTEXT([rvNumber(3), rvString('0" hours"')]))).toBe("3 hours");
+  });
+
+  it("keeps literals around a percentage", () => {
+    expect(asString(fnTEXT([rvNumber(0.25), rvString('0%" off"')]))).toBe("25% off");
+  });
+
+  it("renders General instead of echoing it", () => {
+    expect(asString(fnTEXT([rvNumber(1.5), rvString("General")]))).toBe("1.5");
+  });
+
+  it("puts the minus sign before the currency symbol", () => {
+    expect(asString(fnTEXT([rvNumber(-5), rvString("$#,##0")]))).toBe("-$5");
+  });
+
+  it("renders elapsed time and fractional seconds", () => {
+    expect(asString(fnTEXT([rvNumber(1.5), rvString("[h]:mm")]))).toBe("36:00");
+    expect(asString(fnTEXT([rvNumber(0.0001157), rvString("mm:ss.00")]))).toBe("00:10.00");
+  });
+
+  it("chooses a section by condition", () => {
+    expect(asString(fnTEXT([rvNumber(12345), rvString('[>=1000]0.0,"K";0')]))).toBe("12.3K");
+  });
+
+  it("formats text through a trailing @ section", () => {
+    expect(asString(fnTEXT([rvString("hi"), rvString("0;@")]))).toBe("hi");
+  });
+
+  it("reads numeric text as a number unless the format has four sections", () => {
+    expect(asString(fnTEXT([rvString("12"), rvString("0.00;@")]))).toBe("12.00");
+    expect(asString(fnTEXT([rvString("12"), rvString("0;0;0;@")]))).toBe("12");
+  });
+
+  it("shows a logical as itself under any format", () => {
+    expect(asString(fnTEXT([rvBoolean(true), rvString("0")]))).toBe("TRUE");
+    expect(asString(fnTEXT([rvBoolean(false), rvString("@")]))).toBe("FALSE");
+  });
+
+  it("is #VALUE! where a cell would show hashes", () => {
+    expect(fnTEXT([rvNumber(3000000), rvString("yyyy")])).toEqual(ERRORS.VALUE);
+    expect(fnTEXT([rvNumber(-1), rvString("[h]:mm")])).toEqual(ERRORS.VALUE);
+    expect(asString(fnTEXT([rvNumber(-1), rvString("[h]")]))).toBe("-24");
+  });
+
+  it("returns other text unchanged instead of failing", () => {
+    expect(asString(fnTEXT([rvString("hi"), rvString("0.00")]))).toBe("hi");
+    expect(asString(fnTEXT([rvString(""), rvString("0")]))).toBe("");
+  });
+
+  it("honours the workbook's 1904 epoch", () => {
+    expect(asString(fnTEXT([rvNumber(0), rvString("yyyy-mm-dd")], { date1904: true }))).toBe(
+      "1904-01-01"
+    );
   });
 });

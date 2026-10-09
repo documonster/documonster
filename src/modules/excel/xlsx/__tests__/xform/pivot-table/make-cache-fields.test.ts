@@ -1,5 +1,5 @@
 import { addPivotTable, addTable } from "@excel/core/worksheet";
-import { Workbook } from "@excel/index";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("makeCacheFields", () => {
@@ -440,4 +440,69 @@ describe("makeCacheFields", () => {
       expect(pivotTable.cacheFields[1].maxValue).toBe(0);
     });
   });
+});
+
+describe("makeCacheFields — date columns", () => {
+  // The cache field of a date column carries the built-in short-date format. A number formatted
+  // with a literal unit is not a date, by the same rule the readers apply.
+  function cacheFieldFor(numFmt: string) {
+    const workbook = Workbook.create();
+    const worksheet = Workbook.addWorksheet(workbook, "Source");
+    const rows: [string, number][] = [
+      ["Key", 0],
+      ["A", 45306],
+      ["B", 45307]
+    ];
+    rows.forEach(([key, amount], i) => {
+      Cell.setValue(worksheet, `A${i + 1}`, key);
+      Cell.setValue(worksheet, `B${i + 1}`, i === 0 ? "Amount" : amount);
+      if (i > 0) {
+        Cell.setNumFmt(worksheet, `B${i + 1}`, numFmt);
+      }
+    });
+    addPivotTable(Workbook.addWorksheet(workbook, "Pivot"), {
+      sourceSheet: worksheet,
+      rows: ["Amount"],
+      columns: [],
+      values: ["Key"],
+      metric: "count"
+    });
+    return workbook.pivotTables[0].cacheFields[1];
+  }
+
+  it("marks a date-formatted column with the short-date format", () => {
+    expect(cacheFieldFor("yyyy-mm-dd").numFmtId).toBe("14");
+  });
+
+  it("reads the format from the worksheet cells behind a table source", () => {
+    const workbook = Workbook.create();
+    const worksheet = Workbook.addWorksheet(workbook, "Source");
+    const table = addTable(worksheet, {
+      name: "Dated",
+      ref: "C3",
+      headerRow: true,
+      columns: [{ name: "Key" }, { name: "When" }],
+      rows: [
+        ["A", 45306],
+        ["B", 45307]
+      ]
+    });
+    Cell.setNumFmt(worksheet, "D4", "d-mmm-yy");
+    Cell.setNumFmt(worksheet, "D5", "d-mmm-yy");
+    addPivotTable(Workbook.addWorksheet(workbook, "Pivot"), {
+      sourceTable: table,
+      rows: ["When"],
+      columns: [],
+      values: ["Key"],
+      metric: "count"
+    });
+    expect(workbook.pivotTables[0].cacheFields[1].numFmtId).toBe("14");
+  });
+
+  it.each(["\\$0.0,,\\M", '0" days"', "0_m", "[Red]0", "#,##0.00"])(
+    "leaves a %s column as a number",
+    numFmt => {
+      expect(cacheFieldFor(numFmt).numFmtId).toBeUndefined();
+    }
+  );
 });

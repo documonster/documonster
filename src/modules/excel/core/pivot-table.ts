@@ -1,4 +1,6 @@
 import type { PivotChartOptions } from "@excel/chart/model/types";
+import type { CellData } from "@excel/core/cell";
+import { cellNumFmt } from "@excel/core/cell";
 import type { ColumnData } from "@excel/core/column";
 import type {
   CacheField,
@@ -27,6 +29,7 @@ import { tableModel } from "@excel/core/table";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import {
   columnValues,
+  findCell,
   getColumn,
   getRow,
   getSheetName,
@@ -34,7 +37,7 @@ import {
 } from "@excel/core/worksheet-core";
 import { PivotTableError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
-import { range } from "@utils/utils";
+import { isDateFmt, range } from "@utils/utils";
 
 // Re-export the pure OOXML data types/constants that were relocated to
 // pivot-table-types.ts, preserving backward compatibility for existing
@@ -77,6 +80,19 @@ export interface PivotTableSource {
   getSheetValues(): unknown[][];
   /** Dimensions of the source data (plain range record). */
   dimensions: RangeData;
+  /**
+   * The number format of a source cell, by the same 1-indexed row and column as `getColumn`.
+   *
+   * Row and column values are bare values, so this is the only route to a cell's format — and the format is what
+   * makes `45306` a date rather than a quantity. A source without it can still mark a column of `Date` values.
+   */
+  getNumberFormat?(rowNumber: number, columnNumber: number): string | undefined;
+}
+
+/** A cell's number format as a code, whichever of its two shapes it is stored in. */
+function formatCodeOf(cell: CellData | undefined): string | undefined {
+  const numFmt = cell === undefined ? undefined : cellNumFmt(cell);
+  return typeof numFmt === "string" ? numFmt : numFmt?.formatCode;
 }
 
 /** Extract the values array from a getRow result (RowData or `{ values }`). */
@@ -374,6 +390,12 @@ function createTableSourceAdapter(table: TableData): PivotTableSource {
       }
       return { values };
     },
+    getNumberFormat(rowNumber: number, columnNumber: number): string | undefined {
+      // The table's rows are a copy of its values; the formats stay on the worksheet's cells.
+      return formatCodeOf(
+        findCell(table.worksheet, startRow + rowNumber - 1, startCol + columnNumber - 1)
+      );
+    },
     getSheetValues(): unknown[][] {
       // Return sparse array where index 1 is header row, and subsequent indices are data rows
       const result: unknown[][] = [];
@@ -414,6 +436,8 @@ function resolveSource(model: PivotTableModel): PivotTableSource {
       getRow: (rowNumber: number) => getRow(ws, rowNumber),
       getColumn: (columnNumber: number) => getColumn(ws, columnNumber),
       getSheetValues: () => getSheetValues(ws) as unknown[][],
+      getNumberFormat: (rowNumber: number, columnNumber: number) =>
+        formatCodeOf(findCell(ws, rowNumber, columnNumber)),
       get dimensions(): RangeData {
         return computeSourceDimensions(ws);
       }
@@ -834,8 +858,7 @@ function makeCacheFields(
     const columnValues = columnValuesOf(source.getColumn(columnIndex));
     let sawDate = false;
     for (let i = DATA_START_INDEX; i < columnValues.length; i++) {
-      const cell = columnValues[i];
-      const value = unwrapCellValue(cell);
+      const value = unwrapCellValue(columnValues[i]);
       if (value === null || value === undefined) {
         continue;
       }
@@ -843,11 +866,9 @@ function makeCacheFields(
         sawDate = true;
         continue;
       }
-      const numFmt = (cell as { style?: { numFmt?: string | { formatCode?: string } } } | undefined)
-        ?.style?.numFmt;
-      const code = typeof numFmt === "string" ? numFmt : numFmt?.formatCode;
-      // A date format names a date or time component outside a literal.
-      if (typeof code === "string" && /(?:^|[^\\])[dmyhs]/i.test(code)) {
+      // A date format, by the same rule the readers use to turn a serial into a `Date`. Column values are bare
+      // values, so the format has to come from the cell itself.
+      if (typeof value === "number" && isDateFmt(source.getNumberFormat?.(i, columnIndex))) {
         sawDate = true;
         continue;
       }
