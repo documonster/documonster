@@ -512,6 +512,13 @@ jobs:
           DOCUMONSTER_ENTERPRISE_CORPUS_DIR: ${{ vars.DOCUMONSTER_ENTERPRISE_CORPUS_DIR }}
           DOCUMONSTER_CORPUS_LIBREOFFICE_OPEN_VALIDATION: "1"
 
+      # Number formats rendered by an independent implementation: cell display text and TEXT() results.
+      - name: Number formats agree with LibreOffice
+        run: pnpm exec vitest run src/modules/excel/utils/__tests__/number-format-oracle.node.test.ts
+        env:
+          LIBREOFFICE_BIN: soffice
+          DOCUMONSTER_LIBREOFFICE_SMOKE: "1"
+
       # The examples have to run first: this gate reads what they wrote to `tmp/`.
       #
       # It asks the one question no other check here can — whether an *independent* implementation can read what this

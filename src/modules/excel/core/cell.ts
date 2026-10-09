@@ -596,7 +596,7 @@ function toCivilDate<T extends Date | TemporalPlainValue | null | undefined>(
  * the only link a `CellData` has; a cell not yet attached to a workbook falls back to the 1900 system, which is
  * also what the writers default to.
  */
-function cellDate1904(cell: CellData): boolean {
+export function cellDate1904(cell: CellData): boolean {
   const workbook = cell.row?.worksheet?._workbook as
     | { properties?: { date1904?: boolean } }
     | undefined;
@@ -918,11 +918,7 @@ export function cellText(c: CellData): string {
 }
 
 export function cellDisplayText(c: CellData): string {
-  return getCellDisplayText({
-    value: c._value.value,
-    numFmt: c.style.numFmt,
-    text: c._value.toString()
-  });
+  return getCellDisplayText(cellView(c));
 }
 
 const HTML_ESCAPE_MAP: Record<string, string> = {
@@ -958,6 +954,8 @@ export interface CellView {
   readonly value: CellValueType;
   readonly numFmt: string | NumFmt | undefined;
   readonly text: string;
+  /** The workbook's date system, which turning a `Date` value back into the serial it displays needs. */
+  readonly date1904: boolean;
   readonly effectiveType: ValueType;
   /**
    * The cell's font — the object it *shares* with every other cell its row or column
@@ -986,6 +984,9 @@ export function cellView(c: CellData): CellView {
     },
     get text() {
       return c._value.toString();
+    },
+    get date1904() {
+      return cellDate1904(c);
     },
     get effectiveType() {
       return c._value.effectiveType;

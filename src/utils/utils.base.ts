@@ -183,79 +183,9 @@ export function validInt(value: string | number): number {
   return Number.isNaN(i) ? 0 : i;
 }
 
-/**
- * Split an Excel numFmt string by semicolons, respecting quoted strings and brackets.
- *
- * Excel numFmt can have up to 4 sections: `positive ; negative ; zero ; text`.
- * Semicolons inside `"..."` (literal text) or `[...]` (locale/color tags) must NOT
- * be treated as section separators.
- */
-export function splitFormatSections(fmt: string): string[] {
-  const sections: string[] = [];
-  let current = "";
-  let inQuote = false;
-  let inBracket = false;
-
-  for (let i = 0; i < fmt.length; i++) {
-    const char = fmt[i];
-
-    if (char === '"' && !inBracket) {
-      inQuote = !inQuote;
-      current += char;
-    } else if (char === "[" && !inQuote) {
-      inBracket = true;
-      current += char;
-    } else if (char === "]" && !inQuote) {
-      inBracket = false;
-      current += char;
-    } else if (char === ";" && !inQuote && !inBracket) {
-      sections.push(current);
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  sections.push(current);
-  return sections;
-}
-
-/** Reusable regex — no capture groups, so safe for `test()`. */
-const DATE_FMT_RE = /[ymdhMsb]/;
-
-/** Ignore literal text and spacing/fill characters when detecting date tokens. */
-const STRIP_FORMAT_LITERALS_RE = /\\.|"[^"]*"|\[[^\]]*\]|_.|\*./g;
-
-/** Cache for isDateFmt results — typically only 5-20 unique formats per workbook,
- *  but each may be tested hundreds of thousands of times during reconcile. */
-const _isDateFmtCache = new Map<string, boolean>();
-
-export function isDateFmt(fmt: string | null | undefined): boolean {
-  if (!fmt) {
-    return false;
-  }
-  const cached = _isDateFmtCache.get(fmt);
-  if (cached !== undefined) {
-    return cached;
-  }
-  // Only the first section (used for positive numbers / dates) determines
-  // whether the format represents a date.  The "@" text placeholder may
-  // legitimately appear in later sections as a text fallback (e.g. "mm/dd/yyyy;@").
-  const firstSection = splitFormatSections(fmt)[0];
-
-  // Literal units such as \\M must not turn numeric values into dates.
-  const clean = firstSection.replace(STRIP_FORMAT_LITERALS_RE, "");
-
-  // "@" in the cleaned section means it's a text format, not a date format.
-  let result: boolean;
-  if (clean.indexOf("@") > -1) {
-    result = false;
-  } else {
-    result = DATE_FMT_RE.test(clean);
-  }
-  _isDateFmtCache.set(fmt, result);
-  return result;
-}
+// Number-format reading lives in one place; these names are kept here because every reader imports
+// them from `@utils/utils`.
+export { isDateFmt, splitFormatSections } from "./number-format";
 
 export function parseBoolean(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";

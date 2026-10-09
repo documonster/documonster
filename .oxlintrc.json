@@ -113,6 +113,8 @@
       "files": [
         "src/modules/**/__tests__/browser/**/*.test.ts",
         "src/utils/__tests__/browser/**/*.test.ts",
+        "src/utils/__tests__/number-format.test.ts",
+        "src/utils/__tests__/number-format-render.test.ts",
         "src/modules/draw/**/__tests__/**/*.test.ts",
         "src/modules/xml/__tests__/**/*.test.ts",
         "src/modules/markdown/__tests__/**/*.test.ts",

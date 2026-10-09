@@ -342,7 +342,7 @@ describe("PDF Rendering Edge Cases", () => {
       expect(text).toContain("-");
     });
 
-    it("should produce empty string for #.## with zero", async () => {
+    it("should show no digits for #.## with zero", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Cell.setValue(ws, "A1", 0);
@@ -365,6 +365,28 @@ describe("PDF Rendering Edge Cases", () => {
       const pdfBytes = await excelToPdf(wb);
       const text = await extractText(pdfBytes);
       expect(text).toContain("0.00");
+    });
+  });
+
+  describe("1904 date system", () => {
+    it("renders a loaded duration and date in the workbook's own epoch", async () => {
+      const source = Workbook.create();
+      source.properties.date1904 = true;
+      const ws = Workbook.addWorksheet(source, "Sheet1");
+      Column.setWidth(ws, 1, 24);
+      Cell.setValue(ws, "A1", 1.5);
+      Cell.setStyle(ws, "A1", { numFmt: "[h]:mm:ss" });
+      Cell.setValue(ws, "A2", 45306.5);
+      Cell.setStyle(ws, "A2", { numFmt: "yyyy-mm-dd hh:mm" });
+      // Loading turns both serials into `Date`s through the 1904 epoch; rendering has to undo that with the
+      // same epoch, or the duration grows by 1,462 days.
+      const wb = Workbook.create();
+      await Workbook.read(wb, new Uint8Array(await Workbook.toBuffer(source)));
+
+      const text = await extractText(await excelToPdf(wb));
+      expect(text).toContain("36:00:00");
+      expect(text).not.toContain("35124");
+      expect(text).toContain("2028-01-16 12:00");
     });
   });
 

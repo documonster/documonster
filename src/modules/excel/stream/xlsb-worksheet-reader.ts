@@ -255,12 +255,10 @@ function readWideString(reader: BinaryReader): string {
 /**
  * A serial wearing a date format is a date — through `isDateFmt`, the same rule every other reader applies.
  *
- * This used to carry its own detector and its own epoch expression, and both differed from the buffered reader's.
- * The detector disagreed on four of forty-five real formats: it did not take only the first section, so `";;;dd"`
- * and `"@;;;yyyy"` were dates here and numbers there, and it stripped `\\`-escapes and lacked the `b`/`y` codes, so
- * `"\\d0"` and `"y"` were numbers here and dates there. The same workbook therefore read back differently
- * depending on which container it arrived in and whether the caller streamed it — the one thing two readers of the
- * same document must not do, as `readXlsbInto` says in as many words.
+ * This used to carry its own detector and its own epoch expression, and both differed from the buffered reader's,
+ * so the same workbook read back differently depending on which container it arrived in and whether the caller
+ * streamed it — the one thing two readers of the same document must not do, as `readXlsbInto` says in as many words.
+ * There is now one tokenizer for number formats (`@utils/number-format`), shared with display and `TEXT`.
  */
 function dated(
   value: number,

@@ -41,6 +41,10 @@ export default defineConfig({
       // Platform/runtime browser tests (IIFE smoke, archive/stream native APIs).
       "src/modules/**/__tests__/browser/**/*.test.ts",
       "src/utils/__tests__/browser/**/*.test.ts",
+      // The shared number-format reader and renderer are pure computation that Excel and the formula
+      // engine both ship to the browser; their own edge cases run there directly.
+      "src/utils/__tests__/number-format.test.ts",
+      "src/utils/__tests__/number-format-render.test.ts",
       // Pure-computation modules: their node test suites are free of Node-only
       // APIs and disk fixtures, so we re-run them in a real browser to prove
       // the shipped logic behaves identically there. Node-stream / fixture
