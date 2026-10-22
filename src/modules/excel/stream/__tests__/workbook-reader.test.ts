@@ -840,3 +840,50 @@ describe("WorkbookReader never stalls on a part left unread", () => {
     }).rejects.toThrow("moved past it");
   });
 });
+
+/**
+ * A Web ReadableStream given to the reader — a fetch() body, a File's
+ * stream() — belongs to the caller again once the reader is done with it,
+ * whether the workbook was read to the end or the loop was left early. The
+ * classes' `fromWeb` keeps the lock for good, as Node's does, so the reader
+ * adapts the stream with the module's `readableFromWeb` instead.
+ */
+describe("WorkbookReader over a Web ReadableStream", () => {
+  async function twoSheets(): Promise<Uint8Array> {
+    const wb = Workbook.create();
+    Cell.setValue(Workbook.addWorksheet(wb, "A"), "A1", 1);
+    Cell.setValue(Workbook.addWorksheet(wb, "B"), "A1", 2);
+    return Workbook.toBuffer(wb);
+  }
+
+  function asWebStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      }
+    });
+  }
+
+  it("reads the workbook, then hands the stream back unlocked", async () => {
+    const stream = asWebStream(await twoSheets());
+    const names: string[] = [];
+    for await (const ws of new WorkbookReader(stream, {})) {
+      names.push(ws.name);
+      for await (const _row of ws) {
+        // read it whole
+      }
+    }
+    expect(names).toEqual(["A", "B"]);
+    expect(stream.locked).toBe(false);
+  });
+
+  it("hands the stream back unlocked when the loop is left early", async () => {
+    const stream = asWebStream(await twoSheets());
+    for await (const _ws of new WorkbookReader(stream, {})) {
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(stream.locked).toBe(false);
+  });
+});

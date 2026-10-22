@@ -96,7 +96,7 @@ import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { Readable, Transform } from "@stream";
+import { Readable, Transform, isReadableStream, readableFromWeb } from "@stream";
 import { EventEmitter } from "@utils/event-emitter";
 import { assertLimitOption } from "@utils/limits";
 import { decodeOoxmlEscape } from "@utils/utils";
@@ -182,19 +182,6 @@ export interface WaitingWorksheetEntry {
 
 /** What a streaming workbook reader accepts (all platforms). */
 export type WorkbookReaderInput = Uint8Array | ArrayBuffer | Readable | ReadableStream<Uint8Array>;
-
-/**
- * Structural view of the optional cross-platform statics/constructor on
- * `Readable`. The Node and browser variants expose slightly different surfaces
- * (browser supports a `{ stream }` constructor option; both expose `from`,
- * Node 18+ exposes `fromWeb`), so we probe them through this loose shape rather
- * than the concrete imported type.
- */
-interface ReadableCrossPlatform {
-  fromWeb?: (stream: ReadableStream<Uint8Array>) => Readable;
-  from(source: Uint8Array[]): Readable;
-  new (options: { stream: ReadableStream<Uint8Array> }): Readable;
-}
 
 export interface WorkbookReaderOptions {
   worksheets?: "emit" | "ignore";
@@ -449,30 +436,12 @@ export abstract class WorkbookReaderBase<
       return input;
     }
 
-    // Accept Web ReadableStream (browser fetch() body, Node 18+ fetch(), etc.)
-    if (
-      input &&
-      typeof input === "object" &&
-      typeof (input as unknown as ReadableStream<Uint8Array>).getReader === "function"
-    ) {
-      // Cross-platform feature detection: the imported `Readable` may resolve to
-      // either the Node or browser variant, whose static/constructor surfaces
-      // differ. Probe the optional members through a structural view.
-      const ReadableCtor = Readable as unknown as ReadableCrossPlatform;
-      const fromWeb = ReadableCtor.fromWeb;
-      if (typeof fromWeb === "function") {
-        return fromWeb(input as unknown as ReadableStream<Uint8Array>);
-      }
-
-      // Browser wrapper supports `{ stream }` constructor option.
-      // Node's Readable does not, so this is best-effort.
-      try {
-        return new ReadableCtor({
-          stream: input as unknown as ReadableStream<Uint8Array>
-        });
-      } catch {
-        throw new ExcelFileError("<ReadableStream>", "read", "Could not recognise input");
-      }
+    // A Web ReadableStream — a fetch() body, a File's stream(). The module's
+    // adapter, not the class's `fromWeb`: it hands the lock back once the
+    // workbook has been read or the reader is abandoned, where Node's keeps
+    // it for good. It returns an instance of this entry's Readable.
+    if (isReadableStream(input)) {
+      return readableFromWeb(input as ReadableStream<Uint8Array>) as unknown as Readable;
     }
 
     let data: unknown = input;
@@ -480,8 +449,7 @@ export abstract class WorkbookReaderBase<
       data = new Uint8Array(data);
     }
     if (data instanceof Uint8Array) {
-      // Cross-platform: both Node's Readable and our browser Readable implement `.from()`.
-      return (Readable as unknown as ReadableCrossPlatform).from([data]);
+      return Readable.from([data]);
     }
     throw new ExcelFileError(String(input), "read", "Could not recognise input");
   }
