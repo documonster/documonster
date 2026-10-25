@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/documonster/documonster/compare/v0.21.0...v0.21.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **excel:** Give a Web ReadableStream back unlocked once the streaming reader is done with it ([68a4f7d](https://github.com/documonster/documonster/commit/68a4f7d1eea7f3ab75bc50bfe91a3b93d209ef63))
+
 ## [0.21.0](https://github.com/documonster/documonster/compare/v0.20.2...v0.21.0) (2026-10-22)
 
 
