@@ -58,12 +58,16 @@ interface RowModel {
  *
  * A style and no value. A cell with a formula, a hyperlink or a comment is not blank however empty its value looks —
  * `null` is a value a formula can produce — so all of those are checked rather than only the value.
+ *
+ * A cell that only points at a shared formula, `<f t="shared" si="0"/>`, has no formula text, and its `sharedFormula`
+ * is not filled in until `reconcile`. At this point it is known only by its `si`.
  */
 function isStyledBlank(cell: {
   readonly value?: unknown;
   readonly type?: number;
   readonly formula?: unknown;
   readonly sharedFormula?: unknown;
+  readonly si?: unknown;
   readonly hyperlink?: unknown;
   readonly comment?: unknown;
   readonly styleId?: number;
@@ -73,6 +77,7 @@ function isStyledBlank(cell: {
     cell.value === undefined &&
     cell.formula === undefined &&
     cell.sharedFormula === undefined &&
+    cell.si === undefined &&
     cell.hyperlink === undefined &&
     cell.comment === undefined
   );

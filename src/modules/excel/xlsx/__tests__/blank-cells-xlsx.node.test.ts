@@ -134,6 +134,35 @@ describe("collapse changes the model, not the file", () => {
   });
 });
 
+describe("collapse keeps a styled cell that points at a shared formula", () => {
+  it("reads the filled-down cell as a formula, not as a blank", async () => {
+    // A formula filled down from B2 to B3 with no cached results, as writers that do not calculate save it. B3 has a
+    // style and no `<v>`, and its `<f>` carries only the `si` of the formula it shares.
+    const handle = Workbook.create();
+    const sheet = Workbook.addWorksheet(handle, "S");
+    Cell.setValue(sheet, "A2", 1);
+    Cell.setValue(sheet, "A3", 2);
+    Cell.setValue(sheet, "B2", { formula: "A2" });
+    Cell.setValue(sheet, "B3", { sharedFormula: "B2" });
+    Cell.setNumFmt(sheet, "B3", "@");
+    const bytes = Uint8Array.from(
+      await Workbook.toBuffer(handle, { format: "xlsx", validate: false })
+    );
+    const xml = new TextDecoder().decode(
+      (await extractAll(bytes)).get("xl/worksheets/sheet1.xml")!.data
+    );
+    expect(xml).toMatch(/<c r="B3" s="\d+"><f t="shared" si="0"\/><\/c>/);
+
+    for (const blankCells of ["keep", "collapse"] as const) {
+      const read = Workbook.create();
+      await Workbook.read(read, bytes, { blankCells });
+      expect(Cell.getValue(Workbook.getWorksheets(read)[0], "B3"), blankCells).toEqual({
+        sharedFormula: "B2"
+      });
+    }
+  });
+});
+
 describe("the two containers agree", () => {
   it("collapses to the same rectangles from either form", async () => {
     // The claim the shared representation exists for: the same workbook, read through either container with the same
