@@ -1,6 +1,4 @@
-import { cellSetAlignment, cellSetValue } from "@excel/core/cell";
-import { calculateFormulas } from "@excel/core/formula-adapter";
-import { getCell } from "@excel/core/worksheet";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { pdf as standalonePdf } from "@pdf/pdf";
@@ -423,8 +421,7 @@ describe("PDF Rendering Edge Cases", () => {
       const ws = Workbook.addWorksheet(wb, "Sheet1");
       Column.setWidth(ws, 1, 30);
       Cell.setValue(ws, "A1", "Normal");
-      const r2 = Worksheet.getRow(ws, 2);
-      r2.height = 50;
+      Row.setHeight(ws, 2, 50);
       Cell.setValue(ws, "A2", "Tall");
       Cell.setValue(ws, "A3", "Normal again");
 
@@ -1105,9 +1102,8 @@ describe("PDF Rendering Edge Cases", () => {
       ];
 
       for (let i = 0; i < combos.length; i++) {
-        const cell = getCell(ws, 1, i + 1);
-        cellSetValue(cell, combos[i].value);
-        cellSetAlignment(cell, {
+        Cell.setValue(ws, 1, i + 1, combos[i].value);
+        Cell.setAlignment(ws, 1, i + 1, {
           textRotation: 90,
           horizontal: combos[i].h as any,
           vertical: combos[i].v as any,
@@ -1153,7 +1149,7 @@ describe("PDF Rendering Edge Cases", () => {
       Cell.setValue(ws, "A1", 100);
       Cell.setValue(ws, "B1", { formula: "A1*2", result: 0 });
 
-      const pdfBytes = await excelToPdf(wb, { recalculate: calculateFormulas });
+      const pdfBytes = await excelToPdf(wb, { recalculate: ExcelFormula.calculate });
       expectValidPdf(pdfBytes);
 
       const text = await extractText(pdfBytes);
@@ -1170,7 +1166,7 @@ describe("PDF Rendering Edge Cases", () => {
       Cell.setValue(ws, "A2", 3);
       Cell.setValue(ws, "A3", { formula: "A1+A2", result: 0 });
 
-      const pdfBytes = await excelToPdf(wb, { recalculate: calculateFormulas });
+      const pdfBytes = await excelToPdf(wb, { recalculate: ExcelFormula.calculate });
       expectValidPdf(pdfBytes);
 
       const text = await extractText(pdfBytes);
@@ -1188,7 +1184,7 @@ describe("PDF Rendering Edge Cases", () => {
       // Modify A1 after setting up the formula — the cached result (999) is now stale
       Cell.setValue(ws, "A1", 10);
 
-      const pdfBytes = await excelToPdf(wb, { recalculate: calculateFormulas });
+      const pdfBytes = await excelToPdf(wb, { recalculate: ExcelFormula.calculate });
       expectValidPdf(pdfBytes);
 
       const text = await extractText(pdfBytes);

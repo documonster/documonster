@@ -18,8 +18,9 @@ import { Workbook, Worksheet } from "@excel/index";
 const workbook = Workbook.create();
 const sheet = sampleSheet(workbook);
 
-await Workbook.protect(workbook, "book-secret", { lockStructure: true } as never);
-await Worksheet.protect(sheet, "sheet-secret", {
+await Workbook.protect(workbook, { password: "book-secret", lockStructure: true } as never);
+await Worksheet.protect(sheet, {
+  password: "sheet-secret",
   selectLockedCells: true,
   formatCells: false,
   insertRows: false

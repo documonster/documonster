@@ -23,82 +23,82 @@ declare const strings: ReadableStream<string>;
 
 function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
   // --- readableStreamToAsyncIterable: the element type comes from the reader --
-  const fromNumbers = S.readableStreamToAsyncIterable(numbers);
+  const fromNumbers = S.Streams.readableStreamToAsyncIterable(numbers);
   type _Iterated = Assert<IsEqual<typeof fromNumbers, AsyncGenerator<number, void, unknown>>>;
 
   // --- readableFromWeb: byte mode by default, strings with an encoding --------
-  const decoded = S.readableFromWeb(bytes, { encoding: "utf8" });
+  const decoded = S.Streams.fromWebReadable(bytes, { encoding: "utf8" });
   type _Decoded = Assert<IsEqual<typeof decoded, IReadable<string>>>;
-  const asBytes = S.readableFromWeb(strings);
+  const asBytes = S.Streams.fromWebReadable(strings);
   type _Bytes = Assert<IsEqual<typeof asBytes, IReadable<Uint8Array>>>;
-  const asObjects = S.readableFromWeb(numbers, { objectMode: true });
+  const asObjects = S.Streams.fromWebReadable(numbers, { objectMode: true });
   type _Objects = Assert<IsEqual<typeof asObjects, IReadable<number>>>;
   // @ts-expect-error byte mode cannot carry numbers
-  S.readableFromWeb(numbers);
+  S.Streams.fromWebReadable(numbers);
   // A mode known only at run time may be bytes: the input must suit both.
-  const unknownMode = S.readableFromWeb(strings, { objectMode: Math.random() > 0.5 });
+  const unknownMode = S.Streams.fromWebReadable(strings, { objectMode: Math.random() > 0.5 });
   type _Unknown = Assert<IsEqual<typeof unknownMode, IReadable<string | Uint8Array>>>;
   // @ts-expect-error numbers cannot be carried if the mode turns out to be bytes
-  S.readableFromWeb(numbers, { objectMode: Math.random() > 0.5 });
+  S.Streams.fromWebReadable(numbers, { objectMode: Math.random() > 0.5 });
 
   // Options held in a variable are a mode known only at run time: accepted for
   // input both modes can carry, with both outcomes in the element type.
   const heldOptions: { objectMode?: boolean; encoding?: string } = {};
-  const fromHeld = S.readableFromWeb(bytes, heldOptions);
+  const fromHeld = S.Streams.fromWebReadable(bytes, heldOptions);
   type _FromHeld = Assert<IsEqual<typeof fromHeld, IReadable<string | Uint8Array>>>;
   // @ts-expect-error held options may mean byte mode, which cannot carry numbers
-  S.readableFromWeb(numbers, heldOptions);
+  S.Streams.fromWebReadable(numbers, heldOptions);
   // @ts-expect-error an explicit element type does not survive byte mode
-  S.readableFromWeb<number>(numbers);
+  S.Streams.fromWebReadable<number>(numbers);
   // @ts-expect-error object mode with an encoding decodes, so it needs text or bytes
-  S.readableFromWeb(numbers, { objectMode: true, encoding: "utf8" });
-  const decodedObjects = S.readableFromWeb(strings, { objectMode: true, encoding: "utf8" });
+  S.Streams.fromWebReadable(numbers, { objectMode: true, encoding: "utf8" });
+  const decodedObjects = S.Streams.fromWebReadable(strings, { objectMode: true, encoding: "utf8" });
   type _DecodedObjects = Assert<IsEqual<typeof decodedObjects, IReadable<string>>>;
 
   // --- object-mode factories: objectMode: false yields bytes ------------------
-  const textArray = S.createReadableFromArray(["hi"]);
+  const textArray = S.Streams.createReadableFromArray(["hi"]);
   type _TextArray = Assert<IsEqual<typeof textArray, IReadable<string>>>;
-  const byteArray = S.createReadableFromArray(["hi"], { objectMode: false });
+  const byteArray = S.Streams.createReadableFromArray(["hi"], { objectMode: false });
   type _ByteArray = Assert<IsEqual<typeof byteArray, IReadable<Uint8Array>>>;
-  const sparse = S.createReadableFromArray([1, undefined, 2]);
+  const sparse = S.Streams.createReadableFromArray([1, undefined, 2]);
   type _Sparse = Assert<IsEqual<typeof sparse, IReadable<number>>>;
   // @ts-expect-error byte mode cannot carry numbers
-  S.createReadableFromArray([1, 2], { objectMode: false });
+  S.Streams.createReadableFromArray([1, 2], { objectMode: false });
   const heldFactoryOptions: { objectMode?: boolean } = {};
-  const fromHeldArray = S.createReadableFromArray(["a"] as string[], heldFactoryOptions);
+  const fromHeldArray = S.Streams.createReadableFromArray(["a"] as string[], heldFactoryOptions);
   type _FromHeldArray = Assert<IsEqual<typeof fromHeldArray, IReadable<string | Uint8Array>>>;
   // @ts-expect-error held options may mean byte mode, which cannot carry numbers
-  S.createReadableFromArray([1], heldFactoryOptions);
+  S.Streams.createReadableFromArray([1], heldFactoryOptions);
   // @ts-expect-error an explicit element type does not survive byte mode
-  S.createReadableFromArray<number>([1], { objectMode: false });
+  S.Streams.createReadableFromArray<number>([1], { objectMode: false });
   const words: string[] = ["a"];
-  const eitherArray = S.createReadableFromArray(words, { objectMode: Math.random() > 0.5 });
+  const eitherArray = S.Streams.createReadableFromArray(words, { objectMode: Math.random() > 0.5 });
   type _EitherArray = Assert<IsEqual<typeof eitherArray, IReadable<string | Uint8Array>>>;
 
   // --- thenables are adopted, and what they resolve to is yielded -------------
   const thenable: PromiseLike<number> = { then: resolve => resolve?.(1) as never };
-  const fromThenable = S.createReadableFromPromise(thenable);
+  const fromThenable = S.Streams.createReadableFromPromise(thenable);
   type _FromThenable = Assert<IsEqual<typeof fromThenable, IReadable<number>>>;
-  const transform = S.createTransform((n: number) => thenable.then(v => `${v + n}`), {
+  const transform = S.Streams.createTransform((n: number) => thenable.then(v => `${v + n}`), {
     objectMode: true
   });
   type _TransformOut = Assert<
-    IsEqual<typeof transform, ReturnType<typeof S.createTransform<number, string>>>
+    IsEqual<typeof transform, ReturnType<typeof S.Streams.createTransform<number, string>>>
   >;
-  const kept = S.filter((n: number) => Promise.resolve(n > 1));
+  const kept = S.Streams.filter((n: number) => Promise.resolve(n > 1));
   kept.write(1);
 
   // --- interfaces match the objects the factories return ----------------------
-  const collected = S.createCollector<number>();
+  const collected = S.Streams.createCollector<number>();
   const joined: Uint8Array = collected.toUint8Array();
   const text: string = collected.toString();
   const finished: boolean = collected.isFinished;
-  const pull: IPullStream = S.createPullStream();
+  const pull: IPullStream = S.Streams.createPullStream();
   // @ts-expect-error PullStream has no stream() method
   pull.stream(1);
 
   // --- hooks see the stream as `this` -----------------------------------------
-  const produced = S.createReadable<number>({
+  const produced = S.Streams.createReadable<number>({
     read() {
       this.push(1);
       // @ts-expect-error a number stream's push takes numbers
@@ -108,7 +108,7 @@ function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
   });
   const pushable: IPushableReadable<number> = produced;
   produced.push(2);
-  S.createWritable<number>({
+  S.Streams.createWritable<number>({
     write(chunk, _encoding, done) {
       this.emit("value", chunk);
       const total: number = chunk + 1;
@@ -116,7 +116,7 @@ function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
       done();
     }
   });
-  S.createDuplex<string, number>({
+  S.Streams.createDuplex<string, number>({
     read() {
       this.push("out");
     },
@@ -127,8 +127,8 @@ function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
   });
 
   // --- pipeline: a middle stage must be an async generator --------------------
-  const source = S.createReadableFromArray([1, 2]);
-  const sink = S.createCollector<number>();
+  const source = S.Streams.createReadableFromArray([1, 2]);
+  const sink = S.Streams.createCollector<number>();
   void S.pipeline(
     source,
     async function* (input: AsyncIterable<number>) {
@@ -152,14 +152,14 @@ function sharedFunctions(S: typeof NodeStreams | typeof BrowserStreams): void {
 
 function collectorWrites(): void {
   // The element type constrains what is written, on both entries.
-  const onNode = new node.Collector<number>();
+  const onNode = new node.Streams.Collector<number>();
   onNode.write(1);
   onNode.end(2);
   // @ts-expect-error a number collector takes numbers
   onNode.write("x");
   // @ts-expect-error a number collector takes numbers
   onNode.end("x");
-  const onBrowser = new browser.Collector<number>();
+  const onBrowser = new browser.Streams.Collector<number>();
   onBrowser.write(1);
   // @ts-expect-error a number collector takes numbers
   onBrowser.write("x");

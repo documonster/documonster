@@ -276,14 +276,14 @@ await streamBothFormats(filename, { useSharedStrings: false, useStyles: false },
 
   const row12 = ws.getRow(12);
   row12.height = 40;
-  Stream.setCellValue(Stream.rowCell(row12, 1), "Blue White Horizontal Gradient");
-  Stream.setCellFill(Stream.rowCell(row12, 1), fills.blueWhiteHGrad);
-  Stream.setCellValue(Stream.rowCell(row12, 2), "Red Dark Vertical");
-  Stream.setCellFill(Stream.rowCell(row12, 2), fills.redDarkVertical);
-  Stream.setCellValue(Stream.rowCell(row12, 3), "Red Green Dark Trellis");
-  Stream.setCellFill(Stream.rowCell(row12, 3), fills.redGreenDarkTrellis);
-  Stream.setCellValue(Stream.rowCell(row12, 4), "RGB Path Gradient");
-  Stream.setCellFill(Stream.rowCell(row12, 4), fills.rgbPathGrad);
+  Stream.setCellValue(Stream.getRowCell(row12, 1), "Blue White Horizontal Gradient");
+  Stream.setCellFill(Stream.getRowCell(row12, 1), fills.blueWhiteHGrad);
+  Stream.setCellValue(Stream.getRowCell(row12, 2), "Red Dark Vertical");
+  Stream.setCellFill(Stream.getRowCell(row12, 2), fills.redDarkVertical);
+  Stream.setCellValue(Stream.getRowCell(row12, 3), "Red Green Dark Trellis");
+  Stream.setCellFill(Stream.getRowCell(row12, 3), fills.redGreenDarkTrellis);
+  Stream.setCellValue(Stream.getRowCell(row12, 4), "RGB Path Gradient");
+  Stream.setCellFill(Stream.getRowCell(row12, 4), fills.rgbPathGrad);
 
   // row and column styles
   Stream.setRowFont(ws.getRow(13), fonts.arialBlackUI14);

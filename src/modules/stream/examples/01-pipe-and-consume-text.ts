@@ -1,5 +1,5 @@
 /**
- * Example: pipe() + text() consumer (cross-platform)
+ * Example: pipe() + Streams.text() consumer (cross-platform)
  *
  * Demonstrates:
  * - Creating a Readable from a string
@@ -8,18 +8,18 @@
  * - Consuming the output as text
  */
 
-import { fromString, text, transform } from "@stream";
+import { Streams } from "@stream";
 
 export async function examplePipeAndConsumeText(): Promise<void> {
-  const source = fromString("Hello\nworld\n");
+  const source = Streams.fromString("Hello\nworld\n");
 
-  const upper = transform<Uint8Array, Uint8Array>(chunk => {
+  const upper = Streams.createTransform<Uint8Array, Uint8Array>(chunk => {
     const s = new TextDecoder().decode(chunk);
     return new TextEncoder().encode(s.toUpperCase());
   });
 
   source.pipe(upper);
 
-  const result = await text(upper);
+  const result = await Streams.text(upper);
   console.log(result);
 }

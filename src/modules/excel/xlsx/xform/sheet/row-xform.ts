@@ -1,5 +1,7 @@
+import { Enums } from "@excel/core/enums";
 import { MaxItemsExceededError } from "@excel/errors";
 import type { Style } from "@excel/types";
+import type { ArrayRange } from "@excel/utils/array-ranges";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import { readCellColumn, readRowNumber } from "@excel/xlsx/xform/sheet/cell-reference";
@@ -35,6 +37,15 @@ interface RowXformPrepareOptions {
    * does not mention is a field a caller cannot be told to supply.
    */
   date1904?: boolean;
+  /** The name of the table containing a cell address, forwarded to `CellXform.prepare` — see `tableNameAt`. */
+  tableNameAt?: (address: string) => string | undefined;
+  /**
+   * The sheet's array ranges claimed so far, forwarded to `CellXform.prepare`, which writes a master inside an earlier
+   * range as its cached result — see `claimArrayRange`. One list per sheet, kept across rows.
+   */
+  arrayRanges?: ArrayRange[];
+  /** The style id the sheet's `<col>` gives a one-based column, once the columns are prepared. */
+  columnStyleId?: (column: number) => number | undefined;
 }
 
 interface RowModel {
@@ -85,6 +96,10 @@ class RowXform extends BaseXform<RowModel> {
   declare public parser?: BaseXform;
   declare private lastRowNumber: number;
   declare private lastCellCol: number;
+  /** Whether a `<row>` is open — only then is a `<c>` this parser's to take. */
+  declare private inRow: boolean;
+  /** Depth inside an element of a row this parser does not model, whose subtree is skipped. */
+  declare private skipping: number;
 
   constructor(options?: RowXformOptions) {
     super();
@@ -104,6 +119,8 @@ class RowXform extends BaseXform<RowModel> {
     super.reset();
     this.lastRowNumber = 0;
     this.lastCellCol = 0;
+    this.inRow = false;
+    this.skipping = 0;
   }
 
   prepare(model: RowModel, options: RowXformPrepareOptions): void {
@@ -115,6 +132,17 @@ class RowXform extends BaseXform<RowModel> {
     const cellXform = this.map.c as CellXform;
     model.cells.forEach(cellModel => {
       cellXform.prepare(cellModel, options);
+      // **A blank cell in the default style still says something under a styled row or column**: that this cell is
+      // *not* formatted like its neighbours. Written as nothing, it took the row's or column's style instead — and the
+      // dimension, counted from the model, still included it, so the next read moved the dimension.
+      const cell = cellModel as { type?: number; styleId?: number; address?: string };
+      if (
+        cell.type === Enums.ValueType.Null &&
+        cell.styleId === undefined &&
+        (model.styleId || options.columnStyleId?.(colCache.decodeCol(cell.address ?? "A")))
+      ) {
+        cell.styleId = 0;
+      }
     });
   }
 
@@ -167,10 +195,21 @@ class RowXform extends BaseXform<RowModel> {
 
   parseOpen(node: ParseOpenTag): boolean {
     if (this.parser) {
-      this.parser.parseOpen(node);
+      if (node.name !== "c") {
+        this.parser.parseOpen(node);
+        return true;
+      }
+      // **A `<c>` inside a cell ends that cell**, as a sibling's start would; the streaming reader does the same. It
+      // used to restart the open cell, discarding what it held and leaving its own `</c>` to end the row.
+      this.parser.parseClose("c");
+      this.addCell();
+    }
+    if (this.skipping > 0) {
+      this.skipping++;
       return true;
     }
     if (node.name === "row") {
+      this.inRow = true;
       // Reset lastCellCol for each new row
       this.lastCellCol = 0;
       const spans = node.attributes.spans;
@@ -218,12 +257,22 @@ class RowXform extends BaseXform<RowModel> {
       return true;
     }
 
+    // **A cell belongs to an open row, or to nothing.** A `<c>` directly inside `<sheetData>` reached this parser
+    // through its list, which offers every element to its child; taking it put the cell in whichever row had last
+    // closed, and before the first row it dereferenced a row that did not exist — an untyped `TypeError` out of
+    // `parseClose`. Declining it lets the list skip it, which is what the streaming reader does with the same markup.
+    if (!this.inRow) {
+      return false;
+    }
     this.parser = this.map[node.name];
     if (this.parser) {
       this.parser.parseOpen(node);
       return true;
     }
-    return false;
+    // Something else inside the row (an `extLst`, a foreign element): its subtree is skipped. Returning false here
+    // left its closing tag to be read as the row's own, which ended the row early.
+    this.skipping = 1;
+    return true;
   }
 
   parseText(text: string): void {
@@ -235,41 +284,55 @@ class RowXform extends BaseXform<RowModel> {
   parseClose(name: string): boolean {
     if (this.parser) {
       if (!this.parser.parseClose(name)) {
-        const cellModel = this.parser.model;
-        // See `cell-reference.ts`: a missing `r` follows the previous cell, a present one must name a cell of this row.
-        const written = cellModel.address;
-        this.lastCellCol = readCellColumn(written, this.model!.number, this.lastCellCol);
-        if (!written || colCache.decodePlainRow(written) === 0) {
-          // Absent, or spelled `$A$1`: the address is the one the cell was placed at.
-          cellModel.address = colCache.encodeAddress(this.model!.number, this.lastCellCol);
-        }
-        // **A styled cell with no value is collapsed rather than materialised.**
-        //
-        // `<c r="A9" s="3"/>` is what Excel writes for formatting applied past the data, one per cell — 62,400 of them
-        // for an eight-column region against 200 rows of actual data, costing 36.8 MB retained and reporting 8,000
-        // physical rows where there are 200. The binary container has the identical shape and the identical cost.
-        //
-        // **Collapsed, not dropped.** The run is handed to `collectStyledBlank`, which accumulates rectangles into the
-        // same `styledBlankRanges` the XLSB reader fills and both writers expand again — so a formatted region survives
-        // a round trip through either container and nothing is owed to a fidelity report. That shared field is why this
-        // is not the lossy sibling of a lossless option: making them differ would have been the worse API.
-        if (this.options?.blankCells === "collapse" && isStyledBlank(cellModel)) {
-          this.options.collectStyledBlank?.(
-            this.model!.number - 1,
-            colCache.decodeCol(cellModel.address) - 1,
-            cellModel.styleId ?? 0
-          );
-        } else {
-          this.model!.cells.push(cellModel);
-        }
-        if (this.maxItems && this.model!.cells.length > this.maxItems) {
-          throw new MaxItemsExceededError("column", this.maxItems);
-        }
-        this.parser = undefined;
+        this.addCell();
       }
       return true;
     }
+    if (this.skipping > 0) {
+      this.skipping--;
+      return true;
+    }
+    if (name !== "row") {
+      // The surplus `</c>` of a cell ended early by a nested one: it closes nothing, and must not close the row.
+      return true;
+    }
+    this.inRow = false;
     return false;
+  }
+
+  /** Place the cell the cell parser has just finished in the open row. */
+  private addCell(): void {
+    const cellModel = this.parser!.model;
+    // See `cell-reference.ts`: a missing `r` follows the previous cell, a present one must name a cell of this row.
+    const written = cellModel.address;
+    this.lastCellCol = readCellColumn(written, this.model!.number, this.lastCellCol);
+    if (!written || colCache.decodePlainRow(written) === 0) {
+      // Absent, or spelled `$A$1`: the address is the one the cell was placed at.
+      cellModel.address = colCache.encodeAddress(this.model!.number, this.lastCellCol);
+    }
+    // **A styled cell with no value is collapsed rather than materialised.**
+    //
+    // `<c r="A9" s="3"/>` is what Excel writes for formatting applied past the data, one per cell — 62,400 of them
+    // for an eight-column region against 200 rows of actual data, costing 36.8 MB retained and reporting 8,000
+    // physical rows where there are 200. The binary container has the identical shape and the identical cost.
+    //
+    // **Collapsed, not dropped.** The run is handed to `collectStyledBlank`, which accumulates rectangles into the
+    // same `styledBlankRanges` the XLSB reader fills and both writers expand again — so a formatted region survives
+    // a round trip through either container and nothing is owed to a fidelity report. That shared field is why this
+    // is not the lossy sibling of a lossless option: making them differ would have been the worse API.
+    if (this.options?.blankCells === "collapse" && isStyledBlank(cellModel)) {
+      this.options.collectStyledBlank?.(
+        this.model!.number - 1,
+        colCache.decodeCol(cellModel.address) - 1,
+        cellModel.styleId ?? 0
+      );
+    } else {
+      this.model!.cells.push(cellModel);
+    }
+    if (this.maxItems && this.model!.cells.length > this.maxItems) {
+      throw new MaxItemsExceededError("column", this.maxItems);
+    }
+    this.parser = undefined;
   }
 
   reconcile(model: RowModel, options: RowXformPrepareOptions): void {

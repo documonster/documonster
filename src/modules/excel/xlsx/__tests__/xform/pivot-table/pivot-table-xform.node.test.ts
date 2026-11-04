@@ -4,7 +4,7 @@ import { createZip } from "@archive/zip/zip-bytes";
 import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
 import type { PivotTableModel } from "@excel/core/pivot-table";
 import { addPivotTable, addTable } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Row, Workbook } from "@excel/index";
 import type { CellFormulaValue, CellValue } from "@excel/types";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { PivotTableXform } from "@excel/xlsx/xform/pivot-table/pivot-table-xform";
@@ -1264,44 +1264,23 @@ describe("PivotTableXform - Round 4 fixes", () => {
   // Round 5 audit fixes
   // ===========================================================================
 
-  describe("R5-Fix1: NaN values in source data treated as null", () => {
-    it("should treat NaN as null in sharedItems", async () => {
-      const { cacheDefXml, cacheRecXml } = await buildPivotXml(
-        {
-          columns: [{ name: "Category" }, { name: "Value" }],
-          rows: [
-            ["A", 10],
-            ["B", NaN],
-            ["C", 20]
-          ]
-        },
-        { rows: ["Category"], columns: [], values: ["Value"], metric: "sum" }
-      );
-
-      // NaN should not appear as a numeric shared item
-      expect(cacheDefXml).not.toContain('v="NaN"');
-      // The records should generate without errors (NaN treated as null/missing)
-      expect(cacheRecXml).toBeDefined();
-      expect(cacheRecXml.length).toBeGreaterThan(0);
-    });
-
-    it("should not crash when NaN is in a row field", async () => {
-      const { cacheDefXml, cacheRecXml } = await buildPivotXml(
-        {
-          columns: [{ name: "Group" }, { name: "Value" }],
-          rows: [
-            [1, 10],
-            [NaN, 20],
-            [2, 30]
-          ]
-        },
-        { rows: ["Group"], columns: [], values: ["Value"], metric: "sum" }
-      );
-
-      // Should have null sentinel in sharedItems (for the NaN row)
-      expect(cacheDefXml).toContain("<m />");
-      // Records should exist
-      expect(cacheRecXml).toBeDefined();
+  describe("R5-Fix1: NaN in source data", () => {
+    // NaN used to reach a table's cells and the pivot cache had to treat it as missing. A cell now refuses it at
+    // the call that supplied it — a workbook has no representation for NaN — so the source cannot hold one.
+    it("is refused before it reaches a pivot source", async () => {
+      await expect(
+        buildPivotXml(
+          {
+            columns: [{ name: "Category" }, { name: "Value" }],
+            rows: [
+              ["A", 10],
+              ["B", NaN],
+              ["C", 20]
+            ]
+          },
+          { rows: ["Category"], columns: [], values: ["Value"], metric: "sum" }
+        )
+      ).rejects.toThrow(/cannot hold NaN/);
     });
   });
 
@@ -1979,7 +1958,7 @@ describe("Workbook - issue #238 pivot table roundtrip", () => {
   async function workbookWithPivotXml(pivotXml: string): Promise<Uint8Array> {
     const workbook = Workbook.create();
     const data = Workbook.addWorksheet(workbook, "Data");
-    Worksheet.addRows(data, [
+    Row.addMany(data, [
       ["Region", "Kind", "Qty"],
       ["N", "x", 1],
       ["S", "y", 2],

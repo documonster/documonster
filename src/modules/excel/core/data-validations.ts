@@ -18,9 +18,30 @@ export interface DataValidationsData {
   model: DataValidationModel;
 }
 
-/** Create a data-validation registry, optionally seeded from a parsed model. */
-export function createDataValidations(model?: DataValidationModel): DataValidationsData {
-  return { model: model || {} };
+/**
+ * The sheet each collection a worksheet holds belongs to — kept beside the collection, so its published shape does not
+ * change. A collection made on its own (`DataValidation.create`) belongs to none.
+ */
+const owners = new WeakMap<DataValidationsData, object>();
+
+/**
+ * Create a data-validation registry, optionally seeded from a parsed model. `owner` is the worksheet that holds it, so
+ * an edit through the collection is refused as an edit through the sheet is once the sheet is removed.
+ */
+export function createDataValidations(
+  model?: DataValidationModel,
+  owner?: object
+): DataValidationsData {
+  const collection = { model: model || {} };
+  if (owner !== undefined) {
+    owners.set(collection, owner);
+  }
+  return collection;
+}
+
+/** The worksheet that holds `dv`, or `undefined` for a collection that belongs to no sheet. */
+export function dataValidationsOwner(dv: DataValidationsData): object | undefined {
+  return owners.get(dv);
 }
 
 /**
@@ -178,6 +199,10 @@ export function dataValidationFind(
 }
 
 /** Clear the validation registered for a cell or A1 range. */
-export function dataValidationRemove(dv: DataValidationsData, ref: string): void {
-  dv.model[validationModelKey(ref)] = undefined;
+/** Remove the rule at `ref`. Returns `true` if there was one. */
+export function dataValidationRemove(dv: DataValidationsData, ref: string): boolean {
+  const key = validationModelKey(ref);
+  const existed = dv.model[key] !== undefined;
+  dv.model[key] = undefined;
+  return existed;
 }

@@ -119,7 +119,7 @@ describe("WorkbookReader spool files", () => {
         archive.add(path, path === name ? new TextEncoder().encode(text) : file.data);
       }
     }
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   /** Let anything already scheduled report itself before `uncaught` is read. */

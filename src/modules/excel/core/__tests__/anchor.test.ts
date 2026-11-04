@@ -8,8 +8,7 @@ import {
   anchorSetCol,
   anchorSetRow
 } from "@excel/core/anchor";
-import { getColumn } from "@excel/core/worksheet-core";
-import { Worksheet } from "@excel/index";
+import { getColumn, getRow } from "@excel/core/worksheet-core";
 import { describe, it, expect, beforeEach } from "vitest";
 
 describe("Anchor", () => {
@@ -42,10 +41,10 @@ describe("Anchor", () => {
     });
     it("should rowHeight equals row height", () => {
       const worksheet = testUtils.createSheetMock();
-      Worksheet.getRow(worksheet, 1).height! = 10;
+      getRow(worksheet, 1).height! = 10;
 
       const anchor = anchorCreate(worksheet);
-      expect(anchorRowHeight(anchor)).toBe(Worksheet.getRow(worksheet, 1).height! * 10000);
+      expect(anchorRowHeight(anchor)).toBe(getRow(worksheet, 1).height! * 10000);
     });
   });
   describe("resize worksheet`s cells", () => {
@@ -55,7 +54,7 @@ describe("Anchor", () => {
     beforeEach(() => {
       worksheet = testUtils.createSheetMock();
       getColumn(worksheet, 1).width! = 20;
-      Worksheet.getRow(worksheet, 1).height! = 20;
+      getRow(worksheet, 1).height! = 20;
 
       anchor = anchorCreate(worksheet, { col: 0.6, row: 0.6 });
     });
@@ -68,7 +67,7 @@ describe("Anchor", () => {
     });
     it("should update rowHeight", () => {
       const pre = anchorRowHeight(anchor);
-      Worksheet.getRow(worksheet, 1).height! *= 2;
+      getRow(worksheet, 1).height! *= 2;
       expect(anchorRowHeight(anchor)).not.toBe(pre);
       expect(anchorRowHeight(anchor)).toBe(pre * 2);
     });
@@ -79,18 +78,18 @@ describe("Anchor", () => {
     });
     it("should recalculate row", () => {
       const pre = anchorRow(anchor);
-      Worksheet.getRow(worksheet, 1).height! *= 2;
+      getRow(worksheet, 1).height! *= 2;
       expect(anchorRow(anchor)).not.toBe(pre);
     });
     it("should integer part of row and nativeRow should always be equal", () => {
       expect(Math.floor(anchorRow(anchor))).toBe(Math.floor(anchor.nativeRow));
-      Worksheet.getRow(worksheet, 1).height! *= 2;
+      getRow(worksheet, 1).height! *= 2;
       expect(Math.floor(anchorRow(anchor))).toBe(Math.floor(anchor.nativeRow));
-      Worksheet.getRow(worksheet, 1).height! /= 4;
+      getRow(worksheet, 1).height! /= 4;
       expect(Math.floor(anchorRow(anchor))).toBe(Math.floor(anchor.nativeRow));
-      Worksheet.getRow(worksheet, 1).height! = 0.1;
+      getRow(worksheet, 1).height! = 0.1;
       expect(Math.floor(anchorRow(anchor))).toBe(Math.floor(anchor.nativeRow));
-      Worksheet.getRow(worksheet, 1).height! = 9999;
+      getRow(worksheet, 1).height! = 9999;
       expect(Math.floor(anchorRow(anchor))).toBe(Math.floor(anchor.nativeRow));
     });
     it("should integer part of col and colOff should be always equals", () => {

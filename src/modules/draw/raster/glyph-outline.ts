@@ -31,6 +31,7 @@
  * @module
  */
 
+import { DrawArgumentError, DrawError } from "@draw/errors";
 import { COMP_USE_MY_METRICS, countTtfFaces, glyphComponents, parseTtf } from "@utils/font-ttf";
 import type { TtfFont } from "@utils/font-ttf";
 
@@ -333,6 +334,56 @@ export function parseRasterFont(data: Uint8Array, collectionIndex = 0): RasterFo
   }
 }
 
+/**
+ * {@link parseRasterFont} for a caller holding the bytes: the font is either read or the
+ * call throws, so a file that is not a usable TrueType face, or a `collectionIndex` past
+ * the end of a collection, is reported instead of silently becoming an empty face or face 0.
+ *
+ * The forgiving form stays behind `RasterizeOptions.fonts`, where skipping an unreadable
+ * face and carrying on with the next is the documented behaviour.
+ *
+ * @throws {DrawArgumentError} `data` is not bytes, or `collectionIndex` is not an integer
+ *   naming a face in the file.
+ * @throws {DrawError} the bytes are not a TrueType font with outlines (`glyf`).
+ */
+export function readRasterFont(data: Uint8Array, collectionIndex = 0): RasterFont {
+  if (!isByteSource(data)) {
+    throw new DrawArgumentError(
+      "data",
+      `Draw.parseRasterFont: data must be the bytes of a .ttf or .ttc file, got ${
+        data === null ? "null" : typeof data
+      }`
+    );
+  }
+  const bytes = normalizeBytes(data);
+  if (!Number.isInteger(collectionIndex) || collectionIndex < 0) {
+    throw new DrawArgumentError(
+      "collectionIndex",
+      `Draw.parseRasterFont: collectionIndex must be an integer >= 0, got ${String(collectionIndex)}`
+    );
+  }
+  let faces: number;
+  try {
+    faces = countTtfFaces(bytes);
+  } catch (err) {
+    throw new DrawError("Draw.parseRasterFont: the bytes are not a TrueType font", { cause: err });
+  }
+  if (collectionIndex >= faces) {
+    throw new DrawArgumentError(
+      "collectionIndex",
+      `Draw.parseRasterFont: collectionIndex ${collectionIndex} is out of range — the file has ${faces} face(s)`
+    );
+  }
+  try {
+    return buildRasterFont(parseTtf(bytes, collectionIndex));
+  } catch (err) {
+    throw new DrawError(
+      "Draw.parseRasterFont: the bytes are not a TrueType font with glyph outlines (glyf)",
+      { cause: err }
+    );
+  }
+}
+
 /** Clamp a requested face index to one the file actually has. */
 function resolveFaceIndex(data: Uint8Array, requested: number): number {
   if (!Number.isInteger(requested) || requested < 0) {
@@ -426,39 +477,72 @@ export type RasterFontSource =
   | RasterFont
   | { readonly data: Uint8Array; readonly collectionIndex?: number };
 
+/** Supplied fonts parsed by {@link parseInjectedFonts}, and what could not be used as given. */
+export interface InjectedFonts {
+  readonly fonts: RasterFont[];
+  /** One message per supplied font that was skipped or read differently from how it was named. */
+  readonly warnings: string[];
+}
+
 /**
- * Parse supplied fonts, dropping any that cannot be used.
+ * Parse supplied fonts, dropping any that cannot be used — and saying so.
  *
  * A face that cannot be parsed is skipped rather than throwing: the rasteriser degrades
  * instead of failing, and a caller who passes a CFF font should still get their Latin
- * text drawn.
+ * text drawn. It is reported in `warnings` (and so in `RasterizedImage.textWarnings`):
+ * dropped in silence, the only symptom was missing glyphs, and the advice for those —
+ * supply a font — was what the caller had already done. A `collectionIndex` past the end
+ * of a collection still draws with face 0, as it always has, and is reported too.
  *
  * Lives here, beside {@link parseRasterFont}, rather than in the platform-specific
  * font modules — it touches no filesystem, and having a copy in each of them meant the
  * Node and browser builds could disagree about what a caller was allowed to pass.
  */
-export function parseInjectedFonts(fonts: readonly RasterFontSource[]): RasterFont[] {
-  return (
-    fonts
-      .map(toRasterFont)
-      // Identity, not `familyName`: that member is optional, so filtering on it threw
-      // away a caller's own font object for reporting no name. `parseRasterFont`
-      // returns this exact singleton for anything it could not use.
-      .filter(font => font !== EMPTY_RASTER_FONT)
-  );
+export function parseInjectedFonts(sources: readonly RasterFontSource[]): InjectedFonts {
+  const fonts: RasterFont[] = [];
+  const warnings: string[] = [];
+  sources.forEach((source, i) => {
+    const font = toRasterFont(source, i, warnings);
+    // Identity, not `familyName`: that member is optional, so filtering on it threw
+    // away a caller's own font object for reporting no name. `parseRasterFont`
+    // returns this exact singleton for anything it could not use.
+    if (font !== EMPTY_RASTER_FONT) {
+      fonts.push(font);
+    }
+  });
+  return { fonts, warnings };
 }
 
-/** Normalise one supplied font to a {@link RasterFont}. */
-function toRasterFont(source: RasterFontSource): RasterFont {
-  if (isByteSource(source)) {
-    return parseRasterFont(normalizeBytes(source));
+/** Normalise one supplied font to a {@link RasterFont}, noting in `warnings` what went wrong. */
+function toRasterFont(source: RasterFontSource, index: number, warnings: string[]): RasterFont {
+  const isBytes = isByteSource(source);
+  if (!isBytes && !("data" in source)) {
+    return source;
   }
-  if ("data" in source) {
-    return isByteSource(source.data)
-      ? parseRasterFont(normalizeBytes(source.data), source.collectionIndex ?? 0)
-      : EMPTY_RASTER_FONT;
+  const data = isBytes ? source : source.data;
+  const collectionIndex = isBytes ? 0 : (source.collectionIndex ?? 0);
+  if (!isByteSource(data)) {
+    warnings.push(`fonts[${index}] has no font bytes in data and was skipped.`);
+    return EMPTY_RASTER_FONT;
   }
-  return source;
+  const bytes = normalizeBytes(data);
+  try {
+    return readRasterFont(bytes, collectionIndex);
+  } catch (err) {
+    // The lenient reading is what this has always drawn with: face 0 for an index past the
+    // end of a collection, nothing for bytes it cannot read.
+    const font = parseRasterFont(bytes, collectionIndex);
+    const reason = (err instanceof Error ? err.message : String(err)).replace(
+      /^Draw\.parseRasterFont: /,
+      ""
+    );
+    warnings.push(
+      font === EMPTY_RASTER_FONT
+        ? `fonts[${index}] could not be read (${reason}) and was skipped.`
+        : `fonts[${index}]: ${reason}; face 0 was used.`
+    );
+    return font;
+  }
 }
 
 /**

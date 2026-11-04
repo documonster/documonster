@@ -27,8 +27,8 @@ Modern TypeScript Excel Workbook Manager — read, manipulate, and write XLSX an
 - **Page setup** — print area, print titles, header/footer, page breaks
 - **Data protection** — sheet protection with password (SHA-512)
 - **Streaming** — `WorkbookReader` and `WorkbookWriter` for large files
-- **CSV import/export** — `readCsv`, `writeCsv`, `readCsvFile`, `writeCsvFile`
-- **Markdown import/export** — `readMarkdown`, `writeMarkdown`, `readMarkdownFile`, `writeMarkdownFile`
+- **CSV import/export** — `ExcelCsv.read`, `ExcelCsv.format`, `ExcelCsv.readFile`, `ExcelCsv.writeFile`
+- **Markdown import/export** — `ExcelMarkdown.read`, `ExcelMarkdown.format`, `ExcelMarkdown.readFile`, `ExcelMarkdown.writeFile`
 - **PDF export** — `Pdf.fromExcel()` with full styling, pagination, fonts, encryption
 - **Browser support** — `Workbook.read`, `Workbook.toBuffer`, no polyfills needed
 
@@ -43,9 +43,9 @@ const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "My Sheet");
 
 // Add data
-Worksheet.addRow(sheet, ["Name", "Age", "Email"]);
-Worksheet.addRow(sheet, ["John Doe", 30, "john@example.com"]);
-Worksheet.addRow(sheet, ["Jane Smith", 25, "jane@example.com"]);
+Row.add(sheet, ["Name", "Age", "Email"]);
+Row.add(sheet, ["John Doe", 30, "john@example.com"]);
+Row.add(sheet, ["Jane Smith", 25, "jane@example.com"]);
 
 // Node.js: write to file
 await Workbook.writeFile(workbook, "output.xlsx");
@@ -60,11 +60,11 @@ When columns have keys, rows can be added from objects. Keys may use dotted
 paths to pull values from nested objects:
 
 ```typescript
-Worksheet.setColumns(sheet, [
+Column.setDefinitions(sheet, [
   { header: "Name", key: "name", width: 20 },
   { header: "City", key: "address.city", width: 20 }
 ]);
-Worksheet.addRow(sheet, { name: "Alice", address: { city: "Sydney" } });
+Row.add(sheet, { name: "Alice", address: { city: "Sydney" } });
 ```
 
 ### Reading a Workbook
@@ -72,19 +72,57 @@ Worksheet.addRow(sheet, { name: "Alice", address: { city: "Sydney" } });
 ```typescript
 import { Workbook, Worksheet, Row } from "documonster/excel";
 
-const workbook = Workbook.create();
-
 // Node.js: read from file
-await Workbook.readFile(workbook, "input.xlsx");
+const workbook = await Workbook.readFile("input.xlsx");
 
-// Browser: read from ArrayBuffer
-await Workbook.read(workbook, arrayBuffer);
+// Browser: read from an ArrayBuffer, or a File / Blob straight from an <input>
+// const workbook = await Workbook.read(arrayBuffer);
+// const workbook = await Workbook.read(input.files[0]);
 
 const worksheet = Workbook.getWorksheet(workbook, 1);
-Worksheet.eachRow(worksheet, (row, rowNumber) => {
-  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.values(worksheet, rowNumber)));
+Row.each(worksheet, rowNumber => {
+  console.log("Row " + rowNumber + " = " + JSON.stringify(Row.getValues(worksheet, rowNumber)));
 });
 ```
+
+### Encrypted Workbooks
+
+A workbook with a password to open — what Excel writes for "Encrypt with Password" (Agile Encryption in an OLE
+compound file), XLSX or XLSB — is read with its `password`, by every reader: `Workbook.read`, `readFile`,
+`readStream`, `readWithDiagnostics` and `Stream.WorkbookReader`. Every writer encrypts with one: `toBuffer`,
+`writeFile`, `writeStream` and `toStream`, for both formats; `encryption` tunes it (Office's defaults: AES-256, SHA-512,
+100,000 iterations). It is the same option, and the same implementation, as Word's `Io.read` / `Io.toBuffer`.
+
+```javascript
+import { Workbook, ExcelDecryptionError, ExcelEncryptedError } from "documonster/excel";
+
+await Workbook.writeFile(workbook, "salaries.xlsx", { password: "s3cret" });
+const again = await Workbook.readFile("salaries.xlsx", { password: "s3cret" });
+
+const bytes = await Workbook.toBuffer(workbook, {
+  format: "xlsb",
+  password: "s3cret",
+  encryption: { keyBits: 128, hashAlgorithm: "SHA-256", spinCount: 50_000 }
+});
+
+try {
+  await Workbook.read(bytes, { password: userInput });
+} catch (error) {
+  if (error instanceof ExcelEncryptedError) {
+    // no password given
+  } else if (error instanceof ExcelDecryptionError && error.reason === "password") {
+    // wrong password: ask again
+  }
+}
+```
+
+Without a password an encrypted workbook is an `ExcelEncryptedError`; with a wrong one an `ExcelDecryptionError`
+whose `reason` is `"password"` (other reasons: `"unsupported"` for Excel 2007's Standard Encryption or RC4, which are
+not implemented; `"malformed"`, `"integrity"`, `"limit"`). Both are `ExcelFileError`s. The decrypted package is bounded
+by `zip.maxTotalUncompressedSize`. An encrypted workbook is one encrypted stream, so it is decrypted whole — streamed
+readers read it after decrypting, and writers assemble the package before encrypting it. The encryption code is
+loaded only when a password is given. A legacy `.xls` is an `ExcelFileError` that says so. `Workbook.protect`'s
+password is something else: it locks the workbook's structure and encrypts nothing.
 
 ### Browser Bundle Size
 
@@ -134,9 +172,11 @@ Range.getValues(worksheet, Range.create(7, 7, 19, 8)); // same as "G7:H19"
 
 Whole-column (`"A:A"`) and whole-row (`"1:5"`) references are rejected — they
 have no bounds to read, as is an unset range. To read the whole sheet, either
-pass `Worksheet.dimensions(worksheet)` (which is unset, and so rejected, on a
-sheet with no cells) or use `Worksheet.getValues(worksheet)` — note that one is
-indexed by row _number_, so `result[1]` is row 1 and `result[0]` is empty.
+pass `Worksheet.getDimensions(worksheet)` (which is `undefined` for a sheet with
+no cells, as `Row.getLast` is) or use `Worksheet.getValues(worksheet)` — note that
+one is indexed by row _number_, so `result[1]` is row 1 and `result[0]` is empty. `{ base: 0 }` indexes it as
+`Row.getValues` and `Column.getValues` do (row 1 and column A at `0`), and `{ base: 1 }` asks for the numbered form
+explicitly.
 
 ### Styling Cells
 
@@ -225,8 +265,18 @@ Cell.setValue(worksheet, "A1", { formula: "A1+B1", result: 42 }); // with cached
 Cell.setValue(sheet, "A1", { formula: "B1*2", shareType: "shared", ref: "A1:A10" });
 
 // Defined names
-DefinedNames.add(Workbook.getDefinedNames(workbook), "Sheet1!$A$1:$B$10", "MyRange");
+const names = Workbook.getDefinedNames(workbook);
+DefinedNames.add(names, "Sheet1!$A$1:$B$10", "MyRange");
+DefinedNames.addFormula(names, "Tax", "0.2");
+DefinedNames.get(names, "tax"); // { name: "Tax", ranges: ["0.2"], formulaExpression: "0.2" }
+DefinedNames.remove(names, "Tax"); // the whole name, however it is defined
+// A name scoped to one sheet (its 0-based tab position) — found first by that sheet's formulas
+DefinedNames.add(names, "Sheet2!$A$1", "Total", { localSheetId: 1 }); // returns the name, as `get` would
 ```
+
+A name is checked the same way whichever call gives it — `DefinedNames.add`, `Cell.addName`, `Cell.setName`,
+`Cell.setNames`: one Excel would repair (`A1`, `1abc`, `has space`) or a table already uses is refused with a
+`DefinedNameError` before anything changes.
 
 Setting a formula stores it; it does not evaluate it. To compute results,
 import the calculation engine from the `documonster/excel/formula` subpath
@@ -235,15 +285,49 @@ write XLSX — there is no install or registration step):
 
 ```typescript
 import { Workbook, Cell } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 
 Cell.setValue(worksheet, "A4", { formula: "SUM(A1:A3)" });
-calculateFormulas(workbook); // results written back in place
+ExcelFormula.calculate(workbook); // results written back in place
 console.log(Cell.getResult(worksheet, "A4"));
 ```
 
-See the [formula module docs](../formula/README.md) for the 448 supported
+See the [formula module docs](../formula/README.md) for the 467 supported
 functions and for driving the engine against a non-excel host.
+
+**The spill-range operator `A1#`** — the range a dynamic-array formula in `A1` spills into — is written the way Excel
+writes it, as the future function `_xlfn.ANCHORARRAY(A1)` (a file's formula grammar has no `#` operator), and read
+back as `A1#`, which is what Excel shows. It is the one place a read does not return the file's spelling, and nothing
+is lost by it: the call on a cell reference and the operator are the same formula, and writing the workbook again
+writes the file's text unchanged. A call on anything else — a name, a range, another call — is read as the call.
+`Sheet2!A1#` and `'My Sheet'!A1#` work alike, in cells, shared formulas, defined names, conditional formats and data
+validations, in XLSX and XLSB; inserting a row above the anchor makes it `A2#`, and deleting the anchor makes it
+`#REF!`.
+
+**A formula that produces an array is a dynamic array.** `=SEQUENCE(3)`, `=FILTER(…)`, `={1,2,3}`, `=A1#*2`,
+`=LET(x,SEQUENCE(3),x*2)` set through the API are written with dynamic-array metadata, as Excel writes them, and
+`ExcelFormula.calculate` spills them — the engine spills a formula exactly when the writers (XLSX, XLSB, and both
+streaming writers) store it as a dynamic array. Stored as an ordinary formula, Excel would show only its top-left value.
+A reference at the root (`=A1:A3`, `=INDEX(A1:C3,0,1)`) stays an ordinary formula and is intersected by both, and a
+formula read from a file keeps what the file says: an ordinary `=SEQUENCE(3)` computes its top-left value, as in Excel.
+See the [formula module docs](../formula/README.md#compatibility-notes) for what counts as producing an array.
+
+How a formula set through the API is stored, and how `ExcelFormula.calculate` computes it:
+
+| Set as                                                                                                                                                                                                                                 | Stored as                                                                                         | Computed                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ formula: "A1+B1" }`                                                                                                                                                                                                                 | An ordinary formula (`<f>`)                                                                       | As Excel computes an ordinary formula: a multi-cell reference where Excel intersects one is intersected with the formula's row or column — `=A1:A3` in `D2` is `A2`'s value |
+| `{ formula }` that produces an array — `SEQUENCE`, `FILTER`, `TRANSPOSE`, `MAP`, `{1,2,3}`, `A1#`, a `LET` or `LAMBDA` returning one, a registered function with `returnsArray`, or any of them through an operator (`=SEQUENCE(3)*2`) | A dynamic array over its own cell (`cm` + `t="array"`; XLSB `BrtArrFmla`)                         | Spills from its cell                                                                                                                                                        |
+| `{ formula }` that Excel would compute differently as an ordinary formula — a range below a function that takes it whole, `=SUM(A1:A3*2)`                                                                                              | A dynamic array over its own cell                                                                 | Over the whole range, as typed in Excel 365 (12, where an ordinary formula gives 2)                                                                                         |
+| `{ formula, shareType: "array", ref: "B1:B3" }`                                                                                                                                                                                        | A legacy array formula (`t="array"` over `ref`, no `cm`)                                          | Every cell of `ref` gets its element; cells past the result get `#N/A`; one value fills the range. The master holds the formula, the other cells the values                 |
+| `{ formula, isDynamicArray: true }` (with or without `shareType: "array"` and `ref`)                                                                                                                                                   | A dynamic array                                                                                   | Spills from its cell                                                                                                                                                        |
+| `@` in front of the array — `{ formula: "@SEQUENCE(3)" }`, `"@A1:A3"`                                                                                                                                                                  | An ordinary formula; `@x` is written `_xlfn.SINGLE(x)`, as Excel writes it, and read back as `@x` | One value: the top-left of an array, the cell in the formula's row or column of a range                                                                                     |
+
+A reference at the root (`=A1:A3`, `=INDEX(A1:C3,0,1)`, `=OFFSET(…)`) is an ordinary formula, intersected, by both the
+writers and `calculate`. In XLSB, `@x` is written as Excel writes it: a call to
+the `_xlfn.SINGLE` stub, except in a cell formula where `x` alone is intersected in its place anyway (`@A1:A3`,
+`@A1:A3+1`), which stores `x` alone and reads back as the same formula `A1:A3`. A formula read from a file keeps what the file says; an ordinary one is computed as Excel
+computes it, intersections included.
 
 ### Data Validation
 
@@ -267,7 +351,7 @@ Cell.setValidation(worksheet, "B1", {
 ### Conditional Formatting
 
 ```typescript
-Worksheet.addConditionalFormatting(worksheet, {
+ConditionalFormatting.add(worksheet, {
   ref: "A1:A100",
   rules: [
     {
@@ -321,6 +405,25 @@ Image.place(worksheet, urlId, "B2:D6");
 const fileId = Image.add(workbook, { extension: "png", link: "file:///C:/images/logo.png" });
 Image.place(worksheet, fileId, "F2:H6");
 ```
+
+`Image.list(ws)` returns the images placed on a sheet; `Image.remove(ws, image)`
+takes one off again (by handle or by its index in that list) and answers whether
+it did. The picture stays registered in the workbook, so its id can be placed
+again before the next save; a picture whose last use you removed, and that nothing
+else references, is left out of the file when it is written. Pictures you never
+placed, or that arrived unreferenced in a file you read, are written as before. `Watermark.get(ws)` returns a copy of
+the sheet's watermark, or `null`; replace it with `Watermark.add`.
+
+Every `remove` takes the item its `list` returned or that item's position (a whole number) in the list, and answers
+`false` when there is no such item. Anything else — a name, a reference string, `1.5` — names nothing and is refused
+with `ExcelArgumentError`. `ConditionalFormatting.remove` also takes the block's `ref` (`"A1:B9"`), as
+`DataValidation.remove` takes one, or a predicate, and removes the first block it matches.
+
+The same `list` / `remove` pair exists for pivot tables (`Pivot.remove`) and form
+checkboxes (`Form.remove`). A pivot table that a pivot chart is bound to
+cannot be removed until that chart is (`Chart.remove`) — it throws a
+`PivotTableError` rather than leave the chart pointing at nothing — including a
+chart kept byte-for-byte from the file it was read from.
 
 Linked images also work as overlay watermarks:
 
@@ -383,6 +486,10 @@ Image.addShape(worksheet, {
 });
 ```
 
+`Image.addShape` returns the shape as `Image.listShapes` lists it, and `Image.removeShape(worksheet, shape)` takes it
+away again. The geometry must be one of DrawingML's preset names, colours hex, and the range an area — each is
+checked when the shape is added, as an image's anchor is checked by `Image.place`.
+
 Shapes are write-only (not parsed back on read), consistent with other
 non-chart drawing content.
 
@@ -404,6 +511,47 @@ Table.add(worksheet, {
   ]
 });
 ```
+
+A table is stored under exactly the name it is given, so a formula can use it. A name Excel would not accept — one
+with a space, a character other than a letter, digit, underscore or period, or one that reads as a cell reference
+(`T1`, `R1C1`) — throws a `TableError` that names a form Excel does accept (`"_T1"`), from `Table.add`, `setName`,
+`setDisplayName` and `setModel` alike. A file another program wrote with such a name is read with the name corrected,
+and its formulas are read naming the corrected table. Column names are held to the same rule: two columns whose names
+Excel treats as one (`a` and `A`) are refused with the name Excel would give the second (`A2`), while a file's
+repeated headers are numbered on read, as Excel numbers them.
+
+Every edit is checked before anything on the sheet changes — positions (`Table.addRow(t, values, 2)` takes 0 to the
+number of data rows), values, the area against the sheet's other tables (two tables cannot share a cell) and names
+against the workbook — so one that throws leaves the sheet as it was. `Table.getRef` is the table's whole range
+(`"A1:B3"`), and a removed table's handle refuses further edits.
+
+### Inserting and Deleting Rows and Columns
+
+`Row.insert`, `Row.insertMany`, `Row.splice`, `Row.duplicate` (with `{ insert: true }`) and `Column.splice` move
+cells the way Excel's Insert and Delete do — and everything that names those cells follows them, on every sheet:
+formulas (shared and array formulas included), defined names, tables, conditional formats, data validations, chart
+series, sparklines, auto filters, print areas, pivot sources, form-control links, merges and page breaks. Pictures,
+charts, shapes and form controls move by their own placement: move and size with cells, move only, or stay (a
+checkbox from `Form.addCheckbox` moves without resizing, as Excel's own do, unless its `editAs` says otherwise).
+Removing a sheet removes the names scoped to it.
+
+```typescript
+Cell.setValue(worksheet, "D1", { formula: "SUM(A2:A5)" });
+
+Row.insert(worksheet, 1, ["Title"]); // D2 is now =SUM(A3:A6)
+Row.insert(worksheet, 4, ["new"]); //  inside the range: =SUM(A3:A7)
+Row.splice(worksheet, 3, 1); //       deleted from it:  =SUM(A3:A6)
+Column.splice(worksheet, 1, 0, []); // E2 is now =SUM(B3:B6)
+```
+
+The rules are Excel's, for absolute and relative references alike: lines inserted at a range's first line move it,
+lines inserted strictly inside it grow it (a table gains the rows, or columns named `Column1`, `Column2`, …), lines
+just past its end leave it alone; a deleted range shrinks, and a reference whose cells are all deleted becomes
+`#REF!`. A splice that both removes and inserts overwrites the lines it replaces, so references to them stay.
+
+`Worksheet.setName` renames the sheet in every formula, name and chart series that refers to it, quoting the new name
+where it needs quotes, and `Workbook.removeWorksheet` turns references to the removed sheet into `#REF!`. Internal
+hyperlink locations are text and are not rewritten, as in Excel.
 
 ### Merge Cells
 
@@ -475,7 +623,8 @@ Stream.addRowPageBreak(sheet.getRow(20));
 ### Sheet Protection
 
 ```typescript
-await Worksheet.protect(worksheet, "password123", {
+await Worksheet.protect(worksheet, {
+  password: "password123",
   selectLockedCells: true,
   selectUnlockedCells: true,
   formatCells: false,
@@ -484,6 +633,10 @@ await Worksheet.protect(worksheet, "password123", {
   sort: true,
   autoFilter: true
 });
+await Worksheet.verifyPassword(worksheet, "password123"); // true
+
+await Workbook.protect(workbook, { password: "pw", lockStructure: true });
+await Workbook.verifyPassword(workbook, "pw"); // true
 ```
 
 ### Comments
@@ -506,11 +659,17 @@ Cell.setNote(worksheet, "C1", {
 ### Auto-Fit Column Width
 
 ```typescript
-Worksheet.autoFitColumns(worksheet);
+Column.autoFit(worksheet); // every column in the used range
+Column.autoFit(worksheet, "B"); // one column
+Column.autoFit(worksheet, { start: "B", end: "D" }); // a span
 
 // Hidden rows are ignored, as in Excel. To size columns for a collapsed
 // outline group as it will look once expanded, measure them too:
-Worksheet.autoFitColumns(worksheet, { includeHiddenRows: true });
+Column.autoFit(worksheet, { includeHiddenRows: true });
+
+// Row heights follow the same shape.
+Row.autoFit(worksheet);
+Row.autoFit(worksheet, 3);
 ```
 
 ## Charts
@@ -518,7 +677,7 @@ Worksheet.autoFitColumns(worksheet, { includeHiddenRows: true });
 Documonster includes a structured chart API, raw XML preservation for templates, and deterministic preview renderers. It is designed to cover the open-source gap left by libraries that only preserve chart XML or only write worksheet data.
 
 > **Setup:** No install or registration step is required. The chart APIs
-> (`Chart.add`, the per-type shortcuts, chart load/write, etc.) pull the chart
+> (`Chart.place`, chart load/write, etc.) pull the chart
 > implementation directly and statically. A consumer that never references any
 > chart API gets the entire chart implementation tree-shaken out of the bundle.
 
@@ -526,7 +685,7 @@ Documonster includes a structured chart API, raw XML preservation for templates,
 
 ### Rendering scope
 
-The built-in `Chart.toSVG(chart)` / `Chart.toPNG(chart)` / `Pdf.fromChart(chart)` helpers produce a **zero-dependency deterministic preview** — not an Excel-pixel-perfect compositor. Classic charts are driven by a `ChartScene` intermediate representation shared across SVG, PNG, and PDF; ChartEx charts use dedicated geometry collectors that keep the SVG and vector-PDF paths equivalent by construction. The preview is well-suited to:
+The built-in `Chart.toSvg(chart)` / `Chart.toPng(chart)` / `Pdf.fromChart(chart)` helpers produce a **zero-dependency deterministic preview** — not an Excel-pixel-perfect compositor. Classic charts are driven by a `ChartScene` intermediate representation shared across SVG, PNG, and PDF; ChartEx charts use dedicated geometry collectors that keep the SVG and vector-PDF paths equivalent by construction. The preview is well-suited to:
 
 - Server-side thumbnails, email attachments, and README images
 - CI sanity checks ("does this chart render without crashing")
@@ -545,97 +704,70 @@ It is **not** a replacement for Excel / LibreOffice rendering when pixel-identic
 
 ```typescript
 const ws = Workbook.addWorksheet(workbook, "Sales");
-Worksheet.addRows(ws, [
+Row.addMany(ws, [
   ["Month", "Revenue", "Profit"],
   ["Jan", 120, 32],
   ["Feb", 180, 49],
   ["Mar", 160, 41]
 ]);
 
-Chart.add(
+Chart.place(ws, "E1:M16", {
+  type: "bar",
+  barDir: "col",
+  grouping: "clustered",
+  title: "Revenue",
+  series: [
+    {
+      name: "Revenue",
+      categories: "Sales!$A$2:$A$4",
+      values: "Sales!$B$2:$B$4",
+      dataLabels: { showVal: true },
+      trendline: { type: "linear", lineDash: "dash" },
+      errorBars: { type: "fixedVal", value: 5 }
+    }
+  ],
+  categoryAxis: { title: "Month" },
+  valueAxis: { title: "USD", min: 0 }
+});
+```
+
+### Presets, Tables And Rows
+
+`Chart.place(ws, range, options)` is the one way to add a chart, and it returns the chart's handle. The `type`
+chooses the chart: `"bar"` (with `barDir: "col"` for columns), `"line"`, `"area"`, `"pie"`, `"doughnut"`,
+`"scatter"`, `"bubble"`, `"radar"`, `"stock"`, `"surface"`, and the Office 2016 types `"histogram"`, `"pareto"`,
+`"waterfall"`, `"funnel"`, `"treemap"`, `"sunburst"`, `"boxWhisker"` and `"regionMap"`. Three helpers build the
+options from something else:
+
+```typescript
+import { EXCEL_CHART_PRESETS, EXCEL_CHART_EX_PRESETS } from "documonster/chart";
+
+// A preset — 99 classic and 10 Office 2016 ones, named as Excel's gallery names them.
+Chart.place(
   ws,
-  {
-    type: "bar",
-    barDir: "col",
-    grouping: "clustered",
-    title: "Revenue",
-    series: [
-      {
-        name: "Revenue",
-        categories: "Sales!$A$2:$A$4",
-        values: "Sales!$B$2:$B$4",
-        dataLabels: { showVal: true },
-        trendline: { type: "linear", lineDash: "dash" },
-        errorBars: { type: "fixedVal", value: 5 }
-      }
-    ],
-    categoryAxis: { title: "Month" },
-    valueAxis: { title: "USD", min: 0 }
-  },
-  "E1:M16"
+  "E1:M16",
+  Chart.applyPreset("col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] })
 );
-```
-
-### Presets And Convenience APIs
-
-```typescript
-import {
-  EXCEL_CHART_PRESETS,
-  EXCEL_CHART_EX_PRESETS,
-  applyChartPreset,
-  applyChartExPreset
-} from "documonster/chart";
-
-// 99 classic presets + 10 ChartEx presets (Excel UI aliases)
-Chart.addPreset(ws, "col3DConeStacked100", { series: [{ values: "Sales!$B$2:$B$4" }] }, "E1:M16");
-Chart.addPresetEx(ws, "boxAndWhisker", { series: [{ values: "Samples!$A$2:$A$50" }] }, "N1:V16");
-
-// Per-type shortcut methods — the `type` field is implied.
-Chart.addColumn(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "E18:M32");
-Chart.addBar(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "E34:M48");
-Chart.addLine(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "E50:M64");
-Chart.addArea(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "E66:M80");
-Chart.addPie(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "P1:X16");
-Chart.addDoughnut(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "P18:X32");
-Chart.addScatter(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "P34:X48");
-Chart.addBubble(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "P50:X64");
-Chart.addRadar(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "P66:X80");
-Chart.addStock(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AA1:AI16");
-Chart.addSurface(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AA18:AI32");
-// ChartEx shortcuts
-Chart.addHistogram(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AA34:AI48");
-Chart.addPareto(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AA50:AI64");
-Chart.addWaterfall(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AA66:AI80");
-Chart.addFunnel(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AK1:AS16");
-Chart.addTreemap(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AK18:AS32");
-Chart.addSunburst(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AK34:AS48");
-Chart.addBoxWhisker(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AK50:AS64");
-Chart.addRegionMap(ws, { series: [{ values: "Sales!$B$2:$B$4" }] }, "AK66:AS80");
-
+Chart.place(
+  ws,
+  "N1:V16",
+  Chart.applyPreset("boxAndWhisker", { series: [{ values: "Samples!$A$2:$A$50" }] })
+);
 console.log(EXCEL_CHART_PRESETS.length, EXCEL_CHART_EX_PRESETS.length); // 99, 10
-```
 
-Build chart option bags from data-frame-style inputs:
-
-```typescript
-// Object-array → chart: stages the rows into the worksheet and returns
-// the chart number.
-Chart.addFromRows(
+// Plain rows: they are written to the sheet at `startCell`, and the series refer to them.
+const visits = Chart.createOptionsFromRows(
   ws,
   [
     { day: "Mon", visits: 312 },
     { day: "Tue", visits: 400 },
     { day: "Wed", visits: 280 }
   ],
-  { type: "bar", barDir: "col", x: "day", y: "visits", startCell: "A1" },
-  "C1:K16"
+  { type: "bar", barDir: "col", x: "day", y: "visits", startCell: "A1" }
 );
+Chart.place(ws, "C1:K16", visits);
 
-// Column-shortcut — same as above with `type: "bar", barDir: "col"` implied.
-Chart.addColumnFromRows(ws, rows, { x: "quarter", y: "revenue", startCell: "A1" }, "C1:K16");
-
-// Excel Table → chart. Series references are structured (`Table1[Col]`)
-// so the chart expands automatically when the table grows.
+// An Excel table. Series references are structured (`Kpi[Revenue]`), so the chart grows with the table.
 const table = Table.add(ws, {
   name: "Kpi",
   ref: "A1",
@@ -643,113 +775,99 @@ const table = Table.add(ws, {
   columns: [{ name: "Month" }, { name: "Revenue" }, { name: "Profit" }],
   rows: [["Jan", 1000, 250]]
 });
-Chart.addFromTable(
+Chart.place(
   ws,
-  table,
-  { type: "bar", barDir: "col", categoryColumn: "Month", valueColumns: ["Revenue", "Profit"] },
-  "F1:N18"
+  "F1:N18",
+  Chart.createOptionsFromTable(ws, table, {
+    type: "bar",
+    barDir: "col",
+    categoryColumn: "Month",
+    valueColumns: ["Revenue", "Profit"]
+  })
 );
 
-// ChartEx helpers have the same shape.
-Chart.addExFromRows(ws, rows, { type: "histogram", x: "bucket", y: "count" }, "AA1:AI18");
-Chart.addExFromTable(
+// The Office 2016 types take the same helpers.
+Chart.place(
   ws,
-  table,
-  { type: "funnel", categoryColumn: "Stage", valueColumns: ["Users"] },
-  "AA20:AI40"
+  "AA1:AI18",
+  Chart.createOptionsFromRows(ws, rows, { type: "histogram", x: "bucket", y: "count" })
 );
 
-// Low-level range helper — emits a series with absolute refs, matching
-// what the builders produce internally.
-const s = Chart.seriesFromColumns(ws, {
+// A single series from ranges, with absolute references — what the helpers above produce internally.
+const s = Chart.createSeriesFromColumns(ws, {
   categories: "Sales!$A$2:$A$7",
   values: "Sales!$B$2:$B$7",
   name: "Revenue"
 });
-Chart.add(ws, { type: "line", series: [s] }, "A20:I35");
+Chart.place(ws, "A20:I35", { type: "line", series: [s] });
 ```
 
 ### Combo, ChartEx, Pivot Chart, And Chartsheet
 
 ```typescript
-Chart.addCombo(
-  ws,
-  {
-    groups: [
-      {
-        type: "bar",
-        barDir: "col",
-        series: [{ name: "Revenue", categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }]
-      },
-      {
-        type: "line",
-        useSecondaryAxis: true,
-        series: [{ name: "Profit", categories: "Sales!$A$2:$A$4", values: "Sales!$C$2:$C$4" }]
-      }
-    ],
-    title: "Revenue vs Profit",
-    dataTable: { showKeys: true, showHorzBorder: true, showVertBorder: true }
-  },
-  "N1:V16"
-);
+Chart.place(ws, "N1:V16", {
+  groups: [
+    {
+      type: "bar",
+      barDir: "col",
+      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$4", values: "Sales!$B$2:$B$4" }]
+    },
+    {
+      type: "line",
+      useSecondaryAxis: true,
+      series: [{ name: "Profit", categories: "Sales!$A$2:$A$4", values: "Sales!$C$2:$C$4" }]
+    }
+  ],
+  title: "Revenue vs Profit",
+  dataTable: { showKeys: true, showHorzBorder: true, showVertBorder: true }
+});
 
 // ChartEx — Office 2016+ modern types (histogram/pareto/waterfall/funnel/
-// treemap/sunburst/boxWhisker/regionMap). Each type has a dedicated
-// shortcut; for full control pass `AddChartExOptions` to `addChartEx`.
-Chart.addHistogram(
-  ws,
-  { series: [{ name: "Distribution", values: "Sales!$B$2:$B$4" }], binning: { binType: "auto" } },
-  "N18:V32"
-);
-Chart.addWaterfall(
-  ws,
-  {
-    title: "Revenue waterfall",
-    categories: "Sales!$A$2:$A$7",
-    series: [{ name: "Delta", values: "Sales!$C$2:$C$7", subtotals: [0, 5] }],
-    layout: { connectorLines: true }
-  },
-  "N34:V48"
-);
-Chart.addTreemap(
-  ws,
-  {
-    categories: "Hier!$C$2:$C$10",
-    series: [
-      {
-        name: "Sales",
-        values: "Hier!$D$2:$D$10",
-        hierarchy: ["Hier!$A$2:$A$10", "Hier!$B$2:$B$10"]
-      }
-    ],
-    layout: { parentLabelLayout: "banner" }
-  },
-  "N50:V64"
-);
+// treemap/sunburst/boxWhisker/regionMap) take `AddChartExOptions`.
+Chart.place(ws, "N18:V32", {
+  type: "histogram",
+  series: [{ name: "Distribution", values: "Sales!$B$2:$B$4" }],
+  binning: { binType: "auto" }
+});
+Chart.place(ws, "N34:V48", {
+  type: "waterfall",
+  title: "Revenue waterfall",
+  categories: "Sales!$A$2:$A$7",
+  series: [{ name: "Delta", values: "Sales!$C$2:$C$7", subtotals: [0, 5] }],
+  layout: { connectorLines: true }
+});
+Chart.place(ws, "N50:V64", {
+  type: "treemap",
+  categories: "Hier!$C$2:$C$10",
+  series: [
+    {
+      name: "Sales",
+      values: "Hier!$D$2:$D$10",
+      hierarchy: ["Hier!$A$2:$A$10", "Hier!$B$2:$B$10"]
+    }
+  ],
+  layout: { parentLabelLayout: "banner" }
+});
 
 // Pivot chart — same options as a classic chart plus the link back to
 // the pivot table; `pivotChartOptions` controls drop-zone visibility,
 // refresh-on-open, and the Office 2014 expand/collapse field buttons.
 const pivot = Pivot.add(ws, { sourceTable: src, rows: ["Region"], values: ["Revenue"] });
-Chart.addPivot(
-  ws,
-  pivot,
-  {
-    type: "bar",
-    barDir: "col",
-    series: [{ name: "Revenue", categories: "Src!$A$2:$A$9", values: "Src!$D$2:$D$9" }],
-    pivotChartOptions: {
-      dropZonesVisible: true,
-      dropZoneFilter: true,
-      dropZoneCategories: true,
-      dropZoneData: true,
-      refreshOnOpen: true,
-      showExpandCollapseFieldButtons: true
-    }
-  },
-  "F1:N20"
-);
-Chart.addPivotCombo(ws, pivot, { groups: [] }, "F22:N40");
+Chart.place(ws, "F1:N20", {
+  pivotTable: pivot,
+  type: "bar",
+  barDir: "col",
+  series: [{ name: "Revenue", categories: "Src!$A$2:$A$9", values: "Src!$D$2:$D$9" }],
+  pivotChartOptions: {
+    dropZonesVisible: true,
+    dropZoneFilter: true,
+    dropZoneCategories: true,
+    dropZoneData: true,
+    refreshOnOpen: true,
+    showExpandCollapseFieldButtons: true
+  }
+});
+Chart.place(ws, "F22:N40", { pivotTable: pivot, groups: [] });
 
 // Chartsheet — a full-page chart on its own tab. Works with any of
 // `AddChartOptions`, `AddComboChartOptions`, or `AddChartExOptions`.
@@ -768,108 +886,108 @@ Workbook.addPivotChartsheet(workbook, "Pivot Dashboard", pivot, {
 
 ```typescript
 // String A1 range (two-cell anchor, the most common form).
-Chart.add(ws, { type: "bar", series: [{ values: "Sales!$B$2:$B$4" }] }, "A1:H15");
+Chart.place(ws, "A1:H15", { type: "bar", series: [{ values: "Sales!$B$2:$B$4" }] });
 
 // Two-cell anchor with row/col coordinates.
-Chart.add(ws, options, { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } });
+Chart.place(ws, { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } }, options);
 
 // One-cell anchor — pinned to a cell with a fixed EMU extent (5×3 in).
 // 914400 EMU = 1 inch.
-Chart.add(ws, options, {
-  tl: { col: 1, row: 19 },
-  ext: { cx: 5 * 914400, cy: 3 * 914400 },
-  editAs: "oneCell"
-});
+Chart.place(
+  ws,
+  {
+    tl: { col: 1, row: 19 },
+    ext: { cx: 5 * 914400, cy: 3 * 914400 },
+    editAs: "oneCell"
+  },
+  options
+);
 
 // Absolute anchor — fixed EMU position + size, ignores rows/columns.
-Chart.add(ws, options, {
-  pos: { x: 914400, y: 36 * 914400 },
-  ext: { cx: 5 * 914400, cy: 3 * 914400 },
-  editAs: "absolute"
-});
+Chart.place(
+  ws,
+  {
+    pos: { x: 914400, y: 36 * 914400 },
+    ext: { cx: 5 * 914400, cy: 3 * 914400 },
+    editAs: "absolute"
+  },
+  options
+);
 ```
 
 ### Advanced Series Formatting
 
 ```typescript
-Chart.add(
-  ws,
-  {
-    type: "line",
-    title: {
-      paragraphs: [
-        { runs: [{ text: "Q2 ", properties: { bold: true, size: 1600 } }, { text: "Performance" }] }
-      ]
-    },
-    series: [
-      {
-        name: "Revenue",
-        categories: "Sales!$A$2:$A$7",
-        values: "Sales!$B$2:$B$7",
-        line: "4472C4",
-        lineWidth: 2.5,
-        lineDash: "solid",
-        marker: { symbol: "circle", size: 8, fill: "4472C4", border: "FFFFFF" },
-        trendline: {
-          type: "linear",
-          displayEq: true,
-          displayRSqr: true,
-          forward: 1,
-          line: "ED7D31",
-          lineDash: "dash"
-        },
-        errorBars: {
-          direction: "y",
-          barDir: "both",
-          type: "percentage",
-          value: 10
-        },
-        dataLabels: { showVal: true, position: "t", numFmt: "$#,##0" },
-        // Per-point overrides
-        dataPoints: [
-          { index: 0, fill: "C00000" },
-          { index: 5, fill: "70AD47", marker: { symbol: "diamond", size: 10 } }
-        ]
-      }
-    ],
-    categoryAxis: { title: "Month", textRotation: -45 },
-    valueAxis: {
-      title: "Revenue",
-      numFmt: "$#,##0",
-      min: 0,
-      logBase: 10,
-      majorGridlines: true,
-      displayUnits: "thousands",
-      displayUnitsLabel: "× 1 000"
-    },
-    legendOptions: {
-      entries: [{ index: 1, hidden: true }],
-      txPr: { size: 900, color: { srgb: "595959" } }
-    },
-    plotAreaOptions: { spPr: { fill: "FAFAFA", border: "D9D9D9" } }
+Chart.place(ws, "A1:L20", {
+  type: "line",
+  title: {
+    paragraphs: [
+      { runs: [{ text: "Q2 ", properties: { bold: true, size: 1600 } }, { text: "Performance" }] }
+    ]
   },
-  "A1:L20"
-);
+  series: [
+    {
+      name: "Revenue",
+      categories: "Sales!$A$2:$A$7",
+      values: "Sales!$B$2:$B$7",
+      line: "4472C4",
+      lineWidth: 2.5,
+      lineDash: "solid",
+      marker: { symbol: "circle", size: 8, fill: "4472C4", border: "FFFFFF" },
+      trendline: {
+        type: "linear",
+        displayEq: true,
+        displayRSqr: true,
+        forward: 1,
+        line: "ED7D31",
+        lineDash: "dash"
+      },
+      errorBars: {
+        direction: "y",
+        barDir: "both",
+        type: "percentage",
+        value: 10
+      },
+      dataLabels: { showVal: true, position: "t", numFmt: "$#,##0" },
+      // Per-point overrides
+      dataPoints: [
+        { index: 0, fill: "C00000" },
+        { index: 5, fill: "70AD47", marker: { symbol: "diamond", size: 10 } }
+      ]
+    }
+  ],
+  categoryAxis: { title: "Month", textRotation: -45 },
+  valueAxis: {
+    title: "Revenue",
+    numFmt: "$#,##0",
+    min: 0,
+    logBase: 10,
+    majorGridlines: true,
+    displayUnits: "thousands",
+    displayUnitsLabel: "× 1 000"
+  },
+  legendOptions: {
+    entries: [{ index: 1, hidden: true }],
+    txPr: { size: 900, color: { srgb: "595959" } }
+  },
+  plotAreaOptions: { spPr: { fill: "FAFAFA", border: "D9D9D9" } }
+});
 
 // Picture-fill (bars filled with an image). Accepts raw Uint8Array,
 // a `data:` URL, a bare base64 string, a `{ workbookImageId }` handle,
 // or a structured `ChartPictureFillImageData`.
-Chart.add(
-  ws,
-  {
-    type: "bar",
-    barDir: "col",
-    series: [
-      {
-        name: "Revenue",
-        categories: "Sales!$A$2:$A$7",
-        values: "Sales!$B$2:$B$7",
-        pictureFill: { image: pngBytes, fillMode: "stretch" }
-      }
-    ]
-  },
-  "N1:V16"
-);
+Chart.place(ws, "N1:V16", {
+  type: "bar",
+  barDir: "col",
+  series: [
+    {
+      name: "Revenue",
+      categories: "Sales!$A$2:$A$7",
+      values: "Sales!$B$2:$B$7",
+      pictureFill: { image: pngBytes, fillMode: "stretch" }
+    }
+  ]
+});
 ```
 
 ### Chart Styling
@@ -877,31 +995,42 @@ Chart.add(
 ```typescript
 // Legacy 2007/2010 built-in style (1..48). Emits `<c:style val="N"/>`.
 Chart.setStyle(chart, 42);
-Chart.setBuiltInStyle(chart, 42); // alias for the built-in style index
 
 // Modern Office 2013+ sidecar — full styleN.xml + colorsN.xml. Applied
-// via `addChart` options or copied in later via the chart entry.
-Chart.add(
-  ws,
-  {
-    type: "bar",
-    series: [{ values: "Sales!$B$2:$B$4" }],
-    chartStyle: {
-      id: 201,
-      elements: {
-        chartArea: { fillRefIdx: 1, lnRefIdx: 1, effectRefIdx: 0, fontRefIdx: "minor" },
-        title: { fontRefIdx: "major" }
-      }
-    },
-    chartColors: {
-      method: "cycle",
-      id: 10,
-      colors: [{ srgb: "4472C4" }, { srgb: "ED7D31" }, { srgb: "A5A5A5" }]
+// via the `Chart.place` options or copied in later via the chart entry.
+Chart.place(ws, "A1:H15", {
+  type: "bar",
+  series: [{ values: "Sales!$B$2:$B$4" }],
+  chartStyle: {
+    id: 201,
+    elements: {
+      chartArea: { fillRefIdx: 1, lnRefIdx: 1, effectRefIdx: 0, fontRefIdx: "minor" },
+      title: { fontRefIdx: "major" }
     }
   },
-  "A1:H15"
-);
+  chartColors: {
+    method: "cycle",
+    id: 10,
+    colors: [{ srgb: "4472C4" }, { srgb: "ED7D31" }, { srgb: "A5A5A5" }]
+  }
+});
 ```
+
+### Chart handles and removal
+
+`Chart.place` adds a chart of any family — classic, combo (`groups`), Office 2016
+(`histogram`, `waterfall`, `treemap`, …) or pivot-bound (`pivotTable`) — and returns
+its handle, which `Chart.remove` and every chart operation take:
+
+```typescript
+import { Chart } from "documonster/excel";
+
+const chart = Chart.place(ws, "E1:L14", { type: "bar", barDir: "bar", series });
+Chart.setStyle(chart, 26);
+Chart.remove(ws, chart);
+```
+
+`Chart.remove(ws, n)` with a bare number removes the chart at that **position in `Chart.list(ws)`**.
 
 ### Preview Export
 
@@ -909,11 +1038,11 @@ Chart.add(
 import { Chart } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
-const chart = Chart.get(ws)[0];
+const chart = Chart.list(ws)[0];
 
 // SVG / PNG previews — Promise for PNG because the Node rasteriser is async.
-const svg = Chart.toSVG(chart, { width: 800, height: 450, backgroundColor: "transparent" });
-const png = await Chart.toPNG(chart, { width: 800, height: 450, scale: 2, dpi: 192 });
+const svg = Chart.toSvg(chart, { width: 800, height: 450, background: "transparent" });
+const png = await Chart.toPng(chart, { width: 800, height: 450, scale: 2, dpi: 192 });
 
 // Standalone one-page PDF — classic charts render as vector content
 // (selectable text, resolution-independent shapes); ChartEx types render
@@ -925,13 +1054,36 @@ const pdf = await Pdf.fromChart(chart, {
   margin: 36
 });
 
-// Inspect the vector-vs-raster decision explicitly:
-import { canRenderChartExAsVectorPdf } from "documonster/chart";
-const chartExModel = Chart.chartExModel(chart);
-if (chartExModel) {
-  console.log(canRenderChartExAsVectorPdf(chartExModel));
+// Onto a page of your own: a chart is a display list, drawn as every other one is.
+import { ChartClassic, ChartEx } from "documonster/chart";
+import { Draw } from "documonster/draw";
+const builder = new Pdf.Builder();
+const page = builder.addPage();
+const classic = Chart.getModel(chart);
+const ex = Chart.getExModel(chart);
+const list = classic
+  ? ChartClassic.toDrawList(classic, { width: 400, height: 250 })
+  : ex && ChartEx.toDrawList(ex, { width: 400, height: 250 });
+if (list) {
+  Draw.render(list, Pdf.createDrawSurface(page, { x: 72, y: 450, width: 400, height: 250 }));
 }
+
+// Reproducible pixels: draw with your own fonts only.
+const pinned = await Chart.toPng(chart, { fonts: [fontBytes], useSystemFonts: false });
 ```
+
+Every route draws the same picture, chart area included: the chart's own fill and border from
+`c:chartSpace/c:spPr` (`cx:spPr` for ChartEx), or — where the model says nothing — what Office
+draws for an automatic chart area: white, with a 0.75 pt `#D9D9D9` border inside the box, and
+rounded corners when a loaded classic chart has no `c:roundedCorners` (charts this library builds
+write `val="0"`). `background` replaces that fill (the border stays) and takes what
+`Draw.toSvg` / `Draw.toRgba` take: a CSS colour or `{ r, g, b, a }`.
+`fonts` and `useSystemFonts` mean what they mean to `Draw.toRgba`. In a browser `toPng` lets the
+platform draw the SVG with the page's fonts — unless you choose the fonts (`fonts`, or
+`useSystemFonts: false`), and then the built-in rasteriser draws it, as on Node, so the PNG is the
+same in every environment.
+For the list of characters no font covered, rasterise the display list yourself:
+`Draw.toRgba(ChartClassic.toDrawList(model), { fonts }).uncoveredCodePoints`.
 
 Preview rendering is intentionally deterministic and dependency-free. Browser PNG export uses canvas. Node.js PNG export uses the built-in basic rasterizer. It draws core chart geometry, axes, secondary axes, axis titles, legends, labels, markers, trendlines, and error bars for thumbnails, tests, and server-side previews; it is not an Excel-pixel-perfect renderer or an Excel-identical layout engine. ChartEx `regionMap` previews use a small built-in country centroid table plus projection math for known regions and a deterministic tile fallback for unknown labels; they are geographic previews, not a GIS/map-boundary renderer.
 
@@ -1007,8 +1159,7 @@ Drops are recorded rather than silent, because two of the reasons are things a c
 import { Workbook } from "documonster/excel";
 import type { OpaqueDrop } from "documonster/excel";
 
-const workbook = Workbook.create();
-await Workbook.readFile(workbook, "signed-macro-enabled.xlsm");
+const workbook = await Workbook.readFile("signed-macro-enabled.xlsm");
 
 const drops: readonly OpaqueDrop[] = Workbook.getModel(workbook).opaqueDrops ?? [];
 for (const drop of drops) {
@@ -1083,32 +1234,32 @@ Excel and WPS can be wired into the same pattern by providing CI jobs that conve
 
 #### High-level capability map
 
-| Area                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Classic charts          | bar, bar3D, line, line3D, pie, pie3D, doughnut, area, area3D, scatter, bubble, radar, stock, surface, surface3D, ofPie (see 3D note)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ChartEx                 | sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap (see regionMap note)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Advanced chart features | combo charts, secondary axes, markers, data labels (`DataLabelPosition`, pie leader lines, bar/line collision avoidance), trendlines, error bars, manual plot layout (edge-mode), chartsheets, data table (`c:dTable` — rendered below plot area), user-shape overlays (`c:userShapes` byte-preserving + programmatic replacement; not rendered in SVG/PNG/PDF previews)                                                                                                                                                                                                                |
-| Pivot charts            | classic pivot chart source metadata, field buttons/filter metadata, pivot chartsheets (metadata-only — see pivot chart note below)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| Presets                 | 99 classic presets + 10 ChartEx presets — cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut, histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (via `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`)                                                                                                                                                                                                                                                                                                                        |
-| ChartEx helpers         | `chartExOptionsFromTable` / `chartExOptionsFromRows` (+ `Chart.addExFromTable/addExFromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Template fidelity       | byte-preserving round-trip of unmodified chart / chartEx parts and their style and colour sidecars (not of the package as a whole), raw-XML patching for narrow edits, `templateMode: "strict"` to refuse silent loss, `Chart.unknownElements` surfacing `c15:` / `cx14:` vendor tags                                                                                                                                                                                                                                                                                                   |
-| Package part fidelity   | unmodelled parts (VBA project, custom properties, connections, query tables, printer settings, vendor extensions) preserved with their content type and relationships in both directions; stale caches, invalidated signatures and unreachable parts dropped deliberately and reported via `WorkbookModel.opaqueDrops`                                                                                                                                                                                                                                                                  |
-| Rendering scope         | **zero-dependency deterministic preview** — not an Excel-identical compositor. Classic charts use a `ChartScene` IR for SVG, PNG, PDF; ChartEx uses dedicated geometry collectors for SVG and vector PDF. For pixel-perfect output, round-trip the `.xlsx` through `soffice --convert-to pdf`                                                                                                                                                                                                                                                                                           |
-| Rendering features      | deterministic SVG, browser PNG, Node PNG fallback (honours text `rotate`), PDF drawing bridge (labels/markers/errorBars/trendlines/leader lines/data tables); text anchor+rotation+color+fontFamily (`bold`/`italic` from `txPr/a:latin`); radar/area/bubble true alpha via `PdfColor.a` → `/ExtGState`; bar3D true axonometric projection (`view3D.rotX` / `rotY` / `rAngAx`) with three shaded faces; text sized via `@excel/utils/text-metrics` (Calibri/Arial/Times/9 fonts + ~230 category factors). DrawingML effect filters emit as SVG `<filter>` but are not reproduced in PDF |
-| Commercial-grade gaps   | Excel-perfect rendering, true 3D for line3D/pie3D/area3D/surface3D, arbitrary unknown XML mutation, and full real-file compatibility matrices require external oracle testing                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Area                    | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Classic charts          | bar, bar3D, line, line3D, pie, pie3D, doughnut, area, area3D, scatter, bubble, radar, stock, surface, surface3D, ofPie (see 3D note)                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ChartEx                 | sunburst, treemap, waterfall, funnel, histogram, pareto, boxWhisker, regionMap (see regionMap note)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Advanced chart features | combo charts, secondary axes, markers, data labels (`DataLabelPosition`, pie leader lines, bar/line collision avoidance), trendlines, error bars, manual plot layout (edge-mode), chartsheets, data table (`c:dTable` — rendered below plot area), user-shape overlays (`c:userShapes` byte-preserving + programmatic replacement; not rendered in SVG/PNG/PDF previews)                                                                                                                                                                                                                    |
+| Pivot charts            | classic pivot chart source metadata, field buttons/filter metadata, pivot chartsheets (metadata-only — see pivot chart note below)                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Presets                 | 99 classic presets + 10 ChartEx presets — cone/cylinder/pyramid, scatter variants, stock, surface/contour, exploded pie/doughnut, histogram/pareto/waterfall/funnel/treemap/sunburst/boxWhisker/regionMap (via `EXCEL_CHART_PRESETS` / `EXCEL_CHART_EX_PRESETS`)                                                                                                                                                                                                                                                                                                                            |
+| ChartEx helpers         | `ChartEx.createOptionsFromTable` / `ChartEx.createOptionsFromRows` (+ `Chart.createOptionsFromTable/createOptionsFromRows`) for sunburst/treemap/waterfall/funnel/histogram/pareto/boxWhisker                                                                                                                                                                                                                                                                                                                                                                                               |
+| Template fidelity       | byte-preserving round-trip of unmodified chart / chartEx parts and their style and colour sidecars (not of the package as a whole), raw-XML patching for narrow edits, `templateMode: "strict"` to refuse silent loss, `Chart.getUnknownElements` surfacing `c15:` / `cx14:` vendor tags                                                                                                                                                                                                                                                                                                    |
+| Package part fidelity   | unmodelled parts (VBA project, custom properties, connections, query tables, printer settings, vendor extensions) preserved with their content type and relationships in both directions; stale caches, invalidated signatures and unreachable parts dropped deliberately and reported via `WorkbookModel.opaqueDrops`                                                                                                                                                                                                                                                                      |
+| Rendering scope         | **zero-dependency deterministic preview** — not an Excel-identical compositor. Classic charts use a `ChartScene` IR for SVG, PNG, PDF; ChartEx uses dedicated geometry collectors for SVG and vector PDF. For pixel-perfect output, round-trip the `.xlsx` through `soffice --convert-to pdf`                                                                                                                                                                                                                                                                                               |
+| Rendering features      | deterministic SVG, browser PNG, Node PNG fallback (honours text `rotate`), PDF drawing bridge (labels/markers/errorBars/trendlines/leader lines/data tables); text anchor+rotation+color+fontFamily (`bold`/`italic` from `txPr/a:latin`); radar/area/bubble true alpha (paint alpha → `/ExtGState` in PDF); bar3D true axonometric projection (`view3D.rotX` / `rotY` / `rAngAx`) with three shaded faces; text sized via `@excel/utils/text-metrics` (Calibri/Arial/Times/9 fonts + ~230 category factors). DrawingML effect filters emit as SVG `<filter>` but are not reproduced in PDF |
+| Commercial-grade gaps   | Excel-perfect rendering, true 3D for line3D/pie3D/area3D/surface3D, arbitrary unknown XML mutation, and full real-file compatibility matrices require external oracle testing                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 #### Per-type capability grid
 
 Rows are chart types. Columns mean:
 
-- **Create** — programmatic `addChart` / `addChartEx` (structured API, no template needed)
+- **Create** — programmatic `Chart.place` (structured API, no template needed)
 - **Read** — parse an existing `chartN.xml` / `chartExN.xml` into a structured model
 - **Edit** — `Chart.mutate(chart, fn, { preferRawPatch })` works for this type (raw-patch for narrow edits, structured rebuild for the rest)
 - **Round-trip** — load → write → load yields an equivalent model + package audit passes
 - **Raw preserve** — loaded bytes are preserved verbatim when the chart is not edited (and via raw-patch for narrow edits)
 - **SVG** — content-asserting test (not just "does not throw"): text / path / colour / hash
 - **PNG** — content-asserting test (IHDR / IDAT signature or value-level hash)
-- **PDF** — type-specific PDF surface test beyond the generic `drawChartPdf` smoke
+- **PDF** — type-specific PDF surface test beyond the generic vector-PDF smoke
 - **LibreOffice** — opt-in `chart-oracle` integration run opens the exported xlsx via LibreOffice without error
 
 Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan loop (no value-level assert) · ➖ not implemented / not applicable
@@ -1147,24 +1298,22 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 | boxWhisker |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
 | regionMap  |   ✅   |  ✅  |  ✅  |     ✅     |      ✅      | ✅  | ⬛  | ✅  |     ⬛      |
 
-🟨 = (no longer used in this table) — as of the regionMap vector port every ChartEx layout takes the vector path through `drawChartExPdf`. Callers can still opt into raster per call with `Pdf.fromChart(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text. See the "ChartEx PDF note" below.
+🟨 = (no longer used in this table) — as of the regionMap vector port every ChartEx layout takes the vector path. Callers can still opt into raster per call with `Pdf.fromChart(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text. See the "ChartEx PDF note" below.
 
 ##### Capability gaps that are known but intentional
 
 - **Classic PNG content assertions** are generic: every type hits the PNG pipeline, but only `bar` has a hash golden because binary-level stability across chart types would over-couple tests to renderer internals.
-- **Classic PDF content assertions** exist only where the PDF path diverges meaningfully from SVG (alpha via `/ExtGState`, pie leader lines, marker geometry). Other types re-use the same call graph, so one SVG assertion and the generic `drawChartPdf` smoke are considered sufficient.
+- **Classic PDF content assertions** exist only where the PDF path diverges meaningfully from SVG (alpha via `/ExtGState`, pie leader lines, marker geometry). Other types re-use the same call graph, so one SVG assertion and the generic vector-PDF smoke are considered sufficient.
 - **LibreOffice visual oracle** is gated on `DOCUMONSTER_LIBREOFFICE_VISUAL_ORACLE` and CI does not install LibreOffice by default to keep matrix jobs fast; direct per-type open-validation is provided for `bar` (solo) and the combo/chartsheet/ChartEx-treemap/funnel fixture, with the full catalogue reachable via the `DOCUMONSTER_ENTERPRISE_CORPUS_DIR` opt-in (see `src/modules/excel/__tests__/helpers/enterprise-corpus.ts`).
-- **ChartEx PDF vector path** (`drawChartExPdf`) covers every ChartEx layout the builder currently emits; see the dedicated note.
+- **ChartEx PDF vector path** covers every ChartEx layout the builder currently emits; see the dedicated note.
 
 **3D note:** `bar3D` renders as a **true extruded box** whose axonometric projection is driven by `view3D.rotX` / `view3D.rotY` / `view3D.rAngAx` — three shaded faces (top + front + right) per bar, with depth scaled to bar width so the 3D effect stays readable across chart sizes. The default fallback (`rotX=15°, rotY=20°, rAngAx=true`) matches Excel's new-chart defaults. `line3D`, `pie3D`, `area3D`, `surface3D` and the richer `view3D` / `Scene3D` / `ShapeProperties3D` metadata are **preserved in XML** so clean round-trips and Excel re-opens survive intact, but the preview still renders those types as their 2D equivalents — there is no projection matrix, no light rig, no depth sort for non-bar 3D. This is a preview-grade renderer, not a 3D engine; use Excel or LibreOffice for commercial-grade 3D output.
 
 **Fonts & CJK:** `Pdf.Builder` auto-discovers a system font (the same mechanism used by `Pdf.fromExcel`) whenever a page contains non-WinAnsi characters and no font was explicitly embedded. Call `builder.disableFontAutoDiscovery()` for byte-stable output across hosts, or `builder.embedFont(ttfBytes)` for a deterministic typeface. Register `builder.onWarning(handler)` to receive one diagnostic per distinct unknown `fontFamily` (e.g. non-standard names that fall back to Helvetica metrics) and one diagnostic per build when non-WinAnsi characters land on a page with no covering font (Type3 NOTDEF boxes render).
 
-**Minimal PDF surfaces:** `ChartPdfDrawingSurface.drawPath?` and `drawCircle?` are optional. When a surface lacks `drawPath`, pie/doughnut/ofPie slice outlines degrade to `drawLine` polyline strokes (shape preserved, fill lost); area and radar-filled fills are dropped but the surrounding strokes are still emitted; markers fall back to circle→rect→line chains. `PdfPageBuilder` / `PdfEditorPage` both provide the full interface, so this only matters for custom surfaces.
+**regionMap note:** ChartEx `regionMap` previews ship a ~180-entry country centroid table and four real projection formulas (`mercator`, `miller`, `albers` Equal-Area Conic, `robinson`). This is a centroid-dot geographic preview by default; unmatched labels fall back to a deterministic hexagonal tile layout. For real country polygons, pass a TopoJSON topology via the render option `regionMap: { topology, objectName, match, projection }` — the renderer will decode features, match labels to `feature.id` or `feature.properties.<key>`, and draw choropleth paths. This keeps the library zero-data-bundle: the caller loads their own `world-atlas`/`natural-earth` file. The same three-mode pipeline (TopoJSON → centroid preview → hex-tile fallback) is implemented for **both** SVG and vector PDF — `Pdf.fromChart` and `ChartEx.toDrawList` take the same `regionMap` option. See `src/modules/excel/chart/topojson.ts` and the exported `RegionMapDataOptions` / `TopologyLike` types.
 
-**regionMap note:** ChartEx `regionMap` previews ship a ~180-entry country centroid table and four real projection formulas (`mercator`, `miller`, `albers` Equal-Area Conic, `robinson`). This is a centroid-dot geographic preview by default; unmatched labels fall back to a deterministic hexagonal tile layout. For real country polygons, pass a TopoJSON topology via the render option `regionMap: { topology, objectName, match, projection }` — the renderer will decode features, match labels to `feature.id` or `feature.properties.<key>`, and draw choropleth paths. This keeps the library zero-data-bundle: the caller loads their own `world-atlas`/`natural-earth` file. The same three-mode pipeline (TopoJSON → centroid preview → hex-tile fallback) is implemented for **both** SVG and vector PDF — `Pdf.fromChart` passes the same `regionMap` option through to `drawChartExPdf`. See `src/modules/excel/chart/topojson.ts` and the exported `RegionMapDataOptions` / `TopologyLike` types.
-
-**Built-in chart styles:** `Chart.setStyle(chart, 1..48)` (alias `Chart.setBuiltInStyle(chart, 1..48)`) writes `<c:style val="N"/>` on a classic chart, selecting one of the built-in style indices. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `Chart.add(ws, { …, chartStyle: ChartStyleModel })`.
+**Built-in chart styles:** `Chart.setStyle(chart, 1..48)` writes `<c:style val="N"/>` on a classic chart, selecting one of the built-in style indices. This is the lightweight knob that maps to the 2007/2010 style catalogue. For modern Office-2013-era styling with full `styleN.xml` / `colorsN.xml` sidecars, use `Chart.place(ws, range, { …, chartStyle: ChartStyleModel })`.
 
 **3D rendering boundaries (non-goals):** Beyond the axonometric box used for `bar3D`, we intentionally do **not** render:
 
@@ -1173,14 +1322,14 @@ Legend: ✅ direct type-specific test · ⬛ exercised via generic / preset-scan
 
 These features would require multi-week investments with a low payoff for a preview-grade renderer; users who need Excel-identical 3D output should round-trip through Excel or LibreOffice. All metadata needed to do so (`Scene3D`, `View3D`, `ShapeProperties3D`) already round-trips through XML.
 
-**ChartEx PDF note:** Classic charts render as vector PDF content via `drawChartPdf` (text stays selectable, shapes stay resolution-independent). ChartEx charts now all render as vector PDF content via `drawChartExPdf`:
+**ChartEx PDF note:** Classic charts render as vector PDF content (text stays selectable, shapes stay resolution-independent). ChartEx charts now all render as vector PDF content too:
 
-- **Vector path (default)** — `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`, `pareto`, `boxWhisker`, `regionMap` all go through `drawChartExPdf`, which shares its geometry collectors with the SVG renderer so the two backends stay pixel-equivalent modulo rasterisation. Sunburst arcs are emitted as cubic-Bézier approximations (≤ 0.03 % max error); everything else is straight `drawRect` / `drawLine` / `drawPath` primitives that PDF understands natively. `regionMap` reuses the same TopoJSON decoder + projection math + centroid table as the SVG renderer; the only intentional visual divergence is that the rounded-corner frame (`rx="14"`) becomes a sharp-corner frame in PDF (`drawRect` does not expose a corner radius).
+- **Vector path (default)** — `sunburst`, `treemap`, `waterfall`, `funnel`, `histogram`, `pareto`, `boxWhisker`, `regionMap` all draw the display list `ChartEx.toDrawList` returns, which shares its geometry collectors with the SVG renderer so the two backends stay pixel-equivalent modulo rasterisation. Sunburst arcs are emitted as cubic-Bézier approximations (≤ 0.03 % max error); everything else is straight `drawRect` / `drawLine` / `drawPath` primitives that PDF understands natively. `regionMap` reuses the same TopoJSON decoder + projection math + centroid table as the SVG renderer; the only intentional visual divergence is that the rounded-corner frame (`rx="14"`) becomes a sharp-corner frame in PDF (`drawRect` does not expose a corner radius).
 - **Raster opt-in** — any ChartEx type can be rasterised on demand with `Pdf.fromChart(chart, { forceRaster: true })` when pixel-identity with the SVG preview matters more than selectable text or vector scalability.
 
-Use `Pdf.fromChart(chart, options)` from `documonster/pdf` — it picks the path automatically and honours `forceRaster: true` when you need the raster route on purpose. Import `canRenderChartExAsVectorPdf(model)` separately from `documonster/chart` if you want to inspect the decision before rendering.
+Use `Pdf.fromChart(chart, options)` from `documonster/pdf` — it picks the path automatically and honours `forceRaster: true` when you need the raster route on purpose. To place a chart on a page of your own, draw its display list: `Draw.render(ChartEx.toDrawList(model, { width, height }), Pdf.createDrawSurface(page, rect))`.
 
-**Pivot chart note:** Documonster supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `addPivotChart` / `addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
+**Pivot chart note:** Documonster supports **metadata-only** pivot charts — the `pivotSource`, field buttons, drop-zone options, `refreshOnOpen` and `c16:showExpandCollapseFieldButtons` extensions all round-trip through XML, and `Chart.place` with `pivotTable` / `Workbook.addPivotChartsheet` create the references Excel needs to reconstruct the chart. There is **no** runtime pivot-chart engine: the preview renderer treats pivot charts like regular charts and does not paint field buttons, drop-zone hints, or apply pivot filtering to the data. Once the file is opened in Excel / LibreOffice / WPS, the host application drives the real rendering from the pivot table. For programmatic manipulation of pivot cache data, use the `pivotTable` module directly; the chart side intentionally stays thin.
 
 **Strict template mode:** Writers accept `{ templateMode: "strict" }` (or `{ strictTemplateMode: true }`) to refuse any chart/ChartEx edit that would force a structural rebuild. When a rebuild is unavoidable the error message now lists any unstructured XML elements the parser observed (available as `ChartExModel.unknownElements`) so vendor extensions can never disappear silently from a loaded template.
 
@@ -1202,11 +1351,11 @@ import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Report");
-Worksheet.setColumns(sheet, [
+Column.setDefinitions(sheet, [
   { header: "Product", key: "product", width: 20 },
   { header: "Revenue", key: "revenue", width: 15 }
 ]);
-Worksheet.addRow(sheet, { product: "Widget", revenue: 1000 });
+Row.add(sheet, { product: "Widget", revenue: 1000 });
 Column.setStyle(sheet, "revenue", { numFmt: "$#,##0.00" });
 
 const pdf = await Pdf.fromExcel(workbook, {
@@ -1227,8 +1376,7 @@ window.open(URL.createObjectURL(blob));
 ### XLSX to PDF Conversion
 
 ```typescript
-const workbook = Workbook.create();
-await Workbook.readFile(workbook, "input.xlsx");
+const workbook = await Workbook.readFile("input.xlsx");
 const pdf = await Pdf.fromExcel(workbook);
 ```
 
@@ -1255,60 +1403,88 @@ const pdf = await Pdf.fromExcel(workbook, {
 
 ## CSV Import/Export
 
+`ExcelCsv.read(input)` and `ExcelCsv.readFile(path)` return a **new** workbook holding one worksheet.
+To put the CSV onto a workbook you already have, use `ExcelCsv.addWorksheet(workbook, input)`, which
+adds a worksheet and returns it.
+
 ```typescript
-import { Workbook } from "documonster/excel";
-import {
-  readCsv,
-  writeCsv,
-  writeCsvBuffer,
-  readCsvFile,
-  writeCsvFile
-} from "documonster/excel/csv";
+import { ExcelCsv } from "documonster/excel/csv";
 import fs from "fs";
 
-const workbook = Workbook.create();
-
 // Node.js: read/write CSV files
-await readCsvFile(workbook, "data.csv");
-await writeCsvFile(workbook, "output.csv");
+const workbook = await ExcelCsv.readFile("data.csv");
+await ExcelCsv.writeFile(workbook, "output.csv");
 
-// Read CSV from stream
-await readCsv(workbook, fs.createReadStream("data.csv"), { sheetName: "Imported" });
+// Add CSV from a stream as another worksheet
+await ExcelCsv.addWorksheet(workbook, fs.createReadStream("data.csv"), { sheetName: "Imported" });
 
 // Write CSV to stream
-await writeCsv(workbook, fs.createWriteStream("output.csv"));
+await ExcelCsv.writeStream(workbook, fs.createWriteStream("output.csv"));
 
 // Write CSV to string / bytes
-const csvText = writeCsv(workbook);
-const bytes = await writeCsvBuffer(workbook);
+const csvText = ExcelCsv.format(workbook);
+const bytes = await ExcelCsv.toBuffer(workbook);
+const sameBytes = ExcelCsv.toBufferSync(workbook);
+
+// A writable stream: the CSV written into it is imported as a new worksheet
+fs.createReadStream("data.csv").pipe(ExcelCsv.createImportStream(workbook, { sheetName: "Piped" }));
 
 // Browser: read from string/ArrayBuffer/File
-await readCsv(workbook, csvString);
-await readCsv(workbook, arrayBuffer);
+const fromText = await ExcelCsv.read(csvString);
+const fromBytes = await ExcelCsv.read(arrayBuffer);
+
+// Bytes in another encoding — any label `TextDecoder` knows, for bytes, a File or Blob, a stream, a URL or a path
+const legacy = await ExcelCsv.readFile("legacy.csv", { encoding: "windows-1252" });
+
+// Append to a file that already has its header: leave out the sheet's header row
+await ExcelCsv.writeFile(workbook, "log.csv", { append: true, writeHeaders: false });
 ```
+
+With `append: true`, `ExcelCsv.writeFile` appends every row of the sheet to an existing file — nothing is guessed from
+what the file holds. `writeHeaders: false` leaves out the sheet's first row, its header row, in every writer (`format`,
+`toBuffer`, `toStream`, `writeStream`, `writeFile`), which is how a file that already has its header is continued. A
+line break is written first unless the file already ends with one, read in the write `encoding` (so a UTF-16LE file is
+read as UTF-16LE). A file that does not exist or is empty is simply written.
+
+`encoding` on a read is the encoding of the input bytes (a WHATWG label, as `Csv.parse` takes it). On a write it
+applies to `ExcelCsv.writeFile` only — a Node `Buffer` encoding (`"utf8"`, `"utf16le"`, `"latin1"`, …); the writers that
+return text or bytes produce UTF-8 and refuse another encoding rather than ignore it. A path that is not one is refused
+with `ExcelArgumentError`; a file the system will not read is an `ExcelFileError` naming a CSV file, with the system's
+error as its `cause`.
+
+`documonster/excel/csv` exports the errors its functions throw — `ExcelArgumentError`, `ExcelFileError`,
+`ExcelDownloadError`, `WorksheetNameError`, `InvalidValueTypeError`, `isExcelError`, and `CsvError` / `isCsvError` for
+text the parser cannot read — as the same class objects `documonster/excel` and `documonster/csv` export.
+`documonster/excel/markdown` does the same with `MarkdownError` / `MarkdownParseError` / `isMarkdownError`, and
+`documonster/excel/formula` with `ExcelArgumentError` / `isExcelError`.
 
 ## Markdown Import/Export
 
-```typescript
-import { Workbook } from "documonster/excel";
-import {
-  readMarkdown,
-  writeMarkdown,
-  writeMarkdownBuffer,
-  readMarkdownFile,
-  writeMarkdownFile
-} from "documonster/excel/markdown";
+`ExcelMarkdown.read(text)` returns a **new** workbook holding the first table, and
+`ExcelMarkdown.read(text, { tables: "all" })` one holding a worksheet per table (`readFile` does the same from a path).
+`read` takes the text or its UTF-8 bytes, so what `toBuffer` / `toBufferSync` wrote reads back. To add tables to a workbook you already have, use
+`ExcelMarkdown.addWorksheet(workbook, text)` or `ExcelMarkdown.addWorksheets(workbook, text)`, which
+return what they added. Data cells are read as `ExcelCsv` reads them — numbers, ISO dates, `true`/`false` and error
+literals become values, and the `<br>` the formatter writes for a newline is a newline again — so a workbook formatted
+and read back keeps its values; pass `map` to read them your own way. `format` and the CSV writers refuse a
+`sheetName` or `sheetId` the workbook does not have rather than writing nothing.
 
-const workbook = Workbook.create();
+```typescript
+import { ExcelMarkdown } from "documonster/excel/markdown";
 
 // Read Markdown table
-readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
-await readMarkdownFile(workbook, "table.md");
+const workbook = ExcelMarkdown.read("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const fromFile = await ExcelMarkdown.readFile("table.md");
+
+// Add a table to an existing workbook
+ExcelMarkdown.addWorksheet(workbook, "| Item | Qty |\n| --- | --- |\n| Pen | 3 |", {
+  sheetName: "Stock"
+});
 
 // Write Markdown
-const mdText = writeMarkdown(workbook);
-await writeMarkdownFile(workbook, "output.md");
-const bytes = writeMarkdownBuffer(workbook);
+const mdText = ExcelMarkdown.format(workbook);
+await ExcelMarkdown.writeFile(workbook, "output.md");
+const bytes = await ExcelMarkdown.toBuffer(workbook);
 ```
 
 ## Excel Binary Workbook (`.xlsb`)
@@ -1322,8 +1498,7 @@ import { Workbook } from "documonster/excel";
 await Workbook.writeFile(workbook, "report.xlsb");
 
 // Reads detect it from the package contents.
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, "report.xlsb");
+const reopened = await Workbook.readFile("report.xlsb");
 
 // Bytes and streams take it explicitly, because there is no filename to read it from.
 const bytes = await Workbook.toBuffer(workbook, { format: "xlsb" });
@@ -1343,13 +1518,13 @@ import { Workbook, XlsbFormulaDecodeError } from "documonster/excel";
 // Formatting-only cells past the data. Excel writes a `BrtCellBlank` for every cell of a formatted
 // region, so a sheet with a formatted column carries one per row to the sheet's end — measured at
 // 186 MB of retained heap and 16,379 physical rows against 253 rows of real data.
-await Workbook.readFile(workbook, "wide.xlsb", { blankCells: "collapse" });
+const wide = await Workbook.readFile("wide.xlsb", { blankCells: "collapse" });
 
 // A formula cell holds two things: the value Excel computed and the tokens that computed it. The
 // value always decodes; the token stream is where this codec can be defeated.
-await Workbook.readFile(workbook, "book.xlsb", { formulas: "cached" }); // values only, no expressions
+const valuesOnly = await Workbook.readFile("book.xlsb", { formulas: "cached" }); // values only, no expressions
 try {
-  await Workbook.readFile(workbook, "book.xlsb", { formulas: "error" }); // refuse rather than degrade
+  const strict = await Workbook.readFile("book.xlsb", { formulas: "error" }); // refuse rather than degrade
 } catch (error) {
   if (error instanceof XlsbFormulaDecodeError) {
     console.error(error.sheet, error.addresses);
@@ -1390,7 +1565,7 @@ otherwise — never a rounded approximation.
 **Formulas**, as text and as their cached result. BIFF12 stores an expression as a
 reverse-polish token stream rather than as text, so this module owns the token mapping and
 `documonster/formula` owns the text: `Formula.tokenize` + `Formula.parse` one way,
-`Formula.print` the other. Sharing that is not convenience — precedence and parenthesisation
+`Formula.format` the other. Sharing that is not convenience — precedence and parenthesisation
 are decided in one place, and a second implementation would not fail loudly. `=-2^2` is `4` in
 Excel and `-4` almost everywhere else.
 
@@ -1518,13 +1693,22 @@ Reading has the same option and the **opposite default**, plus a third form for 
 covers — read it _and_ inspect what was lost:
 
 ```typescript
-await Workbook.read(workbook, bytes); // reads it, quietly, losing what it cannot decode
-await Workbook.read(workbook, bytes, { unsupported: "error" }); // or refuse and say what was lost
+const workbook = await Workbook.read(bytes); // reads it, quietly, losing what it cannot decode
+const strict = await Workbook.read(bytes, { unsupported: "error" }); // or refuse and say what was lost
 
-const report = await Workbook.readWithDiagnostics(workbook, bytes);
+const report = await Workbook.readWithDiagnostics(bytes);
 report.lost; // ["Sheet1: 1 cell(s) in BrtShortReal", …]
 report.unknownRecords; // record ids with no name here — not losses, see below
+report.unrecognizedValues; // [{ sheet: "Sheet1", path: "pageSetup.orientation", value: "sideways" }] — kept as read
 ```
+
+`unrecognizedValues` lists, for either format, every sheet setting the file states with a value outside what the
+setting takes. They are not losses either: the field reads as absent, the text is kept, and an XLSX write puts it back
+unchanged while the field is absent. A value you set takes over; clearing the field again brings the kept text back,
+so `Workbook.discardUnrecognizedValues(wb)` is how to remove them — all, or with `{ filter }` the ones you pick by
+sheet, path and text — the filter receives each entry in the same shape the report lists it.
+`Workbook.listUnrecognizedValues(wb)` lists them as the workbook keeps them now, after edits and discards — the
+report's list is what the read found.
 
 `unknownRecords` is deliberately **not** part of `lost`. A record this library has no name for is
 usually a newer schema's extension rather than missing content — every workbook in the reference
@@ -1536,12 +1720,6 @@ library's limitation and stopping costs the caller nothing they had. A workbook 
 written by someone else and the loss already happened; a reader that refuses a real file because
 seven of its cells use a record whose layout is unestablished is a reader nobody can use. `"error"`
 is there for the caller who would rather stop than convert something incomplete.
-
-**Reading replaces the workbook, and does so atomically.** `Workbook.read` into a workbook that
-already has sheets discards them, exactly as the XLSX reader does — and if the package turns out to be
-malformed part-way through, the target is left as it was rather than holding half a file. That holds
-for a _refusal_ too: `{ unsupported: "error" }` evaluates the losses before anything is applied, so a
-rejected read leaves the workbook untouched rather than replacing it and then reporting failure.
 
 ### A field description that cost three features
 
@@ -1874,8 +2052,12 @@ it costs something rather than discovered later in Excel.
   `Ftab` has no id for is called the way Excel calls it: a `PtgName` naming a hidden `_xlfn.*` stub, then the
   arguments, then `PtgFuncVar` with `tab = 0x00FF` and a `cparams` that **counts the name**. The stub itself is
   a defined name with `fHidden | fFunc | fProc | fFutureFunction` and a body of `PtgErr(#NAME?)` — flags
-  `0x0002000b` and rgce `1c 1d`, byte-identical to Excel's. The `_xlfn.` prefix never reaches a caller: a read
-  gives back `XLOOKUP(…)`, which is what was written and what the XML container stores.
+  `0x0002000b` and rgce `1c 1d`, byte-identical to Excel's. A read returns the formula as the file stores it, in
+  both containers: `_xlfn.XLOOKUP(…)`, `_xlfn._xlws.SORT(…)`, `_xlfn.LET(_xlpm.x,…)`, `_xleta.SUM` — except
+  `_xlfn.ANCHORARRAY(A1)`, which is the spill-range operator and reads as `A1#` (see [Formulas](#formulas)). A formula set as
+  `XLOOKUP(…)` is written with its prefix (Excel shows `#NAME?` or refuses the file without it), so after a write and a
+  read it comes back as `_xlfn.XLOOKUP(…)`, not as the bare text that was set. The formula engine accepts both
+  spellings.
 
   **Pivot tables are written — including ones read from an XLSX.** A pivot created through `Pivot.add` carries a
   live source worksheet; one _read from a file_ does not, and `pivotParts` tested for that worksheet and returned
@@ -2019,7 +2201,7 @@ the sheet name is added when the model leaves it off.
 
 **Charts came off this list**, and the estimate that kept them on it was wrong in an instructive way.
 `chart` appears 434 times in the XLSX writer, which reads like a subsystem to port — but a programmatic
-chart goes through `Chart.add` → `addChartEntry`, which puts a `{ chartNumber, model }` entry on the
+chart goes through `Chart.place` → `addChartEntry`, which puts a `{ chartNumber, model }` entry on the
 _workbook_, and one helper renders that entry to XML. The other 434 references are the reading path and
 the chart engine, neither of which a writer needs. Counting references was a proxy for difficulty and a
 bad one.
@@ -2055,6 +2237,24 @@ writes one `vmlDrawing{N}.vml` per sheet holding both a note's box and a checkbo
 has one `BrtLegacyDrawing` — so writing a second file would leave one of them unreachable. The mistake
 worth recording: the VML _relationship_ was emitted only when the sheet had comments, so a checkbox on a
 sheet with none reached Excel with its VML present and nothing pointing at it.
+
+Checkboxes are **read back** too, from both containers: the VML shape gives the state, link, caption
+and anchor, and in an XLSX the sheet's `<controls>` entry adds the name and an exact anchor while the
+ctrlProp part's state wins where it exists. Until that existed, `Form.list` returned nothing for any
+file holding a checkbox — this library's own included — and the next save dropped them. Other legacy
+controls (buttons, list and combo boxes, option buttons, group boxes, spinners, scroll bars, labels) are
+not modelled but are **kept**: each one's VML shape, `<controls>` entry and ctrlProp part are carried as
+read and written back into the regenerated parts, with its shape id allocated workbook-wide like a
+checkbox's. An XLSB has no key from a form control to its ctrlProp part — no record names one
+([MS-XLSB] `BrtActiveX` carries a shape id and relationship id for ActiveX controls only), and §2.1.7.62
+does not list the part among a worksheet's relationships — so each part is matched to the control of its
+type whose VML `<x:ClientData>` restates the same fields (range, link, value, selection, flags). Only
+controls whose shared fields are identical fall back to relationship order against shape order, and a
+part that contradicts every control of its type is not kept.
+
+A drawing in an XLSB that holds only pictures (and controls' bridge anchors) is read into the model the
+way an XLSX drawing is, so `Image.list`, `Image.remove` and `Image.getModel` work on it. A drawing with a
+chart, shape or group in it is still preserved byte for byte, and `Image.list` does not see its pictures.
 
 Nothing narrower remains on the sheet side. Multiple worksheet and workbook views, chartsheets, auto
 filter criteria and **protection passwords** were all on this list and are now written.
@@ -2305,7 +2505,7 @@ Each entry carries an `authority`, and the distinction is load-bearing rather th
 | `excel`         | 18    | Everything. These establish record layouts.                                                                                                                                  |
 | `reduced`       | 2     | Readability. Hand-trimmed bug reports legitimately omit records every real workbook has.                                                                                     |
 | `nonconformant` | 1     | Readability. `poi-Simple.xlsb` says "Microsoft Excel 2007 Beta 2" in its own properties and writes `iTabID` as 0 where the spec says the value MUST be between 1 and 0xFFFF. |
-| `encrypted`     | 2     | That they are refused rather than mangled. OLE-wrapped, not ZIP packages.                                                                                                    |
+| `encrypted`     | 2     | That they decrypt with their passwords and are refused cleanly without. OLE-wrapped, not ZIP packages.                                                                       |
 
 Without that column a beta's mistake becomes evidence about the format, and the temptation is to widen a
 codec to accept it — which is how a reader comes to accept two layouts and write a third.
@@ -2393,7 +2593,7 @@ const reader = new Stream.WorkbookReader("large-file.xlsx", {
 for await (const worksheet of reader) {
   console.log(`Reading: ${worksheet.name}`);
   for await (const row of worksheet) {
-    console.log(row.values);
+    console.log(Stream.getRowValues(row));
   }
 }
 ```
@@ -2449,11 +2649,19 @@ const workbook = new Stream.WorkbookWriter({
 
 const sheet = workbook.addWorksheet("Data");
 for (let i = 0; i < 1000000; i++) {
-  sheet.addRow([`Row ${i}`, i, new Date()]).commit();
+  Stream.commitRow(sheet.addRow([`Row ${i}`, i, new Date()]));
 }
 
 sheet.commit();
 await workbook.commit();
+```
+
+A named cell style registered on the writer is applied with `Stream.applyCellStyle`, which checks the name as
+`Cell.applyStyle` does:
+
+```typescript
+workbook.addCellStyle("Totals", { font: { bold: true } });
+Stream.applyCellStyle(Stream.getRowCell(row, 3), "Totals"); // an unknown name throws
 ```
 
 `WorksheetWriter.commit()` is intentionally synchronous and returns `void`; it cannot wait for
@@ -2478,8 +2686,8 @@ const writable = new WritableStream({
 
 const writer = new Stream.WorkbookWriter({ stream: writable });
 const sheet = writer.addWorksheet("Sheet1");
-sheet.addRow(["Name", "Score"]).commit();
-sheet.addRow(["Alice", 98]).commit();
+Stream.commitRow(sheet.addRow(["Name", "Score"]));
+Stream.commitRow(sheet.addRow(["Alice", 98]));
 sheet.commit();
 await writer.commit();
 
@@ -2501,10 +2709,13 @@ const readable = new ReadableStream({
 const reader = new Stream.WorkbookReader(readable, { worksheets: "emit" });
 for await (const ws of reader) {
   for await (const row of ws) {
-    console.log(row.values);
+    console.log(Stream.getRowValues(row));
   }
 }
 ```
+
+`Workbook.writeStream(wb, writable)` takes a Web `WritableStream` as well as a Node writable, XLSX and XLSB alike, and
+resolves once the stream is closed; anything else is an `ExcelArgumentError` on `stream`.
 
 ## Browser Support
 
@@ -2546,7 +2757,7 @@ no whole-family bundle, so the file name names the module.
 
 ### Browser Notes
 
-- Use `Workbook.read(workbook, arrayBuffer)` instead of `Workbook.readFile(...)`
+- Use `Workbook.read(arrayBuffer)` instead of `Workbook.readFile(...)`
 - Use `Workbook.toBuffer(workbook)` instead of `Workbook.writeFile(...)`
 - PDF export is fully supported
 - CSV and Markdown operations are supported
@@ -2568,6 +2779,13 @@ Cell.setFont(ws, 3, 2, { bold: true }); // facet setters take both forms too
 Mixing them is a compile error rather than a silent misread: `Cell.getValue(ws,
 "A1", 99)` used to type-check and read `"CUA1"`, and `Cell.getValue(ws, 5)` used
 to type-check and throw at runtime. Both are now rejected.
+
+A position outside the grid — row 0, column 16 385, `"ZZ0"` — is refused before anything changes, by getters and
+setters alike, with `RowOutOfBoundsError`, `ColumnOutOfBoundsError` or `InvalidAddressError`. All three are
+`ExcelArgumentError`s whose `field` names the parameter (`row`, `col`, `addr`), so the one `catch` written for bad input
+catches them. A read reports the same positions found in a _file_ as the reader's parse error instead — an
+`XlsxParseError` naming the part (`XlsbParseError` for XLSB, `ExcelFileError` naming the row for CSV and Markdown), the
+position error as its `cause` — because a malformed file is not a wrong argument.
 
 ### Dates: calendar values, not instants
 
@@ -2634,75 +2852,69 @@ _input_ type grew, so no existing code and no exhaustive `switch` is affected.
 ### Columns by key
 
 `Column.*` accepts a key, a letter or a 1-based number. `Column.getNumber`
-bridges a key to the `(row, col)` form, and `Worksheet.columnDefinitions` is the
-inverse of `Worksheet.setColumns`:
+bridges a key to the `(row, col)` form, and `Column.getDefinitions` is the
+inverse of `Column.setDefinitions`:
 
 ```typescript
-Worksheet.setColumns(ws, [{ header: "Total", key: "total", width: 12 }]);
+Column.setDefinitions(ws, [{ header: "Total", key: "total", width: 12 }]);
 
 const col = Column.getNumber(ws, "total"); // 1
 Cell.setValue(ws, 2, col, 99);
 
 // Append a column while keeping the existing definitions — no hand-copying.
-Worksheet.setColumns(ws, [...Worksheet.columnDefinitions(ws), { header: "Error", key: "error" }]);
+Column.setDefinitions(ws, [...Column.getDefinitions(ws), { header: "Error", key: "error" }]);
 ```
 
-`Worksheet.columns(ws)` returns the live, **read-only** column handles; declare
-columns through `setColumns` and change them through `Column.set*`. Note that
-`Worksheet.columnCount(ws)` is unrelated: it measures the _used_ range (the
+Declare columns through `Column.setDefinitions` and change them through
+`Column.set*`. Note that `Column.getCount(ws)` is unrelated: it measures the _used_ range (the
 largest cell count over all rows), not how many columns were declared.
 
 ### Column values
 
-`Column.values` reads down a column into an array indexed by **row number** —
-index `0` is an empty leading slot — so the index it hands the callback is the one
-`Cell.*` takes:
+`Column.getValues` reads down a column into a sparse array (an empty cell is a hole,
+not a `null`). It is 0-based — row 1 at index `0` — unless `{ base: 1 }` asks for the
+index to be the **row number**, which is the index `Cell.*` takes:
 
 ```typescript
 Column.setValues(ws, "C", [120, -40, 75]); // a dense array starts at row 1
 
 const colNumber = Column.getNumber(ws, "C");
-Column.values(ws, "C").forEach((value, rowNumber) => {
+Column.getValues(ws, "C", { base: 1 }).forEach((value, rowNumber) => {
   if (typeof value === "number" && value < 0) {
     Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
   }
 });
 ```
 
-`Column.getValues` is the same read 0-based, for plain array indexing — the pair
-mirrors `Row.getValues` / `Row.values`. Both are sparse: an empty cell is a hole,
-not a `null`.
+`Row.getValues` / `Row.setValues` take the same `{ base }` option, indexed by column.
 
-Unlike the metadata and style accessors, the two readers **materialise nothing**.
-Those resolve their reference through the column record, which pads
-`Worksheet.columns` out to the column asked for; these resolve it to a column
-_number_ and walk the rows that exist, so reading column `Z` of a one-column sheet
-leaves it a one-column sheet. See [Cell handles](#cell-handles) for the same
-distinction on the cell path.
+Unlike `Column.getStyle`, the readers **materialise nothing** — no column record, no row,
+no cell — so reading column `Z` of a one-column sheet leaves it a one-column sheet. See
+[Reading without creating](#reading-without-creating) for the same distinction on the cell path.
 
-`Column.setValues` takes anything `Cell.setValue` takes, and reads a leading hole
-as row-number indexing so that `Column.values` writes back unchanged. It **writes
-rather than replaces**: only the indices the array carries are touched, unlike
-`Row.setValues`, which resets the row.
+`Column.setValues` takes anything `Cell.setValue` takes. With `{ base }` it reads the array
+exactly as `Column.getValues` with the same `base` returns it, so a read with one `base`
+always writes back unchanged with the same one. It **writes rather than replaces**: only
+the indices the array carries are touched, unlike `Row.setValues`, which resets the row.
 
 ```typescript
 Column.setValues(ws, "A", [1, 2]); // rows 1-2; row 4 keeps its value
 Column.setValues(ws, "A", [1, null]); // row 2 cleared explicitly
+Column.setValues(ws, "A", [, "x"], { base: 0 }); // row 2 — index 0 is row 1
 ```
 
-Two consequences worth knowing. Writing one column over another leaves anything
-the source column has no value for:
+Writing one column over another leaves anything the source column has no value for:
 
 ```typescript
 // A1 = "a", A3 = "c", and B2 already holds "stale"
-Column.setValues(ws, "B", Column.values(ws, "A"));
-Column.values(ws, "B"); // B1 "a", B2 "stale", B3 "c"
+Column.setValues(ws, "B", Column.getValues(ws, "A", { base: 1 }), { base: 1 });
+Column.getValues(ws, "B", { base: 1 }); // B1 "a", B2 "stale", B3 "c"
 ```
 
-And pass `Column.values`, not `Column.getValues`, when writing a read back: a
-0-based array whose row 1 is empty starts with a hole, which is also how a
-row-number-indexed array starts, so the two cannot be distinguished and the values
-would land one row high. `Row.getValues` / `Row.setValues` share that ambiguity.
+Without `base`, `setValues` guesses: an array whose index 0 is a hole is read as
+row-number indexed, any other as 0-based. A 0-based array whose row 1 is empty also starts
+with a hole, so the guess lands it one row high — pass `base` whenever the shape is known.
+`Row.setValues` guesses the same way.
 
 ### Rows from your own types
 
@@ -2716,33 +2928,50 @@ interface Invoice {
 }
 
 const invoices: Invoice[] = await load();
-Worksheet.setColumns(ws, [
+Column.setDefinitions(ws, [
   { header: "Invoice", key: "invoiceId", width: 20 },
   { header: "Total", key: "total", width: 12 }
 ]);
-Worksheet.addRows(ws, invoices); // keys are read off each object
+Row.addMany(ws, invoices); // keys are read off each object
 ```
 
-### Cell handles
+### Reading without creating
 
-`Row.eachCell` / `Row.getCell` / `Worksheet.getRow` hand out `CellData` handles.
-A handle exposes its address and style directly; read the rest with `Cell.view`
-and write through the `Stream` handle operations (they are not streaming-only):
+The document model is addressed by position and hands out no row, column or
+cell handles. Iterate with `Row.each` / `Row.eachAddress` / `Column.eachAddress`,
+which pass positions straight to `Cell.*`:
 
 ```typescript
-Row.eachCell(ws, 1, cell => {
-  const header = Cell.view(cell).text.trim();
-  Stream.setCellFont(cell, { bold: true });
+Row.eachAddress(ws, 1, address => {
+  const header = Cell.getText(ws, address).trim();
+  Cell.setFont(ws, address, { bold: true });
 });
 ```
 
-`Cell.find` is the fourth source of a handle. It returns `undefined` for a cell
-that does not exist, and creates nothing:
+`Cell.has` answers whether a cell exists, and creates nothing:
 
 ```typescript
-const cell = Cell.find(ws, "B7"); // CellData | undefined
-const value = cell ? Cell.view(cell).value : null;
+const value = Cell.has(ws, "B7") ? Cell.getValue(ws, "B7") : null;
 ```
+
+`Cell.getView` reads a cell without creating it and without copying anything — a
+live, read-only view of its value, text, number format, effective type, font and
+alignment, or `undefined` when no cell is there. It is the allocation-free way to
+scan a large sheet:
+
+```typescript
+Row.each(ws, row => {
+  Row.eachAddress(ws, row, address => {
+    const view = Cell.getView(ws, address)!;
+    if (view.font?.bold) console.log(address, view.text);
+  });
+});
+```
+
+Per-row facts are read the same way, without creating the row: `Row.has` (and `Column.has`),
+`Row.hasValues`, `Row.getCellCount`, `Row.getActualCellCount`,
+`Row.getDimensions` (first and last column holding a value), `Row.isCollapsed` and
+`Row.getModel` (a serialisable snapshot).
 
 The value readers create nothing either. `Cell.getValue`, `getText`,
 `getDisplayText`, `getType`, `getFormula`, `getResult`, `getNumFmt`,
@@ -2752,16 +2981,16 @@ sheet leaves it, and the file it saves to, untouched:
 
 ```typescript
 Cell.getValue(ws, "A1000"); // null
-Worksheet.rowCount(ws); // unchanged
+Row.getCount(ws); // unchanged
 ```
 
 The style-facet readers — `getStyle`, `getFont`, `getAlignment`, `getBorder`,
-`getFill`, `getProtection` — plus `getModel` and `getMergeMaster` **do** create the
+`getFill`, `getProtection` — plus `getModel` **do** create the
 cell, because what they return is live and meant to be edited in place
 (`Cell.getStyle(ws, "B2").font = { bold: true }`); there is nothing to edit until
-the cell exists. Use `find` when the question is whether a cell is there at all.
+the cell exists. Use `Cell.has` when the question is whether a cell is there at all.
 To read a whole region, `Range.getValues` / `Worksheet.toAoa`; for one column,
-`Column.values` / `Column.getValues`.
+`Column.getValues`.
 
 For a whole-sheet survey — header rows, first data values, totals and where formulas are — see
 [`inspect-sheet.ts`](examples/inspect-sheet.ts). It takes header rows from tables and auto-filters where
@@ -2804,7 +3033,7 @@ const BOX: Partial<Borders> = { top: THIN, bottom: THIN, left: THIN, right: THIN
 export const mergeStyle = (base: Partial<Style>, ...rest: (Partial<Style> | undefined)[]) =>
   rest.reduce<Partial<Style>>((acc, s) => ({ ...acc, ...(s ?? {}) }), base);
 
-// Column definitions for `Worksheet.setColumns`.
+// Column definitions for `Column.setDefinitions`.
 export const REPORT_COLUMNS: ColumnDefn[] = [
   { header: "Invoice", key: "invoiceId", width: 20, style: HEADER },
   { header: "Amount", key: "amount", width: 14, style: { numFmt: "#,##0.00" } }
@@ -2853,15 +3082,14 @@ ws.pageSetup.paperSize = PaperSize.A4;
 One type, one public name — including for handles. Where a namespace publishes a
 `Handle` alias (`Worksheet.Handle`, `Workbook.Handle`, `Table.Handle`, …) that
 alias is the public name, and the underlying `WorksheetData` / `WorkbookData` /
-… interfaces are deliberately not re-exported flat. The cell, row and column
-handles have no such alias, so their declared names are the public ones:
+… interfaces are deliberately not re-exported flat. The cell and row handles
+belong to the streaming API and are named there:
 
 ```typescript
-import type { CellData, ColumnData, RowData } from "documonster/excel";
+import type { Stream } from "documonster/excel";
 
-const cellText = (cell: CellData) => cell.address;
-const rowNumber = (row: RowData) => row.number;
-const columnWidth = (column: ColumnData) => column.width;
+const cellText = (cell: Stream.CellHandle) => cell.address;
+const rowNumber = (row: Stream.RowHandle) => row.number;
 ```
 
 ## Utility Exports
@@ -2888,7 +3116,7 @@ const bytes = await Pdf.fromExcel(workbook);
 
 // Errors extend BaseError and support instanceof + type guards.
 try {
-  await Workbook.readFile(workbook, "broken.xlsx");
+  await Workbook.readFile("broken.xlsx");
 } catch (err) {
   if (isExcelError(err)) {
     console.error("Excel error:", err.message);

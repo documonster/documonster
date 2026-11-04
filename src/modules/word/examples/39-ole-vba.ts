@@ -63,11 +63,11 @@ console.log(
 const baseDoc = (() => {
   const dd = Document.create();
   Document.useDefaultStyles(dd);
-  Document.addParagraphElement(
+  Document.addParagraph(
     dd,
     Build.paragraph([Build.text("Document with an embedded OLE object (Excel sheet stub).")])
   );
-  return Document.build(dd);
+  return dd;
 })();
 const docWithOle = Ole.add(baseDoc, ole);
 fs.writeFileSync(path.join(outDir, "01-with-ole.docx"), await Io.toBuffer(docWithOle));

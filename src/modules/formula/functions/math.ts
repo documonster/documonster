@@ -4,6 +4,7 @@
 
 import {
   argToNumber,
+  asArrayArg,
   flattenAll,
   flattenNumbers,
   firstError,
@@ -1279,10 +1280,13 @@ function sumPairedArrays(
   args: RuntimeValue[],
   combine: (x: number, y: number) => number
 ): RuntimeValue {
-  const a0 = args[0];
-  const a1 = args[1];
-  if (a0.kind !== RVKind.Array || a1.kind !== RVKind.Array) {
-    return ERRORS.VALUE;
+  const a0 = asArrayArg(args[0]);
+  const a1 = asArrayArg(args[1]);
+  if (isError(a0)) {
+    return a0;
+  }
+  if (isError(a1)) {
+    return a1;
   }
   // Excel requires matching shapes — `SUMX2MY2`/`SUMX2PY2`/`SUMXMY2`
   // return `#N/A` when the two arrays have different cell counts.
@@ -1488,10 +1492,10 @@ export function fnPERMUT(args: RuntimeValue[]): RuntimeValue {
  * cell is non-numeric or an error propagates.
  */
 function asNumericMatrix(v: RuntimeValue): number[][] | ErrorValue {
-  if (!isArray(v)) {
-    return ERRORS.VALUE;
+  const arr = asArrayArg(v);
+  if (isError(arr)) {
+    return arr;
   }
-  const arr = v as ArrayValue;
   const out: number[][] = [];
   for (const row of arr.rows) {
     const r: number[] = [];

@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Image, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Image, Row, Workbook } from "@excel/index";
 
 import { Pdf } from "../index";
 import { pdf } from "../pdf";
@@ -44,12 +44,12 @@ if (hasJpeg) {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "JPEG Example");
 
-  Worksheet.setColumns(ws, [
+  Column.setDefinitions(ws, [
     { header: "Product", key: "product", width: 25 },
     { header: "Status", key: "status", width: 15 },
     { header: "Notes", key: "notes", width: 30 }
   ]);
-  Worksheet.addRows(ws, [
+  Row.addMany(ws, [
     { product: "Widget A", status: "Active", notes: "Best seller" },
     { product: "Widget B", status: "Pending", notes: "New launch" },
     { product: "Widget C", status: "Active", notes: "Updated design" }

@@ -36,7 +36,7 @@
  *   while keeping the surrounding element well-formed; `"reject"` throws
  *   `DocxRawXmlPolicyError` so the caller can sanitise the model first.
  *   Sites covered: opaqueRun, opaqueParagraphChild, opaqueDrawing,
- *   drawingShape rawXml/_advancedFillXml/_advancedEffectsXml,
+ *   drawingShape rawXml/_advancedFillXml/_advancedEffectsXml/_preserved,
  *   settings.mailMergeRawXml, theme.formatScheme.rawXml, theme.extLstXml,
  *   webSettings.rawXml, numPicBullet.rawVmlXml.
  *
@@ -44,6 +44,8 @@
  * arrive, callers needing those guarantees should sanitise the input
  * model themselves before serialisation.
  */
+
+import { checkBoolean, checkOneOf, checkRecord, invalidArgument } from "@word/core/argument-checks";
 
 // =============================================================================
 // Security Policy Interface
@@ -77,7 +79,7 @@ export interface WordSecurityPolicy {
 // =============================================================================
 
 /** Default security policy: preserve everything, generous limits. */
-export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
+export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = Object.freeze({
   preserveVbaProject: true,
   preserveOleObjects: true,
   preserveAltChunks: true,
@@ -88,10 +90,10 @@ export const DEFAULT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
   maxXmlDepth: 256,
   rawXmlPolicy: "preserve",
   allowExternalTargets: true
-};
+});
 
 /** Strict security policy: strip dangerous content, tight limits. */
-export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
+export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = Object.freeze({
   preserveVbaProject: false,
   preserveOleObjects: false,
   preserveAltChunks: false,
@@ -102,7 +104,7 @@ export const STRICT_SECURITY_POLICY: Required<WordSecurityPolicy> = {
   maxXmlDepth: 128,
   rawXmlPolicy: "strip",
   allowExternalTargets: false
-};
+});
 
 // =============================================================================
 // Policy Resolution
@@ -121,6 +123,7 @@ export function resolveSecurityPolicy(
   if (!policy) {
     return DEFAULT_SECURITY_POLICY;
   }
+  checkSecurityPolicy(policy, "policy", "Security.resolvePolicy");
   return {
     preserveVbaProject: policy.preserveVbaProject ?? DEFAULT_SECURITY_POLICY.preserveVbaProject,
     preserveOleObjects: policy.preserveOleObjects ?? DEFAULT_SECURITY_POLICY.preserveOleObjects,
@@ -135,4 +138,61 @@ export function resolveSecurityPolicy(
     allowExternalTargets:
       policy.allowExternalTargets ?? DEFAULT_SECURITY_POLICY.allowExternalTargets
   };
+}
+
+const RAW_XML_POLICIES = new Set<string>(["preserve", "strip", "reject"] satisfies NonNullable<
+  WordSecurityPolicy["rawXmlPolicy"]
+>[]);
+
+const POLICY_FLAGS = [
+  "preserveVbaProject",
+  "preserveOleObjects",
+  "preserveAltChunks",
+  "dropSignaturesOnModify",
+  "allowExternalTargets"
+] as const;
+
+const POLICY_LIMITS = ["maxPackageSize", "maxPartSize", "maxPartCount", "maxXmlDepth"] as const;
+
+const POLICY_KEYS: ReadonlySet<string> = new Set([
+  ...POLICY_FLAGS,
+  ...POLICY_LIMITS,
+  "rawXmlPolicy"
+]);
+
+/**
+ * A policy's values, reported as `field` in the name of `where` — the
+ * `securityPolicy` option of the call that takes it (`options.securityPolicy`
+ * of `Io.read`), or `Security.resolvePolicy`'s own `policy`. A limit is a
+ * number ≥ 0 — `Infinity` lifts it — because `NaN` makes every comparison
+ * false and so switched the limit off.
+ */
+export function checkSecurityPolicy(value: unknown, field: string, where: string): void {
+  checkRecord(value, field, where);
+  const policy = value as Partial<WordSecurityPolicy>;
+  // Unknown keys are refused here and nowhere else: a misspelt limit
+  // (`maxEntries` for `maxPartCount`) would otherwise leave the real one at
+  // its default, weakening the policy with nothing said.
+  for (const key of Object.keys(policy)) {
+    if (!POLICY_KEYS.has(key)) {
+      invalidArgument(
+        where,
+        `${field}.${key}`,
+        `absent: a policy has ${[...POLICY_KEYS].join(", ")}`,
+        policy[key as keyof typeof policy]
+      );
+    }
+  }
+  for (const key of POLICY_FLAGS) {
+    checkBoolean(policy[key], `${field}.${key}`, where, { optional: true });
+  }
+  for (const key of POLICY_LIMITS) {
+    const limit = policy[key];
+    if (limit !== undefined && (typeof limit !== "number" || !(limit >= 0))) {
+      invalidArgument(where, `${field}.${key}`, "a number ≥ 0 (Infinity for no limit)", limit);
+    }
+  }
+  checkOneOf(policy.rawXmlPolicy, RAW_XML_POLICIES, `${field}.rawXmlPolicy`, where, {
+    optional: true
+  });
 }

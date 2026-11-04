@@ -1,12 +1,21 @@
-import type { FormCheckboxModel } from "@excel/core/form-control";
+import type { FormCheckboxModel, LegacyControlModel } from "@excel/core/form-control";
 import {
   formCheckboxVmlAnchor,
   formCheckboxVmlCheckedValue,
   formCheckboxVmlStyle
 } from "@excel/core/form-control";
+import { formCheckboxPlacement } from "@excel/core/form-control-placement";
+import { allocateVmlShapeIds, createVmlShapeIdSpace, vmlIdMap } from "@excel/utils/vml-shape-ids";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ShapeModel } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import type { EchoNode } from "@excel/xlsx/xform/drawing/generic-echo-xform";
+import { GenericEchoXform } from "@excel/xlsx/xform/drawing/generic-echo-xform";
+import {
+  VmlFormControlCapture,
+  legacyControlFromVml
+} from "@excel/xlsx/xform/drawing/vml-form-control-capture";
+import { xmlValue } from "@xml/encode";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
@@ -30,6 +39,12 @@ interface VmlHeaderImageModel {
   height?: number;
   /** Excel header/footer section id: LH, CH, RH, LF, CF, or RF. */
   position?: string;
+  /**
+   * The `<v:shape>` as read, so a rewrite keeps what Excel's Format Picture dialog put on it — the
+   * picture's title, washout (`gain`/`blacklevel`), grayscale, bilevel and crop — and anything else the
+   * shape carries. Its id, relationship and size are still this model's.
+   */
+  shape?: EchoNode;
 }
 
 interface VmlDrawingModel {
@@ -37,10 +52,21 @@ interface VmlDrawingModel {
   comments?: ShapeModel[];
   /** Form control checkboxes */
   formControls?: FormCheckboxModel[];
+  /**
+   * Every other legacy control, kept as read. On write each carries the shape id it is to be drawn
+   * with, already allocated.
+   */
+  legacyControls?: LegacyControlModel[];
   /** Header/footer image (for watermark in header mode) */
   headerImage?: VmlHeaderImageModel;
   /** All header/footer image shapes parsed from a foreign workbook. */
   headerImages?: VmlHeaderImageModel[];
+  /**
+   * Shape ids for the notes and header/footer images, in order, from the write's workbook-wide
+   * allocation (`@excel/utils/vml-shape-ids`). The form controls carry their own. Absent, the part
+   * is numbered as if it had the workbook to itself.
+   */
+  shapeIds?: readonly number[];
 }
 
 class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
@@ -78,13 +104,38 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     const hasComments = comments && comments.length > 0;
     const hasFormControls = formControls && formControls.length > 0;
     const hasHeaderImage = headerImages.length > 0;
+    const legacyControls = renderModel.legacyControls ?? [];
+
+    const noteCount = hasComments ? comments.length : 0;
+    const controlIds = [
+      ...(hasFormControls ? formControls.map(control => control.shapeId) : []),
+      ...legacyControls.map(control => control.shapeId)
+    ];
+    const shapeIds =
+      renderModel.shapeIds ??
+      allocateVmlShapeIds(createVmlShapeIdSpace(), {
+        fixed: controlIds,
+        count: noteCount + headerImages.length
+      }).free;
+    const noteIds = shapeIds.slice(0, noteCount);
+    const headerImageIds = shapeIds.slice(noteCount);
 
     xmlStream.openXml(StdDocAttributes);
-    xmlStream.openNode(this.tag, VmlDrawingXform.DRAWING_ATTRIBUTES);
+    // A preserved shape may use a prefix the source root declared and this one does not.
+    const rootAttributes: Record<string, string> = { ...VmlDrawingXform.DRAWING_ATTRIBUTES };
+    for (const control of legacyControls) {
+      for (const [name, uri] of Object.entries(control.vmlNamespaces ?? {})) {
+        rootAttributes[name] ??= uri;
+      }
+    }
+    xmlStream.openNode(this.tag, rootAttributes);
 
     // Shape layout - shared by both notes and form controls
     xmlStream.openNode("o:shapelayout", { "v:ext": "edit" });
-    xmlStream.leafNode("o:idmap", { "v:ext": "edit", data: 1 });
+    xmlStream.leafNode("o:idmap", {
+      "v:ext": "edit",
+      data: vmlIdMap([...noteIds, ...controlIds, ...headerImageIds])
+    });
     xmlStream.closeNode();
 
     // Shapetype 202 for notes/comments
@@ -155,10 +206,27 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
       xmlStream.closeNode(); // v:shapetype
     }
 
+    // The shapetypes the preserved controls name, unless one above already declared that id.
+    const declaredTypes = new Set<string>([
+      ...(hasComments ? ["_x0000_t202"] : []),
+      ...(hasFormControls ? ["_x0000_t201"] : []),
+      ...(hasHeaderImage ? ["_x0000_t75"] : [])
+    ]);
+    const echo = new GenericEchoXform("v:shapetype");
+    for (const control of legacyControls) {
+      const shapeType = control.vmlShapeType;
+      const id =
+        shapeType?.attrs.id === undefined ? undefined : xmlValue(shapeType.attrs.id, "undefined");
+      if (shapeType && id !== undefined && !declaredTypes.has(id)) {
+        declaredTypes.add(id);
+        echo.render(xmlStream, shapeType);
+      }
+    }
+
     // Render comment shapes
     if (hasComments) {
       for (let i = 0; i < comments.length; i++) {
-        (this.map["v:shape"] as VmlShapeXform).render(xmlStream, comments[i], i);
+        (this.map["v:shape"] as VmlShapeXform).render(xmlStream, comments[i], noteIds[i]);
       }
     }
 
@@ -169,10 +237,14 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
       }
     }
 
+    for (const control of legacyControls) {
+      echo.render(xmlStream, withVmlShapeId(control.vmlShape, control.shapeId));
+    }
+
     // Render header/footer image shape
     if (hasHeaderImage) {
       for (let i = 0; i < headerImages.length; i++) {
-        this._renderHeaderImageShape(xmlStream, headerImages[i], i);
+        this._renderHeaderImageShape(xmlStream, headerImages[i], headerImageIds[i]);
       }
     }
 
@@ -185,15 +257,28 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   private _renderHeaderImageShape(
     xmlStream: XmlSink,
     headerImage: VmlHeaderImageModel,
-    index: number
+    shapeId: number
   ): void {
     const width = headerImage.width ?? 467.25;
     const height = headerImage.height ?? 311.25;
 
     const position = headerImage.position ?? "CH";
+    if (headerImage.shape) {
+      new GenericEchoXform("v:shape").render(
+        xmlStream,
+        redrawHeaderShape(headerImage.shape, {
+          id: position,
+          spid: `_x0000_s${shapeId}`,
+          relId: headerImage.imageRelId,
+          width,
+          height
+        })
+      );
+      return;
+    }
     xmlStream.openNode("v:shape", {
       id: position,
-      "o:spid": `_x0000_s${2049 + index}`,
+      "o:spid": `_x0000_s${shapeId}`,
       type: "#_x0000_t75",
       style: `position:absolute;margin-left:0;margin-top:0;width:${width}pt;height:${height}pt;z-index:1`
     });
@@ -212,7 +297,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     const shapeAttrs: Record<string, string> = {
       id: `_x0000_s${control.shapeId}`,
       type: "#_x0000_t201",
-      style: formCheckboxVmlStyle(control),
+      style: control.vmlStyle ?? formCheckboxVmlStyle(control),
       "o:insetmode": "auto",
       fillcolor: "buttonFace [67]",
       strokecolor: "windowText [64]",
@@ -246,10 +331,15 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     // ClientData - the core of the checkbox control
     xmlStream.openNode("x:ClientData", { ObjectType: "Checkbox" });
 
-    // Match Excel's VML patterns (similar to Note ClientData): include positioning and cell address.
-    // Omitting these can cause Excel to repair the sheet by dropping all legacy controls.
-    xmlStream.leafNode("x:MoveWithCells");
-    xmlStream.leafNode("x:SizeWithCells");
+    // Positioning, as Excel writes it: each element is present when the control does *not* move, or does
+    // *not* size, with the cells under it — so the default "move but don't size" carries `x:SizeWithCells` only.
+    const placement = formCheckboxPlacement(control);
+    if (placement === "absolute") {
+      xmlStream.leafNode("x:MoveWithCells");
+    }
+    if (placement !== "twoCell") {
+      xmlStream.leafNode("x:SizeWithCells");
+    }
 
     // Anchor position
     xmlStream.openNode("x:Anchor");
@@ -290,7 +380,13 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
 
   // Parsing - delegate to VmlShapeXform for notes, handle header images directly
   parseOpen(node: ParseOpenTag): boolean {
+    if (this._shapeType) {
+      this._shapeType.parseOpen(node);
+      return true;
+    }
     if (this.parser) {
+      this._control?.open(node);
+      this._shape?.parseOpen(node);
       this.parser.parseOpen(node);
       return true;
     }
@@ -301,11 +397,23 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
           comments: [],
           formControls: []
         };
+        this._shapeTypes = new Map();
+        this._namespaces = Object.fromEntries(
+          Object.entries(node.attributes).filter(
+            ([name]) => name.startsWith("xmlns:") && !(name in VmlDrawingXform.DRAWING_ATTRIBUTES)
+          )
+        );
+        break;
+      case "v:shapetype":
+        this._shapeType = new GenericEchoXform("v:shapetype");
+        this._shapeType.parseOpen(node);
         break;
       case "v:shape":
         // Check if this is a header image shape (type="#_x0000_t75")
         if (node.attributes.type === "#_x0000_t75") {
           this._parsingHeaderImage = true;
+          this._headerShape = new GenericEchoXform("v:shape");
+          this._headerShape.parseOpen(node);
           this._headerImagePosition = node.attributes.id;
           // Extract width/height from style
           const style = node.attributes.style || "";
@@ -314,7 +422,12 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
           this._headerImageWidth = widthMatch ? parseFloat(widthMatch[1]) : undefined;
           this._headerImageHeight = heightMatch ? parseFloat(heightMatch[1]) : undefined;
         } else {
-          // Regular shape — delegate to VmlShapeXform (comments)
+          // Regular shape — delegate to VmlShapeXform (comments). A form control is a `v:shape` too, and
+          // which one it is only shows at `<x:ClientData ObjectType>`, so the control is captured alongside
+          // and the two are told apart when the shape closes.
+          this._control = new VmlFormControlCapture(node.attributes);
+          this._shape = new GenericEchoXform("v:shape");
+          this._shape.parseOpen(node);
           this.parser = this.map[node.name];
           if (this.parser) {
             this.parser.parseOpen(node);
@@ -322,6 +435,7 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
         }
         break;
       default:
+        this._headerShape?.parseOpen(node);
         if (this._parsingHeaderImage && node.name === "v:imagedata") {
           this._headerImageRelId = node.attributes["o:relid"];
         } else {
@@ -336,27 +450,72 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
   }
 
   parseText(text: string): void {
+    if (this._shapeType) {
+      this._shapeType.parseText(text);
+      return;
+    }
+    this._control?.text(text);
+    this._shape?.parseText(text);
+    this._headerShape?.parseText(text);
     if (this.parser) {
       this.parser.parseText(text);
     }
   }
 
   parseClose(name: string): boolean {
+    if (this._shapeType) {
+      if (!this._shapeType.parseClose(name)) {
+        const shapeType = this._shapeType.model;
+        this._shapeType = undefined;
+        if (shapeType?.attrs.id !== undefined) {
+          this._shapeTypes.set(String(shapeType.attrs.id), shapeType);
+        }
+      }
+      return true;
+    }
     if (this.parser) {
+      this._control?.close(name);
+      this._shape?.parseClose(name);
       if (!this.parser.parseClose(name)) {
-        this.model!.comments!.push(this.parser.model);
+        const control = this._control;
+        const shape = this._shape?.model;
+        this._control = undefined;
+        this._shape = undefined;
+        const checkbox = control?.objectType === "Checkbox" ? control.toCheckbox() : undefined;
+        if (checkbox) {
+          this.model!.formControls!.push(checkbox);
+        } else if (control !== undefined && !control.isNote) {
+          // Any other control — and a checkbox too damaged to model — is kept as it was read.
+          const legacy = shape && legacyControlFromVml(control, shape);
+          if (legacy) {
+            (this.model!.legacyControls ??= []).push(legacy);
+          }
+        } else if (control === undefined || control.isNote) {
+          // Only a note is a comment's box. Another control (a button, a list box) is not modelled, and
+          // handing it to the comments merged it into whichever note shared its index.
+          this.model!.comments!.push(this.parser.model);
+        }
         this.parser = undefined;
       }
       return true;
     }
+    let headerShape: EchoNode | undefined;
+    if (this._headerShape) {
+      if (this._headerShape.parseClose(name)) {
+        return true;
+      }
+      headerShape = this._headerShape.model;
+      this._headerShape = undefined;
+    }
     switch (name) {
       case "v:shape":
         if (this._parsingHeaderImage && this._headerImageRelId) {
-          const headerImage = {
+          const headerImage: VmlHeaderImageModel = {
             imageRelId: this._headerImageRelId,
             width: this._headerImageWidth,
             height: this._headerImageHeight,
-            position: this._headerImagePosition
+            position: this._headerImagePosition,
+            ...(headerShape ? { shape: headerShape } : {})
           };
           this.model!.headerImages ??= [];
           this.model!.headerImages.push(headerImage);
@@ -369,11 +528,35 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
         this._headerImagePosition = undefined;
         return true;
       case this.tag:
+        for (const control of this.model!.legacyControls ?? []) {
+          const shapeType = this._shapeTypes.get(
+            String(control.vmlShape.attrs.type ?? "").replace(/^#/, "")
+          );
+          if (shapeType) {
+            control.vmlShapeType = shapeType;
+          }
+          if (Object.keys(this._namespaces).length > 0) {
+            control.vmlNamespaces = this._namespaces;
+          }
+        }
         return false;
       default:
         return true;
     }
   }
+
+  /** The form control the shape being parsed may turn out to be. */
+  private _control?: VmlFormControlCapture;
+  /** The shape being parsed, captured whole in case it is a control this library does not model. */
+  private _shape?: GenericEchoXform;
+  /** The header/footer picture's shape being captured. */
+  private _headerShape?: GenericEchoXform;
+  /** The `<v:shapetype>` being captured. */
+  private _shapeType?: GenericEchoXform;
+  /** The part's shapetypes by id, for the preserved controls that name one. */
+  private _shapeTypes = new Map<string, EchoNode>();
+  /** The root's namespace declarations beyond the three this writer always declares. */
+  private _namespaces: Record<string, string> = {};
 
   // Internal state for parsing header image shapes
   private _parsingHeaderImage = false;
@@ -387,6 +570,54 @@ class VmlDrawingXform extends BaseXform<VmlDrawingModel> {
     "xmlns:o": "urn:schemas-microsoft-com:office:office",
     "xmlns:x": "urn:schemas-microsoft-com:office:excel"
   };
+}
+
+/**
+ * A header/footer picture's shape as read, given the section, shape id, relationship and size this
+ * write draws it with. Everything else on the shape and its `<v:imagedata>` is kept.
+ */
+function redrawHeaderShape(
+  shape: EchoNode,
+  place: { id: string; spid: string; relId: string; width: number; height: number }
+): EchoNode {
+  const style = String(
+    shape.attrs.style ?? "position:absolute;margin-left:0;margin-top:0;z-index:1"
+  );
+  const sized = [`width:${place.width}pt`, `height:${place.height}pt`].reduce(
+    (current, declaration) => {
+      const property = declaration.slice(0, declaration.indexOf(":"));
+      const pattern = new RegExp(`(^|;)\\s*${property}\\s*:[^;]*`);
+      return pattern.test(current)
+        ? current.replace(pattern, `$1${declaration}`)
+        : `${current.replace(/;?\s*$/, "")};${declaration}`;
+    },
+    style
+  );
+  const redraw = (node: EchoNode): EchoNode =>
+    node.tag === "v:imagedata"
+      ? { ...node, attrs: { ...node.attrs, "o:relid": place.relId } }
+      : node;
+  const content = (shape.content ?? shape.children).map(item =>
+    typeof item === "object" ? redraw(item) : item
+  );
+  return {
+    ...shape,
+    attrs: { ...shape.attrs, id: place.id, "o:spid": place.spid, style: sized },
+    children: shape.children.map(redraw),
+    content
+  };
+}
+
+/** `shape` drawn as `_x0000_s{shapeId}`, in whichever attribute carried its id. */
+function withVmlShapeId(shape: EchoNode, shapeId: number): EchoNode {
+  const spid = `_x0000_s${shapeId}`;
+  const attrs = { ...shape.attrs };
+  if (attrs["o:spid"] === undefined && /^_x0000_s\d+$/.test(String(attrs.id ?? ""))) {
+    attrs.id = spid;
+  } else {
+    attrs["o:spid"] = spid;
+  }
+  return { ...shape, attrs };
 }
 
 export { VmlDrawingXform };

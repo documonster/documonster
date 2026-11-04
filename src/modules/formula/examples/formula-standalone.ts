@@ -1,11 +1,11 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
  * Example: Functional / Standalone API
  *
  * Covers:
- * - `calculateFormulas(wb)` from `documonster/excel/formula` — the formula
+ * - `ExcelFormula.calculate(wb)` from `documonster/excel/formula` — the formula
  *   engine driven from a real workbook, with no install / registration step.
  *   Its own subpath, so a consumer who never imports it never bundles the
  *   engine.
@@ -29,9 +29,9 @@ Cell.setValue(ws, "B1", { formula: "SUM(A1:A3)" });
 Cell.setValue(ws, "B2", { formula: "AVERAGE(A1:A3)" });
 Cell.setValue(ws, "B3", { formula: "MAX(A1:A3)" });
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
-console.log("Functional calculateFormulas():");
+console.log("Functional ExcelFormula.calculate():");
 console.log("  B1 =", Cell.getResult(ws, "B1")); // 60
 console.log("  B2 =", Cell.getResult(ws, "B2")); // 20
 console.log("  B3 =", Cell.getResult(ws, "B3")); // 30
@@ -56,7 +56,7 @@ try {
 
 // A deliberately malformed formula
 try {
-  Formula.parse(Formula.tokenize("SUM(A1:"));
+  Formula.parse("SUM(A1:");
   console.log("unexpected success");
 } catch (err) {
   console.log("Bad formula rejected as expected:", (err as Error).message);

@@ -20,10 +20,13 @@ import type {
   ChartTitle,
   ShapeProperties
 } from "@excel/chart/model/types";
+import { CHART_EX_ROOT_NAMESPACES } from "@excel/chart/serialize/chart-ex-namespaces";
 import { escapeXml, escapeXmlAttr } from "@excel/chart/shared/chart-utils";
 import { parseSpPr, parseTxPr } from "@excel/chart/shared/shape-properties";
+import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
+import { normalizeElementPrefixes } from "@excel/xlsx/xform/namespace-prefixes";
 import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
-import type { XmlElement, XmlNode } from "@xml/types";
+import type { ParseOpenTag, XmlElement, XmlNode } from "@xml/types";
 
 // Element-name whitelists for unknown-child detection. Parents not listed here
 // are either (a) purely raw-passthrough containers already captured via
@@ -132,6 +135,18 @@ function collectUnknownChildren(
 
 export function parseChartEx(rawXml: string): ChartExModel {
   const root = parseXml(rawXml).root;
+  // `cx:` is matched below; a part may bind the namespace to any prefix.
+  const textViews = normalizeElementPrefixes(root);
+  const previous = fragmentSource;
+  fragmentSource = { root, textViews };
+  try {
+    return parseChartExTree(root, rawXml);
+  } finally {
+    fragmentSource = previous;
+  }
+}
+
+function parseChartExTree(root: XmlElement, rawXml: string): ChartExModel {
   const chartDataEl = findChild(root, "cx:chartData");
   const chartEl = findChild(root, "cx:chart");
   const collector: UnknownCollector = { entries: [] };
@@ -1182,15 +1197,99 @@ function rawElementFromNode(el: XmlElement | undefined): string | undefined {
   return serializeElement(el);
 }
 
+/** The ChartEx writer's own root declarations. */
+const CHART_EX_WRITER_NAMESPACES: ReadonlyMap<string, string> = new Map(
+  Object.entries(CHART_EX_ROOT_NAMESPACES)
+);
+
+/**
+ * The tree being parsed, for the subtrees kept as XML: each is written back under the ChartEx writer's
+ * root, not the source's, so it must declare what it borrowed from its ancestors — see
+ * `fragment-namespaces.ts`.
+ */
+let fragmentSource:
+  | {
+      readonly root: XmlElement;
+      readonly textViews: ReadonlyMap<object, ParseOpenTag>;
+      parents?: WeakMap<XmlElement, XmlElement>;
+    }
+  | undefined;
+
+function textView(el: XmlElement): ParseOpenTag {
+  return (
+    fragmentSource?.textViews.get(el) ?? {
+      name: el.name,
+      attributes: el.attributes ?? {},
+      isSelfClosing: false
+    }
+  );
+}
+
+/** The bindings in force inside `el`, from the text views of it and its ancestors. */
+function bindingsAt(el: XmlElement): ReadonlyMap<string, string> {
+  const source = fragmentSource!;
+  if (source.parents === undefined) {
+    const parents = new WeakMap<XmlElement, XmlElement>();
+    const index = (parent: XmlElement): void => {
+      for (const child of parent.children ?? []) {
+        if (child.type === "element") {
+          parents.set(child, parent);
+          index(child);
+        }
+      }
+    };
+    index(source.root);
+    source.parents = parents;
+  }
+  const out = new Map<string, string>();
+  for (let at: XmlElement | undefined = el; at !== undefined; at = source.parents.get(at)) {
+    const attributes = textView(at).attributes;
+    for (const key in attributes) {
+      const prefix = key === "xmlns" ? "" : key.startsWith("xmlns:") ? key.slice(6) : undefined;
+      if (prefix !== undefined && !out.has(prefix)) {
+        out.set(prefix, attributes[key]);
+      }
+    }
+  }
+  if (!out.has("")) {
+    out.set("", "");
+  }
+  return out;
+}
+
 function serializeElement(el: XmlElement): string {
-  const attrs = Object.entries(el.attributes ?? {})
+  if (fragmentSource === undefined) {
+    return serializeTree(el, undefined);
+  }
+  const namespaces = new FragmentNamespaces({
+    scope: {
+      inForce: bindingsAt(el),
+      provided: CHART_EX_WRITER_NAMESPACES,
+      documentDefault: textView(fragmentSource.root).attributes.xmlns ?? ""
+    }
+  });
+  return namespaces.finish(serializeTree(el, namespaces));
+}
+
+function serializeTree(el: XmlElement, namespaces: FragmentNamespaces | undefined): string {
+  const tag = namespaces?.open(textView(el)) ?? el;
+  const attrs = Object.entries(tag.attributes ?? {})
     .map(([key, value]) => ` ${key}="${escapeXmlAttr(value)}"`)
     .join("");
   const children = el.children ?? [];
+  let xml: string;
   if (children.length === 0) {
-    return `<${el.name}${attrs}/>`;
+    xml = `<${tag.name}${attrs}/>`;
+  } else {
+    const inner = children
+      .map(child =>
+        child.type === "element" ? serializeTree(child, namespaces) : serializeNode(child)
+      )
+      .join("");
+    xml = `<${tag.name}${attrs}>${inner}</${tag.name}>`;
   }
-  return `<${el.name}${attrs}>${children.map(serializeNode).join("")}</${el.name}>`;
+  namespaces?.close(tag.name);
+  return xml;
 }
 
 function serializeNode(node: XmlNode): string {

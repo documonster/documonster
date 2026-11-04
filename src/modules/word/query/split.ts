@@ -5,11 +5,27 @@
  * sections, page breaks, or heading levels.
  */
 
+import {
+  checkBoolean,
+  checkHandle,
+  checkHeadingLevel,
+  checkOneOf,
+  checkRecord
+} from "@word/core/argument-checks";
+import { collectImageKeys, indexImagesByKey } from "@word/core/image-keys";
+import { listRangeMarkers, withParagraphChildren } from "@word/core/range-markers";
 import { isRun } from "@word/core/text-utils";
 import { resolveHeadingLevel } from "@word/query/heading";
 import { indexStyles } from "@word/query/style-resolve";
 import type { StyleIndex } from "@word/query/style-resolve";
-import type { DocxDocument, BodyContent, Paragraph, ParagraphChild } from "@word/types";
+import type {
+  DocxDocument,
+  BodyContent,
+  ImageDef,
+  Paragraph,
+  ParagraphChild,
+  RangeMarker
+} from "@word/types";
 
 // =============================================================================
 // Public API
@@ -38,10 +54,17 @@ export interface SplitOptions {
   /**
    * Whether each split document keeps the original document's
    * styles, numbering, settings, fonts, etc.
-   * Default: true.
+   * Default: true. Without them a part still carries the images its body
+   * shows, since those are content rather than shared setup.
    */
   readonly preserveSharedParts?: boolean;
 }
+
+const SPLIT_BY: ReadonlySet<string> = new Set<NonNullable<SplitOptions["by"]>>([
+  "section",
+  "pageBreak",
+  "heading"
+]);
 
 /**
  * Split a DocxDocument into multiple documents.
@@ -51,11 +74,24 @@ export interface SplitOptions {
  * comments, styles, numbering, and settings are preserved in each split unless
  * `preserveSharedParts: false` is specified.
  *
+ * Does not modify `doc`; each result may share unchanged nodes with it — see
+ * `Document.clone`.
+ *
  * @param doc - The document to split.
  * @param options - Split criteria.
  * @returns Array of split documents (at least 1).
  */
 export function splitDocument(doc: DocxDocument, options?: SplitOptions): DocxDocument[] {
+  checkHandle(doc, "document", "doc", "Transform.split");
+  const where = "Transform.split";
+  checkRecord(options, "options", where, { optional: true });
+  checkOneOf(options?.by, SPLIT_BY, "options.by", where, { optional: true });
+  if (options?.headingLevel !== undefined) {
+    checkHeadingLevel(options.headingLevel, "options.headingLevel", where);
+  }
+  checkBoolean(options?.preserveSharedParts, "options.preserveSharedParts", where, {
+    optional: true
+  });
   const opts: Required<SplitOptions> = {
     by: options?.by ?? "section",
     headingLevel: options?.headingLevel ?? 1,
@@ -71,7 +107,8 @@ export function splitDocument(doc: DocxDocument, options?: SplitOptions): DocxDo
     return [doc];
   }
 
-  return segments.map(segment => buildSplitDoc(doc, segment, opts));
+  // Range markers after the source's last block belong to the last part only.
+  return segments.map((segment, i) => buildSplitDoc(doc, segment, opts, i === segments.length - 1));
 }
 
 // =============================================================================
@@ -177,19 +214,22 @@ function paragraphHasExplicitPageBreakRun(para: Paragraph): boolean {
  * not render as a blank page in the standalone split document.
  */
 function stripPageBreakRuns(para: Paragraph): Paragraph {
-  const newChildren: ParagraphChild[] = [];
+  const items: (ParagraphChild | RangeMarker)[] = [];
   for (const child of para.children) {
     if (isRun(child)) {
       const content = child.content.filter(c => !(c.type === "break" && c.breakType === "page"));
       if (content.length > 0) {
-        newChildren.push({ ...child, content });
+        items.push({ ...child, content });
+      } else {
+        // Drop runs that became empty after removing the page break; the
+        // range markers riding on one stay where it was.
+        items.push(...(child.rangeMarkersBefore ?? []));
       }
-      // Drop runs that became empty after removing the page break.
     } else {
-      newChildren.push(child);
+      items.push(child);
     }
   }
-  return { ...para, children: newChildren };
+  return withParagraphChildren(para, items);
 }
 
 /** True when a paragraph has no children (after page-break stripping). */
@@ -200,7 +240,8 @@ function paragraphIsEmpty(para: Paragraph): boolean {
 function buildSplitDoc(
   source: DocxDocument,
   segment: BodyContent[],
-  opts: Required<SplitOptions>
+  opts: Required<SplitOptions>,
+  isLast: boolean
 ): DocxDocument {
   // When splitting by section, the segment's last paragraph carries the
   // section break (often `nextPage`) that originally separated it from the
@@ -209,6 +250,8 @@ function buildSplitDoc(
   // sectPr and promote its page setup to the document's own section
   // properties instead.
   let body = segment;
+  // Range markers of a paragraph dropped from the end of the segment.
+  let trailingMarkers: RangeMarker[] = [];
   let promotedSectPr: DocxDocument["sectionProperties"] | undefined;
   if (opts.by === "section" && segment.length > 0) {
     const last = segment[segment.length - 1];
@@ -234,18 +277,29 @@ function buildSplitDoc(
     const last = segment[segment.length - 1];
     if (last.type === "paragraph" && paragraphHasExplicitPageBreakRun(last)) {
       const stripped = stripPageBreakRuns(last as Paragraph);
-      body = paragraphIsEmpty(stripped)
-        ? segment.slice(0, -1)
-        : [...segment.slice(0, -1), stripped];
+      if (paragraphIsEmpty(stripped)) {
+        body = segment.slice(0, -1);
+        trailingMarkers = listRangeMarkers([stripped]);
+      } else {
+        body = [...segment.slice(0, -1), stripped];
+      }
     }
   }
 
+  const after = [...trailingMarkers, ...((isLast && source.bodyRangeMarkersAfter) || [])];
+  const bodyRangeMarkersAfter = after.length > 0 ? after : undefined;
+
   if (!opts.preserveSharedParts) {
-    // Minimal split: just body + docType
+    // Minimal split: just body + docType — plus the pictures the body shows,
+    // which are content rather than shared setup: without them the body's
+    // image references would point at nothing.
+    const images = imagesShownBy(source.images, [body, bodyRangeMarkersAfter]);
     return {
       docType: source.docType,
       body,
-      ...(promotedSectPr ? { sectionProperties: promotedSectPr } : {})
+      ...(promotedSectPr ? { sectionProperties: promotedSectPr } : {}),
+      ...(bodyRangeMarkersAfter ? { bodyRangeMarkersAfter } : {}),
+      ...(images.length > 0 ? { images } : {})
     };
   }
 
@@ -253,6 +307,22 @@ function buildSplitDoc(
   return {
     ...source,
     body,
+    bodyRangeMarkersAfter,
     ...(promotedSectPr ? { sectionProperties: promotedSectPr } : {})
   };
+}
+
+/** The images of `images` that content under `root` refers to, in table order. */
+function imagesShownBy(images: readonly ImageDef[] | undefined, root: unknown): ImageDef[] {
+  if (!images || images.length === 0) {
+    return [];
+  }
+  const index = indexImagesByKey(images);
+  const keys = new Set<string>();
+  collectImageKeys(root, index, keys);
+  const shown = new Set<ImageDef>();
+  for (const key of keys) {
+    shown.add(index.get(key)!);
+  }
+  return images.filter(img => shown.has(img));
 }

@@ -7,7 +7,9 @@
 import { describe, it, expect } from "vitest";
 
 import { htmlToDocxBody } from "../convert/html/html-import";
-import type { BodyContent, Paragraph, Run, Table } from "../types";
+import { HTML_BULLET_LIST_NUM_ID, HTML_NUMBERED_LIST_NUM_ID, WordHtml, htmlToDocx } from "../html";
+import { Io, Query } from "../index";
+import type { BodyContent, DocxDocument, Paragraph, Run, Table } from "../types";
 
 // Helper to extract paragraph text
 function paraText(block: BodyContent): string {
@@ -368,5 +370,76 @@ describe("htmlToDocxBody", () => {
       const run = para.children[0] as Run;
       expect(run.properties?.size).toBe(28);
     });
+  });
+});
+
+describe("WordHtml.toDocx / toDocxBody mirror WordMarkdown", () => {
+  const html =
+    '<h1>T</h1><ul><li>a</li></ul><ol><li>b</li></ol><p><img src="data:image/png;base64,iVBORw0KGgo=" width="1" height="1"></p>';
+
+  it("toDocx returns a complete document", async () => {
+    const doc: DocxDocument = WordHtml.toDocx(html);
+    expect(doc.styles?.some(st => st.styleId === "Heading1")).toBe(true);
+    const ids = new Set(doc.numberingInstances?.map(n => n.numId));
+    expect(ids.has(HTML_BULLET_LIST_NUM_ID)).toBe(true);
+    expect(ids.has(HTML_NUMBERED_LIST_NUM_ID)).toBe(true);
+    expect(doc.images).toHaveLength(1);
+    const back = await Io.read(await Io.toBuffer(doc));
+    expect(Query.getText(back)).toContain("b");
+  });
+
+  it("toDocxBody returns the body with every definition it refers to", () => {
+    const fragment = WordHtml.toDocxBody(html);
+    expect(Object.keys(fragment).sort()).toEqual(
+      ["abstractNumberings", "body", "docDefaults", "images", "numberingInstances", "styles"].sort()
+    );
+    expect(fragment.body).toHaveLength(WordHtml.toDocx(html).body.length);
+    expect(fragment.images).toHaveLength(1);
+    // The picture run names the image returned beside it.
+    expect(JSON.stringify(fragment.body)).toContain(JSON.stringify(fragment.images[0]!.rId));
+    expect(fragment.styles.map(s => s.styleId)).toContain("Heading1");
+    expect(new Set(fragment.numberingInstances.map(n => n.numId))).toEqual(
+      new Set([HTML_BULLET_LIST_NUM_ID, HTML_NUMBERED_LIST_NUM_ID])
+    );
+    // Every numbering instance's definition comes with it.
+    const abstractIds = new Set(fragment.abstractNumberings.map(a => a.abstractNumId));
+    expect(fragment.numberingInstances.every(n => abstractIds.has(n.abstractNumId))).toBe(true);
+  });
+
+  it("the deprecated flat names keep their old results", () => {
+    expect(Array.isArray(htmlToDocxBody(html))).toBe(true);
+    expect(Object.keys(htmlToDocx(html)).sort()).toEqual(["body", "images"]);
+  });
+});
+
+describe("WordHtml image an import cannot embed", () => {
+  const markdownPlaceholder = async (alt: string, url: string): Promise<Run> => {
+    const { WordMarkdown } = await import("../markdown");
+    const md = await WordMarkdown.toDocx(`![${alt}](${url})`);
+    return (md.body[0] as Paragraph).children[0] as Run;
+  };
+  const firstRun = (doc: DocxDocument): Run => (doc.body[0] as Paragraph).children[0] as Run;
+
+  it("is the same placeholder WordMarkdown writes, for a remote URL", async () => {
+    const html = WordHtml.toDocx('<p><img src="https://example.com/a.png" alt="logo"></p>');
+    expect(firstRun(html)).toEqual(await markdownPlaceholder("logo", "https://example.com/a.png"));
+    expect(JSON.stringify(html.body)).not.toContain('"rId":""');
+  });
+
+  it("names the source when there is no alt text, as WordMarkdown does", async () => {
+    const html = WordHtml.toDocx('<p><img src="pic/a.png"></p>');
+    expect(firstRun(html)).toEqual(await markdownPlaceholder("", "pic/a.png"));
+  });
+
+  it("is the same in toDocxBody, and an undecodable data: URL gets it too", () => {
+    const fragment = WordHtml.toDocxBody('<p><img src="data:image/png;base64,@@@" alt="x"></p>');
+    const run = (fragment.body[0] as Paragraph).children[0] as Run;
+    expect(run.content).toEqual([{ type: "text", text: "[Image: x]" }]);
+    expect(run.properties).toMatchObject({ italic: true, color: "666666" });
+  });
+
+  it("keeps the deprecated flat names' old placeholder", () => {
+    const old = htmlToDocx('<p><img src="https://example.com/a.png" alt="logo"></p>');
+    expect(JSON.stringify(old.body)).toContain('"rId":""');
   });
 });

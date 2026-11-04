@@ -20,7 +20,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { extractAll } from "@archive/unzip/extract";
-import { Workbook } from "@excel";
+import { ExcelDecryptionError, ExcelEncryptedError, Workbook } from "@excel";
 import { validateXlsbBuffer } from "@excel/utils/xlsb-validator";
 import { XLSB_CORPUS } from "@excel/xlsb/corpus/manifest";
 import { XLSB_CORPUS_CACHE } from "@excel/xlsb/corpus/paths";
@@ -105,23 +105,25 @@ describe.skipIf(available.length === 0)("real XLSB corpus", () => {
     for (const { entry, bytes } of awkward) {
       const workbook = Workbook.create();
       await Workbook.read(workbook, bytes);
-      expect(Workbook.getWorksheets(workbook).length, entry.name).toBeGreaterThan(0);
+      expect(Workbook.listWorksheets(workbook).length, entry.name).toBeGreaterThan(0);
     }
   });
 
-  it("refuses the encrypted workbooks rather than mangling them", async () => {
-    // Not ZIP packages at all — OLE-wrapped and encrypted. Pinned because a corpus of only files that
-    // work is not a corpus of what people have, and because failing cleanly is a behaviour worth
-    // asserting rather than assuming.
+  it("reads the encrypted workbooks with their passwords, and refuses them cleanly without", async () => {
+    // Not ZIP packages at all — OLE-wrapped and Agile-encrypted, written by other tools than this library. They
+    // were refused outright before Excel could decrypt; the passwords are the ones their own projects test with.
+    const passwords: Record<string, string> = {
+      "cal-pass_protected.xlsb": "1234",
+      "poi-protected_passtika.xlsb": "tika"
+    };
     expect(encrypted.length).toBe(2);
     for (const { entry, bytes } of encrypted) {
-      await expect(
-        (async () => {
-          const workbook = Workbook.create();
-          await Workbook.read(workbook, bytes);
-        })(),
-        entry.name
-      ).rejects.toThrow();
+      await expect(Workbook.read(bytes), entry.name).rejects.toBeInstanceOf(ExcelEncryptedError);
+      await expect(Workbook.read(bytes, { password: "wrong" }), entry.name).rejects.toBeInstanceOf(
+        ExcelDecryptionError
+      );
+      const workbook = await Workbook.read(bytes, { password: passwords[entry.name] });
+      expect(Workbook.getWorksheets(workbook).length, entry.name).toBeGreaterThan(0);
     }
   });
 

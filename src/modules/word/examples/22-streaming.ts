@@ -2,7 +2,7 @@
  * Word Example 22 — Streaming writer
  *
  * Covers:
- *   - createDocxStream() — incrementally write a large DOCX without
+ *   - Streaming.createWriter() — incrementally write a large DOCX without
  *     keeping the whole body in memory.
  *   - addText / add (raw BodyContent) / addMany
  *   - Progress callback every N elements
@@ -30,7 +30,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 {
   const t0 = performance.now();
-  const stream = Streaming.createDocxStream({
+  const stream = Streaming.createWriter({
     compressionLevel: 6,
     chunkSize: 500,
     sectionProperties: {
@@ -78,7 +78,7 @@ fs.mkdirSync(outDir, { recursive: true });
     stream.addText(`Paragraph ${i}: Lorem ipsum dolor sit amet, consectetur adipiscing elit.`);
     if (i - lastProgress >= 1000) {
       lastProgress = i;
-      // No public progress hook on createDocxStream — but elementCount works
+      // No public progress hook on Streaming.createWriter — but elementCount works
       console.log(`  ... ${stream.elementCount} elements written`);
     }
   }
@@ -98,7 +98,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // 2. Empty stream — finalize immediately
 // ---------------------------------------------------------------------------
 {
-  const stream = Streaming.createDocxStream();
+  const stream = Streaming.createWriter();
   const buf = await stream.finalize();
   fs.writeFileSync(path.join(outDir, "22-streaming-empty.docx"), buf);
   console.log(`  → 22-streaming-empty.docx (${buf.length} bytes)`);
@@ -108,7 +108,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // 3. addMany convenience: pre-batched elements
 // ---------------------------------------------------------------------------
 {
-  const stream = Streaming.createDocxStream();
+  const stream = Streaming.createWriter();
   stream.addMany(
     Array.from({ length: 100 }, (_, i) => ({
       type: "paragraph",
@@ -122,7 +122,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 // ---------------------------------------------------------------------------
 // 4. Direct StreamingDocxWriter instantiation + onProgress callback.
-//    `createDocxStream()` is a thin convenience wrapper around the
+//    `Streaming.createWriter()` is a thin convenience wrapper around the
 //    StreamingDocxWriter class. Instantiating the class directly lets you
 //    register the onProgress callback (the factory's option bag does not
 //    expose it) and keep a strongly-typed reference for tools that need it

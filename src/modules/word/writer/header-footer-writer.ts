@@ -4,36 +4,68 @@
  * Renders word/header{N}.xml and word/footer{N}.xml parts.
  */
 
+import { mapToStandardFont, measureTextWidth } from "@utils/font-metrics";
 import {
+  DOCUMENT_NAMESPACES,
   NS_W,
   NS_R,
   NS_V,
   NS_O,
   NS_W10,
-  NS_WP,
-  NS_M,
-  NS_W14,
-  NS_W15,
-  NS_WP14,
-  NS_MC,
   STD_DOC_ATTRIBUTES
 } from "@word/constants";
+import { atNode, unwritableNode, writableList } from "@word/core/node-path";
 import type { HeaderFooterContent, TextWatermark, Watermark } from "@word/types";
 import { renderParagraph } from "@word/writer/paragraph-writer";
 import type { RenderHelpers } from "@word/writer/render-context";
 import { renderTable } from "@word/writer/table-writer";
 import type { XmlSink } from "@xml/types";
 
-/** Render content blocks (shared between header and footer). */
-function renderContent(xml: XmlSink, content: HeaderFooterContent, helpers?: RenderHelpers): void {
+/** A watermark drawn by a header, and the id its picture has in that header's rels. */
+export interface HeaderWatermark {
+  readonly watermark: Watermark;
+  readonly imageRId?: string;
+}
+
+/**
+ * Render content blocks (shared between header and footer). A watermark is
+ * drawn by the first paragraph, as Word places it; a header that starts with
+ * a table, or has no content, gets a paragraph of its own for it.
+ */
+function renderContent(
+  xml: XmlSink,
+  content: HeaderFooterContent,
+  helpers?: RenderHelpers,
+  watermark?: HeaderWatermark
+): void {
   let emitted = 0;
-  for (const child of content.children) {
-    if (child.type === "paragraph") {
-      renderParagraph(xml, child, helpers);
-      emitted++;
-    } else if (child.type === "table") {
-      renderTable(xml, child, helpers);
-      emitted++;
+  const leading = watermark
+    ? (sink: XmlSink): void => renderWatermarkRun(sink, watermark.watermark, watermark.imageRId)
+    : undefined;
+  const children = writableList(content.children, "children");
+  const first = children.find(c => c?.type === "paragraph" || c?.type === "table");
+  if (leading && first?.type !== "paragraph") {
+    renderWatermarkParagraph(xml, watermark!);
+    emitted++;
+  }
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]!;
+    try {
+      if (child?.type === "paragraph") {
+        renderParagraph(xml, child, helpers, child === first ? leading : undefined);
+        emitted++;
+      } else if (child?.type === "table") {
+        renderTable(xml, child, helpers);
+        emitted++;
+      } else {
+        unwritableNode(
+          "type",
+          "a paragraph or a table",
+          (child as { type?: unknown } | null)?.type
+        );
+      }
+    } catch (error) {
+      throw atNode(`children[${i}]`, error);
     }
   }
   // OOXML requires every header/footer part to contain at least one
@@ -46,30 +78,22 @@ function renderContent(xml: XmlSink, content: HeaderFooterContent, helpers?: Ren
 }
 
 /** Standard namespace attributes for header/footer parts — must include DrawingML namespaces. */
-const HEADER_FOOTER_NAMESPACES: Record<string, string> = {
-  "xmlns:w": NS_W,
-  "xmlns:r": NS_R,
-  "xmlns:wp": NS_WP,
-  "xmlns:m": NS_M,
-  "xmlns:v": NS_V,
-  "xmlns:o": NS_O,
-  "xmlns:w10": NS_W10,
-  "xmlns:w14": NS_W14,
-  "xmlns:w15": NS_W15,
-  "xmlns:wp14": NS_WP14,
-  "xmlns:mc": NS_MC,
-  "mc:Ignorable": "w14 w15 wp14"
-};
+/**
+ * Every prefix the document part declares: drawings and markup kept verbatim
+ * in a header use the same ones (`wps:` for a shape, `wp14:` on a frame).
+ */
+const HEADER_FOOTER_NAMESPACES: Readonly<Record<string, string>> = DOCUMENT_NAMESPACES;
 
 /** Render a header part (word/header{N}.xml). */
 export function renderHeader(
   xml: XmlSink,
   content: HeaderFooterContent,
-  helpers?: RenderHelpers
+  helpers?: RenderHelpers,
+  watermark?: HeaderWatermark
 ): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:hdr", HEADER_FOOTER_NAMESPACES);
-  renderContent(xml, content, helpers);
+  renderContent(xml, content, helpers, watermark);
   xml.closeNode();
 }
 
@@ -96,14 +120,27 @@ export function renderWatermarkHeader(xml: XmlSink, watermark: Watermark, imageR
     "xmlns:w10": NS_W10
   });
 
-  // Watermark lives in a paragraph styled as a Header, matching what
-  // Microsoft Word emits. The run carries <w:noProof/> so the WordArt
-  // text is not spell-checked.
+  renderWatermarkParagraph(xml, { watermark, imageRId });
+
+  xml.closeNode(); // hdr
+}
+
+/**
+ * The paragraph a header without one of its own draws its watermark in:
+ * styled as a Header, matching what Microsoft Word emits. The reader
+ * recognises exactly this paragraph as carrying nothing but the watermark.
+ */
+function renderWatermarkParagraph(xml: XmlSink, watermark: HeaderWatermark): void {
   xml.openNode("w:p");
   xml.openNode("w:pPr");
   xml.leafNode("w:pStyle", { "w:val": "Header" });
   xml.closeNode(); // pPr
+  renderWatermarkRun(xml, watermark.watermark, watermark.imageRId);
+  xml.closeNode(); // p
+}
 
+/** The run drawing a watermark. It carries <w:noProof/> so WordArt text is not spell-checked. */
+function renderWatermarkRun(xml: XmlSink, watermark: Watermark, imageRId?: string): void {
   xml.openNode("w:r");
   xml.openNode("w:rPr");
   xml.leafNode("w:noProof");
@@ -118,9 +155,6 @@ export function renderWatermarkHeader(xml: XmlSink, watermark: Watermark, imageR
 
   xml.closeNode(); // pict
   xml.closeNode(); // r
-  xml.closeNode(); // p
-
-  xml.closeNode(); // hdr
 }
 
 function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
@@ -172,11 +206,15 @@ function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
   xml.leafNode("o:lock", { "v:ext": "edit", text: "t", shapetype: "t" });
   xml.closeNode(); // shapetype
 
-  // The watermark shape itself. Word fixes font-size at 1pt and relies on
-  // fitshape="t" to scale the text to fill the shape box; rotation is
-  // applied on the shape via the style string.
+  // The watermark shape itself. Word stretches the text over the shape box
+  // (fitshape="t"), so the box is the size: its own watermarks (the
+  // Watermarks building blocks it ships) all say font-size:1pt and differ only
+  // in width/height. A requested fontSize is therefore expressed as a box one
+  // line of that size tall and as wide as the text, and written on the text
+  // path as well so it reads back; rotation goes on the shape's style.
+  const { widthPt, heightPt } = textWatermarkBox(wm, font);
   const style =
-    `position:absolute;margin-left:0;margin-top:0;width:468pt;height:234pt;` +
+    `position:absolute;margin-left:0;margin-top:0;width:${formatPt(widthPt)}pt;height:${formatPt(heightPt)}pt;` +
     `${rotation ? `rotation:${rotation};` : ""}z-index:-251658752;` +
     `mso-position-horizontal:center;mso-position-horizontal-relative:margin;` +
     `mso-position-vertical:center;mso-position-vertical-relative:margin`;
@@ -196,11 +234,39 @@ function renderTextWatermarkVml(xml: XmlSink, wm: TextWatermark): void {
     xml.leafNode("v:fill", { opacity: ".5" });
   }
   xml.leafNode("v:textpath", {
-    style: `font-family:"${font}";font-size:1pt`,
+    style: `font-family:"${font}";font-size:${wm.fontSize !== undefined ? formatPt(wm.fontSize / 2) : "1"}pt`,
     string: wm.text
   });
 
   xml.closeNode(); // v:shape
+}
+
+/** Word's box for a watermark nobody sized: the width of a Letter page's text column, half as tall. */
+const DEFAULT_TEXT_WATERMARK_BOX = { widthPt: 468, heightPt: 234 } as const;
+
+function textWatermarkBox(
+  wm: TextWatermark,
+  font: string
+): { readonly widthPt: number; readonly heightPt: number } {
+  if (wm.widthPt !== undefined && wm.heightPt !== undefined) {
+    return { widthPt: wm.widthPt, heightPt: wm.heightPt };
+  }
+  if (wm.fontSize === undefined) {
+    return {
+      widthPt: wm.widthPt ?? DEFAULT_TEXT_WATERMARK_BOX.widthPt,
+      heightPt: wm.heightPt ?? DEFAULT_TEXT_WATERMARK_BOX.heightPt
+    };
+  }
+  const sizePt = wm.fontSize / 2;
+  return {
+    widthPt: wm.widthPt ?? measureTextWidth(wm.text, mapToStandardFont(font), sizePt),
+    heightPt: wm.heightPt ?? sizePt
+  };
+}
+
+/** A length for a VML style: at most two decimals, no trailing zeros. */
+function formatPt(value: number): string {
+  return String(Math.round(value * 100) / 100);
 }
 
 function renderImageWatermarkVml(

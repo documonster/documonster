@@ -12,12 +12,14 @@
  * would lose accuracy for nothing if the flattening happened upstream.
  */
 
+import { DrawArgumentError, DrawError } from "@draw/errors";
 import { BasicRasterCanvas } from "@draw/raster/canvas";
 import type { RasterFontSource } from "@draw/raster/glyph-outline";
 import { renderDrawList } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import { DEFAULT_TEXT_FAMILY, flattenPath, roundedRectToPath, sectorToPath } from "@draw/types";
 import type { DrawClip, DrawList, DrawPaint, DrawPoint } from "@draw/types";
+import { parseCssColor } from "@utils/svg-lex";
 import type { Rgba01 } from "@utils/svg-lex";
 
 /** Options for {@link rasterizeToRgba}. */
@@ -37,12 +39,16 @@ export interface RasterizeOptions {
    * including any added later, rather than teaching each one to compute coverage.
    */
   readonly samples?: number;
-  /** Background fill. Omitted leaves the canvas transparent. */
-  readonly background?: Rgba01;
+  /**
+   * Background fill: an IR colour `{ r, g, b, a }` or a CSS colour string — the same two forms
+   * `ToSvgOptions.background` takes. Omitted, `"none"` or `"transparent"` leaves the canvas
+   * transparent.
+   */
+  readonly background?: Rgba01 | string;
   /**
    * Fonts to draw text with, ahead of anything discovered on the host.
    *
-   * Raw `.ttf`/`.ttc` bytes, a `RasterFont` from `parseRasterFont`, or
+   * Raw `.ttf`/`.ttc` bytes, a `RasterFont` from `Draw.parseRasterFont`, or
    * `{ data, collectionIndex }` to name a face inside a collection. In Node these
    * outrank the discovered face; in a **browser they are the only way to get a glyph
    * outside ASCII at all**, since there is no font directory to search and the
@@ -138,7 +144,7 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
   const pixelWidth = Math.max(1, Math.round(width * scale));
   const pixelHeight = Math.max(1, Math.round(height * scale));
   if (pixelWidth * pixelHeight > MAX_OUTPUT_PIXELS) {
-    throw new Error(
+    throw new DrawError(
       `raster output ${pixelWidth}x${pixelHeight} is ${Math.round(
         (pixelWidth * pixelHeight) / 1e6
       )}M pixels, over the ${Math.round(MAX_OUTPUT_PIXELS / 1e6)}M limit — ` +
@@ -147,13 +153,15 @@ export function rasterizeToRgba(list: DrawList, options: RasterizeOptions = {}):
   }
   const samples = normalizeSamples(options.samples, pixelWidth, pixelHeight);
   const canvas = new BasicRasterCanvas(pixelWidth * samples, pixelHeight * samples);
-  if (options.background) {
-    canvas.fillRect(0, 0, pixelWidth * samples, pixelHeight * samples, token(options.background));
+  const background =
+    typeof options.background === "string" ? parseCssColor(options.background) : options.background;
+  if (background) {
+    canvas.fillRect(0, 0, pixelWidth * samples, pixelHeight * samples, token(background));
   }
   // Scoped to this canvas, not to the process: see `BasicRasterCanvas.setFonts`. The
   // defaults here are the canvas's own, so this is unconditional rather than guarded.
   canvas.setFonts(options.fonts ?? [], { useSystemFonts: options.useSystemFonts ?? true });
-  renderDrawList(list, createRasterSurface(canvas, fit * scale * samples));
+  renderDrawList(list, createRasterSurface(canvas, { scale: fit * scale * samples }));
   return {
     width: pixelWidth,
     height: pixelHeight,
@@ -260,7 +268,10 @@ export function normalizeSamples(
 ): number {
   const requested = samples === undefined ? 3 : samples;
   if (!Number.isFinite(requested) || requested < 1) {
-    throw new Error("raster samples must be a finite number >= 1");
+    throw new DrawArgumentError(
+      "samples",
+      `raster samples must be a finite number >= 1, got ${String(requested)}`
+    );
   }
   let allowed = Math.max(1, Math.min(4, Math.floor(requested)));
   while (allowed > 1 && pixelWidth * allowed * pixelHeight * allowed > MAX_INTERNAL_PIXELS) {
@@ -269,13 +280,30 @@ export function normalizeSamples(
   return allowed;
 }
 
+/** How {@link createRasterSurface} maps a list onto its canvas. */
+export interface RasterSurfaceOptions {
+  /** Factor from list user units to canvas pixels. Defaults to 1. */
+  readonly scale?: number;
+}
+
 /**
  * Build a surface over an existing canvas.
  *
  * @param canvas - Target canvas.
- * @param scale - Factor from list user units to canvas pixels.
  */
-export function createRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawSurface {
+export function createRasterSurface(
+  canvas: BasicRasterCanvas,
+  options: RasterSurfaceOptions = {}
+): DrawSurface {
+  return createScaledRasterSurface(canvas, options.scale ?? 1);
+}
+
+/**
+ * {@link createRasterSurface} with the factor as its own argument — the signature the deprecated
+ * `createRasterSurface(canvas, scale)` of `documonster/draw` had, defaults included, so that
+ * forward behaves exactly as before for any `scale` it was given.
+ */
+export function createScaledRasterSurface(canvas: BasicRasterCanvas, scale = 1): DrawSurface {
   const at = (value: number): number => value * scale;
   const points = (input: readonly DrawPoint[]): DrawPoint[] =>
     input.map(point => ({ x: at(point.x), y: at(point.y) }));
@@ -526,7 +554,10 @@ function normalizeScale(scale: number | undefined): number {
     return 1;
   }
   if (!Number.isFinite(scale) || scale <= 0) {
-    throw new Error("raster scale must be a positive finite number");
+    throw new DrawArgumentError(
+      "scale",
+      `raster scale must be a positive finite number, got ${String(scale)}`
+    );
   }
   return Math.min(8, scale);
 }

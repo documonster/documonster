@@ -6,10 +6,10 @@
  */
 
 import { getUtf8ByteLength } from "@csv/constants";
-import { CsvError } from "@csv/errors";
+import { CsvArgumentError, CsvError } from "@csv/errors";
 import type { ParseConfig } from "@csv/parse/config";
 import { resolveParseConfig, toScannerConfig } from "@csv/parse/config";
-import { filterValidHeaders } from "@csv/parse/helpers";
+import { filterValidHeaders, textAfterQuoteError } from "@csv/parse/helpers";
 import { splitLinesWithEndings } from "@csv/parse/lines";
 import type { RowProcessResult } from "@csv/parse/row-processor";
 import { processCompletedRow, rowToRecord } from "@csv/parse/row-processor";
@@ -28,9 +28,9 @@ import type {
   DynamicTypingConfig,
   CastDateConfig
 } from "@csv/types";
+import { checkNoStreamingOptions } from "@csv/utils/check-options";
 import { applyDynamicTypingToArrayRow } from "@csv/utils/dynamic-typing";
 import { isEmptyRow } from "@csv/utils/row";
-import { isSafeDynamicKey } from "@utils/object";
 
 // =============================================================================
 // Helper Functions
@@ -55,9 +55,29 @@ function normalizeValidateResult(result: boolean | { isValid: boolean; reason?: 
 function applyArrayTyping(
   row: string[],
   dynamicTyping: DynamicTypingConfig | undefined,
-  castDate: CastDateConfig | undefined
+  castDate: CastDateConfig | undefined,
+  decimalSeparator: "." | ","
 ): unknown[] {
-  return applyDynamicTypingToArrayRow(row, null, dynamicTyping || false, castDate);
+  return applyDynamicTypingToArrayRow(
+    row,
+    null,
+    dynamicTyping || false,
+    castDate,
+    decimalSeparator
+  );
+}
+
+/**
+ * The {@link CsvError} a parse form with no `errors` channel throws for its record errors:
+ * the first one, with how many there were. Pass `onSkip`, or ask for a result object
+ * (`info`, `headers` or `validate`), to receive them instead.
+ */
+export function recordErrorToThrow(where: string, errors: readonly CsvRecordError[]): CsvError {
+  const first = errors[0];
+  const more = errors.length > 1 ? ` (and ${errors.length - 1} more)` : "";
+  return new CsvError(
+    `${where}: ${first.message} on line ${first.line} [${first.code}]${more}; pass onSkip to receive malformed records instead`
+  );
 }
 
 /**
@@ -206,7 +226,8 @@ export function* parseWithScanner(
   input: string,
   config: ParseConfig,
   state: ParseState,
-  errors: CsvRecordError[]
+  errors: CsvRecordError[],
+  plainForm = false
 ): Generator<RowProcessResult, void, undefined> {
   const scannerConfig = toScannerConfig(config);
   const len = input.length;
@@ -308,17 +329,26 @@ export function* parseWithScanner(
     // Populate state for processCompletedRow
     // (state.currentRow was removed as dead code - row is passed directly)
 
-    // Check for unterminated quotes and report error
+    // An unterminated quote: in a result that has `errors`, the record is kept and the error
+    // listed beside it. The plain `string[][]` result has no such place, so there it is a
+    // record error like any other — left out, handed to `onSkip`, or thrown (see parseCsv).
+    let recordError = scanResult.textAfterQuote
+      ? textAfterQuoteError(state.lineNumber, input.slice(scanResult.rawStart, rawEndPos))
+      : undefined;
     if (scanResult.unterminatedQuote) {
-      // Line number for error is 1-based
-      errors.push({
+      const missing: CsvRecordError = {
         code: "MissingQuotes",
         message: "Quoted field unterminated",
         line: state.lineNumber
-      });
+      };
+      if (plainForm) {
+        recordError ??= missing;
+      } else {
+        errors.push(missing);
+      }
     }
 
-    const result = processCompletedRow(row, state, config, errors, state.lineNumber);
+    const result = processCompletedRow(row, state, config, errors, state.lineNumber, recordError);
 
     if (result.stop) {
       yield result;
@@ -348,6 +378,15 @@ export function* parseWithScanner(
 export function parseCsv(input: string): string[][];
 
 /**
+ * Parse CSV string - with `validate` (array mode) the result object is returned, so rows a
+ * validator rejected can be read from `invalidRows`.
+ */
+export function parseCsv(
+  input: string,
+  options: CsvParseArrayOptions & { validate: NonNullable<CsvParseOptions["validate"]> }
+): CsvParseResult<string[] | RecordWithInfo<string[]>>;
+
+/**
  * Parse CSV string - returns string[][] when headers is false/undefined and no info option.
  *
  * Note: When `info: true` is set, returns CsvParseResult instead.
@@ -364,6 +403,14 @@ export function parseCsv(
   input: string,
   options: CsvParseArrayOptions & { info: true }
 ): CsvParseResult<RecordWithInfo<string[]>>;
+
+/**
+ * Parse CSV string - with `objname`, rows are an object keyed by that column's value.
+ */
+export function parseCsv(
+  input: string,
+  options: CsvParseObjectOptions & { objname: string }
+): CsvParseResultWithObjname<Record<string, unknown>>;
 
 /**
  * Parse CSV string - returns CsvParseResult when headers are enabled.
@@ -400,15 +447,15 @@ export function parseCsv(
  * @example
  * ```ts
  * // Simple array output (no headers)
- * const rows = parseCsv("a,b,c\n1,2,3");
+ * const rows = Csv.parse("a,b,c\n1,2,3");
  * // rows: string[][] = [["a","b","c"], ["1","2","3"]]
  *
  * // Object output with headers
- * const result = parseCsv("name,age\nAlice,30", { headers: true });
+ * const result = Csv.parse("name,age\nAlice,30", { headers: true });
  * // result.rows: Record<string, unknown>[] = [{ name: "Alice", age: "30" }]
  *
  * // With info option
- * const result = parseCsv("a,b\n1,2", { info: true });
+ * const result = Csv.parse("a,b\n1,2", { info: true });
  * // result.rows: RecordWithInfo<string[]>[] = [{ record: ["a","b"], info: {...} }, ...]
  * ```
  */
@@ -422,9 +469,31 @@ export function parseCsv(
   | CsvParseResult<RecordWithInfo<Record<string, unknown>>>
   | CsvParseResult<RecordWithInfo<string[]>>
   | CsvParseResult<string[] | unknown[]>
+  | CsvParseResult<string[] | RecordWithInfo<string[]>>
+  | CsvParseResultWithObjname<Record<string, unknown>> {
+  return parseCsvAt("Csv.parse", input, options);
+}
+
+/**
+ * {@link parseCsv}, naming `where` — the public call, such as `Csv.parseAsync` — in the
+ * errors it throws for its arguments and records.
+ */
+export function parseCsvAt(
+  where: string,
+  input: string,
+  options: CsvParseOptions
+):
+  | string[][]
+  | CsvParseResult<Record<string, string>>
+  | CsvParseResult<Record<string, unknown>>
+  | CsvParseResult<RecordWithInfo<Record<string, unknown>>>
+  | CsvParseResult<RecordWithInfo<string[]>>
+  | CsvParseResult<string[] | unknown[]>
+  | CsvParseResult<string[] | RecordWithInfo<string[]>>
   | CsvParseResultWithObjname<Record<string, unknown>> {
   // Resolve config and preprocess input
-  const { config, processedInput } = resolveParseConfig(input, options);
+  const { config, processedInput } = resolveParseConfig(input, options, where);
+  checkNoStreamingOptions(where, options);
 
   // Initialize state
   const state = createParseState(config);
@@ -432,9 +501,11 @@ export function parseCsv(
   const invalidRows: { row: string[]; reason: string }[] = [];
 
   // Choose parser based on mode
+  // The plain `string[][]` result: nowhere to report a record error but `onSkip`.
+  const plainForm = !state.useHeaders && !config.infoOption && !options.validate;
   const parser = config.fastMode
     ? parseFastMode(processedInput, config, state, errors)
-    : parseWithScanner(processedInput, config, state, errors);
+    : parseWithScanner(processedInput, config, state, errors, plainForm);
 
   // ==========================================================================
   // Single-pass processing: parse + transform + validate + dynamicTyping
@@ -469,7 +540,12 @@ export function parseCsv(
 
         // Apply dynamicTyping/castDate if configured
         if (config.dynamicTyping || config.castDate) {
-          row = applyArrayTyping(row as string[], config.dynamicTyping, config.castDate);
+          row = applyArrayTyping(
+            row as string[],
+            config.dynamicTyping,
+            config.castDate,
+            config.decimalSeparator
+          );
         }
 
         // Push with or without info in single pass
@@ -513,6 +589,10 @@ export function parseCsv(
       } as CsvParseResult<string[] | unknown[]>;
     }
 
+    // A record error must not vanish: without `onSkip` it is thrown.
+    if (errors.length > 0 && !options.onSkip) {
+      throw recordErrorToThrow(where, errors);
+    }
     return processedRows as string[][];
   }
 
@@ -572,6 +652,12 @@ export function parseCsv(
   // Handle objname option
   const { objname } = options;
   if (objname && state.headerRow) {
+    if (!state.headerRow.includes(objname)) {
+      throw new CsvArgumentError(
+        "options.objname",
+        `${where}: objname ${JSON.stringify(objname)} is not a header`
+      );
+    }
     const objResult: Record<
       string,
       Record<string, unknown> | RecordWithInfo<Record<string, unknown>>
@@ -584,13 +670,10 @@ export function parseCsv(
         ? (item as RecordWithInfo<Record<string, unknown>>).record
         : item;
       const key = (rec as Record<string, unknown>)[objname];
-      // Convert undefined/null to empty string, otherwise convert to string
+      // Convert undefined/null to empty string, otherwise convert to string. The result has
+      // no prototype, so any key is an ordinary property; a later record with the same key
+      // replaces the earlier one (as documented on `objname`).
       const keyStr = key === undefined || key === null ? "" : String(key);
-      // Skip unsafe keys to prevent prototype pollution and reject
-      // control-char / over-long keys derived from the objname column.
-      if (!isSafeDynamicKey(keyStr)) {
-        continue;
-      }
       objResult[keyStr] = item;
     }
     return {

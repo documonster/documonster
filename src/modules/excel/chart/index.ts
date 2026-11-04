@@ -1,63 +1,77 @@
 /**
  * Public entry for the documonster chart module.
  *
- * **Functional, zero-side-effect, fully tree-shakeable.** Import the chart
- * builders, renderers, presets and parsers you need:
+ * **Functional, zero-side-effect, fully tree-shakeable.** Three namespaces:
+ *
+ * - `ChartClassic` — classic charts: build a model, render it to SVG / PNG / a display list
+ *   (which `documonster/draw` puts on a PDF page through `Pdf.createDrawSurface`), read and
+ *   write the chart style and colour sidecars;
+ * - `ChartEx` — the same operations for the modern ChartEx family, plus its XML;
+ * - `DrawingMl` — the `spPr` / `txPr` shape and text property helpers.
  *
  * ```ts
- * import { buildChartModel, renderChartSvg } from "documonster/chart";
- * const model = buildChartModel(options);
- * const svg   = renderChartSvg(model);
+ * import { ChartClassic } from "documonster/chart";
+ * const model = ChartClassic.createModel(options);
+ * const svg   = ChartClassic.toSvg(model);
  * ```
  *
  * No install / registration step exists. The high-level chart APIs
- * (`Chart.add`, `Worksheet.addChart`, chart serialisation on `Workbook.toBuffer`,
+ * (`Chart.place`, chart serialisation on `Workbook.toBuffer`,
  * XLSX chart reconstruction on load) import the chart implementation directly
  * and statically. A consumer that never references any chart API gets the
  * entire chart implementation tree-shaken out by the bundler — the package's
  * root `sideEffects: false` contract keeps this guarantee intact.
  */
 
-export { buildChartModel } from "@excel/chart/chart-handle";
-export type { ChartHandle } from "@excel/core/worksheet-core";
-export { buildComboChartModel } from "@excel/chart/build/chart-builder";
-export {
-  fillChartCaches,
-  fillChartExCaches,
-  fillNumRef,
-  fillStrRef
+import * as ChartExNs from "@excel/chart/api/chart-ex";
+import * as ClassicNs from "@excel/chart/api/classic";
+import * as DrawingMlNs from "@excel/chart/api/drawing-ml";
+import {
+  fillChartCaches as fillChartCachesImpl,
+  fillChartExCaches as fillChartExCachesImpl,
+  fillNumRef as fillNumRefImpl,
+  fillStrRef as fillStrRefImpl
 } from "@excel/chart/bridge/excel-chart-host";
-export {
-  parseChartColors,
-  buildChartColors,
-  parseChartStyle,
-  buildChartStyle
-} from "@excel/chart/serialize/chart-sidecar";
-export { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
-export { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
-export {
-  canRenderChartExAsVectorPdf,
-  drawChartExPdf,
-  renderChartExPng,
-  renderChartExSvg,
-  VECTOR_PDF_CHART_EX_LAYOUT_IDS
+import type { ChartExModel as ChartExModelType } from "@excel/chart/model/chart-ex-types";
+import {
+  canRenderChartExAsVectorPdf as canRenderChartExAsVectorPdfImpl,
+  checkChartExModel,
+  drawChartExPdf as drawChartExPdfImpl
 } from "@excel/chart/render/chart-ex-renderer";
-export { renderChartEx } from "@excel/chart/serialize/chart-ex-serialize";
+import { drawChartPdf as drawChartPdfImpl } from "@excel/chart/render/chart-renderer";
+import type {
+  ChartPdfDrawingSurface as ChartPdfDrawingSurfaceType,
+  ChartPdfPathOp as ChartPdfPathOpType,
+  PdfChartRenderOptions as PdfChartRenderOptionsType,
+  PdfColor as ChartPdfColorType,
+  RegionMapDataOptions as RegionMapDataOptionsType
+} from "@excel/chart/render/chart-renderer";
+import { checkChartRenderOptions, checkDrawPdfArguments } from "@excel/chart/render/render-options";
+
+// =============================================================================
+// Public API — namespaces (tree-shaken via `export * as`)
+// =============================================================================
+
+export * as ChartClassic from "@excel/chart/api/classic";
+export * as ChartEx from "@excel/chart/api/chart-ex";
+export * as DrawingMl from "@excel/chart/api/drawing-ml";
+export type { ChartFillNumRefOptions, ChartFillRefOptions } from "@excel/chart/api/types";
+export type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
+
+/**
+ * Invalid chart options, references, presets or topology throw `ChartOptionsError`, an
+ * `ExcelError` — the same classes `documonster/excel` publishes. `ChartEx.fromXml` reports
+ * malformed XML with `documonster/xml`'s `XmlParseError` (see `isXmlError`).
+ */
+export { ChartOptionsError, ExcelError, isExcelError } from "@excel/errors";
+export type { ChartHandle } from "@excel/core/worksheet-core";
 export {
-  applyChartExPreset,
-  applyChartPreset,
   CHART_EX_PRESETS,
   CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
   EXCEL_CHART_PRESETS
 } from "@excel/chart/model/chart-presets";
-export {
-  chartExOptionsFromRows,
-  chartExOptionsFromTable,
-  chartOptionsFromRows,
-  chartOptionsFromTable,
-  seriesFromColumns
-} from "@excel/chart/build/chart-api";
+export { VECTOR_PDF_CHART_EX_LAYOUT_IDS } from "@excel/chart/render/chart-ex-renderer";
 export type {
   AddChartExFromRowsOptions,
   AddChartExFromTableOptions,
@@ -71,17 +85,7 @@ export type {
   ExcelChartExPreset,
   ExcelChartPreset
 } from "@excel/chart/model/chart-presets";
-export {
-  applyAxisTransform,
-  buildChartScene,
-  buildEffectFilter,
-  drawChartPdf,
-  renderChartPng,
-  renderChartSvg
-} from "@excel/chart/render/chart-renderer";
 export type {
-  ChartPdfDrawingSurface,
-  ChartPdfPathOp,
   ChartRenderOptions,
   ChartScene,
   ChartSceneLegend,
@@ -89,12 +93,9 @@ export type {
   ChartScenePieSlice,
   ChartSceneSeries,
   ChartSceneText,
-  PdfChartRenderOptions,
-  PdfColor,
   RegionMapDataOptions,
   RegionMapMatchRule
 } from "@excel/chart/render/chart-renderer";
-export { resolveTopologyObject } from "@excel/chart/render/topojson";
 export type {
   ResolvedRing,
   TopoGeometry,
@@ -153,6 +154,8 @@ export type {
   ShapeProperties,
   ChartTextProperties,
   ChartColor,
+  ChartColorTransform,
+  ChartColorTransformKind,
   ChartFill,
   ChartLine,
   PivotChartSource,
@@ -290,17 +293,153 @@ export type {
   ChartStyleElement,
   ChartRange
 } from "@excel/chart/model/types";
-export {
-  parseSpPr,
-  parseTxPr,
-  getSpPrFillColor,
-  getSpPrLine,
-  getSpPrGradient,
-  getSpPrPattern,
-  getTxPrFontSize,
-  getTxPrColor,
-  buildSpPr,
-  buildTxPr,
-  setSpPrFill,
-  setSpPrLine
-} from "@excel/chart/shared/shape-properties";
+/**
+ * The colour a {@link ChartPdfDrawingSurface} is painted with — channels in `0..1`,
+ * optional alpha. Prefixed because `documonster/pdf` publishes its own `PdfColor`.
+ *
+ * @deprecated A type of the deprecated {@link drawChartPdf} / {@link drawChartExPdf}. A chart
+ * goes onto a PDF page as a display list: `Draw.render(ChartClassic.toDrawList(model),
+ * Pdf.createDrawSurface(page, rect))`. Removed in 1.0.
+ */
+export type ChartPdfColor = ChartPdfColorType;
+/** @deprecated See {@link ChartPdfColor}. Removed in 1.0. */
+export type PdfColor = ChartPdfColorType;
+/**
+ * The surface the deprecated {@link drawChartPdf} / {@link drawChartExPdf} draw onto.
+ *
+ * @deprecated A chart goes onto a PDF page as a display list, through `Pdf.createDrawSurface`
+ * (a `PdfDrawPage`). Removed in 1.0.
+ */
+export type ChartPdfDrawingSurface = ChartPdfDrawingSurfaceType;
+/** @deprecated A path operation of {@link ChartPdfDrawingSurface}. Removed in 1.0. */
+export type ChartPdfPathOp = ChartPdfPathOpType;
+/**
+ * The options of the deprecated {@link drawChartPdf}: the render options and the box's corner.
+ *
+ * @deprecated Pass `ChartRenderOptions` to `ChartClassic.toDrawList` and the box to
+ * `Pdf.createDrawSurface`. Removed in 1.0.
+ */
+export type PdfChartRenderOptions = PdfChartRenderOptionsType;
+
+// =============================================================================
+// Deprecated flat names — forwards to the namespaces above
+// =============================================================================
+
+/** @deprecated Use `ChartClassic.createModel`. Removed in 1.0. */
+export const buildChartModel = ClassicNs.createModel;
+/** @deprecated Use `ChartClassic.createComboModel`. Removed in 1.0. */
+export const buildComboChartModel = ClassicNs.createComboModel;
+/** @deprecated Use `ChartClassic.fillCaches(model, workbook, { worksheet })`. Removed in 1.0. */
+export const fillChartCaches = fillChartCachesImpl;
+/** @deprecated Use `ChartEx.fillCaches(model, workbook, { worksheet })`. Removed in 1.0. */
+export const fillChartExCaches = fillChartExCachesImpl;
+/**
+ * @deprecated Use `ChartClassic.fillNumRef(ref, workbook, { date1904, worksheet })`. Removed in 1.0.
+ */
+export const fillNumRef = fillNumRefImpl;
+/**
+ * @deprecated Use `ChartClassic.fillStrRef(ref, workbook, { worksheet })`. Removed in 1.0.
+ */
+export const fillStrRef = fillStrRefImpl;
+/** @deprecated Use `ChartClassic.fromColorsXml`. Removed in 1.0. */
+export const parseChartColors = ClassicNs.fromColorsXml;
+/** @deprecated Use `ChartClassic.toColorsXml`. Removed in 1.0. */
+export const buildChartColors = ClassicNs.toColorsXml;
+/** @deprecated Use `ChartClassic.fromStyleXml`. Removed in 1.0. */
+export const parseChartStyle = ClassicNs.fromStyleXml;
+/** @deprecated Use `ChartClassic.toStyleXml`. Removed in 1.0. */
+export const buildChartStyle = ClassicNs.toStyleXml;
+/** @deprecated Use `ChartEx.createModel`. Removed in 1.0. */
+export const buildChartExModel = ChartExNs.createModel;
+/** @deprecated Use `ChartEx.fromXml`. Removed in 1.0. */
+export const parseChartEx = ChartExNs.fromXml;
+/**
+ * @deprecated Every Office 2016 chart has a vector picture: `ChartEx.toDrawList(model)` draws
+ * any model, and `Pdf.fromChart` picks its path itself. This still says whether each series'
+ * layout is one of `VECTOR_PDF_CHART_EX_LAYOUT_IDS`. Removed in 1.0.
+ */
+export const canRenderChartExAsVectorPdf = canRenderChartExAsVectorPdfImpl;
+/**
+ * @deprecated Put the chart on the page as a display list, as every producer does:
+ * `Draw.render(ChartEx.toDrawList(model, { width, height }), Pdf.createDrawSurface(page, rect))`.
+ * This draws that same display list — the chart and its chart area — onto a surface with
+ * `drawRect` / `drawLine` / `drawText`. Removed in 1.0.
+ */
+export function drawChartExPdf(
+  surface: ChartPdfDrawingSurfaceType,
+  model: ChartExModelType,
+  rect: { x: number; y: number; width: number; height: number },
+  options: { title?: string; regionMap?: RegionMapDataOptionsType } = {}
+): ChartPdfDrawingSurfaceType {
+  const where = "drawChartExPdf";
+  checkDrawPdfArguments(where, surface, rect);
+  checkChartExModel(where, model);
+  checkChartRenderOptions(where, options);
+  return drawChartExPdfImpl(surface, model, rect, options);
+}
+/** @deprecated Use `ChartEx.toPng`. Removed in 1.0. */
+export const renderChartExPng = ChartExNs.toPng;
+/** @deprecated Use `ChartEx.toSvg`. Removed in 1.0. */
+export const renderChartExSvg = ChartExNs.toSvg;
+/** @deprecated Use `ChartEx.toXml` — this returns the part's XML, not a picture. Removed in 1.0. */
+export const renderChartEx = ChartExNs.toXml;
+/** @deprecated Use `ChartEx.applyPreset`. Removed in 1.0. */
+export const applyChartExPreset = ChartExNs.applyPreset;
+/** @deprecated Use `ChartClassic.applyPreset`. Removed in 1.0. */
+export const applyChartPreset = ClassicNs.applyPreset;
+/** @deprecated Use `ChartEx.createOptionsFromRows`. Removed in 1.0. */
+export const chartExOptionsFromRows = ChartExNs.createOptionsFromRows;
+/** @deprecated Use `ChartEx.createOptionsFromTable`. Removed in 1.0. */
+export const chartExOptionsFromTable = ChartExNs.createOptionsFromTable;
+/** @deprecated Use `ChartClassic.createOptionsFromRows`. Removed in 1.0. */
+export const chartOptionsFromRows = ClassicNs.createOptionsFromRows;
+/** @deprecated Use `ChartClassic.createOptionsFromTable`. Removed in 1.0. */
+export const chartOptionsFromTable = ClassicNs.createOptionsFromTable;
+/** @deprecated Use `ChartClassic.createSeriesFromColumns`. Removed in 1.0. */
+export const seriesFromColumns = ClassicNs.createSeriesFromColumns;
+/** @deprecated Use `ChartClassic.Backend.applyAxisTransform`. Removed in 1.0. */
+export const applyAxisTransform = ClassicNs.Backend.applyAxisTransform;
+/** @deprecated Use `ChartClassic.Backend.toScene`. Removed in 1.0. */
+export const buildChartScene = ClassicNs.Backend.toScene;
+/** @deprecated Use `ChartClassic.Backend.toSvgFilter`. Removed in 1.0. */
+export const buildEffectFilter = ClassicNs.Backend.toSvgFilter;
+/**
+ * @deprecated Put the chart on the page as a display list, as every producer does:
+ * `Draw.render(ChartClassic.toDrawList(model, { width, height }), Pdf.createDrawSurface(page, rect))`.
+ * This draws that same display list — the chart and its chart area — onto a surface with
+ * `drawRect` / `drawLine` / `drawText`. Removed in 1.0.
+ */
+export const drawChartPdf = drawChartPdfImpl;
+/** @deprecated Use `ChartClassic.toPng`. Removed in 1.0. */
+export const renderChartPng = ClassicNs.toPng;
+/** @deprecated Use `ChartClassic.toSvg`. Removed in 1.0. */
+export const renderChartSvg = ClassicNs.toSvg;
+/** @deprecated Use `ChartClassic.Backend.resolveTopologyObject`. Removed in 1.0. */
+export const resolveTopologyObject = ClassicNs.Backend.resolveTopologyObject;
+/** @deprecated Use `DrawingMl.parseSpPr`. Removed in 1.0. */
+export const parseSpPr = DrawingMlNs.parseSpPr;
+/** @deprecated Use `DrawingMl.parseTxPr`. Removed in 1.0. */
+export const parseTxPr = DrawingMlNs.parseTxPr;
+/** @deprecated Use `DrawingMl.getSpPrFillColor`. Removed in 1.0. */
+export const getSpPrFillColor = DrawingMlNs.getSpPrFillColor;
+/** @deprecated Use `DrawingMl.getSpPrLine`. Removed in 1.0. */
+export const getSpPrLine = DrawingMlNs.getSpPrLine;
+/** @deprecated Use `DrawingMl.getSpPrGradient`. Removed in 1.0. */
+export const getSpPrGradient = DrawingMlNs.getSpPrGradient;
+/** @deprecated Use `DrawingMl.getSpPrPattern`. Removed in 1.0. */
+export const getSpPrPattern = DrawingMlNs.getSpPrPattern;
+/** @deprecated Use `DrawingMl.getTxPrFontSize`. Removed in 1.0. */
+export const getTxPrFontSize = DrawingMlNs.getTxPrFontSize;
+/** @deprecated Use `DrawingMl.getTxPrColor`. Removed in 1.0. */
+export const getTxPrColor = DrawingMlNs.getTxPrColor;
+/** @deprecated Use `DrawingMl.createSpPr`. Removed in 1.0. */
+export const buildSpPr = DrawingMlNs.createSpPr;
+/** @deprecated Use `DrawingMl.createTxPr`. Removed in 1.0. */
+export const buildTxPr = DrawingMlNs.createTxPr;
+/** @deprecated Use `DrawingMl.setSpPrFill`. Removed in 1.0. */
+export const setSpPrFill = DrawingMlNs.setSpPrFill;
+/** @deprecated Use `DrawingMl.setSpPrLine`. Removed in 1.0. */
+export const setSpPrLine = DrawingMlNs.setSpPrLine;
+
+// The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
+export type { BaseErrorOptions } from "@utils/errors";

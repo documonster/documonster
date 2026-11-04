@@ -91,8 +91,10 @@ describe("parseNumberFromCsv", () => {
       expect(parseNumberFromCsv("abc", ".")).toBeNaN();
     });
 
-    it("returns 0 for empty string (Number behavior)", () => {
-      expect(parseNumberFromCsv("", ".")).toBe(0);
+    // `Number("")` is 0, which this used to return: an empty field holds no number.
+    it("returns NaN for an empty or blank string", () => {
+      expect(parseNumberFromCsv("", ".")).toBeNaN();
+      expect(parseNumberFromCsv("  ", ".")).toBeNaN();
     });
   });
 
@@ -123,8 +125,8 @@ describe("parseNumberFromCsv", () => {
       expect(parseNumberFromCsv("abc", ",")).toBeNaN();
     });
 
-    it("returns 0 for empty string (Number behavior)", () => {
-      expect(parseNumberFromCsv("", ",")).toBe(0);
+    it("returns NaN for an empty or blank string", () => {
+      expect(parseNumberFromCsv("", ",")).toBeNaN();
     });
   });
 

@@ -72,20 +72,53 @@ describe("layoutDocumentFull — header / footer", () => {
     expect(page.footer).toHaveLength(1);
   });
 
-  it("falls back to the first reference when no default is declared", () => {
+  // This used to pin a fallback to whichever reference came first; Word shows
+  // a `first` header only on a `titlePage` first page.
+  it("shows no header when no `default` is declared and the page is not a title page", () => {
     const headerDef: HeaderDef = {
       content: { children: [para("first-page only")] }
     };
     const doc = baseDoc({
       headers: new Map([["rIdH1", headerDef]]),
       sectionProperties: {
-        // Only `first` declared — no `default`. Layout falls back to
-        // the first reference rather than emitting an empty header.
         headers: [{ type: "first", rId: "rIdH1" }]
       }
     });
     const layout = layoutDocumentFull(doc);
-    expect(layout.pages[0].header).toBeDefined();
+    expect(layout.pages[0].header).toBeUndefined();
+  });
+
+  it("leaves a title page without a `first` footer bare, not on the default one", () => {
+    const doc = baseDoc({
+      body: [
+        para("one"),
+        { type: "paragraph", children: [{ content: [{ type: "break", breakType: "page" }] }] },
+        para("two")
+      ],
+      footers: new Map([["rIdF1", { content: { children: [para("footer")] } }]]),
+      sectionProperties: { titlePage: true, footers: [{ type: "default", rId: "rIdF1" }] }
+    });
+    const layout = layoutDocumentFull(doc);
+    expect(layout.pages[0].footer).toBeUndefined();
+    expect(layout.pages[1].footer).toHaveLength(1);
+  });
+
+  it("inherits a header type the section does not name from the previous section", () => {
+    const doc = baseDoc({
+      body: [
+        {
+          type: "paragraph",
+          properties: { sectionProperties: { headers: [{ type: "default", rId: "rIdH1" }] } },
+          children: [{ content: [{ type: "text", text: "one" }] }]
+        },
+        para("two")
+      ],
+      headers: new Map([["rIdH1", { content: { children: [para("header")] } }]]),
+      sectionProperties: {}
+    });
+    const layout = layoutDocumentFull(doc);
+    expect(layout.pages).toHaveLength(2);
+    expect(layout.pages[1].header).toHaveLength(1);
   });
 
   it("omits the header field entirely when section has no header refs", () => {

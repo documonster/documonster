@@ -1049,7 +1049,7 @@ export function discoverSystemFont(): SystemFontCandidate | null {
  * Find a system font for `codePoints`, and return it parsed.
  *
  * This is the single selection rule used by every auto-embed path (the
- * spreadsheet exporter, the Word bridge, and `PdfDocumentBuilder.build()`), so
+ * spreadsheet exporter, the Word bridge, and `PdfDocumentBuilder.toBuffer()`), so
  * they all agree on which font a document ends up with. Candidates that fail to
  * parse are skipped — which is how CFF-flavoured faces such as PingFang are
  * passed over.

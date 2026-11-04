@@ -9,6 +9,8 @@
  * This module provides the canonical implementation to avoid triplication.
  */
 
+import { excelNameKey } from "@utils/name-key";
+
 /**
  * Minimum subset of table snapshot fields required to derive geometry
  * and resolve structured-reference columns.
@@ -90,7 +92,7 @@ export function resolveStructuredRefColumns(
 
   const indices: number[] = [];
   for (const colName of columns) {
-    const idx = table.columns.findIndex(c => c.name.toLowerCase() === colName.toLowerCase());
+    const idx = table.columns.findIndex(c => excelNameKey(c.name) === excelNameKey(colName));
     if (idx === -1) {
       if (mode === "strict") {
         return "error";

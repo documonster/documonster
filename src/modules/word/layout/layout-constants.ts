@@ -10,6 +10,7 @@
  *   - Margins:   1 in on all sides (1440 twips)
  */
 
+import { finalViewRuns } from "@word/query/final-view";
 import type { StyleResolver } from "@word/query/style-resolver";
 import type {
   Paragraph,
@@ -34,10 +35,18 @@ export const DEFAULT_PAGE_MARGIN_TWIPS = 1440;
  * Default body font size in points, for a run whose size no style in its chain
  * declares.
  *
- * Word's own default is 11pt Calibri. Keeping this in one place matters because
- * the paginator, the positioner and the SVG renderer all have to agree on the
- * height of a size-less run: when they disagreed, the page each item was
- * assigned to no longer matched the space it actually occupied.
+ * Keeping this in one place matters because the paginator, the positioner and
+ * the SVG renderer all have to agree on the height of a size-less run: when
+ * they disagreed, the page each item was assigned to no longer matched the
+ * space it actually occupied.
+ *
+ * **This is a fallback, not Word's answer.** A file with no `w:docDefaults`
+ * gets its defaults in Word from the user's Normal template, which differs
+ * between Word versions (Word for Mac 16.114 uses Aptos 12pt, 8pt after,
+ * 1.16 lines), so no fallback can match Word for such a file. It applies
+ * only to such files: a document the library builds states current Word's
+ * new-document defaults and is laid out and written with them
+ * (`withStatedDefaults`).
  */
 export const DEFAULT_FONT_SIZE_PT = 11;
 
@@ -85,14 +94,17 @@ export interface CellMarginsTwips {
 }
 
 /**
- * Word's defaults when a table declares no `w:tblCellMar`: 0.05 inch left and
- * right, nothing top and bottom.
+ * Word's cell margins when neither the cell nor the table — its own
+ * properties or its table style's (the document's default table style, for a
+ * table naming none) — sets any: none at all. Word's own default table style, `Normal Table`, is what
+ * carries the familiar 0.08 inch left and right; a document without one
+ * (`w:default="1"`) gets flush cells (Word for Mac 16.114).
  */
 export const DEFAULT_CELL_MARGINS_TWIPS: CellMarginsTwips = {
   top: 0,
-  right: 108,
+  right: 0,
   bottom: 0,
-  left: 108
+  left: 0
 };
 
 /**
@@ -113,7 +125,9 @@ function marginTwips(width: TableWidth | undefined, fallback: number): number | 
 
 /**
  * Resolve a cell's effective inner margins in twips: the cell's own `w:tcMar`
- * wins, otherwise the table's `w:tblCellMar`, otherwise Word's defaults.
+ * wins, otherwise the table's `w:tblCellMar`, otherwise
+ * {@link DEFAULT_CELL_MARGINS_TWIPS}. `tableProps` are the table's effective
+ * properties (`StyleResolver.tableProperties`), its table style's included.
  */
 export function resolveCellMarginsTwips(
   tableProps: TableProperties | undefined,
@@ -283,6 +297,24 @@ export function layoutRunProperties(
  *
  * Returns equal columns when no usable grid is declared.
  */
+/**
+ * How many grid columns a table spans: its `w:tblGrid`, or the widest row
+ * counted in grid columns (`w:gridBefore`, each cell's `w:gridSpan`,
+ * `w:gridAfter`) when that is wider. A row's cell count is not it — a row of a
+ * three-column span and one cell covers four columns.
+ */
+export function gridColumnCount(table: Table): number {
+  let count = table.columnWidths?.length ?? 0;
+  for (const row of table.rows) {
+    let cols = (row.properties?.gridBefore ?? 0) + (row.properties?.gridAfter ?? 0);
+    for (const cell of row.cells) {
+      cols += Math.max(1, cell.properties?.gridSpan ?? 1);
+    }
+    count = Math.max(count, cols);
+  }
+  return count;
+}
+
 export function resolveColumnWidthsTwips(
   table: Table,
   numCols: number,
@@ -304,6 +336,40 @@ export function resolveColumnWidthsTwips(
 }
 
 /**
+ * The width, in twips, a table nested in a cell sets out at, or `undefined`
+ * when the cell decides it (an auto-fit table in an auto-fit table, sized by
+ * its content).
+ *
+ * A nested table is not stretched or shrunk to the cell holding it. Its
+ * preferred width (`w:tblW`, ECMA-376 17.4.64) wins where one is declared — a
+ * percentage of the cell's content width; otherwise a fixed-layout table
+ * (`w:tblLayout`, 17.4.53) keeps its grid, and so does an auto-fit one inside
+ * a fixed-layout table. The grid is scaled to the declared width. Word for Mac
+ * 16.114 lays out every case this way, overflowing the cell where the width is
+ * wider (final7 R0–R3c, Re, Rg: 2×2232 → 111.6pt, 2×2340 → 117pt, tblW 3000
+ * over a 2×2000 or 2×3000 grid → 75pt, 2×1000 auto-fit → 50pt, 2×3000 → 150pt).
+ */
+export function nestedTableWidthTwips(
+  properties: TableProperties | undefined,
+  columnWidths: readonly number[] | undefined,
+  cellContentWidthTwips: number,
+  outerFixed: boolean
+): number | undefined {
+  const width = properties?.width;
+  if (width?.type === "dxa" && width.value > 0) {
+    return width.value;
+  }
+  if (width?.type === "pct" && width.value > 0) {
+    return (cellContentWidthTwips * width.value) / 5000;
+  }
+  const grid = columnWidths?.reduce((a, b) => a + b, 0) ?? 0;
+  if (grid > 0 && (properties?.layout === "fixed" || outerFixed)) {
+    return grid;
+  }
+  return undefined;
+}
+
+/**
  * The shortest a table row can be, in points.
  *
  * One line of body text plus the row's own cell margins. The two passes had
@@ -318,4 +384,47 @@ export function minimumRowHeightPt(
 ): number {
   const margins = resolveCellMarginsTwips(tableProperties, undefined);
   return defaultFontSizePt * LINE_HEIGHT_FACTOR + (margins.top + margins.bottom) / 20;
+}
+
+/**
+ * Whether block `index` of a cell is the empty paragraph that closes it after a
+ * nested table. A cell must end with a paragraph, so one follows every nested
+ * table at the end of a cell; Word for Mac 16.114 gives it no height whatever
+ * the nested table's layout and whether or not it fits the cell (final5
+ * M2-noimg: a 97.5pt row, 121.4pt with the paragraph laid out as a line; final7
+ * R0–R3c, Re, Rg, Qae, Qag: fixed and auto-fit, fitting and overflowing).
+ */
+export function isCellEndAfterNestedTable(
+  content: readonly (Paragraph | Table)[],
+  index: number
+): boolean {
+  const block = content[index];
+  return (
+    index === content.length - 1 &&
+    index > 0 &&
+    content[index - 1]!.type === "table" &&
+    block?.type === "paragraph" &&
+    [...finalViewRuns(block.children)].every(run => run.content.length === 0)
+  );
+}
+
+/**
+ * Rotated cell text (`w:textDirection` `tbRl`, `btLr`, …), as Word for Mac 16 sets
+ * it. An auto-fit rotated column is as wide as its paragraphs are high, each laid
+ * out on one line ({@link ROTATED_LINE_WIDTH_PT} wide), plus
+ * {@link ROTATED_PARAGRAPH_EXTRA_PT} per paragraph and
+ * {@link ROTATED_COLUMN_EXTRA_PT} once (pages2 P21: one to five 11pt paragraphs
+ * are 28.9, 74.8 and 120.7pt of text room — 22.95pt each, 22.49 laid out — a 20pt
+ * line 40.9pt, a single-spaced line without spacing 20.0pt). Fitted to Word's
+ * measurements; the reason for the residue is not known.
+ */
+export const ROTATED_LINE_WIDTH_PT = 1e6;
+export const ROTATED_PARAGRAPH_EXTRA_PT = 0.46;
+export const ROTATED_COLUMN_EXTRA_PT = 5.95;
+
+/** Whether a cell's text runs top to bottom or bottom to top. */
+export function isRotatedTextDirection(direction: string | undefined): boolean {
+  return (
+    direction === "tbRl" || direction === "btLr" || direction === "tbRlV" || direction === "tbLrV"
+  );
 }

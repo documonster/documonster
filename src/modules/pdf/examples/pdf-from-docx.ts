@@ -2,10 +2,11 @@
  * Example: Pdf.fromDocx — Render a Word Document to PDF
  *
  * `Pdf.fromDocx(doc, options?)` converts a `DocxDocument` (the value
- * returned by `Document.build(...)`) to PDF bytes. Options come from
- * `DocxToPdfOptions` (see pdf/word-bridge.ts): pageWidth/pageHeight, the
- * four margins, defaultFont/defaultFontSize, header/footer margins, and an
- * optional chartRenderer.
+ * returned by `Document.create()`) to PDF bytes. Options come from
+ * `DocxToPdfOptions`: pageWidth/pageHeight, `margins`,
+ * defaultFontFamily/defaultFontSize, header/footer margins, an optional
+ * chartRenderer, and the document options every converter takes (metadata,
+ * fixed dates, encryption, fonts).
  *
  * The pdf module is allowed to reach into @word via its bridge layer, so
  * this example builds the document with @word directly.
@@ -38,7 +39,7 @@ const doc = Document.create();
 Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Word → PDF", 1);
 Document.addParagraph(doc, "A plain paragraph rendered through the PDF flow renderer.");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Mixed run: "),
@@ -62,7 +63,7 @@ Document.addTable(
   { headerRow: true, borders: true }
 );
 
-const letterBytes = await Pdf.fromDocx(Document.build(doc));
+const letterBytes = await Pdf.fromDocx(doc);
 const letterPath = path.join(outDir, "from-docx-letter.pdf");
 fs.writeFileSync(letterPath, letterBytes);
 console.log(`Default (US Letter) PDF: ${letterPath} (${letterBytes.length} bytes)`);
@@ -77,16 +78,17 @@ Document.addHeading(a5, "Custom A5 Portrait", 1);
 Document.addParagraph(a5, "This PDF is rendered onto an A5 page (148 × 210 mm).");
 Document.addParagraph(a5, "Lorem ipsum dolor sit amet. ".repeat(40));
 
-const a5Bytes = await Pdf.fromDocx(Document.build(a5), {
+const a5Bytes = await Pdf.fromDocx(a5, {
   // A5 portrait: 148mm × 210mm ≈ 419.5 × 595.3 points
   pageWidth: 419.5,
   pageHeight: 595.3,
-  marginTop: 36,
-  marginBottom: 36,
-  marginLeft: 36,
-  marginRight: 36,
-  defaultFont: "Helvetica",
-  defaultFontSize: 10
+  margins: { top: 36, right: 36, bottom: 36, left: 36 },
+  defaultFontFamily: "Helvetica",
+  defaultFontSize: 10,
+  // Metadata the document's core properties do not give, and a fixed date: the same
+  // document gives the same bytes on every run.
+  keywords: "example, a5",
+  creationDate: new Date("2026-01-01T00:00:00Z")
 });
 const a5Path = path.join(outDir, "from-docx-a5.pdf");
 fs.writeFileSync(a5Path, a5Bytes);
@@ -96,7 +98,7 @@ console.log(`Custom A5 PDF:           ${a5Path} (${a5Bytes.length} bytes)`);
 // 3. Read the default PDF back to confirm the conversion is valid
 // =============================================================================
 
-const read = await Pdf.read(letterBytes);
+const read = await Pdf.extract(letterBytes);
 console.log(
   `\nRead back: ${read.pages.length} page(s), ` +
     `${read.pages[0].width.toFixed(0)} x ${read.pages[0].height.toFixed(0)} pts`

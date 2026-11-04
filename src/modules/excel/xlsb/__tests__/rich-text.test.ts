@@ -123,7 +123,7 @@ describe("a rich string in the shared-string table", () => {
     ]);
     const back = Workbook.create();
     await Workbook.read(back, await Workbook.toBuffer(handle, { format: "xlsb" }));
-    const value = Cell.getValue(Workbook.getWorksheets(back)[0]!, "A1") as {
+    const value = Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1") as {
       richText?: readonly { text: string; font?: { bold?: boolean; italic?: boolean } }[];
     };
     expect(value.richText?.map(run => run.text)).toEqual(["Hello ", "world"]);
@@ -143,7 +143,7 @@ describe("a rich string in the shared-string table", () => {
     const texts = async (format: "xlsx" | "xlsb") => {
       const back = Workbook.create();
       await Workbook.read(back, await Workbook.toBuffer(handle, { format }));
-      const value = Cell.getValue(Workbook.getWorksheets(back)[0]!, "A1") as {
+      const value = Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1") as {
         richText?: readonly { text: string }[];
       };
       return value.richText?.map(run => run.text);

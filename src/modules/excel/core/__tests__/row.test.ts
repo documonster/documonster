@@ -24,7 +24,8 @@ import {
   columnSetDefn,
   getColumn
 } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Row", () => {
@@ -32,7 +33,7 @@ describe("Row", () => {
     const sheet = testUtils.createSheetMock();
     columnSetDefn(getColumn(sheet, 1), { key: "name" });
 
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     expect(row1.number).toBe(1);
     expect(rowHasValues(row1)).not.toBeTruthy();
 
@@ -87,7 +88,7 @@ describe("Row", () => {
     // eachCell should just cover non-null cells
     expect(count).toBe(3);
 
-    const row2 = Worksheet.getRow(sheet, 2);
+    const row2 = getRow(sheet, 2);
     expect(rowDimensions(row2)).toBeNull();
   });
 
@@ -99,7 +100,7 @@ describe("Row", () => {
 
     const now = new Date();
 
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
 
     // set values by contiguous array
     rowSetValues(row1, [5, "Hello, World!", null]);
@@ -136,7 +137,7 @@ describe("Row", () => {
   describe("Splice", () => {
     it("remove only", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
 
       cellSetValue(rowGetCell(row, 2), 2);
       cellSetValue(rowGetCell(row, 3), 3);
@@ -159,7 +160,7 @@ describe("Row", () => {
 
     it("remove to end", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
 
       cellSetValue(rowGetCell(row, 1), 1);
       cellSetValue(rowGetCell(row, 2), 2);
@@ -178,7 +179,7 @@ describe("Row", () => {
 
     it("remove almost to end", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
 
       cellSetValue(rowGetCell(row, 1), 1);
       cellSetValue(rowGetCell(row, 2), 2);
@@ -198,7 +199,7 @@ describe("Row", () => {
 
     it("remove past end", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
 
       cellSetValue(rowGetCell(row, 1), 1);
       cellSetValue(rowGetCell(row, 2), 2);
@@ -220,7 +221,7 @@ describe("Row", () => {
 
     it("remove and insert fewer", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
       rowSetValues(row, [1, 2, 3, 4, 5, 6, 7, 8]);
       rowSplice(row, 4, 3, "four", "five");
       expect(rowValues(row)).toEqual([, 1, 2, 3, "four", "five", 7, 8]);
@@ -228,7 +229,7 @@ describe("Row", () => {
 
     it("remove and insert replacements", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
       rowSetValues(row, [1, 2, 3, 4, 5, 6, 7, 8]);
       rowSplice(row, 4, 3, "four", "five", "six");
       expect(rowValues(row)).toEqual([, 1, 2, 3, "four", "five", "six", 7, 8]);
@@ -236,7 +237,7 @@ describe("Row", () => {
 
     it("remove and insert more", () => {
       const sheet = testUtils.createSheetMock();
-      const row = Worksheet.getRow(sheet, 1);
+      const row = getRow(sheet, 1);
       rowSetValues(row, [1, 2, 3, 4, 5, 6, 7, 8]);
       rowSplice(row, 4, 3, "four", "five", "six", "six and a half");
       expect(rowValues(row)).toEqual([, 1, 2, 3, "four", "five", "six", "six and a half", 7, 8]);
@@ -245,7 +246,7 @@ describe("Row", () => {
 
   it("iterates over cells", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
 
     cellSetValue(rowGetCell(row1, 1), 1);
     cellSetValue(rowGetCell(row1, 2), 2);
@@ -266,7 +267,7 @@ describe("Row", () => {
 
   it("exposes 0-based values helpers", () => {
     const sheet = testUtils.createSheetMock();
-    const row = Worksheet.getRow(sheet, 1);
+    const row = getRow(sheet, 1);
 
     rowSetValues(row, [1, 2, 3]);
     expect(rowValues(row)).toEqual([, 1, 2, 3]);
@@ -276,7 +277,7 @@ describe("Row", () => {
     expect(rowValuesToString(row, "|")).toBe("1|2|3");
 
     // Sparse: only column 2 has a value
-    const row2 = Worksheet.getRow(sheet, 2);
+    const row2 = getRow(sheet, 2);
     cellSetValue(rowGetCell(row2, 2), 42);
     expect(rowValues(row2)).toEqual([, , 42]);
     expect(rowGetValues(row2)).toEqual([, 42]);
@@ -285,7 +286,7 @@ describe("Row", () => {
 
   it("builds a model", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     cellSetValue(rowGetCell(row1, 1), 5);
     cellSetValue(rowGetCell(row1, 2), "Hello, World!");
     cellSetValue(rowGetCell(row1, 4), {
@@ -324,10 +325,10 @@ describe("Row", () => {
       collapsed: false
     });
 
-    const row2 = Worksheet.getRow(sheet, 2);
+    const row2 = getRow(sheet, 2);
     expect(rowGetModel(row2)).toBeNull();
 
-    const row3 = Worksheet.getRow(sheet, 3);
+    const row3 = getRow(sheet, 3);
     cellSetValue(rowGetCell(row3, 1), 5);
     rowSetOutlineLevel(row3, 1);
     expect(rowGetModel(row3)).toEqual({
@@ -346,7 +347,7 @@ describe("Row", () => {
 
   it("builds model with height=0 (auto-height)", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     cellSetValue(rowGetCell(row1, 1), "Hello");
     row1.height! = 0;
 
@@ -358,7 +359,7 @@ describe("Row", () => {
 
   it("preserves height=0 through model setter", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     rowSetModel(row1, {
       cells: [{ address: "A1", type: Enums.ValueType.Number, value: 5 }],
       number: 1,
@@ -372,7 +373,7 @@ describe("Row", () => {
 
   it("preserves customHeight through model round-trip", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     rowSetModel(row1, {
       cells: [{ address: "A1", type: Enums.ValueType.Number, value: 5 }],
       number: 1,
@@ -392,7 +393,7 @@ describe("Row", () => {
 
   it("returns model for height=0 row without cells", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     row1.height! = 0;
 
     const model = rowGetModel(row1);
@@ -403,7 +404,7 @@ describe("Row", () => {
 
   it("clears customHeight when model has no customHeight", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     row1.customHeight = true;
     row1.height! = 30;
 
@@ -422,7 +423,7 @@ describe("Row", () => {
 
   it("builds from model", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
     rowSetModel(row1, {
       cells: [
         { address: "A1", type: Enums.ValueType.Number, value: 5 },
@@ -463,7 +464,7 @@ describe("Row", () => {
 
   it("counts cells", () => {
     const sheet = testUtils.createSheetMock();
-    const row1 = Worksheet.getRow(sheet, 1);
+    const row1 = getRow(sheet, 1);
 
     cellSetValue(rowGetCell(row1, 1), "one");
     cellSetValue(rowGetCell(row1, 2), "two");
@@ -487,7 +488,7 @@ describe("Row", () => {
       Cell.setValue(ws, "A1", "A");
       Cell.setValue(ws, "B1", "B");
 
-      rowSetBorder(Worksheet.getRow(ws, 1), {
+      rowSetBorder(getRow(ws, 1), {
         top: { style: "thin" },
         bottom: { style: "thin" }
       });
@@ -504,7 +505,7 @@ describe("Row", () => {
       Cell.setValue(ws, "A1", "A");
       Cell.setValue(ws, "B1", "B");
 
-      rowSetFont(Worksheet.getRow(ws, 1), { bold: true, size: 12 });
+      rowSetFont(getRow(ws, 1), { bold: true, size: 12 });
 
       Cell.getStyle(ws, "A1").font!.bold = false;
 
@@ -517,12 +518,12 @@ describe("Row", () => {
       const ws = Workbook.addWorksheet(wb, "test");
       Cell.setValue(ws, "A1", "A");
       Cell.setValue(ws, "B1", "B");
-      rowSetFont(Worksheet.getRow(ws, 1), { bold: true, size: 12 });
+      rowSetFont(getRow(ws, 1), { bold: true, size: 12 });
 
       // Reaching a facet without going through `Cell.get*` would rewrite it for
       // every cell in the row. Freezing the snapshot turns that into a throw
       // rather than silent cross-cell corruption.
-      const shared = cellFont(rowGetCell(Worksheet.getRow(ws, 1), 1))!;
+      const shared = cellFont(rowGetCell(getRow(ws, 1), 1))!;
       expect(Object.isFrozen(shared)).toBe(true);
       expect(() => {
         shared.bold = false;

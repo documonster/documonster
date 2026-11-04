@@ -11,9 +11,9 @@
  * @example
  * ```ts
  * let crc = 0xffffffff;
- * crc = crc32Update(crc, chunk1);
- * crc = crc32Update(crc, chunk2);
- * const checksum = crc32Finalize(crc);
+ * crc = Archive.crc32Update(crc, chunk1);
+ * crc = Archive.crc32Update(crc, chunk2);
+ * const checksum = Archive.crc32Finalize(crc);
  * ```
  */
 

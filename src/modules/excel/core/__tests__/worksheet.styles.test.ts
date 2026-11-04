@@ -17,7 +17,8 @@ import {
   getCell,
   getColumn
 } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getRow, findRow } from "@excel/core/worksheet-core";
+import { Cell, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 describe("Worksheet", () => {
@@ -39,11 +40,11 @@ describe("Worksheet", () => {
       Cell.setStyle(ws, "C1", { border: testUtils.styles.borders.doubleRed });
       Cell.setStyle(ws, "C1", { fill: testUtils.styles.fills.redDarkVertical });
 
-      rowSetNumFmt(Worksheet.getRow(ws, 1), testUtils.styles.numFmts.numFmt2);
-      rowSetFont(Worksheet.getRow(ws, 1), testUtils.styles.fonts.comicSansUdB16);
-      rowSetAlignment(Worksheet.getRow(ws, 1), testUtils.styles.namedAlignments.middleCentre);
-      rowSetBorder(Worksheet.getRow(ws, 1), testUtils.styles.borders.thin);
-      rowSetFill(Worksheet.getRow(ws, 1), testUtils.styles.fills.redGreenDarkTrellis);
+      rowSetNumFmt(getRow(ws, 1), testUtils.styles.numFmts.numFmt2);
+      rowSetFont(getRow(ws, 1), testUtils.styles.fonts.comicSansUdB16);
+      rowSetAlignment(getRow(ws, 1), testUtils.styles.namedAlignments.middleCentre);
+      rowSetBorder(getRow(ws, 1), testUtils.styles.borders.thin);
+      rowSetFill(getRow(ws, 1), testUtils.styles.fills.redGreenDarkTrellis);
 
       // Existing cell A1 should be overwritten by row style
       expect(Cell.getStyle(ws, "A1").numFmt).toEqual(testUtils.styles.numFmts.numFmt2);
@@ -109,7 +110,7 @@ describe("Worksheet", () => {
       expect(Cell.getStyle(ws, "A1").fill).toEqual(testUtils.styles.fills.redGreenDarkTrellis);
 
       // Row 2 didn't exist, should not be materialized
-      expect(Worksheet.findRow(ws, 2)).toBeUndefined();
+      expect(findRow(ws, 2)).toBeUndefined();
 
       // Existing cell A3 should be overwritten
       expect(Cell.getStyle(ws, "A3").numFmt).toEqual(testUtils.styles.numFmts.numFmt2);
@@ -228,7 +229,7 @@ describe("Worksheet", () => {
       Cell.setValue(ws, "A1", "row 1");
       Cell.setValue(ws, "A2", "row 2");
 
-      rowSetFont(Worksheet.getRow(ws, 1), testUtils.styles.fonts.arialBlackUI14);
+      rowSetFont(getRow(ws, 1), testUtils.styles.fonts.arialBlackUI14);
 
       expect(Cell.getStyle(ws, "A1").font).toEqual(testUtils.styles.fonts.arialBlackUI14);
       // Row 2 should NOT have the font
@@ -289,7 +290,7 @@ describe("Worksheet", () => {
       const ws = Workbook.addWorksheet(wb, "test");
 
       Cell.setValue(ws, "A1", 1.5);
-      rowSetNumFmt(Worksheet.getRow(ws, 1), "0.000");
+      rowSetNumFmt(getRow(ws, 1), "0.000");
 
       const buffer = await Workbook.toBuffer(wb);
       const wb2 = Workbook.create();

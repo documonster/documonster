@@ -16,6 +16,7 @@ import { createDefinedNames, definedNamesModel } from "@excel/core/defined-names
 import { defaultFormulaSyntaxProbe, loadDefinedNamesModel } from "@excel/core/model-load";
 import { getDefinedNames } from "@excel/core/workbook";
 import { Workbook } from "@excel/index";
+import { excelNameKey } from "@utils/name-key";
 import { describe, expect, it } from "vitest";
 
 describe("DefinedNames — default-probe classification (no install step)", () => {
@@ -23,9 +24,9 @@ describe("DefinedNames — default-probe classification (no install step)", () =
     const dn = createDefinedNames();
     loadDefinedNamesModel(dn, [{ name: "Single", ranges: [], rawText: "Sheet1!$A$1" }]);
 
-    expect(dn.matrixMap["Single"]).toBeDefined();
-    expect(dn.formulaMap["Single"]).toBeUndefined();
-    expect(dn.opaqueMap["Single"]).toBeUndefined();
+    expect(dn.matrixMap[excelNameKey("Single")]).toBeDefined();
+    expect(dn.formulaMap[excelNameKey("Single")]).toBeUndefined();
+    expect(dn.opaqueMap[excelNameKey("Single")]).toBeUndefined();
   });
 
   it("classifies comma-separated range union as reference", () => {
@@ -34,9 +35,9 @@ describe("DefinedNames — default-probe classification (no install step)", () =
       { name: "Multi", ranges: [], rawText: "Sheet1!$A$1:$B$2,Sheet1!$D$1:$E$2" }
     ]);
 
-    expect(dn.matrixMap["Multi"]).toBeDefined();
-    expect(dn.formulaMap["Multi"]).toBeUndefined();
-    expect(dn.opaqueMap["Multi"]).toBeUndefined();
+    expect(dn.matrixMap[excelNameKey("Multi")]).toBeDefined();
+    expect(dn.formulaMap[excelNameKey("Multi")]).toBeUndefined();
+    expect(dn.opaqueMap[excelNameKey("Multi")]).toBeUndefined();
   });
 
   it("classifies parseable OFFSET(...) as formula out of the box", () => {
@@ -45,25 +46,25 @@ describe("DefinedNames — default-probe classification (no install step)", () =
       { name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }
     ]);
 
-    expect(dn.formulaMap["Dyn"]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
-    expect(dn.opaqueMap["Dyn"]).toBeUndefined();
+    expect(dn.formulaMap[excelNameKey("Dyn")]).toBe("OFFSET(Sheet1!$A$1,0,0,3,1)");
+    expect(dn.opaqueMap[excelNameKey("Dyn")]).toBeUndefined();
   });
 
   it("classifies unparseable text as opaque (not a formula expression)", () => {
     const dn = createDefinedNames();
     loadDefinedNamesModel(dn, [{ name: "Junk", ranges: [], rawText: "@@bad@@" }]);
 
-    expect(dn.opaqueMap["Junk"]).toBeDefined();
-    expect(dn.opaqueMap["Junk"].rawText).toBe("@@bad@@");
-    expect(dn.formulaMap["Junk"]).toBeUndefined();
+    expect(dn.opaqueMap[excelNameKey("Junk")]).toBeDefined();
+    expect(dn.opaqueMap[excelNameKey("Junk")].rawText).toBe("@@bad@@");
+    expect(dn.formulaMap[excelNameKey("Junk")]).toBeUndefined();
   });
 
   it("classifies malformed paren-containing text as opaque", () => {
     const dn = createDefinedNames();
     loadDefinedNamesModel(dn, [{ name: "Bad", ranges: [], rawText: "OFFSET(???" }]);
 
-    expect(dn.opaqueMap["Bad"]).toBeDefined();
-    expect(dn.formulaMap["Bad"]).toBeUndefined();
+    expect(dn.opaqueMap[excelNameKey("Bad")]).toBeDefined();
+    expect(dn.formulaMap[excelNameKey("Bad")]).toBeUndefined();
   });
 
   it("opaque classification preserves rawText through a model round-trip", () => {
@@ -90,8 +91,8 @@ describe("DefinedNames — default-probe classification (no install step)", () =
       { name: "Dyn", ranges: [], rawText: "OFFSET(Sheet1!$A$1,0,0,3,1)" }
     ]);
 
-    expect(dn.opaqueMap["Dyn"]).toBeDefined();
-    expect(dn.formulaMap["Dyn"]).toBeUndefined();
+    expect(dn.opaqueMap[excelNameKey("Dyn")]).toBeDefined();
+    expect(dn.formulaMap[excelNameKey("Dyn")]).toBeUndefined();
   });
 
   it("the exported defaultFormulaSyntaxProbe reports parseability", () => {
@@ -109,8 +110,8 @@ describe("DefinedNames — default-probe classification (no install step)", () =
     ]);
 
     // Custom probe rejects, so it stays opaque rather than formula.
-    expect(getDefinedNames(wb).opaqueMap["Dyn"]).toBeDefined();
-    expect(getDefinedNames(wb).formulaMap["Dyn"]).toBeUndefined();
+    expect(getDefinedNames(wb).opaqueMap[excelNameKey("Dyn")]).toBeDefined();
+    expect(getDefinedNames(wb).formulaMap[excelNameKey("Dyn")]).toBeUndefined();
   });
 
   it("default probe (no option) classifies SUM(...) as formula", () => {
@@ -119,7 +120,7 @@ describe("DefinedNames — default-probe classification (no install step)", () =
       { name: "Dyn", ranges: [], rawText: "SUM(Sheet1!$A$1:$A$3)" }
     ]);
 
-    expect(getDefinedNames(wb).formulaMap["Dyn"]).toBe("SUM(Sheet1!$A$1:$A$3)");
-    expect(getDefinedNames(wb).opaqueMap["Dyn"]).toBeUndefined();
+    expect(getDefinedNames(wb).formulaMap[excelNameKey("Dyn")]).toBe("SUM(Sheet1!$A$1:$A$3)");
+    expect(getDefinedNames(wb).opaqueMap[excelNameKey("Dyn")]).toBeUndefined();
   });
 });

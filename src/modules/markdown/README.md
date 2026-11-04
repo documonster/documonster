@@ -20,7 +20,7 @@ import { Markdown } from "documonster/markdown";
 - **CJK/Emoji Width** — Built-in display width calculation for proper column alignment
 - **Multiline Cells** — `<br>` tag support for newlines within cells
 - **Multi-Table** — Extract all tables from a Markdown document with `Markdown.parseAll`
-- **Workbook Integration** — `readMarkdown(workbook, input)` / `writeMarkdown(workbook)` from `documonster/excel/markdown` for Excel↔Markdown
+- **Workbook Integration** — `ExcelMarkdown.read(input)` / `ExcelMarkdown.format(workbook)` from `documonster/excel/markdown` for Excel↔Markdown
 
 ---
 
@@ -77,32 +77,32 @@ Markdown.format(["Name", "Age", "Active"], [["Alice", 30, true]]);
 
 ### Workbook Integration
 
+`ExcelMarkdown.read` returns a new workbook — the first table, or every table with `{ tables: "all" }` — from Markdown
+text or its UTF-8 bytes (what `toBuffer` produces); `ExcelMarkdown.addWorksheet` / `ExcelMarkdown.addWorksheets` add
+to one you already have and return what they added.
+
 ```typescript
-import { Workbook, Cell } from "documonster/excel";
-import {
-  readMarkdown,
-  writeMarkdown,
-  readMarkdownAll,
-  readMarkdownFile,
-  writeMarkdownFile
-} from "documonster/excel/markdown";
+import { Cell, Workbook } from "documonster/excel";
+import { ExcelMarkdown } from "documonster/excel/markdown";
 
-const workbook = Workbook.create();
-
-// Read Markdown → Worksheet
-const ws = readMarkdown(workbook, "| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+// Read Markdown → a new workbook
+const workbook = ExcelMarkdown.read("| Name | Age |\n| --- | --- |\n| Alice | 30 |");
+const ws = Workbook.listWorksheets(workbook)[0];
 console.log(Cell.getValue(ws, "A2")); // "Alice"
 
 // Worksheet → Markdown
-const markdownText = writeMarkdown(workbook);
+const markdownText = ExcelMarkdown.format(workbook);
 
-// Read all tables from a document
-const sheets = readMarkdownAll(workbook, markdownDoc, { sheetName: "Table" });
+// Read all tables from a document into a new workbook
+const tables = ExcelMarkdown.read(markdownDoc, { sheetName: "Table", tables: "all" });
 // Creates "Table", "Table_2", "Table_3", ...
 
+// Add all tables to an existing workbook
+const sheets = ExcelMarkdown.addWorksheets(workbook, markdownDoc, { sheetName: "Table" });
+
 // File I/O (Node.js only)
-await readMarkdownFile(workbook, "data.md");
-await writeMarkdownFile(workbook, "output.md");
+const fromFile = await ExcelMarkdown.readFile("data.md");
+await ExcelMarkdown.writeFile(workbook, "output.md");
 ```
 
 ---
@@ -186,7 +186,7 @@ interface MarkdownColumnConfig {
 
 ## Multiline Cells
 
-Newlines in cell content are converted to `<br>` tags during formatting, and can be converted back during parsing with `convertBr: true`.
+Newlines in cell content are converted to `<br>` tags during formatting, and can be converted back during parsing with `convertBr: true`. A cell that holds the text `<br>` is written as `\<br>`, which parsing reads back as `<br>` rather than a newline, so `Markdown.parse(Markdown.format(h, rows), { convertBr: true })` returns the cells as they were (apart from the trimming GFM does). Tables inside fenced or indented code blocks are not parsed — GFM renders them as code.
 
 ```typescript
 // Format: newlines become <br>
@@ -235,23 +235,25 @@ try {
 
 ## Workbook Methods
 
-| Method                                | Platform | Description                      |
-| ------------------------------------- | -------- | -------------------------------- |
-| `readMarkdown(input, options?)`       | All      | Parse Markdown table → Worksheet |
-| `readMarkdownAll(input, options?)`    | All      | Parse all tables → Worksheet[]   |
-| `writeMarkdown(options?)`             | All      | Worksheet → Markdown string      |
-| `writeMarkdownBuffer(options?)`       | All      | Worksheet → Uint8Array (UTF-8)   |
-| `readMarkdownFile(path, options?)`    | Node.js  | Read from file                   |
-| `readMarkdownAllFile(path, options?)` | Node.js  | Read all tables from file        |
-| `writeMarkdownFile(path, options?)`   | Node.js  | Write to file                    |
+| Method                                             | Platform | Description                                                                                    |
+| -------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `ExcelMarkdown.read(input, options?)`              | All      | First table (`tables: "all"`: every table, one sheet each) → new Workbook; text or UTF-8 bytes |
+| `ExcelMarkdown.addWorksheet(wb, input, options?)`  | All      | First table → new Worksheet on `wb`                                                            |
+| `ExcelMarkdown.addWorksheets(wb, input, options?)` | All      | All tables → Worksheet[] on `wb`                                                               |
+| `ExcelMarkdown.format(wb, options?)`               | All      | Worksheet → Markdown string                                                                    |
+| `ExcelMarkdown.toBuffer(wb, options?)`             | All      | Worksheet → Promise<Uint8Array> (UTF-8)                                                        |
+| `ExcelMarkdown.toBufferSync(wb, options?)`         | All      | Worksheet → Uint8Array (UTF-8), synchronous                                                    |
+| `ExcelMarkdown.readFile(path, options?)`           | Node.js  | A file's first table (or every one) → new Workbook                                             |
+| `ExcelMarkdown.writeFile(wb, path, options?)`      | Node.js  | Write to file                                                                                  |
 
 **Workbook Options (`MarkdownOptions`)** extends both `MarkdownParseOptions` and `MarkdownFormatOptions`, plus:
 
-| Option             | Type                         | Description                                            |
-| ------------------ | ---------------------------- | ------------------------------------------------------ |
-| `sheetName`        | `string`                     | Worksheet name (for `readMarkdownAll`: used as prefix) |
-| `sheetId`          | `number`                     | Worksheet ID to write                                  |
-| `map`              | `(value, column) => unknown` | Custom value mapper for parsing                        |
-| `dateFormat`       | `string`                     | Date format for writing                                |
-| `dateUTC`          | `boolean`                    | Use UTC for dates                                      |
-| `includeEmptyRows` | `boolean`                    | Include empty rows in output                           |
+| Option             | Type                      | Description                                                                                     |
+| ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `sheetName`        | `string`                  | Worksheet name (for `tables: "all"` / `addWorksheets`: used as prefix)                          |
+| `tables`           | `"first" \| "all"`        | Which tables `read` / `readFile` import (default `"first"`)                                     |
+| `sheetId`          | `number`                  | Worksheet ID to write                                                                           |
+| `map`              | `(text, column) => value` | Custom value mapper for parsing: the cell's text and 0-based column in, a cell value out        |
+| `dateFormat`       | `string`                  | Date format for writing (default: ISO 8601 in UTC, `…Z`)                                        |
+| `dateUTC`          | `boolean`                 | Write dates from their UTC fields, as Excel shows them (default `true`; `false` for local time) |
+| `includeEmptyRows` | `boolean`                 | Include empty rows in output                                                                    |

@@ -35,19 +35,21 @@
  */
 import type { TableColumnProperties, TableStyleProperties } from "@excel/types";
 import { encodeRange as encodeReference } from "@excel/utils/address";
+import { toFileFormula } from "@excel/utils/future-functions";
 import {
   encodeBiffRecords,
   encodeNullableWideString,
   encodeRange,
   readNullableWideString,
-  readRange,
+  readSheetRange,
   readWideString,
   tryDecodeRange,
-  type BiffRange
+  type BiffRange,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import { encodeTableStyleClient } from "@excel/xlsb/table-style";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** `ListType`, MS-XLSB 2.5.89. Only a standard table is written. */
 const LTRANGE = 0x00000000;
@@ -106,7 +108,14 @@ export interface SheetTable {
 }
 
 /** Serialise a whole `xl/tables/table{N}.bin`. */
-export function encodeTablePart(table: SheetTable): Uint8Array | undefined {
+export function encodeTablePart(
+  table: SheetTable,
+  /**
+   * A calculated column's formula as the `CellParsedFormula` `BrtListCCFmla` carries, or `undefined` when it cannot
+   * be encoded (the caller reports it). Without it no calculated column formula is written.
+   */
+  calculatedColumnFormula?: (text: string, column: string) => Uint8Array | undefined
+): Uint8Array | undefined {
   const range = tryDecodeRange(table.ref);
   if (range === undefined || table.columns.length === 0) {
     // A table with no range or no columns is not a table. Returning rather than throwing lets the
@@ -125,10 +134,21 @@ export function encodeTablePart(table: SheetTable): Uint8Array | undefined {
     record("BrtBeginListCols", new BinaryWriter().writeUint32(table.columns.length).toUint8Array())
   );
   table.columns.forEach((column, index) => {
-    records.push(
-      record("BrtBeginListCol", encodeListColumn(column, index + 1)),
-      record("BrtEndListCol")
-    );
+    records.push(record("BrtBeginListCol", encodeListColumn(column, index + 1)));
+    // The calculated column's formula, inside the column's scope as Excel writes it: `fArray` clear, then the
+    // formula. Excel refuses a `calculatedColumnFormula` that does not name its table, so the text goes through
+    // `toFileFormula` with this table's name first.
+    const formula =
+      column.calculatedColumnFormula === undefined || calculatedColumnFormula === undefined
+        ? undefined
+        : calculatedColumnFormula(
+            toFileFormula(column.calculatedColumnFormula, { table: table.name }),
+            column.name
+          );
+    if (formula !== undefined) {
+      records.push(record("BrtListCCFmla", concatUint8Arrays([Uint8Array.of(0x00), formula])));
+    }
+    records.push(record("BrtEndListCol"));
   });
   records.push(record("BrtEndListCols"));
   // **The style, last inside the collection.** Without it a table is drawn unstyled — the banding and the
@@ -153,7 +173,12 @@ export function readTablePart(
   bytes: Uint8Array,
   part: string,
   records: (bytes: Uint8Array, part: string) => Iterable<{ id: number; payload: Uint8Array }>,
-  nameOf: (id: number) => string | undefined
+  nameOf: (id: number) => string | undefined,
+  /**
+   * Formula text from a `BrtListCCFmla`'s `rgce` and `rgbExtra`, or `undefined` when it does not decode. Without it the
+   * calculated column formulas are not read.
+   */
+  formulaText?: (rgce: Uint8Array, extra: Uint8Array) => string | undefined
 ): SheetTable | undefined {
   let header: Omit<SheetTable, "columns"> | undefined;
   const columns: TableColumnProperties[] = [];
@@ -169,7 +194,7 @@ export function readTablePart(
       // The filter range, which is not the table's own range — see `autoFilterRange`. Recovering it means a
       // re-write keeps the range the file had rather than re-deriving one that may differ.
       autoFilterRef = safely(() =>
-        rangeReference(readRange(new BinaryReader(entry.payload, 0, part)))
+        rangeReference(readSheetRange(new XlsbReader(entry.payload, 0, part), "BrtBeginAFilter"))
       );
       continue;
     }
@@ -181,6 +206,22 @@ export function readTablePart(
       const column = safely(() => readListColumn(entry.payload, part));
       if (column !== undefined) {
         columns.push(column);
+      }
+      continue;
+    }
+    if (name === "BrtListCCFmla" && formulaText !== undefined && columns.length > 0) {
+      const text = safely(() => {
+        const reader = new XlsbReader(entry.payload, 0, part);
+        reader.readUint8(); // fArray and reserved bits
+        const rgce = reader.readBytes(reader.readUint32());
+        const extra = reader.readBytes(reader.readUint32());
+        return formulaText(rgce, extra);
+      });
+      if (text !== undefined) {
+        columns[columns.length - 1] = {
+          ...columns[columns.length - 1]!,
+          calculatedColumnFormula: text
+        };
       }
     }
   }
@@ -249,8 +290,8 @@ function encodeListHeader(table: SheetTable, range: BiffRange): Uint8Array {
 }
 
 function readListHeader(payload: Uint8Array, part: string): Omit<SheetTable, "columns"> {
-  const reader = new BinaryReader(payload, 0, part);
-  const range = readRange(reader);
+  const reader = new XlsbReader(payload, 0, part);
+  const range = readSheetRange(reader, "BrtBeginList");
   reader.readUint32(); // lt
   const id = reader.readUint32();
   const headerRow = reader.readUint32() !== 0;
@@ -305,7 +346,7 @@ function encodeListColumn(column: TableColumnProperties, id: number): Uint8Array
 }
 
 function readListColumn(payload: Uint8Array, part: string): TableColumnProperties {
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   reader.readUint32(); // idField
   const totals = reader.readUint32();
   reader.readUint32(); // nDxfHdr
@@ -357,7 +398,7 @@ const DEFAULT_TABLE_STYLE = "TableStyleMedium2";
 
 /** `BrtTableStyleClient` back into the model's style shape. */
 function readTableStyleClient(payload: Uint8Array, part: string): TableStyleProperties {
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const flags = reader.readUint16();
   const theme = readWideString(reader, part);
   return {

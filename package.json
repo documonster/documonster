@@ -320,6 +320,7 @@
     "verify:doc-examples": "node scripts/verify-doc-examples.ts",
     "verify:doc-links": "node scripts/verify-doc-links.ts",
     "verify:examples": "node scripts/run-examples.ts",
+    "verify:compat": "node scripts/verify-compat.ts",
     "verify:install": "node scripts/verify-installed-package.cjs",
     "verify:layers": "node scripts/verify-layers.ts",
     "verify:libreoffice": "node --import @oxc-node/core/register scripts/verify-libreoffice.ts",

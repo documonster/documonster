@@ -24,7 +24,9 @@ import { build as rolldownBuild } from "rolldown";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8"));
 const PKG_NAME: string = PKG.name;
-const TMP_DIR = path.join(ROOT, "tmp");
+// A directory of its own: `tmp/` also holds example output and anything else a developer keeps there,
+// and this script deletes its working directory before and after every run.
+const TMP_DIR = path.join(ROOT, "tmp", "treeshake-verify");
 
 /**
  * The formula-engine module trees that must never be dragged in by a
@@ -145,6 +147,15 @@ function exclude(self: string, allowed: string[]): string[] {
  * Generate a full-coverage, entry-chunk-isolated scenario for one namespace.
  * `allowed` = lower-layer module trees this namespace may legitimately pull.
  */
+/**
+ * An excel namespace whose structural edits rewrite references: it reaches the formula *tokenizer* (and the error
+ * type it throws), and must still never reach the evaluator — that stays behind `documonster/excel/formula`.
+ */
+function structuralNs(nsName: string, platform?: "browser" | "node"): Scenario {
+  const scenario = ns("excel", nsName, ["modules/formula/"], platform);
+  return { ...scenario, mustNotInclude: [...scenario.mustNotInclude, ...FORMULA_ENGINE_MODULES] };
+}
+
 function ns(
   mod: string,
   nsName: string,
@@ -169,7 +180,7 @@ function ns(
 
 /**
  * `Chart` is the one excel namespace that legitimately reaches `archive/`:
- * `Chart.toPNG` encodes a PNG, a PNG's IDAT *is* a zlib stream, and its chunks
+ * `Chart.toPng` encodes a PNG, a PNG's IDAT *is* a zlib stream, and its chunks
  * are CRC32-checked — so the shared encoder (`@archive/png`) pulls
  * `archive/compression/{compress,crc32}`. This used to come out archive-free
  * only because the chart renderer carried a private encoder that emitted
@@ -180,7 +191,7 @@ function ns(
  * Only the primitives are allowed. Everything built on top of them — ZIP, TAR,
  * the archive surface — is still asserted absent, as is every other module
  * tree. A consumer that never renders keeps paying nothing: the
- * `Chart.add` / `Workbook.create` scenarios below prove the create path drops
+ * `Chart.place` / `Workbook.create` scenarios below prove the create path drops
  * the renderers, and with them the encoder.
  *
  * It is also the one namespace that eagerly reaches `draw/`: the renderers draw
@@ -202,9 +213,13 @@ function chartNs(platform?: "browser" | "node"): Scenario {
     // directory it sits beside: the ZIP/TAR containers stay asserted absent.
     // `archive/core/defaults` is where `compression/compress` reads DEFAULT_DEFLATE_LEVEL from, so it
     // travels with the primitives. Named as precisely as they are.
+    // `archive/core/errors` is the typed error those primitives and the encoder throw for a bad
+    // argument or a failed codec (`ArchiveError`, `ArchiveLimitError`) — an error a public function
+    // throws travels with it.
     allowModules: [
       "modules/archive/compression/",
       "modules/archive/core/defaults.",
+      "modules/archive/core/errors.",
       "modules/archive/png."
     ],
     platform,
@@ -245,6 +260,18 @@ function streamNs(platform?: "browser" | "node"): Scenario {
     lazySplit: true
   };
 }
+
+/**
+ * The Office file encryption Word and Excel share (`archive/office-crypto/`, the CFB container in `archive/cfb/cfb`,
+ * and Word's wrappers over them). A read or write reaches it through `import()` only when a password is involved —
+ * the readers carry no more than the signature test in `archive/cfb/signature` — so a consumer that never encrypts
+ * must not load it eagerly.
+ */
+const OFFICE_ENCRYPTION = [
+  "modules/archive/office-crypto/",
+  "modules/archive/cfb/cfb.js",
+  "modules/word/security/encryption.js"
+];
 
 /**
  * What a write-only XLSX export must not load eagerly (issue #241). Each is behind an `import()` that only
@@ -289,8 +316,62 @@ const WRITE_ONLY_FORBIDDEN = [
   "modules/excel/core/worksheet-load.js",
   "modules/excel/chart/chart-handle.js",
   "modules/excel/core/form-control.js",
-  "modules/formula/"
+  "modules/formula/",
+  // The encryption a `{ password }` write loads.
+  ...OFFICE_ENCRYPTION
 ];
+
+/** Reading and writing workbooks and documents without a password loads no encryption code. */
+function officeEncryptionScenarios(): Scenario[] {
+  const entries = [
+    {
+      label: "excel: Workbook.read",
+      from: "excel",
+      imports: ["Workbook"],
+      use: "console.log(Workbook.read)"
+    },
+    {
+      label: "excel: Workbook.readFile + writeFile",
+      from: "excel",
+      imports: ["Workbook"],
+      use: "console.log(Workbook.readFile, Workbook.writeFile)"
+    },
+    {
+      label: "excel: Stream",
+      from: "excel",
+      imports: ["Stream"],
+      use: "console.log(Stream.WorkbookReader)"
+    },
+    {
+      label: "word: Io.read + Io.toBuffer",
+      from: "word",
+      imports: ["Io"],
+      use: "console.log(Io.read, Io.toBuffer)"
+    },
+    {
+      label: "word: Streaming",
+      from: "word",
+      imports: ["Streaming"],
+      use: "console.log(Streaming.createReader)"
+    }
+  ];
+  return entries.flatMap(({ label, from, imports, use }) =>
+    // File-path IO is Node-only, so it has no browser scenario.
+    (label.includes("readFile") ? (["node"] as const) : (["node", "browser"] as const)).map(
+      (platform): Scenario => ({
+        name: `${platform === "browser" ? "browser " : ""}/${label} (no Office encryption until a password is given)`,
+        importFrom: `${PKG_NAME}/${from}`,
+        imports,
+        useExpr: use,
+        mustNotInclude: OFFICE_ENCRYPTION,
+        platform,
+        lazySplit: true,
+        // A single-file bundle inlines what `import()` loads.
+        excludeBundlers: ["esbuild"]
+      })
+    )
+  );
+}
 
 /** The reproducer from issue #241, as its reporter wrote it. */
 const ISSUE_241_REPRO = `
@@ -328,6 +409,9 @@ function writeOnlyScenarios(): Scenario[] {
       imports,
       useExpr,
       mustNotInclude: WRITE_ONLY_FORBIDDEN,
+      // Data, not the engine: the writer spells a future function's `_xlfn.` prefix from it (`toFileFormula`). It
+      // sat in `excel/xlsb/formula/` until the evaluator needed its operand classes too.
+      allowModules: ["modules/formula/syntax/function-table."],
       platform,
       lazySplit: true,
       excludeBundlers: ["esbuild"]
@@ -344,9 +428,9 @@ const scenarios: Scenario[] = [
   ns("excel", "Address", []),
   ns("excel", "Anchor", []),
   ns("excel", "Cell", []),
-  chartNs(), // xml/encode + the draw engine; DEFLATE+CRC32 for Chart.toPNG
+  chartNs(), // xml/encode + the draw engine; DEFLATE+CRC32 for Chart.toPng
   ns("excel", "Chartsheet", []),
-  ns("excel", "Column", []),
+  structuralNs("Column"), // structural edits rewrite references with the formula tokenizer
   ns("excel", "DataValidation", []),
   ns("excel", "DefinedNames", ["modules/formula/"]), // named ranges may hold formulas
   ns("excel", "Form", []),
@@ -354,7 +438,7 @@ const scenarios: Scenario[] = [
   ns("excel", "Note", []),
   ns("excel", "Pivot", []),
   ns("excel", "Range", []),
-  ns("excel", "Row", []),
+  structuralNs("Row"), // structural edits rewrite references with the formula tokenizer
   ns("excel", "Sparkline", []),
   streamNs(), // zip + xml writer/sax + stream primitives; the formula parser for XLSB Ptg
   ns("excel", "Table", []),
@@ -366,10 +450,10 @@ const scenarios: Scenario[] = [
     "modules/stream/",
     "modules/formula/"
   ]),
-  ns("excel", "Worksheet", []),
+  structuralNs("Worksheet"), // structural edits rewrite references with the formula tokenizer
 
   // ===========================================================================
-  // /word subpath — ALL 19 namespaces. word may reach formula / archive / xml /
+  // /word subpath — every namespace. word may reach formula / archive / xml /
   // csv / markdown / stream, but NEVER pdf or excel (excel-bridge is lazy).
   // ===========================================================================
   ns("word", "Build", ["modules/xml/"]), // xml/encode for content XML
@@ -383,12 +467,20 @@ const scenarios: Scenario[] = [
   ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], undefined, ["esbuild"]), // docx read/write
   ns("word", "Layout", ["modules/xml/"]), // xml/encode
   ns("word", "Ole", ["modules/xml/"]), // xml/encode
+  // Byte-level .docx operations (part edits, template fill/patch) read and write the package, so
+  // they share Io's allowance — including Io's esbuild exclusion, via document-io.
+  ns("word", "Package", ["modules/archive/", "modules/xml/", "modules/stream/"], undefined, [
+    "esbuild"
+  ]),
   ns("word", "Query", ["modules/xml/"]), // parses docx content (dom/sax)
   ns("word", "RenderContext", []),
-  ns("word", "Security", []),
+  // The deprecated `Security.encrypt` forward loads the shared Office encryption with `import()`, which a single-file
+  // esbuild bundle inlines — as for `Io` above.
+  ns("word", "Security", [], undefined, ["esbuild"]),
   ns("word", "Streaming", ["modules/archive/", "modules/xml/", "modules/stream/"]),
   ns("word", "Styles", []),
   ns("word", "Template", ["modules/xml/"]), // parses template content (dom/sax)
+  ns("word", "Transform", ["modules/xml/"]), // resolveDataBindings parses custom XML parts
   ns("word", "Theme", []),
   ns("word", "Units", []),
   ns("word", "Validation", []),
@@ -411,22 +503,40 @@ const scenarios: Scenario[] = [
     mustNotInclude: FORMULA_ENGINE_MODULES,
     lazySplit: true
   },
-  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"], undefined, ["esbuild"]), // zlib + PDF metadata XML
+  // `Pdf.createDrawSurface` is the PDF backend for `documonster/draw` and needs its sector
+  // geometry (`sectorToPath`) from `draw/types` — a dependency-free leaf. The scenario below
+  // pins that it is the only part of `draw/` that comes along.
+  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/", "modules/draw/"], undefined, ["esbuild"]), // zlib + PDF metadata XML + draw geometry
+  {
+    name: "/pdf: Pdf reaches draw/types only (no walker, SVG or rasteriser)",
+    importFrom: `${PKG_NAME}/pdf`,
+    imports: ["Pdf"],
+    mustNotInclude: [
+      "draw/render.js",
+      "draw/svg.js",
+      "draw/text.js",
+      "draw/colour.js",
+      "draw/raster/",
+      "modules/mermaid/"
+    ],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
 
   // ===========================================================================
   // /excel member-level — chart CREATE path must NOT pull the SVG/PNG renderers
   // (chart-renderer.js / chart-ex-renderer.js, ~550 KB combined). Guards the
-  // chart-handle → chart-render-ops split: `Chart.add` (create) and
-  // `Workbook.create` must render-free; only `Chart.toSVG`/`toPNG` pull the
+  // chart-handle → chart-render-ops split: `Chart.place` (create) and
+  // `Workbook.create` must render-free; only `Chart.toSvg`/`toPng` pull the
   // renderers. Verified on rspack (file-level DCE) — without the split, rspack
-  // dragged the renderers into every `Chart.add` consumer via the shared
+  // dragged the renderers into every `Chart.place` consumer via the shared
   // chart-handle module.
   // ===========================================================================
   {
-    name: "/excel: Chart.add (create path, no renderers)",
+    name: "/excel: Chart.place (create path, no renderers)",
     importFrom: `${PKG_NAME}/excel`,
     imports: ["Chart"],
-    useExpr: "console.log(Chart.add)",
+    useExpr: "console.log(Chart.place)",
     mustNotInclude: ["chart/chart-renderer.js", "chart/chart-ex-renderer.js"],
     lazySplit: true
   },
@@ -493,7 +603,7 @@ const scenarios: Scenario[] = [
   ),
 
   // ===========================================================================
-  // /pdf member-level — `Pdf.create` must NOT bundle the Type3 Unicode glyph
+  // /pdf member-level — `Pdf.fromTable` must NOT bundle the Type3 Unicode glyph
   // tables (~700 KB of math/arrow/dingbat vector glyphs). They are loaded
   // lazily via dynamic import() inside FontManager, only when a document
   // actually contains non-WinAnsi characters. A plain-text PDF never pays.
@@ -502,10 +612,10 @@ const scenarios: Scenario[] = [
   // inlines it; see `runEsbuild`.
   // ===========================================================================
   {
-    name: "/pdf: Pdf.create (no Type3 glyph tables)",
+    name: "/pdf: Pdf.fromTable (no Type3 glyph tables)",
     importFrom: `${PKG_NAME}/pdf`,
     imports: ["Pdf"],
-    useExpr: "console.log(Pdf.create)",
+    useExpr: "console.log(Pdf.fromTable)",
     mustNotInclude: [
       "pdf/font/type3-glyphs-quality.js",
       "pdf/font/type3-glyphs-fill.js",
@@ -513,6 +623,18 @@ const scenarios: Scenario[] = [
       "pdf/font/type3-glyphs.js",
       "pdf/font/type3-font.js"
     ],
+    lazySplit: true,
+    excludeBundlers: ["esbuild"]
+  },
+  // `Pdf.Editor` and `Pdf.extract` read and edit XMP with the `xml` module's parser (an XMP
+  // packet is XML, and the regex editor before it was wrong four ways). The builder writes its
+  // PDF/A packet as a string and needs no parser, so a builder-only bundle must not carry one.
+  {
+    name: "/pdf: Pdf.Builder (no XML parser)",
+    importFrom: `${PKG_NAME}/pdf`,
+    imports: ["Pdf"],
+    useExpr: "console.log(Pdf.Builder)",
+    mustNotInclude: ["xml/dom.js", "xml/sax.js"],
     lazySplit: true,
     excludeBundlers: ["esbuild"]
   },
@@ -529,6 +651,7 @@ const scenarios: Scenario[] = [
   // re-exported namespace object.
   // ===========================================================================
   ...writeOnlyScenarios(),
+  ...officeEncryptionScenarios(),
 
   // ===========================================================================
   // /formula member-level — the full-table evaluator must NOT be pulled by
@@ -568,7 +691,7 @@ const scenarios: Scenario[] = [
   ns("excel", "Cell", [], "browser"),
   chartNs("browser"),
   ns("excel", "Chartsheet", [], "browser"),
-  ns("excel", "Column", [], "browser"),
+  structuralNs("Column", "browser"),
   ns("excel", "DataValidation", [], "browser"),
   ns("excel", "DefinedNames", ["modules/formula/"], "browser"),
   ns("excel", "Form", [], "browser"),
@@ -576,7 +699,7 @@ const scenarios: Scenario[] = [
   ns("excel", "Note", [], "browser"),
   ns("excel", "Pivot", [], "browser"),
   ns("excel", "Range", [], "browser"),
-  ns("excel", "Row", [], "browser"),
+  structuralNs("Row", "browser"),
   ns("excel", "Sparkline", [], "browser"),
   streamNs("browser"),
   ns("excel", "Table", [], "browser"),
@@ -587,7 +710,7 @@ const scenarios: Scenario[] = [
     ["modules/archive/", "modules/xml/", "modules/stream/", "modules/formula/"],
     "browser"
   ),
-  ns("excel", "Worksheet", [], "browser"),
+  structuralNs("Worksheet", "browser"),
 
   ns("word", "Build", ["modules/xml/"], "browser"),
   ns("word", "Convert", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
@@ -598,12 +721,16 @@ const scenarios: Scenario[] = [
   ns("word", "Io", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser", ["esbuild"]),
   ns("word", "Layout", ["modules/xml/"], "browser"),
   ns("word", "Ole", ["modules/xml/"], "browser"),
+  ns("word", "Package", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser", [
+    "esbuild"
+  ]),
   ns("word", "Query", ["modules/xml/"], "browser"),
   ns("word", "RenderContext", [], "browser"),
-  ns("word", "Security", [], "browser"),
+  ns("word", "Security", [], "browser", ["esbuild"]), // see the node scenario
   ns("word", "Streaming", ["modules/archive/", "modules/xml/", "modules/stream/"], "browser"),
   ns("word", "Styles", [], "browser"),
   ns("word", "Template", ["modules/xml/"], "browser"),
+  ns("word", "Transform", ["modules/xml/"], "browser"),
   ns("word", "Theme", [], "browser"),
   ns("word", "Units", [], "browser"),
   ns("word", "Validation", [], "browser"),
@@ -621,7 +748,7 @@ const scenarios: Scenario[] = [
     platform: "browser",
     lazySplit: true
   },
-  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/"], "browser", ["esbuild"]),
+  ns("pdf", "Pdf", ["modules/archive/", "modules/xml/", "modules/draw/"], "browser", ["esbuild"]),
 
   // ===========================================================================
   // Layer 1/2 modules with intentionally flat exports (not namespaced).
@@ -1083,11 +1210,11 @@ const SINGLE_FILE_ENTRY = `import { Workbook, Worksheet, Row, Column, Cell } fro
 export function run() {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "S");
-  Worksheet.setColumns(ws, [{ header: "a", key: "a" }]);
+  Column.setDefinitions(ws, [{ header: "a", key: "a" }]);
   Row.setHeight(ws, 1, 20);
   Column.setWidth(ws, 1, 9);
   Cell.setValue(ws, "A1", 1);
-  return Worksheet.rowCount(ws);
+  return Row.getCount(ws);
 }
 `;
 

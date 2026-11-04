@@ -545,8 +545,8 @@ describe("MATCH comprehensive", () => {
     expect(fnMATCH([ERRORS.NA, arr, rvNumber(0)])).toEqual(ERRORS.NA);
   });
 
-  it("non-array lookup range → #N/A", () => {
-    expect(fnMATCH([rvNumber(1), rvNumber(1), rvNumber(0)])).toEqual(ERRORS.NA);
+  it("single value is a one-cell lookup range", () => {
+    expect(fnMATCH([rvNumber(1), rvNumber(1), rvNumber(0)])).toEqual(rvNumber(1));
   });
 
   it("matchType 0 on a column (M×1) works", () => {
@@ -591,8 +591,10 @@ describe("VLOOKUP comprehensive", () => {
     expect(fnVLOOKUP([ERRORS.NA, table, rvNumber(2), rvBoolean(false)])).toEqual(ERRORS.NA);
   });
 
-  it("non-array table_array → #N/A", () => {
-    expect(fnVLOOKUP([rvNumber(1), rvNumber(1), rvNumber(1), rvBoolean(false)])).toEqual(ERRORS.NA);
+  it("single value is a one-cell table", () => {
+    expect(fnVLOOKUP([rvNumber(1), rvNumber(1), rvNumber(1), rvBoolean(false)])).toEqual(
+      rvNumber(1)
+    );
   });
 
   it("col_index_num = 0 → #REF!", () => {
@@ -663,8 +665,10 @@ describe("HLOOKUP comprehensive", () => {
     expect(fnHLOOKUP([ERRORS.NA, table, rvNumber(2), rvBoolean(false)])).toEqual(ERRORS.NA);
   });
 
-  it("non-array table → #N/A", () => {
-    expect(fnHLOOKUP([rvNumber(1), rvNumber(1), rvNumber(1), rvBoolean(false)])).toEqual(ERRORS.NA);
+  it("single value is a one-cell table", () => {
+    expect(fnHLOOKUP([rvNumber(1), rvNumber(1), rvNumber(1), rvBoolean(false)])).toEqual(
+      rvNumber(1)
+    );
   });
 
   it("row_index_num = 0 → #REF!", () => {
@@ -677,12 +681,14 @@ describe("HLOOKUP comprehensive", () => {
 });
 
 describe("XLOOKUP comprehensive", () => {
-  it("non-array lookup_array → #VALUE!", () => {
-    expect(fnXLOOKUP([rvNumber(1), rvNumber(1), rvArray([[rvString("x")]])])).toEqual(ERRORS.VALUE);
+  it("single value is a one-cell lookup_array", () => {
+    expect(fnXLOOKUP([rvNumber(1), rvNumber(1), rvArray([[rvString("x")]])])).toEqual(
+      rvString("x")
+    );
   });
 
-  it("non-array return_array → #VALUE!", () => {
-    expect(fnXLOOKUP([rvNumber(1), rvArray([[rvNumber(1)]]), rvNumber(5)])).toEqual(ERRORS.VALUE);
+  it("single value is a one-cell return_array", () => {
+    expect(fnXLOOKUP([rvNumber(1), rvArray([[rvNumber(1)]]), rvNumber(5)])).toEqual(rvNumber(5));
   });
 
   it("searchMode -1 reverse scan finds last match", () => {
@@ -715,11 +721,10 @@ describe("XLOOKUP comprehensive", () => {
     expect(asString(fnXLOOKUP([rvNumber(4), lookup, ret, BLANK, rvNumber(1)]))).toBe("c");
   });
 
-  it("horizontal lookup with narrow return_array yields BLANK for out-of-range index", () => {
+  it("horizontal lookup with a return_array narrower than lookup_array → #VALUE!", () => {
     const lookup = rvArray([[rvNumber(1), rvNumber(2), rvNumber(3)]]);
-    // return has only 1 column — found index 1 (for value 2) is out of width
     const ret = rvArray([[rvString("x")]]);
-    expect(fnXLOOKUP([rvNumber(2), lookup, ret])).toEqual(BLANK);
+    expect(fnXLOOKUP([rvNumber(2), lookup, ret])).toEqual(ERRORS.VALUE);
   });
 
   it("propagates error from lookup value", () => {
@@ -730,8 +735,8 @@ describe("XLOOKUP comprehensive", () => {
 });
 
 describe("XMATCH comprehensive", () => {
-  it("non-array lookup_array → #VALUE!", () => {
-    expect(fnXMATCH([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("single value is a one-cell lookup_array", () => {
+    expect(fnXMATCH([rvNumber(1), rvNumber(1)])).toEqual(rvNumber(1));
   });
 
   it("propagates error from lookup value", () => {
@@ -868,8 +873,8 @@ describe("LOOKUP comprehensive", () => {
     expect(fnLOOKUP([ERRORS.NA, la])).toEqual(ERRORS.NA);
   });
 
-  it("non-array lookup_vector → #N/A", () => {
-    expect(fnLOOKUP([rvNumber(1), rvNumber(1)])).toEqual(ERRORS.NA);
+  it("single value is a one-cell lookup_vector", () => {
+    expect(fnLOOKUP([rvNumber(1), rvNumber(1)])).toEqual(rvNumber(1));
   });
 
   it("vector form — vertical M×1 lookup vector", () => {

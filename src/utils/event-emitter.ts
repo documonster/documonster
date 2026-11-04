@@ -6,7 +6,7 @@
  */
 
 /** Generic event listener signature. */
-type EventListener = (...args: any[]) => void;
+export type EventListener = (...args: any[]) => void;
 
 /**
  * A listener that may be a `once` wrapper. The wrapper carries the original

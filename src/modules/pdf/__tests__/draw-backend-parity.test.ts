@@ -8,19 +8,14 @@
  * operators, modulo each backend's coordinate convention.
  */
 
-import {
-  DEFAULT_TEXT_FAMILY,
-  measureText,
-  rasterizeToRgba,
-  rotate,
-  sectorToPath,
-  toSvg,
-  translate
-} from "@draw/index";
+import { Matrix, Draw, DEFAULT_TEXT_FAMILY } from "@draw/index";
 import type { DrawList, DrawNode, DrawPathCommand } from "@draw/index";
 import { BasicRasterCanvas } from "@draw/raster/canvas";
 import { normalizeSamples } from "@draw/raster/surface";
 import { renderDrawList } from "@draw/render";
+import { ChartClassic, ChartEx } from "@excel/chart/index";
+import { drawChartExPdf } from "@excel/chart/render/chart-ex-renderer";
+import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import { rasterizeDrawList } from "@excel/chart/render/draw-raster-png";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { createPdfDrawSurface } from "@pdf/render/draw-surface";
@@ -84,7 +79,7 @@ function pdfStream(list: DrawList, box = { x: 0, y: 0, width: SIZE, height: SIZE
 }
 
 describe("every primitive reaches every backend", () => {
-  const svg = toSvg(scene);
+  const svg = Draw.toSvg(scene);
   const stream = pdfStream(scene);
 
   it("emits each primitive in the SVG", () => {
@@ -128,7 +123,7 @@ describe("geometry agrees across backends", () => {
       children: [{ kind: "rect", x: 10, y: 20, width: 40, height: 30, paint: { fill: BLUE } }]
     };
     const svgRect = /<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.-]+)" height="([\d.-]+)"/.exec(
-      toSvg(list)
+      Draw.toSvg(list)
     );
     expect(svgRect).not.toBeNull();
     const pdfRect = /^([\d.-]+) ([\d.-]+) ([\d.-]+) ([\d.-]+) re$/m.exec(pdfStream(list));
@@ -175,7 +170,7 @@ describe("geometry agrees across backends", () => {
         }
       ]
     };
-    expect(toSvg(list)).toContain("rotate(-90 20 80)");
+    expect(Draw.toSvg(list)).toContain("rotate(-90 20 80)");
 
     const matrix = /(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/.exec(
       pdfStream(list)
@@ -203,7 +198,7 @@ describe("geometry agrees across backends", () => {
       ]
     };
     // SVG: the second baseline is 12 units lower (larger y).
-    const svgOut = toSvg(list);
+    const svgOut = Draw.toSvg(list);
     expect(svgOut).toContain('<tspan x="30" y="30">one</tspan>');
     expect(svgOut).toContain('<tspan x="30" y="42">two</tspan>');
 
@@ -238,7 +233,7 @@ function pdfStreamScaled(list: DrawList, scale: number): string {
     createPdfDrawSurface(
       page,
       { x: 0, y: 0, width: list.width * scale, height: list.height * scale },
-      scale
+      { scale }
     )
   );
   return page.getContentStream().toString();
@@ -313,7 +308,7 @@ describe("paint semantics agree across backends", () => {
       children: [{ kind: "rect", x: 0, y: 0, width: 20, height: 20, paint: {} }]
     };
     // No implicit black: the display list is explicit, unlike SVG's initial values.
-    expect(toSvg(list)).toContain('fill="none"');
+    expect(Draw.toSvg(list)).toContain('fill="none"');
     expect(pdfStream(list)).not.toContain(" rg");
     const decoded = decodePng(rasterizeDrawList(list, { width: 20, height: 20 }));
     let painted = 0;
@@ -375,7 +370,7 @@ describe("a stroked sector reaches every backend", () => {
   };
 
   it("strokes the slice separator in markup and in the page", () => {
-    expect(toSvg(list)).toContain('stroke="#ffffff"');
+    expect(Draw.toSvg(list)).toContain('stroke="#ffffff"');
     // `S` / `B` mean the content stream actually strokes rather than only filling.
     expect(pdfStream(list)).toMatch(/\bRG\b/);
   });
@@ -462,7 +457,7 @@ describe("an odd-length dash array agrees across backends", () => {
         }
       ]
     };
-    expect(toSvg(list)).toContain('stroke-dasharray="3 3"');
+    expect(Draw.toSvg(list)).toContain('stroke-dasharray="3 3"');
     expect(pdfStream(list)).toContain("[3 3]");
   });
 });
@@ -525,7 +520,7 @@ describe("a rounded rect keeps its corners in every backend", () => {
   });
 
   it("agrees with the markup about the radius", () => {
-    expect(toSvg(list(10))).toContain('rx="10"');
+    expect(Draw.toSvg(list(10))).toContain('rx="10"');
     // The PDF path has a native rounded rect, so its corners were never in doubt.
     expect(pdfStream(list(10))).toMatch(/\bc\b/);
   });
@@ -714,8 +709,8 @@ describe("stroke ends and corners reach every backend", () => {
 
   it("carries the shapes into the markup and the page", () => {
     const list = bar({ lineJoin: "round", lineCap: "round" });
-    expect(toSvg(list)).toContain('stroke-linejoin="round"');
-    expect(toSvg(list)).toContain('stroke-linecap="round"');
+    expect(Draw.toSvg(list)).toContain('stroke-linejoin="round"');
+    expect(Draw.toSvg(list)).toContain('stroke-linecap="round"');
     // `1 j` and `1 J` are the content stream's round join and round cap. The builder
     // had no way to set either until this field existed.
     const stream = pdfStream(list, { x: 0, y: 0, width: 60, height: 40 });
@@ -1240,8 +1235,8 @@ describe("a compound path resolves its rings together", () => {
   });
 
   it("carries the rule into the markup", () => {
-    expect(toSvg(list(false, "evenodd"))).toContain('fill-rule="evenodd"');
-    expect(toSvg(list(false, "nonzero"))).not.toContain("fill-rule");
+    expect(Draw.toSvg(list(false, "evenodd"))).toContain('fill-rule="evenodd"');
+    expect(Draw.toSvg(list(false, "nonzero"))).not.toContain("fill-rule");
   });
 
   it("still strokes each ring separately", () => {
@@ -1286,7 +1281,7 @@ describe("the PDF surface carries the whole paint", () => {
     // annulus's two rings the same way. PDF fills nonzero, so the hole closed up while
     // SVG and the rasteriser cut it. Using the shared builder is what fixes it — the
     // rings come back with opposite signed areas.
-    const rings = sectorToPath(0, 0, 30, 12, 0, Math.PI * 2);
+    const rings = Draw.Geometry.sectorToPath(0, 0, 30, 12, 0, Math.PI * 2);
     const areas: number[] = [];
     let current: Array<{ x: number; y: number }> = [];
     for (const command of rings) {
@@ -1542,12 +1537,12 @@ describe("text names the face it was measured in", () => {
     // Omitting it left the choice to the viewer's default while the width had been
     // measured as Arial, so anything positioned from that width — a centred title, a
     // wrapped label — was placed for a font the viewer was not using.
-    expect(toSvg(list)).toContain('font-family="arial"');
+    expect(Draw.toSvg(list)).toContain('font-family="arial"');
   });
 
   it("measures the default face as the same face it draws", () => {
-    expect(measureText("Widget", { size: 12 })).toBe(
-      measureText("Widget", { size: 12, family: DEFAULT_TEXT_FAMILY })
+    expect(Draw.measureText("Widget", { size: 12 })).toBe(
+      Draw.measureText("Widget", { size: 12, family: DEFAULT_TEXT_FAMILY })
     );
   });
 });
@@ -1655,7 +1650,7 @@ describe("clipping agrees across backends", () => {
   };
 
   it("scopes the clip in the SVG and closes the group", () => {
-    const svg = toSvg(clipped);
+    const svg = Draw.toSvg(clipped);
     expect(svg).toContain("<clipPath");
     expect(svg).toContain('<rect x="0" y="0" width="20" height="20"/></clipPath>');
     expect(svg).toContain('clip-path="url(#dc0)"');
@@ -1756,7 +1751,7 @@ describe("clipping agrees across backends", () => {
       children: [
         {
           kind: "group",
-          transform: translate(20, 0),
+          transform: Matrix.translate(20, 0),
           clip: { x: 0, y: 0, width: 20, height: 20 },
           children: [{ kind: "rect", x: 0, y: 0, width: 40, height: 40, paint: { fill: BLUE } }]
         }
@@ -1779,7 +1774,7 @@ describe("ellipses are exact in every backend", () => {
   };
 
   it("emits a real ellipse element and PDF curves", () => {
-    expect(toSvg(list)).toContain('<ellipse cx="30" cy="20" rx="25" ry="10"');
+    expect(Draw.toSvg(list)).toContain('<ellipse cx="30" cy="20" rx="25" ry="10"');
     expect(pdfStream(list, { x: 0, y: 0, width: 60, height: 40 })).toMatch(/ c$/m);
   });
 
@@ -1818,7 +1813,7 @@ describe("sectors are first-class in every backend", () => {
 
   it("uses a native arc in the SVG", () => {
     // Lowering to cubics upstream would cost SVG its exact arc for nothing.
-    const svg = toSvg(quarter());
+    const svg = Draw.toSvg(quarter());
     expect(svg).toMatch(/<path d="M 40 40 L 70 40 A 30 30 0 0 1 40 70 Z"/);
   });
 
@@ -1844,7 +1839,7 @@ describe("sectors are first-class in every backend", () => {
   });
 
   it("punches the hole of an annular sector in every backend", () => {
-    const svg = toSvg(quarter(15));
+    const svg = Draw.toSvg(quarter(15));
     // Outer arc, a line across to the inner radius, then the inner arc back.
     expect(svg).toContain("A 30 30 0 0 1");
     expect(svg).toContain("A 15 15 0 0 0");
@@ -1874,7 +1869,7 @@ describe("sectors are first-class in every backend", () => {
         }
       ]
     };
-    expect(toSvg(full)).toContain('<circle cx="40" cy="40" r="30"');
+    expect(Draw.toSvg(full)).toContain('<circle cx="40" cy="40" r="30"');
     const decoded = decodePng(rasterizeDrawList(full, { width: 80, height: 80 }));
     const alphaAt = (x: number, y: number): number =>
       decoded.alpha ? decoded.alpha[y * decoded.width + x] : 255;
@@ -1906,7 +1901,7 @@ describe("sectors are first-class in every backend", () => {
         }
       ]
     };
-    expect(toSvg(ring)).toContain('fill-rule="evenodd"');
+    expect(Draw.toSvg(ring)).toContain('fill-rule="evenodd"');
     const decoded = decodePng(rasterizeDrawList(ring, { width: 80, height: 80 }));
     const alphaAt = (x: number, y: number): number =>
       decoded.alpha ? decoded.alpha[y * decoded.width + x] : 255;
@@ -1921,7 +1916,7 @@ describe("sectors are first-class in every backend", () => {
       children: [
         {
           kind: "group",
-          transform: rotate(90, 40, 40),
+          transform: Matrix.rotate(90, 40, 40),
           children: [
             {
               kind: "sector",
@@ -1938,7 +1933,7 @@ describe("sectors are first-class in every backend", () => {
       ]
     };
     // Still an arc in the SVG — a sector survives rotation as a sector.
-    expect(toSvg(rotated)).toContain("A 30 30 0 0 1");
+    expect(Draw.toSvg(rotated)).toContain("A 30 30 0 0 1");
     const decoded = decodePng(rasterizeDrawList(rotated, { width: 80, height: 80 }));
     const alphaAt = (x: number, y: number): number =>
       decoded.alpha ? decoded.alpha[y * decoded.width + x] : 255;
@@ -1980,19 +1975,19 @@ describe("text reaches every backend, whatever the script", () => {
 
   it("puts the same string in the SVG and the PDF content stream", async () => {
     const list = textList(CJK_LABEL);
-    expect(toSvg(list)).toContain(CJK_LABEL);
+    expect(Draw.toSvg(list)).toContain(CJK_LABEL);
 
     const doc = new PdfDocumentBuilder();
     const page = doc.addPage({ width: 200, height: 60 });
     renderDrawList(list, createPdfDrawSurface(page, { x: 0, y: 0, width: 200, height: 60 }));
     // The PDF encodes text, so the assertion is that a font was embedded to carry
     // it rather than the literal bytes appearing.
-    const pdf = await doc.build();
+    const pdf = await doc.toBuffer();
     expect(pdf.byteLength).toBeGreaterThan(0);
   });
 
   it("draws ink in the rasteriser for CJK, given a font that covers it", () => {
-    const image = rasterizeToRgba(textList(CJK_LABEL), {
+    const image = Draw.toRgba(textList(CJK_LABEL), {
       width: 200,
       height: 60,
       background: { r: 1, g: 1, b: 1, a: 1 },
@@ -2014,7 +2009,7 @@ describe("text reaches every backend, whatever the script", () => {
   it("reports the gap instead of silently drawing nothing", () => {
     // No font at all: the stroke font covers ASCII only, so CJK cannot be drawn
     // and that has to be visible to the caller rather than only in the picture.
-    const image = rasterizeToRgba(textList(CJK_LABEL), {
+    const image = Draw.toRgba(textList(CJK_LABEL), {
       width: 200,
       height: 60,
       useSystemFonts: false
@@ -2031,7 +2026,7 @@ describe("glyph antialiasing modulates the paint alpha", () => {
 
   /** Peak alpha over the whole image, which is the glyph's densest pixel. */
   function peakAlpha(fill: { r: number; g: number; b: number; a: number }): number {
-    const image = rasterizeToRgba(
+    const image = Draw.toRgba(
       {
         width: 60,
         height: 30,
@@ -2069,5 +2064,57 @@ describe("glyph antialiasing modulates the paint alpha", () => {
     // The bug: `faded` equalled `opaque`, because coverage replaced the alpha.
     expect(faded).toBeLessThan(opaque);
     expect(faded).toBeGreaterThan(0);
+  });
+});
+
+describe("a chart's frame is the same in every backend", () => {
+  // The chart area — the chart's own fill and border — is a node of the display list, so the
+  // markup, the pixels, the public PDF route and the PDF bridges all draw the same one. The
+  // bridges used to paint a white rect with a fixed grey border (0.8 / 0.85) instead, and SVG
+  // and PNG drew no border at all.
+  const model = ChartClassic.createModel({
+    type: "bar",
+    series: [{ name: "S", categories: "Sheet1!$A$1:$A$2", values: "Sheet1!$B$1:$B$2" }]
+  });
+  const list = ChartClassic.toDrawList(model, { width: 120, height: 80 });
+  /** Office's automatic chart-area border — `tx1` at 85 % luminance, `#D9D9D9` — as a PDF stroke. */
+  const BORDER_RG = /^0\.85\d* 0\.85\d* 0\.85\d* RG$/m;
+  /** The invented frame: a rect over the whole 120 × 80 box at the origin. */
+  const INVENTED_FRAME = /^0 0 120 80 re$/m;
+
+  it("draws the border in the markup", () => {
+    expect(Draw.toSvg(list)).toMatch(/<rect[^>]*stroke="#d9d9d9"/i);
+  });
+
+  it("draws the border in the pixels, inside the edge", () => {
+    const decoded = decodePng(rasterizeDrawList(list, { width: 120, height: 80 }));
+    const grey = (x: number, y: number) => decoded.pixels[(y * decoded.width + x) * 3];
+    expect(decoded.alpha?.[40 * decoded.width] ?? 255).toBe(255);
+    expect(grey(0, 40)).toBeGreaterThan(200);
+    expect(grey(0, 40)).toBeLessThan(250);
+  });
+
+  it("draws the same border through Pdf.createDrawSurface and through the PDF bridges", () => {
+    const routed = pdfStream(list, { x: 0, y: 0, width: 120, height: 80 });
+    expect(routed).toMatch(BORDER_RG);
+    const page = new PdfDocumentBuilder().addPage({ width: 200, height: 200 });
+    drawChartPdf(page, model, { x: 0, y: 0, width: 120, height: 80 });
+    const bridged = page.getContentStream().toString();
+    expect(bridged).toMatch(BORDER_RG);
+    expect(bridged).not.toMatch(INVENTED_FRAME);
+    const exPage = new PdfDocumentBuilder().addPage({ width: 200, height: 200 });
+    drawChartExPdf(
+      exPage,
+      ChartEx.createModel({
+        type: "treemap",
+        series: [
+          { values: "Sheet1!$B$1:$B$2", literalValues: [1, 2], literalCategories: ["A", "B"] }
+        ]
+      } as never),
+      { x: 0, y: 0, width: 120, height: 80 }
+    );
+    const exStream = exPage.getContentStream().toString();
+    expect(exStream).toMatch(BORDER_RG);
+    expect(exStream).not.toMatch(INVENTED_FRAME);
   });
 });

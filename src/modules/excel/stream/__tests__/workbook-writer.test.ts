@@ -501,7 +501,7 @@ describe("WorkbookWriter", () => {
   describe("workbook protection", () => {
     it("protection round-trips through streaming write then load", async () => {
       const { wb, getBuffer } = createMemoryWriter({ useStyles: true });
-      await wb.protect("mypass", { lockStructure: true });
+      await wb.protect({ password: "mypass", lockStructure: true });
       const ws = wb.addWorksheet("Sheet1");
       rowCommit(ws.addRow(["data"]));
       ws.commit();
@@ -516,6 +516,13 @@ describe("WorkbookWriter", () => {
       expect(wb2.protection!.hashValue).toBeTruthy();
       expect(wb2.protection!.saltValue).toBeTruthy();
       expect(wb2.protection!.spinCount).toBe(100000);
+    });
+
+    it("the deprecated (password, options) form still protects", async () => {
+      const { wb } = createMemoryWriter({ useStyles: true });
+      await wb.protect("mypass", { lockStructure: true });
+      expect(wb.protection!.lockStructure).toBe(true);
+      expect(wb.protection!.hashValue).toBeTruthy();
     });
   });
 

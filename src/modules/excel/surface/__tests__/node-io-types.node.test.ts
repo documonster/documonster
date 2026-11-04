@@ -12,7 +12,7 @@ import { readFile, rm } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-import { Workbook, Worksheet } from "@excel/index";
+import { Row, Workbook } from "@excel/index";
 import { testFilePath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
@@ -20,7 +20,7 @@ function buildWorkbook(rows: number): Workbook.Handle {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "S");
   for (let i = 0; i < rows; i++) {
-    Worksheet.addRow(ws, [`cell-${i}`, i, `padding text to grow the package ${i}`]);
+    Row.add(ws, [`cell-${i}`, i, `padding text to grow the package ${i}`]);
   }
   return wb;
 }
@@ -46,7 +46,7 @@ describe("Workbook.toBuffer (Node)", () => {
     await Workbook.read(reread, bytes);
     const ws = Workbook.getWorksheet(reread, "S");
     expect(ws).toBeDefined();
-    expect(Worksheet.rowCount(ws!)).toBe(500);
+    expect(Row.getCount(ws!)).toBe(500);
   });
 });
 

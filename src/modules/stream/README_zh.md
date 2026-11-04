@@ -10,12 +10,12 @@ Node.js 风格的流类与工具函数，同一份代码可在 Node.js 和浏览
 - **浏览器**：移植自 Node 的 `lib/internal/streams`，背压、事件顺序和销毁流程与 Node 一致。
 
 两端凡是接受流的地方都接受 Web Streams（`ReadableStream`、`WritableStream`、`TransformStream`）。
-转换时请使用 `readableFromWeb` / `readableToWeb` / `writableFromWeb` / `writableToWeb`，它们在 Node.js、Bun
+转换时请使用 `Streams.fromWebReadable` / `Streams.toWebReadable` / `Streams.fromWebWritable` / `Streams.toWebWritable`，它们在 Node.js、Bun
 和浏览器上行为一致；类自带的 `Readable.fromWeb` 等方法保持 Node 的行为，缺陷也一样（见
 [Node 风格流与 Web 流的转换](#node-风格流与-web-流的转换)）。
 
 ```typescript
-import { Readable, pipeline, createTransform } from "documonster/stream";
+import { Readable, pipeline, Streams } from "documonster/stream";
 ```
 
 ## 功能特性
@@ -38,25 +38,19 @@ import {
   Duplex,
   pipeline,
   finished,
-  createTransform,
-  createCollector
+  Streams
 } from "documonster/stream";
 ```
 
 ## 快速开始
 
 ```typescript
-import {
-  createReadableFromArray,
-  createTransform,
-  createCollector,
-  pipeline
-} from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Create a pipeline that doubles numbers
-const source = createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = createCollector<number>({ objectMode: true });
+const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+const collector = Streams.createCollector<number>({ objectMode: true });
 
 await pipeline(source, double, collector);
 console.log(collector.chunks); // [2, 4, 6, 8, 10]
@@ -113,10 +107,10 @@ emitter.removeAllListeners("data");
 用于消费数据的可读流。
 
 ```typescript
-import { Readable, createReadableFromArray } from "documonster/stream";
+import { Readable, Streams } from "documonster/stream";
 
 // Create from array
-const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
+const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
 
 // Using async iteration (recommended)
 for await (const chunk of readable) {
@@ -220,10 +214,10 @@ writable.uncork(); // Flush all at once
 在数据通过时进行转换的双工流。
 
 ```typescript
-import { Transform, createTransform } from "documonster/stream";
+import { Transform, Streams } from "documonster/stream";
 
 // Simple transform with factory function (recommended)
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
 
 // Using class constructor
 const uppercase = new Transform({
@@ -234,7 +228,7 @@ const uppercase = new Transform({
 });
 
 // Async transform function
-const asyncTransform = createTransform<string, string>(
+const asyncTransform = Streams.createTransform<string, string>(
   async chunk => {
     await delay(100);
     return chunk.toUpperCase();
@@ -274,10 +268,10 @@ const nodeStyle = new Transform({
 同时独立具备可读和可写功能的流。
 
 ```typescript
-import { Duplex, createDuplex, duplexPair } from "documonster/stream";
+import { Duplex, duplexPair, Streams } from "documonster/stream";
 
 // Create duplex stream
-const duplex = createDuplex({
+const duplex = Streams.createDuplex({
   objectMode: true,
   read() {
     this.push("data from readable side");
@@ -310,10 +304,10 @@ client.on("data", data => console.log("Client received:", data));
 将流中的所有数据收集到数组中。
 
 ```typescript
-import { createCollector, pipeline, finished } from "documonster/stream";
+import { pipeline, finished, Streams } from "documonster/stream";
 
 // Collect objects
-const collector = createCollector<number>({ objectMode: true });
+const collector = Streams.createCollector<number>({ objectMode: true });
 collector.write(1);
 collector.write(2);
 collector.write(3);
@@ -323,14 +317,14 @@ await finished(collector);
 console.log(collector.chunks); // [1, 2, 3]
 
 // Use in pipeline
-const source = createReadableFromArray(["a", "b", "c"], { objectMode: true });
-const collector2 = createCollector<string>({ objectMode: true });
+const source = Streams.createReadableFromArray(["a", "b", "c"], { objectMode: true });
+const collector2 = Streams.createCollector<string>({ objectMode: true });
 
 await pipeline(source, collector2);
 console.log(collector2.chunks); // ["a", "b", "c"]
 
 // Collect binary data and convert
-const binaryCollector = createCollector<Uint8Array>();
+const binaryCollector = Streams.createCollector<Uint8Array>();
 binaryCollector.write(new Uint8Array([1, 2, 3]));
 binaryCollector.write(new Uint8Array([4, 5, 6]));
 binaryCollector.end();
@@ -347,9 +341,9 @@ const text = binaryCollector.toString(); // Decode as UTF-8 string
 基于拉取的 Transform 流，支持模式匹配。适用于解析协议和文件格式。
 
 ```typescript
-import { createPullStream } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const pull = createPullStream();
+const pull = Streams.createPullStream();
 
 // Write data
 pull.write(Buffer.from("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello"));
@@ -360,7 +354,7 @@ const statusLine = await pull.pullUntil(Buffer.from("\r\n"));
 console.log(statusLine.toString()); // "HTTP/1.1 200 OK"
 
 // Pull until pattern, including the pattern in result
-const headerWithNewline = await pull.pullUntil(Buffer.from("\r\n"), true);
+const headerWithNewline = await pull.pullUntil(Buffer.from("\r\n"), { includePattern: true });
 
 // Pull exact number of bytes (e.g., read body based on Content-Length)
 const body = await pull.pull(5);
@@ -379,7 +373,7 @@ console.log(pull.matchPosition);
 **模式匹配：**
 
 ```typescript
-const pull = createPullStream();
+const pull = Streams.createPullStream();
 pull.write(Buffer.from("key1=value1&key2=value2"));
 pull.end();
 
@@ -397,9 +391,9 @@ const val2 = await pull.pull(Infinity); // "value2" (rest of stream)
 具有高效内部缓冲的 Duplex 流。
 
 ```typescript
-import { createBufferedStream, BufferedStream } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const buffered = createBufferedStream();
+const buffered = Streams.createBufferedStream();
 
 // Write various data types
 buffered.write("Hello ");
@@ -410,8 +404,8 @@ buffered.write(new Uint8Array([33])); // "!"
 console.log(buffered.bufferedLength); // 12
 
 // Get all data
-console.log(buffered.toString()); // "Hello World!"
-console.log(buffered.toUint8Array()); // Uint8Array
+const all = buffered.read(); // Uint8Array, or null when empty
+console.log(new TextDecoder().decode(all ?? new Uint8Array())); // "Hello World!"
 
 // Check state
 console.log(buffered.isFinished);
@@ -424,9 +418,9 @@ console.log(buffered.isFinished);
 高效的字符串构建器，输出为 Uint8Array。适用于高效构建大型字符串/XML/JSON。
 
 ```typescript
-import { ChunkedBuilder } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const builder = new ChunkedBuilder();
+const builder = new Streams.ChunkedBuilder();
 
 // Push strings
 builder.push("<xml>");
@@ -450,9 +444,9 @@ console.log(builder.toString()); // "<xml><item>Hello</item><item>World</item></
 支持快照/回滚的 ChunkedBuilder。适用于可能需要回溯的推测性解析。
 
 ```typescript
-import { TransactionalChunkedBuilder } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const builder = new TransactionalChunkedBuilder();
+const builder = new Streams.TransactionalChunkedBuilder();
 
 builder.push("header");
 
@@ -492,20 +486,15 @@ builder.commit(); // Confirm level 1
 将多个流通过管道连接，提供正确的错误处理和清理。返回一个 Promise。
 
 ```typescript
-import {
-  pipeline,
-  createReadableFromArray,
-  createTransform,
-  createCollector
-} from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
-const source = createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
-const filter = createTransform<number, number>(
+const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
+const filter = Streams.createTransform<number, number>(
   n => (n % 2 === 0 ? n : undefined), // undefined = skip
   { objectMode: true }
 );
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-const collector = createCollector<number>({ objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+const collector = Streams.createCollector<number>({ objectMode: true });
 
 // Chain multiple streams
 await pipeline(source, filter, double, collector);
@@ -527,9 +516,9 @@ try {
 等待流完成（结束、关闭或出错）。
 
 ```typescript
-import { finished, createReadableFromArray } from "documonster/stream";
+import { finished, Streams } from "documonster/stream";
 
-const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
+const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
 
 // Consume data
 readable.on("data", chunk => console.log(chunk));
@@ -539,7 +528,7 @@ await finished(readable);
 console.log("Stream completed");
 
 // Also works with writables
-const writable = createCollector();
+const writable = Streams.createCollector();
 writable.write("data");
 writable.end();
 await finished(writable);
@@ -556,17 +545,17 @@ Web 流、生成器函数、可迭代对象），规则与 Node 一致：不传�
 它可以用在任何接受 `node:stream` 的 `compose` 结果的地方。
 
 ```typescript
-import { compose, createTransform, createReadableFromArray, pipeline } from "documonster/stream";
+import { compose, pipeline, Streams } from "documonster/stream";
 
-const addOne = createTransform<number, number>(n => n + 1, { objectMode: true });
-const double = createTransform<number, number>(n => n * 2, { objectMode: true });
-const square = createTransform<number, number>(n => n * n, { objectMode: true });
+const addOne = Streams.createTransform<number, number>(n => n + 1, { objectMode: true });
+const double = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
+const square = Streams.createTransform<number, number>(n => n * n, { objectMode: true });
 
 // Combine into single transform: (n + 1) * 2, then square
 const combined = compose(addOne, double, square);
 
-const source = createReadableFromArray([1, 2, 3], { objectMode: true });
-const collector = createCollector<number>({ objectMode: true });
+const source = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+const collector = Streams.createCollector<number>({ objectMode: true });
 
 await pipeline(source, combined, collector);
 console.log(collector.chunks); // [16, 36, 64]
@@ -577,22 +566,22 @@ console.log(collector.chunks); // [16, 36, 64]
 
 ---
 
-### finishedAll
+### Streams.waitForFinished
 
 等待多个流全部完成。
 
 ```typescript
-import { finishedAll, createReadableFromArray } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const stream1 = createReadableFromArray([1, 2, 3], { objectMode: true });
-const stream2 = createReadableFromArray([4, 5, 6], { objectMode: true });
+const stream1 = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+const stream2 = Streams.createReadableFromArray([4, 5, 6], { objectMode: true });
 
 // Start consuming
 stream1.on("data", () => {});
 stream2.on("data", () => {});
 
 // Wait for both to finish
-await finishedAll([stream1, stream2]);
+await Streams.waitForFinished([stream1, stream2]);
 console.log("All streams completed");
 ```
 
@@ -603,10 +592,10 @@ console.log("All streams completed");
 为任意流添加中止信号处理。
 
 ```typescript
-import { addAbortSignal, createReadableFromArray, finished } from "documonster/stream";
+import { addAbortSignal, finished, Streams } from "documonster/stream";
 
 const controller = new AbortController();
-const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
+const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
 
 // Attach abort signal
 addAbortSignal(controller.signal, readable);
@@ -630,18 +619,18 @@ try {
 
 ## 工厂函数
 
-### createReadableFromArray
+### Streams.createReadableFromArray
 
 从数组创建可读流。
 
 ```typescript
-import { createReadableFromArray } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Object mode (for non-binary data)
-const objectStream = createReadableFromArray([{ a: 1 }, { b: 2 }], { objectMode: true });
+const objectStream = Streams.createReadableFromArray([{ a: 1 }, { b: 2 }], { objectMode: true });
 
 // Binary mode
-const binaryStream = createReadableFromArray([
+const binaryStream = Streams.createReadableFromArray([
   new Uint8Array([1, 2, 3]),
   new Uint8Array([4, 5, 6])
 ]);
@@ -649,12 +638,12 @@ const binaryStream = createReadableFromArray([
 
 ---
 
-### createReadableFromAsyncIterable
+### Streams.createReadableFromAsyncIterable
 
 从异步可迭代对象创建可读流。
 
 ```typescript
-import { createReadableFromAsyncIterable } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 async function* generateNumbers() {
   for (let i = 1; i <= 5; i++) {
@@ -663,7 +652,7 @@ async function* generateNumbers() {
   }
 }
 
-const readable = createReadableFromAsyncIterable(generateNumbers());
+const readable = Streams.createReadableFromAsyncIterable(generateNumbers());
 
 for await (const n of readable) {
   console.log(n); // 1, 2, 3, 4, 5
@@ -672,14 +661,14 @@ for await (const n of readable) {
 
 ---
 
-### createReadableFromGenerator
+### Streams.createReadableFromGenerator
 
 从生成器函数创建可读流。
 
 ```typescript
-import { createReadableFromGenerator } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const readable = createReadableFromGenerator(async function* () {
+const readable = Streams.createReadableFromGenerator(async function* () {
   yield await fetch("/api/part1").then(r => r.json());
   yield await fetch("/api/part2").then(r => r.json());
   yield await fetch("/api/part3").then(r => r.json());
@@ -688,14 +677,14 @@ const readable = createReadableFromGenerator(async function* () {
 
 ---
 
-### createReadableFromPromise
+### Streams.createReadableFromPromise
 
 从 Promise 创建可读流（发出单个值）。
 
 ```typescript
-import { createReadableFromPromise } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const readable = createReadableFromPromise(
+const readable = Streams.createReadableFromPromise(
   fetch("/api/data").then(r => r.json()),
   { objectMode: true }
 );
@@ -707,27 +696,27 @@ for await (const data of readable) {
 
 ---
 
-### createEmptyReadable
+### Streams.createEmptyReadable
 
 创建一个立即结束且无数据的可读流。
 
 ```typescript
-import { createEmptyReadable, pipeline } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
-const empty = createEmptyReadable();
+const empty = Streams.createEmptyReadable();
 // Useful for conditional pipelines or testing
 ```
 
 ---
 
-### createNullWritable
+### Streams.createNullWritable
 
 创建一个丢弃所有数据的可写流（类似 `/dev/null`）。
 
 ```typescript
-import { createNullWritable, pipeline } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
-const devNull = createNullWritable();
+const devNull = Streams.createNullWritable();
 
 // Drain a stream without collecting data
 await pipeline(source, devNull);
@@ -740,9 +729,9 @@ await pipeline(source, devNull);
 用于消费整个流的工具函数。
 
 ```typescript
-import { consumers, createReadableFromArray } from "documonster/stream";
+import { consumers, Streams } from "documonster/stream";
 
-const readable = createReadableFromArray([
+const readable = Streams.createReadableFromArray([
   new Uint8Array([123, 34, 110, 97, 109, 101, 34, 58, 34, 116, 101, 115, 116, 34, 125])
 ]);
 
@@ -768,14 +757,14 @@ const arrayBuffer = await consumers.arrayBuffer(readable);
 ## 类型守卫
 
 ```typescript
-import { isReadable, isWritable, isTransform, isDuplex, isStream } from "documonster/stream";
+import { isReadable, isWritable, Streams } from "documonster/stream";
 
 // Check stream types
 isReadable(stream); // true if readable stream
 isWritable(stream); // true if writable stream
-isTransform(stream); // true if transform stream
-isDuplex(stream); // true if duplex stream
-isStream(stream); // true if any stream type
+Streams.isTransform(stream); // true if transform stream
+Streams.isDuplex(stream); // true if duplex stream
+Streams.isStream(stream); // true if any stream type
 
 // Usage
 async function processStream(input: unknown) {
@@ -835,18 +824,18 @@ for (const a of arrays) {
 
 ## Promise 工具
 
-### onceEvent
+### Streams.LowLevel.onceEvent
 
 等待来自 emitter 的单个事件。
 
 ```typescript
-import { onceEvent } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // 等待单个事件（事件触发时 resolve 为 void）
-await onceEvent(emitter, "data");
+await Streams.LowLevel.onceEvent(emitter, "data");
 console.log("data event fired");
 
-// 注意：onceEvent 仅接受 (emitter, event)，返回 Promise<void>。
+// 注意：Streams.LowLevel.onceEvent 仅接受 (emitter, event)，返回 Promise<void>。
 // 它不接受 AbortSignal，也不会以事件参数进行 resolve。
 // 若需要 Node 中可返回参数、支持 { signal } 的 `once`，请从 node:events 导入：
 //   import { once } from "node:events";
@@ -854,21 +843,21 @@ console.log("data event fired");
 
 ---
 
-### promisify
+### Streams.LowLevel.fromCallback
 
-将回调风格的函数转换为 Promise。
+运行一次回调风格的操作，并以 Promise 返回其结果。
 
 ```typescript
-import { promisify } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Callback-style function
 function fetchData(callback: (err: Error | null, data?: string) => void) {
   setTimeout(() => callback(null, "result"), 100);
 }
 
-// Convert to promise
-const fetchDataAsync = promisify(fetchData);
-const data = await fetchDataAsync();
+// 立即调用 fetchData，并以其回调结果 settle。与 node:util 的 `promisify` 不同，
+// 它不返回包装后的函数。
+const data = await Streams.LowLevel.fromCallback<string>(fetchData);
 ```
 
 ---
@@ -929,10 +918,10 @@ const writable = new Writable({
 ## 错误处理
 
 ```typescript
-import { pipeline, createTransform, createReadableFromArray } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Error in transform function
-const badTransform = createTransform(
+const badTransform = Streams.createTransform(
   chunk => {
     if (chunk === "bad") {
       throw new Error("Invalid data");
@@ -958,6 +947,8 @@ badTransform.on("error", err => {
 // Manual stream destruction
 stream.destroy(new Error("Manual destruction"));
 ```
+
+本模块拒绝的参数抛出 `StreamTypeError` 或 `UnsupportedStreamTypeError`(都是 `StreamError`,`isStreamError` 能识别):`field` 指出参数(`options.highWaterMark`、`stream`),消息以调用名开头(`Streams.bytes: …`)。被中止的流以 `AbortError` 失败,它与 `documonster/archive` 导出的是同一个类;它不是 `StreamError`。
 
 ---
 
@@ -998,12 +989,7 @@ Node.js 和浏览器之间的 API **完全相同**，允许你编写一次代码
 ### CSV 处理
 
 ```typescript
-import {
-  createReadableFromArray,
-  createTransform,
-  createCollector,
-  pipeline
-} from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 interface Person {
   name: string;
@@ -1016,13 +1002,13 @@ const data: Person[] = [
   { name: "Charlie", age: 35 }
 ];
 
-const source = createReadableFromArray(data, { objectMode: true });
+const source = Streams.createReadableFromArray(data, { objectMode: true });
 
-const toCsv = createTransform<Person, string>(row => `${row.name},${row.age}\n`, {
+const toCsv = Streams.createTransform<Person, string>(row => `${row.name},${row.age}\n`, {
   objectMode: true
 });
 
-const collector = createCollector<string>({ objectMode: true });
+const collector = Streams.createCollector<string>({ objectMode: true });
 
 await pipeline(source, toCsv, collector);
 console.log(collector.chunks.join(""));
@@ -1034,16 +1020,18 @@ console.log(collector.chunks.join(""));
 ### 数据过滤和转换
 
 ```typescript
-const numbers = createReadableFromArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], { objectMode: true });
+const numbers = Streams.createReadableFromArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], {
+  objectMode: true
+});
 
-const filterEven = createTransform<number, number>(
+const filterEven = Streams.createTransform<number, number>(
   n => (n % 2 === 0 ? n : undefined), // undefined skips
   { objectMode: true }
 );
 
-const square = createTransform<number, number>(n => n * n, { objectMode: true });
+const square = Streams.createTransform<number, number>(n => n * n, { objectMode: true });
 
-const collector = createCollector<number>({ objectMode: true });
+const collector = Streams.createCollector<number>({ objectMode: true });
 
 await pipeline(numbers, filterEven, square, collector);
 console.log(collector.chunks); // [4, 16, 36, 64, 100]
@@ -1054,7 +1042,7 @@ console.log(collector.chunks); // [4, 16, 36, 64, 100]
 ### 异步数据处理
 
 ```typescript
-const urls = createReadableFromArray(
+const urls = Streams.createReadableFromArray(
   [
     "https://api.example.com/users/1",
     "https://api.example.com/users/2",
@@ -1063,7 +1051,7 @@ const urls = createReadableFromArray(
   { objectMode: true }
 );
 
-const fetchData = createTransform<string, object>(
+const fetchData = Streams.createTransform<string, object>(
   async url => {
     const response = await fetch(url);
     return response.json();
@@ -1071,7 +1059,7 @@ const fetchData = createTransform<string, object>(
   { objectMode: true }
 );
 
-const collector = createCollector<object>({ objectMode: true });
+const collector = Streams.createCollector<object>({ objectMode: true });
 
 await pipeline(urls, fetchData, collector);
 console.log(collector.chunks); // Array of user objects
@@ -1082,10 +1070,10 @@ console.log(collector.chunks); // Array of user objects
 ### 使用 PullStream 解析协议
 
 ```typescript
-import { createPullStream } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
 // Parse a simple protocol: LENGTH:DATA
-const pull = createPullStream();
+const pull = Streams.createPullStream();
 pull.write(Buffer.from("5:Hello3:World"));
 pull.end();
 
@@ -1117,10 +1105,10 @@ console.log(messages); // ["Hello", "World"]
 
 ```typescript
 import { createReadStream, createWriteStream } from "fs";
-import { pipeline, createTransform } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // Transform file content to uppercase
-const uppercase = createTransform<Buffer, Buffer>(chunk =>
+const uppercase = Streams.createTransform<Buffer, Buffer>(chunk =>
   Buffer.from(chunk.toString().toUpperCase())
 );
 
@@ -1132,16 +1120,16 @@ await pipeline(createReadStream("input.txt"), uppercase, createWriteStream("outp
 ### Fetch API 集成（浏览器）
 
 ```typescript
-import { readableFromWeb, pipeline, createCollector } from "documonster/stream";
+import { pipeline, Streams } from "documonster/stream";
 
 // 获取并处理响应
 const response = await fetch("/api/large-data");
 
 // 把 Web ReadableStream 转成 Node 风格的 Readable（也可以直接把 `response.body` 交给 `pipeline`，
 // 它原样接受 Web 流）
-const readable = readableFromWeb(response.body!);
+const readable = Streams.fromWebReadable(response.body!);
 
-const collector = createCollector<Uint8Array>();
+const collector = Streams.createCollector<Uint8Array>();
 
 await pipeline(readable, collector);
 const data = collector.toUint8Array();
@@ -1153,56 +1141,76 @@ const data = collector.toUint8Array();
 
 ### 类
 
-| 类                            | 描述                   |
-| ----------------------------- | ---------------------- |
-| `Readable`                    | 可读流类               |
-| `Writable`                    | 可写流类               |
-| `Transform`                   | 转换流类               |
-| `Duplex`                      | 双工流类               |
-| `PassThrough`                 | 直通转换（无操作）     |
-| `Collector`                   | 将流数据收集到数组中   |
-| `PullStream`                  | 支持模式匹配的拉取式流 |
-| `BufferedStream`              | 带内部缓冲的流         |
-| `ChunkedBuilder`              | 高效字符串构建器       |
-| `TransactionalChunkedBuilder` | 支持快照/回滚的构建器  |
-| `createStringChunk()`         | 字符串数据块工厂函数   |
-| `createByteChunk()`           | 二进制数据块工厂函数   |
+| 类                                                  | 描述                   |
+| --------------------------------------------------- | ---------------------- |
+| `Readable`                                          | 可读流类               |
+| `Writable`                                          | 可写流类               |
+| `Transform`                                         | 转换流类               |
+| `Duplex`                                            | 双工流类               |
+| `PassThrough`                                       | 直通转换（无操作）     |
+| `Streams.Collector` / `createCollector()`           | 将流数据收集到数组中   |
+| `Streams.PullStream` / `createPullStream()`         | 支持模式匹配的拉取式流 |
+| `Streams.BufferedStream` / `createBufferedStream()` | 带内部缓冲的流         |
+| `new Streams.ChunkedBuilder()`                      | 高效字符串构建器       |
+| `new Streams.TransactionalChunkedBuilder()`         | 支持快照/回滚的构建器  |
+| `Streams.createStringChunk()`                       | 字符串数据块工厂函数   |
+| `Streams.createByteChunk()`                         | 二进制数据块工厂函数   |
+
+类本身作为值公开（`Streams.Collector`、`Streams.PullStream` 等），可用于 `instanceof` 判断和继承；`create*` 工厂是构造实例的常用方式。
+
+### 适配事件源与写入端
+
+| 函数                                                      | 描述                                                                                                                                             |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Streams.LowLevel.eventsToAsyncIterableNoDestroy(stream)` | 把事件式 readable 转为异步可迭代对象；提前 `break` 只移除监听并暂停，不会销毁源流                                                                |
+| `new Streams.LowLevel.SinkAdapter(sink)`                  | 把 Web `WritableStream`、Node writable 或 `{ write, end }` 包装为 `Streams.LowLevel.SinkAdapter`，`write`/`end` 可 await，错误在下一次调用时抛出 |
+
+```typescript
+import { Streams } from "documonster/stream";
+
+for await (const chunk of Streams.LowLevel.eventsToAsyncIterableNoDestroy<string>(source)) {
+  if (chunk === "stop") break; // 源流被暂停，而非销毁
+}
+
+const sink = new Streams.LowLevel.SinkAdapter(anyWritable);
+await sink.write(new TextEncoder().encode("hello"));
+await sink.end();
+```
 
 ### 工厂函数
 
-| 函数                                | 描述                       |
-| ----------------------------------- | -------------------------- |
-| `createReadable()`                  | 使用自定义选项创建可读流   |
-| `createReadableFromArray()`         | 从数组创建可读流           |
-| `createReadableFromAsyncIterable()` | 从异步可迭代对象创建可读流 |
-| `createReadableFromGenerator()`     | 从生成器创建可读流         |
-| `createReadableFromPromise()`       | 从 Promise 创建可读流      |
-| `createEmptyReadable()`             | 创建空可读流               |
-| `createWritable()`                  | 使用自定义选项创建可写流   |
-| `createNullWritable()`              | 创建丢弃数据的可写流       |
-| `createTransform()`                 | 使用函数创建转换流         |
-| `createDuplex()`                    | 创建双工流                 |
-| `createPassThrough()`               | 创建直通转换流             |
-| `createCollector()`                 | 创建数据收集器             |
-| `createPullStream()`                | 创建拉取式流               |
-| `createBufferedStream()`            | 创建带缓冲的流             |
-| `duplexPair()`                      | 创建已连接的双工流对       |
+| 函数                                        | 描述                       |
+| ------------------------------------------- | -------------------------- |
+| `Streams.createReadable()`                  | 使用自定义选项创建可读流   |
+| `Streams.createReadableFromArray()`         | 从数组创建可读流           |
+| `Streams.createReadableFromAsyncIterable()` | 从异步可迭代对象创建可读流 |
+| `Streams.createReadableFromGenerator()`     | 从生成器创建可读流         |
+| `Streams.createReadableFromPromise()`       | 从 Promise 创建可读流      |
+| `Streams.createEmptyReadable()`             | 创建空可读流               |
+| `Streams.createWritable()`                  | 使用自定义选项创建可写流   |
+| `Streams.createNullWritable()`              | 创建丢弃数据的可写流       |
+| `Streams.createTransform()`                 | 使用函数创建转换流         |
+| `Streams.createDuplex()`                    | 创建双工流                 |
+| `Streams.createPassThrough()`               | 创建直通转换流             |
+| `Streams.createCollector()`                 | 创建数据收集器             |
+| `Streams.createPullStream()`                | 创建拉取式流               |
+| `Streams.createBufferedStream()`            | 创建带缓冲的流             |
+| `duplexPair()`                              | 创建已连接的双工流对       |
 
 ### 工具函数
 
-| 函数                   | 描述                          |
-| ---------------------- | ----------------------------- |
-| `pipeline()`           | 管道连接流并处理错误          |
-| `finished()`           | 等待流完成                    |
-| `compose()`            | 组合多个转换流                |
-| `finishedAll()`        | 等待多个流完成                |
-| `addAbortSignal()`     | 为流添加中止信号              |
-| `onceEvent()`          | 等待单个事件；resolve 为 void |
-| `promisify()`          | 将回调转换为 Promise          |
-| `streamToUint8Array()` | 收集流为 Uint8Array           |
-| `streamToString()`     | 收集流为字符串                |
-| `drainStream()`        | 消费流但不收集数据            |
-| `copyStream()`         | 将源流复制到目标流            |
+| 函数                              | 描述                                  |
+| --------------------------------- | ------------------------------------- |
+| `pipeline()`                      | 管道连接流并处理错误                  |
+| `finished()`                      | 等待流完成                            |
+| `compose()`                       | 组合多个转换流                        |
+| `Streams.waitForFinished()`       | 等待多个流完成                        |
+| `addAbortSignal()`                | 为流添加中止信号                      |
+| `Streams.LowLevel.onceEvent()`    | 等待单个事件；resolve 为 void         |
+| `Streams.LowLevel.fromCallback()` | 以 Promise 形式运行一次回调风格的操作 |
+| `Streams.bytes()`                 | 收集流为 Uint8Array                   |
+| `Streams.text()`                  | 收集流为字符串                        |
+| `Streams.discard()`               | 消费流但不收集数据                    |
 
 ### 二进制工具
 
@@ -1216,16 +1224,16 @@ const data = collector.toUint8Array();
 
 ### 类型守卫
 
-| 函数            | 返回 true 的条件 |
-| --------------- | ---------------- |
-| `isReadable()`  | 可读流           |
-| `isWritable()`  | 可写流           |
-| `isTransform()` | 转换流           |
-| `isDuplex()`    | 双工流           |
-| `isStream()`    | 任意流类型       |
-| `isDestroyed()` | 流已被销毁       |
-| `isDisturbed()` | 流已被读取       |
-| `isErrored()`   | 流已发生错误     |
+| 函数                    | 返回 true 的条件 |
+| ----------------------- | ---------------- |
+| `isReadable()`          | 可读流           |
+| `isWritable()`          | 可写流           |
+| `Streams.isTransform()` | 转换流           |
+| `Streams.isDuplex()`    | 双工流           |
+| `Streams.isStream()`    | 任意流类型       |
+| `isDestroyed()`         | 流已被销毁       |
+| `isDisturbed()`         | 流已被读取       |
+| `isErrored()`           | 流已发生错误     |
 
 ---
 
@@ -1240,7 +1248,7 @@ API 及其类型在 Node.js、Bun 和浏览器上完全相同。下面这些差�
 | **事件调度**                            | `process.nextTick`                                                                                | 一个微任务按顺序执行期间排入的所有 tick                                                            | 流自身事件和回调之间的顺序与 Node 一致；在宏任务（事件回调、定时器、I/O）中排入的 tick，执行位置也与 Node 一致。在 Promise 续体中排入时，Node 要等整个微任务队列清空才执行，浏览器没有任何原语能做到，因此会更早执行。两者均由 `__tests__/stream-scheduling.node.test.ts` 实测验证。 |
 | **`_readableState` / `_writableState`** | Node 的内部状态对象                                                                               | 字段名相同，但是不同的对象                                                                         | 属于内部实现：请使用公开的访问器（`readableLength`、`writableNeedDrain` 等）。                                                                                                                                                                                                       |
 | **`isDisturbed(webStream)`**            | 由 Node 自己的 Web Streams 回答                                                                   | 未锁定的流可准确判断（通过 `new Response(stream)` 探测，既不加锁也不读取）；已锁定的流返回 `false` | 对已锁定的流，真实答案是“未知”：读过和没读过无法区分，所以这里的 `false` 表示“未发现被读取过”。                                                                                                                                                                                      |
-| **`instanceof` 流的类**                 | 任何来源的 `node:stream` 流都为 `true`                                                            | 只有本模块的类创建的流为 `true`                                                                    | 其他来源的流（`readable-stream`、其他库）仍能被这里的所有函数识别和驱动：和 Node 一样，它们按流的协议判断，而不是按类判断。请用 `isReadable` / `isWritable` / `isStream` 判断，不要用 `instanceof`。                                                                                 |
+| **`instanceof` 流的类**                 | 任何来源的 `node:stream` 流都为 `true`                                                            | 只有本模块的类创建的流为 `true`                                                                    | 其他来源的流（`readable-stream`、其他库）仍能被这里的所有函数识别和驱动：和 Node 一样，它们按流的协议判断，而不是按类判断。请用 `isReadable` / `isWritable` / `Streams.isStream` 判断，不要用 `instanceof`。                                                                         |
 | **`finished(webStream)`**               | 任意 Web 流                                                                                       | 不支持：立即拒绝，且不对流加锁                                                                     | 标准 API 没有不加锁的完成信号，Web 流的队列是否被消费完，只有消费它的 reader 知道。请等待你自己的 reader / writer 的 `closed`。                                                                                                                                                      |
 
 ### Node 风格流与 Web 流的转换
@@ -1248,25 +1256,25 @@ API 及其类型在 Node.js、Bun 和浏览器上完全相同。下面这些差�
 请使用本模块自己的转换函数，它们在两端的行为一致：
 
 ```ts
-import { readableFromWeb, readableToWeb, writableFromWeb, writableToWeb } from "documonster/stream";
+import { Streams } from "documonster/stream";
 
-const nodeStyle = readableFromWeb(response.body!);
-const web = writableToWeb(nodeStyleWritable);
+const nodeStyle = Streams.fromWebReadable(response.body!);
+const web = Streams.toWebWritable(nodeStyleWritable);
 ```
 
 类上的静态方法（`Readable.fromWeb`、`Writable.toWeb`、`Duplex.fromWeb` 等）在**两端**都是 Node 的行为：
 Node 入口中是 `node:stream` 自己的实现，浏览器中是对它的忠实移植。因此基于它们写的代码在各处表现一致，
 缺陷也一致。截至 Node 26 它们有五处行为是错的，上面这几个模块函数全部修正了，且两端一致：
 
-| 类的静态方法（Node 的行为）                                                                             | 模块函数                                           |
-| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `Readable.fromWeb` 把读到的 `null` push 进去，导致流提前结束，后面的数据被悄悄丢掉                      | `readableFromWeb` 以 `ERR_STREAM_NULL_VALUES` 失败 |
-| `Readable.fromWeb` / `Writable.fromWeb` / `Duplex.fromWeb` 永久持有 Web 流的锁                          | 适配器用完后交还锁                                 |
-| `w.writableNeedDrain` 时调用 `Writable.toWeb(w)`：下一次 Web 写入直接完成，从未调用 `w.write()`         | 先写入这块数据，再等待 drain                       |
-| `r.setEncoding(...)` 之后调用 `Readable.toWeb(r)`：字符串一旦排队，`'data'` 中抛出未捕获的 `RangeError` | 按字符数计算字符串大小                             |
-| `Readable.toWeb` / `Writable.toWeb` 用完后不移除挂在源流上的 `'data'` / `'drain'` 监听器                | 移除监听器                                         |
+| 类的静态方法（Node 的行为）                                                                             | 模块函数                                                   |
+| ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `Readable.fromWeb` 把读到的 `null` push 进去，导致流提前结束，后面的数据被悄悄丢掉                      | `Streams.fromWebReadable` 以 `ERR_STREAM_NULL_VALUES` 失败 |
+| `Readable.fromWeb` / `Writable.fromWeb` / `Duplex.fromWeb` 永久持有 Web 流的锁                          | 适配器用完后交还锁                                         |
+| `w.writableNeedDrain` 时调用 `Writable.toWeb(w)`：下一次 Web 写入直接完成，从未调用 `w.write()`         | 先写入这块数据，再等待 drain                               |
+| `r.setEncoding(...)` 之后调用 `Readable.toWeb(r)`：字符串一旦排队，`'data'` 中抛出未捕获的 `RangeError` | 按字符数计算字符串大小                                     |
+| `Readable.toWeb` / `Writable.toWeb` 用完后不移除挂在源流上的 `'data'` / `'drain'` 监听器                | 移除监听器                                                 |
 
-`pipeline` 和 `compose` 自己读写 Web 流，`toWritable` 经由 `writableFromWeb`，所以两端都不受这些缺陷影响。
+`pipeline` 和 `compose` 自己读写 Web 流，`Streams.toWritable` 经由 `Streams.fromWebWritable`，所以两端都不受这些缺陷影响。
 
 在 Bun 上，Node 入口的类就是 Bun 自己的 `node:stream`，所以静态方法也是 Bun 的行为。例如 Bun 1.4 的 `Readable.fromWeb`
 在流结束后会释放锁，而 Node 不会。只有本模块的转换函数在 Node、Bun 和浏览器上行为完全一致。

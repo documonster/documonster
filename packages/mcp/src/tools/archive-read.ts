@@ -31,7 +31,7 @@
 import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { Archive, ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -142,7 +142,7 @@ export const archiveReadTool = defineTool({
 
     assertNoBomb(selected, config);
 
-    // ArchiveFile's format-neutral entry type loses ZIP's file/symlink bit.
+    // Archive.ArchiveFile's format-neutral entry type loses ZIP's file/symlink bit.
     // Recover it from the public streaming reader, or a ZIP symlink is exposed
     // as an ordinary 11-byte file and would be written despite our "skip
     // special entries" promise.
@@ -201,7 +201,7 @@ export const archiveReadTool = defineTool({
         }
         let bytes: Uint8Array | null;
         try {
-          bytes = await archive.readEntry(entry.path, args.password);
+          bytes = await archive.readEntry(entry.path, { password: args.password });
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : String(cause);
           throw toolError.unsupported(
@@ -264,20 +264,23 @@ export const archiveReadTool = defineTool({
   }
 });
 
-type ArchiveEntry = Awaited<ReturnType<ArchiveFile["getEntries"]>>[number];
+type ArchiveEntry = Awaited<ReturnType<Archive.ArchiveFile["getEntries"]>>[number];
 
 async function open(
   archivePath: string,
   displayPath: string,
   format: "zip" | "tar" | undefined,
   password: string | undefined
-): Promise<ArchiveFile<"zip"> | ArchiveFile<"tar">> {
+): Promise<Archive.ArchiveFile<"zip"> | Archive.ArchiveFile<"tar">> {
   const resolvedFormat = format ?? inferFormat(archivePath);
   try {
     if (resolvedFormat === "tar") {
-      return await ArchiveFile.fromFile(archivePath, { format: "tar" });
+      return await Archive.ArchiveFile.fromFile(archivePath, { format: "tar" });
     }
-    return await ArchiveFile.fromFile(archivePath, password === undefined ? {} : { password });
+    return await Archive.ArchiveFile.fromFile(
+      archivePath,
+      password === undefined ? {} : { password }
+    );
   } catch (cause) {
     throw toolError.unsupported(
       `could not open ${displayPath} as a ${resolvedFormat} archive`,
@@ -300,7 +303,7 @@ async function zipSpecialEntries(
   archivePath: string,
   password: string | undefined
 ): Promise<ReadonlySet<string>> {
-  const reader = Archive.unzip(new Uint8Array(await readFile(archivePath)), {
+  const reader = Archive.openZip(new Uint8Array(await readFile(archivePath)), {
     ...(password === undefined ? {} : { password })
   });
   const special = new Set<string>();

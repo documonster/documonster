@@ -101,7 +101,7 @@ async function build(text: string, font: Uint8Array): Promise<Built> {
   const builder = new PdfDocumentBuilder({ fonts: { default: { regular: font } } });
   builder.onWarning(message => warnings.push(message));
   builder.addPage().drawText(text, { x: 40, y: 700, fontSize: 20 });
-  return { bytes: await builder.build(), warnings };
+  return { bytes: await builder.toBuffer(), warnings };
 }
 
 /**
@@ -110,7 +110,7 @@ async function build(text: string, font: Uint8Array): Promise<Built> {
  * These are two independent code paths inside `FontManager` — `routeText` for a configured
  * document, a single embedded face otherwise — and they shape in different places. Testing
  * only the configured one left the other completely uncovered: disabling shaping there
- * outright kept every assertion in this file green, and it is the path `Pdf.create` with an
+ * outright kept every assertion in this file green, and it is the path `Pdf.fromTable` with an
  * auto-discovered font and the whole Word→PDF bridge take.
  */
 async function buildEmbedded(text: string, font: Uint8Array): Promise<Built> {
@@ -119,7 +119,7 @@ async function buildEmbedded(text: string, font: Uint8Array): Promise<Built> {
   builder.embedFont(font);
   builder.onWarning(message => warnings.push(message));
   builder.addPage().drawText(text, { x: 40, y: 700, fontSize: 20 });
-  return { bytes: await builder.build(), warnings };
+  return { bytes: await builder.toBuffer(), warnings };
 }
 
 /** Every `<...> <...>` pair in the PDF's ToUnicode CMap, as `[cid, codePoints]`. */
@@ -308,8 +308,8 @@ describe("PDF shaping", () => {
     // Anchored at the end, so the measured width decides where the ink starts.
     joinedPage.drawText(HELLO, { x: 400, y: 700, fontSize: 20, anchor: "end" });
     unjoinedPage.drawText(HELLO, { x: 400, y: 700, fontSize: 20, anchor: "end" });
-    await joined.build();
-    await unjoined.build();
+    await joined.toBuffer();
+    await unjoined.toBuffer();
 
     const measured = joinedPage.measureText(HELLO, { fontSize: 20 });
     const measuredUnshaped = unjoinedPage.measureText(HELLO, { fontSize: 20 });
@@ -349,12 +349,12 @@ describe("Word layout is left unshaped", () => {
 
   function arabicDoc(): DocxDocument {
     const handle = Document.create();
-    Document.addParagraphElement(handle, Build.paragraph([Build.text(ARABIC)]));
-    return Document.build(handle);
+    Document.addParagraph(handle, Build.paragraph([Build.text(ARABIC)]));
+    return handle;
   }
 
   it("keeps the original characters in the SVG it renders", () => {
-    const svg = Layout.renderPageToSvg(arabicDoc(), 1);
+    const svg = Layout.pageToSvg(arabicDoc(), 1);
     // A presentation form here would be shaped again by the viewer.
     expect(/[\uFB50-\uFDFF\uFE70-\uFEFF]/.test(svg)).toBe(false);
     expect(svg).toContain("\u0645");
@@ -364,7 +364,7 @@ describe("Word layout is left unshaped", () => {
     // The static advance tables have no entry for a presentation form, so a shaped layout
     // would measure this run at the fallback average width and could paginate differently —
     // and that number is written into NUMPAGES, PAGE, PAGEREF and the TOC.
-    expect(Layout.document(arabicDoc()).pageCount).toBe(1);
+    expect(Layout.getPageMap(arabicDoc()).pageCount).toBe(1);
   });
 
   it("still produces a joined PDF through the bridge", async () => {

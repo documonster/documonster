@@ -4,7 +4,7 @@
  * Complements `xml-complete.ts` (which uses `new Xml.SaxParser()` directly)
  * by covering the functional / streaming SAX surface it skips:
  * - Xml.parseSax: async generator yielding batches of SAX events per chunk
- * - Xml.saxStream: low-overhead adapter feeding an async iterable into a
+ * - Xml.feedSax: low-overhead adapter feeding an async iterable into a
  *   pre-configured SaxParser (no per-event object allocation)
  * - Xml.validateCommentText: validate text is legal inside an XML comment
  *
@@ -84,10 +84,10 @@ try {
 }
 
 // =============================================================================
-// 2. Xml.saxStream — direct streaming into a pre-configured SaxParser
+// 2. Xml.feedSax — direct streaming into a pre-configured SaxParser
 // =============================================================================
 
-console.log("\n=== 2. Xml.saxStream (direct adapter) ===");
+console.log("\n=== 2. Xml.feedSax (direct adapter) ===");
 
 // Register handlers on the parser *before* calling saxStream. No intermediate
 // { eventType, value } objects are created — handlers fire directly.
@@ -121,7 +121,7 @@ parser.on("closetag", tag => {
   }
 });
 
-await Xml.saxStream(parser, chunkSource());
+await Xml.feedSax(parser, chunkSource());
 
 console.log("Books parsed via saxStream:");
 for (const book of books) {
@@ -132,7 +132,7 @@ for (const book of books) {
 console.log("\n--- saxStream error propagation ---");
 const errParser = new Xml.SaxParser();
 try {
-  await Xml.saxStream(errParser, ["<a><b></a>"]);
+  await Xml.feedSax(errParser, ["<a><b></a>"]);
   console.log("No error thrown");
 } catch (err) {
   console.log("saxStream rejected on malformed input:", (err as Error).message);

@@ -2,7 +2,7 @@
  * Example: Pdf.fromChart — Render an Excel Chart to a Standalone PDF
  *
  * `Pdf.fromChart(chart, options?)` takes a single `ChartHandle` (the value
- * returned by `Chart.add(...)`) and renders it to a one-page PDF. Classic
+ * returned by `Chart.place(...)`) and renders it to a one-page PDF. Classic
  * charts take the vector path, so text stays selectable and shapes stay
  * resolution-independent. Options come from `ChartToPdfOptions`
  * (see pdf/excel-bridge.ts): pageWidth/pageHeight, width/height, margin,
@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Chart, Workbook, Worksheet } from "@excel/index";
+import { Chart, Row, Workbook } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -35,7 +35,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Sales");
-Worksheet.addRows(ws, [
+Row.addMany(ws, [
   ["Quarter", "Revenue", "Cost"],
   ["Q1", 1200, 800],
   ["Q2", 1500, 900],
@@ -43,26 +43,22 @@ Worksheet.addRows(ws, [
   ["Q4", 1800, 1050]
 ]);
 
-// Add the chart, then retrieve its ChartHandle via `Chart.get(ws)` — the
+// Add the chart, then retrieve its ChartHandle via `Chart.list(ws)` — the
 // retrieved handle carries the worksheet/workbook backref the bridge needs.
-Chart.add(
-  ws,
-  {
-    type: "bar",
-    barDir: "col",
-    grouping: "clustered",
-    title: "Quarterly Revenue vs Cost",
-    series: [
-      { name: "Revenue", categories: "Sales!$A$2:$A$5", values: "Sales!$B$2:$B$5", fill: "4472C4" },
-      { name: "Cost", categories: "Sales!$A$2:$A$5", values: "Sales!$C$2:$C$5", fill: "ED7D31" }
-    ],
-    categoryAxis: { title: "Quarter" },
-    valueAxis: { title: "USD", numFmt: "$#,##0" },
-    legendPosition: "b"
-  },
-  "E2:M18"
-);
-const chart = Chart.get(ws)[0];
+Chart.place(ws, "E2:M18", {
+  type: "bar",
+  barDir: "col",
+  grouping: "clustered",
+  title: "Quarterly Revenue vs Cost",
+  series: [
+    { name: "Revenue", categories: "Sales!$A$2:$A$5", values: "Sales!$B$2:$B$5", fill: "4472C4" },
+    { name: "Cost", categories: "Sales!$A$2:$A$5", values: "Sales!$C$2:$C$5", fill: "ED7D31" }
+  ],
+  categoryAxis: { title: "Quarter" },
+  valueAxis: { title: "USD", numFmt: "$#,##0" },
+  legendPosition: "b"
+});
+const chart = Chart.list(ws)[0];
 
 console.log("=== Pdf.fromChart ===\n");
 
@@ -99,7 +95,7 @@ console.log(`Raster chart PDF: ${rasterPath} (${rasterBytes.length} bytes)`);
 // 4. Read the vector PDF back to confirm it is a valid one-page document
 // =============================================================================
 
-const read = await Pdf.read(vectorBytes);
+const read = await Pdf.extract(vectorBytes);
 console.log(
   `\nRead back: ${read.pages.length} page(s), ` +
     `${read.pages[0].width.toFixed(0)} x ${read.pages[0].height.toFixed(0)} pts, ` +

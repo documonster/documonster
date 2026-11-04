@@ -8,18 +8,10 @@
  */
 
 import type { BarChartGroup, LineChartGroup, AreaChartGroup, ChartExModel } from "@excel/chart";
-import {
-  buildChartModel,
-  buildComboChartModel,
-  buildChartExModel,
-  renderChartExPng,
-  buildChartScene,
-  buildEffectFilter,
-  renderChartSvg
-} from "@excel/chart";
+import { ChartEx, ChartClassic } from "@excel/chart";
 import type { ChartSceneSeries } from "@excel/chart/index";
 import { addChart, addChartEx, addComboChart, getCharts } from "@excel/core/worksheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 import {
@@ -38,7 +30,7 @@ const textDecoder = new TextDecoder();
 
 describe("buildChartModel — all 16 chart types", () => {
   it("bar chart", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("bar");
     expect(pa(m).axes.length).toBe(2);
     expect(pa(m).axes[0].axisType).toBe("cat");
@@ -54,7 +46,7 @@ describe("buildChartModel — all 16 chart types", () => {
     // one of them being silently dropped during build → write → load.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30],
@@ -127,7 +119,7 @@ describe("buildChartModel — all 16 chart types", () => {
     expect(charts.length).toBe(4);
 
     const layoutFor = (idx: number) =>
-      Chart.chartExModel(charts[idx])!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr;
+      Chart.getExModel(charts[idx])!.chartSpace.chart.plotArea.plotAreaRegion!.series[0].layoutPr;
 
     // Histogram
     const histo = layoutFor(0);
@@ -166,7 +158,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "sunburst",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "sunburst",
             series: [{ values: "A", literalValues: [1, 2], literalCategories: ["A", "B"] }]
           })
@@ -174,7 +166,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "treemap",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "treemap",
             series: [{ values: "A", literalValues: [10, 5], literalCategories: ["A", "B"] }]
           })
@@ -182,7 +174,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "waterfall",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "waterfall",
             categories: "A1:A3",
             series: [
@@ -193,7 +185,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "funnel",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "funnel",
             series: [
               { values: "A", literalValues: [100, 80, 50], literalCategories: ["T", "M", "B"] }
@@ -203,7 +195,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "histogram",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "histogram",
             series: [{ values: "A", literalValues: [1, 2, 3, 4, 5] }],
             binning: { binCount: 3 }
@@ -212,7 +204,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "pareto",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "pareto",
             series: [{ values: "A", literalValues: [5, 3, 1], literalCategories: ["A", "B", "C"] }]
           })
@@ -220,7 +212,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "boxWhisker",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "boxWhisker",
             categories: "A1:A3",
             series: [
@@ -231,7 +223,7 @@ describe("buildChartModel — all 16 chart types", () => {
       {
         name: "regionMap",
         build: (): ChartExModel =>
-          buildChartExModel({
+          ChartEx.createModel({
             type: "regionMap",
             series: [
               {
@@ -244,7 +236,7 @@ describe("buildChartModel — all 16 chart types", () => {
       }
     ];
     for (const fixture of fixtures) {
-      const png = await renderChartExPng(fixture.build(), { width: 240, height: 160 });
+      const png = await ChartEx.toPng(fixture.build(), { width: 240, height: 160 });
       // PNG magic bytes (8-byte signature) + IHDR chunk header.
       expect([...png.slice(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
       expect(textDecoder.decode(png.slice(12, 16))).toBe("IHDR");
@@ -257,7 +249,7 @@ describe("buildChartModel — all 16 chart types", () => {
   });
 
   it("line chart", () => {
-    const m = buildChartModel({ type: "line", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "line", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("line");
     expect(pa(m).axes.length).toBe(2);
     // line chart defaults marker: true
@@ -265,26 +257,26 @@ describe("buildChartModel — all 16 chart types", () => {
   });
 
   it("line3D chart", () => {
-    const m = buildChartModel({ type: "line3D", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "line3D", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("line3D");
     expect(pa(m).axes.length).toBe(3);
     expect(pa(m).axes[2].axisType).toBe("ser");
   });
 
   it("pie chart", () => {
-    const m = buildChartModel({ type: "pie", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "pie", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("pie");
     expect(pa(m).axes.length).toBe(0);
   });
 
   it("pie3D chart", () => {
-    const m = buildChartModel({ type: "pie3D", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "pie3D", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("pie3D");
     expect(pa(m).axes.length).toBe(0);
   });
 
   it("doughnut chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "doughnut",
       series: [baseSeries("S1")],
       holeSize: 50
@@ -295,20 +287,20 @@ describe("buildChartModel — all 16 chart types", () => {
   });
 
   it("area chart", () => {
-    const m = buildChartModel({ type: "area", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "area", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("area");
     expect(pa(m).axes.length).toBe(2);
   });
 
   it("area3D chart", () => {
-    const m = buildChartModel({ type: "area3D", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "area3D", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("area3D");
     expect(pa(m).axes.length).toBe(3);
     expect(pa(m).axes[2].axisType).toBe("ser");
   });
 
   it("scatter chart", () => {
-    const m = buildChartModel({ type: "scatter", series: [scatterSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "scatter", series: [scatterSeries("S1")] });
     expect(ctg(m).type).toBe("scatter");
     expect(pa(m).axes.length).toBe(2);
     // scatter uses val+val axes, not cat+val
@@ -317,7 +309,7 @@ describe("buildChartModel — all 16 chart types", () => {
   });
 
   it("bubble chart", () => {
-    const m = buildChartModel({ type: "bubble", series: [bubbleSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bubble", series: [bubbleSeries("S1")] });
     expect(ctg(m).type).toBe("bubble");
     expect(pa(m).axes.length).toBe(2);
     expect(pa(m).axes[0].axisType).toBe("val");
@@ -325,14 +317,14 @@ describe("buildChartModel — all 16 chart types", () => {
   });
 
   it("radar chart", () => {
-    const m = buildChartModel({ type: "radar", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "radar", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("radar");
     expect((ctg(m) as any).radarStyle).toBe("marker");
     expect(pa(m).axes.length).toBe(2);
   });
 
   it("stock chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "stock",
       series: [baseSeries("High"), baseSeries("Low"), baseSeries("Close")]
     });
@@ -342,20 +334,20 @@ describe("buildChartModel — all 16 chart types", () => {
   });
 
   it("surface chart", () => {
-    const m = buildChartModel({ type: "surface", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "surface", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("surface");
     expect(pa(m).axes.length).toBe(3);
     expect(pa(m).axes[2].axisType).toBe("ser");
   });
 
   it("surface3D chart", () => {
-    const m = buildChartModel({ type: "surface3D", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "surface3D", series: [baseSeries("S1")] });
     expect(ctg(m).type).toBe("surface3D");
     expect(pa(m).axes.length).toBe(3);
   });
 
   it("ofPie chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "ofPie",
       series: [baseSeries("S1")],
       ofPieType: "bar",
@@ -380,13 +372,13 @@ describe("buildChartModel — defaults and options", () => {
     // behaviour. The new semantics: omit → leave Excel to auto-title
     // (autoTitleDeleted undefined); pass `title: null` to explicitly
     // suppress.
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")] });
     expect(m.chart.autoTitleDeleted).toBeUndefined();
     expect(m.chart.title).toBeUndefined();
   });
 
   it("auto-deletes title when title is explicitly null", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       title: null
@@ -396,14 +388,14 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("sets string title", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")], title: "Sales" });
+    const m = ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")], title: "Sales" });
     expect(m.chart.autoTitleDeleted).toBe(false);
     expect(m.chart.title).toBeDefined();
     expect(m.chart.title!.text?.paragraphs[0].runs![0].text).toBe("Sales");
   });
 
   it("sets formula title", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       title: { formula: "Sheet1!$A$1" }
@@ -414,7 +406,7 @@ describe("buildChartModel — defaults and options", () => {
 
   it("sets rich text title", () => {
     const richText = { paragraphs: [{ runs: [{ text: "Bold", rPr: { b: true } }] }] };
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       title: richText
@@ -423,18 +415,22 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("creates legend by default", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")] });
     expect(m.chart.legend).toBeDefined();
     expect(m.chart.legend!.legendPos).toBe("b");
   });
 
   it("hides legend when showLegend=false", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")], showLegend: false });
+    const m = ChartClassic.createModel({
+      type: "bar",
+      series: [baseSeries("S1")],
+      showLegend: false
+    });
     expect(m.chart.legend).toBeUndefined();
   });
 
   it("sets legendPosition", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       legendPosition: "t"
@@ -443,7 +439,7 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("uses displayBlanksAs option", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S1")],
       displayBlanksAs: "span"
@@ -452,12 +448,12 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("defaults displayBlanksAs to gap", () => {
-    const m = buildChartModel({ type: "line", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "line", series: [baseSeries("S1")] });
     expect(m.chart.dispBlanksAs).toBe("gap");
   });
 
   it("sets barDir option", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       barDir: "bar"
@@ -466,7 +462,7 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("sets grouping option", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       grouping: "stacked"
@@ -475,7 +471,7 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("sets scatterStyle option", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [scatterSeries("S1")],
       scatterStyle: "smoothMarker"
@@ -484,7 +480,7 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("sets radarStyle option", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "radar",
       series: [baseSeries("S1")],
       radarStyle: "filled"
@@ -493,7 +489,7 @@ describe("buildChartModel — defaults and options", () => {
   });
 
   it("sets gapWidth and overlap on bar chart group", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       gapWidth: 200,
@@ -505,68 +501,78 @@ describe("buildChartModel — defaults and options", () => {
 
   it("throws clear errors for invalid chart options", () => {
     expect(() =>
-      buildChartModel({
+      ChartClassic.createModel({
         type: "pie",
         series: [{ ...baseSeries("S1"), trendline: { type: "linear" } }]
       })
-    ).toThrow("chart.series[0].trendline is not valid for pie charts");
+    ).toThrow("options.series[0].trendline is not valid for pie charts");
 
     expect(() =>
-      buildChartModel({ type: "doughnut", series: [baseSeries("S1")], holeSize: 120 })
-    ).toThrow("chart.holeSize must be an integer between 0 and 90");
+      ChartClassic.createModel({ type: "doughnut", series: [baseSeries("S1")], holeSize: 120 })
+    ).toThrow("options.holeSize must be an integer between 0 and 90");
 
     expect(() =>
-      buildChartModel({
+      ChartClassic.createModel({
         type: "pie",
         series: [baseSeries("S1")],
         categoryAxis: { title: "Invalid" }
       })
-    ).toThrow("chart.categoryAxis is not valid for pie charts because they do not have axes");
+    ).toThrow("options.categoryAxis is not valid for pie charts because they do not have axes");
 
     expect(() =>
-      buildChartModel({ type: "bar", series: [baseSeries("S1")], valueAxis: { min: 10, max: 5 } })
-    ).toThrow("chart.valueAxis.min must be less than chart.valueAxis.max");
+      ChartClassic.createModel({
+        type: "bar",
+        series: [baseSeries("S1")],
+        valueAxis: { min: 10, max: 5 }
+      })
+    ).toThrow("options.valueAxis.min must be less than options.valueAxis.max");
 
     expect(() =>
-      buildChartModel({ type: "pie", series: [baseSeries("S1")], grouping: "stacked" })
-    ).toThrow("chart.grouping is only valid for bar, line, and area charts");
+      ChartClassic.createModel({ type: "pie", series: [baseSeries("S1")], grouping: "stacked" })
+    ).toThrow("options.grouping is only valid for bar, line, and area charts");
 
     expect(() =>
-      buildChartModel({ type: "bar", series: [baseSeries("S1")], scatterStyle: "smooth" })
-    ).toThrow("chart.scatterStyle is only valid for scatter charts");
+      ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")], scatterStyle: "smooth" })
+    ).toThrow("options.scatterStyle is only valid for scatter charts");
 
     expect(() =>
-      buildChartModel({ type: "bar", series: [baseSeries("S1")], wireframe: true })
-    ).toThrow("chart.wireframe is only valid for surface and surface3D charts");
+      ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")], wireframe: true })
+    ).toThrow("options.wireframe is only valid for surface and surface3D charts");
   });
 
   it("throws clear errors for invalid nested options", () => {
     expect(() =>
-      buildChartModel({ type: "line", series: [{ ...baseSeries("S1"), marker: { size: 100 } }] })
-    ).toThrow("chart.series[0].marker.size must be an integer between 2 and 72");
+      ChartClassic.createModel({
+        type: "line",
+        series: [{ ...baseSeries("S1"), marker: { size: 100 } }]
+      })
+    ).toThrow("options.series[0].marker.size must be an integer between 2 and 72");
 
-    expect(() => buildChartModel({ type: "scatter", series: [baseSeries("S1")] })).toThrow(
-      "chart.series[0].xValues is required for scatter charts"
+    expect(() => ChartClassic.createModel({ type: "scatter", series: [baseSeries("S1")] })).toThrow(
+      "options.series[0].xValues is required for scatter charts"
     );
 
     expect(() =>
-      buildChartModel({ type: "bubble", series: [{ ...baseSeries("S1"), xValues: VALUES_A }] })
-    ).toThrow("chart.series[0].bubbleSize is required for bubble charts");
+      ChartClassic.createModel({
+        type: "bubble",
+        series: [{ ...baseSeries("S1"), xValues: VALUES_A }]
+      })
+    ).toThrow("options.series[0].bubbleSize is required for bubble charts");
 
     expect(() =>
-      buildChartModel({
+      ChartClassic.createModel({
         type: "line",
         series: [{ ...baseSeries("S1"), trendline: { type: "poly", order: 8 } }]
       })
-    ).toThrow("chart.series[0].trendline.order must be an integer between 2 and 6");
+    ).toThrow("options.series[0].trendline.order must be an integer between 2 and 6");
 
     expect(() =>
-      buildChartModel({
+      ChartClassic.createModel({
         type: "line",
         series: [{ ...baseSeries("S1"), errorBars: { type: "cust", plus: VALUES_A } }]
       })
     ).toThrow(
-      'chart.series[0].errorBars.plus and chart.series[0].errorBars.minus are required when type is "cust"'
+      'options.series[0].errorBars.plus and options.series[0].errorBars.minus are required when type is "cust"'
     );
   });
 });
@@ -577,7 +583,7 @@ describe("buildChartModel — defaults and options", () => {
 
 describe("buildChartModel — series options", () => {
   it("applies fill and line to series spPr", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ ...baseSeries("S1"), fill: "FF0000", line: "0000FF", lineWidth: 2 }]
     });
@@ -589,7 +595,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies smooth to line series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [{ ...baseSeries("S1"), smooth: true }]
     });
@@ -597,7 +603,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies smooth to scatter series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [{ ...scatterSeries("S1"), smooth: true }]
     });
@@ -605,7 +611,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies explosion to pie series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "pie",
       series: [{ ...baseSeries("S1"), explosion: 25 }]
     });
@@ -613,7 +619,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies invertIfNegative to bar series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ ...baseSeries("S1"), invertIfNegative: false }]
     });
@@ -621,7 +627,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies bubble3D to bubble series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bubble",
       series: [{ ...bubbleSeries("S1"), bubble3D: true }]
     });
@@ -629,7 +635,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies marker options", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [
         {
@@ -646,7 +652,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies dataLabels to series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -662,7 +668,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies trendline to series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [
         {
@@ -681,7 +687,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies dataPoints to series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -701,7 +707,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies single errorBars to bar series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -717,7 +723,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies errorBars array to scatter series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [
         {
@@ -738,7 +744,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies errorBars array to bubble series", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bubble",
       series: [
         {
@@ -753,7 +759,7 @@ describe("buildChartModel — series options", () => {
   });
 
   it("applies group-level dataLabels", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       dataLabels: { showVal: true, showPercent: false }
@@ -770,7 +776,7 @@ describe("buildChartModel — series options", () => {
 
 describe("buildChartModel — axis options", () => {
   it("applies categoryAxis title", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       categoryAxis: { title: "Category" }
@@ -781,7 +787,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies valueAxis min/max/orientation", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { min: 0, max: 100, orientation: "maxMin" }
@@ -793,7 +799,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies valueAxis majorUnit/minorUnit", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S1")],
       valueAxis: { majorUnit: 10, minorUnit: 2 }
@@ -804,7 +810,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies axis gridlines", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { majorGridlines: true, minorGridlines: true }
@@ -815,7 +821,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies axis hidden option", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       categoryAxis: { hidden: true }
@@ -825,7 +831,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies axis numFmt", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { numFmt: "#,##0.00" }
@@ -835,7 +841,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies axis textRotation", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       categoryAxis: { textRotation: -45 }
@@ -846,7 +852,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies axis crossBetween on valueAxis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       valueAxis: { crossBetween: "midCat" }
@@ -856,7 +862,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies axis logBase", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [scatterSeries("S1")],
       valueAxis: { logBase: 10 }
@@ -868,7 +874,7 @@ describe("buildChartModel — axis options", () => {
   });
 
   it("applies scatter categoryAxis to x val axis", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [scatterSeries("S1")],
       categoryAxis: { title: "X Axis" },
@@ -887,7 +893,7 @@ describe("buildChartModel — axis options", () => {
 
 describe("buildComboChartModel", () => {
   it("creates multiple chart type groups", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Bars")] },
         { type: "line", series: [baseSeries("Lines")] }
@@ -899,7 +905,7 @@ describe("buildComboChartModel", () => {
   });
 
   it("shares primary axes between groups", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Bars")] },
         { type: "line", series: [baseSeries("Lines")] }
@@ -912,7 +918,7 @@ describe("buildComboChartModel", () => {
   });
 
   it("creates secondary axes for useSecondaryAxis groups", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Primary")] },
         { type: "line", series: [baseSeries("Secondary")], useSecondaryAxis: true }
@@ -928,7 +934,7 @@ describe("buildComboChartModel", () => {
   });
 
   it("creates serAx for 3D groups in combo", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar3D", series: [baseSeries("3D Bars")] },
         { type: "line", series: [baseSeries("Lines")] }
@@ -943,7 +949,7 @@ describe("buildComboChartModel", () => {
   });
 
   it("creates secondary serAx for 3D secondary groups", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Primary")] },
         { type: "bar3D", series: [baseSeries("Secondary 3D")], useSecondaryAxis: true }
@@ -957,7 +963,7 @@ describe("buildComboChartModel", () => {
   });
 
   it("handles scatter in combo", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "scatter", series: [scatterSeries("S1")] },
         { type: "scatter", series: [scatterSeries("S2")], useSecondaryAxis: true }
@@ -970,7 +976,7 @@ describe("buildComboChartModel", () => {
   });
 
   it("applies combo-level title", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("S1")] },
         { type: "line", series: [baseSeries("S2")] }
@@ -998,11 +1004,11 @@ describe("chart round-trip via addChart API", () => {
 
     expect(chart).toBeDefined();
     expect(chart.chartNumber).toBeGreaterThan(0);
-    expect(Chart.title(chart)).toBe("Quarterly Results");
-    expect(Chart.chartTypes(chart).length).toBe(1);
-    expect(Chart.chartTypes(chart)[0].type).toBe("bar");
+    expect(Chart.getTitle(chart)).toBe("Quarterly Results");
+    expect(Chart.getChartTypes(chart).length).toBe(1);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("bar");
     expect(Chart.getSeriesCount(chart, 0)).toBe(2);
-    expect(Chart.axes(chart).length).toBe(2);
+    expect(Chart.getAxes(chart).length).toBe(2);
   });
 
   it("round-trips a line chart with smooth", async () => {
@@ -1012,8 +1018,8 @@ describe("chart round-trip via addChart API", () => {
       title: "Trend Line"
     });
 
-    expect(Chart.title(chart)).toBe("Trend Line");
-    expect(Chart.chartTypes(chart)[0].type).toBe("line");
+    expect(Chart.getTitle(chart)).toBe("Trend Line");
+    expect(Chart.getChartTypes(chart)[0].type).toBe("line");
   });
 
   it("round-trips a pie chart", async () => {
@@ -1023,9 +1029,9 @@ describe("chart round-trip via addChart API", () => {
       title: "Market Share"
     });
 
-    expect(Chart.title(chart)).toBe("Market Share");
-    expect(Chart.chartTypes(chart)[0].type).toBe("pie");
-    expect(Chart.axes(chart).length).toBe(0);
+    expect(Chart.getTitle(chart)).toBe("Market Share");
+    expect(Chart.getChartTypes(chart)[0].type).toBe("pie");
+    expect(Chart.getAxes(chart).length).toBe(0);
   });
 
   it("round-trips a scatter chart", async () => {
@@ -1035,8 +1041,8 @@ describe("chart round-trip via addChart API", () => {
       scatterStyle: "lineMarker"
     });
 
-    expect(Chart.chartTypes(chart)[0].type).toBe("scatter");
-    expect(Chart.axes(chart).length).toBe(2);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("scatter");
+    expect(Chart.getAxes(chart).length).toBe(2);
   });
 
   it("round-trips a 3D bar chart with serAx", async () => {
@@ -1046,10 +1052,10 @@ describe("chart round-trip via addChart API", () => {
       title: "3D Chart"
     });
 
-    expect(Chart.title(chart)).toBe("3D Chart");
-    expect(Chart.chartTypes(chart)[0].type).toBe("bar3D");
-    expect(Chart.axes(chart).length).toBe(3);
-    expect(Chart.axes(chart)[2].axisType).toBe("ser");
+    expect(Chart.getTitle(chart)).toBe("3D Chart");
+    expect(Chart.getChartTypes(chart)[0].type).toBe("bar3D");
+    expect(Chart.getAxes(chart).length).toBe(3);
+    expect(Chart.getAxes(chart)[2].axisType).toBe("ser");
   });
 
   it("round-trips a doughnut chart", async () => {
@@ -1059,7 +1065,7 @@ describe("chart round-trip via addChart API", () => {
       holeSize: 60
     });
 
-    expect(Chart.chartTypes(chart)[0].type).toBe("doughnut");
+    expect(Chart.getChartTypes(chart)[0].type).toBe("doughnut");
   });
 
   it("round-trips an area chart", async () => {
@@ -1069,8 +1075,8 @@ describe("chart round-trip via addChart API", () => {
       grouping: "stacked"
     });
 
-    expect(Chart.chartTypes(chart)[0].type).toBe("area");
-    expect(Chart.axes(chart).length).toBe(2);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("area");
+    expect(Chart.getAxes(chart).length).toBe(2);
   });
 
   it("round-trips a radar chart", async () => {
@@ -1080,7 +1086,7 @@ describe("chart round-trip via addChart API", () => {
       radarStyle: "filled"
     });
 
-    expect(Chart.chartTypes(chart)[0].type).toBe("radar");
+    expect(Chart.getChartTypes(chart)[0].type).toBe("radar");
   });
 
   it("round-trips a surface chart", async () => {
@@ -1090,8 +1096,8 @@ describe("chart round-trip via addChart API", () => {
       wireframe: true
     });
 
-    expect(Chart.chartTypes(chart)[0].type).toBe("surface");
-    expect(Chart.axes(chart).length).toBe(3);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("surface");
+    expect(Chart.getAxes(chart).length).toBe(3);
   });
 
   it("round-trips a bubble chart", async () => {
@@ -1101,8 +1107,8 @@ describe("chart round-trip via addChart API", () => {
       bubbleScale: 200
     });
 
-    expect(Chart.chartTypes(chart)[0].type).toBe("bubble");
-    expect(Chart.axes(chart).length).toBe(2);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("bubble");
+    expect(Chart.getAxes(chart).length).toBe(2);
   });
 
   it("round-trips chart with no title (autoTitleDeleted)", async () => {
@@ -1111,7 +1117,7 @@ describe("chart round-trip via addChart API", () => {
       series: [baseSeries("S1")]
     });
 
-    expect(Chart.title(chart)).toBeUndefined();
+    expect(Chart.getTitle(chart)).toBeUndefined();
   });
 
   it("round-trips chart with axis options", async () => {
@@ -1122,9 +1128,9 @@ describe("chart round-trip via addChart API", () => {
       valueAxis: { title: "Amount", min: 0, max: 50, majorGridlines: true }
     });
 
-    const catAx = Chart.categoryAxis(chart);
+    const catAx = Chart.getCategoryAxis(chart);
     expect(catAx).toBeDefined();
-    const valAx = Chart.valueAxis(chart);
+    const valAx = Chart.getValueAxis(chart);
     expect(valAx).toBeDefined();
     expect(valAx!.scaling?.min).toBe(0);
     expect(valAx!.scaling?.max).toBe(50);
@@ -1190,12 +1196,12 @@ describe("combo chart round-trip via addComboChart API", () => {
     await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
-    expect(Chart.title(chart)).toBe("Combo");
-    expect(Chart.chartTypes(chart).length).toBe(2);
-    expect(Chart.chartTypes(chart)[0].type).toBe("bar");
-    expect(Chart.chartTypes(chart)[1].type).toBe("line");
+    expect(Chart.getTitle(chart)).toBe("Combo");
+    expect(Chart.getChartTypes(chart).length).toBe(2);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("bar");
+    expect(Chart.getChartTypes(chart)[1].type).toBe("line");
     // Should have 4 axes (primary cat+val, secondary cat+val)
-    expect(Chart.axes(chart).length).toBe(4);
+    expect(Chart.getAxes(chart).length).toBe(4);
   });
 
   it("round-trips combo with 3D group", async () => {
@@ -1219,10 +1225,10 @@ describe("combo chart round-trip via addComboChart API", () => {
     await Workbook.read(wb2, buf);
     const chart = getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0];
 
-    expect(Chart.title(chart)).toBe("3D Combo");
-    expect(Chart.chartTypes(chart).length).toBe(2);
+    expect(Chart.getTitle(chart)).toBe("3D Combo");
+    expect(Chart.getChartTypes(chart).length).toBe(2);
     // bar3D produces serAx
-    expect(Chart.axes(chart).some(a => a.axisType === "ser")).toBe(true);
+    expect(Chart.getAxes(chart).some(a => a.axisType === "ser")).toBe(true);
   });
 });
 
@@ -1231,54 +1237,54 @@ describe("combo chart round-trip via addComboChart API", () => {
 // ---------------------------------------------------------------------------
 
 describe("Chart high-level API", () => {
-  it("Chart.title getter/setter", async () => {
+  it("Chart.getTitle getter/setter", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
     addChart(ws, { type: "bar", series: [baseSeries("S1")], title: "Original" }, "C1:J10");
     const chart = getCharts(ws)[0];
-    expect(Chart.title(chart)).toBe("Original");
+    expect(Chart.getTitle(chart)).toBe("Original");
 
     Chart.setTitle(chart, "Updated");
-    expect(Chart.title(chart)).toBe("Updated");
+    expect(Chart.getTitle(chart)).toBe("Updated");
 
     Chart.setTitle(chart, undefined);
-    expect(Chart.title(chart)).toBeUndefined();
+    expect(Chart.getTitle(chart)).toBeUndefined();
   });
 
-  it("Chart.legend getter/setter", async () => {
+  it("Chart.getLegend getter/setter", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(Chart.legend(chart)).toBeDefined();
+    expect(Chart.getLegend(chart)).toBeDefined();
     Chart.setLegend(chart, undefined);
-    expect(Chart.legend(chart)).toBeUndefined();
+    expect(Chart.getLegend(chart)).toBeUndefined();
   });
 
-  it("Chart.chartTypes returns chart type groups", () => {
+  it("Chart.getChartTypes returns chart type groups", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
     addChart(ws, { type: "line", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(Chart.chartTypes(chart).length).toBe(1);
-    expect(Chart.chartTypes(chart)[0].type).toBe("line");
+    expect(Chart.getChartTypes(chart).length).toBe(1);
+    expect(Chart.getChartTypes(chart)[0].type).toBe("line");
   });
 
-  it("Chart.axes returns axis list", () => {
+  it("Chart.getAxes returns axis list", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
 
-    expect(Chart.axes(chart).length).toBe(2);
-    expect(Chart.categoryAxis(chart)).toBeDefined();
-    expect(Chart.valueAxis(chart)).toBeDefined();
+    expect(Chart.getAxes(chart).length).toBe(2);
+    expect(Chart.getCategoryAxis(chart)).toBeDefined();
+    expect(Chart.getValueAxis(chart)).toBeDefined();
   });
 
   it("Chart.getSeries returns series by index", () => {
@@ -1301,7 +1307,7 @@ describe("Chart high-level API", () => {
     expect(Chart.getSeries(chart, 2)).toBeUndefined();
   });
 
-  it("Chart.spPr getter/setter", () => {
+  it("Chart.getSpPr getter/setter", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
@@ -1309,10 +1315,10 @@ describe("Chart high-level API", () => {
     const chart = getCharts(ws)[0];
 
     Chart.setSpPr(chart, { fill: { solid: { rgb: "FFFFFF" } } } as any);
-    expect(Chart.spPr(chart)).toBeDefined();
+    expect(Chart.getSpPr(chart)).toBeDefined();
   });
 
-  it("Chart.chartModel returns undefined for non-existent chart entry", () => {
+  it("Chart.getModel returns undefined for non-existent chart entry", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", "x");
@@ -1320,8 +1326,8 @@ describe("Chart high-level API", () => {
     addChart(ws, { type: "bar", series: [baseSeries("S1")] }, "C1:J10");
     const chart = getCharts(ws)[0];
     // chartModel should be defined for a normal chart
-    expect(Chart.chartModel(chart)).toBeDefined();
-    expect(Chart.isChartEx(chart)).toBe(false);
+    expect(Chart.getModel(chart)).toBeDefined();
+    expect(Chart.isEx(chart)).toBe(false);
   });
 
   it("getCharts returns all charts on the worksheet", () => {
@@ -1333,8 +1339,8 @@ describe("Chart high-level API", () => {
 
     const charts = getCharts(ws);
     expect(charts.length).toBe(2);
-    expect(Chart.chartTypes(charts[0])[0].type).toBe("bar");
-    expect(Chart.chartTypes(charts[1])[0].type).toBe("pie");
+    expect(Chart.getChartTypes(charts[0])[0].type).toBe("bar");
+    expect(Chart.getChartTypes(charts[1])[0].type).toBe("pie");
   });
 });
 
@@ -1344,15 +1350,17 @@ describe("Chart high-level API", () => {
 
 describe("chart builder edge cases", () => {
   it("rejects empty series array (Excel won't render a series-less chart)", () => {
-    expect(() => buildChartModel({ type: "bar", series: [] })).toThrow(/at least one series/);
+    expect(() => ChartClassic.createModel({ type: "bar", series: [] })).toThrow(
+      /at least one series/
+    );
   });
 
   it("rejects undefined series (same reason)", () => {
-    expect(() => buildChartModel({ type: "bar" })).toThrow(/at least one series/);
+    expect(() => ChartClassic.createModel({ type: "bar" })).toThrow(/at least one series/);
   });
 
   it("multiple series with correct index/order", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("A"), baseSeries("B"), baseSeries("C")]
     });
@@ -1366,13 +1374,13 @@ describe("chart builder edge cases", () => {
   });
 
   it("axis IDs are unique within a chart", () => {
-    const m = buildChartModel({ type: "bar3D", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bar3D", series: [baseSeries("S1")] });
     const axIds = pa(m).axes.map(a => a.axId);
     expect(new Set(axIds).size).toBe(axIds.length);
   });
 
   it("combo chart axis IDs are all unique", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Primary")] },
         { type: "line", series: [baseSeries("Secondary")], useSecondaryAxis: true }
@@ -1383,7 +1391,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("bubble chart with bubbleScale and showNegBubbles", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bubble",
       series: [bubbleSeries("S1")],
       bubbleScale: 150,
@@ -1397,7 +1405,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("trendline with all options", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [
         {
@@ -1432,7 +1440,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("errorBars with noEndCap and custom plus/minus", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -1455,7 +1463,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("dataLabels with numFmt and separator", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [
         {
@@ -1480,7 +1488,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("ofPie chart with splitType and splitPos", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "ofPie",
       series: [baseSeries("S1")],
       ofPieType: "pie",
@@ -1496,7 +1504,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("surface chart with wireframe", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "surface",
       series: [baseSeries("S1")],
       wireframe: true
@@ -1505,7 +1513,7 @@ describe("chart builder edge cases", () => {
   });
 
   it("chart has roundedCorners=false and lang=en-US by default", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [{ categories: CATEGORIES, values: VALUES_A }]
     });
@@ -1535,10 +1543,10 @@ describe("multiple charts round-trip", () => {
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
     expect(getCharts(ws2).length).toBe(2);
-    expect(Chart.title(getCharts(ws2)[0])).toBe("Chart 1");
-    expect(Chart.title(getCharts(ws2)[1])).toBe("Chart 2");
-    expect(Chart.chartTypes(getCharts(ws2)[0])[0].type).toBe("bar");
-    expect(Chart.chartTypes(getCharts(ws2)[1])[0].type).toBe("pie");
+    expect(Chart.getTitle(getCharts(ws2)[0])).toBe("Chart 1");
+    expect(Chart.getTitle(getCharts(ws2)[1])).toBe("Chart 2");
+    expect(Chart.getChartTypes(getCharts(ws2)[0])[0].type).toBe("bar");
+    expect(Chart.getChartTypes(getCharts(ws2)[1])[0].type).toBe("pie");
   });
 });
 
@@ -1548,7 +1556,11 @@ describe("multiple charts round-trip", () => {
 
 describe("builder chart-level options", () => {
   it("dataTable=true sets all borders and keys", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")], dataTable: true });
+    const m = ChartClassic.createModel({
+      type: "bar",
+      series: [baseSeries("S1")],
+      dataTable: true
+    });
     const dt = pa(m).dataTable;
     expect(dt).toBeDefined();
     expect(dt!.showHorzBorder).toBe(true);
@@ -1558,7 +1570,7 @@ describe("builder chart-level options", () => {
   });
 
   it("dataTable with partial options", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       dataTable: { showHorzBorder: true, showKeys: false }
@@ -1571,14 +1583,14 @@ describe("builder chart-level options", () => {
   });
 
   it("dataTable not set when undefined", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")] });
     expect(pa(m).dataTable).toBeUndefined();
   });
 
   it("renderChartSvg draws a dataTable overlay below the plot", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Jan", 10, 20],
       ["Feb", 15, 25],
       ["Mar", 20, 30]
@@ -1600,8 +1612,8 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    const scene = buildChartScene(model, { width: 600, height: 400 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    const scene = ChartClassic.Backend.toScene(model, { width: 600, height: 400 });
     expect(scene.dataTable).toBeDefined();
     const dt = scene.dataTable!;
     // Header row + 2 series rows = 3 rows → 4 row boundaries.
@@ -1620,7 +1632,7 @@ describe("builder chart-level options", () => {
 
     // The SVG emits the category header, series names and values as
     // <text> nodes and the outline/key swatches as <rect> nodes.
-    const svg = renderChartSvg(model, { width: 600, height: 400 });
+    const svg = ChartClassic.toSvg(model, { width: 600, height: 400 });
     expect(svg).toContain(">Jan<");
     expect(svg).toContain(">Feb<");
     expect(svg).toContain(">Sales<");
@@ -1632,7 +1644,7 @@ describe("builder chart-level options", () => {
   it("dataTable suppresses x-axis category labels (Excel parity)", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 10],
       ["Q2", 20]
     ]);
@@ -1645,8 +1657,8 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    const scene = buildChartScene(model, { width: 500, height: 350 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    const scene = ChartClassic.Backend.toScene(model, { width: 500, height: 350 });
     expect(scene.dataTable).toBeDefined();
     expect(scene.xLabels).toEqual([]);
   });
@@ -1654,7 +1666,7 @@ describe("builder chart-level options", () => {
   it("bar3D renders a true extruded box with view3D-driven projection", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 5],
       ["B", 20, 15],
       ["C", 30, 25]
@@ -1671,8 +1683,8 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    const scene = buildChartScene(model, { width: 640, height: 400 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    const scene = ChartClassic.Backend.toScene(model, { width: 640, height: 400 });
     const bar = scene.series.find(
       (s): s is ChartSceneSeries & { type: "bar" } => s.type === "bar"
     )!;
@@ -1683,7 +1695,7 @@ describe("builder chart-level options", () => {
     expect(Math.abs(bar.projection3D!.dx)).toBeGreaterThan(0);
     expect(Math.abs(bar.projection3D!.dy)).toBeGreaterThan(0);
     // SVG emits three polygons/rects per bar (top face + right face + front rect).
-    const svg = renderChartSvg(model, { width: 640, height: 400 });
+    const svg = ChartClassic.toSvg(model, { width: 640, height: 400 });
     // Two series × 3 bars each = 6 bars. Each produces 2 polygons (top+right) + 1 rect.
     const polygonMatches = svg.match(/<polygon /g) ?? [];
     expect(polygonMatches.length).toBeGreaterThanOrEqual(12);
@@ -1692,7 +1704,7 @@ describe("builder chart-level options", () => {
   it("bar3D falls back to default view3D when model omits it", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1704,9 +1716,9 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
     expect(model.chart.view3D).toBeUndefined();
-    const scene = buildChartScene(model, { width: 500, height: 350 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 500, height: 350 });
     const bar = scene.series.find(
       (s): s is ChartSceneSeries & { type: "bar" } => s.type === "bar"
     )!;
@@ -1720,7 +1732,7 @@ describe("builder chart-level options", () => {
   it("stacked column y-range includes the cumulative sum, not per-series max", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 10, 30],
       ["Q2", 20, 40],
       ["Q3", 30, 50]
@@ -1738,7 +1750,7 @@ describe("builder chart-level options", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
       width: 500,
       height: 300
     });
@@ -1763,8 +1775,8 @@ describe("builder chart-level options", () => {
   it("renderChartSvg never emits NaN or undefined in attribute values", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRow(ws, ["A"]);
-    Worksheet.addRow(ws, ["Single"]);
+    Row.add(ws, ["A"]);
+    Row.add(ws, ["Single"]);
     addChart(
       ws,
       {
@@ -1773,7 +1785,7 @@ describe("builder chart-level options", () => {
       },
       "C1:J10"
     );
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, {
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
       width: 400,
       height: 260
     });
@@ -1789,7 +1801,7 @@ describe("builder chart-level options", () => {
   // rendering. Each `feMerge` must now have a `result="<id>"` that the
   // next step can reference.
   it("buildEffectFilter chains layered effects with named merge results", () => {
-    const xml = buildEffectFilter("test-filter", {
+    const xml = ChartClassic.Backend.toSvgFilter("test-filter", {
       outerShadow: {
         blurRadius: 50800,
         distance: 25400,
@@ -1816,17 +1828,21 @@ describe("builder chart-level options", () => {
   });
 
   it("plotVisOnly defaults to true", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "bar", series: [baseSeries("S1")] });
     expect(m.chart.plotVisOnly).toBe(true);
   });
 
   it("plotVisOnly=false is respected", () => {
-    const m = buildChartModel({ type: "bar", series: [baseSeries("S1")], plotVisOnly: false });
+    const m = ChartClassic.createModel({
+      type: "bar",
+      series: [baseSeries("S1")],
+      plotVisOnly: false
+    });
     expect(m.chart.plotVisOnly).toBe(false);
   });
 
   it("showDLblsOverMax is set when provided", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       showDLblsOverMax: true
@@ -1835,7 +1851,7 @@ describe("builder chart-level options", () => {
   });
 
   it("firstSliceAng on pie chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "pie",
       series: [baseSeries("S1")],
       firstSliceAng: 90
@@ -1844,12 +1860,12 @@ describe("builder chart-level options", () => {
   });
 
   it("firstSliceAng defaults to 0 for pie", () => {
-    const m = buildChartModel({ type: "pie", series: [baseSeries("S1")] });
+    const m = ChartClassic.createModel({ type: "pie", series: [baseSeries("S1")] });
     expect((ctg(m) as any).firstSliceAng).toBe(0);
   });
 
   it("hiLowLines on line chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S1")],
       hiLowLines: true
@@ -1859,7 +1875,7 @@ describe("builder chart-level options", () => {
   });
 
   it("upDownBars on line chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S1")],
       upDownBars: true
@@ -1870,7 +1886,7 @@ describe("builder chart-level options", () => {
   });
 
   it("upDownBars with custom gapWidth", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S1")],
       upDownBars: { gapWidth: 50 }
@@ -1880,7 +1896,7 @@ describe("builder chart-level options", () => {
   });
 
   it("dropLines on line chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "line",
       series: [baseSeries("S1")],
       dropLines: true
@@ -1890,7 +1906,7 @@ describe("builder chart-level options", () => {
   });
 
   it("dropLines on area chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "area",
       series: [baseSeries("S1")],
       dropLines: true
@@ -1900,7 +1916,7 @@ describe("builder chart-level options", () => {
   });
 
   it("serLines on bar chart", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bar",
       series: [baseSeries("S1")],
       serLines: true

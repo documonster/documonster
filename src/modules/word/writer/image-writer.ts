@@ -6,115 +6,43 @@
  */
 
 import { NS_A, NS_PIC, URI_PIC, NS_ASVG, GUID_SVG } from "@word/constants";
+import { drawingInteger } from "@word/core/drawing-geometry";
 import type { FloatingImage } from "@word/types";
-import { DEFAULT_RELATIVE_HEIGHT, DEFAULT_WRAP_MARGIN_EMU } from "@word/units";
+import { closeDrawingFrame, frameModel, openDrawingFrame } from "@word/writer/drawing-frame";
+import type { RenderHelpers } from "@word/writer/render-context";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /** Render a floating image as a standalone paragraph with wp:anchor. */
 export function renderFloatingImage(
   xml: XmlSink,
   img: FloatingImage,
-  imageRemap?: ReadonlyMap<string, string>,
-  nextDocPrId?: () => number
+  helpers?: RenderHelpers
 ): void {
-  const drawingId = nextDocPrId?.() ?? img.drawingId ?? 1;
+  xml.openNode("w:p");
+  renderFloatingImageRun(xml, img, helpers);
+  xml.closeNode(); // w:p
+}
+
+/** Render a floating image's run (`w:r` holding its wp:anchor), for a paragraph to hold. */
+export function renderFloatingImageRun(
+  xml: XmlSink,
+  img: FloatingImage,
+  helpers?: RenderHelpers
+): void {
+  const imageRemap = helpers?.imageRemap;
+  const drawingId = helpers?.nextDocPrId?.() ?? img.drawingId ?? 1;
   const name = img.name ?? "Picture";
   // Resolve relationship id used in r:embed via packager-provided remap.
   const embedRId = imageRemap?.get(img.rId) ?? img.rId;
   const svgEmbedRId = img.svgRId ? (imageRemap?.get(img.svgRId) ?? img.svgRId) : undefined;
 
-  xml.openNode("w:p");
   xml.openNode("w:r");
   xml.openNode("w:drawing");
 
-  // Wrap margins
-  const wrapMargins = img.wrap?.margins;
-
-  xml.openNode("wp:anchor", {
-    distT: String(img.distT ?? wrapMargins?.top ?? 0),
-    distB: String(img.distB ?? wrapMargins?.bottom ?? 0),
-    distL: String(img.distL ?? wrapMargins?.left ?? DEFAULT_WRAP_MARGIN_EMU),
-    distR: String(img.distR ?? wrapMargins?.right ?? DEFAULT_WRAP_MARGIN_EMU),
-    simplePos: img.simplePos ? "1" : "0",
-    relativeHeight: String(img.relativeHeight ?? DEFAULT_RELATIVE_HEIGHT),
-    behindDoc: img.behindDoc ? "1" : "0",
-    locked: img.lockAnchor ? "1" : "0",
-    layoutInCell: img.layoutInCell === false ? "0" : "1",
-    allowOverlap: img.allowOverlap === false ? "0" : "1"
-  });
-
-  xml.leafNode("wp:simplePos", {
-    x: String(img.simplePos?.x ?? 0),
-    y: String(img.simplePos?.y ?? 0)
-  });
-
-  // Horizontal position
-  {
-    const hp = img.horizontalPosition;
-    xml.openNode("wp:positionH", { relativeFrom: hp?.relativeTo ?? "column" });
-    if (hp?.align) {
-      xml.openNode("wp:align");
-      xml.writeText(hp.align);
-      xml.closeNode();
-    } else {
-      xml.openNode("wp:posOffset");
-      xml.writeText(String(hp?.offset ?? 0));
-      xml.closeNode();
-    }
-    xml.closeNode();
-  }
-
-  // Vertical position
-  {
-    const vp = img.verticalPosition;
-    xml.openNode("wp:positionV", { relativeFrom: vp?.relativeTo ?? "paragraph" });
-    if (vp?.align) {
-      xml.openNode("wp:align");
-      xml.writeText(vp.align);
-      xml.closeNode();
-    } else {
-      xml.openNode("wp:posOffset");
-      xml.writeText(String(vp?.offset ?? 0));
-      xml.closeNode();
-    }
-    xml.closeNode();
-  }
-
-  xml.leafNode("wp:extent", { cx: String(img.width), cy: String(img.height) });
-  xml.leafNode("wp:effectExtent", { l: "0", t: "0", r: "0", b: "0" });
-
-  // Wrapping
-  if (img.wrap) {
-    switch (img.wrap.style) {
-      case "square":
-        xml.leafNode("wp:wrapSquare", { wrapText: img.wrap.side ?? "bothSides" });
-        break;
-      case "tight":
-        xml.leafNode("wp:wrapTight", { wrapText: img.wrap.side ?? "bothSides" });
-        break;
-      case "through":
-        xml.leafNode("wp:wrapThrough", { wrapText: img.wrap.side ?? "bothSides" });
-        break;
-      case "topAndBottom":
-        xml.leafNode("wp:wrapTopAndBottom");
-        break;
-      case "none":
-        xml.leafNode("wp:wrapNone");
-        break;
-    }
-  } else {
-    xml.leafNode("wp:wrapNone");
-  }
-
-  xml.leafNode("wp:docPr", {
-    id: String(drawingId),
-    name,
-    ...(img.altText ? { descr: img.altText } : {})
-  });
-
-  xml.openNode("wp:cNvGraphicFramePr");
-  xml.leafNode("a:graphicFrameLocks", { "xmlns:a": NS_A, noChangeAspect: "1" });
-  xml.closeNode();
+  const frame = frameModel("anchor", "picture", img, "Picture");
+  const then = img._frame ? frameModel("anchor", "picture", img._frame.read, "Picture") : undefined;
+  openDrawingFrame(xml, frame, img._frame, then, drawingId, helpers);
 
   xml.openNode("a:graphic", { "xmlns:a": NS_A });
   xml.openNode("a:graphicData", { uri: URI_PIC });
@@ -122,7 +50,7 @@ export function renderFloatingImage(
   xml.openNode("pic:pic", { "xmlns:pic": NS_PIC });
 
   xml.openNode("pic:nvPicPr");
-  xml.leafNode("pic:cNvPr", { id: String(drawingId), name });
+  xml.leafNode("pic:cNvPr", { id: xmlValue(drawingId, "id"), name });
   xml.leafNode("pic:cNvPicPr");
   xml.closeNode();
 
@@ -147,16 +75,16 @@ export function renderFloatingImage(
     const sr = img.srcRect;
     const srAttrs: Record<string, string> = {};
     if (sr.l !== undefined) {
-      srAttrs["l"] = String(sr.l);
+      srAttrs["l"] = drawingInteger(sr.l, "srcRect.l");
     }
     if (sr.t !== undefined) {
-      srAttrs["t"] = String(sr.t);
+      srAttrs["t"] = drawingInteger(sr.t, "srcRect.t");
     }
     if (sr.r !== undefined) {
-      srAttrs["r"] = String(sr.r);
+      srAttrs["r"] = drawingInteger(sr.r, "srcRect.r");
     }
     if (sr.b !== undefined) {
-      srAttrs["b"] = String(sr.b);
+      srAttrs["b"] = drawingInteger(sr.b, "srcRect.b");
     }
     xml.leafNode("a:srcRect", srAttrs);
   }
@@ -169,8 +97,8 @@ export function renderFloatingImage(
 
   // Transform with rotation/flip
   const xfrmAttrs: Record<string, string> = {};
-  if (img.rotation) {
-    xfrmAttrs["rot"] = String(img.rotation);
+  if (img.rotation !== undefined && img.rotation !== 0) {
+    xfrmAttrs["rot"] = drawingInteger(img.rotation, "rotation");
   }
   if (img.flipHorizontal) {
     xfrmAttrs["flipH"] = "1";
@@ -180,7 +108,10 @@ export function renderFloatingImage(
   }
   xml.openNode("a:xfrm", Object.keys(xfrmAttrs).length > 0 ? xfrmAttrs : undefined);
   xml.leafNode("a:off", { x: "0", y: "0" });
-  xml.leafNode("a:ext", { cx: String(img.width), cy: String(img.height) });
+  xml.leafNode("a:ext", {
+    cx: drawingInteger(img.width, "width"),
+    cy: drawingInteger(img.height, "height")
+  });
   xml.closeNode();
 
   xml.openNode("a:prstGeom", { prst: "rect" });
@@ -191,7 +122,7 @@ export function renderFloatingImage(
   if (img.outline) {
     const lnAttrs: Record<string, string> = {};
     if (img.outline.width !== undefined) {
-      lnAttrs["w"] = String(img.outline.width);
+      lnAttrs["w"] = drawingInteger(img.outline.width, "outline.width");
     }
     xml.openNode("a:ln", Object.keys(lnAttrs).length > 0 ? lnAttrs : undefined);
     if (img.outline.color) {
@@ -207,8 +138,7 @@ export function renderFloatingImage(
   xml.closeNode(); // pic:pic
   xml.closeNode(); // a:graphicData
   xml.closeNode(); // a:graphic
-  xml.closeNode(); // wp:anchor
+  closeDrawingFrame(xml, frame, img._frame, helpers); // wp:anchor
   xml.closeNode(); // w:drawing
   xml.closeNode(); // w:r
-  xml.closeNode(); // w:p
 }

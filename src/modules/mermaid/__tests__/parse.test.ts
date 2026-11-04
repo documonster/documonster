@@ -7,11 +7,11 @@
  * reason: when one fails it names the construct rather than reporting that a diagram
  * came out different.
  */
-import { MermaidSyntaxError, parseMermaid } from "@mermaid/index";
+import { Mermaid, MermaidParseError } from "@mermaid/index";
 import type { FlowchartDiagram, PieDiagram, SequenceDiagram } from "@mermaid/types";
 import { describe, expect, it } from "vitest";
 
-const flow = (source: string): FlowchartDiagram => parseMermaid(source) as FlowchartDiagram;
+const flow = (source: string): FlowchartDiagram => Mermaid.parse(source) as FlowchartDiagram;
 
 describe("a flowchart's header", () => {
   it("takes its direction from the header", () => {
@@ -253,7 +253,7 @@ describe("lexical rules", () => {
 });
 
 describe("pie", () => {
-  const pie = (source: string): PieDiagram => parseMermaid(source) as PieDiagram;
+  const pie = (source: string): PieDiagram => Mermaid.parse(source) as PieDiagram;
 
   it("reads slices, the title and showData from the header", () => {
     const diagram = pie(`pie showData title Split
@@ -278,7 +278,7 @@ describe("pie", () => {
 });
 
 describe("sequenceDiagram", () => {
-  const sequence = (source: string): SequenceDiagram => parseMermaid(source) as SequenceDiagram;
+  const sequence = (source: string): SequenceDiagram => Mermaid.parse(source) as SequenceDiagram;
 
   it("reads participants, aliases and message arrows", () => {
     const diagram = sequence(`sequenceDiagram
@@ -316,11 +316,11 @@ describe("sequenceDiagram", () => {
 describe("an unsupported diagram", () => {
   it("names what it could not draw rather than drawing nothing", () => {
     // An empty picture and a picture of nothing look the same to the author.
-    expect(() => parseMermaid("zenuml\n title A")).toThrow(MermaidSyntaxError);
-    expect(() => parseMermaid("zenuml\n title A")).toThrow(/zenuml/);
+    expect(() => Mermaid.parse("zenuml\n title A")).toThrow(MermaidParseError);
+    expect(() => Mermaid.parse("zenuml\n title A")).toThrow(/zenuml/);
   });
 
   it("reports an empty source as empty", () => {
-    expect(() => parseMermaid("   \n\n")).toThrow(/empty/);
+    expect(() => Mermaid.parse("   \n\n")).toThrow(/empty/);
   });
 });

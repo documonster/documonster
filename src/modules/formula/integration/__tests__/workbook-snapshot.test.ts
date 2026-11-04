@@ -4,6 +4,7 @@
  * cells and defined names consistently.
  */
 
+import { excelNameKey } from "@utils/name-key";
 import { describe, it, expect } from "vitest";
 
 import {
@@ -63,19 +64,19 @@ describe("spillCellKeyFromId", () => {
 describe("scopedNameKey", () => {
   it("uses NUL separator for sheet-scoped names", () => {
     const k = scopedNameKey("Data", "MyName");
-    expect(k).toBe("DATA\u0000MYNAME");
+    expect(k).toBe("data\u0000myname");
   });
 
-  it("uppercases both sheet and name", () => {
-    const k = scopedNameKey("data", "myname");
-    expect(k).toBe("DATA\u0000MYNAME");
+  it("compares sheet and name without case, as Excel does", () => {
+    const k = scopedNameKey("DATA", "MYNAME");
+    expect(k).toBe("data\u0000myname");
   });
 
   it("NUL separator avoids collision with literal sheet names", () => {
     // If we used ':' or '!' then a sheet like 'A:B' could collide.
     // NUL isn't allowed in Excel sheet/name literals, so keys are unique.
-    expect(scopedNameKey("A", "B:C")).toBe("A\u0000B:C");
-    expect(scopedNameKey("A:B", "C")).toBe("A:B\u0000C");
+    expect(scopedNameKey("A", "B:C")).toBe("a\u0000b:c");
+    expect(scopedNameKey("A:B", "C")).toBe("a:b\u0000c");
     expect(scopedNameKey("A", "B:C")).not.toBe(scopedNameKey("A:B", "C"));
   });
 });
@@ -91,20 +92,24 @@ describe("resolveDefinedName", () => {
   });
 
   it("finds workbook-scoped global name", () => {
-    const map = new Map<string, DefinedNameSnapshot>([["TAXRATE", dn("TaxRate", "Sheet1!$A$1")]]);
+    const map = new Map<string, DefinedNameSnapshot>([
+      [excelNameKey("TaxRate"), dn("TaxRate", "Sheet1!$A$1")]
+    ]);
     const r = resolveDefinedName(map, "TaxRate");
     expect(r?.name).toBe("TaxRate");
   });
 
   it("is case-insensitive for workbook names", () => {
-    const map = new Map<string, DefinedNameSnapshot>([["TAXRATE", dn("TaxRate", "Sheet1!$A$1")]]);
+    const map = new Map<string, DefinedNameSnapshot>([
+      [excelNameKey("TaxRate"), dn("TaxRate", "Sheet1!$A$1")]
+    ]);
     expect(resolveDefinedName(map, "taxrate")?.name).toBe("TaxRate");
     expect(resolveDefinedName(map, "TAXRATE")?.name).toBe("TaxRate");
   });
 
   it("sheet-scoped name takes precedence over workbook", () => {
     const map = new Map<string, DefinedNameSnapshot>([
-      ["TAXRATE", dn("TaxRate", "Sheet1!$A$1")],
+      [excelNameKey("TaxRate"), dn("TaxRate", "Sheet1!$A$1")],
       [scopedNameKey("Report", "TaxRate"), dn("TaxRate", "Report!$B$1")]
     ]);
     const sheetScoped = resolveDefinedName(map, "TaxRate", "Report");
@@ -113,7 +118,7 @@ describe("resolveDefinedName", () => {
 
   it("sheet-scoped lookup on unrelated sheet falls back to global", () => {
     const map = new Map<string, DefinedNameSnapshot>([
-      ["TAXRATE", dn("TaxRate", "Sheet1!$A$1")],
+      [excelNameKey("TaxRate"), dn("TaxRate", "Sheet1!$A$1")],
       [scopedNameKey("Report", "TaxRate"), dn("TaxRate", "Report!$B$1")]
     ]);
     // Looking from a different sheet → finds workbook-level

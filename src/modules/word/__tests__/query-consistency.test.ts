@@ -105,9 +105,9 @@ describe("getHeadings and splitDocument use the shared heading rule", () => {
 describe("Query publishes the style index its resolvers accept", () => {
   it("indexStyles builds a reusable StyleIndex", () => {
     const d = doc([], [style("Base", { runProperties: { bold: true } })]);
-    const index: StyleIndex = Query.indexStyles(d);
+    const index: StyleIndex = Query.createStyleIndex(d);
     const p = para("x", { style: "Base" });
-    expect(Query.resolveStyle(d, p, undefined, index)).toEqual(Query.resolveStyle(d, p));
+    expect(Query.getParagraphStyle(d, p, { styles: index })).toEqual(Query.getParagraphStyle(d, p));
   });
 });
 

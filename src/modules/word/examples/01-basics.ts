@@ -28,12 +28,11 @@ fs.mkdirSync(outDir, { recursive: true });
 
 // ---------------------------------------------------------------------------
 // Edge case 1: an empty document still produces a valid .docx (Word requires
-// at least one paragraph in document.xml — Document.build() handles that for
-// callers, so building an empty handle is a no-op and the writer adds the
-// implicit empty paragraph).
+// at least one paragraph in document.xml — the writer adds the implicit empty
+// paragraph for a document with no content).
 // ---------------------------------------------------------------------------
 const emptyDoc = Document.create();
-const emptyBuf = await Io.toBuffer(Document.build(emptyDoc));
+const emptyBuf = await Io.toBuffer(emptyDoc);
 fs.writeFileSync(path.join(outDir, "01-basics-empty.docx"), emptyBuf);
 console.log(`  → 01-basics-empty.docx (${emptyBuf.length} bytes)`);
 
@@ -60,12 +59,12 @@ for (const lvl of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
 // fully-formed Paragraph object you can compose, store or transform before
 // inserting. Useful when generating headings programmatically.
 for (const lvl of [1, 2, 3] as const) {
-  Document.addParagraphElement(doc, Build.heading(`Built via heading() — level ${lvl}`, lvl));
+  Document.addParagraph(doc, Build.heading(`Built via heading() — level ${lvl}`, lvl));
 }
 
 // Tabs and positional tabs
 Document.addHeading(doc, "Tabs & breaks", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Left"),
@@ -75,7 +74,7 @@ Document.addParagraphElement(
     Build.text("Right (with regular tabs — relies on default tab stops).")
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Positional tab → "),
@@ -85,7 +84,7 @@ Document.addParagraphElement(
 );
 
 // Line break vs paragraph break
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Line one"),
@@ -97,14 +96,14 @@ Document.addParagraphElement(
 );
 
 // Carriage return (treated like a line break by Word)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.text("CR before:"), Build.carriageReturn(), Build.text("CR after.")])
 );
 
 // Page break inside a run
 Document.addParagraph(doc, "Below this paragraph a page break is inserted.");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.pageBreak(), Build.text("This is on a new page.")])
 );
@@ -136,7 +135,7 @@ Document.addParagraph(
 Document.addParagraph(doc, "Emoji: 😀 🚀 🇨🇳 🇺🇸 🧑‍💻 (ZWJ sequence) ⚙️");
 
 // RTL paragraph (set bidi flag so layout engines treat it accordingly)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.text("هذا نص عربي RTL مع كلمة latin بداخلها.")], { bidi: true })
 );
@@ -146,7 +145,7 @@ const long = "Lorem ipsum dolor sit amet. ".repeat(200);
 Document.addParagraph(doc, `Long paragraph (${long.length} chars): ${long}`);
 
 // noBreakHyphen / softHyphen
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("part-one"),
@@ -209,6 +208,6 @@ Document.addParagraph(doc, "Control char dropped: [\u0007] bell, [\u0001] SOH.")
 // ---------------------------------------------------------------------------
 // Build & write
 // ---------------------------------------------------------------------------
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "01-basics.docx"), buf);
 console.log(`  → 01-basics.docx (${buf.length} bytes)`);

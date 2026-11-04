@@ -19,9 +19,9 @@
  * Russian-locale workbook and `Sheet1` through `Sheet4` in another.
  */
 import type { Color } from "@excel/types";
-import { encodeWideString, readWideString } from "@excel/xlsb/binary";
+import { encodeWideString, readWideString, XlsbReader } from "@excel/xlsb/binary";
 import { COLOR_SIZE, automaticColor, encodeColor, readColor } from "@excel/xlsb/color";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /**
  * Bytes before the code name's character count.
@@ -76,7 +76,7 @@ export function readSheetProperties(
   if (payload.length < HEADER_SIZE + 4) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   reader.skip(3); // flags
   const tabColor = readColor(reader);
   reader.readUint32(); // rwSync

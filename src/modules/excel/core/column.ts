@@ -35,6 +35,8 @@ export interface ColumnModel {
   width?: number;
   style?: Partial<Style>;
   isCustomWidth?: boolean;
+  /** `customWidth` as a file stated it; absent for a column a caller made or resized. */
+  customWidth?: boolean;
   hidden?: boolean;
   outlineLevel?: number;
   collapsed?: boolean;
@@ -54,16 +56,21 @@ export interface ColumnData {
   hidden?: boolean;
   outlineLevel?: number;
   bestFit?: boolean;
+  /**
+   * Whether the file this column was read from called its width the author's (`customWidth`). Cleared when a caller
+   * sets a width, which is then theirs; absent, the width alone decides.
+   */
+  customWidth?: boolean;
   style: Partial<Style>;
 }
 
 /**
- * A **read-only view** of a column record, as handed out by `Worksheet.columns`
- * / `Worksheet.lastColumn`.
+ * A **read-only view** of a column record, as handed out by the deprecated
+ * `Worksheet.columns` / `Worksheet.lastColumn`.
  *
  * The same live object as the {@link ColumnData} handle, minus the `worksheet`
  * back-reference and with every field (including the nested `style`) readonly:
- * columns are declared through `Worksheet.setColumns` and changed through the
+ * columns are declared through `Column.setDefinitions` and changed through the
  * `Column` namespace, both of which keep the column numbering, the key registry
  * and the cells' styles in sync. Writing to the object directly does not.
  *
@@ -126,12 +133,33 @@ export function columnCollapsed(c: ColumnData): boolean {
   return !!(c.outlineLevel && c.outlineLevel >= (c.worksheet.properties.outlineLevelCol ?? 0));
 }
 
+/**
+ * Whether two column styles are equal. Columns read or styled together share their facet objects, so comparing the
+ * facets by identity settles almost every pair; `deepEqual` is the fallback. Writing a sheet compares every column with
+ * its neighbour, and comparing each pair deeply was a large part of writing a wide sheet.
+ */
+function sameStyle(a: Partial<Style> | undefined, b: Partial<Style> | undefined): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a !== undefined && b !== undefined) {
+    const keys = Object.keys(a) as (keyof Style)[];
+    if (
+      keys.length === Object.keys(b).length &&
+      keys.every(key => Object.hasOwn(b, key) && a[key] === b[key])
+    ) {
+      return true;
+    }
+  }
+  return deepEqual(a, b);
+}
+
 export function columnEquivalentTo(c: ColumnData, other: ColumnData): boolean {
   return (
     c.width === other.width &&
     columnHidden(c) === columnHidden(other) &&
     columnOutlineLevel(c) === columnOutlineLevel(other) &&
-    deepEqual(c.style, other.style)
+    sameStyle(c.style, other.style)
   );
 }
 
@@ -141,7 +169,8 @@ export function columnEquivalentToModel(c: ColumnData, model: ColumnModel): bool
     columnHidden(c) === model.hidden &&
     columnOutlineLevel(c) === model.outlineLevel &&
     c.bestFit === model.bestFit &&
-    deepEqual(c.style, model.style)
+    c.customWidth === model.customWidth &&
+    sameStyle(c.style, model.style)
   );
 }
 
@@ -227,13 +256,16 @@ export function columnToModel(columns: readonly ColumnData[]): ColumnModel[] | u
       col = {
         min: index + 1,
         max: index + 1,
-        width: column.width !== undefined ? column.width : DEFAULT_COLUMN_WIDTH,
+        // A column with no width of its own keeps none: filling in the default wrote `width="9"` for a column the
+        // file had left to `defaultColWidth`, which the next read took as a width the author had chosen.
+        width: column.width,
         style: column.style,
-        isCustomWidth: columnIsCustomWidth(column),
+        isCustomWidth: column.customWidth ?? columnIsCustomWidth(column),
         hidden: columnHidden(column),
         outlineLevel: columnOutlineLevel(column),
         collapsed: columnCollapsed(column),
-        bestFit: column.bestFit
+        bestFit: column.bestFit,
+        ...(column.customWidth === undefined ? {} : { customWidth: column.customWidth })
       };
       cols.push(col);
     } else {

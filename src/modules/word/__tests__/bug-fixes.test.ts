@@ -7,9 +7,9 @@ import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
 import { describe, expect, it } from "vitest";
 
+import { htmlToDocxBody } from "../convert/html/html-import";
 import { utf8Decoder, utf8Encoder } from "../core/internal-utils";
-import { htmlToDocxBody } from "../html";
-import { Document, Build, Io, Streaming } from "../index";
+import { Build, Document, Io, Package, Streaming } from "../index";
 import type { BodyContent, DocxDocument, Paragraph, Run } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import type { BodyContent, DocxDocument, Paragraph, Run } from "../types";
 async function buildSimpleDoc(): Promise<DocxDocument> {
   const doc = Document.create();
   Document.addContent(doc, Build.textParagraph("Hello"));
-  return Document.build(doc);
+  return doc;
 }
 
 function paragraphText(p: Paragraph): string {
@@ -56,7 +56,7 @@ async function replacePart(
   for (const [p, d] of entries) {
     archive.add(p, d);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ async function replacePart(
 
 describe("Bug-2: tolerant non-critical part parsing", () => {
   it("readDocx still returns the body even when settings.xml is corrupt", async () => {
-    const original = await Io.package(await buildSimpleDoc());
+    const original = await Io.toBuffer(await buildSimpleDoc());
     const broken = await replacePart(
       original,
       "word/settings.xml",
@@ -77,7 +77,7 @@ describe("Bug-2: tolerant non-critical part parsing", () => {
   });
 
   it("readDocx still returns the body even when styles.xml is corrupt", async () => {
-    const original = await Io.package(await buildSimpleDoc());
+    const original = await Io.toBuffer(await buildSimpleDoc());
     const broken = await replacePart(original, "word/styles.xml", utf8Encoder.encode("<<<"));
     const doc = await Io.read(broken);
     expect(doc.body.length).toBeGreaterThan(0);
@@ -90,14 +90,14 @@ describe("Bug-2: tolerant non-critical part parsing", () => {
 
 describe("Bug-14: encryption version detection", () => {
   it("rejects unsupported (Standard Encryption v4.2) versions cleanly", async () => {
-    const { decryptDocx } = await import("../crypto");
+    const { WordCrypto } = await import("../crypto");
     // Synthesize a CFB OLE document with EncryptionInfo header carrying
     // major=4, minor=2 (Standard Encryption). We don't construct a full
     // CFB; we just confirm the path: detection happens via OLE magic in
     // isEncryptedDocx, so a plain ZIP returns false and decryptDocx
     // throws DocxParseError or DocxDecryptionError.
-    const notEncrypted = await Io.package(await buildSimpleDoc());
-    await expect(decryptDocx(notEncrypted, "x")).rejects.toThrow();
+    const notEncrypted = await Io.toBuffer(await buildSimpleDoc());
+    await expect(WordCrypto.decrypt(notEncrypted, "x")).rejects.toThrow();
   });
 });
 
@@ -108,14 +108,14 @@ describe("Bug-14: encryption version detection", () => {
 describe("Bug-10: incremental-edit path normalization", () => {
   it("replaceBody preserves the original sectPr instead of the empty fallback", async () => {
     const docModel = await buildSimpleDoc();
-    const buffer = await Io.package(docModel);
+    const buffer = await Io.toBuffer(docModel);
     // Record the original sectPr snippet (very loose — we just verify
     // that something with `<w:sectPr` survives a body replacement).
     const original = await entriesOf(buffer);
     const docXml = utf8Decoder.decode(original.get("word/document.xml")!);
     expect(docXml).toContain("<w:sectPr");
 
-    const newBuf = await Io.editDocxIncremental(buffer, [
+    const newBuf = await Package.edit(buffer, [
       {
         type: "replaceBody",
         body: [Build.textParagraph("Replaced")]
@@ -129,8 +129,8 @@ describe("Bug-10: incremental-edit path normalization", () => {
   });
 
   it("normalizes leading slashes on edit paths so callers can pass either form", async () => {
-    const buffer = await Io.package(await buildSimpleDoc());
-    const after = await Io.editDocxIncremental(buffer, [
+    const buffer = await Io.toBuffer(await buildSimpleDoc());
+    const after = await Package.edit(buffer, [
       {
         type: "replacePartText",
         path: "/word/document.xml",
@@ -211,7 +211,7 @@ describe("Bug-15: bookmark/comment id handling", () => {
       `</w:p>` +
       `</w:body>` +
       `</w:document>`;
-    const buffer = await Io.package(await buildSimpleDoc());
+    const buffer = await Io.toBuffer(await buildSimpleDoc());
     const buf = await replacePart(buffer, "word/document.xml", utf8Encoder.encode(docXml));
     const out = await Io.read(buf);
     const para = out.body[0] as Paragraph;
@@ -251,33 +251,29 @@ describe("Bug-1: cross-paragraph fields", () => {
       `<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>` +
       `</w:body>` +
       `</w:document>`;
-    const buffer = await Io.package(await buildSimpleDoc());
+    const buffer = await Io.toBuffer(await buildSimpleDoc());
     const buf = await replacePart(buffer, "word/document.xml", utf8Encoder.encode(docXml));
     const out = await Io.read(buf);
-    // The terminal paragraph should now hold a Run whose content is a
-    // single FieldContent carrying the assembled instruction and the
-    // concatenated cached chunks. Earlier the whole field was lost.
-    let foundField = false;
-    let cached = "";
-    for (const block of out.body as readonly BodyContent[]) {
-      if (block.type !== "paragraph") {
-        continue;
-      }
-      for (const child of (block as Paragraph).children) {
-        if (!("content" in child)) {
-          continue;
-        }
-        for (const c of (child as Run).content) {
-          if (c.type === "field") {
-            foundField = true;
-            cached = c.cachedValue ?? "";
-          }
-        }
-      }
-    }
-    expect(foundField).toBe(true);
-    expect(cached).toContain("chunk-B");
-    expect(cached).toContain("chunk-C");
+    // Each paragraph keeps its own runs, and the field is read field
+    // character by field character in the paragraphs the characters were
+    // in. Earlier the whole field was lost; later it was moved, whole, to
+    // the last paragraph with the result's paragraphs merged into it.
+    const shape = (out.body as readonly BodyContent[])
+      .filter((b): b is Paragraph => b.type === "paragraph")
+      .map(p =>
+        p.children.flatMap(child =>
+          "content" in child
+            ? (child as Run).content.map(c =>
+                c.type === "field"
+                  ? `${c.fieldChar}:${c.instruction}`
+                  : c.type === "text"
+                    ? c.text
+                    : c.type
+              )
+            : []
+        )
+      );
+    expect(shape).toEqual([["begin: TOC "], ["separate:", "chunk-B"], ["chunk-C", "end:"]]);
   });
 });
 
@@ -314,7 +310,7 @@ describe("Bug-7: track-change wrappers register their relationships", () => {
       ]
     } as Paragraph);
 
-    const built = Document.build(doc);
+    const built = doc;
     const bytes = await Io.toBuffer(built);
     const entries = await entriesOf(bytes);
     const rels = utf8Decoder.decode(entries.get("word/_rels/document.xml.rels")!);
@@ -328,12 +324,12 @@ describe("Bug-7: track-change wrappers register their relationships", () => {
 
 describe("Med-3: markdown import paragraph + table boundary", () => {
   it("recognizes a GFM table immediately after a paragraph (no blank line)", async () => {
-    const { markdownToDocx } = await import("../markdown");
+    const { WordMarkdown } = await import("../markdown");
     const md = `Some prose
 | h1 | h2 |
 | --- | --- |
 | a | b |`;
-    const doc = await markdownToDocx(md);
+    const doc = await WordMarkdown.toDocx(md);
     const types = doc.body.map(b => b.type);
     expect(types).toContain("paragraph");
     expect(types).toContain("table");
@@ -368,7 +364,7 @@ describe("Med-9: hyphenation minLeft boundary", () => {
 
 describe("Bug-6: streaming-writer parity with packager", () => {
   it("registers a hyperlink rId in document.xml.rels", async () => {
-    const stream = Streaming.createDocxStream();
+    const stream = Streaming.createWriter();
     stream.add({
       type: "paragraph",
       children: [
@@ -395,7 +391,7 @@ describe("Bug-6: streaming-writer parity with packager", () => {
       0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
       0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
     ]);
-    const stream = Streaming.createDocxStream({
+    const stream = Streaming.createWriter({
       images: [{ rId: "rId99", fileName: "tiny.png", mediaType: "png", data: png }]
     });
     stream.add({

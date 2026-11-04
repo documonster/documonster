@@ -40,7 +40,8 @@
  */
 
 import type { AddChartOptions } from "@excel/chart";
-import { drawChartPdf, renderChartSvg } from "@excel/chart";
+import { ChartClassic } from "@excel/chart";
+import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import { addChart, getCharts } from "@excel/core/worksheet";
 import { Cell, Chart, Workbook } from "@excel/index";
 import { recordChartPdf } from "@test/pdf-draw-record";
@@ -54,22 +55,22 @@ const HEIGHT = 160;
 
 /** `[hash of the recorded drawing, number of calls]`. */
 const BASELINES: Record<string, readonly [string, number]> = {
-  bar: ["f380adf7", 30],
-  bar3D: ["62311213", 38],
-  line: ["adcc2895", 31],
-  line3D: ["adcc2895", 31],
-  pie: ["682accd6", 14],
-  pie3D: ["682accd6", 14],
-  doughnut: ["9cf81606", 14],
-  area: ["f29240c5", 28],
-  area3D: ["f29240c5", 28],
-  scatter: ["84a4c64c", 46],
-  bubble: ["2bed9a3f", 45],
-  radar: ["5cb22ad7", 28],
-  stock: ["8b36e0ca", 39],
-  surface: ["74a0f173", 30],
-  surface3D: ["74a0f173", 30],
-  ofPie: ["a532e2c0", 31]
+  bar: ["858fb076", 30],
+  bar3D: ["7fba7fcc", 38],
+  line: ["20afe54a", 31],
+  line3D: ["20afe54a", 31],
+  pie: ["16c746f1", 14],
+  pie3D: ["16c746f1", 14],
+  doughnut: ["6597e3f5", 14],
+  area: ["6d1c7f04", 28],
+  area3D: ["6d1c7f04", 28],
+  scatter: ["7b6613bf", 46],
+  bubble: ["60afa2f2", 45],
+  radar: ["ba8e1cb0", 28],
+  stock: ["71695a39", 39],
+  surface: ["d1f4ce52", 30],
+  surface3D: ["d1f4ce52", 30],
+  ofPie: ["cffeddff", 31]
 };
 
 /** Build a minimal but non-degenerate chart of the given type. */
@@ -105,7 +106,7 @@ function chartOf(type: AddChartOptions["type"]) {
           ? { type, series: [series("O"), series("H", "C"), series("L"), series("C", "C")] }
           : { type, series: [series("S")], title: "T" };
   addChart(ws, options as AddChartOptions, "E1:L12");
-  return Chart.chartModel(getCharts(ws)[0])!;
+  return Chart.getModel(getCharts(ws)[0])!;
 }
 
 /** Record what `drawChartPdf` draws for one chart type. */
@@ -147,11 +148,12 @@ describe("classic chart PDF output is stable", () => {
     }
   });
 
-  it("frames the chart before drawing into it", () => {
-    // The PDF preview draws a white panel with a light border; the display list is
-    // built with a transparent background so the frame is not painted over.
+  it("draws the chart area first: the model's own, Office's automatic one here", () => {
+    // White, with Office's 0.75 pt #D9D9D9 border inside the box — the node the display list
+    // draws, so SVG and PNG show it too. This used to be a frame only the PDF drew, in a
+    // fixed #CCCCCC, whatever the chart said.
     const first = record("bar").calls[0];
-    expect(first).toBe(`rect 0,0 ${WIDTH}x${HEIGHT} f=#ffffff s=#cccccc`);
+    expect(first).toBe(`rect 0.38,0.38 ${WIDTH - 0.75}x${HEIGHT - 0.75} f=#ffffff s=#d9d9d9`);
   });
 });
 
@@ -163,7 +165,7 @@ describe("the PDF and SVG backends draw the same picture", () => {
    */
   const swatchesFromSvg = (type: string): { x: number; y: number }[] =>
     extractSvgGeometry(
-      renderChartSvg(chartOf(type as AddChartOptions["type"]), { width: WIDTH, height: HEIGHT })
+      ChartClassic.toSvg(chartOf(type as AddChartOptions["type"]), { width: WIDTH, height: HEIGHT })
     )
       .filter(shape => shape.kind === "rect" && shape.coords[2] === 10 && shape.coords[3] === 10)
       .map(shape => ({ x: shape.coords[0], y: shape.coords[1] }));
@@ -195,7 +197,7 @@ describe("the PDF and SVG backends draw the same picture", () => {
     // The PDF path passed no colour at all, so labels rendered black against
     // SVG's #555555.
     const svgLabel = extractSvgGeometry(
-      renderChartSvg(chartOf("bar"), { width: WIDTH, height: HEIGHT })
+      ChartClassic.toSvg(chartOf("bar"), { width: WIDTH, height: HEIGHT })
     ).find(shape => shape.kind === "text" && shape.text === "Cat1");
     expect(svgLabel?.fill).toBe("#555555");
     expect(record("bar").calls.some(call => /^text .*"Cat1".*c=#555555/.test(call))).toBe(true);
@@ -212,7 +214,7 @@ describe("the PDF and SVG backends draw the same picture", () => {
     // Pre-mixing towards white hid the gridlines under an area fill, and only the
     // SVG emitter did it — so the two disagreed on colour as well as on opacity.
     const svgFill = extractSvgGeometry(
-      renderChartSvg(chartOf("area"), { width: WIDTH, height: HEIGHT })
+      ChartClassic.toSvg(chartOf("area"), { width: WIDTH, height: HEIGHT })
     ).find(shape => shape.kind === "polygon");
     expect(svgFill?.fill).toBe("#4472c4@0.35");
     expect(record("area").calls.some(call => /f=#4472c4@0\.35/.test(call))).toBe(true);

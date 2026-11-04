@@ -55,9 +55,8 @@ const lenient = await Workbook.toBuffer(withUnsupported, {
   format: "xlsb",
   unsupported: "ignore"
 });
-const reopened = Workbook.create();
-await Workbook.read(reopened, lenient);
-const readSheet = Workbook.getWorksheets(reopened)[0]!;
+const reopened = await Workbook.read(lenient);
+const readSheet = Workbook.listWorksheets(reopened)[0]!;
 console.log("A2 survived:", Cell.getValue(readSheet, "A2"));
 console.log("A3 is blank:", JSON.stringify(Cell.getValue(readSheet, "A3")));
 
@@ -71,9 +70,8 @@ console.log("A3 is blank:", JSON.stringify(Cell.getValue(readSheet, "A3")));
 // and an image, each reachable through a relationship — the shape Excel produces.
 const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "data/themed.xlsb");
 
-const themed = Workbook.create();
-await Workbook.readFile(themed, fixture);
-console.log("read the fixture:", Worksheet.getName(Workbook.getWorksheets(themed)[0]!));
+const themed = await Workbook.readFile(fixture);
+console.log("read the fixture:", Worksheet.getName(Workbook.listWorksheets(themed)[0]!));
 
 const rewritten = await Workbook.toBuffer(themed, { format: "xlsb" });
 const before = await extractAll(fs.readFileSync(fixture));
@@ -114,9 +112,8 @@ for (const date1904 of [false, true]) {
   Cell.setValue(dates, "A1", new Date(Date.UTC(2024, 5, 1)));
   Cell.setStyle(dates, "A1", { numFmt: "yyyy-mm-dd" });
 
-  const back = Workbook.create();
-  await Workbook.read(back, await Workbook.toBuffer(epoch, { format: "xlsb" }));
-  const value = Cell.getValue(Workbook.getWorksheets(back)[0]!, "A1");
+  const back = await Workbook.read(await Workbook.toBuffer(epoch, { format: "xlsb" }));
+  const value = Cell.getValue(Workbook.listWorksheets(back)[0]!, "A1");
   console.log(
     `date1904=${String(date1904).padEnd(5)} →`,
     value instanceof Date ? value.toISOString().slice(0, 10) : String(value)

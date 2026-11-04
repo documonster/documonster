@@ -64,8 +64,10 @@ describe("compress", () => {
       const original = new TextEncoder().encode("Hello, World!");
       const compressed = await compress(original, { level: 0 });
 
-      // Level 0 should return original data unchanged
-      expect(compressed).toEqual(original);
+      // Level 0 is stored DEFLATE blocks — still a DEFLATE stream (this test used to expect
+      // the input back unchanged, which no inflater can read).
+      expect(compressed.length).toBeGreaterThan(original.length);
+      expect(await decompress(compressed)).toEqual(original);
     });
 
     it("should compress with different levels", async () => {
@@ -122,7 +124,7 @@ describe("compress", () => {
       const original = new TextEncoder().encode("Hello, World!");
       const compressed = compressSync(original, { level: 0 });
 
-      expect(compressed).toEqual(original);
+      expect(decompressSync(compressed)).toEqual(original);
     });
 
     it("should compress and decompress large data synchronously", () => {

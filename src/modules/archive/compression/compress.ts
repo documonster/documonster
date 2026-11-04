@@ -88,19 +88,15 @@ import { assertLimitOption } from "@utils/limits";
  * @example
  * ```ts
  * const data = new TextEncoder().encode("Hello, World!");
- * const compressed = await compress(data, { level: 6 });
+ * const compressed = await Compression.deflate(data, { level: 6 });
  * ```
  */
 export async function compress(
   data: Uint8Array,
   options: CompressOptions = {}
 ): Promise<Uint8Array> {
+  // Level 0 is DEFLATE's stored blocks: still a DEFLATE stream, which zlib writes.
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
-
-  // Level 0 means no compression
-  if (level === 0) {
-    return data;
-  }
 
   const thresholdBytes = resolveCompressThresholdBytes(options);
   const input = uint8ArrayToBuffer(data);
@@ -123,11 +119,6 @@ export async function compress(
  */
 export function compressSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
-
-  if (level === 0) {
-    return data;
-  }
-
   const input = uint8ArrayToBuffer(data);
   const zlibOptions = { level };
   return bufferToUint8Array(nodeZlib.deflateRawSync(input, zlibOptions));
@@ -384,7 +375,7 @@ export function unzlibSync(data: Uint8Array, options: CompressOptions = {}): Uin
  * @example
  * ```ts
  * // Works with any format
- * const data = await decompressAuto(compressed);
+ * const data = await Compression.decompressAuto(compressed);
  * ```
  */
 export async function decompressAuto(

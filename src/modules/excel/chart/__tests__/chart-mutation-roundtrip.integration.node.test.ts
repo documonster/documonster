@@ -149,7 +149,7 @@ describe("Chart mutation round-trip", () => {
             return;
           }
           const chart = charts[0];
-          if (!Chart.chartModel(chart)) {
+          if (!Chart.getModel(chart)) {
             return;
           }
           Chart.mutate(chart, model => {
@@ -208,10 +208,10 @@ describe("Chart mutation round-trip", () => {
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
         const chart = charts[0];
-        if (!Chart.chartExModel(chart)) {
+        if (!Chart.getExModel(chart)) {
           continue;
         }
-        Chart.mutateChartEx(chart, model => {
+        Chart.mutateEx(chart, model => {
           // Mutating any structured field invalidates rawXml so the writer
           // must round-trip via the structured renderer; this is the path
           // most likely to drop the marker if the renderer regresses.
@@ -242,7 +242,9 @@ describe("Chart mutation round-trip", () => {
         expect(xml, `${fixture.id} cx:extLst uri preserved`).toContain(
           "{synthetic-cx-roundtrip-fixture}"
         );
-        expect(xml, `${fixture.id} cx15:foo preserved`).toContain("cx15:foo");
+        // The fixture binds the chartEx namespace to `cx15`; the reader reads prefixes by URI and
+        // keeps the part with Excel's own, so the element survives as `cx:foo`.
+        expect(xml, `${fixture.id} cx15:foo preserved`).toMatch(/<cx:foo\b[^>]*\bval="42"/);
       }
     });
   });
@@ -276,10 +278,10 @@ describe("Chart mutation round-trip", () => {
         const wb = Workbook.create();
         await Workbook.read(wb, fixture.bytes);
         const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-        if (!Chart.chartExModel(chart)) {
+        if (!Chart.getExModel(chart)) {
           continue;
         }
-        Chart.mutateChartEx(chart, model => {
+        Chart.mutateEx(chart, model => {
           const title = model.chartSpace.chart.title;
           if (title) {
             title.overlay = !title.overlay;

@@ -7,8 +7,8 @@
  * directly.
  *
  * Covers:
- *   - createConversionContext — collects warnings + asset registry
- *   - docxToSemantic — turn a DocxDocument into a SemanticDocument
+ *   - Convert.createConversionContext — collects warnings + asset registry
+ *   - Convert.toSemantic — turn a DocxDocument into a SemanticDocument
  *   - Walking the SemanticDocument: blocks, inlines, headings, lists, tables,
  *     code, images
  *   - Custom export: render the SemanticDocument as plain text and as
@@ -45,7 +45,7 @@ Document.useDefaultStyles(d);
 Document.setCoreProperties(d, { title: "IR demo", creator: "OpenCode" });
 Document.addHeading(d, "IR demo", 1);
 Document.addHeading(d, "Section A", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.text("A paragraph with "),
@@ -72,20 +72,20 @@ Document.addImage(d, tinyPng, "png", Units.cmToEmu(2), Units.cmToEmu(2), { altTe
 Document.addFootnote(d, "Footnote at the end of section A.");
 Document.addParagraph(d, "End of section A.");
 
-const docModel = Document.build(d);
-fs.writeFileSync(path.join(outDir, "00-source.docx"), await Io.toBuffer(docModel));
+fs.writeFileSync(path.join(outDir, "00-source.docx"), await Io.toBuffer(d));
 
 // ---------------------------------------------------------------------------
-// 1. createConversionContext + docxToSemantic
-//    docxToSemantic creates its own internal context and returns
-//    { document, context }. createConversionContext is the building block
-//    used by custom converters that drive the IR pipeline manually.
+// 1. Convert.createConversionContext + Convert.toSemantic
+//    toSemantic creates its own context and returns { document, context };
+//    the context carries the warnings and assets collected on the way.
+//    createConversionContext is the building block used by custom converters
+//    that drive the IR pipeline manually.
 // ---------------------------------------------------------------------------
 const standalone = Convert.createConversionContext();
 standalone.addWarning("info", "demo", "createConversionContext usable on its own", "/example");
 console.log(`  standalone context: ${standalone.warnings.length} warning(s) collected`);
 
-const result = Convert.docxToSemantic(docModel);
+const result = Convert.toSemantic(d);
 const ir = result.document;
 console.log(
   `  IR: ${ir.blocks.length} blocks, ${ir.assets.length} asset(s), ${ir.footnotes.length} footnote(s)`
@@ -201,5 +201,5 @@ console.log(`  block-type counts: ${JSON.stringify(summary)}`);
 // ---------------------------------------------------------------------------
 // 4. Edge: empty doc still produces a SemanticDocument
 // ---------------------------------------------------------------------------
-const empty = Convert.docxToSemantic(Document.build(Document.create()));
+const empty = Convert.toSemantic(Document.create());
 console.log(`  empty doc → ${empty.document.blocks.length} block(s)`);

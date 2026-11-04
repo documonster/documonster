@@ -8,38 +8,72 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
   "toAsyncIterable",
   "toReadableStream",
 
-  // High-level archive API
-  "zip",
-  "editZip",
-  "editZipUrl",
-  "unzip",
-  "ZipArchive",
-  "ZipEditor",
-  "ZipEditPlan",
-  "ZipReader",
-  "UnzipEntry",
-
-  // TAR archive support (basic - no gzip)
-  "TAR_BLOCK_SIZE",
-  "TAR_TYPE",
-  "TarArchive",
-  "TarReader",
-  "createTarReaderEntry",
-  "createTarArchive",
-  "createTarReader",
-  "tar",
-  "tarSync",
+  // Format matrix — builder, reader, one-shot pack/unpack, entry lists
+  "createZip",
+  "openZip",
+  "packZip",
+  "packZipSync",
+  "unpackZip",
+  "unpackZipSync",
+  "createTar",
+  "openTar",
+  "packTar",
+  "packTarSync",
+  "unpackTar",
+  "unpackTarSync",
   "parseTar",
   "parseTarStream",
-  "untar",
+  "createTarGz",
+  "openTarGz",
+  "packTarGz",
+  "packTarGzSync",
+  "unpackTarGz",
+  "unpackTarGzSync",
+  "parseTarGz",
+  "parseTarGzStream",
+
+  // Classes behind the factories
+  "ZipArchive",
+  "ZipReader",
+  "TarArchive",
+  "TarReader",
+  "TarGzArchive",
+
+  // ZIP editing and entries
+  "editZip",
+  "editZipUrl",
+  "ZipEditor",
+  "ZipEditPlan",
+  "UnzipEntry",
+
+  // TAR entries and constants
+  "TAR_BLOCK_SIZE",
+  "TAR_TYPE",
+  "createTarReaderEntry",
   "isTarFile",
   "isTarDirectory",
   "isTarSymlink",
   "isTarHardLink",
   "isTarDataEntry",
 
+  // Deprecated forwards
+  "zip",
+  "unzip",
+  "createTarArchive",
+  "createTarReader",
+  "tar",
+  "tarSync",
+  "untar",
+
+  // CRC-32 and PNG encoding
+  "crc32",
+  "crc32Update",
+  "crc32Finalize",
+  "encodePng",
+
   // Random access / HTTP Range reading
   "HttpRangeReader",
+  "Crypto",
   "createBufferReader",
   "RemoteZipReader",
 
@@ -91,8 +125,12 @@ export const ARCHIVE_NAMESPACE_EXPORTS = [
  * compression/CRC primitives, and error classes.
  */
 export const ARCHIVE_BROWSER_EXPORTS = [
-  // Domain namespace
+  // Domain namespaces
   "Archive",
+  "Compression",
+
+  // Everything below except constants and errors is a deprecated forward to a
+  // namespace member.
 
   // CRC32 (platform-specific implementation)
   "crc32",
@@ -164,18 +202,24 @@ export const ARCHIVE_BROWSER_EXPORTS = [
   "Crc32MismatchError",
   "EntrySizeMismatchError",
   "ArchiveLimitError",
+  "WorkerStreamStartError",
+  "ArchiveArgumentError",
   "DecryptionError",
   "PasswordRequiredError",
   "RangeNotSupportedError",
   "HttpRangeError",
   "FileTooLargeError",
-  "UnsupportedCompressionError"
+  "UnsupportedCompressionError",
+  "isArchiveError"
 ] as const;
 
 /**
  * File system convenience layer exports (Node.js only)
  */
 export const ARCHIVE_NODE_EXPORTS = [
+  // File-system namespace
+  "Fs",
+
   // Node stream adapter
   "toNodeReadable",
 
@@ -228,6 +272,42 @@ export const ARCHIVE_RUNTIME_EXPORTS = [
   ...ARCHIVE_NODE_EXPORTS
 ] as const;
 
+/** Members only the Node entry's `Archive` namespace carries. */
+export const ARCHIVE_NODE_NAMESPACE_EXPORTS = ["ArchiveFile", "toNodeReadable"] as const;
+
+/** Members of the `Compression` namespace (identical on both entries). */
+export const COMPRESSION_NAMESPACE_EXPORTS = [
+  "deflate",
+  "deflateSync",
+  "inflate",
+  "inflateSync",
+  "gzip",
+  "gunzip",
+  "gzipSync",
+  "gunzipSync",
+  "isGzipData",
+  "zlib",
+  "unzlib",
+  "zlibSync",
+  "unzlibSync",
+  "isZlibData",
+  "decompressAuto",
+  "decompressAutoSync",
+  "detectFormat",
+  "hasCompressionStream",
+  "hasWorkerSupport",
+  "hasGzipCompressionStream",
+  "hasGzipDecompressionStream",
+  "createDeflateStream",
+  "createInflateStream",
+  "createGzipStream",
+  "createGunzipStream",
+  "createZlibStream",
+  "createUnzlibStream",
+  "hasDeflateRaw",
+  "Workers"
+] as const;
+
 export type ArchiveNamespaceExport = (typeof ARCHIVE_NAMESPACE_EXPORTS)[number];
 export type ArchiveBrowserExport = (typeof ARCHIVE_BROWSER_EXPORTS)[number];
 export type ArchiveNodeExport = (typeof ARCHIVE_NODE_EXPORTS)[number];
@@ -236,3 +316,38 @@ export type ArchiveRuntimeExport = (typeof ARCHIVE_RUNTIME_EXPORTS)[number];
 export function getRuntimeExportKeys(moduleNamespace: object): string[] {
   return Object.keys(moduleNamespace).sort();
 }
+
+/** Members of the Node-only `Fs` namespace. */
+export const FS_NAMESPACE_EXPORTS = [
+  "traverseDirectory",
+  "traverseDirectorySync",
+  "glob",
+  "globSync",
+  "globToRegex",
+  "matchGlob",
+  "matchGlobAny",
+  "ensureDir",
+  "ensureDirSync",
+  "fileExists",
+  "fileExistsSync",
+  "readFileBytes",
+  "readFileBytesSync",
+  "writeFileBytes",
+  "writeFileBytesSync",
+  "setFileTime",
+  "setFileTimeSync",
+  "safeStats",
+  "safeStatsSync",
+  "readFileText",
+  "readFileTextSync",
+  "writeFileText",
+  "writeFileTextSync",
+  "remove",
+  "removeSync",
+  "copyFile",
+  "copyFileSync",
+  "createReadStream",
+  "createWriteStream",
+  "createTempDir",
+  "createTempDirSync"
+] as const;

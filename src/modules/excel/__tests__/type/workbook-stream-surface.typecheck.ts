@@ -11,7 +11,7 @@ import { Readable } from "node:stream";
 import { pipeline as nodePipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
-import { createCsvReadStream } from "@excel/bridge/csv.node";
+import { ExcelCsv } from "@excel/bridge/csv.node";
 import { Workbook } from "@excel/index";
 import type { IReadable } from "@stream";
 import { pipeline, Writable } from "@stream";
@@ -57,12 +57,12 @@ export async function bufferSurface(): Promise<void> {
   void bytes;
 }
 
-// `createCsvReadStream` is a byte stream, like `toStream` — chunks must be bytes,
+// `ExcelCsv.toStream` is a byte stream, like `toStream` — chunks must be bytes,
 // and a `string` element type must not typecheck.
 export async function csvIsBytes(): Promise<void> {
-  const csv: IReadable<Uint8Array> = createCsvReadStream(wb);
-  const nodeCsv: Readable = createCsvReadStream(wb);
-  const webCsv: NodeReadableStream = Readable.toWeb(createCsvReadStream(wb));
+  const csv: IReadable<Uint8Array> = ExcelCsv.toStream(wb);
+  const nodeCsv: Readable = ExcelCsv.toStream(wb);
+  const webCsv: NodeReadableStream = Readable.toWeb(ExcelCsv.toStream(wb));
   for await (const chunk of csv) {
     const bytes: Uint8Array = chunk;
     // @ts-expect-error a CSV chunk is bytes, never a string
@@ -78,7 +78,7 @@ export async function csvIsBytes(): Promise<void> {
 // underlying Transform must stay off the public type: writing to it would inject
 // rows into the output.
 export function csvIsReadOnly(): void {
-  const csv = createCsvReadStream(wb);
+  const csv = ExcelCsv.toStream(wb);
   // @ts-expect-error a CSV read stream must not expose the formatter's `write`
   csv.write(["injected", "row"]);
   // @ts-expect-error a CSV read stream must not expose the formatter's `end`

@@ -36,7 +36,7 @@ w.leafNode("item", { id: "1" }, "hello");
 w.leafNode("item", { id: "2" }, "world");
 w.closeNode();
 
-console.log(w.xml);
+console.log(w.toString());
 // <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 // <root version="1.0"><item id="1">hello</item><item id="2">world</item></root>
 ```
@@ -66,6 +66,7 @@ const parser = new Xml.SaxParser();
 parser.on("opentag", tag => console.log("open:", tag.name, tag.attributes));
 parser.on("text", text => console.log("text:", text));
 parser.on("closetag", tag => console.log("close:", tag.name));
+// Each event has one handler: a second `on("text", …)` replaces the first.
 parser.write('<root><item id="1">hello</item></root>');
 parser.close();
 ```
@@ -77,8 +78,8 @@ import { Xml } from "documonster/xml";
 
 const doc = Xml.parse('<root><item id="1">hello</item></root>');
 const item = Xml.findChild(doc.root, "item");
-console.log(Xml.attr(item!, "id")); // "1"
-console.log(Xml.textContent(item!)); // "hello"
+console.log(Xml.getAttr(item!, "id")); // "1"
+console.log(Xml.getText(item!)); // "hello"
 ```
 
 ### XML to Plain Object
@@ -145,9 +146,9 @@ Xml.decode("&lt;hello&gt;"); // "<hello>"
 src/modules/xml/
 ├── types.ts              # Core types (XmlNode, XmlSink, SaxTag, etc.)
 ├── errors.ts             # XmlError, XmlParseError, XmlWriteError
-├── encode.ts             # Xml.encode, Xml.decode, Xml.validateXmlName, Xml.encodeCData, etc.
+├── encode.ts             # Xml.encode, Xml.decode, Xml.validateName, Xml.encodeCData, etc.
 ├── writer.ts             # Xml.Writer (buffered, with rollback support)
-├── stream-writer.ts      # Xml.StreamWriter (streaming, writes to WritableTarget)
+├── stream-writer.ts      # Xml.StreamWriter (streaming, writes to XmlWritableTarget)
 ├── sax.ts                # Xml.SaxParser (event-driven) + Xml.parseSax (async generator)
 ├── dom.ts                # Xml.parse + DOM query helpers + Xml.toPlainObject
 ├── to-object.ts          # Xml.parseToObject (SAX-direct, single-pass)
@@ -165,7 +166,7 @@ XmlSink (interface)
 │                      Supports rollback/transactions (save/commit/rollback)
 │                      Best for: small-medium XML, speculative writes
 │
-└── Xml.StreamWriter  — Writes directly to a WritableTarget
+└── Xml.StreamWriter  — Writes directly to an XmlWritableTarget
                        O(1) memory — never holds full document
                        Best for: large XML (worksheets with 100K+ rows)
 ```
@@ -173,7 +174,7 @@ XmlSink (interface)
 ### Read Path
 
 ```
-Xml.SaxParser        — Event-driven streaming parser
+Xml.SaxParser  — Event-driven streaming parser
 │                      Feed chunks via write(), events fire synchronously
 │                      Best for: large XML, when you only need specific elements
 │
@@ -198,35 +199,41 @@ Xml.SaxParser        — Event-driven streaming parser
 
 ### Xml.Writer
 
+Built with `new Xml.Writer()`.
+
 | Method                          | Description                             |
 | ------------------------------- | --------------------------------------- |
-| `openXml(attrs?)`               | Write `<?xml ...?>` declaration         |
+| `openXml(attrs?)`               | Write `<?xml ...?>` declaration (first) |
 | `openNode(name, attrs?)`        | Open an element                         |
 | `closeNode()`                   | Close the most recent element           |
 | `leafNode(name, attrs?, text?)` | Write a complete element in one call    |
 | `addAttribute(name, value)`     | Add attribute to currently-open element |
 | `addAttributes(attrs)`          | Add multiple attributes                 |
 | `writeText(text)`               | Write escaped text content              |
-| `writeRaw(xml)`                 | Write pre-escaped XML                   |
+| `writeRaw(xml)`                 | Write pre-escaped XML (a string)        |
 | `writeCData(text)`              | Write `<![CDATA[...]]>` section         |
 | `writeComment(text)`            | Write `<!--...-->` comment              |
 | `closeAll()`                    | Close all open elements                 |
-| `toString()` / `xml`            | Get the built XML string                |
+| `toString()`                    | Get the built XML string                |
 | `save()`                        | Save rollback snapshot                  |
 | `commit()`                      | Discard snapshot (keep changes)         |
 | `rollback()`                    | Restore to snapshot (discard changes)   |
 | `reset()`                       | Clear everything                        |
 | `depth`                         | Current nesting depth                   |
 | `currentElement`                | Name of innermost open element          |
-| `cursor`                        | Monotonic position counter              |
+| `cursor`                        | Grows with each write; rollback lowers  |
 
 ### Xml.StreamWriter
 
-Same methods as `Xml.Writer` (both implement `XmlSink`), except:
+Built with `new Xml.StreamWriter(target)`. Same methods as `Xml.Writer` (both implement `XmlSink`), except:
 
-- No `toString()` / `xml` — content is already written to target
+- No `toString()` — content is already written to target
 - No `save()` / `commit()` / `rollback()` — streaming is irreversible
 - No `cursor` — not applicable for streaming
+
+Both writers refuse `openXml` once anything has been written (`XmlWriteError`): XML allows the
+declaration only at the very start of a document. `Xml.parse` is lenient here and drops a misplaced
+`<?xml …?>` silently, as it is used to read files other programs wrote.
 
 ### Xml.SaxParser
 
@@ -288,24 +295,25 @@ Xml.parse(xml: string, options?: XmlParseOptions): XmlDocument;
 | `root`        | `XmlElement`                                    | First (or only) root element                               |
 | `roots`       | `XmlElement[]`                                  | All root-level elements (useful in fragment mode)          |
 | `declaration` | `Record<string, string> \| undefined`           | XML declaration attributes (version, encoding, standalone) |
-| `prologue`    | `Array<XmlComment \| XmlProcessingInstruction>` | Top-level comments and PIs (when enabled via options)      |
+| `prologue`    | `Array<XmlComment \| XmlProcessingInstruction>` | Top-level comments and PIs before the root (when enabled)  |
+| `epilogue`    | `Array<XmlComment \| XmlProcessingInstruction>` | Top-level comments and PIs after the root (when enabled)   |
 
 ### DOM Helpers
 
-| Function                     | Description                 |
-| ---------------------------- | --------------------------- |
-| `Xml.findChild(el, name)`    | First child element by name |
-| `Xml.findChildren(el, name)` | All child elements by name  |
-| `Xml.textContent(node)`      | Recursive text content      |
-| `Xml.attr(el, name)`         | Get attribute value         |
-| `Xml.walk(el, visitor)`      | Depth-first traversal       |
+| Function                       | Description                 |
+| ------------------------------ | --------------------------- |
+| `Xml.findChild(el, name)`      | First child element by name |
+| `Xml.listChildren(el, name)`   | All child elements by name  |
+| `Xml.getText(node)`            | Recursive text content      |
+| `Xml.getAttr(el, name)`        | Get attribute value         |
+| `Xml.eachElement(el, visitor)` | Depth-first traversal       |
 
 ### Xml.toPlainObject
 
 ```text
 Xml.toPlainObject(
   element: XmlElement,
-  options?: ToPlainObjectOptions
+  options?: XmlToPlainObjectOptions
 ): Record<string, unknown>;
 ```
 
@@ -314,7 +322,7 @@ Convert an `XmlElement` DOM tree into a plain JavaScript object.
 ### Xml.parseToObject
 
 ```text
-Xml.parseToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
+Xml.parseToObject(xml: string, options?: XmlParseToObjectOptions): Record<string, unknown>;
 ```
 
 Parse an XML string directly into a plain JavaScript object in a single SAX pass. ~1.6x faster than `Xml.parse()` + `Xml.toPlainObject()` on medium/large XML.
@@ -353,9 +361,12 @@ import { Xml } from "documonster/xml";
 | `a/*/c`        | Wildcard: any element name at that level        |
 | `a//c`         | Recursive descent: `c` at any depth under `a`   |
 | `a/b[0]`       | Index: first matching `b` under each parent `a` |
+| `//c`          | `c` at any depth under the context element      |
 
 - `Xml.query(element, path)` — First match or `undefined`
-- `Xml.queryAll(element, path)` — All matches (may be empty)
+- `Xml.queryAll(element, path)` — All matches (may be empty), each once, in document order
+
+Anything else — an absolute path (`/a`), an empty step (`a/`), `.`/`..`, or a predicate not listed above (`[@id]`, `[last()]`) — throws `XmlError` rather than matching nothing. Indexes are 0-based, unlike XPath.
 
 Index filters use **per-parent semantics**: `a/b[0]` returns the first `b` under _each_ `a`, not the globally first `b`.
 
@@ -366,7 +377,7 @@ Index filters use **per-parent semantics**: `a/b[0]` returns the first `b` under
 | `Xml.encode(text)`              | Encode text for XML content (`<`, `>`, `&`, `"`, `'`)         |
 | `Xml.decode(text)`              | Decode XML entities back to text                              |
 | `Xml.encodeAttr(value)`         | Encode an attribute value (adds `\t\n\r` → `&#x9;&#xA;&#xD;`) |
-| `Xml.validateXmlName(name)`     | Validate an XML element/attribute name                        |
+| `Xml.validateName(name)`        | Validate an XML element/attribute name                        |
 | `Xml.validateCommentText(text)` | Validate text for XML comment content                         |
 | `Xml.encodeCData(text)`         | Encode text for a CDATA section (splits `]]>`)                |
 
@@ -401,9 +412,14 @@ Note: Unprefixed attributes do **not** inherit the default namespace, per XML Na
 ## Security
 
 - **Entity expansion limits** — Prevents XML bomb attacks (configurable via `maxEntityExpansions`)
+- **No DTD processing** — A `<!DOCTYPE>` is accepted and its internal subset skipped, not read: entities declared
+  there (`<!ENTITY e "x">`), external entities and parameter entities are never defined or fetched. A reference to
+  one is reported as `undefined entity: e (entities declared in a DOCTYPE internal subset are not supported)`. The
+  five predefined entities and character references are always available; a caller can add others through the
+  parser's `ENTITIES` map.
 - **Nesting depth limits** — Prevents stack overflow from deeply nested XML (configurable via `maxDepth`)
 - **Duplicate attribute rejection** — XML 1.0 §3.1 WFC: Unique Att Spec (reports error, recovers with last-value-wins)
-- **Name injection prevention** — Writers validate element and attribute names via `Xml.validateXmlName()`
+- **Name injection prevention** — Writers validate element and attribute names via `Xml.validateName()`
 - **Comment/CDATA safety** — `Xml.validateCommentText()` rejects `--`, `Xml.encodeCData()` splits `]]>`
 - **BOM handling** — UTF-8 BOM at start of input is silently stripped
 - **Prototype pollution prevention** — DOM attribute maps use null-prototype objects with dangerous key filtering

@@ -7,7 +7,7 @@
  */
 
 import { extractAll } from "@archive/unzip/extract";
-import { flattenPath } from "@draw/index";
+import { Draw } from "@draw/index";
 import type { DrawPathCommand } from "@draw/index";
 import type {
   AddChartOptions,
@@ -18,21 +18,9 @@ import type {
   ChartExModel,
   ChartModel
 } from "@excel/chart";
-import {
-  chartOptionsFromRows,
-  fillChartCaches,
-  fillChartExCaches,
-  parseSpPr,
-  parseTxPr,
-  buildChartExModel,
-  renderChartExSvg,
-  buildChartScene,
-  renderChartSvg,
-  renderChartPng,
-  drawChartPdf,
-  seriesFromColumns
-} from "@excel/chart";
+import { DrawingMl, ChartEx, ChartClassic } from "@excel/chart";
 import { createChart } from "@excel/chart/chart-handle";
+import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import {
   chartsheetId,
   chartsheetModel,
@@ -55,7 +43,7 @@ import {
   addScatterChart,
   getCharts
 } from "@excel/core/worksheet";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Workbook } from "@excel/index";
 import { extractSvgGeometry } from "@test/svg-geometry";
 import { describe, it, expect } from "vitest";
 
@@ -70,7 +58,7 @@ describe("Second-round chart bug fixes", () => {
     // `-Infinity` when includeZero is false).
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", -100],
       ["B", -50],
       ["C", -75]
@@ -84,8 +72,11 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    fillChartCaches(Chart.chartModel(getCharts(ws)[0])!, wb, ws);
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    ChartClassic.fillCaches(Chart.getModel(getCharts(ws)[0])!, wb, { worksheet: ws });
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     // With the fix, the value axis spans [-100, 0] — ticks are 0,
     // -20, -40, -60, -80, -100. The bug produced max=1 so the top
     // tick was "1". Grep the SVG for a standalone "1" tick label.
@@ -100,7 +91,7 @@ describe("Second-round chart bug fixes", () => {
     // projection does.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -115,7 +106,10 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const barSeries = scene.series.find(s => s.type === "bar");
     expect(barSeries?.type).toBe("bar");
     if (barSeries?.type === "bar") {
@@ -131,7 +125,7 @@ describe("Second-round chart bug fixes", () => {
     // negatives.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 50, -10],
       ["B", 30, -20],
       ["C", 20, -30]
@@ -147,7 +141,10 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const barSeries = scene.series.filter(s => s.type === "bar");
     for (const series of barSeries) {
       if (series.type === "bar") {
@@ -167,7 +164,7 @@ describe("Second-round chart bug fixes", () => {
     // sum to 100%. Fix switches to `|v| / Σ|v|`.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 50],
       ["B", -10],
       ["C", 30]
@@ -186,7 +183,10 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     // Every slice gets a rounded percentage. Sum of authored |v|:
     // 50 + 10 + 30 = 90, so slice percentages are ~56%, 11%, 33%.
     // They should sum to 100 (± rounding).
@@ -204,7 +204,7 @@ describe("Second-round chart bug fixes", () => {
     // on the scene series.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -223,8 +223,11 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    fillChartCaches(Chart.chartModel(getCharts(ws)[0])!, wb, ws);
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    ChartClassic.fillCaches(Chart.getModel(getCharts(ws)[0])!, wb, { worksheet: ws });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     const barSeries = scene.series.find(
       (s): s is Extract<typeof s, { type: "bar" }> => s.type === "bar"
     );
@@ -245,7 +248,7 @@ describe("Second-round chart bug fixes", () => {
     // bin so at least one bucket exists.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [[5], [5], [5], [5]]);
+    Row.addMany(ws, [[5], [5], [5], [5]]);
     addChartEx(
       ws,
       {
@@ -254,9 +257,9 @@ describe("Second-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const model = Chart.chartExModel(getCharts(ws)[0])!;
+    const model = Chart.getExModel(getCharts(ws)[0])!;
     // Must not throw:
-    const svg = renderChartExSvg(model, { width: 400, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 400, height: 240 });
     expect(svg).toContain("<svg");
   });
 
@@ -264,7 +267,7 @@ describe("Second-round chart bug fixes", () => {
     // Bug: `hierarchyDepth(root)` counted the invisible root, so the
     // outer `1/depth` of the plot radius was left blank. The fix uses
     // `depth - 1` to match the number of visible rings.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "sunburst",
       series: [
         {
@@ -275,7 +278,7 @@ describe("Second-round chart bug fixes", () => {
         }
       ]
     });
-    const svg = renderChartExSvg(model, { width: 400, height: 400 });
+    const svg = ChartEx.toSvg(model, { width: 400, height: 400 });
     // With the fix, a single-level hierarchy draws slices reaching the
     // outer radius (~radius). Parse the SVG to confirm at least one
     // path element extends beyond half the plot radius — the old
@@ -294,7 +297,7 @@ describe("Second-round chart bug fixes", () => {
     // Bug: `normalizeRegionLabel` stripped "the" and "republic of"
     // from the query but not from the dictionary keys, making the
     // two Congo entries unreachable via their canonical names.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -305,7 +308,7 @@ describe("Second-round chart bug fixes", () => {
         }
       ]
     });
-    const svg = renderChartExSvg(model, { width: 400, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 400, height: 240 });
     // The centroid preview should have found and plotted the country
     // — look for its canonical identifier in the output. The SVG
     // encodes the label as-is, so the presence of "Congo" confirms
@@ -320,7 +323,7 @@ describe("Second-round chart bug fixes", () => {
     // zero height and corrupting the running sum for every
     // subsequent bar. Fix uses `end = running` and preserves
     // `running` across subtotal rows.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "waterfall",
       layout: { subtotals: [{ idx: 2 }, { idx: 4 }] },
       series: [
@@ -332,7 +335,7 @@ describe("Second-round chart bug fixes", () => {
         }
       ]
     });
-    const svg = renderChartExSvg(model, { width: 400, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 400, height: 240 });
     // Subtotal at idx=2 covers running sum 30 (10+20). Total at idx=4
     // covers running sum 25 (30-5). Both should appear in the SVG
     // value-axis labels (dynamic range: 0..30 approx).
@@ -350,7 +353,7 @@ describe("Second-round chart bug fixes", () => {
     // and the axis rendered with a single tick label.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30],
@@ -365,7 +368,10 @@ describe("Second-round chart bug fixes", () => {
       },
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, { width: 400, height: 240 });
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
+      width: 400,
+      height: 240
+    });
     // Expect multiple tick labels — one per majorUnit step from 50 down
     // to 0 would give ~6 labels. The bug produced exactly one.
     expect(scene.yLabels.length).toBeGreaterThanOrEqual(3);
@@ -379,7 +385,7 @@ describe("Second-round chart bug fixes", () => {
     // author's choice.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Mon", 10, 1],
       ["Tue", 20, 2],
       ["Wed", 30, 3]
@@ -403,7 +409,7 @@ describe("Second-round chart bug fixes", () => {
       categories: "Sheet1!$A$1:$A$3",
       xValueType: "text"
     });
-    const group = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0];
+    const group = Chart.getModel(chart)!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: unknown[] }).series[0] as {
       xVal?: { strRef?: unknown; numRef?: unknown };
     };
@@ -421,7 +427,7 @@ describe("Second-round chart bug fixes", () => {
     // the shared axes explicitly.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 1],
       ["B", 20, 2],
       ["C", 30, 3]
@@ -443,7 +449,7 @@ describe("Second-round chart bug fixes", () => {
       },
       "E1:L10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
     const valAx = model.chart.plotArea.axes.find(a => a.axisType === "val") as ValueAxis;
     // Options from the SECOND group should have reached the shared val
     // axis (numFmt, majorUnit). The bug silently dropped them.
@@ -458,7 +464,7 @@ describe("Second-round chart bug fixes", () => {
     // and width. Fix deep-merges the line sub-object.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -479,7 +485,7 @@ describe("Second-round chart bug fixes", () => {
     );
     const chart = getCharts(ws)[0];
     Chart.updateSeries(chart, 0, { lineDash: "dash" });
-    const group = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0];
+    const group = Chart.getModel(chart)!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: unknown[] }).series[0] as {
       spPr?: { line?: { color?: { srgb?: string }; width?: number; dash?: string } };
     };
@@ -497,7 +503,7 @@ describe("Second-round chart bug fixes", () => {
     // new object.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [[100], [200], [300]]);
+    Row.addMany(ws, [[100], [200], [300]]);
     addChartEx(
       ws,
       {
@@ -512,7 +518,7 @@ describe("Second-round chart bug fixes", () => {
       } as AddChartExOptions,
       "D1:J10"
     );
-    const model = Chart.chartExModel(getCharts(ws)[0])!;
+    const model = Chart.getExModel(getCharts(ws)[0])!;
     // Synthetically inject a formatCode on an existing level, then
     // clear the points so the refill path re-runs and we can confirm
     // the formatCode survives.
@@ -522,11 +528,11 @@ describe("Second-round chart bug fixes", () => {
       numEntry.numDim.levels[0].formatCode = "#,##0";
       numEntry.numDim.levels[0].points = [];
     }
-    fillChartExCaches(model, wb, ws);
+    ChartEx.fillCaches(model, wb, { worksheet: ws });
     expect(numEntry?.numDim?.levels?.[0].formatCode).toBe("#,##0");
   });
 
-  it("Chart.title returns undefined for formula-bound title when cache is unresolved", () => {
+  it("Chart.getTitle returns undefined for formula-bound title when cache is unresolved", () => {
     // Bug: the getter returned `""` for `strRef.cache.points = []`
     // because the truthiness check fired on the defined-but-empty
     // array. Callers couldn't distinguish "unresolved" from
@@ -539,7 +545,7 @@ describe("Second-round chart bug fixes", () => {
     // must report `undefined`, not `""`.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [[100]]);
+    Row.addMany(ws, [[100]]);
     addBarChart(
       ws,
       {
@@ -551,10 +557,10 @@ describe("Second-round chart bug fixes", () => {
     const chart = getCharts(ws)[0];
     // Cache cannot be populated because the referenced sheet doesn't
     // exist — `points` stays `[]` and the getter returns `undefined`.
-    expect(Chart.title(chart)).toBeUndefined();
+    expect(Chart.getTitle(chart)).toBeUndefined();
   });
 
-  it("Chart.title auto-populates formula-bound title from cache fill", () => {
+  it("Chart.getTitle auto-populates formula-bound title from cache fill", () => {
     // Positive counterpart to the test above: once the reference is
     // resolvable, `addBarChart` + `fillChartCaches` should read the
     // cell through, populate the strRef cache, and surface the value
@@ -563,7 +569,7 @@ describe("Second-round chart bug fixes", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "Q1 Sales");
-    Worksheet.addRows(ws, [[100]]);
+    Row.addMany(ws, [[100]]);
     addBarChart(
       ws,
       {
@@ -573,7 +579,7 @@ describe("Second-round chart bug fixes", () => {
       "D1:J10"
     );
     const chart = getCharts(ws)[0];
-    expect(Chart.title(chart)).toBe("Q1 Sales");
+    expect(Chart.getTitle(chart)).toBe("Q1 Sales");
   });
 
   it("parseSpPr: unknown schemeClr token round-trips as schemeClr, not sysClr", () => {
@@ -583,7 +589,7 @@ describe("Second-round chart bug fixes", () => {
     // — silently changing the DrawingML element type. The fix adds a
     // `schemeName` field that round-trips as `<a:schemeClr>`.
     const rawXml = `<a:spPr><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:spPr>`;
-    const parsed = parseSpPr({ _rawXml: rawXml });
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
     const color = parsed.fill?.solid;
     expect(color).toBeDefined();
     expect(color?.schemeName).toBe("phClr");
@@ -597,7 +603,7 @@ describe("Second-round chart bug fixes", () => {
     // silently dropped the line width — Excel's default `9525` was
     // used instead, noticeably changing the stroke thickness.
     const rawXml = `<a:spPr><a:ln cap="flat" w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
-    const parsed = parseSpPr({ _rawXml: rawXml });
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
     expect(parsed.line?.width).toBe(12700);
   });
 
@@ -607,14 +613,14 @@ describe("Second-round chart bug fixes", () => {
   describe("parseSpPr: <a:ln> excision (no regex lookbehind)", () => {
     it("does not read a paired line's own fill as the shape fill", () => {
       const rawXml = `<a:spPr><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
-      const parsed = parseSpPr({ _rawXml: rawXml });
+      const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
       expect(parsed.fill).toBeUndefined();
       expect(parsed.line?.color?.srgb).toBe("000000");
     });
 
     it("keeps the shape fill when the line is self-closing", () => {
       const rawXml = `<a:spPr><a:ln/><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:spPr>`;
-      const parsed = parseSpPr({ _rawXml: rawXml });
+      const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
       expect(parsed.fill?.solid?.srgb).toBe("FF0000");
       expect(parsed.line?.color).toBeUndefined();
     });
@@ -625,7 +631,7 @@ describe("Second-round chart bug fixes", () => {
       // `<a:solidFill>` was then harvested as the shape's fill — painting
       // the whole chart area with the border colour on re-save.
       const rawXml = `<a:spPr><a:ln/><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
-      const parsed = parseSpPr({ _rawXml: rawXml });
+      const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
       expect(parsed.fill).toBeUndefined();
     });
 
@@ -635,7 +641,7 @@ describe("Second-round chart bug fixes", () => {
       // pairs with it, consume the second line's close, and leave that
       // line's `<a:solidFill>` behind as the shape fill.
       const rawXml = `<a:spPr><a:ln cap="flat" w="12700" /><a:ln><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></a:spPr>`;
-      const parsed = parseSpPr({ _rawXml: rawXml });
+      const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
       expect(parsed.fill).toBeUndefined();
     });
 
@@ -644,7 +650,7 @@ describe("Second-round chart bug fixes", () => {
       // `\b` after the tag name is what keeps them out; a rewrite that
       // drops it would excise the wrong element.
       const rawXml = `<a:spPr><a:lnRef idx="2"><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:lnRef><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:spPr>`;
-      const parsed = parseSpPr({ _rawXml: rawXml });
+      const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml });
       // The first solidFill inside `<a:lnRef>` is what the shape-fill
       // search reaches first; the point of this case is that parsing
       // completes and `<a:lnRef>` is not treated as `<a:ln>`.
@@ -654,8 +660,8 @@ describe("Second-round chart bug fixes", () => {
 
     it("degrades gracefully on a line with no close tag", () => {
       const rawXml = `<a:spPr><a:ln w="12700"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:spPr>`;
-      expect(() => parseSpPr({ _rawXml: rawXml })).not.toThrow();
-      expect(parseSpPr({ _rawXml: rawXml }).line?.width).toBe(12700);
+      expect(() => DrawingMl.parseSpPr({ _rawXml: rawXml })).not.toThrow();
+      expect(DrawingMl.parseSpPr({ _rawXml: rawXml }).line?.width).toBe(12700);
     });
   });
 
@@ -667,11 +673,11 @@ describe("Second-round chart bug fixes", () => {
     const boldTxPr = {
       _rawXml: `<a:txPr><a:rPr b="true" sz="1100"/></a:txPr>`
     };
-    expect(parseTxPr(boldTxPr).bold).toBe(true);
+    expect(DrawingMl.parseTxPr(boldTxPr).bold).toBe(true);
     const italicTxPr = {
       _rawXml: `<a:txPr><a:rPr i="true" sz="1100"/></a:txPr>`
     };
-    expect(parseTxPr(italicTxPr).italic).toBe(true);
+    expect(DrawingMl.parseTxPr(italicTxPr).italic).toBe(true);
   });
 
   it("chartOptionsFromRows: rejects y column that duplicates the x column", () => {
@@ -682,7 +688,7 @@ describe("Second-round chart bug fixes", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     expect(() =>
-      chartOptionsFromRows(
+      ChartClassic.createOptionsFromRows(
         ws,
         [
           { year: 2024, sales: 100 },
@@ -700,12 +706,15 @@ describe("Second-round chart bug fixes", () => {
     // its data source through inserts / deletes. Fix normalises the
     // range portion via `absoluteA1Range` on both branches.
     // Relative-only input (no `!` → caller-provided sheet prefix).
-    const s = seriesFromColumns("Sheet1", { values: "B1:B2", categories: "A1:A2" });
+    const s = ChartClassic.createSeriesFromColumns("Sheet1", {
+      values: "B1:B2",
+      categories: "A1:A2"
+    });
     expect(s.values).toBe("Sheet1!$B$1:$B$2");
     expect(s.categories).toBe("Sheet1!$A$1:$A$2");
     // Already-qualified but relative range — the old code left it
     // as-is; the fix normalises the range portion to absolute.
-    const s2 = seriesFromColumns("Sheet1", { values: "Other!B1:B2" });
+    const s2 = ChartClassic.createSeriesFromColumns("Sheet1", { values: "Other!B1:B2" });
     expect(s2.values).toBe("Other!$B$1:$B$2");
   });
 });
@@ -719,7 +728,7 @@ describe("Third-round chart bug fixes", () => {
   it("bar3D rejects the 2D-only `overlap` option", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [["A", 10]]);
+    Row.addMany(ws, [["A", 10]]);
     expect(() =>
       addChart(
         ws,
@@ -737,7 +746,7 @@ describe("Third-round chart bug fixes", () => {
   it("line3D rejects the 2D-only `showMarker` / `smooth` / `hiLowLines` / `upDownBars` options", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [["A", 10]]);
+    Row.addMany(ws, [["A", 10]]);
     const base = {
       type: "line3D",
       series: [{ name: "S", categories: "Sheet1!$A$1:$A$1", values: "Sheet1!$B$1:$B$1" }]
@@ -759,7 +768,7 @@ describe("Third-round chart bug fixes", () => {
   it("bar3D writer emits children in CT_Bar3DChart schema order", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -795,7 +804,7 @@ describe("Third-round chart bug fixes", () => {
   it("c:scaling emits `logBase → orientation → max → min` per schema", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 100],
       ["C", 1000]
@@ -833,7 +842,7 @@ describe("Third-round chart bug fixes", () => {
   it("updateSeries fill patch clears _rawXml so structural change reaches disk", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -846,7 +855,7 @@ describe("Third-round chart bug fixes", () => {
     );
     const chart = getCharts(ws)[0];
     // Simulate a loaded chart whose spPr was captured as raw XML.
-    const group = Chart.chartModel(chart)!.chart.plotArea.chartTypes[0];
+    const group = Chart.getModel(chart)!.chart.plotArea.chartTypes[0];
     const ser = (group as ChartTypeGroup & { series: BarSeries[] }).series[0];
     ser.spPr = { _rawXml: '<c:spPr><a:solidFill><a:srgbClr val="000000"/></a:solidFill></c:spPr>' };
     // Patch: update fill to red. The fix clears `_rawXml` so the
@@ -857,7 +866,7 @@ describe("Third-round chart bug fixes", () => {
   });
 
   it("ChartEx axis hidden=false round-trips (explicit visibility)", async () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "waterfall",
       series: [
         {
@@ -872,7 +881,7 @@ describe("Third-round chart bug fixes", () => {
     if (axes[0]) {
       axes[0].hidden = false;
     }
-    const svg = renderChartExSvg(model, { width: 400, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 400, height: 240 });
     // Renderer's structured writer is also used to build the xml in
     // tests that round-trip. For this specific regression we confirm
     // that the SVG renders without crashing and the scene reads the
@@ -885,7 +894,7 @@ describe("Third-round chart bug fixes", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "Sales Q1");
-    Worksheet.addRows(ws, [["100", 100]]);
+    Row.addMany(ws, [["100", 100]]);
     addChartEx(
       ws,
       {
@@ -958,7 +967,7 @@ describe("Third-round chart bug fixes", () => {
         }
       }
     };
-    const svg = renderChartExSvg(model, { width: 400, height: 240 });
+    const svg = ChartEx.toSvg(model, { width: 400, height: 240 });
     // `paretoLine` layoutId should produce a polyline + marker circles
     // (the shared `renderParetoSvg` helper), NOT the column bars the
     // default fallback would emit.
@@ -969,7 +978,7 @@ describe("Third-round chart bug fixes", () => {
   it("removeUserShapes cleans workbook-level _chartRels so the .rels file drops the entry", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [["A", 10]]);
+    Row.addMany(ws, [["A", 10]]);
     addColumnChart(ws, { series: [{ name: "S", values: "Sheet1!$B$1:$B$1" }] }, "D1:J10");
     const chart = getCharts(ws)[0];
     // Inject a synthetic userShapes rel at both locations the writer
@@ -1011,7 +1020,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // other run-property attribute. This test exercises every field
     // the `ChartTextProperties` model declares.
     const raw = `<a:txPr><a:bodyPr rot="2700000"/><a:p><a:pPr><a:defRPr sz="1200" b="1" i="1" u="sng" strike="sngStrike" cap="small" baseline="30000" kern="1200" spc="-50" lang="ja-JP"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:latin typeface="Meiryo"/><a:ea typeface="MS Gothic"/><a:cs typeface="Arial"/></a:defRPr></a:pPr></a:p></a:txPr>`;
-    const parsed = parseTxPr({ _rawXml: raw });
+    const parsed = DrawingMl.parseTxPr({ _rawXml: raw });
     expect(parsed.size).toBe(1200);
     expect(parsed.bold).toBe(true);
     expect(parsed.italic).toBe(true);
@@ -1035,7 +1044,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // truthy values were recognised; `b="0"` was dropped as if the
     // attribute were absent.
     const raw = `<a:txPr><a:p><a:pPr><a:defRPr b="0" i="0" sz="1000"/></a:pPr></a:p></a:txPr>`;
-    const parsed = parseTxPr({ _rawXml: raw });
+    const parsed = DrawingMl.parseTxPr({ _rawXml: raw });
     expect(parsed.bold).toBe(false);
     expect(parsed.italic).toBe(false);
   });
@@ -1043,7 +1052,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   it("chartsheet does NOT emit worksheet-only elements (printOptions, rowBreaks, colBreaks, pageBreaks)", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1068,7 +1077,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   it("chartsheet pageSetup only emits CT_CsPageSetup attributes (no worksheet-only fields)", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1124,13 +1133,13 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   // We don't have a user-facing regression test for the rounding
   // because the validator rejects fractional inputs upstream.
 
-  it("Chart.toPNG returns a rejected promise (not a synchronous throw) when no model is attached", async () => {
+  it("Chart.toPng returns a rejected promise (not a synchronous throw) when no model is attached", async () => {
     // Previously `toPNG` was non-async; the "no model available" branch
     // threw synchronously, violating its `Promise<Uint8Array>` contract.
     // Callers using `.catch()` would see an uncaught exception.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1148,7 +1157,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // mutating the real workbook state.
     const orphan = createChart(ws, { chartNumber: 99999 }, "A1");
     expect(chart).toBeDefined();
-    const result = Chart.toPNG(orphan);
+    const result = Chart.toPng(orphan);
     // `result` must be a Promise even on the failure path.
     expect(typeof (result as Promise<unknown>).then).toBe("function");
     await expect(result).rejects.toThrow(/Cannot render chart/);
@@ -1162,8 +1171,8 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // to Date cells.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRow(ws, [new Date(Date.UTC(2023, 0, 15)), 10]);
-    Worksheet.addRow(ws, [new Date(Date.UTC(2023, 5, 30)), 20]);
+    Row.add(ws, [new Date(Date.UTC(2023, 0, 15)), 10]);
+    Row.add(ws, [new Date(Date.UTC(2023, 5, 30)), 20]);
     addChart(
       ws,
       {
@@ -1173,7 +1182,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
       "D1:J10"
     );
     const chart = getCharts(ws)[0];
-    const model = Chart.chartModel(chart)!;
+    const model = Chart.getModel(chart)!;
     const catCache = (model.chart.plotArea.chartTypes[0] as any).series[0].categoryAxis?.strRef
       ?.cache;
     // strRef.cache is only populated for string-typed category cells;
@@ -1189,7 +1198,6 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("chart-ex-renderer honours valScaling.min/max on the value axis", async () => {
-    const { renderChartExSvg } = await import("@excel/chart/render/chart-ex-renderer");
     // Histogram with explicit axis bounds wider than the data range.
     // Without the fix, the rendered SVG's axis range is
     // [0, maxOfData]; with the fix, it stretches to the authored
@@ -1242,7 +1250,7 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
     // Sanity: render without throwing — and confirm the rendered SVG
     // reflects the authored range by including the authored-bound
     // numeric tick labels near the min side.
-    const svg = renderChartExSvg(model);
+    const svg = ChartEx.toSvg(model);
     expect(svg).toContain("<svg");
     // When the axis range spans [-50, 50], a `0` tick should land
     // somewhere in the middle. The preview labels don't format
@@ -1253,22 +1261,21 @@ describe("Fourth-round chart bug fixes (schema & round-trip correctness)", () =>
   });
 
   it("gradient scaled attribute round-trips (default absent vs. explicit 0/1)", async () => {
-    const { parseSpPr } = await import("@excel/chart/shared/shape-properties");
     // Author-side value forwarded through the parser — this is the
     // path a file loaded from disk takes. The parser was previously
     // missing the `scaled` attribute entirely, so `parseSpPr` always
     // returned `scaled: undefined` and the writer always emitted
     // `scaled="1"`.
     const withScaledZero = `<a:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0" scaled="0"/></a:gradFill></a:spPr>`;
-    const parsed0 = parseSpPr({ _rawXml: withScaledZero });
+    const parsed0 = DrawingMl.parseSpPr({ _rawXml: withScaledZero });
     expect(parsed0.fill?.gradient?.scaled).toBe(false);
 
     const withScaledOne = `<a:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0" scaled="1"/></a:gradFill></a:spPr>`;
-    const parsed1 = parseSpPr({ _rawXml: withScaledOne });
+    const parsed1 = DrawingMl.parseSpPr({ _rawXml: withScaledOne });
     expect(parsed1.fill?.gradient?.scaled).toBe(true);
 
     const withoutScaled = `<a:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"/></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="0"/></a:gradFill></a:spPr>`;
-    const parsedU = parseSpPr({ _rawXml: withoutScaled });
+    const parsedU = DrawingMl.parseSpPr({ _rawXml: withoutScaled });
     expect(parsedU.fill?.gradient?.scaled).toBeUndefined();
   });
 
@@ -1342,8 +1349,8 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // unopenable in Excel as a result.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRow(ws, ["Label", "Value"]);
-    Worksheet.addRows(ws, [
+    Row.add(ws, ["Label", "Value"]);
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15],
@@ -1442,7 +1449,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // chartsheet drawing as "Drawing shape (Removed Part)".
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1480,7 +1487,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // silently vanished.
     const wb = Workbook.create();
     const ws1 = Workbook.addWorksheet(wb, "WS1");
-    Worksheet.addRow(ws1, ["A", 1]);
+    Row.add(ws1, ["A", 1]);
     Workbook.addChartsheet(wb, "CS1", {
       chart: {
         type: "bar",
@@ -1488,7 +1495,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
       }
     });
     const ws2 = Workbook.addWorksheet(wb, "WS2");
-    Worksheet.addRows(ws2, [
+    Row.addMany(ws2, [
       ["Header", "Value"],
       ["A", 10],
       ["B", 20]
@@ -1527,7 +1534,7 @@ describe("Fifth-round chart/workbook bug fixes (confirmed)", () => {
     // re-emitted the drawing rel and left every other r:id dangling.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1624,9 +1631,9 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
       if (v === null || !Number.isFinite(v)) {
         // Blank cell → chart reads as gap (NaN through
         // `collectNumberValues`).
-        Worksheet.addRow(ws, [cat]);
+        Row.add(ws, [cat]);
       } else {
-        Worksheet.addRow(ws, [cat, v]);
+        Row.add(ws, [cat, v]);
       }
     });
     const n = categories.length;
@@ -1644,7 +1651,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
       } as AddChartOptions,
       "D1:J10"
     );
-    return renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 640, height: 480 });
+    return ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, { width: 640, height: 480 });
   }
 
   it("pie slices don't collapse to the origin when a value is NaN (chart-renderer buildPieSeries)", () => {
@@ -1713,9 +1720,9 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // duplicate `<c:idx val="0"/>` entries that Excel collapses.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "WS");
-    Worksheet.addRow(ws, ["A", 1, 4]);
-    Worksheet.addRow(ws, ["B", 2, 5]);
-    Worksheet.addRow(ws, ["C", 3, 6]);
+    Row.add(ws, ["A", 1, 4]);
+    Row.add(ws, ["B", 2, 5]);
+    Row.add(ws, ["C", 3, 6]);
     addChart(
       ws,
       {
@@ -1746,8 +1753,8 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // multi-view binding and "fit to window" setting.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
-    Worksheet.addRow(ws, ["A", 1]);
-    Worksheet.addRow(ws, ["B", 2]);
+    Row.add(ws, ["A", 1]);
+    Row.add(ws, ["B", 2]);
     Workbook.addChartsheet(wb, "Charts", {
       workbookViewId: 1,
       zoomToFit: true,
@@ -1776,15 +1783,15 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // Before: `colCache.decode("Table1[Sales]")` silently returned
     // garbage (treated as cell `T1`), so `seriesFromColumns` emitted
     // `Sheet1!$T$1` instead of the structured reference.
-    const result = seriesFromColumns("Data", {
+    const result = ChartClassic.createSeriesFromColumns("Data", {
       values: "Data!Table1[Sales]"
     });
     expect(result.values).toBe("Data!Table1[Sales]");
     // Bare defined-name too.
-    const result2 = seriesFromColumns("Data", { values: "MyRange" });
+    const result2 = ChartClassic.createSeriesFromColumns("Data", { values: "MyRange" });
     expect(result2.values).toBe("MyRange");
     // A plain A1 reference still gets canonicalised.
-    const result3 = seriesFromColumns("Data", { values: "A1:B3" });
+    const result3 = ChartClassic.createSeriesFromColumns("Data", { values: "A1:B3" });
     expect(result3.values).toBe("Data!$A$1:$B$3");
   });
 
@@ -1838,7 +1845,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
         }
       }
     } as unknown as ChartExModel;
-    const svg = renderChartExSvg(model, { width: 640, height: 480 });
+    const svg = ChartEx.toSvg(model, { width: 640, height: 480 });
     // The "Cumulative %" caption / overlay polyline must still
     // render despite the NaN gap.
     expect(svg).toContain("Cumulative %");
@@ -1890,11 +1897,14 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
         }
       }
     } as unknown as ChartExModel;
-    const svg = renderChartExSvg(model, { width: 640, height: 480 });
+    const svg = ChartEx.toSvg(model, { width: 640, height: 480 });
     // Standalone paretoLine has zero companion columns — it must
     // emit ONLY the cumulative polyline + markers. No `<rect>`
     // column shapes inside the plot area (positive x and y).
-    const dataColumnCount = (svg.match(/<rect\s+x="\d+(?:\.\d+)?"\s+y="\d/g) ?? []).length;
+    // The chart area is a rect too (with Office's automatic border); it is not a column.
+    const dataColumnCount = [...svg.matchAll(/<rect\s+x="\d+(?:\.\d+)?"\s+y="\d[^>]*>/g)].filter(
+      match => !/stroke="#d9d9d9"/i.test(match[0])
+    ).length;
     expect(dataColumnCount).toBe(0);
     // Still emits the polyline + cumulative caption, confirming
     // the overlay itself is drawn.
@@ -1947,7 +1957,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
         }
       }
     } as unknown as ChartExModel;
-    const svg = renderChartExSvg(model, { width: 640, height: 480 });
+    const svg = ChartEx.toSvg(model, { width: 640, height: 480 });
     // At least 2 column rects in the histogram; the bug produced one.
     // Filter down to data rects (positive x, positive y).
     const dataRectCount = (svg.match(/<rect\s+x="[1-9]\d*(?:\.\d+)?"\s+y="\d/g) ?? []).length;
@@ -2018,7 +2028,7 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
         }
       }
     } as unknown as ChartExModel;
-    const svg = renderChartExSvg(model, { width: 640, height: 480 });
+    const svg = ChartEx.toSvg(model, { width: 640, height: 480 });
     // Count filled inner points (r="1.6") vs hollow outliers
     // (r="2" fill="none"). The 100 outlier must appear ONLY as a
     // hollow ring, never as a filled inner-point dot.
@@ -2049,8 +2059,8 @@ describe("Sixth-round chart bug fixes (NaN / schema / round-trip)", () => {
     // pictureFormat + stack parameters.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRow(ws, ["a", 1]);
-    Worksheet.addRow(ws, ["b", 2]);
+    Row.add(ws, ["a", 1]);
+    Row.add(ws, ["b", 2]);
     addChart(
       ws,
       {
@@ -2095,7 +2105,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // ignored this field and computed the wrong scope.
     const wb = Workbook.create();
     const ws1 = Workbook.addWorksheet(wb, "WS1");
-    Worksheet.addRow(ws1, ["x", 100]);
+    Row.add(ws1, ["x", 100]);
     Workbook.addChartsheet(wb, "CS1", {
       chart: {
         type: "bar",
@@ -2103,7 +2113,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
       }
     });
     const ws2 = Workbook.addWorksheet(wb, "WS2");
-    Worksheet.addRows(ws2, [
+    Row.addMany(ws2, [
       ["Header", "Value"],
       ["A", 10],
       ["B", 20]
@@ -2235,8 +2245,8 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // raw chart XML, confirm no stray `scaled="1"` was injected.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRow(ws, ["a", 1]);
-    Worksheet.addRow(ws, ["b", 2]);
+    Row.add(ws, ["a", 1]);
+    Row.add(ws, ["b", 2]);
     addChart(
       ws,
       {
@@ -2280,8 +2290,8 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // confirm the serialiser does NOT emit `val="NaN"` (which Excel rejects).
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRow(ws, ["a", 1]);
-    Worksheet.addRow(ws, ["b", 2]);
+    Row.add(ws, ["a", 1]);
+    Row.add(ws, ["b", 2]);
     addChart(
       ws,
       {
@@ -2312,7 +2322,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // than emit `<a:tint val="NaN"/>`.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRow(ws, ["a", 1]);
+    Row.add(ws, ["a", 1]);
     addChart(
       ws,
       {
@@ -2377,7 +2387,7 @@ describe("Seventh-round chart/workbook bug fixes (round-trip & raw-patch correct
     // structured path when any structured field is populated.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRow(ws, ["a", 1]);
+    Row.add(ws, ["a", 1]);
     addChart(
       ws,
       {
@@ -2533,7 +2543,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
   function barChart(): { model: ChartModel } {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 30]
@@ -2546,7 +2556,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       },
       "D1:J10"
     );
-    return { model: Chart.chartModel(getCharts(ws)[0])! };
+    return { model: Chart.getModel(getCharts(ws)[0])! };
   }
 
   /** A bar chart whose title has one paragraph per supplied string. */
@@ -2634,7 +2644,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // points — the shape the reader is being told it is not.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 5],
       ["C", 2],
@@ -2649,9 +2659,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    fillChartCaches(model, wb);
-    const svg = renderChartSvg(model, { width: 300, height: 200 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    ChartClassic.fillCaches(model, wb);
+    const svg = ChartClassic.toSvg(model, { width: 300, height: 200 });
     const path = /<path d="([^"]*)"/.exec(svg);
     expect(path).not.toBeNull();
     // Three segments for four points, each a cubic.
@@ -2663,7 +2673,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // own values. The segment endpoints are the data points.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 5],
       ["C", 2],
@@ -2678,9 +2688,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    fillChartCaches(model, wb);
-    const svg = renderChartSvg(model, { width: 300, height: 200 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    ChartClassic.fillCaches(model, wb);
+    const svg = ChartClassic.toSvg(model, { width: 300, height: 200 });
     // The markers sit on the data points; every one must lie on the curve's own anchors.
     const markers = extractSvgGeometry(svg)
       .filter(shape => shape.kind === "circle")
@@ -2707,7 +2717,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     const values = [100, 95, 0, 98, 100];
-    Worksheet.addRows(
+    Row.addMany(
       ws,
       values.map((value, index) => [`C${index}`, value])
     );
@@ -2720,9 +2730,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    fillChartCaches(model, wb);
-    const svg = renderChartSvg(model, { width: 300, height: 200 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    ChartClassic.fillCaches(model, wb);
+    const svg = ChartClassic.toSvg(model, { width: 300, height: 200 });
 
     // The plot's vertical extent, read from the axis lines.
     const vertical = extractSvgGeometry(svg).filter(
@@ -2750,7 +2760,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
         y: numbers[i + 5]
       });
     }
-    const ys = flattenPath(commands).flatMap(run => run.points.map(point => point.y));
+    const ys = Draw.Geometry.flattenPath(commands).flatMap(run => run.points.map(point => point.y));
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(top - 0.01);
     expect(Math.max(...ys)).toBeLessThanOrEqual(bottom + 0.01);
   });
@@ -2758,7 +2768,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
   it("leaves a non-smooth line straight", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 5],
       ["C", 2],
@@ -2772,9 +2782,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    fillChartCaches(model, wb);
-    const svg = renderChartSvg(model, { width: 300, height: 200 });
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    ChartClassic.fillCaches(model, wb);
+    const svg = ChartClassic.toSvg(model, { width: 300, height: 200 });
     expect(svg).not.toContain("<path");
   });
 
@@ -2786,7 +2796,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // it, so a smooth line and a straight one rendered identically.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 5],
       ["C", 2]
@@ -2800,7 +2810,10 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 200, height: 150 });
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
+      width: 200,
+      height: 150
+    });
     expect(svg).toContain('stroke-linejoin="round"');
     expect(svg).toContain('stroke-linecap="round"');
   });
@@ -2810,7 +2823,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // would make every line chart look smoothed.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 1],
       ["B", 5],
       ["C", 2]
@@ -2823,13 +2836,16 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const svg = renderChartSvg(Chart.chartModel(getCharts(ws)[0])!, { width: 200, height: 150 });
+    const svg = ChartClassic.toSvg(Chart.getModel(getCharts(ws)[0])!, {
+      width: 200,
+      height: 150
+    });
     expect(svg).not.toContain("stroke-linejoin");
     expect(svg).not.toContain("stroke-linecap");
   });
 
   it("keeps the SVG backend on the same 1.2 em step", () => {
-    const svg = renderChartSvg(titledModel(["Quarterly", "Revenue"]), {
+    const svg = ChartClassic.toSvg(titledModel(["Quarterly", "Revenue"]), {
       width: 300,
       height: 200
     });
@@ -2851,12 +2867,12 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // rasterised run together as "QuarterlyRevenue" — byte-identical to a chart
     // actually titled that. Distinct output proves the tspans are walked.
     const size = { width: 300, height: 200 };
-    const stacked = await renderChartPng(titledModel(["Quarterly", "Revenue"]), size);
-    const runTogether = await renderChartPng(titledModel(["QuarterlyRevenue"]), size);
+    const stacked = await ChartClassic.toPng(titledModel(["Quarterly", "Revenue"]), size);
+    const runTogether = await ChartClassic.toPng(titledModel(["QuarterlyRevenue"]), size);
     expect(pngHash(stacked)).not.toBe(pngHash(runTogether));
 
     // …and rendering stays deterministic.
-    const again = await renderChartPng(titledModel(["Quarterly", "Revenue"]), size);
+    const again = await ChartClassic.toPng(titledModel(["Quarterly", "Revenue"]), size);
     expect(pngHash(again)).toBe(pngHash(stacked));
   });
 
@@ -2867,7 +2883,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // collapsing) or run together (raster).
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 5],
       ["B", 20, 12]
     ]);
@@ -2886,9 +2902,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
 
-    const scene = buildChartScene(model, { width: 300, height: 200 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 300, height: 200 });
     expect(scene.legend.items.map(item => item.label)).toContain("North Region");
     expect(scene.legend.items.every(item => !/[\r\n]/.test(item.label))).toBe(true);
 
@@ -2905,7 +2921,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // name, and `varyColors` was not read anywhere in the renderer.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 10],
       ["Q2", 20],
       ["Q3", 15]
@@ -2919,7 +2935,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
       width: 300,
       height: 200
     });
@@ -2929,7 +2945,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
   it("names the categories on a pie, whose slices are coloured one by one", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 10],
       ["Q2", 20],
       ["Q3", 15]
@@ -2943,7 +2959,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
       width: 300,
       height: 200
     });
@@ -2956,7 +2972,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // plain bar chart.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["Q1", 10],
       ["Q2", 20],
       ["Q3", 15]
@@ -2971,7 +2987,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const scene = buildChartScene(Chart.chartModel(getCharts(ws)[0])!, {
+    const scene = ChartClassic.Backend.toScene(Chart.getModel(getCharts(ws)[0])!, {
       width: 300,
       height: 200
     });
@@ -2984,7 +3000,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // describe nothing. Asserting the legend alone cannot see that.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -2999,9 +3015,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    fillChartCaches(model, wb);
-    const shapes = extractSvgGeometry(renderChartSvg(model, { width: 320, height: 220 }));
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    ChartClassic.fillCaches(model, wb);
+    const shapes = extractSvgGeometry(ChartClassic.toSvg(model, { width: 320, height: 220 }));
     const swatches = shapes
       .filter(shape => shape.kind === "rect" && shape.coords[2] === 10 && shape.coords[3] === 10)
       .map(shape => shape.fill);
@@ -3022,7 +3038,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
   it("keeps every point one colour without varyColors", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -3036,9 +3052,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       } as AddChartOptions,
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
-    fillChartCaches(model, wb);
-    const bars = extractSvgGeometry(renderChartSvg(model, { width: 320, height: 220 }))
+    const model = Chart.getModel(getCharts(ws)[0])!;
+    ChartClassic.fillCaches(model, wb);
+    const bars = extractSvgGeometry(ChartClassic.toSvg(model, { width: 320, height: 220 }))
       .filter(
         shape =>
           shape.kind === "rect" &&
@@ -3060,7 +3076,7 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
     // Q4` instead of its series name.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["North\nRegion", 10],
       ["South", 20]
     ]);
@@ -3074,9 +3090,9 @@ describe("Eighth-round chart bug fixes (multi-line text parity between backends)
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
 
-    const scene = buildChartScene(model, { width: 300, height: 200 });
+    const scene = ChartClassic.Backend.toScene(model, { width: 300, height: 200 });
     expect(scene.legend.items.every(item => !/[\r\n]/.test(item.label))).toBe(true);
     expect(scene.legend.items.map(item => item.label)).toContain("North Region");
   });
@@ -3090,7 +3106,7 @@ describe("Tenth-round chart bug fixes (rotation sense across the Y flip)", () =>
     // rotation, so the angle has to flip with it.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -3102,14 +3118,14 @@ describe("Tenth-round chart bug fixes (rotation sense across the Y flip)", () =>
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
     const valueAxis = model.chart.plotArea.axes.find(
       axis => (axis as ValueAxis).axisType === "val"
     ) as ValueAxis;
     valueAxis.title = { text: { paragraphs: [{ runs: [{ text: "Units" }] }] } } as never;
 
     // SVG keeps the authored, screen-space angle…
-    expect(renderChartSvg(model, { width: 300, height: 200 })).toContain("rotate(-90 ");
+    expect(ChartClassic.toSvg(model, { width: 300, height: 200 })).toContain("rotate(-90 ");
 
     // …and the PDF surface receives its mirror image.
     const rotations: number[] = [];
@@ -3134,7 +3150,7 @@ describe("Tenth-round chart bug fixes (rotation sense across the Y flip)", () =>
   it("leaves unrotated text alone", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -3147,7 +3163,7 @@ describe("Tenth-round chart bug fixes (rotation sense across the Y flip)", () =>
       },
       "D1:J10"
     );
-    const model = Chart.chartModel(getCharts(ws)[0])!;
+    const model = Chart.getModel(getCharts(ws)[0])!;
     const seen: (number | undefined)[] = [];
     const page = {
       drawRect() {

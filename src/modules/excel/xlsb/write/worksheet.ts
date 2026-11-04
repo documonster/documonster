@@ -9,6 +9,7 @@
  */
 import type { HeaderFooter, IgnoredError, Margins } from "@excel/types";
 import { encodeCol } from "@excel/utils/address";
+import { slideFormula } from "@excel/utils/shared-formula";
 import {
   COLUMN_WIDTH_UNITS,
   encodeBiffRecords,
@@ -16,6 +17,7 @@ import {
   encodeNullableWideString,
   encodeRange,
   encodeWideString,
+  tryDecodeRange,
   type BiffRange
 } from "@excel/xlsb/binary";
 import {
@@ -53,13 +55,70 @@ import {
 import { encodePane, paneSelections, type SheetPane } from "@excel/xlsb/pane";
 import { encodeSheetProperties, type SheetProperties } from "@excel/xlsb/sheet-properties";
 import { sparklineRecords, type SheetSparklineGroup } from "@excel/xlsb/sparkline";
+import { requireRecordSpec } from "@excel/xlsb/spec/records";
 import { DEFAULT_DATE_FORMAT, internStyle, type CellFormatTable } from "@excel/xlsb/styles";
 import { encodeCellRecord, isRefused, usedRange } from "@excel/xlsb/write/cells";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
 import { encodeRowHeader } from "@excel/xlsb/write/rows";
 import type { SharedStringTable } from "@excel/xlsb/write/shared-strings";
-import { type SheetColumn, type SheetRow } from "@excel/xlsb/write/types";
+import { type SheetCell, type SheetColumn, type SheetRow } from "@excel/xlsb/write/types";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
+
+const CELL_META_ID = requireRecordSpec("BrtCellMeta").id;
+const ARRAY_FORMULA_ID = requireRecordSpec("BrtArrFmla").id;
+const SHARED_FORMULA_ID = requireRecordSpec("BrtShrFmla").id;
+
+/**
+ * The shared and array masters of one sheet, keyed `row:column`: those written with their `BrtArrFmla`/`BrtShrFmla`,
+ * and those that were not.
+ *
+ * A follower is a `PtgExp` naming its master, and Excel refuses a file in which that master has no formula record.
+ * A master can fail to be written after its followers were planned — refused by the encoder (a sheet a streamed
+ * workbook has not written yet, a construct XLSB cannot hold) or withheld as unsupported — so a follower is written
+ * as a `PtgExp` only when its master is in `written`. Masters come first in row-major order, so the ledger is
+ * complete by the time any follower is reached.
+ */
+export interface MasterLedger {
+  readonly written: Set<string>;
+  readonly dropped: Map<
+    string,
+    { readonly formula: string; readonly address: string; readonly kind: "shared" | "array" }
+  >;
+}
+
+export function createMasterLedger(): MasterLedger {
+  return { written: new Set(), dropped: new Map() };
+}
+
+/** The ledger key of the master a follower's `sharedFormula` names. */
+function followerKey(master: string): string {
+  const range = tryDecodeRange(master);
+  return range === undefined ? "" : `${range.firstRow}:${range.firstColumn}`;
+}
+
+/**
+ * A follower whose master was not written, as a cell of its own: a shared formula's member gets the master's formula
+ * slid to its own address — which the caller may still refuse, leaving its cached value — and an array member keeps
+ * only its cached value, since one cell of an array formula is not a formula by itself.
+ */
+function detachedFollower(cell: SheetCell, masters: MasterLedger): SheetCell {
+  if (cell.sharedFormula === undefined) {
+    return cell;
+  }
+  const key = followerKey(cell.sharedFormula);
+  if (masters.written.has(key)) {
+    return cell;
+  }
+  const dropped = masters.dropped.get(key);
+  const own = `${encodeCol(cell.column)}${cell.row + 1}`;
+  return {
+    ...cell,
+    sharedFormula: undefined,
+    ...(dropped?.kind === "shared"
+      ? { formula: slideFormula(dropped.formula, dropped.address, own) }
+      : {})
+  };
+}
 
 export interface WrittenWorksheet {
   readonly bytes: Uint8Array;
@@ -73,6 +132,16 @@ export interface WrittenWorksheet {
    * the silent loss the report exists to prevent.
    */
   readonly unsupported: readonly string[];
+}
+
+/**
+ * Package-level parts a sheet's records depend on, recorded as the rows are encoded.
+ *
+ * Mutable and shared across sheets: a dynamic array's `BrtCellMeta` points into `xl/metadata.bin`, which the package
+ * writer emits only when some sheet — buffered or streamed — wrote one.
+ */
+export interface WorksheetFeatures {
+  dynamicArrays: boolean;
 }
 
 /**
@@ -91,6 +160,8 @@ export interface WrittenWorksheet {
 export interface WriteWorksheetPartOptions {
   /** Rows in any order; they are sorted here, because the format requires ascending row numbers. */
   readonly rows: readonly SheetRow[];
+  /** Where to record the package-level parts the rows need — see {@link WorksheetFeatures}. */
+  readonly features?: WorksheetFeatures;
   /**
    * Omit `BrtWsDim`, for a caller that does not have the sheet's extent yet.
    *
@@ -263,14 +334,17 @@ export interface WriteWorksheetPartOptions {
  * asserted by the validator rather than left to this function's reading order.
  */
 export function writeWorksheetPart(options: WriteWorksheetPartOptions): WrittenWorksheet {
-  const { rows, strings, formats, formulaContext = {} } = options;
+  const { rows, strings, formats, formulaContext = {}, features } = options;
   const unsupported: string[] = [];
   const records: Emitted[] = [...worksheetPrologueRecords(options)];
+  const masters = createMasterLedger();
   // The rows, through the same encoder a streaming caller drives one row at a time. Extracted rather than
   // inlined so the two cannot diverge: a buffered write and a streamed write must produce the same records for
   // the same rows, and the only honest way to guarantee that is for there to be one place that produces them.
   for (const row of sortedRows(rows)) {
-    records.push(...encodeRowRecords(row, { strings, formats, formulaContext, unsupported }));
+    records.push(
+      ...encodeRowRecords(row, { strings, formats, formulaContext, unsupported, features, masters })
+    );
   }
   records.push(...worksheetEpilogueRecords(options, unsupported));
   return { bytes: encodeBiffRecords(records), unsupported };
@@ -541,9 +615,17 @@ export function worksheetEpilogueRecords(
   // `BrtBeginDVals` carries the count, so a validation that cannot be encoded has to be dropped *before*
   // the count is written rather than skipped inside the loop, or the header promises more records than
   // follow and a reader walks off the end of the collection.
-  const encodedValidations = validations
-    .map(validation => encodeValidation(validation, formulaContext, "data validation", date1904))
-    .filter((bytes): bytes is Uint8Array => bytes !== undefined);
+  // One that cannot is reported: `encodeValidation` returns rather than throws so that the sheet survives, and
+  // dropping it here without a word was a loss `unsupported: "error"` never refused.
+  const encodedValidations: Uint8Array[] = [];
+  for (const validation of validations) {
+    const bytes = encodeValidation(validation, formulaContext, "data validation", date1904);
+    if (bytes === undefined) {
+      unsupported.push(`${validation.ranges.join(" ")}: data validation`);
+    } else {
+      encodedValidations.push(bytes);
+    }
+  }
   if (encodedValidations.length > 0) {
     // **Eighteen bytes, with the count last.** MS-XLSB 2.5.36 makes this a `DVals`: a flag word, the input
     // prompt's on-screen position, an unused word, and only then `idvMac`. This wrote the count alone, four
@@ -717,9 +799,12 @@ export function encodeRowRecords(
     readonly formats: CellFormatTable;
     readonly formulaContext: PtgContext;
     readonly unsupported: string[];
+    readonly features?: WorksheetFeatures;
+    /** The sheet's shared and array masters so far — see {@link MasterLedger}. One per sheet, kept across rows. */
+    readonly masters: MasterLedger;
   }
 ): readonly Emitted[] {
-  const { strings, formats, formulaContext, unsupported } = context;
+  const { strings, formats, formulaContext, unsupported, features, masters } = context;
   const records: Emitted[] = [];
 
   // The inclusive column range the row's cells occupy, which the row header declares so a
@@ -767,7 +852,34 @@ export function encodeRowRecords(
         ? { ...cell, numberFormat: DEFAULT_DATE_FORMAT }
         : cell
     );
-    const emitted = encodeCellRecord({ ...cell, styleIndex }, strings, formulaContext, formats);
+    const written = detachedFollower({ ...cell, styleIndex }, masters);
+    // A dependent of a shared master withheld before it reached here loses its formula with nothing else to say so.
+    // One that got the master's formula slid onto it reports for itself if that is refused, and an array member
+    // never had a formula of its own.
+    if (
+      written.sharedFormula === undefined &&
+      cell.sharedFormula !== undefined &&
+      written.formula === undefined
+    ) {
+      const kind = masters.dropped.get(followerKey(cell.sharedFormula))?.kind;
+      if (kind === undefined) {
+        unsupported.push(
+          `${address}: shared formula (its master ${cell.sharedFormula} was not written)`
+        );
+      }
+    }
+    const emitted = encodeCellRecord(written, strings, formulaContext, formats);
+    if (emitted !== undefined && !isRefused(emitted)) {
+      if (emitted.some(item => item.id === ARRAY_FORMULA_ID || item.id === SHARED_FORMULA_ID)) {
+        masters.written.add(`${cell.row}:${cell.column}`);
+      }
+    } else if (cell.formula !== undefined && cell.ref !== undefined) {
+      masters.dropped.set(`${cell.row}:${cell.column}`, {
+        formula: cell.formula,
+        address,
+        kind: cell.shareType === "array" ? "array" : "shared"
+      });
+    }
     if (emitted === undefined || isRefused(emitted)) {
       // The encoder refused. The reason — which the encoder hands back rather than swallowing — is reported, and the
       // cell keeps its position and its formatting.
@@ -808,6 +920,9 @@ export function encodeRowRecords(
           : literal)
       );
       continue;
+    }
+    if (features !== undefined && emitted[0]?.id === CELL_META_ID) {
+      features.dynamicArrays = true;
     }
     // Spread rather than pushed: a shared or array formula's master cell is *two* records — the cell,
     // then the `BrtShrFmla`/`BrtArrFmla` that carries the expression the cell's `PtgExp` defers to.

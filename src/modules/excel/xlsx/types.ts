@@ -81,12 +81,27 @@ export interface XlsxReadOptions {
    * Limits applied while unpacking the XLSX container, to decline decompression
    * bombs. By default each part may inflate to 512 MiB, all parts together to
    * 2 GiB, and the package may hold 10,000 parts; set them lower when reading
-   * untrusted uploads, or `Infinity` to lift one.
+   * untrusted uploads, or `Infinity` to lift one. Every part is also checked against
+   * its recorded CRC-32 unless `checkCrc32` is `false`.
    */
   zip?: XlsxZipReadLimits;
+  /**
+   * The password of an encrypted workbook — one Excel saved with "Encrypt with Password" (Agile Encryption in an OLE
+   * compound file), or `Workbook.toBuffer(wb, { password })` wrote. The same option Word's `Io.read` takes. Without
+   * it such a workbook is an `ExcelEncryptedError`; with a wrong one an `ExcelDecryptionError` (`reason:
+   * "password"`). The decrypted package is bounded by `zip.maxTotalUncompressedSize`. An encrypted XLSX or XLSB is
+   * detected as an unencrypted one is; ignored for an unencrypted workbook.
+   */
+  password?: string;
 }
 
-/** Container limits for {@link XlsxReadOptions.zip}. */
+/**
+ * Container limits and integrity checking for {@link XlsxReadOptions.zip}.
+ *
+ * A package past a limit fails the read with the archive's `ArchiveLimitError` (from `documonster/archive`), which
+ * says which limit to raise; a damaged package — a part that fails its CRC-32, or bytes that are not a ZIP package —
+ * fails with an `ExcelFileError` whose `cause` is the archive's error.
+ */
 export interface XlsxZipReadLimits {
   /** Largest uncompressed size of one part, in bytes. */
   maxEntrySize?: number;
@@ -94,6 +109,13 @@ export interface XlsxZipReadLimits {
   maxTotalUncompressedSize?: number;
   /** Most parts (ZIP entries) the package may contain. @default 10000 */
   maxEntries?: number;
+  /**
+   * Whether each part is checked against the CRC-32 the package records for it, failing
+   * the read on a mismatch with an `ExcelFileError` whose `cause` is the archive's
+   * `Crc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * @default true
+   */
+  checkCrc32?: boolean;
 }
 
 export interface ZipWriterOptions {
@@ -140,7 +162,7 @@ export interface XlsxWriteOptions {
    * `c15:`/`cx14:` extension paths the parser observed, so authors can decide
    * between relaxing the mode or reshaping the mutation into a patch-friendly
    * path. To inspect those paths *before* writing (for example to decide
-   * whether to opt into strict mode at all), use {@link Chart.unknownElements}
+   * whether to opt into strict mode at all), use `Chart.getUnknownElements`
    * on each chart of interest.
    */
   templateMode?: XlsxTemplateMode;

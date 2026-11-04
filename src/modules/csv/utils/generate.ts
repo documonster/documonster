@@ -12,6 +12,7 @@
  * - Cross-platform (Node.js and Browser)
  */
 
+import { CsvArgumentError } from "@csv/errors";
 import { uuidV4 } from "@utils/uuid";
 
 // =============================================================================
@@ -50,6 +51,40 @@ export type BuiltinColumnType =
   | "color"
   | "username"
   | "slug";
+
+/** Every {@link BuiltinColumnType}, for checking a column definition. */
+const BUILTIN_COLUMN_TYPES: ReadonlySet<string> = new Set<BuiltinColumnType>([
+  "string",
+  "int",
+  "float",
+  "bool",
+  "date",
+  "datetime",
+  "uuid",
+  "email",
+  "name",
+  "firstName",
+  "lastName",
+  "word",
+  "sentence",
+  "paragraph",
+  "phone",
+  "url",
+  "ip",
+  "ipv6",
+  "hex",
+  "index",
+  "company",
+  "country",
+  "currency",
+  "percent",
+  "timestamp",
+  "city",
+  "zipCode",
+  "color",
+  "username",
+  "slug"
+]);
 
 /** Custom generator function */
 export type GeneratorFn = (context: GeneratorContext) => unknown;
@@ -123,7 +158,7 @@ export interface StopContext {
 /** CSV generator options */
 export interface CsvGenerateOptions {
   /** Column definitions (number for count, or array of definitions) */
-  columns?: number | ColumnDef[];
+  columns?: number | readonly ColumnDef[];
   /**
    * Number of rows to generate.
    * Use Infinity or -1 for unlimited (must use iterator API).
@@ -132,24 +167,24 @@ export interface CsvGenerateOptions {
   /** Seed for reproducible random data */
   seed?: number;
   /** Include header row */
-  headers?: boolean | string[];
+  headers?: boolean | readonly string[];
   /** Field delimiter */
   delimiter?: string;
   /** Row delimiter (line ending) */
   lineEnding?: string;
   /**
    * Append string at end of output (e.g., "\n" for trailing newline).
-   * Only applies to csvGenerate(), not iterators.
+   * Only applies to Csv.generate(), not iterators.
    */
   eof?: string;
   /**
    * Prepend UTF-8 BOM (Byte Order Mark) for Excel compatibility.
-   * Only applies to csvGenerate(), not iterators.
+   * Only applies to Csv.generate(), not iterators.
    */
   bom?: boolean;
   /**
    * Output rows as objects with header keys instead of arrays.
-   * Only applies to csvGenerateData().
+   * Only applies to Csv.generateData().
    */
   objectMode?: boolean;
   /**
@@ -502,7 +537,10 @@ const COLORS = [
 /**
  * Generate header names from column definitions
  */
-function generateHeaderNames(colDefs: ColumnDef[], providedHeaders?: boolean | string[]): string[] {
+function generateHeaderNames(
+  colDefs: readonly ColumnDef[],
+  providedHeaders?: boolean | readonly string[]
+): string[] {
   const headerNames: string[] = [];
 
   if (providedHeaders === false) {
@@ -533,10 +571,91 @@ function generateHeaderNames(colDefs: ColumnDef[], providedHeaders?: boolean | s
   return headerNames;
 }
 
+function checkGenerateOptions(options: CsvGenerateOptions, where: string): void {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new CsvArgumentError(
+      "options",
+      `${where}: options must be an options object, got ${options === null ? "null" : typeof options}`
+    );
+  }
+  const fail = (option: string, expected: string, value: unknown): never => {
+    throw new CsvArgumentError(
+      `options.${option}`,
+      `${where}: ${option} must be ${expected}, got ${typeof value === "string" ? JSON.stringify(value) : String(value)}`
+    );
+  };
+  const integer = (option: keyof CsvGenerateOptions, min: number): void => {
+    const value = options[option];
+    if (
+      value !== undefined &&
+      (typeof value !== "number" || !Number.isInteger(value) || value < min)
+    ) {
+      fail(option, `an integer >= ${min}`, value);
+    }
+  };
+  const finite = (option: keyof CsvGenerateOptions): void => {
+    const value = options[option];
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
+      fail(option, "a finite number", value);
+    }
+  };
+  if (typeof options.columns === "number") {
+    integer("columns", 0);
+  } else if (options.columns !== undefined && !Array.isArray(options.columns)) {
+    fail("columns", "a column count or an array of column definitions", options.columns);
+  } else if (options.columns !== undefined) {
+    options.columns.forEach((def, i) => {
+      const type =
+        typeof def === "object" && def !== null ? (def as GeneratorColumnConfig).type : def;
+      if (typeof type !== "function" && !BUILTIN_COLUMN_TYPES.has(type as string)) {
+        fail(`columns[${i}]`, "a built-in column type, a function or { type }", type);
+      }
+    });
+  }
+  if (options.rows !== Infinity && options.rows !== -1) {
+    integer("rows", 0);
+  }
+  for (const option of ["delimiter", "lineEnding"] as const) {
+    const value = options[option];
+    if (value !== undefined && (typeof value !== "string" || value === "")) {
+      fail(option, "a non-empty string", value);
+    }
+  }
+  if (options.eof !== undefined && typeof options.eof !== "string") {
+    fail("eof", "a string", options.eof);
+  }
+  if (options.quote !== undefined && !["auto", "always", "never"].includes(options.quote)) {
+    fail("quote", '"auto", "always" or "never"', options.quote);
+  }
+  finite("seed");
+  integer("skipRows", 0);
+  integer("stringLength", 0);
+  // `toFixed` accepts 0 to 100 digits.
+  integer("floatPrecision", 0);
+  if ((options.floatPrecision ?? 0) > 100) {
+    fail("floatPrecision", "an integer from 0 to 100", options.floatPrecision);
+  }
+  for (const option of ["intMin", "intMax", "floatMin", "floatMax"] as const) {
+    finite(option);
+  }
+  finite("duration");
+  if (
+    options.until !== undefined &&
+    !(options.until instanceof Date
+      ? Number.isFinite(options.until.getTime())
+      : Number.isFinite(options.until))
+  ) {
+    fail("until", "a valid Date or timestamp", options.until);
+  }
+  if (options.transform !== undefined && typeof options.transform !== "function") {
+    fail("transform", "a function", options.transform);
+  }
+}
+
 /**
  * Normalize column definitions
  */
-function normalizeColumns(columns: number | ColumnDef[]): ColumnDef[] {
+function normalizeColumns(columns: number | readonly ColumnDef[]): readonly ColumnDef[] {
   return typeof columns === "number" ? Array(columns).fill("string") : columns;
 }
 
@@ -888,7 +1007,7 @@ class CsvGenerator {
    * Generate a single row of data
    */
   generateRow(
-    colDefs: ColumnDef[],
+    colDefs: readonly ColumnDef[],
     rowIndex: number,
     headerNames: string[],
     transform?: CsvGenerateOptions["transform"]
@@ -1006,13 +1125,15 @@ function createStopChecker(options: CsvGenerateOptions): (ctx: StopContext) => b
  * ```
  */
 export function csvGenerate(options: CsvGenerateOptions = {}): CsvGenerateResult {
+  checkGenerateOptions(options, "Csv.generate");
   const { columns = 5, rows = 10, seed, headers, eof, bom, transform, skipRows = 0 } = options;
 
   // Prevent infinite generation in sync API
   if (rows === -1 || rows === Infinity) {
-    throw new Error(
-      "Unlimited generation (rows: -1 or Infinity) is not supported in csvGenerate(). " +
-        "Use csvGenerateRows() iterator instead."
+    throw new CsvArgumentError(
+      "options.rows",
+      "Unlimited generation (rows: -1 or Infinity) is not supported in Csv.generate(). " +
+        "Use the Csv.generateRows() iterator instead."
     );
   }
 
@@ -1089,6 +1210,7 @@ export function csvGenerate(options: CsvGenerateOptions = {}): CsvGenerateResult
 export function* csvGenerateRows(
   options: CsvGenerateOptions = {}
 ): Generator<string, void, undefined> {
+  checkGenerateOptions(options, "Csv.generateRows");
   const { columns = 5, seed, headers, transform, skipRows = 0 } = options;
 
   const generator = new CsvGenerator(seed, options);
@@ -1150,6 +1272,7 @@ export function* csvGenerateRows(
 export async function* csvGenerateAsync(
   options: CsvGenerateOptions & { delay?: number } = {}
 ): AsyncGenerator<string, void, undefined> {
+  checkGenerateOptions(options, "Csv.generateRowsAsync");
   const { columns = 5, seed, headers, delay = 0, transform, skipRows = 0 } = options;
 
   const generator = new CsvGenerator(seed, options);
@@ -1221,13 +1344,15 @@ export function csvGenerateData<T extends CsvGenerateOptions>(
   options?: T
 ): T extends { objectMode: true } ? Record<string, unknown>[] : unknown[][] {
   const opts = options ?? ({} as T);
+  checkGenerateOptions(opts, "Csv.generateData");
   const { columns = 5, rows = 10, seed, objectMode, transform, skipRows = 0 } = opts;
 
   // Prevent infinite generation in sync API
   if (rows === -1 || rows === Infinity) {
-    throw new Error(
-      "Unlimited generation (rows: -1 or Infinity) is not supported in csvGenerateData(). " +
-        "Use csvGenerateRows() iterator instead."
+    throw new CsvArgumentError(
+      "options.rows",
+      "Unlimited generation (rows: -1 or Infinity) is not supported in Csv.generateData(). " +
+        "Use the Csv.generateRows() iterator instead."
     );
   }
 
@@ -1283,6 +1408,7 @@ export function csvGenerateData<T extends CsvGenerateOptions>(
  * ```
  */
 export function createCsvGenerator(baseOptions: CsvGenerateOptions = {}) {
+  checkGenerateOptions(baseOptions, "Csv.createGenerator");
   return {
     /**
      * Generate CSV synchronously

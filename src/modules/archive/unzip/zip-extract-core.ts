@@ -23,7 +23,8 @@ import {
   PasswordRequiredError,
   UnsupportedCompressionError,
   throwIfAborted,
-  toError
+  toError,
+  toInflateError
 } from "@archive/core/errors";
 import {
   ZIP_CRYPTO_HEADER_SIZE,
@@ -54,7 +55,11 @@ export const LOCAL_HEADER_FIXED_SIZE = 30;
 export interface ExtractCoreOptions {
   /** Password for encrypted entries */
   password?: string | Uint8Array;
-  /** Whether to validate CRC32 checksum after extraction */
+  /**
+   * Whether to verify each entry's CRC-32 (`Crc32MismatchError`). AES entries carry an
+   * HMAC instead and ZipCrypto entries are always verified.
+   * @default true
+   */
   checkCrc32?: boolean;
   /**
    * Whether to validate that the decompressed size matches the declared size.
@@ -106,7 +111,8 @@ function planEntryInflation(
       entry.path,
       `declares uncompressed size of ${entry.uncompressedSize} bytes, ` +
         `which exceeds the maximum allowed size of ${maxEntrySize} bytes. ` +
-        "Use the streaming API for large entries."
+        "Use the streaming API for large entries.",
+      { allowed: maxEntrySize }
     );
   }
   const bound = validateEntrySizes ? entry.uncompressedSize : maxEntrySize;
@@ -114,18 +120,22 @@ function planEntryInflation(
 }
 
 /**
- * Translate an inflater limit hit into the error that names the entry.
+ * Translate an inflater failure into the error that names the entry: a limit hit into the size error, anything the
+ * inflater raised untyped into an `ArchiveError`.
  */
-function translateOutputLimit(err: unknown, plan: EntryInflation): unknown {
+function translateInflateFailure(err: unknown, plan: EntryInflation): Error {
   if (!(err instanceof ArchiveLimitError)) {
-    return err;
+    return toInflateError(err, plan.entry.path);
   }
   const { entry, bound } = plan;
   return plan.validateEntrySizes
     ? new EntrySizeMismatchError(entry.path, entry.uncompressedSize, undefined, "too-many-bytes", {
         cause: err
       })
-    : new FileTooLargeError(entry.path, `inflates beyond ${bound} bytes`, { cause: err });
+    : new FileTooLargeError(entry.path, `inflates beyond ${bound} bytes`, {
+        cause: err,
+        allowed: bound
+      });
 }
 
 /**
@@ -136,7 +146,7 @@ function translateOutputLimit(err: unknown, plan: EntryInflation): unknown {
  * @param entry - Entry metadata
  * @param compressedData - Raw compressed (and possibly encrypted) data from the ZIP
  * @param password - Optional password for decryption
- * @param checkCrc32 - Whether to validate CRC32 checksum (default: false)
+ * @param checkCrc32 - Whether to validate CRC32 checksum (default: true)
  * @param validateEntrySizes - Whether to validate decompressed size matches declared size (default: true)
  * @param maxEntrySize - Largest entry that may be inflated into memory (default: 512 MiB)
  * @returns Decompressed entry content
@@ -145,7 +155,7 @@ export async function processEntryData(
   entry: ZipEntryRecord,
   compressedData: Uint8Array,
   password?: string | Uint8Array,
-  checkCrc32 = false,
+  checkCrc32 = true,
   validateEntrySizes = true,
   maxEntrySize = DEFAULT_MAX_ENTRY_SIZE
 ): Promise<Uint8Array> {
@@ -223,15 +233,17 @@ export async function processEntryData(
  * @param password - Optional password for decryption
  * @param validateEntrySizes - Whether to validate decompressed size matches declared size (default: true)
  * @param maxEntrySize - Largest entry that may be inflated into memory (default: 512 MiB)
+ * @param checkCrc32 - Whether to validate CRC32 checksum (default: true)
  * @returns Decompressed entry content
- * @throws Error if the entry uses AES encryption
+ * @throws ArchiveError if the entry uses AES encryption
  */
 export function processEntryDataSync(
   entry: ZipEntryRecord,
   compressedData: Uint8Array,
   password?: string | Uint8Array,
   validateEntrySizes = true,
-  maxEntrySize = DEFAULT_MAX_ENTRY_SIZE
+  maxEntrySize = DEFAULT_MAX_ENTRY_SIZE,
+  checkCrc32 = true
 ): Uint8Array {
   let result: Uint8Array;
 
@@ -247,7 +259,9 @@ export function processEntryDataSync(
     if (entry.encryptionMethod === "aes") {
       // AES requires async Web Crypto API
       throw new ArchiveError(
-        `File "${entry.path}" uses AES encryption. Use the async extract() method instead of extractSync().`
+        `File "${entry.path}" uses AES encryption, which requires the asynchronous API (it ` +
+          "runs on Web Crypto): read it with Archive.unpackZip or Archive.openZip rather than " +
+          'Archive.unpackZipSync, or the ArchiveFile method without the "Sync" suffix'
       );
     } else if (entry.encryptionMethod === "zipcrypto") {
       // ZipCrypto decryption (synchronous)
@@ -278,6 +292,14 @@ export function processEntryDataSync(
     throw new EntrySizeMismatchError(entry.path, entry.uncompressedSize, result.length, reason);
   }
 
+  // ZipCrypto was verified above; AES cannot reach here
+  if (checkCrc32 && !entry.isEncrypted) {
+    const actualCrc = crc32(result);
+    if (actualCrc !== entry.crc32) {
+      throw new Crc32MismatchError(entry.path, entry.crc32, actualCrc);
+    }
+  }
+
   return result;
 }
 
@@ -297,7 +319,7 @@ async function decompressData(
     try {
       return await decompress(data, { maxOutputLength: plan.bound });
     } catch (err) {
-      throw translateOutputLimit(err, plan);
+      throw translateInflateFailure(err, plan);
     }
   }
   throw new UnsupportedCompressionError(compressionMethod);
@@ -404,13 +426,39 @@ async function* inflateRawStream(
   // event (forwarded by the iterator), so the consumer below rejects. The
   // producer itself never rejects, so it can never become an unhandled rejection.
   //
-  // The source is always read to completion into `inputChunks` (even if the
-  // inflator errors) so the pure-JS fallback below has the full compressed
-  // entry available.
+  // The source is read to completion into `inputChunks` (even if the inflator
+  // errors) so the pure-JS fallback below has the full compressed entry
+  // available — unless the consumer stops first. Then `stopProducer` releases
+  // any read or write the producer is parked on: a write the paused inflator
+  // will not accept until its output is read, or one in flight when it is
+  // destroyed, never calls back, and waiting for it would hang the consumer.
+  // A failed inflator likewise drops the callback of the write it was processing.
+  // Its listener stays for the inflator's lifetime: the adapter's goes when the
+  // consumer stops, and an error reported after that would otherwise be unhandled.
+  let stopProducer!: () => void;
+  const stopped = new Promise<typeof STOPPED>(resolve => {
+    stopProducer = () => resolve(STOPPED);
+  });
+  const failed = new Promise<typeof FAILED>(resolve => {
+    inflator.on("error", () => resolve(FAILED));
+  });
+  const untilStopped = <T>(step: Promise<T>): Promise<T | typeof STOPPED | typeof FAILED> =>
+    Promise.race([step, stopped, failed]);
+  const input = source[Symbol.asyncIterator]();
   const producer = (async () => {
     let writeFailed = false;
+    let inputDone = false;
     try {
-      for await (const chunk of source) {
+      while (true) {
+        const step = await Promise.race([input.next(), stopped]);
+        if (step === STOPPED) {
+          return;
+        }
+        if (step.done) {
+          inputDone = true;
+          break;
+        }
+        const chunk = step.value;
         throwIfAborted(signal);
         inputChunks.push(chunk);
         if (writeFailed) {
@@ -418,15 +466,17 @@ async function* inflateRawStream(
           continue;
         }
         try {
-          await new Promise<void>((resolve, reject) => {
-            inflator.write(chunk, err => {
-              if (err) {
-                reject(err);
-              } else {
-                resolve();
-              }
-            });
-          });
+          const written = await untilStopped(
+            new Promise<void>((resolve, reject) => {
+              inflator.write(chunk, err => (err ? reject(err) : resolve()));
+            })
+          );
+          if (written === STOPPED) {
+            return;
+          }
+          if (written === FAILED) {
+            writeFailed = true;
+          }
         } catch (e) {
           writeFailed = true;
           try {
@@ -440,15 +490,11 @@ async function* inflateRawStream(
 
       if (!writeFailed) {
         throwIfAborted(signal);
-        await new Promise<void>((resolve, reject) => {
-          inflator.end(err => {
-            if (err) {
-              reject(err);
-            } else {
-              resolve();
-            }
-          });
-        });
+        await untilStopped(
+          new Promise<void>((resolve, reject) => {
+            inflator.end(err => (err ? reject(err) : resolve()));
+          })
+        );
       }
     } catch (e) {
       inputDrained = true;
@@ -456,6 +502,11 @@ async function* inflateRawStream(
         inflator.destroy(toError(e));
       } catch {
         // ignore
+      }
+    } finally {
+      if (!inputDone) {
+        // Queued behind a read still pending, if any; the source owns its own errors
+        input.return?.()?.catch(() => {});
       }
     }
   })();
@@ -479,22 +530,28 @@ async function* inflateRawStream(
     // with the deterministic pure-JS inflater, preserving streaming by
     // re-chunking the result so downstream consumers stay incremental.
     if (producedOutput) {
-      throw err;
+      throw toInflateError(err);
     }
     await iterator.return?.();
     await producer;
     if (!inputDrained) {
       // Source could not be fully buffered; cannot safely re-decode.
-      throw err;
+      throw toInflateError(err);
     }
     const compressed = concatUint8Arrays(inputChunks);
-    const inflated = decompressSync(compressed);
+    let inflated: Uint8Array;
+    try {
+      inflated = decompressSync(compressed);
+    } catch (fallbackErr) {
+      throw toInflateError(fallbackErr);
+    }
     yield* chunkUint8Array(inflated, STREAM_RECHUNK_SIZE);
     return;
   } finally {
-    // Stop the adapter (detaches listeners, pauses the stream), settle the
-    // producer (it never rejects), and tear down the inflator.
+    // Stop the adapter (detaches listeners, pauses the stream), release and settle
+    // the producer (it never rejects), and tear down the inflator.
     await iterator.return?.();
+    stopProducer();
     await producer;
     try {
       inflator.destroy();
@@ -503,6 +560,9 @@ async function* inflateRawStream(
     }
   }
 }
+
+const STOPPED = Symbol("stopped");
+const FAILED = Symbol("failed");
 
 /** Output slice size used when re-chunking a fully-inflated buffer. */
 const STREAM_RECHUNK_SIZE = 65536;
@@ -610,7 +670,7 @@ export function processEntryDataStream(
 ): AsyncIterable<Uint8Array> {
   const {
     password,
-    checkCrc32 = false,
+    checkCrc32 = true,
     validateEntrySizes = true,
     maxEntrySize = DEFAULT_MAX_ENTRY_SIZE,
     signal
@@ -735,7 +795,7 @@ function decompressDataSync(
     try {
       return decompressSync(data, { maxOutputLength: plan.bound });
     } catch (err) {
-      throw translateOutputLimit(err, plan);
+      throw translateInflateFailure(err, plan);
     }
   }
   throw new UnsupportedCompressionError(compressionMethod);

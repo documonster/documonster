@@ -14,18 +14,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { encodePng } from "@archive/png";
-import { rasterizeToRgba, renderDrawList, toSvg } from "@draw/index";
+import { Draw } from "@draw/index";
 import type { DrawList, DrawNode, DrawPathCommand } from "@draw/index";
-import {
-  fillChartCaches,
-  fillChartExCaches,
-  renderChartExPng,
-  renderChartExSvg,
-  renderChartPng,
-  renderChartSvg
-} from "@excel/chart";
-import { Chart, Workbook, Worksheet } from "@excel/index";
-import { createPdfDrawSurface, Pdf } from "@pdf/index";
+import { ChartEx, ChartClassic } from "@excel/chart";
+import { Chart, Row, Workbook } from "@excel/index";
+import { Pdf } from "@pdf/index";
 
 const OUT = path.resolve("tmp/proof");
 mkdirSync(OUT, { recursive: true });
@@ -36,22 +29,22 @@ const INK = { r: 0.15, g: 0.15, b: 0.15, a: 1 };
 
 /** Render one display list to all three backends, at 2x for the raster. */
 function threeWays(name: string, list: DrawList): void {
-  writeFileSync(path.join(OUT, `${name}.svg`), toSvg(list));
+  writeFileSync(path.join(OUT, `${name}.svg`), Draw.toSvg(list));
 
   // Pixels and PNG encoding are separate steps on purpose: the rasteriser is
   // part of the drawing engine, while encoding needs DEFLATE and so lives with
   // it in `documonster/archive`. Pair them, or pair the pixels with any other
   // encoder.
-  const image = rasterizeToRgba(list, { width: list.width, height: list.height, scale: 2 });
+  const image = Draw.toRgba(list, { width: list.width, height: list.height, scale: 2 });
   writeFileSync(path.join(OUT, `${name}.png`), encodePng(image.data, image.width, image.height));
 
   const builder = new Pdf.Builder();
   const page = builder.addPage({ width: list.width, height: list.height });
-  renderDrawList(
+  Draw.render(
     list,
-    createPdfDrawSurface(page, { x: 0, y: 0, width: list.width, height: list.height })
+    Pdf.createDrawSurface(page, { x: 0, y: 0, width: list.width, height: list.height })
   );
-  void builder.build().then(bytes => writeFileSync(path.join(OUT, `${name}.pdf`), bytes));
+  void builder.toBuffer().then(bytes => writeFileSync(path.join(OUT, `${name}.pdf`), bytes));
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +416,7 @@ function sheet(): {
 } {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "S");
-  Worksheet.addRows(ws, [
+  Row.addMany(ws, [
     ["Q1", 42, 30],
     ["Q2", 58, 44],
     ["Q3", 31, 52],
@@ -486,15 +479,15 @@ const classic: Array<[string, Record<string, unknown>]> = [
 
 for (const [name, options] of classic) {
   const { ws, wb } = sheet();
-  Chart.add(ws, options as never, "E1:L14");
-  const model = Chart.chartModel(Chart.get(ws)[0])!;
+  Chart.place(ws, "E1:L14", options as never);
+  const model = Chart.getModel(Chart.list(ws)[0])!;
   // Without the caches the renderer has no category strings to read and falls back
   // to 1..n, which would make a real labelling bug indistinguishable from a
   // half-built example.
-  fillChartCaches(model, wb);
+  ChartClassic.fillCaches(model, wb);
   const size = { width: 460, height: 300 };
-  writeFileSync(path.join(OUT, `03-${name}.svg`), renderChartSvg(model, size));
-  void renderChartPng(model, size).then(png =>
+  writeFileSync(path.join(OUT, `03-${name}.svg`), ChartClassic.toSvg(model, size));
+  void ChartClassic.toPng(model, size).then(png =>
     writeFileSync(path.join(OUT, `03-${name}.png`), png)
   );
 }
@@ -600,14 +593,12 @@ const chartEx: Array<[string, Record<string, unknown>]> = [
 
 for (const [name, options] of chartEx) {
   const { ws, wb } = sheet();
-  Chart.addEx(ws, options as never, "E1:L14");
-  const model = Chart.chartExModel(Chart.get(ws)[0])!;
-  fillChartExCaches(model, wb);
+  Chart.place(ws, "E1:L14", options as never);
+  const model = Chart.getExModel(Chart.list(ws)[0])!;
+  ChartEx.fillCaches(model, wb);
   const size = { width: 460, height: 300 };
-  writeFileSync(path.join(OUT, `04-${name}.svg`), renderChartExSvg(model, size));
-  void renderChartExPng(model, size).then(png =>
-    writeFileSync(path.join(OUT, `04-${name}.png`), png)
-  );
+  writeFileSync(path.join(OUT, `04-${name}.svg`), ChartEx.toSvg(model, size));
+  void ChartEx.toPng(model, size).then(png => writeFileSync(path.join(OUT, `04-${name}.png`), png));
 }
 
 console.log(`Wrote proof sheet to ${OUT}`);

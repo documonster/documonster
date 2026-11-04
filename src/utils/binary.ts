@@ -62,10 +62,16 @@ export function getTextDecoder(encoding?: string): TextDecoder {
  * Create a new TextDecoder instance.
  *
  * Use this for streaming decode (`decode(..., { stream: true })`) to avoid
- * sharing mutable decoder state across concurrent operations.
+ * sharing mutable decoder state across concurrent operations. A leading BOM is kept unless
+ * `options.ignoreBOM` is `false`, which strips it as `TextDecoder`'s own default does.
  */
-export function createTextDecoder(encoding?: string): TextDecoder {
-  return createTextDecoderOrTypeError(normalizeEncodingLabel(encoding), { ignoreBOM: true });
+export function createTextDecoder(
+  encoding?: string,
+  options: { ignoreBOM?: boolean } = {}
+): TextDecoder {
+  return createTextDecoderOrTypeError(normalizeEncodingLabel(encoding), {
+    ignoreBOM: options.ignoreBOM ?? true
+  });
 }
 
 function createTextDecoderOrTypeError(encoding: string, options?: TextDecoderOptions): TextDecoder {
@@ -594,7 +600,7 @@ export function writeFloat64LE(value: number): Uint8Array {
 export class BinaryReader {
   private readonly view: DataView;
   private readonly data: Uint8Array;
-  private readonly label: string;
+  protected readonly label: string;
   private offset: number;
 
   /**
@@ -625,9 +631,7 @@ export class BinaryReader {
    */
   set position(value: number) {
     if (!Number.isInteger(value) || value < 0 || value > this.data.length) {
-      throw new RangeError(
-        `${this.label}: cannot seek to ${value} — length is ${this.data.length}`
-      );
+      throw this.outOfBounds(`cannot seek to ${value} — length is ${this.data.length}`);
     }
     this.offset = value;
   }
@@ -650,8 +654,8 @@ export class BinaryReader {
    */
   require(length: number): void {
     if (!Number.isInteger(length) || length < 0 || length > this.remaining) {
-      throw new RangeError(
-        `${this.label}: truncated at byte ${this.offset} — need ${length} byte(s), ${this.remaining} remain`
+      throw this.outOfBounds(
+        `truncated at byte ${this.offset} — need ${length} byte(s), ${this.remaining} remain`
       );
     }
   }
@@ -744,11 +748,20 @@ export class BinaryReader {
     // and returns the *first* uint32 in the stream as though it were the one
     // asked for.
     if (!Number.isInteger(offset) || offset < 0 || offset + 4 > this.data.length) {
-      throw new RangeError(
-        `${this.label}: cannot peek 4 byte(s) at ${offset} — length is ${this.data.length}`
-      );
+      throw this.outOfBounds(`cannot peek 4 byte(s) at ${offset} — length is ${this.data.length}`);
     }
     return this.view.getUint32(offset, true);
+  }
+
+  /**
+   * The error a read past the end, or a seek outside the data, throws.
+   *
+   * A `RangeError` here, because this layer knows bytes and not formats. A format reader overrides it: running out of
+   * bytes in a ZIP header or a BIFF12 record is malformed input, and the caller should receive that format's own
+   * error rather than a built-in one it cannot tell apart from a bug.
+   */
+  protected outOfBounds(detail: string): Error {
+    return new RangeError(`${this.label}: ${detail}`);
   }
 }
 

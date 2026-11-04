@@ -479,13 +479,16 @@ export function segmentForWrap(text: string): string[] {
  * segmentation beyond the space-splitting it already did.
  */
 export function hasCjk(text: string): boolean {
-  for (const char of text) {
-    if (isCjkBreakable(char.codePointAt(0)!)) {
-      return true;
-    }
-  }
-  return false;
+  return CJK_BREAKABLE.test(text);
 }
+
+/**
+ * Exactly the code points {@link isCjkBreakable} accepts. A native scan: the
+ * question is asked of whole documents' text, where iterating it code point by
+ * code point in script cost more than writing the document.
+ */
+const CJK_BREAKABLE =
+  /[\u{1100}-\u{11ff}\u{3000}-\u{9fff}\u{a000}-\u{a4cf}\u{a960}-\u{a97f}\u{ac00}-\u{d7a3}\u{d7b0}-\u{d7ff}\u{f900}-\u{faff}\u{fe10}-\u{fe6f}\u{ff01}-\u{ffdc}\u{20000}-\u{3ffff}]/u;
 
 /** A maximal stretch of text that is either East Asian or not. */
 export interface ScriptRun {

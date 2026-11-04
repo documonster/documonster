@@ -27,6 +27,7 @@ import type { WorkbookData } from "@excel/core/workbook-core";
 import { getWorksheets } from "@excel/core/workbook-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
 import { eachRow, findCell, getSheetName, getTables } from "@excel/core/worksheet-core";
+import { sheetNameKey } from "@utils/name-key";
 
 export function captureChartDataSnapshot(
   workbook: WorkbookData,
@@ -57,7 +58,7 @@ export function captureChartDataSnapshot(
     : undefined;
   const worksheets: ChartWorksheetSnapshot[] = hostWorksheets.map((worksheet, index) => {
     const cells = new Map<string, unknown>();
-    const requested = requestedCells?.get(getSheetName(worksheet).toLowerCase());
+    const requested = requestedCells?.get(sheetNameKey(getSheetName(worksheet)));
     if (requestedCells) {
       for (const key of requested ?? []) {
         const [row, col] = key.split(":").map(Number);
@@ -89,7 +90,7 @@ export function captureChartDataSnapshot(
     return {
       worksheets: sheets,
       worksheetsByName: new Map(
-        sheets.map(worksheet => [worksheet.name.toLowerCase(), worksheet] as const)
+        sheets.map(worksheet => [sheetNameKey(worksheet.name), worksheet] as const)
       ),
       definedNames,
       date1904: workbook.properties?.date1904 ?? false,

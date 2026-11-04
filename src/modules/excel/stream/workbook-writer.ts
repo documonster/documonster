@@ -29,6 +29,11 @@ interface OutputStreamLike {
   removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
 }
 
+/**
+ * Write a workbook a row at a time, to a file (`filename`) or a stream (`stream`), without holding the sheets in
+ * memory: `addWorksheet` hands out a {@link WorksheetWriter}, each committed row is written and released, and
+ * `commit` finishes the package. A sheet's rows go out in order, so a committed row or sheet takes no more edits.
+ */
 class WorkbookWriter extends WorkbookWriterBase<WorksheetWriter> {
   constructor(options: WorkbookWriterOptions = {}) {
     super(options, WorksheetWriter);

@@ -28,10 +28,11 @@ import {
   readWideString,
   type BiffCell,
   type BiffRange,
-  type BiffRecord
+  type BiffRecord,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import { recordSpec, type BiffFieldSpec, type BiffRecordSpec } from "@excel/xlsb/spec/records";
-import { BinaryReader } from "@utils/binary";
+import type { BinaryReader } from "@utils/binary";
 
 /** A decoded field value. */
 export type BiffValue = number | string | undefined | BiffCell | BiffRange;
@@ -59,7 +60,7 @@ export function decodeRecord(record: BiffRecord, context: string): DecodedRecord
     return undefined;
   }
 
-  const reader = new BinaryReader(record.payload, 0, context);
+  const reader = new XlsbReader(record.payload, 0, context);
   const fields = new Map<string, BiffValue>();
   for (const field of spec.fields) {
     let value: BiffValue;

@@ -4,9 +4,9 @@
  * Fills coverage gaps promised by archive-complete.ts but not demonstrated there:
  * - AES-encrypted ZIP (aes-128 / aes-192 / aes-256) via ArchiveFile, with
  *   decrypt round-trip verification.
- * - Low-level AES primitives: Archive.aesEncrypt / Archive.aesDecrypt and
- *   Archive.buildAesExtraField.
- * - Random-access / "remote" ZIP reading via Archive.RemoteZipReader, fed by an
+ * - Low-level AES primitives: Archive.Crypto.encryptAes / Archive.Crypto.decryptAes and
+ *   Archive.Crypto.createAesExtraField.
+ * - Random-access / "remote" ZIP reading via Archive.RemoteZipReader.fromReader, fed by an
  *   in-memory RandomAccessReader from Archive.createBufferReader (no network):
  *   fromReader() / getEntries() / extract() / getStats() / close().
  * - Abort signals: Archive.throwIfAborted / Archive.isAbortError /
@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Archive, ArchiveFile } from "../index";
+import { Archive } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -31,21 +31,21 @@ fs.mkdirSync(outDir, { recursive: true });
 const decoder = new TextDecoder();
 
 // =============================================================================
-// 1. AES-encrypted ZIP via ArchiveFile (high-level)
+// 1. AES-encrypted ZIP via Archive.ArchiveFile (high-level)
 // =============================================================================
 //
 // NOTE: AES key strength is selected through the `encryptionMethod` string
-// itself — "aes-128" | "aes-192" | "aes-256". The ArchiveFile/ZipFileOptions
+// itself — "aes-128" | "aes-192" | "aes-256". The Archive.ArchiveFile/ZipFileOptions
 // layer does NOT expose a separate `aesKeyStrength` option (that field only
 // appears on *read* results in ZipEntryRecord). See report for details.
 
-console.log("1. AES-encrypted ZIP (high-level ArchiveFile):");
+console.log("1. AES-encrypted ZIP (high-level Archive.ArchiveFile):");
 
 const aesMethods = ["aes-128", "aes-192", "aes-256"] as const;
 const aesPassword = "correct horse battery staple";
 
 for (const method of aesMethods) {
-  const af = new ArchiveFile({
+  const af = new Archive.ArchiveFile({
     format: "zip",
     encryptionMethod: method,
     password: aesPassword
@@ -60,7 +60,10 @@ for (const method of aesMethods) {
   // Inspect the metadata: confirm encryption + reported key strength.
   // getEntry() returns ZIP-specific info (isEncrypted / encryptionMethod /
   // aesKeyStrength), whereas getEntries() returns format-agnostic info.
-  const reader = ArchiveFile.fromBuffer(encrypted, { format: "zip", password: aesPassword });
+  const reader = Archive.ArchiveFile.fromBuffer(encrypted, {
+    format: "zip",
+    password: aesPassword
+  });
   const info = reader.getEntry("secret.txt")!;
   console.log(
     `  ${method}.zip: ${encrypted.length} bytes, ` +
@@ -74,7 +77,7 @@ for (const method of aesMethods) {
 
   // Wrong password should fail
   try {
-    const bad = ArchiveFile.fromBuffer(encrypted, { format: "zip", password: "wrong" });
+    const bad = Archive.ArchiveFile.fromBuffer(encrypted, { format: "zip", password: "wrong" });
     await bad.readAsText("secret.txt");
     console.log("    UNEXPECTED: wrong password succeeded");
   } catch {
@@ -83,25 +86,25 @@ for (const method of aesMethods) {
 }
 
 // =============================================================================
-// 2. Low-level AES primitives: aesEncrypt / aesDecrypt / buildAesExtraField
+// 2. Low-level AES primitives (Archive.Crypto): aesEncrypt / aesDecrypt / buildAesExtraField
 // =============================================================================
 
 console.log("\n2. Low-level AES primitives:");
 
 const plaintext = new TextEncoder().encode("Raw AES-256 payload for primitive demo.");
-const aesEncrypted = await Archive.aesEncrypt(plaintext, aesPassword, 256);
+const aesEncrypted = await Archive.Crypto.encryptAes(plaintext, aesPassword, 256);
 console.log(
   `  aesEncrypt(256): ${plaintext.length} -> ${aesEncrypted.length} bytes ` +
     `(salt + verify + ciphertext + HMAC)`
 );
 
-const aesRoundTrip = await Archive.aesDecrypt(aesEncrypted, aesPassword, 256);
+const aesRoundTrip = await Archive.Crypto.decryptAes(aesEncrypted, aesPassword, 256);
 console.log(
   `  aesDecrypt(256) match: ${decoder.decode(aesRoundTrip) === decoder.decode(plaintext)}`
 );
 
 // buildAesExtraField: AE-2, 256-bit, original compression method 8 (DEFLATE)
-const extraField = Archive.buildAesExtraField(2, 256, 8);
+const extraField = Archive.Crypto.createAesExtraField(2, 256, 8);
 console.log(
   `  buildAesExtraField(AE-2, 256, DEFLATE): ${extraField.length} bytes, ` +
     `header id=0x${((extraField[1]! << 8) | extraField[0]!).toString(16).padStart(4, "0")}`
@@ -117,11 +120,11 @@ console.log(
 
 console.log("\n3. Remote (random-access) ZIP reading:");
 
-const sourceZip = await Archive.zip()
+const sourceZip = await Archive.createZip()
   .add("docs/readme.txt", "Read me first. ".repeat(50))
   .add("docs/changelog.txt", "v1.0.0 initial release")
   .add("data/numbers.json", JSON.stringify({ values: [1, 2, 3, 4, 5] }))
-  .bytes();
+  .toBuffer();
 
 const bufferReader = Archive.createBufferReader(sourceZip);
 const remote = await Archive.RemoteZipReader.fromReader(bufferReader);
@@ -132,7 +135,7 @@ for (const entry of remoteEntries) {
   console.log(`    ${entry.path} (${entry.type}): ${entry.uncompressedSize} bytes`);
 }
 
-// Random-access extract of a single entry — only the bytes for that entry are read
+// Random-access read of a single entry — only the bytes for that entry are read
 const extracted = await remote.extract("data/numbers.json");
 console.log(
   `  extract("data/numbers.json"): ${extracted ? decoder.decode(extracted) : "<missing>"}`

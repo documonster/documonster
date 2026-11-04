@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -24,7 +24,7 @@ const filename = process.argv[2] ?? path.join(outDir, "xlsb-number-formats.xlsb"
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Formats");
 
-Worksheet.addRow(ws, ["Format code", "Raw value", "As Excel shows it"]);
+Row.add(ws, ["Format code", "Raw value", "As Excel shows it"]);
 Cell.setStyle(ws, "A1", { font: { bold: true } });
 Cell.setStyle(ws, "B1", { font: { bold: true } });
 Cell.setStyle(ws, "C1", { font: { bold: true } });
@@ -72,9 +72,8 @@ await Workbook.writeFile(wb, filename);
 console.log(`wrote ${filename}`);
 
 // The round trip, reported per format so a mismatch names itself.
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
-const read = Workbook.getWorksheets(reopened)[0]!;
+const reopened = await Workbook.readFile(filename);
+const read = Workbook.listWorksheets(reopened)[0]!;
 let kept = 0;
 cases.forEach(({ code }, index) => {
   const got = Cell.getStyle(read, `C${index + 2}`)?.numFmt;

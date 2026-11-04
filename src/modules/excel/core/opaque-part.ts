@@ -14,6 +14,8 @@
  * `xlsx/opaque-parts.ts`.
  */
 
+import { ImageError } from "@excel/errors";
+
 /**
  * A relationship carried through verbatim.
  *
@@ -51,55 +53,62 @@ export interface OpaqueSourceRelationship extends OpaqueRelationship {
  * `appendOpaqueSourceRelationships` regardless of which container is being written.
  */
 /**
- * The parts that describe a *sheet*, per container, by content type.
+ * Whether a content type belongs to one container's own part family.
  *
  * A preserved part is normally container-neutral — a chart, a drawing, a theme, a VBA project are the same bytes with
- * the same content type in both containers, which is why preservation works across a conversion at all. The sheet
- * parts are the exception: BIFF12 records and SpreadsheetML are not interchangeable, and a part of one kind is
- * meaningless in a package of the other.
+ * the same content type in both containers, which is why preservation works across a conversion at all. The
+ * SpreadsheetML parts and their BIFF12 counterparts are the exception: a sheet, table, comments, pivot, query-table,
+ * connections, external-link, metadata or calc-chain part of one kind is meaningless in a package of the other.
+ *
+ * This used to list only the sheet, styles and shared-strings types, so every other part of a family crossed: an XLSX
+ * conversion of an XLSB carried `xl/tables/table1.bin` with `application/vnd.ms-excel.table` beside the `table1.xml`
+ * written from the model. The families are recognised by their prefix instead of by a list, because a list is what
+ * left them out.
+ *
+ * - BIFF12: `application/vnd.ms-excel.*` without an `+xml` suffix. The `+xml` members of that namespace (threaded
+ *   comments, persons, rich data, slicers, timelines, control properties) are XML in both containers.
+ * - SpreadsheetML: `application/vnd.openxmlformats-officedocument.spreadsheetml.*` and the macro-enabled main parts,
+ *   except printer settings — an opaque blob that both containers carry under that type.
  *
  * Keyed on the content type rather than the extension, because the extension does not decide it. `.bin` is perfectly
  * legitimate in an XLSX package — `printerSettings.bin` and `vbaProject.bin` both are — so dropping preserved parts by
  * extension would throw away a workbook's macros.
  */
-const SHEET_CONTENT_TYPES: Readonly<Record<"xlsx" | "xlsb", readonly string[]>> = {
-  xlsb: [
-    "application/vnd.ms-excel.sheet.binary.macroenabled.main",
-    "application/vnd.ms-excel.worksheet",
-    "application/vnd.ms-excel.chartsheet",
-    "application/vnd.ms-excel.dialogsheet",
-    "application/vnd.ms-excel.styles",
-    "application/vnd.ms-excel.sharedstrings"
-  ],
-  xlsx: [
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.dialogsheet+xml",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml".toLowerCase()
-  ]
-};
+function containerFamily(contentType: string): "xlsx" | "xlsb" | undefined {
+  if (contentType.startsWith("application/vnd.ms-excel.")) {
+    if (!contentType.endsWith("+xml")) {
+      return "xlsb";
+    }
+    return /\.macroenabled\.main\+xml$/.test(contentType) ? "xlsx" : undefined;
+  }
+  if (
+    contentType.startsWith("application/vnd.openxmlformats-officedocument.spreadsheetml.") &&
+    contentType !== "application/vnd.openxmlformats-officedocument.spreadsheetml.printersettings"
+  ) {
+    return "xlsx";
+  }
+  return undefined;
+}
 
 /**
- * Whether a preserved part is a sheet part belonging to the *other* container, and so cannot be written into this one.
+ * Whether a preserved part belongs to the *other* container's part family, and so cannot be written into this one.
  *
  * **This is the other half of `isRootOrWorkbookSourced`, and without it that fix would have made things worse.**
  * Recognising a workbook-sourced edge across containers is what stops a preserved theme being dropped — and it also
- * kept alive the one part that genuinely must not travel: reading `cal-any_sheets.xlsb` and writing XLSX then placed
+ * kept alive parts that genuinely must not travel: reading `cal-any_sheets.xlsb` and writing XLSX then placed
  * `xl/chartsheets/sheet1.bin`, content type `application/vnd.ms-excel.chartsheet`, inside a SpreadsheetML package.
  *
- * The chart, its style and colour parts, the drawing and the theme are all container-neutral and do travel; only the
- * sheet itself does not, because a BIFF12 record stream is not SpreadsheetML. A caller is told through the ordinary
- * drop report rather than left to find it in the package.
+ * The chart, its style and colour parts, the drawing and the theme are all container-neutral and do travel. A part
+ * this library models is never preserved in the first place, so what is filtered here is what it could not model —
+ * a real loss, and a caller is told through the ordinary drop report rather than left to find it in the package.
  */
-export function isForeignSheetPart(part: OpaquePart, writing: "xlsx" | "xlsb"): boolean {
+export function isForeignContainerPart(part: OpaquePart, writing: "xlsx" | "xlsb"): boolean {
   const contentType = part.contentType?.toLowerCase();
   if (contentType === undefined) {
     return false;
   }
-  const foreign = writing === "xlsx" ? "xlsb" : "xlsx";
-  return SHEET_CONTENT_TYPES[foreign].includes(contentType);
+  const family = containerFamily(contentType);
+  return family !== undefined && family !== writing;
 }
 
 export function isRootOrWorkbookSourced(relationship: OpaqueSourceRelationship): boolean {
@@ -178,8 +187,18 @@ export interface OpaqueDrop {
  * workbook written both ways.
  *
  * Lower-cased by the caller, not here: OPC matches an extension case-insensitively, and the callers key maps by it.
+ *
+ * Every writer types a media part through here, so this is where an extension that cannot name one is refused:
+ * `image/png` passed as an extension used to become a part `xl/media/image1.image/png` and a `Default` for
+ * `image/png`, which no consumer can resolve. `Image.add` rejects that at the boundary; this catches a model
+ * built by hand.
  */
 export function imageContentTypeFor(extension: string): string {
+  if (!/^[a-z0-9]+$/i.test(extension)) {
+    throw new ImageError(
+      `Cannot write an image with extension ${JSON.stringify(extension)}: a media part's extension must be letters and digits (png, jpeg, gif, …)`
+    );
+  }
   switch (extension) {
     case "svg":
       return "image/svg+xml";

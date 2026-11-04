@@ -15,14 +15,14 @@ describe("Documonster.Stream IIFE bundle", () => {
   }, 60000);
 
   it("exposes core stream constructors and helpers", () => {
-    for (const member of ["Readable", "Writable", "Transform", "fromString", "streamToString"]) {
+    for (const member of ["Readable", "Writable", "Transform", "pipeline", "Streams"]) {
       expect(Stream[member], `Documonster.Stream.${member}`).toBeTruthy();
     }
   });
 
   it("round-trips a string through a readable stream", async () => {
-    const readable = Stream.fromString("hello stream");
-    const out: string = await Stream.streamToString(readable);
+    const readable = Stream.Streams.fromString("hello stream");
+    const out: string = await Stream.Streams.text(readable);
     expect(out).toBe("hello stream");
   });
 

@@ -32,18 +32,22 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { encodePng } from "@archive/png";
-import { rasterizeToRgba, toSvg } from "@draw/index";
-import { layoutFlowchart, mermaidToDrawList, parseMermaid } from "@mermaid/index";
+import { Draw } from "@draw/index";
+import { Mermaid } from "@mermaid/index";
 import type { FlowchartDiagram } from "@mermaid/types";
 
 const OUT = process.argv[2] ?? path.join(process.cwd(), "tmp", "mermaid-labels");
 mkdirSync(OUT, { recursive: true });
 
 /** Write one diagram as both SVG and PNG, and report its size and label count. */
-function draw(name: string, source: string, options: Parameters<typeof mermaidToDrawList>[1] = {}) {
-  const list = mermaidToDrawList(source, options);
-  writeFileSync(path.join(OUT, `${name}.svg`), toSvg(list, { background: "#ffffff" }));
-  const pixels = rasterizeToRgba(list, { scale: 2 });
+function draw(
+  name: string,
+  source: string,
+  options: Parameters<typeof Mermaid.toDrawList>[1] = {}
+) {
+  const list = Mermaid.toDrawList(source, options);
+  writeFileSync(path.join(OUT, `${name}.svg`), Draw.toSvg(list, { background: "#ffffff" }));
+  const pixels = Draw.toRgba(list, { scale: 2 });
   writeFileSync(
     path.join(OUT, `${name}.png`),
     encodePng(pixels.data, pixels.width, pixels.height, { dpi: 144 })
@@ -52,8 +56,11 @@ function draw(name: string, source: string, options: Parameters<typeof mermaidTo
 }
 
 /** How many pairs of edge labels share any area. Zero is the only acceptable answer. */
-function overlappingLabels(source: string, options: Parameters<typeof layoutFlowchart>[1] = {}) {
-  const boxes = layoutFlowchart(parseMermaid(source) as FlowchartDiagram, options)
+function overlappingLabels(
+  source: string,
+  options: Parameters<typeof Mermaid.layoutGraph>[1] = {}
+) {
+  const boxes = Mermaid.layoutGraph(Mermaid.parse(source) as FlowchartDiagram, options)
     .edges.map(route => route.label)
     .filter((label): label is NonNullable<typeof label> => label !== undefined);
   let hits = 0;
@@ -98,7 +105,7 @@ const DOTTED = `flowchart TB
     RM --> OUT
     IM --> OUT`;
 
-const parsed = parseMermaid(DOTTED) as FlowchartDiagram;
+const parsed = Mermaid.parse(DOTTED) as FlowchartDiagram;
 const dotted = parsed.edges.filter(edge => edge.stroke === "dotted");
 console.log("1. `-. text .->` and an edge naming a subgraph");
 console.log(
@@ -108,7 +115,7 @@ console.log(`   labels on those: ${dotted.map(edge => edge.label ?? "-").join(",
 // No node called ALIGNMENT: the edge attached to the group.
 console.log(`   nodes: ${parsed.nodes.map(node => node.id).join(", ")}`);
 
-const laid = layoutFlowchart(parsed);
+const laid = Mermaid.layoutGraph(parsed);
 const frame = laid.groups.find(group => group.id === "ALIGNMENT")!;
 const top = laid.nodes.find(node => node.id === "DM")!;
 console.log(
@@ -175,7 +182,7 @@ for (const [label, options] of [
   ["both narrowed to 70", { maxLabelWidth: 70, maxEdgeLabelWidth: 70 }],
   ["only edge labels narrowed", { maxEdgeLabelWidth: 70 }]
 ] as const) {
-  const list = mermaidToDrawList(WORDY, options);
+  const list = Mermaid.toDrawList(WORDY, options);
   const fit = Math.min(1, 468 / list.width);
   console.log(
     `   ${label.padEnd(26)} ${list.width.toFixed(0).padStart(4)}x${list.height.toFixed(0).padStart(4)} ` +

@@ -1,4 +1,5 @@
 import type { DefinedNameModel } from "@excel/core/defined-names";
+import { fromFileFormula, toFileFormula } from "@excel/utils/future-functions";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { ParseOpenTag, XmlAttributes, XmlSink } from "@xml/types";
 
@@ -30,7 +31,9 @@ class DefinedNamesXform extends BaseXform {
     // For opaque names, write the rawText verbatim to preserve round-trip fidelity.
     // For reference/formula names, join the ranges array as before.
     if (model.kind === "opaque" && model.rawText) {
-      xmlStream.writeText(model.rawText);
+      xmlStream.writeText(toFileFormula(model.rawText));
+    } else if (model.formulaExpression !== undefined) {
+      xmlStream.writeText(toFileFormula(model.formulaExpression));
     } else {
       xmlStream.writeText(model.ranges.join(","));
     }
@@ -65,7 +68,8 @@ class DefinedNamesXform extends BaseXform {
     const model: DefinedNameModel = {
       name: this._parsedName!,
       ranges: [],
-      rawText: rawText.trim() || undefined
+      // `_xlfn.ANCHORARRAY(…)` read back as the spill-range operator it stores, as a cell's formula is.
+      rawText: fromFileFormula(rawText.trim()) || undefined
     };
 
     if (this._parsedLocalSheetId !== undefined) {

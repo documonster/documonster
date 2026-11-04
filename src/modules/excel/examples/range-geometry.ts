@@ -4,13 +4,13 @@
  * Covers the geometric utilities, which need no worksheet:
  * - Range.create        — build a range from an A1 range string
  * - Range.toString      — serialise back to a range string
- * - Range.count         — number of cells covered
+ * - Range.getCount         — number of cells covered
  * - Range.contains      — does the range contain an A1 address
  * - Range.containsCell  — does the range contain a decoded Address
  * - Range.intersects    — do two ranges overlap
  * - Range.expand        — grow a range to include a t/l/b/r box
  * - Range.expandToAddress — grow a range to include an A1 address
- * - Range.forEachAddress — iterate every cell address in the range
+ * - Range.eachAddress — iterate every cell address in the range
  *
  * …plus the one helper that reads a worksheet:
  * - Range.getValues     — read a rectangular range as a row-major matrix
@@ -24,7 +24,7 @@ import type { DecodedAddress } from "@excel/types";
 // 1. Create + serialise + count
 const r = Range.create("B2:D5");
 console.log("range:", Range.toString(r)); // B2:D5
-console.log("cell count:", Range.count(r)); // 3 cols * 4 rows = 12
+console.log("cell count:", Range.getCount(r)); // 3 cols * 4 rows = 12
 
 // 2. contains (by A1 string)
 console.log("contains C3:", Range.contains(r, "C3")); // true
@@ -51,7 +51,7 @@ console.log("after expandToAddress H10:", Range.toString(r)); // B2:H10
 // 7. forEachAddress — enumerate cells of a small range
 const small = Range.create("A1:B2");
 const addresses: string[] = [];
-Range.forEachAddress(small, (address, row, col) => {
+Range.eachAddress(small, (address, row, col) => {
   addresses.push(`${address}(r${row},c${col})`);
 });
 console.log("forEachAddress A1:B2:", addresses.join(" "));

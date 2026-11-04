@@ -53,12 +53,12 @@ export interface CorpusEntry {
 }
 
 /**
- * Two of these are not readable, on purpose.
+ * Two of these are encrypted.
  *
- * `cal-pass_protected.xlsb` and `poi-protected_passtika.xlsb` are OLE-wrapped encrypted workbooks — not
- * ZIP packages at all. They are pinned because "this reader refuses an encrypted file rather than
- * mangling it" is a claim worth testing, and because a corpus that contained only files that work would
- * not be a corpus of what people actually have.
+ * `cal-pass_protected.xlsb` (password `1234`) and `poi-protected_passtika.xlsb` (`tika`) are OLE-wrapped
+ * Agile-encrypted workbooks — not ZIP packages at all — written by tools other than this library. They
+ * are pinned to test that the reader decrypts what others encrypt, and refuses each cleanly without its
+ * password; a corpus that contained only files that work would not be a corpus of what people have.
  */
 export const XLSB_CORPUS: readonly CorpusEntry[] = [
   {

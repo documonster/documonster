@@ -1,4 +1,4 @@
-import { ExcelError, InvalidAddressError } from "@excel/errors";
+import { InvalidAddressError, RowOutOfBoundsError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 
 /**
@@ -35,7 +35,11 @@ export function readRowNumber(r: string | undefined, previousRow: number): numbe
     }
   }
   if (row < 1 || row > MAX_ROW) {
-    throw new ExcelError(`Invalid row number "${r ?? row}": expected 1 to ${MAX_ROW}`);
+    // A position error like the column's, so the reader's part boundary reports it as the part's parse error.
+    throw new RowOutOfBoundsError(
+      row,
+      `Invalid row number "${r ?? row}": expected 1 to ${MAX_ROW}`
+    );
   }
   return row;
 }

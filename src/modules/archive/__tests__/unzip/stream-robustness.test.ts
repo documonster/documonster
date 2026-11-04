@@ -167,7 +167,7 @@ describe("robustness: consumer lifecycle edge cases", () => {
       .add("first.bin", new Uint8Array(8192).fill(0x11))
       .add("second.txt", new TextEncoder().encode("second-content"))
       .add("third.dat", new Uint8Array(256).fill(0x33))
-      .bytes();
+      .toBuffer();
   }
 
   async function makeDdZip(): Promise<Uint8Array> {
@@ -290,7 +290,7 @@ describe("robustness: consumption mode content consistency", () => {
         .add("text.txt", new TextEncoder().encode("hello world 你好世界"))
         .add("binary.bin", new Uint8Array(4096).fill(0xab))
         .add("empty.dat", new Uint8Array(0));
-      const zipBytes = await z.bytes();
+      const zipBytes = await z.toBuffer();
 
       const resultBytes = await collectEntries(zipBytes, "bytes");
       const resultStream = await collectEntries(zipBytes, "stream");
@@ -320,7 +320,7 @@ describe("robustness: consumption mode content consistency", () => {
     const z = zip({ level: 0 })
       .add("a.txt", new TextEncoder().encode("content-a"))
       .add("b.bin", new Uint8Array(1024).fill(0xbb));
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     // Mode A: for-await via unzip()
     const crcA = new Map<string, number>();
@@ -387,7 +387,7 @@ describe("robustness: error classification", () => {
   it("truncated ZIP (missing EOCD) should error, not hang", { timeout: 10_000 }, async () => {
     const zipBytes = await zip({ level: 0 })
       .add("a.txt", new TextEncoder().encode("hello"))
-      .bytes();
+      .toBuffer();
 
     // Truncate: remove last 30 bytes (EOCD is 22+ bytes).
     const truncated = zipBytes.subarray(0, Math.max(0, zipBytes.length - 30));
@@ -403,7 +403,7 @@ describe("robustness: error classification", () => {
   it("truncated ZIP via streaming should error", { timeout: 10_000 }, async () => {
     const zipBytes = await zip({ level: 0 })
       .add("a.txt", new TextEncoder().encode("hello"))
-      .bytes();
+      .toBuffer();
     const truncated = zipBytes.subarray(0, Math.max(0, zipBytes.length - 30));
 
     await expect(async () => {
@@ -474,7 +474,7 @@ describe("robustness: error classification", () => {
     async () => {
       const zipBytes = await zip({ level: 0 })
         .add("big.bin", new Uint8Array(4096).fill(0xaa))
-        .bytes();
+        .toBuffer();
 
       // Truncate in the middle of the entry data.
       const halfValid = zipBytes.subarray(0, 100);
@@ -498,7 +498,7 @@ describe("robustness: real errors not swallowed", () => {
     // Create a valid ZIP with compression, then corrupt the compressed data.
     const zipBytes = await zip({ level: 6 })
       .add("file.txt", new TextEncoder().encode("a".repeat(1000)))
-      .bytes();
+      .toBuffer();
 
     // Find the compressed data region and corrupt it.
     // Local file header is at least 30 bytes + filename length.
@@ -539,7 +539,7 @@ describe("robustness: real errors not swallowed", () => {
 
   it("valid ZIP should still fully succeed (sanity check)", { timeout: 10_000 }, async () => {
     const content = new TextEncoder().encode("a".repeat(1000));
-    const zipBytes = await zip({ level: 6 }).add("file.txt", content).bytes();
+    const zipBytes = await zip({ level: 6 }).add("file.txt", content).toBuffer();
 
     const reader = unzip(zipBytes);
     for await (const entry of reader.entries()) {
@@ -561,7 +561,10 @@ describe("robustness: soak tests", () => {
   it("Readable.from(entry.stream()) x50 repetitions", { timeout: 60_000 }, async () => {
     const content1 = new Uint8Array(2048).fill(0x41);
     const content2 = new Uint8Array(2048).fill(0x42);
-    const zipBytes = await zip({ level: 0 }).add("a.bin", content1).add("b.bin", content2).bytes();
+    const zipBytes = await zip({ level: 0 })
+      .add("a.bin", content1)
+      .add("b.bin", content2)
+      .toBuffer();
 
     for (let i = 0; i < 50; i++) {
       const reader = unzip(chunkBytes(zipBytes, 128));
@@ -618,7 +621,7 @@ describe("robustness: soak tests", () => {
     const zipBytes = await zip({ level: 0 })
       .add("big.bin", new Uint8Array(16384))
       .add("small.txt", new TextEncoder().encode("ok"))
-      .bytes();
+      .toBuffer();
 
     for (let i = 0; i < 50; i++) {
       const reader = unzip(chunkBytes(zipBytes, 4096));
@@ -659,7 +662,7 @@ describe("robustness: soak tests", () => {
       .add("a.txt", new TextEncoder().encode("aaa"))
       .add("b.txt", new TextEncoder().encode("bbb"))
       .add("c.txt", new TextEncoder().encode("ccc"))
-      .bytes();
+      .toBuffer();
 
     for (let i = 0; i < 50; i++) {
       const reader = unzip(chunkBytes(zipBytes, 128));

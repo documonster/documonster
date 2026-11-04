@@ -24,8 +24,7 @@
  * … BrtSheetProtection → BrtPrintOptions → BrtMargins → BrtDrawing → … → BrtEndSheet
  * ```
  */
-import { encodeWideString, readWideString } from "@excel/xlsb/binary";
-import { BinaryReader } from "@utils/binary";
+import { encodeWideString, readWideString, XlsbReader } from "@excel/xlsb/binary";
 
 /**
  * `BrtDrawing` — the relationship id of the sheet's drawing part.
@@ -40,7 +39,7 @@ export function encodeDrawing(relationshipId: string): Uint8Array {
 /** Read a `BrtDrawing`, or `undefined` when the record is malformed. */
 export function readDrawing(payload: Uint8Array, part: string): string | undefined {
   try {
-    const id = readWideString(new BinaryReader(payload, 0, part), part);
+    const id = readWideString(new XlsbReader(payload, 0, part), part);
     return id.length === 0 ? undefined : id;
   } catch {
     // A truncated record costs the drawing reference, not the sheet.

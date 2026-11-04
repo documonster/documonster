@@ -5,7 +5,7 @@
  * a fixed shape — so they read as a loop over statements rather than a scanner.
  */
 
-import { decodeLabel, splitStatements, unquote } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, splitStatementsAt, unquote } from "@mermaid/parse/lex";
 import type {
   EdgeEnd,
   SequenceEntry,
@@ -24,7 +24,9 @@ export function parsePie(source: string): PieDiagram {
   let title: string | undefined;
   let showData = false;
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     const header = /^pie\b\s*(showData)?\s*(?:title\s+(.*))?$/i.exec(text);
     if (header) {
       showData = header[1] !== undefined;
@@ -45,11 +47,11 @@ export function parsePie(source: string): PieDiagram {
     // `"Label" : 42`. The quotes are required by Mermaid but tolerated when missing,
     // because a label without spaces reads unambiguously either way.
     const slice = /^(.*?)\s*:\s*([-+]?[\d.]+(?:e[-+]?\d+)?)$/i.exec(text);
-    if (slice) {
-      const value = Number.parseFloat(slice[2]);
-      if (Number.isFinite(value)) {
-        slices.push({ label: decodeLabel(slice[1]), value });
-      }
+    const value = slice ? Number.parseFloat(slice[2]) : Number.NaN;
+    if (slice && Number.isFinite(value)) {
+      slices.push({ label: decodeLabel(slice[1]), value });
+    } else {
+      skipped.add(statement);
     }
   }
 
@@ -57,7 +59,8 @@ export function parsePie(source: string): PieDiagram {
     kind: "pie",
     ...(title === undefined ? {} : { title }),
     showData,
-    slices
+    slices,
+    ...skipped.report()
   };
 }
 
@@ -97,7 +100,9 @@ export function parseSequence(source: string): SequenceDiagram {
     return block ? block.sections[block.sections.length - 1].body : root;
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^sequenceDiagram\b/i.test(text)) {
       continue;
     }
@@ -112,7 +117,7 @@ export function parseSequence(source: string): SequenceDiagram {
       continue;
     }
 
-    const participantMatch = /^(participant|actor)\s+(.+)$/i.exec(text);
+    const participantMatch = /^(?:create\s+)?(participant|actor)\s+(.+)$/i.exec(text);
     if (participantMatch) {
       const body = participantMatch[2].trim();
       const aliased = /^(\S+)\s+as\s+(.+)$/i.exec(body);
@@ -163,7 +168,7 @@ export function parseSequence(source: string): SequenceDiagram {
       declare(activate[2]);
       continue;
     }
-    if (/^(box|links?|properties|accTitle|accDescr)\b/i.test(text)) {
+    if (/^(box|links?|properties|destroy|accTitle|accDescr)\b/i.test(text)) {
       continue;
     }
 
@@ -173,6 +178,8 @@ export function parseSequence(source: string): SequenceDiagram {
       declare(message.to);
       messages.push(message);
       current().push({ kind: "message", ...message });
+    } else {
+      skipped.add(statement);
     }
   }
 
@@ -188,7 +195,8 @@ export function parseSequence(source: string): SequenceDiagram {
     participants: [...participants.values()],
     messages,
     body: root,
-    autonumber
+    autonumber,
+    ...skipped.report()
   };
 }
 

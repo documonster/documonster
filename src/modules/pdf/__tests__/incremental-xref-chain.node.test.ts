@@ -51,14 +51,14 @@ describe("hybrid-reference file", () => {
     expect(doc.xrefRecovered).toBe(false);
     expect(dictName(doc.resolve(3), "Type")).toBe("Page");
     expect(dictName(doc.resolve(5), "BaseFont")).toBe("Helvetica");
-    const read = await Pdf.read(HYBRID);
+    const read = await Pdf.extract(HYBRID);
     expect(read.pages[0].text).toContain("Original hybrid text");
   });
 
   it("appends a classic section chained to the hybrid trailer", async () => {
-    const editor = Pdf.Editor.load(HYBRID);
+    const editor = Pdf.Editor.read(HYBRID);
     editor.getPage(0).drawText("Appended text", { x: 72, y: 600, fontSize: 12 });
-    const updated = await editor.saveIncremental();
+    const updated = await editor.toBuffer({ incremental: true });
     expect(updated.subarray(0, HYBRID.length)).toEqual(HYBRID);
 
     const original = new PdfDocument(HYBRID);
@@ -70,7 +70,7 @@ describe("hybrid-reference file", () => {
     expect(doc.xrefRecovered).toBe(false);
     // The font is still reached through the original trailer's /XRefStm.
     expect(dictName(doc.resolve(5), "BaseFont")).toBe("Helvetica");
-    const read = await Pdf.read(updated);
+    const read = await Pdf.extract(updated);
     expect(read.pages[0].text).toContain("Original hybrid text");
     expect(read.pages[0].text).toContain("Appended text");
   });
@@ -86,18 +86,18 @@ describe("recovered cross-reference data", () => {
   it("falls back to a full save instead of chaining to a broken section", async () => {
     const builder = new Pdf.Builder();
     builder.addPage().drawText("Base text", { x: 72, y: 700, fontSize: 12 });
-    const broken = breakStartxref(await builder.build());
+    const broken = breakStartxref(await builder.toBuffer());
     expect(new PdfDocument(broken).xrefRecovered).toBe(true);
 
-    const editor = Pdf.Editor.load(broken);
+    const editor = Pdf.Editor.read(broken);
     editor.getPage(0).drawText("Appended text", { x: 72, y: 600, fontSize: 12 });
-    const out = await editor.saveIncremental();
+    const out = await editor.toBuffer({ incremental: true });
 
     // A rewrite, not the broken bytes plus an update.
     expect(latin1(out.subarray(0, broken.length))).not.toBe(latin1(broken));
     const doc = new PdfDocument(out);
     expect(doc.xrefRecovered).toBe(false);
-    const read = await Pdf.read(out);
+    const read = await Pdf.extract(out);
     expect(read.pages[0].text).toContain("Base text");
     expect(read.pages[0].text).toContain("Appended text");
   });
@@ -106,16 +106,21 @@ describe("recovered cross-reference data", () => {
     const { certificate, privateKey } = await generateSelfSignedCertificate("Recovered");
     const builder = new Pdf.Builder();
     builder.addPage().drawText("Signed", { x: 72, y: 750, fontSize: 14 });
-    const signed = await Pdf.Editor.load(await builder.build()).sign({ certificate, privateKey });
+    const signed = await Pdf.Editor.read(await builder.toBuffer()).sign({
+      certificate,
+      privateKey
+    });
     const broken = breakStartxref(signed);
 
-    const editor = Pdf.Editor.load(broken);
+    const editor = Pdf.Editor.read(broken);
     expect(editor.hasSignatures).toBe(true);
     editor.getPage(0).drawText("Appended", { x: 72, y: 600, fontSize: 12 });
-    await expect(editor.saveIncremental()).rejects.toThrow(PdfSignatureInvalidationError);
-    await expect(editor.saveIncremental({ invalidateSignatures: true })).resolves.toBeInstanceOf(
-      Uint8Array
+    await expect(editor.toBuffer({ incremental: true })).rejects.toThrow(
+      PdfSignatureInvalidationError
     );
+    await expect(
+      editor.toBuffer({ incremental: true, invalidateSignatures: true })
+    ).resolves.toBeInstanceOf(Uint8Array);
   });
 });
 
@@ -126,7 +131,7 @@ describe("recovery of objects stored in object streams", () => {
     const doc = new PdfDocument(broken);
     expect(doc.xrefRecovered).toBe(true);
     expect(doc.getPages()).toHaveLength(3);
-    const read = await Pdf.read(broken);
+    const read = await Pdf.extract(broken);
     expect(read.pages.map(p => p.text.trim())).toEqual([
       "Page 1 text",
       "Page 2 text",
@@ -153,13 +158,13 @@ describe("recovery of objects stored in object streams", () => {
   });
 
   it("falls back to a full save that keeps every page", async () => {
-    const editor = Pdf.Editor.load(broken);
+    const editor = Pdf.Editor.read(broken);
     editor.getPage(2).drawText("Appended text", { x: 20, y: 50, fontSize: 12 });
-    const out = await editor.saveIncremental();
+    const out = await editor.toBuffer({ incremental: true });
     expect(latin1(out.subarray(0, broken.length))).not.toBe(latin1(broken));
     const doc = new PdfDocument(out);
     expect(doc.xrefRecovered).toBe(false);
-    const read = await Pdf.read(out);
+    const read = await Pdf.extract(out);
     expect(read.pages).toHaveLength(3);
     expect(read.pages[0].text).toContain("Page 1 text");
     expect(read.pages[2].text).toContain("Page 3 text");

@@ -1,6 +1,8 @@
 import { withPngDpi } from "@archive/png";
+import type { RasterFontSource } from "@draw/raster/glyph-outline";
 import { renderDrawList } from "@draw/render";
 import { toSvg } from "@draw/svg";
+import type { DrawList } from "@draw/types";
 import type {
   AxisDataSource,
   ChartAxis,
@@ -25,13 +27,20 @@ import type {
   StringReference,
   Trendline
 } from "@excel/chart/model/types";
+import { classicChartStyle, resolveChartArea } from "@excel/chart/render/chart-area";
+import type { ChartArea } from "@excel/chart/render/chart-area";
 import { createChartPdfDrawSurface } from "@excel/chart/render/chart-pdf-draw-surface";
 import { rasterizeDrawList } from "@excel/chart/render/draw-raster-png";
+import {
+  chartBackground,
+  checkChartRenderOptions,
+  requestsFontControl
+} from "@excel/chart/render/render-options";
 import { sceneToDrawList } from "@excel/chart/render/scene-to-draw";
-import type { PdfColor } from "@excel/chart/shared/chart-utils";
+import type { ChartThemeColors, PdfColor } from "@excel/chart/shared/chart-utils";
 import {
   AXIS_COLOR,
-  COLORS,
+  automaticSeriesColor,
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
   GRID_COLOR,
@@ -56,6 +65,8 @@ import {
   getSpPrLine,
   getTxPrFontSize
 } from "@excel/chart/shared/shape-properties";
+import { ChartOptionsError, ExcelError } from "@excel/errors";
+import type { Rgba01 } from "@utils/svg-lex";
 
 export type { PdfColor };
 
@@ -157,8 +168,43 @@ export interface ChartRenderOptions {
   width?: number;
   height?: number;
   title?: string;
-  /** Background fill for SVG/PNG previews. Set to "transparent" for transparent PNG output. */
+  /**
+   * The chart area's fill, replacing the model's: a CSS colour string or an IR colour
+   * `{ r, g, b, a }` — what `Draw.toSvg` and `Draw.toRgba` take as `background`.
+   * `"transparent"` paints none (a transparent PNG). The chart area's border is the model's
+   * either way. Default: the model's chart-area fill (`c:chartSpace/c:spPr`), or Office's
+   * automatic one — white — when it has none.
+   */
+  background?: string | Rgba01;
+  /**
+   * @deprecated Use {@link background}, which also takes `{ r, g, b, a }`. When both are
+   * given, `background` wins. Removed in 1.0.
+   */
   backgroundColor?: string;
+  /**
+   * Fonts `toPng` draws text with on the built-in rasteriser, ahead of anything discovered on
+   * the host — what `Draw.toRgba` takes as `fonts`: `.ttf`/`.ttc` bytes, a `RasterFont` from
+   * `Draw.parseRasterFont`, or `{ data, collectionIndex }`. Ignored by `toSvg` and
+   * `toDrawList`. In a browser `toPng` normally lets the platform draw the SVG with the page's
+   * fonts; giving `fonts` (or `useSystemFonts: false`) makes it use the built-in rasteriser
+   * there too, so the PNG is the same in every environment. For the report of characters no
+   * font covered, draw the display list yourself: `Draw.toRgba(ChartClassic.toDrawList(model), { fonts })`.
+   */
+  fonts?: readonly RasterFontSource[];
+  /**
+   * Whether `toPng`'s built-in rasteriser may use the host's installed fonts — what
+   * `Draw.toRgba` takes as `useSystemFonts`. Default `true`. `false` with {@link fonts} makes
+   * the PNG the same on every machine. Ignored where {@link fonts} is.
+   */
+  useSystemFonts?: boolean;
+  /**
+   * The theme's colour scheme — six hex digits (`RRGGBB`) per slot (`dk1`, `lt1`, `accent1`,
+   * …) — that the chart's scheme colours (`<a:schemeClr val="accent1"/>`, `tx1`, `bg1`)
+   * resolve against, with their transforms applied on top. A slot left out takes the default
+   * Office theme's colour. `Chart.toSvg` / `toPng`, `Pdf.fromChart` and `Pdf.fromExcel` read
+   * it from the chart's workbook; give it for a model rendered on its own.
+   */
+  themeColors?: ChartThemeColors;
   /** Output scale multiplier for PNG previews. Useful for high-DPI exports. */
   scale?: number;
   /** PNG output DPI metadata. Stored as a pHYs chunk when provided. */
@@ -196,13 +242,16 @@ export type RegionMapMatchRule = "id" | `property:${string}`;
 export interface RegionMapDataOptions {
   /**
    * Parsed TopoJSON topology. Compatible with the output of
-   * `world-atlas` bundles or any `topojson-server` emitter.
+   * `world-atlas` bundles or any `topojson-server` emitter. One that cannot be read — no
+   * `objects`, an arc table or a geometry of the wrong shape — is refused with
+   * `ChartOptionsError` naming the path (`options.regionMap.topology.arcs[3]`); one whose
+   * features match no category draws the built-in preview instead.
    */
   topology: unknown;
   /**
    * Name of the geometry collection to draw — typically `"countries"`
-   * for `world-atlas`. Throws at render time if missing from the
-   * topology.
+   * for `world-atlas`. A name the topology does not have is refused with
+   * `ChartOptionsError` (field `options.regionMap.objectName`).
    */
   objectName: string;
   /**
@@ -350,6 +399,12 @@ export interface ChartScene {
    * does the same so category names only appear once.
    */
   dataTable?: ChartSceneDataTable;
+  /**
+   * The chart area — the chart's own fill and border, from `c:chartSpace/c:spPr` or Office's
+   * automatic format where it says nothing — drawn first, under everything else. A scene built
+   * by hand may leave it out and gets a plain white background.
+   */
+  chartArea?: ChartArea;
   /**
    * SVG filter definitions referenced by individual series via
    * `effectFilterId`. One entry per unique `a:effectLst` observed on
@@ -705,9 +760,41 @@ function maxSeriesLength(groupSeries: readonly { values: readonly unknown[] }[])
   return max;
 }
 
-export function buildChartScene(model: ChartModel, options: ChartRenderOptions = {}): ChartScene {
+/** Refuse something that is not a classic chart model, rather than fail inside the renderer with a `TypeError`. */
+function checkChartModel(where: string, model: unknown): void {
+  if (
+    model === null ||
+    typeof model !== "object" ||
+    (model as { chart?: unknown }).chart === null ||
+    typeof (model as { chart?: unknown }).chart !== "object"
+  ) {
+    throw new ChartOptionsError(
+      "model",
+      `${where}: model must be a classic chart model, an object with a \`chart\` — build one with ChartClassic.createModel.`
+    );
+  }
+}
+
+/**
+ * The scene a classic chart model draws as.
+ *
+ * `where` names the public call (`ChartClassic.Backend.toScene`) whose options are checked;
+ * an internal caller whose options are already checked — the PDF path, sized from its
+ * destination box — leaves it out.
+ */
+export function buildChartScene(
+  model: ChartModel,
+  options: ChartRenderOptions = {},
+  where?: string
+): ChartScene {
+  checkChartModel(where ?? "ChartClassic.Backend.toScene", model);
+  if (where !== undefined) {
+    checkChartRenderOptions(where, options);
+  }
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
+  // The workbook's theme colours, for every scheme colour the chart names.
+  const colors = options.themeColors;
   const titleText = options.title ?? extractTitle(model);
   // `title.overlay === true` instructs Excel to paint the title on top
   // of the plot area rather than reserving space above it. Thread this
@@ -718,13 +805,14 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   const titleOverlay = model.chart.title?.overlay === true;
   const hasReservedTitle = !!titleText && !titleOverlay;
   const groups = model.chart.plotArea.chartTypes;
-  const normalized = normalizeSeries(groups, model);
+  const normalized = normalizeSeries(colors, groups, model);
   const seriesValues = normalized.map(s => s.values);
   const categories =
     normalized.find(s => s.categories && s.categories.length > 0)?.categories ??
     seriesValues[0]?.map((_, i) => String(i + 1)) ??
     [];
   const legend = buildSceneLegend(
+    colors,
     model.chart.legend,
     normalized,
     width,
@@ -751,6 +839,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   );
   const axisContext = buildAxisContext(model, normalized);
   const sceneSeries = buildSceneSeries(
+    colors,
     groups,
     normalized,
     plot,
@@ -764,9 +853,9 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   // a stable JSON stringify of the effect tree. The writer (renderChartSvg)
   // embeds the filters in `<defs>` and each series references its
   // filter via the `effectFilterId` we thread onto the scene.
-  const effectFilters = assignEffectFilters(normalized, sceneSeries);
+  const effectFilters = assignEffectFilters(colors, normalized, sceneSeries);
   const dataTable = dataTableSpec
-    ? buildSceneDataTable(dataTableSpec, normalized, categories, plot, dataTableHeight)
+    ? buildSceneDataTable(colors, dataTableSpec, normalized, categories, plot, dataTableHeight)
     : undefined;
   const primaryYRange = axisContext.primaryYAxis
     ? (axisContext.yRangesByAxisId.get(axisContext.primaryYAxis.axId) ?? axisContext.defaultYRange)
@@ -797,6 +886,13 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   return {
     width,
     height,
+    chartArea: resolveChartArea({
+      spPr: model.spPr,
+      style: classicChartStyle(model),
+      // `c:roundedCorners` absent is rounded in Excel; the builder writes `val="0"`.
+      rounded: model.roundedCorners !== false,
+      themeColors: colors
+    }),
     title: titleText
       ? {
           x: width / 2,
@@ -807,7 +903,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
           // renderer; authors who supplied an explicit txPr colour win.
           color:
             (model.chart.title
-              ? colorFromChartTextProperties(model.chart.title.txPr)
+              ? colorFromChartTextProperties(colors, model.chart.title.txPr)
               : undefined) ?? "#222222",
           anchor: "middle",
           ...textStyleFromTxPr(model.chart.title?.txPr)
@@ -817,6 +913,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
     gridlines: isPieOnly
       ? []
       : buildGridlines(
+          colors,
           plot,
           axisContext.primaryYAxis,
           primaryYRange,
@@ -832,10 +929,11 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
       ? []
       : dataTable
         ? []
-        : buildXLabels(categories, plot, axisContext.primaryXAxis, primaryXRange),
+        : buildXLabels(colors, categories, plot, axisContext.primaryXAxis, primaryXRange),
     yLabels: isPieOnly
       ? []
       : buildYLabels(
+          colors,
           primaryYRange.min,
           primaryYRange.max,
           plot,
@@ -847,6 +945,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
       ? []
       : axisContext.secondaryXAxis
         ? buildXLabels(
+            colors,
             secondaryXCategories,
             plot,
             axisContext.secondaryXAxis,
@@ -858,6 +957,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
       ? []
       : axisContext.secondaryYAxis && secondaryYRange
         ? buildYLabels(
+            colors,
             secondaryYRange.min,
             secondaryYRange.max,
             plot,
@@ -866,7 +966,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
             categories
           )
         : [],
-    axisTitles: isPieOnly ? [] : buildAxisTitles(axisContext, plot),
+    axisTitles: isPieOnly ? [] : buildAxisTitles(colors, axisContext, plot),
     series: sceneSeries,
     legend,
     dataTable,
@@ -875,6 +975,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
       ? { x: undefined, y: undefined, x2: undefined, y2: undefined }
       : {
           x: applyLineStyle(
+            colors,
             {
               x1: plot.x,
               y1: plot.y + plot.height,
@@ -885,6 +986,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
             axisContext.primaryXAxis
           ),
           y: applyLineStyle(
+            colors,
             {
               x1: plot.x,
               y1: plot.y,
@@ -896,6 +998,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
           ),
           x2: axisContext.secondaryXAxis
             ? applyLineStyle(
+                colors,
                 {
                   x1: plot.x,
                   y1: plot.y,
@@ -908,6 +1011,7 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
             : undefined,
           y2: axisContext.secondaryYAxis
             ? applyLineStyle(
+                colors,
                 {
                   x1: plot.x + plot.width,
                   y1: plot.y,
@@ -922,29 +1026,51 @@ export function buildChartScene(model: ChartModel, options: ChartRenderOptions =
   };
 }
 
-export function renderChartSvg(model: ChartModel, options: ChartRenderOptions = {}): string {
-  return toSvg(
-    sceneToDrawList(buildChartScene(model, options), options.backgroundColor ?? "#fff"),
-    {
-      comment: "deterministic preview; not an Excel-identical layout"
-    }
-  );
+/**
+ * A classic chart model as a display list — what `toSvg` serialises and `toPng` rasterises,
+ * for a caller drawing it with `documonster/draw` (`Draw.toRgba` with its own fonts, say).
+ */
+export function chartDrawList(
+  model: ChartModel,
+  options: ChartRenderOptions = {},
+  where = "ChartClassic.toDrawList"
+): DrawList {
+  return sceneToDrawList(buildChartScene(model, options, where), chartBackground(options));
+}
+
+export function renderChartSvg(
+  model: ChartModel,
+  options: ChartRenderOptions = {},
+  where = "ChartClassic.toSvg"
+): string {
+  return toSvg(chartDrawList(model, options, where), {
+    comment: "deterministic preview; not an Excel-identical layout"
+  });
 }
 
 export async function renderChartPng(
   model: ChartModel,
-  options: ChartRenderOptions = {}
+  options: ChartRenderOptions = {},
+  where = "ChartClassic.toPng"
 ): Promise<Uint8Array> {
+  checkChartModel(where, model);
+  checkChartRenderOptions(where, options);
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
   // In a browser, hand the SVG to the platform: its own SVG engine beats the
-  // built-in rasteriser on filters, fonts and anti-aliasing. On Node there is no
+  // built-in rasteriser on filters, fonts and anti-aliasing — unless the caller chose
+  // the fonts (`fonts`, or `useSystemFonts: false`), which only the built-in rasteriser
+  // can honour; a browser's SVG engine draws with whatever the page has. On Node there is no
   // such engine, and the display list goes straight to pixels — no SVG string,
   // and therefore no regex re-parse of the markup this very function just
   // produced, which is where the raster backend used to lose dashes, opacity,
   // rounded corners and multi-line text.
-  if (typeof document !== "undefined" && typeof Image !== "undefined") {
-    const svg = renderChartSvg(model, { ...options, width, height });
+  if (
+    typeof document !== "undefined" &&
+    typeof Image !== "undefined" &&
+    !requestsFontControl(options)
+  ) {
+    const svg = renderChartSvg(model, { ...options, width, height }, where);
     return renderSvgToPng(svg, {
       width,
       height,
@@ -952,10 +1078,12 @@ export async function renderChartPng(
       dpi: options.dpi
     });
   }
-  const scene = buildChartScene(model, { ...options, width, height });
-  return rasterizeDrawList(sceneToDrawList(scene, options.backgroundColor ?? "#fff"), {
+  const scene = buildChartScene(model, { ...options, width, height }, where);
+  return rasterizeDrawList(sceneToDrawList(scene, chartBackground(options)), {
     width,
     height,
+    ...(options.fonts === undefined ? {} : { fonts: options.fonts }),
+    ...(options.useSystemFonts === undefined ? {} : { useSystemFonts: options.useSystemFonts }),
     ...(options.scale === undefined ? {} : { scale: normalizePngScale(options.scale) }),
     ...(options.dpi === undefined ? {} : { dpi: options.dpi })
   });
@@ -975,10 +1103,7 @@ export async function renderSvgToPng(
     // Unreachable in production: both callers guard on the same pair. This used
     // to re-parse the SVG with a regex scanner, which had no callers left once
     // the chart PNG paths started rasterising a display list directly.
-    throw new Error(
-      "renderSvgToPng needs a DOM: use renderChartPng or renderChartExPng, which " +
-        "rasterise a display list directly on Node."
-    );
+    throw new ExcelError("A chart PNG drawn by the platform needs a DOM (document and Image).");
   }
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -989,7 +1114,7 @@ export async function renderSvgToPng(
     canvas.height = outputHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      throw new Error("Canvas 2D context is unavailable");
+      throw new ExcelError("A chart PNG could not be drawn: the canvas has no 2D context.");
     }
     ctx.drawImage(image, 0, 0, outputWidth, outputHeight);
     const pngBlob = await new Promise<Blob>((resolve, reject) => {
@@ -997,7 +1122,9 @@ export async function renderSvgToPng(
         if (result) {
           resolve(result);
         } else {
-          reject(new Error("Canvas PNG encoding failed"));
+          reject(
+            new ExcelError("A chart PNG could not be drawn: the canvas did not encode a PNG.")
+          );
         }
       }, "image/png");
     });
@@ -1009,42 +1136,41 @@ export async function renderSvgToPng(
   }
 }
 
+/**
+ * The device pixel ratio a PNG is drawn at, clamped to 8. The value was checked by
+ * `checkChartRenderOptions` (both renderers check before they pick a backend: the browser
+ * path stamps `dpi` with `withPngDpi`, which ignores a value it cannot write, while the Node
+ * path hands it to `encodePng`, which refuses one).
+ */
 function normalizePngScale(scale: number | undefined): number {
-  if (scale === undefined) {
-    return 1;
-  }
-  if (!Number.isFinite(scale) || scale <= 0) {
-    throw new Error("chart render scale must be a positive finite number");
-  }
-  return Math.min(8, scale);
+  return scale === undefined ? 1 : Math.min(8, scale);
 }
 
+/**
+ * Draw a classic chart as vector content onto a PDF page: the display list
+ * `ChartClassic.toDrawList` returns, placed at `options.x` / `options.y`. `where` names the
+ * public call (the deprecated `drawChartPdf`) whose options are checked; an internal caller with
+ * checked options leaves it out.
+ */
 export function drawChartPdf(
   page: ChartPdfDrawingSurface,
   model: ChartModel,
-  options: PdfChartRenderOptions
+  options: PdfChartRenderOptions,
+  where?: string
 ): ChartPdfDrawingSurface {
-  const scene = buildChartScene(model, options);
+  const scene = buildChartScene(model, options, where);
   const trace = options.trace;
   trace?.push(
     `canvas:${fmt(scene.width)}x${fmt(scene.height)}@${fmt(options.x)},${fmt(options.y)}`
   );
 
-  // The PDF preview frames the chart. The display list is built with a
-  // transparent background so the frame is not painted over.
-  page.drawRect({
-    x: options.x,
-    y: options.y,
-    width: scene.width,
-    height: scene.height,
-    fill: { r: 1, g: 1, b: 1 },
-    stroke: { r: 0.8, g: 0.8, b: 0.8 }
-  });
-
-  // One conversion, one walk. This replaced a second full traversal of the scene
-  // — around 680 lines paired function-for-function with the SVG emitter — which
-  // is what let the two drift apart on dashes, rotation sense and text metrics.
-  const list = sceneToDrawList(scene, "transparent");
+  // The display list `toDrawList` returns, chart area included — one picture on every
+  // route. This used to paint its own frame first (white, with a fixed grey border, whatever
+  // the chart said) over a transparent list, so a PDF showed a border that SVG and PNG did not
+  // and none of the chart's own. One conversion, one walk: this replaced a second full
+  // traversal of the scene, which is what let the backends drift apart on dashes, rotation
+  // sense and text metrics.
+  const list = sceneToDrawList(scene, chartBackground(options));
   if (trace) {
     traceScene(scene, trace);
   }
@@ -1302,6 +1428,7 @@ function getTxPrFontSizePx(txPr: ChartTextProperties | undefined): number | unde
  * `showKeys` is on). Remaining columns are equal-width category cells.
  */
 function buildSceneDataTable(
+  colors: ChartThemeColors | undefined,
   table: DataTable,
   normalized: NormalizedSeries[],
   categories: string[],
@@ -1313,7 +1440,7 @@ function buildSceneDataTable(
   }
   const fontSize = resolveDataTableFontSize(table);
   const rowHeight = (height - DATA_TABLE_TOP_GAP) / (1 + normalized.length);
-  const color = colorFromChartTextProperties(table.txPr) ?? "#444444";
+  const color = colorFromChartTextProperties(colors, table.txPr) ?? "#444444";
   const textStyle = textStyleFromTxPr(table.txPr);
   const showKeys = table.showKeys !== false;
   // Series-name column width — widest label + swatch + padding.
@@ -1422,7 +1549,7 @@ function buildSceneDataTable(
   // Any `spPr` on the dTable element is used for the stroke colour so
   // themed borders carry through from the source file.
   const borders: ChartSceneLine[] = [];
-  const borderColor = getSpPrLineColor(table.spPr) ?? "#888888";
+  const borderColor = getSpPrLineColor(colors, table.spPr) ?? "#888888";
   const borderWidth = 0.75;
   const pushLine = (x1: number, y1: number, x2: number, y2: number): void => {
     borders.push({ x1, y1, x2, y2, color: borderColor, width: borderWidth });
@@ -1510,7 +1637,10 @@ function toRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-function getSpPrLineColor(spPr: DataTable["spPr"]): string | undefined {
+function getSpPrLineColor(
+  colors: ChartThemeColors | undefined,
+  spPr: DataTable["spPr"]
+): string | undefined {
   if (!spPr) {
     return undefined;
   }
@@ -1520,10 +1650,11 @@ function getSpPrLineColor(spPr: DataTable["spPr"]): string | undefined {
   // Previously this helper read `line.color.srgb` only, so a
   // theme-coloured data-table frame silently fell back to the
   // caller's default (grey).
-  return resolveChartColor(getSpPrLine(spPr)?.color);
+  return resolveChartColor(getSpPrLine(spPr)?.color, colors);
 }
 
 function buildSceneSeries(
+  colors: ChartThemeColors | undefined,
   groups: ChartTypeGroup[],
   normalized: NormalizedSeries[],
   plot: ChartSceneRect,
@@ -1542,7 +1673,9 @@ function buildSceneSeries(
       const yRange = getSeriesYRange(first, axisContext);
       result.push(
         withAdornments(
+          colors,
           buildPieSeries(
+            colors,
             group.type === "doughnut" ? "doughnut" : "pie",
             first.values,
             plot,
@@ -1565,7 +1698,8 @@ function buildSceneSeries(
       const yRange = getSeriesYRange(first, axisContext);
       result.push(
         withAdornments(
-          buildOfPieSeries(first.values, plot, group.secondPieSize, first),
+          colors,
+          buildOfPieSeries(colors, first.values, plot, group.secondPieSize, first),
           first,
           plot,
           yRange.min,
@@ -1580,6 +1714,7 @@ function buildSceneSeries(
         const yRange = getSeriesYRange(s, axisContext);
         result.push(
           withAdornments(
+            colors,
             buildRadarSeries(s, plot, yRange.min, yRange.max, group.radarStyle === "filled"),
             s,
             plot,
@@ -1593,7 +1728,7 @@ function buildSceneSeries(
     }
     if (group.type === "stock") {
       const yRange = getGroupYRange(group, axisContext);
-      result.push(buildStockSeries(groupSeries, plot, yRange.min, yRange.max, categories));
+      result.push(buildStockSeries(colors, groupSeries, plot, yRange.min, yRange.max, categories));
       continue;
     }
     if (group.type === "surface" || group.type === "surface3D") {
@@ -1630,6 +1765,7 @@ function buildSceneSeries(
           : { upper: buildLinePoints(s.values, plot, yRange.min, yRange.max), lower: undefined };
         result.push(
           withAdornments(
+            colors,
             {
               type: "area",
               color: s.color,
@@ -1656,6 +1792,7 @@ function buildSceneSeries(
         const xRange = getSeriesXRange(s, axisContext);
         result.push(
           withAdornments(
+            colors,
             {
               type: "bubble",
               color: s.color,
@@ -1723,6 +1860,7 @@ function buildSceneSeries(
               : buildLinePoints(s.values, plot, yRange.min, yRange.max);
         result.push(
           withAdornments(
+            colors,
             {
               type: sceneType,
               color: s.color,
@@ -1822,6 +1960,7 @@ function buildSceneSeries(
           : 0;
         result.push(
           withAdornments(
+            colors,
             {
               type: "bar",
               color: s.color,
@@ -2250,6 +2389,7 @@ function buildBubbles(
 }
 
 function buildPieSeries(
+  colors: ChartThemeColors | undefined,
   type: "pie" | "doughnut",
   values: number[],
   plot: ChartSceneRect,
@@ -2281,7 +2421,7 @@ function buildPieSeries(
   // (one colour per slice); previously the renderer ignored
   // `dataPoints` entirely and every slice rotated through the 6-entry
   // default palette — breaking the common "colour-by-category" idiom.
-  const dataPointColors = collectDataPointColors(series);
+  const dataPointColors = collectDataPointColors(colors, series);
   const dataPointExplosions = collectDataPointExplosions(series);
   // OOXML `firstSliceAng` is the clockwise offset (in degrees) from
   // 12 o'clock. Convert to radians and add to the SVG base angle
@@ -2301,7 +2441,7 @@ function buildPieSeries(
     const offsetRadius = explosion > 0 ? radius * (explosion / 100) : 0;
     const mid = (angle + next) / 2;
     const slice = {
-      color: dataPointColors[i] ?? COLORS[i % COLORS.length],
+      color: dataPointColors[i] ?? automaticSeriesColor(i, colors),
       cx: cx + Math.cos(mid) * offsetRadius,
       cy: cy + Math.sin(mid) * offsetRadius,
       radius,
@@ -2316,6 +2456,7 @@ function buildPieSeries(
 }
 
 function buildOfPieSeries(
+  colors: ChartThemeColors | undefined,
   values: number[],
   plot: ChartSceneRect,
   secondPieSize = 75,
@@ -2325,6 +2466,7 @@ function buildOfPieSeries(
   const primaryValues = values.slice(0, split);
   const secondaryValues = values.slice(split);
   const primary = buildPieSeries(
+    colors,
     "pie",
     primaryValues,
     { ...plot, width: plot.width * 0.62 },
@@ -2346,12 +2488,12 @@ function buildOfPieSeries(
   // Per-slice colour overrides for the secondary pie. Index is the
   // absolute source position (`split + i`), matching how Excel writes
   // `c:dPt` for ofPie series.
-  const dataPointColors = collectDataPointColors(series);
+  const dataPointColors = collectDataPointColors(colors, series);
   const secondarySlices = secondaryValues.map((value, i) => {
     const sweep = Number.isFinite(value) ? (Math.abs(value) / total) * Math.PI * 2 : 0;
     const next = angle + sweep;
     const slice = {
-      color: dataPointColors[split + i] ?? COLORS[(split + i) % COLORS.length],
+      color: dataPointColors[split + i] ?? automaticSeriesColor(split + i, colors),
       cx,
       cy,
       radius,
@@ -2435,6 +2577,7 @@ function buildRadarSeries(
 }
 
 function buildStockSeries(
+  colors: ChartThemeColors | undefined,
   groupSeries: NormalizedSeries[],
   plot: ChartSceneRect,
   min: number,
@@ -2507,7 +2650,12 @@ function buildStockSeries(
       up: open === undefined || close === undefined ? true : close >= open
     });
   }
-  return { type: "stock", color: COLORS[0], candles, label: groupSeries[0]?.label };
+  return {
+    type: "stock",
+    color: automaticSeriesColor(0, colors),
+    candles,
+    label: groupSeries[0]?.label
+  };
 }
 
 function buildSurfaceSeries(
@@ -2754,6 +2902,7 @@ function formatLogAxisNumber(logValue: number, logBase: number): string {
 }
 
 function buildGridlines(
+  colors: ChartThemeColors | undefined,
   plot: ChartSceneRect,
   yAxis: ChartAxis | undefined,
   yRange: ValueRange,
@@ -2776,7 +2925,8 @@ function buildGridlines(
   // `i = 1..4` (top to bottom) and keeps SVG golden-hash snapshots
   // from churning when the gridline values didn't actually move.
   if (yAxis?.majorGridlines !== undefined) {
-    const color = previewShapeLineColor(getSpPrLine(yAxis.majorGridlines)) ?? GRID_COLOR;
+    const yLine = getSpPrLine(yAxis.majorGridlines);
+    const color = yLine?.noFill ? "none" : (previewShapeLineColor(yLine, colors) ?? GRID_COLOR);
     if (yAxis.axisType === "cat" || yAxis.axisType === "ser") {
       // Horizontal bar charts put categories on the Y axis. Draw
       // horizontal lines at the boundaries *between* category slots
@@ -2812,7 +2962,8 @@ function buildGridlines(
   // rendered no gridlines at all (Excel draws vertical lines at each
   // tick for exactly this chart orientation).
   if (xAxis?.majorGridlines !== undefined) {
-    const color = previewShapeLineColor(getSpPrLine(xAxis.majorGridlines)) ?? GRID_COLOR;
+    const xLine = getSpPrLine(xAxis.majorGridlines);
+    const color = xLine?.noFill ? "none" : (previewShapeLineColor(xLine, colors) ?? GRID_COLOR);
     if (xAxis.axisType === "cat" || xAxis.axisType === "ser") {
       // Column / line / area chart category axis on the X side. The
       // previous implementation fed the category x-axis through
@@ -2842,6 +2993,7 @@ function buildGridlines(
 }
 
 function withAdornments<T extends ChartSceneSeries>(
+  colors: ChartThemeColors | undefined,
   sceneSeries: T,
   series: NormalizedSeries,
   plot: ChartSceneRect,
@@ -2859,9 +3011,9 @@ function withAdornments<T extends ChartSceneSeries>(
   // back to the display values when no raw copy is available
   // (synthetic series used by a handful of legacy callers).
   const labelValues = series.rawValues ?? values;
-  let labels = buildDataLabels(points, labelValues, categories, series, plot, sceneSeries);
+  let labels = buildDataLabels(colors, points, labelValues, categories, series, plot, sceneSeries);
   const markers = buildMarkers(points, series);
-  const trendlines = buildTrendlines(points, values, series, plot, min, max);
+  const trendlines = buildTrendlines(colors, points, values, series, plot, min, max);
   let leaderLines: ChartSceneLine[] | undefined;
   if (
     labels.length > 0 &&
@@ -2889,6 +3041,7 @@ function withAdornments<T extends ChartSceneSeries>(
   // matches Excel's "extend along the value axis" convention.
   const horizontal = sceneSeries.type === "bar" && sceneSeries.horizontal === true;
   const errorBars = buildErrorBars(
+    colors,
     points,
     values,
     series,
@@ -3209,6 +3362,7 @@ function representativePoints(series: ChartSceneSeries): ChartScenePoint[] {
 }
 
 function buildDataLabels(
+  colors: ChartThemeColors | undefined,
   points: ChartScenePoint[],
   values: number[],
   categories: string[],
@@ -3278,7 +3432,7 @@ function buildDataLabels(
   }
   const position = labels.position ?? "outEnd";
   const labelStyle = textStyleFromTxPr(labels.txPr);
-  const labelColor = colorFromChartTextProperties(labels.txPr) ?? "#333333";
+  const labelColor = colorFromChartTextProperties(colors, labels.txPr) ?? "#333333";
   // For bar / column series, the representative `point` is the
   // value-end of each bar. Some positions (`inBase`, `ctr`) need the
   // bar's *other* endpoint — e.g. `inBase` on a vertical column means
@@ -3458,6 +3612,7 @@ function buildMarkers(points: ChartScenePoint[], series: NormalizedSeries): Char
 }
 
 function buildTrendlines(
+  colors: ChartThemeColors | undefined,
   points: ChartScenePoint[],
   values: number[],
   series: NormalizedSeries,
@@ -3478,7 +3633,7 @@ function buildTrendlines(
     const lastPoint = trendPoints.length > 0 ? trendPoints[trendPoints.length - 1] : undefined;
     return {
       color:
-        previewShapeLineColor(trendline.spPr ? getSpPrLine(trendline.spPr) : undefined) ??
+        previewShapeLineColor(trendline.spPr ? getSpPrLine(trendline.spPr) : undefined, colors) ??
         "#666666",
       // Reuse `previewShapeLineWidthPx` so the EMU→pt conversion, the
       // `0.5pt` minimum stroke, and the `undefined`-when-absent
@@ -3505,6 +3660,7 @@ function buildTrendlines(
 }
 
 function buildErrorBars(
+  colors: ChartThemeColors | undefined,
   points: ChartScenePoint[],
   values: number[],
   series: NormalizedSeries,
@@ -3520,7 +3676,8 @@ function buildErrorBars(
   }
   const bars: ChartSceneErrorBar[] = [];
   for (const err of series.errorBars) {
-    const color = previewShapeLineColor(err.spPr ? getSpPrLine(err.spPr) : undefined) ?? "#555555";
+    const color =
+      previewShapeLineColor(err.spPr ? getSpPrLine(err.spPr) : undefined, colors) ?? "#555555";
     // Honour `barDir` ("plus" / "minus" / "both") and `errDir`
     // ("x" / "y"). Previously the renderer ignored both fields and
     // always drew a full-both-sides vertical error bar for every
@@ -3642,6 +3799,7 @@ function buildErrorBars(
 }
 
 function buildXLabels(
+  colors: ChartThemeColors | undefined,
   categories: string[],
   plot: ChartSceneRect,
   axis?: ChartAxis,
@@ -3653,7 +3811,7 @@ function buildXLabels(
   }
   if (axis?.axisType === "val") {
     const { min, max } = range ?? { min: 0, max: 1 };
-    return buildValueXLabels(min, max, plot, axis, top);
+    return buildValueXLabels(colors, min, max, plot, axis, top);
   }
   const count = Math.max(1, categories.length);
   const groupWidth = plot.width / count;
@@ -3688,7 +3846,7 @@ function buildXLabels(
       y: top ? plot.y - 10 : plot.y + plot.height + 18,
       text: truncateLabel(label),
       fontSize: 10,
-      color: tickLabelColor(axis),
+      color: tickLabelColor(colors, axis),
       anchor: shouldRotate ? ("end" as const) : ("middle" as const),
       rotate: shouldRotate ? -90 : undefined,
       ...axisStyle
@@ -3697,6 +3855,7 @@ function buildXLabels(
 }
 
 function buildValueXLabels(
+  colors: ChartThemeColors | undefined,
   min: number,
   max: number,
   plot: ChartSceneRect,
@@ -3704,7 +3863,7 @@ function buildValueXLabels(
   top: boolean
 ): ChartSceneText[] {
   const labels: ChartSceneText[] = [];
-  const color = tickLabelColor(axis);
+  const color = tickLabelColor(colors, axis);
   const axisStyle = textStyleFromTxPr(axis?.txPr);
   const logBase = axisScaleLogBase(axis);
   // Use the shared tick-position helper so axis labels align with the
@@ -3727,6 +3886,7 @@ function buildValueXLabels(
 }
 
 function buildYLabels(
+  colors: ChartThemeColors | undefined,
   min: number,
   max: number,
   plot: ChartSceneRect,
@@ -3738,7 +3898,7 @@ function buildYLabels(
     return [];
   }
   const labels: ChartSceneText[] = [];
-  const color = tickLabelColor(axis);
+  const color = tickLabelColor(colors, axis);
   const axisStyle = textStyleFromTxPr(axis?.txPr);
   // Category / series axes on a horizontal-bar-style Y axis should
   // render as category names, not numeric quintiles. Excel places the
@@ -3793,7 +3953,11 @@ function buildYLabels(
   return labels;
 }
 
-function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): NormalizedSeries[] {
+function normalizeSeries(
+  colors: ChartThemeColors | undefined,
+  groups: ChartTypeGroup[],
+  model?: ChartModel
+): NormalizedSeries[] {
   // Resolve the axis log transform *per group* rather than once for the
   // whole chart. Combo charts (`c:barChart` + `c:lineChart` sharing a
   // plot area) routinely bind groups to different value axes via
@@ -3848,7 +4012,7 @@ function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): Normaliz
         seriesIndex,
         globalIndex,
         label: collectSeriesLabel(s, globalIndex),
-        color: seriesColor(s, globalIndex),
+        color: seriesColor(colors, s, globalIndex),
         values: yLogBase
           ? rawValues.map(v => (typeof v === "number" ? applyAxisTransform(v, yLogBase) : v))
           : rawValues,
@@ -3874,10 +4038,14 @@ function normalizeSeries(groups: ChartTypeGroup[], model?: ChartModel): Normaliz
   return normalized;
 }
 
-function seriesColor(series: SeriesBase, index: number): string {
+function seriesColor(
+  colors: ChartThemeColors | undefined,
+  series: SeriesBase,
+  index: number
+): string {
   return (
-    previewShapeFillColor(series.spPr ? getSpPrFill(series.spPr) : undefined, undefined) ??
-    COLORS[index % COLORS.length]
+    previewShapeFillColor(series.spPr ? getSpPrFill(series.spPr) : undefined, undefined, colors) ??
+    automaticSeriesColor(index, colors)
   );
 }
 
@@ -3911,10 +4079,15 @@ function collectDataPointProperty<T>(
   return out;
 }
 
-function collectDataPointColors(series: NormalizedSeries | undefined): Array<string | undefined> {
+function collectDataPointColors(
+  colors: ChartThemeColors | undefined,
+  series: NormalizedSeries | undefined
+): Array<string | undefined> {
   return collectDataPointProperty(
     series,
-    dp => previewShapeFillColor(dp.spPr ? getSpPrFill(dp.spPr) : undefined, undefined) || undefined
+    dp =>
+      previewShapeFillColor(dp.spPr ? getSpPrFill(dp.spPr) : undefined, undefined, colors) ||
+      undefined
   );
 }
 
@@ -4219,6 +4392,7 @@ function isPointColouredGroup(group: ChartTypeGroup): boolean {
 }
 
 function buildSceneLegend(
+  colors: ChartThemeColors | undefined,
   legend: ChartLegend | undefined,
   series: NormalizedSeries[],
   width: number,
@@ -4247,7 +4421,7 @@ function buildSceneLegend(
   if (pointColoured && series.length === 1 && categories.length > 1) {
     items = categories.map((cat, i) => ({
       label: singleLineLabel(cat),
-      color: COLORS[i % COLORS.length]
+      color: automaticSeriesColor(i, colors)
     }));
   } else {
     items = series
@@ -4261,7 +4435,7 @@ function buildSceneLegend(
   const visibleLabels = items.map(item => item.label);
   const rect = legendRect(position, orientation, width, height, hasTitle, visibleLabels);
   const txStyle = textStyleFromTxPr(legend?.txPr);
-  const txColor = legend?.txPr ? colorFromChartTextProperties(legend.txPr) : undefined;
+  const txColor = legend?.txPr ? colorFromChartTextProperties(colors, legend.txPr) : undefined;
   const textStyle =
     txStyle.fontFamily !== undefined ||
     txStyle.bold ||
@@ -4336,16 +4510,21 @@ function legendRect(
   };
 }
 
-function buildAxisTitles(context: ChartAxisContext, plot: ChartSceneRect): ChartSceneText[] {
+function buildAxisTitles(
+  colors: ChartThemeColors | undefined,
+  context: ChartAxisContext,
+  plot: ChartSceneRect
+): ChartSceneText[] {
   const titles: ChartSceneText[] = [];
-  addAxisTitle(titles, context.primaryXAxis, plot);
-  addAxisTitle(titles, context.primaryYAxis, plot);
-  addAxisTitle(titles, context.secondaryXAxis, plot);
-  addAxisTitle(titles, context.secondaryYAxis, plot);
+  addAxisTitle(colors, titles, context.primaryXAxis, plot);
+  addAxisTitle(colors, titles, context.primaryYAxis, plot);
+  addAxisTitle(colors, titles, context.secondaryXAxis, plot);
+  addAxisTitle(colors, titles, context.secondaryYAxis, plot);
   return titles;
 }
 
 function addAxisTitle(
+  colors: ChartThemeColors | undefined,
   titles: ChartSceneText[],
   axis: ChartAxis | undefined,
   plot: ChartSceneRect
@@ -4360,7 +4539,7 @@ function addAxisTitle(
   const base = {
     text,
     fontSize: 11,
-    color: titleColor(axis.title),
+    color: titleColor(colors, axis.title),
     anchor: "middle" as const,
     ...textStyleFromTxPr(axis.title.txPr)
   };
@@ -4397,19 +4576,23 @@ function titleToText(title: ChartTitle): string | undefined {
   );
 }
 
-function axisColor(axis: ChartAxis | undefined): string {
-  return previewShapeLineColor(axis?.spPr ? getSpPrLine(axis.spPr) : undefined) ?? AXIS_COLOR;
+function axisColor(colors: ChartThemeColors | undefined, axis: ChartAxis | undefined): string {
+  const line = axis?.spPr ? getSpPrLine(axis.spPr) : undefined;
+  // `<a:ln><a:noFill/></a:ln>` is an axis drawn without its line, which is how Excel saves a
+  // value axis; it used to come out in the default grey.
+  return line?.noFill ? "none" : (previewShapeLineColor(line, colors) ?? AXIS_COLOR);
 }
 
-function tickLabelColor(axis: ChartAxis | undefined): string {
-  return colorFromChartTextProperties(axis?.txPr) ?? "#555555";
+function tickLabelColor(colors: ChartThemeColors | undefined, axis: ChartAxis | undefined): string {
+  return colorFromChartTextProperties(colors, axis?.txPr) ?? "#555555";
 }
 
-function titleColor(title: ChartTitle): string {
-  return colorFromChartTextProperties(title.txPr) ?? "#333333";
+function titleColor(colors: ChartThemeColors | undefined, title: ChartTitle): string {
+  return colorFromChartTextProperties(colors, title.txPr) ?? "#333333";
 }
 
 function colorFromChartTextProperties(
+  colors: ChartThemeColors | undefined,
   textProperties: ChartTextProperties | undefined
 ): string | undefined {
   if (!textProperties) {
@@ -4430,7 +4613,7 @@ function colorFromChartTextProperties(
   // implementation read `color.srgb` only and silently reverted every
   // theme-coloured title / legend / axis / data-label text to the
   // caller's default grey.
-  return resolveChartColor(resolved.color);
+  return resolveChartColor(resolved.color, colors);
 }
 
 /**
@@ -5216,6 +5399,7 @@ export function applyAxisTransform(value: number, logBase: number | undefined): 
  * has no effect lists — returns an empty array in that case.
  */
 function assignEffectFilters(
+  colors: ChartThemeColors | undefined,
   normalized: NormalizedSeries[],
   sceneSeries: ChartSceneSeries[]
 ): ChartSceneEffectFilter[] {
@@ -5243,7 +5427,9 @@ function assignEffectFilters(
     const key = JSON.stringify(structured);
     let id = keyToId.get(key);
     if (!id) {
-      const xml = buildEffectFilter(`documonster-fx-${filters.length + 1}`, structured);
+      const xml = buildEffectFilter(`documonster-fx-${filters.length + 1}`, structured, {
+        themeColors: colors
+      });
       if (!xml) {
         continue;
       }
@@ -5299,7 +5485,13 @@ function getSpPrEffectList(spPr: ShapeProperties): EffectList | undefined {
  * shapes they want to affect. Returns `""` when the effect list is
  * empty — callers can skip emission entirely.
  */
-export function buildEffectFilter(id: string, effects: EffectList | undefined): string {
+export function buildEffectFilter(
+  id: string,
+  effects: EffectList | undefined,
+  options: { readonly themeColors?: ChartThemeColors } = {}
+): string {
+  // The theme the effect colours' scheme slots resolve against (`ChartRenderOptions.themeColors`).
+  const colors = options.themeColors;
   if (!effects) {
     return "";
   }
@@ -5327,7 +5519,7 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
     // `presetShadow` lacks `blurRadius`; fall back to a gentle default.
     const blur = emuToPx((shadow as { blurRadius?: number }).blurRadius ?? 38100);
     const [dx, dy] = polarOffset(shadow.distance ?? 0, shadow.direction ?? 0);
-    const colour = colourToHex(shadow.color) ?? "#000000";
+    const colour = colourToHex(colors, shadow.color) ?? "#000000";
     const alpha = alphaFromColor(shadow.color);
     prims.push(
       `<feGaussianBlur in="SourceAlpha" stdDeviation="${blur}" result="shadowBlur"/>`,
@@ -5341,7 +5533,7 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
 
   if (effects.glow) {
     const blur = emuToPx(effects.glow.radius);
-    const colour = colourToHex(effects.glow.color) ?? "#ffff66";
+    const colour = colourToHex(colors, effects.glow.color) ?? "#ffff66";
     prims.push(
       `<feGaussianBlur in="SourceAlpha" stdDeviation="${blur}" result="glowBlur"/>`,
       `<feFlood flood-color="${colour}" result="glowColour"/>`,
@@ -5357,7 +5549,7 @@ export function buildEffectFilter(id: string, effects: EffectList | undefined): 
       effects.innerShadow.distance ?? 0,
       effects.innerShadow.direction ?? 0
     );
-    const colour = colourToHex(effects.innerShadow.color) ?? "#000000";
+    const colour = colourToHex(colors, effects.innerShadow.color) ?? "#000000";
     const alpha = alphaFromColor(effects.innerShadow.color);
     prims.push(
       `<feGaussianBlur in="SourceAlpha" stdDeviation="${blur}" result="innerBlur"/>`,
@@ -5396,7 +5588,10 @@ function polarOffset(distanceEmu: number, direction1_60000: number): [number, nu
   return [dist * Math.cos(rad), dist * Math.sin(rad)];
 }
 
-function colourToHex(color: ChartColor | undefined): string | undefined {
+function colourToHex(
+  colors: ChartThemeColors | undefined,
+  color: ChartColor | undefined
+): string | undefined {
   // Delegate every DrawingML colour variant to the shared
   // `resolveChartColor` helper — previously this function only
   // honoured `srgbClr` and silently dropped theme / preset / sysClr
@@ -5405,7 +5600,7 @@ function colourToHex(color: ChartColor | undefined): string | undefined {
   // separately via `<a:alpha>`; CSS 8-digit `#RRGGBBAA` is a
   // downstream extension we do not round-trip as a fill colour)
   // moves into the resolver's srgb branch via `normalizeHex6`.
-  const resolved = resolveChartColor(color);
+  const resolved = resolveChartColor(color, colors);
   if (!resolved) {
     return undefined;
   }
@@ -5421,10 +5616,14 @@ function alphaFromColor(color: ChartColor | undefined): number {
   return Math.max(0, Math.min(1, color.alpha / 100000));
 }
 
-function applyLineStyle(line: ChartSceneLine, axis: ChartAxis | undefined): ChartSceneLine {
+function applyLineStyle(
+  colors: ChartThemeColors | undefined,
+  line: ChartSceneLine,
+  axis: ChartAxis | undefined
+): ChartSceneLine {
   return {
     ...line,
-    color: axisColor(axis),
+    color: axisColor(colors, axis),
     width: previewShapeLineWidthPx(axis?.spPr ? getSpPrLine(axis.spPr) : undefined) ?? line.width
   };
 }
@@ -5671,7 +5870,10 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Failed to load chart SVG image"));
+    image.onerror = () =>
+      reject(
+        new ExcelError("A chart PNG could not be drawn: the platform could not load its SVG.")
+      );
     image.src = url;
   });
 }

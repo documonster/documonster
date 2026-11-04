@@ -2,7 +2,7 @@
  * Financial Functions — Native RuntimeValue implementation.
  */
 
-import { flattenNumbers, firstError } from "@formula/functions/_shared";
+import { asArrayArg, flattenNumbers, firstError } from "@formula/functions/_shared";
 import type { FunctionRuntimeContext } from "@formula/runtime/function-context";
 import { DEFAULT_FUNCTION_CONTEXT } from "@formula/runtime/function-context";
 import type { RuntimeValue, NumberValue, ErrorValue } from "@formula/runtime/values";
@@ -226,11 +226,12 @@ export function fnIRR(
   args: RuntimeValue[],
   context: FunctionRuntimeContext = DEFAULT_FUNCTION_CONTEXT
 ): RuntimeValue {
-  if (!isArray(args[0])) {
-    return ERRORS.VALUE;
+  const cashFlows = asArrayArg(args[0]);
+  if (isError(cashFlows)) {
+    return cashFlows;
   }
   const values: number[] = [];
-  for (const row of args[0].rows) {
+  for (const row of cashFlows.rows) {
     for (const cell of row) {
       if (cell.kind === RVKind.Number) {
         values.push(cell.value);
@@ -1035,8 +1036,13 @@ export function fnXNPV(
   if (isError(rate)) {
     return rate;
   }
-  if (!isArray(args[1]) || !isArray(args[2])) {
-    return ERRORS.VALUE;
+  const valuesArr = asArrayArg(args[1]);
+  const datesArr = asArrayArg(args[2]);
+  if (isError(valuesArr)) {
+    return valuesArr;
+  }
+  if (isError(datesArr)) {
+    return datesArr;
   }
   // Excel requires rate > -1. At rate = -1 the discount factor is
   // singular; below -1 `Math.pow(negative, non-integer)` yields NaN
@@ -1044,12 +1050,12 @@ export function fnXNPV(
   if (rate.value <= -1) {
     return ERRORS.NUM;
   }
-  const rawValues = flattenNumbers([args[1]]);
+  const rawValues = flattenNumbers([valuesArr]);
   const valuesErr = firstError(rawValues);
   if (valuesErr) {
     return valuesErr;
   }
-  const rawDates = flattenNumbers([args[2]]);
+  const rawDates = flattenNumbers([datesArr]);
   const datesErr = firstError(rawDates);
   if (datesErr) {
     return datesErr;
@@ -1071,15 +1077,20 @@ export function fnXIRR(
   args: RuntimeValue[],
   context: FunctionRuntimeContext = DEFAULT_FUNCTION_CONTEXT
 ): RuntimeValue {
-  if (!isArray(args[0]) || !isArray(args[1])) {
-    return ERRORS.VALUE;
+  const valuesArr = asArrayArg(args[0]);
+  const datesArr = asArrayArg(args[1]);
+  if (isError(valuesArr)) {
+    return valuesArr;
   }
-  const rawValues = flattenNumbers([args[0]]);
+  if (isError(datesArr)) {
+    return datesArr;
+  }
+  const rawValues = flattenNumbers([valuesArr]);
   const valuesErr = firstError(rawValues);
   if (valuesErr) {
     return valuesErr;
   }
-  const rawDates = flattenNumbers([args[1]]);
+  const rawDates = flattenNumbers([datesArr]);
   const datesErr = firstError(rawDates);
   if (datesErr) {
     return datesErr;
@@ -1187,10 +1198,11 @@ export function fnMIRR(
   args: RuntimeValue[],
   context: FunctionRuntimeContext = DEFAULT_FUNCTION_CONTEXT
 ): RuntimeValue {
-  if (!isArray(args[0])) {
-    return ERRORS.VALUE;
+  const valuesArr = asArrayArg(args[0]);
+  if (isError(valuesArr)) {
+    return valuesArr;
   }
-  const rawValues = flattenNumbers([args[0]]);
+  const rawValues = flattenNumbers([valuesArr]);
   const valuesErr = firstError(rawValues);
   if (valuesErr) {
     return valuesErr;
@@ -1205,8 +1217,11 @@ export function fnMIRR(
     return reinvestRate;
   }
   const n = values.length;
-  if (n < 2) {
-    return ERRORS.NUM;
+  // Microsoft: values must hold at least one positive and one negative value, otherwise
+  // #DIV/0! — which also covers a single value (it was #NUM!) and an all-negative series
+  // (which computed -1).
+  if (!values.some(v => v > 0) || !values.some(v => v < 0)) {
+    return ERRORS.DIV0;
   }
   // Guard the singularities at rate = -1. Without this the pow()s below
   // become division by zero and produce Infinity/NaN.

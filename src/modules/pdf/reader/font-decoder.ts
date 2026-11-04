@@ -640,6 +640,13 @@ function buildWidths(
 }
 
 /**
+ * Highest CID a /W array may name (ISO 32000-1 Annex C: a CID is at most 65,535). The range
+ * form `[first last w]` is otherwise bounded by nothing but the file: `3 4294967296 700`
+ * asked for four billion map entries.
+ */
+const MAX_CID = 0xffff;
+
+/**
  * Parse CID font /W array.
  * Format: [cid [w1 w2 ...]] or [cidFirst cidLast w]
  */
@@ -659,17 +666,17 @@ function parseCIDWidths(
     const next = wArray[i];
     if (isPdfArray(next)) {
       // [cid [w1 w2 ...]]
-      for (let j = 0; j < next.length; j++) {
+      for (let j = 0; j < next.length && first + j <= MAX_CID; j++) {
         widths.set(first + j, next[j] as number);
       }
       i++;
     } else if (typeof next === "number") {
       // [cidFirst cidLast w]
-      const last = next;
+      const last = Math.min(next, MAX_CID);
       i++;
       if (i < wArray.length) {
         const w = wArray[i] as number;
-        for (let cid = first; cid <= last; cid++) {
+        for (let cid = Math.max(first, 0); cid <= last; cid++) {
           widths.set(cid, w);
         }
         i++;

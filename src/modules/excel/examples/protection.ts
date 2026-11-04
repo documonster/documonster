@@ -29,7 +29,7 @@ async function save() {
   const stopwatch = new HrStopwatch();
   stopwatch.start();
 
-  await Worksheet.protect(ws, password);
+  await Worksheet.protect(ws, { password });
   console.log("Protection Time:", stopwatch.microseconds);
 
   stopwatch.start();

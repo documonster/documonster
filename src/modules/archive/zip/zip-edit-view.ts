@@ -5,7 +5,12 @@
  * for both ZipEditor and ZipFile classes, reducing code duplication.
  */
 
-import { ArchiveError } from "@archive/core/errors";
+import {
+  checkArchiveSource,
+  checkEntryName,
+  checkZipEntryOptions
+} from "@archive/core/entry-checks";
+import { ArchiveArgumentError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
 import { normalizeZipPath } from "@archive/zip-spec/zip-path";
@@ -77,6 +82,12 @@ export interface ZipEditViewOptions {
  */
 export class ZipEditView<TInfo> {
   private readonly _view: Map<string, InternalViewEntry<TInfo>> = new Map();
+  /**
+   * Earlier entries of a name the opened archive holds more than once, by name. They are
+   * written back as they were while the name is untouched — an unedited archive keeps every
+   * entry — and dropped once an edit touches the name, which then has one entry.
+   */
+  private readonly _shadowed: Map<string, TInfo[]> = new Map();
   private readonly _pathOptions: false | ZipPathOptions;
   private _originalSize: number = 0;
 
@@ -89,7 +100,7 @@ export class ZipEditView<TInfo> {
    */
   private _normalize(name: string): string {
     if (!name) {
-      throw new ArchiveError("Entry name is required");
+      throw new ArchiveArgumentError("name", "Entry name is required");
     }
     if (this._pathOptions === false) {
       return name;
@@ -109,10 +120,20 @@ export class ZipEditView<TInfo> {
    */
   initFromEntries(entries: readonly TInfo[], getPath: (info: TInfo) => string): void {
     this._view.clear();
+    this._shadowed.clear();
     for (const info of entries) {
       const path = getPath(info);
       // Normalize the path so lookups via has()/delete() work correctly
       const normalizedPath = this._normalize(path);
+      const earlier = this._view.get(normalizedPath);
+      if (earlier?.kind === "base") {
+        const list = this._shadowed.get(normalizedPath);
+        if (list) {
+          list.push(earlier.info);
+        } else {
+          this._shadowed.set(normalizedPath, [earlier.info]);
+        }
+      }
       this._view.set(normalizedPath, { kind: "base", info });
     }
     this._originalSize = this._view.size;
@@ -134,7 +155,14 @@ export class ZipEditView<TInfo> {
    * Get all output entry names (after applying edits).
    */
   getOutputNames(): string[] {
-    return Array.from(this._view.keys());
+    const names: string[] = [];
+    for (const name of this._view.keys()) {
+      for (let i = this._shadowed.get(name)?.length ?? 0; i > 0; i--) {
+        names.push(name);
+      }
+      names.push(name);
+    }
+    return names;
   }
 
   /**
@@ -170,6 +198,7 @@ export class ZipEditView<TInfo> {
    */
   delete(name: string): boolean {
     const n = this._normalize(name);
+    this._shadowed.delete(n);
     return this._view.delete(n);
   }
 
@@ -206,6 +235,8 @@ export class ZipEditView<TInfo> {
     }
 
     for (const name of toDelete) {
+      deleted += this._shadowed.get(name)?.length ?? 0;
+      this._shadowed.delete(name);
       if (this._view.delete(name)) {
         deleted++;
       }
@@ -217,8 +248,31 @@ export class ZipEditView<TInfo> {
    * Add or update an entry with new content.
    */
   set(name: string, source: ArchiveSource, options?: ZipEntryOptions): void {
-    const n = this._normalize(name);
+    const n = this.checkSet(name, source, options);
+    this._shadowed.delete(n);
     this._view.set(n, { kind: "set", source, options });
+  }
+
+  /**
+   * Everything {@link set} checks, without changing the view: returns the name the entry
+   * would be stored under, or throws the error `set` would throw.
+   */
+  checkSet(name: string, source: unknown, options?: ZipEntryOptions): string {
+    if (this._pathOptions === false && name) {
+      checkEntryName("Archive.ZipEditor#set", name);
+    }
+    checkArchiveSource("Archive.ZipEditor#set", "source", source);
+    checkZipEntryOptions("Archive.ZipEditor#set", options);
+    return this._normalize(name);
+  }
+
+  /** Everything {@link rename} checks about the target name, without changing the view. */
+  checkRename(from: string, to: string): void {
+    if (this._pathOptions === false && to) {
+      checkEntryName("Archive.ZipEditor#rename", to);
+    }
+    this._normalize(from);
+    this._normalize(to);
   }
 
   /**
@@ -230,6 +284,7 @@ export class ZipEditView<TInfo> {
    * @returns `true` if the rename was successful, `false` if source doesn't exist
    */
   rename(from: string, to: string): boolean {
+    this.checkRename(from, to);
     const src = this._normalize(from);
     const dst = this._normalize(to);
 
@@ -243,6 +298,8 @@ export class ZipEditView<TInfo> {
     }
 
     // Overwrite semantics: destination is replaced
+    this._shadowed.delete(src);
+    this._shadowed.delete(dst);
     this._view.delete(dst);
     this._view.delete(src);
 
@@ -262,6 +319,9 @@ export class ZipEditView<TInfo> {
     const result: Array<{ name: string; info: TInfo }> = [];
     for (const [name, entry] of this._view) {
       if (entry.kind === "base") {
+        for (const info of this._shadowed.get(name) ?? []) {
+          result.push({ name, info });
+        }
         result.push({ name, info: entry.info });
       }
     }

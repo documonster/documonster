@@ -85,9 +85,12 @@ function usesFixedArityToken(formula: string): boolean {
  *
  * A fixed-arity function cannot be called with the wrong count — the token has nowhere to record one — so the
  * encoder refuses it, and a test that always passed one argument would be testing the refusal. The counts here
- * are the smallest that satisfy each signature.
+ * are the smallest that satisfy each signature, with a reference where only a reference is accepted — the writers refuse
+ * a constant there (`referenceOnly` in the function table).
  */
 const ARGUMENTS: ReadonlyMap<string, string> = new Map([
+  // Two, because a one-argument `SUM` is not a call token at all — Excel writes it as `PtgAttrSum`.
+  ["SUM", "1,1"],
   ["TEXT", "1,1"],
   ["ROUND", "1,1"],
   ["MOD", "1,1"],
@@ -105,21 +108,22 @@ const ARGUMENTS: ReadonlyMap<string, string> = new Map([
   ["STDEVA", "1"],
   ["GETPIVOTDATA", "1,1"],
   ["IFERROR", "1,1"],
-  ["COUNTIFS", "1,1"],
+  ["COUNTIFS", "A1,1"],
   ["BESSELY", "1,1"],
-  ["SUMIFS", "1,1,1"],
+  ["SUMIFS", "A1,A1,1"],
   ["BESSELI", "1,1"],
-  ["AVERAGEIF", "1,1"],
+  ["AVERAGEIF", "A1,1"],
   ["XNPV", "1,1,1"],
-  ["AVERAGEIFS", "1,1,1"],
+  ["AVERAGEIFS", "A1,A1,1"],
   ["PRICEMAT", "1,1,1,1,1"],
   ["CUMIPMT", "1,1,1,1,1,1"],
   ["ODDFYIELD", "1,1,1,1,1,1,1,1"],
   ["THAIYEAR", "1"],
   ["SET.NAME", "1"],
   ["GET.CELL", "1"],
-  ["SUBTOTAL", "109,1"],
-  ["CUBEVALUE", "1"]
+  ["SUBTOTAL", "109,A1"],
+  ["CUBEVALUE", "1"],
+  ["SUMIF", "A1,1"]
 ]);
 
 function callTo(name: string): string {
@@ -170,7 +174,7 @@ describe("Ftab", () => {
     expect(usesFixedArityToken("PI()")).toBe(true);
     // Variadic, so the count has to be carried.
     expect(usesFixedArityToken("SUM(1,2,3)")).toBe(false);
-    expect(usesFixedArityToken("SUBTOTAL(109,1)")).toBe(false);
+    expect(usesFixedArityToken("SUBTOTAL(109,A1)")).toBe(false);
   });
 
   it("refuses a fixed-arity call with the wrong number of arguments", () => {
@@ -239,7 +243,8 @@ describe("the two function tables agree with each other", () => {
   it("holds the counts it is expected to hold", () => {
     // Pinned so a bulk edit that drops rows is a failure rather than a quieter table. Update deliberately.
     expect(FUNCTION_TABLES.names).toHaveLength(475);
-    expect(FUNCTION_TABLES.arities).toHaveLength(256);
+    // 257: `EXACT` was added after Excel wrote it as `PtgFunc` — see the table.
+    expect(FUNCTION_TABLES.arities).toHaveLength(257);
   });
 
   it("states an arity that is a plausible parameter count", () => {

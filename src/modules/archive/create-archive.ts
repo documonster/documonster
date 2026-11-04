@@ -1,25 +1,10 @@
 import { TarArchive } from "@archive/tar/tar-archive";
-import type { ZipOptionsTar, ZipOptionsZip } from "@archive/zip/zip-archive";
+import type { ZipOptions, ZipOptionsTar, ZipOptionsZip } from "@archive/zip/zip-archive";
 import { ZipArchive } from "@archive/zip/zip-archive";
 
 /**
- * Create a new archive
- *
- * @param options - Archive options including format
- * @returns ZipArchive or TarArchive depending on format option
- *
- * @example
- * ```ts
- * // Create ZIP archive (default)
- * const zipArchive = zip();
- * zipArchive.add("file.txt", "content");
- * const zipBytes = await zipArchive.bytes();
- *
- * // Create TAR archive
- * const tarArchive = zip({ format: "tar" });
- * tarArchive.add("file.txt", "content");
- * const tarBytes = await tarArchive.bytes();
- * ```
+ * Create a ZIP or TAR builder, the format chosen by `options.format`. Kept for the
+ * deprecated `Archive.zip`; `Archive.createZip` and `Archive.createTar` name the format.
  */
 export function zip(options: ZipOptionsTar): TarArchive;
 export function zip(options?: ZipOptionsZip): ZipArchive;
@@ -33,5 +18,21 @@ export function zip(options: ZipOptionsTar | ZipOptionsZip = {}): ZipArchive | T
     });
   }
 
+  return new ZipArchive({ ...options, format: "zip" });
+}
+
+/**
+ * Create a ZIP builder. Published as `Archive.createZip`.
+ *
+ * @example
+ * ```ts
+ * import { Archive } from "documonster/archive";
+ *
+ * const archive = Archive.createZip({ level: 9 });
+ * archive.add("file.txt", "content");
+ * const bytes = await archive.toBuffer();
+ * ```
+ */
+export function createZip(options: Omit<ZipOptions, "format"> = {}): ZipArchive {
   return new ZipArchive({ ...options, format: "zip" });
 }

@@ -30,6 +30,11 @@ export interface IterableStreamLike<T = Uint8Array | string> extends EventEmitte
   on(event: "data", listener: (chunk: T) => void): this;
   on(event: "end", listener: () => void): this;
   on(event: "error", listener: (err: Error) => void): this;
+  on(event: "close", listener: () => void): this;
+  /** Node streams' failure, if any — read so a stream that failed before it was iterated is not waited on. */
+  readonly errored?: unknown;
+  readonly destroyed?: boolean;
+  readonly readableEnded?: boolean;
 }
 
 async function* iterateStream<T = Uint8Array | string>(
@@ -37,39 +42,54 @@ async function* iterateStream<T = Uint8Array | string>(
 ): AsyncGenerator<T> {
   const contents: T[] = [];
   let resolveDataPromise: (() => void) | null = null;
-
-  const onData = (data: T) => {
-    contents.push(data);
+  const wake = () => {
     if (resolveDataPromise) {
       resolveDataPromise();
       resolveDataPromise = null;
     }
+  };
+
+  const onData = (data: T) => {
+    contents.push(data);
+    wake();
   };
   stream.on("data", onData);
 
   let ended = false;
   const onEnd = () => {
     ended = true;
-    if (resolveDataPromise) {
-      resolveDataPromise();
-      resolveDataPromise = null;
-    }
+    wake();
   };
   stream.on("end", onEnd);
 
-  let error: Error | false = false;
+  // A stream that failed before it was iterated has already emitted its `error`; one destroyed before it ended never
+  // will emit `end`. Either way, waiting for an event would wait forever.
+  let error: Error | false = stream.errored ? toError(stream.errored) : false;
   const onError = (err: Error) => {
     error = err;
-    if (resolveDataPromise) {
-      resolveDataPromise();
-      resolveDataPromise = null;
-    }
+    wake();
   };
   stream.on("error", onError);
+
+  // Only a destroyed stream's `close` means no `end` is coming: the ZIP parser announces `close` itself, ahead of the
+  // `end` its readable side still has to deliver.
+  const onClose = () => {
+    if (!ended && !error && stream.destroyed) {
+      error = prematureCloseError();
+    }
+    wake();
+  };
+  stream.on("close", onClose);
+  if (!error && stream.destroyed && !stream.readableEnded) {
+    error = prematureCloseError();
+  }
 
   try {
     while (!ended || contents.length > 0) {
       if (contents.length === 0) {
+        if (error) {
+          throw toError(error);
+        }
         stream.resume();
         await new Promise<void>(resolve => {
           resolveDataPromise = resolve;
@@ -90,7 +110,13 @@ async function* iterateStream<T = Uint8Array | string>(
     stream.removeListener("data", onData);
     stream.removeListener("end", onEnd);
     stream.removeListener("error", onError);
+    stream.removeListener("close", onClose);
   }
+}
+
+/** What Node's own stream iterator reports for a stream closed before it ended. */
+function prematureCloseError(): Error {
+  return Object.assign(new Error("Premature close"), { code: "ERR_STREAM_PREMATURE_CLOSE" });
 }
 
 export { iterateStream };

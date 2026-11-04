@@ -116,14 +116,16 @@ describe("decoded stream limits", () => {
     );
   });
 
-  it("is plumbed through Pdf.read", async () => {
+  it("is plumbed through Pdf.extract", async () => {
     const doc = new Pdf.Builder();
     doc.addPage().drawText("x".repeat(2000), { x: 10, y: 700, fontSize: 4 });
-    const bytes = await doc.build();
+    const bytes = await doc.toBuffer();
     // A limit hit is a hard failure, never a page warning with a truncated result
-    await expect(Pdf.read(bytes, { maxDecodedBytes: 16 })).rejects.toThrow(PdfLimitExceededError);
-    await expect(Pdf.read(bytes, { maxDecodedBytes: 16 })).rejects.toThrow(/maxDecodedBytes/);
-    const full = await Pdf.read(bytes);
+    await expect(Pdf.extract(bytes, { maxDecodedBytes: 16 })).rejects.toThrow(
+      PdfLimitExceededError
+    );
+    await expect(Pdf.extract(bytes, { maxDecodedBytes: 16 })).rejects.toThrow(/maxDecodedBytes/);
+    const full = await Pdf.extract(bytes);
     expect(full.pages[0].warnings).toEqual([]);
   });
 
@@ -139,10 +141,10 @@ describe("decoded stream limits", () => {
       `<< /Length 3 /Filter [${chain}] >>\nstream\n00>\nendstream`
     ]);
 
-    const editor = Pdf.Editor.load(enc.encode(pdf));
-    await expect(editor.save()).rejects.toThrow(PdfLimitExceededError);
+    const editor = Pdf.Editor.read(enc.encode(pdf));
+    await expect(editor.toBuffer()).rejects.toThrow(PdfLimitExceededError);
     editor.getPage(0).drawText("x", { x: 10, y: 10 });
-    await expect(editor.saveIncremental()).rejects.toThrow(PdfLimitExceededError);
+    await expect(editor.toBuffer({ incremental: true })).rejects.toThrow(PdfLimitExceededError);
   });
 });
 
@@ -153,13 +155,13 @@ describe("incremental update generations", () => {
       "<< /Type /Pages /Kids [3 2 R] /Count 1 >>",
       { gen: 2, body: "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>" }
     ]);
-    const editor = Pdf.Editor.load(enc.encode(pdf));
+    const editor = Pdf.Editor.read(enc.encode(pdf));
     editor.getPage(0).drawText("Updated", { x: 10, y: 100, fontSize: 12 });
-    const out = await editor.saveIncremental();
+    const out = await editor.toBuffer({ incremental: true });
     const appended = latin1(out.subarray(pdf.length));
     expect(appended).toContain("3 2 obj");
     expect(appended).toMatch(/ 00002 n \n/);
-    const read = await Pdf.read(out);
+    const read = await Pdf.extract(out);
     expect(read.text).toContain("Updated");
   });
 });
@@ -172,9 +174,9 @@ describe("incremental form fill", () => {
       "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R] >>",
       "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (old) /Rect [10 10 150 30] /P 3 0 R >>"
     ]);
-    const editor = Pdf.Editor.load(enc.encode(pdf));
+    const editor = Pdf.Editor.read(enc.encode(pdf));
     editor.setFormField("name", "new value");
-    const out = await editor.saveIncremental();
+    const out = await editor.toBuffer({ incremental: true });
     const appended = latin1(out.subarray(pdf.length));
     const apRef = /\/AP << \/N (\d+) 0 R >>/.exec(appended);
     expect(apRef).not.toBeNull();
@@ -192,43 +194,47 @@ async function buildSigned(): Promise<Uint8Array> {
   const { certificate, privateKey } = await generateSelfSignedCertificate("Hardening");
   const doc = new Pdf.Builder();
   doc.addPage().drawText("Signed", { x: 72, y: 750, fontSize: 14 });
-  const unsigned = await doc.build();
-  return Pdf.Editor.load(unsigned).sign({ certificate, privateKey });
+  const unsigned = await doc.toBuffer();
+  return Pdf.Editor.read(unsigned).sign({ certificate, privateKey });
 }
 
 describe("signature preservation", () => {
   it("detects signatures", async () => {
     const signed = await buildSigned();
-    expect(Pdf.Editor.load(signed).hasSignatures).toBe(true);
+    expect(Pdf.Editor.read(signed).hasSignatures).toBe(true);
     const builder = new Pdf.Builder();
     builder.addPage();
-    const plain = await builder.build();
-    expect(Pdf.Editor.load(plain).hasSignatures).toBe(false);
+    const plain = await builder.toBuffer();
+    expect(Pdf.Editor.read(plain).hasSignatures).toBe(false);
   });
 
   it("refuses a full save of a signed document unless opted in", async () => {
     const signed = await buildSigned();
-    const editor = Pdf.Editor.load(signed);
-    await expect(editor.save()).rejects.toThrow(PdfSignatureInvalidationError);
-    await expect(editor.save({ invalidateSignatures: true })).resolves.toBeInstanceOf(Uint8Array);
+    const editor = Pdf.Editor.read(signed);
+    await expect(editor.toBuffer()).rejects.toThrow(PdfSignatureInvalidationError);
+    await expect(editor.toBuffer({ invalidateSignatures: true })).resolves.toBeInstanceOf(
+      Uint8Array
+    );
   });
 
   it("refuses to re-sign or fall back from saveIncremental", async () => {
     const signed = await buildSigned();
     const { certificate, privateKey } = await generateSelfSignedCertificate("Second");
-    await expect(Pdf.Editor.load(signed).sign({ certificate, privateKey })).rejects.toThrow(
+    await expect(Pdf.Editor.read(signed).sign({ certificate, privateKey })).rejects.toThrow(
       PdfSignatureInvalidationError
     );
-    const editor = Pdf.Editor.load(signed);
+    const editor = Pdf.Editor.read(signed);
     editor.addPage();
-    await expect(editor.saveIncremental()).rejects.toThrow(PdfSignatureInvalidationError);
+    await expect(editor.toBuffer({ incremental: true })).rejects.toThrow(
+      PdfSignatureInvalidationError
+    );
   });
 
   it("saveIncremental keeps the signed bytes as a prefix and the signature valid", async () => {
     const signed = await buildSigned();
-    const editor = Pdf.Editor.load(signed);
+    const editor = Pdf.Editor.read(signed);
     editor.getPage(0).drawText("Annotated", { x: 72, y: 700, fontSize: 12 });
-    const updated = await editor.saveIncremental();
+    const updated = await editor.toBuffer({ incremental: true });
     expect(updated.length).toBeGreaterThan(signed.length);
     expect(updated.subarray(0, signed.length)).toEqual(signed);
 
@@ -236,8 +242,8 @@ describe("signature preservation", () => {
     const contents = text.match(/\/Contents\s*<([0-9a-fA-F]+)>/)![1];
     const br = text.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/)!;
     const range = [1, 2, 3, 4].map(i => parseInt(br[i], 10)) as [number, number, number, number];
-    const result = await Pdf.verifySignature(updated, contents, range);
-    expect(result.valid).toBe(true);
+    const result = await Pdf.Signature.verify(updated, contents, range);
+    expect(result.intact).toBe(true);
     expect(result.coversWholeFile).toBe(false);
   });
 });
@@ -306,16 +312,16 @@ function lastXrefSection(bytes: Uint8Array): { offset: number; dict: string } {
 describe("incremental update of an xref-stream file", () => {
   it("appends an xref stream section instead of rewriting", async () => {
     const original = buildXrefStreamPdf();
-    const editor = Pdf.Editor.load(original);
+    const editor = Pdf.Editor.read(original);
     editor.getPage(0).drawText("Hi", { x: 10, y: 100, fontSize: 12 });
-    const updated = await editor.saveIncremental();
+    const updated = await editor.toBuffer({ incremental: true });
     expect(updated.subarray(0, original.length)).toEqual(original);
     const appended = latin1(updated.subarray(original.length));
     expect(appended).toContain("/Type /XRef");
     expect(appended).toContain("/Prev ");
     expect(appended).not.toContain("trailer");
 
-    const read = await Pdf.read(updated);
+    const read = await Pdf.extract(updated);
     expect(read.pages[0].text).toContain("Hi");
   });
 });
@@ -324,9 +330,9 @@ describe("incremental update that only modifies existing objects (xref stream)",
   it("numbers the xref stream past the original /Size and keeps every object", async () => {
     const original = buildXrefStreamPdf(FORM_OBJECTS, ` /ID [${FILE_ID} ${FILE_ID}]`);
     const originalSize = FORM_OBJECTS.length + 2; // objects 1..4, xref stream 5, plus 0
-    const editor = Pdf.Editor.load(original);
+    const editor = Pdf.Editor.read(original);
     editor.setFormField("name", "new value");
-    const updated = await editor.saveIncremental();
+    const updated = await editor.toBuffer({ incremental: true });
     expect(updated.subarray(0, original.length)).toEqual(original);
 
     const { offset, dict } = lastXrefSection(updated);
@@ -339,7 +345,8 @@ describe("incremental update that only modifies existing objects (xref stream)",
     expect(dict).toContain(`/Size ${xrefObjNum + 1}`);
     // ID[0] (and here ID[1]) carried over unchanged
     expect(dict).toContain(`/ID [${FILE_ID} ${FILE_ID}]`);
-    // Only modified objects (page 3, widget 4), the widget's new appearance
+    // Only modified objects (the catalog 1, whose inline AcroForm gains
+    // /NeedAppearances true; page 3; widget 4), the widget's new appearance
     // stream and the xref stream itself are listed
     const index = dict
       .match(/\/Index \[([^\]]*)\]/)![1]
@@ -352,7 +359,7 @@ describe("incremental update that only modifies existing objects (xref stream)",
         listed.push(index[i] + n);
       }
     }
-    expect(listed).toEqual([3, 4, originalSize, xrefObjNum]);
+    expect(listed).toEqual([1, 3, 4, originalSize, xrefObjNum]);
     expect(xrefObjNum).toBe(originalSize + 1);
 
     const doc = new PdfDocument(updated);
@@ -363,7 +370,7 @@ describe("incremental update that only modifies existing objects (xref stream)",
     // The original xref stream object is still reachable, not shadowed
     expect(doc.resolve(originalSize - 1)).toMatchObject({ type: "stream" });
 
-    const read = await Pdf.read(updated);
+    const read = await Pdf.extract(updated);
     expect(read.formFields.find(f => f.name === "name")?.value).toBe("new value");
   });
 });
@@ -373,32 +380,44 @@ describe("encrypted documents", () => {
     const doc = new Pdf.Builder();
     doc.setEncryption({ userPassword: "user", ownerPassword: "owner" });
     doc.addPage().drawText("Secret body", { x: 72, y: 700, fontSize: 12 });
-    return doc.build();
+    return doc.toBuffer();
   }
 
   it("saveIncremental encrypts the appended objects with the document's own handler", async () => {
     const encrypted = await buildEncrypted();
-    const editor = Pdf.Editor.load(encrypted, { password: "user" });
+    const editor = Pdf.Editor.read(encrypted, { password: "user" });
     editor.getPage(0).drawText("Overlay", { x: 72, y: 600, fontSize: 12 });
-    const updated = await editor.saveIncremental();
+    const updated = await editor.toBuffer({ incremental: true });
     // The original bytes are untouched and the update claims no new handler.
     expect(updated.subarray(0, encrypted.length)).toEqual(encrypted);
     const appended = latin1(updated.subarray(encrypted.length));
     expect(appended).not.toContain("Overlay");
-    const read = await Pdf.read(updated, { password: "user" });
+    const read = await Pdf.extract(updated, { password: "user" });
     expect(read.pages[0].text).toContain("Secret body");
     expect(read.pages[0].text).toContain("Overlay");
   });
 
   it("save() writes a decrypted copy that does not claim /Encrypt", async () => {
     const encrypted = await buildEncrypted();
-    const editor = Pdf.Editor.load(encrypted, { password: "user" });
+    const editor = Pdf.Editor.read(encrypted, { password: "user" });
     editor.getPage(0).drawText("Overlay", { x: 72, y: 600, fontSize: 12 });
     const saved = await editor.save();
     expect(latin1(saved)).not.toContain("/Encrypt");
-    const read = await Pdf.read(saved);
+    const read = await Pdf.extract(saved);
     expect(read.pages[0].text).toContain("Secret body");
     expect(read.pages[0].text).toContain("Overlay");
+  });
+
+  it('toBuffer() keeps the encryption; { encryption: "remove" } writes the decrypted copy', async () => {
+    const encrypted = await buildEncrypted();
+    const editor = Pdf.Editor.read(encrypted, { password: "user" });
+    editor.getPage(0).drawText("Overlay", { x: 72, y: 600, fontSize: 12 });
+    const kept = await editor.toBuffer();
+    expect(latin1(kept)).toContain("/Encrypt");
+    expect((await Pdf.extract(kept, { password: "user" })).pages[0].text).toContain("Overlay");
+    const removed = await editor.toBuffer({ encryption: "remove" });
+    expect(latin1(removed)).not.toContain("/Encrypt");
+    expect((await Pdf.extract(removed)).pages[0].text).toContain("Secret body");
   });
 });
 
@@ -416,19 +435,19 @@ describe("signature detection", () => {
 
   it("ignores /SigFlags without a signed field", () => {
     const pdf = withFields("<< /Fields [] /SigFlags 3 >>", []);
-    expect(Pdf.Editor.load(pdf).hasSignatures).toBe(false);
+    expect(Pdf.Editor.read(pdf).hasSignatures).toBe(false);
   });
 
   it("ignores an unsigned signature field", () => {
     const pdf = withFields("<< /Fields [4 0 R] /SigFlags 3 >>", ["<< /FT /Sig /T (s) >>"]);
-    expect(Pdf.Editor.load(pdf).hasSignatures).toBe(false);
+    expect(Pdf.Editor.read(pdf).hasSignatures).toBe(false);
   });
 
   it("requires both /ByteRange and /Contents", () => {
     const pdf = withFields("<< /Fields [4 0 R] >>", [
       "<< /FT /Sig /T (s) /V << /ByteRange [0 1 2 3] >> >>"
     ]);
-    expect(Pdf.Editor.load(pdf).hasSignatures).toBe(false);
+    expect(Pdf.Editor.read(pdf).hasSignatures).toBe(false);
   });
 
   it("finds a signed kid whose /FT is inherited from its parent", () => {
@@ -436,7 +455,7 @@ describe("signature detection", () => {
       "<< /FT /Sig /T (parent) /Kids [5 0 R] >>",
       `<< /Parent 4 0 R /T (kid) /V ${signedValue} >>`
     ]);
-    expect(Pdf.Editor.load(pdf).hasSignatures).toBe(true);
+    expect(Pdf.Editor.read(pdf).hasSignatures).toBe(true);
   });
 
   it("guards the inline-page fallback inside saveIncremental", async () => {
@@ -445,12 +464,14 @@ describe("signature detection", () => {
       "<< /Type /Pages /Kids [<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>] /Count 1 >>",
       `<< /FT /Sig /T (s) /V ${signedValue} >>`
     ]);
-    const editor = Pdf.Editor.load(pdf);
+    const editor = Pdf.Editor.read(pdf);
     expect(editor.hasSignatures).toBe(true);
     editor.getPage(0).drawText("x", { x: 10, y: 10, fontSize: 12 });
-    await expect(editor.saveIncremental()).rejects.toThrow(PdfSignatureInvalidationError);
-    const rewritten = await editor.saveIncremental({ invalidateSignatures: true });
-    const read = await Pdf.read(rewritten);
+    await expect(editor.toBuffer({ incremental: true })).rejects.toThrow(
+      PdfSignatureInvalidationError
+    );
+    const rewritten = await editor.toBuffer({ incremental: true, invalidateSignatures: true });
+    const read = await Pdf.extract(rewritten);
     expect(read.pages[0].text).toContain("x");
   });
 });
@@ -462,7 +483,7 @@ describe("creation date", () => {
       const doc = new Pdf.Builder();
       doc.setMetadata({ title: "T", creationDate, modDate: creationDate });
       doc.addPage().drawText("same", { x: 10, y: 700, fontSize: 12 });
-      return doc.build();
+      return doc.toBuffer();
     };
     const a = await build();
     expect(latin1(a)).toContain("/CreationDate (D:20200102030405Z)");

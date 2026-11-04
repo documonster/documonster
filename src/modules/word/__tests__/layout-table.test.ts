@@ -71,9 +71,11 @@ describe("layoutTable — nested tables", () => {
 
 describe("layoutTable — column widths", () => {
   it("honours table.columnWidths proportionally instead of forcing equal widths", () => {
-    // 3:1 width ratio between the two columns (in twips).
+    // 3:1 width ratio between the two columns (in twips), in a fixed-layout
+    // table: an auto-fit one is sized by its content (below).
     const table: Table = {
       type: "table",
+      properties: { layout: "fixed" },
       columnWidths: [4500, 1500],
       rows: [
         {
@@ -92,6 +94,7 @@ describe("layoutTable — column widths", () => {
   it("falls back to equal widths when columnWidths is absent", () => {
     const table: Table = {
       type: "table",
+      properties: { layout: "fixed" },
       rows: [
         {
           cells: [{ content: [textPara("a")] }, { content: [textPara("b")] }]
@@ -101,6 +104,37 @@ describe("layoutTable — column widths", () => {
     const laid = firstTable(minimalDoc([table]));
     const [c0, c1] = laid.cells;
     expect(c0.rect.width).toBeCloseTo(c1.rect.width, 1);
+  });
+});
+
+describe("layoutTable — auto-fit column widths", () => {
+  // An auto-fit table whose cells ask for no width is sized by what they hold,
+  // whatever its grid says: Word for Mac 16 lays this one out "wide" column
+  // narrower than "narrow", not 3:1.
+  const table = (properties?: Table["properties"]): Table => ({
+    type: "table",
+    ...(properties ? { properties } : {}),
+    columnWidths: [4500, 1500],
+    rows: [{ cells: [{ content: [textPara("wide")] }, { content: [textPara("narrow")] }] }]
+  });
+  /**
+   * 11pt Calibri advances of the cell text. The document has no default table
+   * style, so Word gives the cells no margins (this pinned 5.4pt either side,
+   * which only `Normal Table` as the default table style supplies).
+   */
+  const wide = (11 * (1464 + 470 + 1076 + 1019)) / 2048;
+  const narrow = (11 * (1076 + 981 + 714 + 714 + 1080 + 1464)) / 2048;
+
+  it("gives each column its content, plus any cell margins, in a table of auto width", () => {
+    const [c0, c1] = firstTable(minimalDoc([table()])).cells;
+    expect(c0.rect.width).toBeCloseTo(wide, 1);
+    expect(c1.rect.width).toBeCloseTo(narrow, 1);
+  });
+
+  it("shares a set table width out in proportion to the content", () => {
+    const [c0, c1] = firstTable(minimalDoc([table({ width: { value: 5000, type: "pct" } })])).cells;
+    expect(c0.rect.width + c1.rect.width).toBeCloseTo(468, 2);
+    expect(c0.rect.width / c1.rect.width).toBeCloseTo(wide / narrow, 2);
   });
 });
 
@@ -131,9 +165,9 @@ describe("layoutTable — gridSpan", () => {
     const row1 = laid.cells.filter(c => c.row === 1);
     expect(row1).toHaveLength(2);
     const [spanCell, lastCell] = row1;
-    const singleColWidth = laid.cells.find(c => c.row === 0)!.rect.width;
-    // The spanning cell is ~2 columns wide.
-    expect(spanCell.rect.width).toBeCloseTo(singleColWidth * 2, 0);
+    const [a, b] = laid.cells.filter(c => c.row === 0);
+    // The spanning cell is as wide as the two columns it covers.
+    expect(spanCell.rect.width).toBeCloseTo(a!.rect.width + b!.rect.width, 1);
     // The trailing cell starts in the 3rd grid column, not the 2nd.
     expect(lastCell.rect.x).toBeCloseTo(spanCell.rect.x + spanCell.rect.width, 1);
   });

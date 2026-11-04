@@ -5,7 +5,8 @@
  * Uses generics and base types to reduce repetition.
  */
 
-import type { CsvParseOptions, CsvFormatOptions, CsvParseResult, Row } from "@csv/types";
+import type { CsvFormatData } from "@csv/format/formatter";
+import type { CsvParseOptions, CsvFormatOptions, CsvParseResult } from "@csv/types";
 
 // =============================================================================
 // Base Result Type (for reuse)
@@ -144,7 +145,7 @@ interface BaseRequest<T extends CsvWorkerTaskType> {
 export type CsvWorkerRequestMessage =
   | (BaseRequest<"parse"> & { data: string; options?: CsvParseOptions })
   | (BaseRequest<"format"> & {
-      data: Row[] | Record<string, unknown>[];
+      data: CsvFormatData;
       options?: CsvFormatOptions;
     })
   | (BaseRequest<"load"> & {

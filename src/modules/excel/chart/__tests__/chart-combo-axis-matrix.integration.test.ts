@@ -87,7 +87,7 @@ describe("Chart combo / axis matrix", () => {
     expect(chartXml).toMatch(/<c:max val="100"\/>/);
 
     const chart = getCharts(Workbook.getWorksheet(wb, "Data")!)[0];
-    const valueAxis = Chart.chartModel(chart)?.chart.plotArea.axes.find(a => a.axisType === "val");
+    const valueAxis = Chart.getModel(chart)?.chart.plotArea.axes.find(a => a.axisType === "val");
     expect(valueAxis, "value axis").toBeDefined();
     expect(valueAxis!.scaling?.logBase).toBe(10);
     expect(valueAxis!.scaling?.min).toBe(1);

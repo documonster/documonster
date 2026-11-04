@@ -94,7 +94,7 @@ describe("preserved pivot cache bindings", () => {
     const shuffled = await withReversedCaches(await twoPivots());
     const workbook = Workbook.create();
     await Workbook.read(workbook, shuffled);
-    Cell.setValue(Workbook.getWorksheets(workbook)[0]!, "ZZ999", "edited");
+    Cell.setValue(Workbook.listWorksheets(workbook)[0]!, "ZZ999", "edited");
     const written = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
     const parts = await extractAll(written);
     expect(

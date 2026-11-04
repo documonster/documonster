@@ -22,6 +22,7 @@
  */
 
 import { ChartOptionsError } from "@excel/errors";
+import { describeValue } from "@utils/describe-value";
 
 /** Raw TopoJSON topology as produced by d3 / world-atlas. */
 export interface TopologyLike {
@@ -90,51 +91,190 @@ export interface TopoGeometryCollection {
 export type ResolvedRing = Array<[number, number]>;
 
 /**
+ * Where a topology came from, for the errors {@link checkTopology} raises: the public call, when
+ * the check knows it, and the paths of the topology and the object name from that call's
+ * parameters (`options.regionMap.topology` for a renderer, `topology` for
+ * `ChartClassic.Backend.resolveTopologyObject`).
+ */
+export interface TopologyArgument {
+  readonly where?: string;
+  readonly topology: string;
+  readonly objectName: string;
+}
+
+const AS_PARAMETERS: TopologyArgument = {
+  where: "ChartClassic.Backend.resolveTopologyObject",
+  topology: "topology",
+  objectName: "objectName"
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFinitePair(value: unknown): value is [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    Number.isFinite(value[0]) &&
+    Number.isFinite(value[1])
+  );
+}
+
+/**
+ * Check the parts of a topology {@link resolveTopologyObject} reads, and that `objectName`
+ * names one of its objects: `objects` an object; `arcs` a list of point lists; a `transform`, when
+ * present, two finite `[number, number]` pairs; the named object a `GeometryCollection` with a
+ * `geometries` list, or one geometry; each geometry of a known type with arcs or coordinates of
+ * its shape. A geometry of another type (`type: null` is allowed by the specification) is
+ * skipped when drawn, not refused here.
+ *
+ * Every refusal is a {@link ChartOptionsError} whose `field` is the path from the caller's own
+ * parameter, so a malformed file names the entry that is wrong — it used to be a `TypeError`
+ * from inside the decoder, or, from a renderer, a silent fall-back to the centroid preview.
+ */
+export function checkTopology(
+  topology: unknown,
+  objectName: unknown,
+  at: TopologyArgument = AS_PARAMETERS
+): asserts topology is TopologyLike {
+  const prefix = at.where === undefined ? "" : `${at.where}: `;
+  const fail = (field: string, expected: string, value: unknown): never => {
+    throw new ChartOptionsError(
+      field,
+      `${prefix}${field} must be ${expected}, got ${describeValue(value)}`
+    );
+  };
+  const t = at.topology;
+  if (!isRecord(topology)) {
+    return fail(t, "a TopoJSON topology { type, arcs, objects }", topology);
+  }
+  if (!isRecord(topology.objects)) {
+    return fail(`${t}.objects`, "an object of named geometry collections", topology.objects);
+  }
+  const objects = topology.objects;
+  if (typeof objectName !== "string" || !Object.hasOwn(objects, objectName)) {
+    const names = Object.keys(objects);
+    throw new ChartOptionsError(
+      at.objectName,
+      `${prefix}${at.objectName} must name a geometry collection of the topology (it has ${
+        names.length === 0 ? "none" : names.map(name => JSON.stringify(name)).join(", ")
+      }), got ${describeValue(objectName)}`
+    );
+  }
+  if (!Array.isArray(topology.arcs)) {
+    return fail(`${t}.arcs`, "an array of arcs", topology.arcs);
+  }
+  topology.arcs.forEach((arc: unknown, i) => {
+    if (!Array.isArray(arc)) {
+      fail(`${t}.arcs[${i}]`, "an array of [x, y] points", arc);
+    }
+  });
+  if (topology.transform !== undefined) {
+    if (!isRecord(topology.transform)) {
+      fail(`${t}.transform`, "an object { scale, translate }", topology.transform);
+    }
+    const transform = topology.transform as Record<string, unknown>;
+    for (const key of ["scale", "translate"] as const) {
+      if (!isFinitePair(transform[key])) {
+        fail(`${t}.transform.${key}`, "[number, number] of finite numbers", transform[key]);
+      }
+    }
+  }
+  const object = objects[objectName];
+  const objectField = `${t}.objects[${JSON.stringify(objectName)}]`;
+  if (!isRecord(object)) {
+    return fail(objectField, "a geometry or a GeometryCollection", object);
+  }
+  if (object.type === "GeometryCollection") {
+    if (!Array.isArray(object.geometries)) {
+      return fail(`${objectField}.geometries`, "an array of geometries", object.geometries);
+    }
+    object.geometries.forEach((geometry: unknown, i) =>
+      checkGeometry(geometry, `${objectField}.geometries[${i}]`, fail)
+    );
+    return;
+  }
+  checkGeometry(object, objectField, fail);
+}
+
+/** The arcs and coordinates of one geometry, by its type (see {@link checkTopology}). */
+function checkGeometry(
+  geometry: unknown,
+  field: string,
+  fail: (field: string, expected: string, value: unknown) => never
+): void {
+  if (!isRecord(geometry)) {
+    fail(field, "a geometry object", geometry);
+  }
+  const g = geometry as Record<string, unknown>;
+  // Nesting depth of each known type's `arcs`: a list of arc indices is depth 1.
+  const depth: Record<string, number> = {
+    LineString: 1,
+    MultiLineString: 2,
+    Polygon: 2,
+    MultiPolygon: 3
+  };
+  const arcDepth = typeof g.type === "string" ? depth[g.type] : undefined;
+  if (arcDepth !== undefined) {
+    const walk = (value: unknown, at: string, level: number): void => {
+      if (level === 0) {
+        if (!Number.isInteger(value)) {
+          fail(at, "an arc index (an integer)", value);
+        }
+        return;
+      }
+      if (!Array.isArray(value)) {
+        fail(at, level === 1 ? "an array of arc indices" : "an array", value);
+      }
+      (value as unknown[]).forEach((item, i) => walk(item, `${at}[${i}]`, level - 1));
+    };
+    walk(g.arcs, `${field}.arcs`, arcDepth);
+    return;
+  }
+  if (g.type === "Point" && !isFinitePair(g.coordinates)) {
+    fail(`${field}.coordinates`, "[number, number] of finite numbers", g.coordinates);
+  }
+  if (g.type === "MultiPoint") {
+    if (!Array.isArray(g.coordinates)) {
+      fail(`${field}.coordinates`, "an array of [number, number] points", g.coordinates);
+    }
+    (g.coordinates as unknown[]).forEach((point, i) => {
+      if (!isFinitePair(point)) {
+        fail(`${field}.coordinates[${i}]`, "[number, number] of finite numbers", point);
+      }
+    });
+  }
+}
+
+/**
  * Resolve a named object from a {@link TopologyLike} into a flat list
  * of `{ id, rings }` records. Each `rings[0]` is the outer ring and
  * the remainder are holes. For `LineString` / `MultiLineString`,
  * `rings` contains the open polylines; the caller is expected to
  * treat them as un-closed paths.
  *
- * Throws if the object is missing or not a recognised geometry type —
- * preferring a loud failure over silent "empty map" output, which is
- * almost always a wiring bug on the caller's side.
+ * The topology is checked first ({@link checkTopology}): a missing object, a malformed arc
+ * table or a geometry of the wrong shape throws `ChartOptionsError` naming the path — preferring
+ * a loud failure over silent "empty map" output, which is almost always a wiring bug on the
+ * caller's side. `at` names the paths from the public caller's parameters.
  */
 export function resolveTopologyObject(
   topology: TopologyLike,
-  objectName: string
+  objectName: string,
+  at: TopologyArgument = AS_PARAMETERS
 ): Array<{
   id: string | number | undefined;
   properties: Record<string, unknown> | undefined;
   geometry: TopoGeometry;
   rings: ResolvedRing[];
 }> {
-  const obj = topology.objects?.[objectName];
-  if (!obj) {
-    throw new ChartOptionsError(
-      `resolveTopologyObject: topology.objects['${objectName}'] not found (available: ${
-        Object.keys(topology.objects ?? {}).join(", ") || "<none>"
-      }).`
-    );
-  }
-  if (!Array.isArray(topology.arcs)) {
-    // Malformed input — TopoJSON spec requires `arcs` to be an array. We
-    // bail out explicitly (rather than throwing inside `decode` below
-    // from a `TypeError: Cannot read properties of undefined`) so the
-    // caller sees a clear message.
-    throw new ChartOptionsError(
-      `resolveTopologyObject: topology.arcs is missing or not an array; cannot decode geometry.`
-    );
-  }
-  const rawScale = topology.transform?.scale;
-  const rawTranslate = topology.transform?.translate;
-  // Defensive: verify both are finite 2-tuples before forwarding to
-  // `dequantiseArc`. A single `NaN` / `Infinity` in scale or translate
-  // would otherwise propagate through every coordinate.
-  const isFinitePair = (v: unknown): v is [number, number] =>
-    Array.isArray(v) && v.length === 2 && Number.isFinite(v[0]) && Number.isFinite(v[1]);
-  const scale = isFinitePair(rawScale) ? rawScale : undefined;
-  const translate = isFinitePair(rawTranslate) ? rawTranslate : undefined;
+  checkTopology(topology, objectName, at);
+  const obj = topology.objects[objectName];
+  // Both are finite pairs when present (checked above), so a `NaN` cannot propagate through
+  // every coordinate.
+  const scale = topology.transform?.scale;
+  const translate = topology.transform?.translate;
   // Cache decoded arcs by their positive index. A world-atlas topology
   // typically shares each arc between 2–4 neighbouring countries; with
   // no cache, `dequantiseArc` (an O(n) delta-accumulator) runs that

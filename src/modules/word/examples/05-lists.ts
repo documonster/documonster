@@ -97,13 +97,12 @@ const legalAbstract: AbstractNumbering = {
 const legalNumId = 100;
 const legalInstance: NumberingInstance = { numId: legalNumId, abstractNumId: 100 };
 
-const docModel = Document.build(doc);
 const merged = {
-  ...docModel,
-  abstractNumberings: [...(docModel.abstractNumberings ?? []), legalAbstract],
-  numberingInstances: [...(docModel.numberingInstances ?? []), legalInstance],
+  ...doc,
+  abstractNumberings: [...(doc.abstractNumberings ?? []), legalAbstract],
+  numberingInstances: [...(doc.numberingInstances ?? []), legalInstance],
   body: [
-    ...docModel.body,
+    ...doc.body,
     Build.textParagraph("Article one — overview.", {
       numbering: { numId: legalNumId, level: 0 }
     }),

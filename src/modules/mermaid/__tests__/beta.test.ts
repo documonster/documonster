@@ -6,7 +6,7 @@
  * have to be rewritten whenever a margin moved and would say nothing about quality.
  */
 import type { DrawNode } from "@draw/types";
-import { layoutFlowchart, mermaidToDrawList, parseMermaid } from "@mermaid/index";
+import { Mermaid } from "@mermaid/index";
 import { resolveTheme } from "@mermaid/theme";
 import type {
   ArchitectureDiagram,
@@ -38,7 +38,7 @@ function segmentsCross(
 
 /** How many pairs of edges cross in the drawn result. */
 function crossingCount(source: string): number {
-  const result = layoutFlowchart(parseMermaid(source) as FlowchartDiagram);
+  const result = Mermaid.layoutGraph(Mermaid.parse(source) as FlowchartDiagram);
   let total = 0;
   for (let i = 0; i < result.edges.length; i++) {
     for (let j = i + 1; j < result.edges.length; j++) {
@@ -113,8 +113,8 @@ describe("layered layout", () => {
   it("threads a skip edge through the diagram rather than around it", () => {
     // Dummy nodes hold a lane open at each rank the edge passes through, so it can be
     // ordered against what is there instead of routed around everything afterwards.
-    const result = layoutFlowchart(
-      parseMermaid("flowchart TD\n A --> B --> C --> D\n A --> D") as FlowchartDiagram
+    const result = Mermaid.layoutGraph(
+      Mermaid.parse("flowchart TD\n A --> B --> C --> D\n A --> D") as FlowchartDiagram
     );
     const skip = result.edges.find(route => route.edge.from === "A" && route.edge.to === "D")!;
     for (const point of skip.points) {
@@ -126,8 +126,8 @@ describe("layered layout", () => {
   it("does not let the scaffolding bend the trunk", () => {
     // A dummy threading past a chain used to pull its neighbours sideways, so the trunk
     // drifted towards whichever long edge happened to run alongside it.
-    const result = layoutFlowchart(
-      parseMermaid("flowchart TD\n A --> B --> C --> D --> E\n A --> E") as FlowchartDiagram
+    const result = Mermaid.layoutGraph(
+      Mermaid.parse("flowchart TD\n A --> B --> C --> D --> E\n A --> E") as FlowchartDiagram
     );
     const centres = ["A", "B", "C", "D", "E"].map(id => {
       const box = result.nodes.find(node => node.id === id)!;
@@ -143,8 +143,8 @@ describe("layered layout", () => {
 
   it("leaves no dummy in the result", () => {
     // They are scaffolding: they steer the layout and then leave.
-    const result = layoutFlowchart(
-      parseMermaid("flowchart TD\n A --> B --> C --> D\n A --> D") as FlowchartDiagram
+    const result = Mermaid.layoutGraph(
+      Mermaid.parse("flowchart TD\n A --> B --> C --> D\n A --> D") as FlowchartDiagram
     );
     expect(result.nodes.map(node => node.id).sort()).toEqual(["A", "B", "C", "D"]);
   });
@@ -152,10 +152,10 @@ describe("layered layout", () => {
   it("reads a link written without spaces", () => {
     // `-` may sit inside an identifier, so `n1-->n2` parsed as one node called `n1--` and
     // the arrow disappeared with the edge it declared.
-    const diagram = parseMermaid("flowchart TD\n n1-->n2-->n3") as FlowchartDiagram;
+    const diagram = Mermaid.parse("flowchart TD\n n1-->n2-->n3") as FlowchartDiagram;
     expect(diagram.edges.map(edge => `${edge.from}${edge.to}`)).toEqual(["n1n2", "n2n3"]);
     expect(
-      (parseMermaid("flowchart TD\n my-node-->other-node") as FlowchartDiagram).edges[0]
+      (Mermaid.parse("flowchart TD\n my-node-->other-node") as FlowchartDiagram).edges[0]
     ).toMatchObject({ from: "my-node", to: "other-node" });
   });
 });
@@ -178,7 +178,7 @@ describe("theme", () => {
 });
 
 describe("packet", () => {
-  const parse = (source: string): PacketDiagram => parseMermaid(source) as PacketDiagram;
+  const parse = (source: string): PacketDiagram => Mermaid.parse(source) as PacketDiagram;
 
   it("reads a range and a single bit alike", () => {
     const diagram = parse('packet-beta\n 0-15: "A"\n 16: "B"');
@@ -190,13 +190,13 @@ describe("packet", () => {
 
   it("splits a field that straddles a row", () => {
     // One field, two cells: the diagram is read row by row.
-    const list = mermaidToDrawList('packet-beta\n bits-per-row: 8\n 4-11: "Wide"');
+    const list = Mermaid.toDrawList('packet-beta\n bits-per-row: 8\n 4-11: "Wide"');
     const cells = list.children.filter(node => node.kind === "rect");
     expect(cells).toHaveLength(2);
   });
 
   it("sizes a cell by the bits it covers", () => {
-    const list = mermaidToDrawList('packet-beta\n 0-3: "Narrow"\n 4-19: "Wide"');
+    const list = Mermaid.toDrawList('packet-beta\n 0-3: "Narrow"\n 4-19: "Wide"');
     const cells = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "rect" }> => node.kind === "rect"
     );
@@ -205,7 +205,7 @@ describe("packet", () => {
 });
 
 describe("kanban", () => {
-  const parse = (source: string): KanbanDiagram => parseMermaid(source) as KanbanDiagram;
+  const parse = (source: string): KanbanDiagram => Mermaid.parse(source) as KanbanDiagram;
 
   it("takes its columns and cards from the indentation", () => {
     const diagram = parse("kanban\n todo[To do]\n  a[One]\n  b[Two]\n done[Done]\n  c[Three]");
@@ -222,7 +222,7 @@ describe("kanban", () => {
   });
 
   it("draws a lane per column and a panel per card", () => {
-    const list = mermaidToDrawList("kanban\n a[A]\n  x[One]\n b[B]");
+    const list = Mermaid.toDrawList("kanban\n a[A]\n  x[One]\n b[B]");
     const panels = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "rect" }> => node.kind === "rect" && node.rx === 4
     );
@@ -231,7 +231,7 @@ describe("kanban", () => {
 });
 
 describe("radar", () => {
-  const parse = (source: string): RadarDiagram => parseMermaid(source) as RadarDiagram;
+  const parse = (source: string): RadarDiagram => Mermaid.parse(source) as RadarDiagram;
 
   it("reads axes and curves", () => {
     const diagram = parse('radar-beta\n axis a["A"], b["B"], c["C"]\n curve x["X"]{1, 2, 3}');
@@ -240,7 +240,7 @@ describe("radar", () => {
   });
 
   it("draws a closed ring per series", () => {
-    const list = mermaidToDrawList(
+    const list = Mermaid.toDrawList(
       "radar-beta\n axis a, b, c, d\n curve one{1,2,3,4}\n curve two{4,3,2,1}"
     );
     const rings = list.children.filter(
@@ -252,13 +252,13 @@ describe("radar", () => {
   });
 
   it("refuses to draw fewer than three axes rather than inventing a shape", () => {
-    expect(mermaidToDrawList("radar-beta\n axis a, b\n curve x{1,2}").children).toHaveLength(0);
+    expect(Mermaid.toDrawList("radar-beta\n axis a, b\n curve x{1,2}").children).toHaveLength(0);
   });
 });
 
 describe("architecture", () => {
   const parse = (source: string): ArchitectureDiagram =>
-    parseMermaid(source) as ArchitectureDiagram;
+    Mermaid.parse(source) as ArchitectureDiagram;
 
   it("reads services, their icons and the group they sit in", () => {
     const diagram = parse(`architecture-beta
@@ -278,7 +278,7 @@ describe("architecture", () => {
   });
 
   it("names the icon it cannot draw rather than dropping it", () => {
-    const list = mermaidToDrawList(
+    const list = Mermaid.toDrawList(
       "architecture-beta\n service db(database)[Store]\n service a\n db --> a"
     );
     const labels = list.children
@@ -293,24 +293,24 @@ describe("every token does what its name says", () => {
   it("colours data from the palette and boxes from the node tokens", () => {
     // A Gantt bar is a value, not a box: restyling a flowchart's boxes must not restyle a
     // chart, and vice versa.
-    const bar = mermaidToDrawList("gantt\n section S\n T :2024-01-01, 5d", {
+    const bar = Mermaid.toDrawList("gantt\n section S\n T :2024-01-01, 5d", {
       theme: { palette: ["#ff0000"] }
     });
-    const unchanged = mermaidToDrawList("gantt\n section S\n T :2024-01-01, 5d", {
+    const unchanged = Mermaid.toDrawList("gantt\n section S\n T :2024-01-01, 5d", {
       theme: { nodeFill: "#ff0000" }
     });
-    const plain = mermaidToDrawList("gantt\n section S\n T :2024-01-01, 5d");
+    const plain = Mermaid.toDrawList("gantt\n section S\n T :2024-01-01, 5d");
     expect(JSON.stringify(bar)).not.toBe(JSON.stringify(plain));
     expect(JSON.stringify(unchanged)).toBe(JSON.stringify(plain));
   });
 
   it("colours a flowchart's boxes from the node tokens and not from the palette", () => {
     const source = "flowchart TD\n A --> B";
-    const plain = JSON.stringify(mermaidToDrawList(source));
-    expect(JSON.stringify(mermaidToDrawList(source, { theme: { nodeFill: "#ff0000" } }))).not.toBe(
+    const plain = JSON.stringify(Mermaid.toDrawList(source));
+    expect(JSON.stringify(Mermaid.toDrawList(source, { theme: { nodeFill: "#ff0000" } }))).not.toBe(
       plain
     );
-    expect(JSON.stringify(mermaidToDrawList(source, { theme: { palette: ["#ff0000"] } }))).toBe(
+    expect(JSON.stringify(Mermaid.toDrawList(source, { theme: { palette: ["#ff0000"] } }))).toBe(
       plain
     );
   });

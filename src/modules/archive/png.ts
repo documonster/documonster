@@ -31,7 +31,7 @@
  * `crc32`, so DEFLATE is reachable from this entry with or without this file;
  * the encoder adds only its chunk framing. From the other direction the edge is
  * unchanged in cost, one hop longer: `excel/chart → archive/png →
- * archive/compression`, so `Chart.toPNG` still pays for DEFLATE + CRC32 (≈4 KB
+ * archive/compression`, so `Chart.toPng` still pays for DEFLATE + CRC32 (≈4 KB
  * on Node, which reaches `node:zlib`; ≈24 KB in a browser, which needs the JS
  * deflate because `CompressionStream` is async). `scripts/treeshake-verify.ts`
  * allows exactly `archive/compression/` and `archive/png` for the `Chart`
@@ -41,6 +41,7 @@
 
 import { zlibSync } from "@archive/compression/compress";
 import { crc32 } from "@archive/compression/crc32";
+import { ArchiveArgumentError } from "@archive/core/errors";
 import { concatUint8Arrays, textEncoder } from "@utils/binary";
 
 /** PNG file signature (\x89 P N G \r \n \x1a \n). */
@@ -57,32 +58,63 @@ export interface EncodePngOptions {
   /**
    * Physical resolution in dots per inch, written as a `pHYs` chunk so
    * consumers (Word, Excel, print pipelines) scale the image correctly instead
-   * of assuming 96 DPI. Omitted entirely when undefined.
+   * of assuming 96 DPI. No `pHYs` is written when it is undefined; anything but a
+   * positive finite number describes no resolution and is refused.
    */
   readonly dpi?: number;
 }
 
 /**
- * Encode 8-bit RGBA pixels as a PNG file.
+ * Encode 8-bit RGBA pixels as a PNG file. A wrong argument is an `ArchiveArgumentError`.
  *
- * @param rgba - Row-major RGBA bytes, exactly `width * height * 4` long.
+ * @param rgba - Row-major RGBA bytes, exactly `width * height * 4` long: a `Uint8Array`
+ *   or a `Uint8ClampedArray` (a canvas `ImageData`'s `data`).
  * @param width - Image width in pixels; must be a positive integer.
  * @param height - Image height in pixels; must be a positive integer.
  * @param options - Optional `pHYs` resolution.
+ * @throws {ArchiveArgumentError} For a wrong argument; `field` names it (`"options.dpi"` for a
+ *   dpi that is not a positive finite number).
  */
 export function encodePng(
-  rgba: Uint8Array,
+  rgba: Uint8Array | Uint8ClampedArray,
   width: number,
   height: number,
   options: EncodePngOptions = {}
 ): Uint8Array {
+  if (
+    !ArrayBuffer.isView(rgba) ||
+    (rgba as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT !== 1
+  ) {
+    throw new ArchiveArgumentError(
+      "rgba",
+      "Archive.encodePng: rgba must be a Uint8Array or Uint8ClampedArray"
+    );
+  }
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
-    throw new Error(`PNG dimensions must be positive integers, got ${width}x${height}`);
+    throw new ArchiveArgumentError(
+      Number.isInteger(width) && width > 0 ? "height" : "width",
+      `Archive.encodePng: width and height must be positive integers, got ${width}x${height}`
+    );
+  }
+  if (typeof options !== "object" || options === null) {
+    throw new ArchiveArgumentError("options", "Archive.encodePng: options must be an object");
+  }
+  const { dpi } = options;
+  // A NaN or non-positive dpi would round to an invalid zero pixels-per-metre `pHYs`, and
+  // writing none instead would hide the mistake.
+  if (dpi !== undefined && (typeof dpi !== "number" || !Number.isFinite(dpi) || dpi <= 0)) {
+    throw new ArchiveArgumentError(
+      "options.dpi",
+      `Archive.encodePng: options.dpi must be a positive finite number, got ${
+        typeof dpi === "number" ? String(dpi) : dpi === null ? "null" : typeof dpi
+      }`
+    );
   }
   const expected = width * height * 4;
   if (rgba.length !== expected) {
-    throw new Error(
-      `PNG pixel buffer is ${rgba.length} bytes but ${width}x${height} RGBA needs ${expected}`
+    throw new ArchiveArgumentError(
+      "rgba",
+      `Archive.encodePng: rgba is ${rgba.length} bytes but ${width}x${height} RGBA needs ${expected}`
     );
   }
 
@@ -100,11 +132,8 @@ export function encodePng(
     )
   ];
 
-  // Guard the same way `withPngDpi` does: a NaN or non-positive dpi would
-  // otherwise round to NaN and serialise as a zero pixels-per-metre `pHYs`,
-  // which is invalid rather than merely unhelpful.
-  if (options.dpi !== undefined && Number.isFinite(options.dpi) && options.dpi > 0) {
-    const pixelsPerMetre = Math.max(1, Math.round(options.dpi / METRES_PER_INCH));
+  if (dpi !== undefined) {
+    const pixelsPerMetre = Math.max(1, Math.round(dpi / METRES_PER_INCH));
     chunks.push(
       pngChunk(
         "pHYs",
@@ -132,7 +161,11 @@ export function encodePng(
  * lets deflate do the work; the adaptive filters would only pay off for
  * photographic content, which nothing here produces.
  */
-function buildScanlines(rgba: Uint8Array, width: number, height: number): Uint8Array {
+function buildScanlines(
+  rgba: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number
+): Uint8Array {
   const rowBytes = width * 4;
   const strideOut = rowBytes + 1;
   const out = new Uint8Array(strideOut * height);
@@ -167,7 +200,7 @@ function u32be(value: number): Uint8Array {
  *
  * Needed because the browser raster path produces its bytes with
  * `canvas.toBlob()`, which has no way to express a physical resolution — so
- * `Chart.toPNG({ dpi })` wrote the resolution on Node and silently dropped it in
+ * `Chart.toPng({ dpi })` wrote the resolution on Node and silently dropped it in
  * a browser, and the same call produced images that printed at different sizes
  * per platform. Rewriting the container afterwards is cheap and keeps the pixel
  * data untouched.

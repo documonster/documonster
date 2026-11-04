@@ -49,6 +49,8 @@
 
 import type { ExternalLinkCachedSheet, ExternalLinkModel } from "@excel/core/workbook.browser";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
+import { PreservedSubtreeXform } from "@excel/xlsx/xform/preserved-xml-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
@@ -68,7 +70,19 @@ export interface ParsedExternalLink {
   externalBookRId: string;
   sheetNames: string[];
   cachedValues: Record<string, ExternalLinkCachedSheet>;
+  /** What the model does not describe, when the part had any. */
+  unmodelled?: {
+    /** `mc:Ignorable` and the `xmlns:*` declarations of the root. */
+    rootAttributes: Record<string, string>;
+    /** Unmodelled children of `<externalBook>`, with the modelled element each followed. */
+    bookChildren: { xml: string; after: string }[];
+    /** Unmodelled children of `<externalLink>` (an `extLst`), as XML. */
+    linkChildren: string[];
+  };
 }
+
+/** The children of `<externalBook>` the model describes; anything else is kept as XML. */
+const MODELLED_BOOK_CHILDREN = new Set(["sheetNames", "sheetDataSet"]);
 
 class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
   /** Sheet name indexed by sheetId (0-based) — filled during parse. */
@@ -84,9 +98,27 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
   private currentCellValue: string | null = null;
   /** Which element we're currently inside. */
   private inV = false;
+  /** Open elements outside a captured subtree, outermost first. */
+  private open: string[] = [];
+  /** The unmodelled subtree being captured, and where it goes. */
+  private capture: { xform: PreservedSubtreeXform; into: "book" | "link" } | null = null;
+  /** The last modelled child of `<externalBook>` seen, for placing a captured one. */
+  private lastBookChild = "start";
+  /** The root's declarations, and what was captured; see `ParsedExternalLink.unmodelled`. */
+  private rootAttributes: Record<string, string> = {};
+  private bookChildren: { xml: string; after: string }[] = [];
+  private linkChildren: string[] = [];
 
   get tag(): string {
     return "externalLink";
+  }
+
+  /**
+   * What the root is written with: the fixed pair, and — for a part read from a file — the declarations its root
+   * carried, so a fragment kept from it need not repeat them.
+   */
+  get writerNamespaces(): WriterNamespaces {
+    return { fixed: ROOT_ATTRIBUTES, preservesDocumentPrefixes: true };
   }
 
   reset(): void {
@@ -98,6 +130,12 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
     this.currentCellType = "n";
     this.currentCellValue = null;
     this.inV = false;
+    this.open = [];
+    this.capture = null;
+    this.lastBookChild = "start";
+    this.rootAttributes = {};
+    this.bookChildren = [];
+    this.linkChildren = [];
   }
 
   // ==========================================================================
@@ -105,12 +143,21 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
   // ==========================================================================
 
   render(xmlStream: XmlSink, model: ExternalLinkModel): void {
+    const preserved = model.preserved;
+    const bookChildren = (after: string): void => {
+      for (const child of preserved?.bookChildren ?? []) {
+        if (child.after === after) {
+          xmlStream.writeRaw(child.xml);
+        }
+      }
+    };
     xmlStream.openXml(StdDocAttributes);
-    xmlStream.openNode("externalLink", ROOT_ATTRIBUTES);
+    xmlStream.openNode("externalLink", { ...preserved?.rootAttributes, ...ROOT_ATTRIBUTES });
 
-    // We always use "rId1" for the externalBook ref — the externalLinkN.rels
-    // file only ever has a single relationship (the externalLinkPath one).
-    xmlStream.openNode("externalBook", { "r:id": "rId1" });
+    // "rId1" for a link this library authored, whose part has a single relationship. A link read from a file keeps
+    // the id its book used, because the fragments preserved beside it name the part's other relationships by id.
+    xmlStream.openNode("externalBook", { "r:id": preserved?.bookRelationshipId ?? "rId1" });
+    bookChildren("start");
 
     if (model.sheetNames.length > 0) {
       xmlStream.openNode("sheetNames");
@@ -119,6 +166,7 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
       }
       xmlStream.closeNode();
     }
+    bookChildren("sheetNames");
 
     // Emit cached values when supplied. We must always emit <sheetDataSet>
     // if any sheet has cached values — it's fine to omit when none do.
@@ -142,8 +190,12 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
       }
     }
     xmlStream.closeNode();
+    bookChildren("sheetDataSet");
 
     xmlStream.closeNode(); // </externalBook>
+    for (const child of preserved?.linkChildren ?? []) {
+      xmlStream.writeRaw(child);
+    }
     xmlStream.closeNode(); // </externalLink>
   }
 
@@ -154,6 +206,28 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
   parseOpen(node: ParseOpenTag): boolean {
     const name = node.name as string;
 
+    if (this.capture) {
+      this.capture.xform.parseOpen(node);
+      return true;
+    }
+    const parent = this.open[this.open.length - 1];
+    if (
+      this.model &&
+      ((parent === "externalBook" && !MODELLED_BOOK_CHILDREN.has(name)) ||
+        (parent === "externalLink" && name !== "externalBook"))
+    ) {
+      this.capture = {
+        xform: new PreservedSubtreeXform(),
+        into: parent === "externalBook" ? "book" : "link"
+      };
+      this.capture.xform.parseOpen(node);
+      return true;
+    }
+    this.open.push(name);
+    if (parent === "externalBook") {
+      this.lastBookChild = name;
+    }
+
     switch (name) {
       case "externalLink":
         this.model = {
@@ -161,6 +235,17 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
           sheetNames: [],
           cachedValues: {}
         };
+        // The writer declares the main and relationship namespaces itself, under its own prefixes, so a declaration of
+        // either is not kept — whatever prefix the file used for it.
+        this.rootAttributes = Object.fromEntries(
+          Object.entries(node.attributes).filter(
+            ([key, value]) =>
+              (key.startsWith("xmlns:") && value !== NAMESPACE && value !== R_NAMESPACE) ||
+              key.endsWith(":Ignorable")
+          )
+        ) as Record<string, string>;
+        this.bookChildren = [];
+        this.linkChildren = [];
         this.sheetNamesByIndex = [];
         return true;
 
@@ -205,12 +290,29 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
   }
 
   parseText(text: string): void {
+    if (this.capture) {
+      this.capture.xform.parseText(text);
+      return;
+    }
     if (this.inV) {
       this.currentCellValue = (this.currentCellValue ?? "") + text;
     }
   }
 
   parseClose(name: string): boolean {
+    if (this.capture) {
+      if (!this.capture.xform.parseClose(name)) {
+        const xml = this.capture.xform.model as string;
+        if (this.capture.into === "book") {
+          this.bookChildren.push({ xml, after: this.lastBookChild });
+        } else {
+          this.linkChildren.push(xml);
+        }
+        this.capture = null;
+      }
+      return true;
+    }
+    this.open.pop();
     switch (name) {
       case "v":
         this.inV = false;
@@ -243,6 +345,13 @@ class ExternalLinkXform extends BaseXform<ParsedExternalLink> {
 
       case "externalLink":
         // Document root closed — stop parsing
+        if (this.model && (this.bookChildren.length > 0 || this.linkChildren.length > 0)) {
+          this.model.unmodelled = {
+            rootAttributes: this.rootAttributes,
+            bookChildren: this.bookChildren,
+            linkChildren: this.linkChildren
+          };
+        }
         return false;
 
       default:

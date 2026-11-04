@@ -21,7 +21,7 @@ import {
   DEFAULT_TAR_GNAME
 } from "@archive/tar/tar-constants";
 import type { TarEntryInfo } from "@archive/tar/tar-entry-info";
-import { textEncoder, textDecoder } from "@utils/binary";
+import { concatUint8Arrays, textEncoder, textDecoder } from "@utils/binary";
 
 /**
  * Encode a string to a fixed-size field (null-terminated if space allows)
@@ -58,38 +58,45 @@ function encodeOctal(value: number, size: number): Uint8Array {
 }
 
 /**
- * Encode a large number (for sizes > 8GB) using GNU binary format
+ * Encode a number in a `size`-byte field: octal when it fits (`size - 1` digits and a NUL,
+ * what every reader understands), else GNU base-256 — a set high bit, then the value as
+ * big-endian two's complement, which holds a negative value (an mtime before 1970) too.
  */
 function encodeLargeNumber(value: number, size: number): Uint8Array {
-  if (value < 0o77777777777) {
-    // Fits in octal
+  if (value >= 0 && value < 8 ** (size - 1)) {
     return encodeOctal(value, size);
   }
 
-  // Use GNU binary format: high bit set, followed by big-endian number
   const result = new Uint8Array(size);
-  result[0] = 0x80; // High bit set indicates binary format
-
-  // Write as big-endian (right-aligned)
+  // Two's complement, one byte at a time from the low end; exact for any safe integer.
   let remaining = value;
-  for (let i = size - 1; i > 0; i--) {
-    result[i] = remaining & 0xff;
-    remaining = Math.floor(remaining / 256);
+  for (let i = size - 1; i >= 0; i--) {
+    const byte = ((remaining % 256) + 256) % 256;
+    result[i] = byte;
+    remaining = (remaining - byte) / 256;
   }
-
+  result[0] = value < 0 ? 0xff : 0x80 | result[0]!;
   return result;
 }
 
 /**
- * Decode an octal number from a field
+ * Decode a number field: octal, or GNU base-256 (high bit set; two's complement, so a
+ * leading `0xff` is negative).
  */
 function decodeOctal(data: Uint8Array, offset: number, size: number): number {
-  // Check for GNU binary format (high bit set)
-  if (data[offset] & 0x80) {
-    // Binary format: big-endian number
-    let value = 0;
+  const first = data[offset]!;
+  if (first === 0xff) {
+    // Negative: read the complement, which stays small and exact, then negate.
+    let complement = 0;
     for (let i = offset + 1; i < offset + size; i++) {
-      value = value * 256 + data[i];
+      complement = complement * 256 + (255 - data[i]!);
+    }
+    return -(complement + 1);
+  }
+  if (first & 0x80) {
+    let value = first & 0x7f;
+    for (let i = offset + 1; i < offset + size; i++) {
+      value = value * 256 + data[i]!;
     }
     return value;
   }
@@ -159,28 +166,24 @@ export function isZeroBlock(block: Uint8Array): boolean {
  * Returns null if the path is too long even with prefix
  */
 function splitPath(path: string): { prefix: string; name: string } | null {
-  const maxName = TAR_HEADER.name.size - 1; // 99 chars
-  const maxPrefix = TAR_HEADER.prefix.size - 1; // 154 chars
-  const maxTotal = maxName + maxPrefix + 1; // +1 for separator
+  // The fields hold bytes, so a name is measured in UTF-8 bytes, not characters.
+  const maxName = TAR_HEADER.name.size - 1; // 99 bytes
+  const maxPrefix = TAR_HEADER.prefix.size - 1; // 154 bytes
+  const byteLength = (text: string) => textEncoder.encode(text).length;
 
-  if (path.length <= maxName) {
+  if (byteLength(path) <= maxName) {
     return { prefix: "", name: path };
   }
 
-  if (path.length > maxTotal) {
-    return null; // Too long even with prefix
-  }
-
-  // Find a good split point (directory separator within valid range)
-  const splitStart = path.length - maxName;
-  const splitEnd = Math.min(path.length, maxPrefix + 1);
-
-  for (let i = splitEnd; i >= splitStart; i--) {
-    if (path[i] === "/") {
-      return {
-        prefix: path.substring(0, i),
-        name: path.substring(i + 1)
-      };
+  // Split at the last separator that leaves both halves within their fields.
+  for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
+    const name = path.substring(i + 1);
+    if (byteLength(name) > maxName) {
+      return null; // Splitting further left only lengthens the name
+    }
+    const prefix = path.substring(0, i);
+    if (name && byteLength(prefix) <= maxPrefix) {
+      return { prefix, name };
     }
   }
 
@@ -205,8 +208,9 @@ export interface TarHeaderOptions {
 /**
  * Encode a TAR header
  *
- * Returns { header, longName? } where longName is an optional GNU long name entry
- * if the filename exceeds ustar limits.
+ * Returns { header, longName? } where longName holds the GNU records that go before the
+ * header: a long-link record (`K`) when the link target exceeds its 100-byte field, then a
+ * long-name record (`L`) when the path exceeds the ustar name and prefix fields.
  */
 export function encodeHeader(options: TarHeaderOptions): {
   header: Uint8Array;
@@ -241,7 +245,13 @@ export function encodeHeader(options: TarHeaderOptions): {
     // Path too long - use GNU long name extension
     name = path.substring(0, TAR_HEADER.name.size - 1);
     prefix = "";
-    longNameHeader = createGnuLongNameHeader(path);
+    longNameHeader = createGnuLongNameHeader(path, TAR_TYPE.GNU_LONG_NAME);
+  }
+
+  // A link target too long for its field goes in a GNU long-link record, read the same way.
+  if (textEncoder.encode(linkname).length >= TAR_HEADER.linkname.size) {
+    const longLink = createGnuLongNameHeader(linkname, TAR_TYPE.GNU_LONG_LINK);
+    longNameHeader = longNameHeader ? concatUint8Arrays([longLink, longNameHeader]) : longLink;
   }
 
   // Create header block
@@ -253,16 +263,17 @@ export function encodeHeader(options: TarHeaderOptions): {
   // Mode
   header.set(encodeOctal(mode, TAR_HEADER.mode.size), TAR_HEADER.mode.offset);
 
-  // UID/GID
-  header.set(encodeOctal(uid, TAR_HEADER.uid.size), TAR_HEADER.uid.offset);
-  header.set(encodeOctal(gid, TAR_HEADER.gid.size), TAR_HEADER.gid.offset);
+  // UID/GID: base-256 past the 7 octal digits (2097151), as container images need
+  header.set(encodeLargeNumber(uid, TAR_HEADER.uid.size), TAR_HEADER.uid.offset);
+  header.set(encodeLargeNumber(gid, TAR_HEADER.gid.size), TAR_HEADER.gid.offset);
 
   // Size
   header.set(encodeLargeNumber(size, TAR_HEADER.size.size), TAR_HEADER.size.offset);
 
-  // Modification time (seconds since epoch)
+  // Modification time (seconds since epoch); past 2242 the 11 octal digits run out, and
+  // GNU base-256 holds it as the size field does
   const mtimeSecs = Math.floor(mtime.getTime() / 1000);
-  header.set(encodeOctal(mtimeSecs, TAR_HEADER.mtime.size), TAR_HEADER.mtime.offset);
+  header.set(encodeLargeNumber(mtimeSecs, TAR_HEADER.mtime.size), TAR_HEADER.mtime.offset);
 
   // Type flag
   header.set(textEncoder.encode(type), TAR_HEADER.type.offset);
@@ -301,7 +312,10 @@ export function encodeHeader(options: TarHeaderOptions): {
 /**
  * Create a GNU long name header entry
  */
-function createGnuLongNameHeader(path: string): Uint8Array {
+function createGnuLongNameHeader(
+  path: string,
+  type: typeof TAR_TYPE.GNU_LONG_NAME | typeof TAR_TYPE.GNU_LONG_LINK
+): Uint8Array {
   const nameBytes = textEncoder.encode(path + "\0");
   const paddedSize = Math.ceil(nameBytes.length / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
 
@@ -309,7 +323,7 @@ function createGnuLongNameHeader(path: string): Uint8Array {
   const { header } = encodeHeader({
     path: "././@LongLink",
     size: nameBytes.length,
-    type: TAR_TYPE.GNU_LONG_NAME,
+    type,
     mode: 0,
     mtime: new Date(0)
   });

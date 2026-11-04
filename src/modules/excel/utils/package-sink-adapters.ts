@@ -72,7 +72,7 @@ export class ArchiveSink implements PackageSink {
 
   /** The finished package. */
   async bytes(): Promise<Uint8Array> {
-    return await this.archive.bytes();
+    return await this.archive.toBuffer();
   }
 }
 

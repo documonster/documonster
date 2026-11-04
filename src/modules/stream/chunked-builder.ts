@@ -5,7 +5,7 @@
  * This file provides the same API but works in browser environments.
  */
 
-import { StreamStateError } from "@stream/errors";
+import { StreamStateError, StreamTypeError } from "@stream/errors";
 import { textEncoder } from "@utils/binary";
 
 /**
@@ -16,6 +16,15 @@ export interface ChunkedBuilderOptions {
   chunkSize?: number;
   /** Initial capacity hint */
   initialCapacity?: number;
+}
+
+function checkPiece(piece: unknown): void {
+  if (typeof piece !== "string") {
+    throw new StreamTypeError("a string piece", piece === null ? "null" : typeof piece, {
+      field: "piece",
+      where: "Streams.ChunkedBuilder#push"
+    });
+  }
 }
 
 /**
@@ -36,6 +45,7 @@ export class ChunkedBuilder {
    * Add a piece to the builder
    */
   push(piece: string): void {
+    checkPiece(piece);
     this._pieces.push(piece);
     this._totalLength += piece.length;
     if (this._pieces.length >= this._chunkSize) {
@@ -46,7 +56,11 @@ export class ChunkedBuilder {
   /**
    * Add multiple pieces
    */
-  pushAll(pieces: string[]): void {
+  pushAll(pieces: readonly string[]): void {
+    // Checked before any is added, so a refusal leaves the builder as it was.
+    for (const piece of pieces) {
+      checkPiece(piece);
+    }
     const len = pieces.length;
     for (let i = 0; i < len; i++) {
       this._pieces.push(pieces[i]);
@@ -106,34 +120,16 @@ export class ChunkedBuilder {
   }
 
   /**
-   * Build final string
+   * Build final string. A read: the builder is left as it was.
    */
   toString(): string {
-    const chunksLen = this._chunks.length;
-    const piecesLen = this._pieces.length;
-
-    // Fast path: only pieces, no chunks
-    if (chunksLen === 0) {
-      if (piecesLen === 0) {
-        return "";
-      }
-      if (piecesLen === 1) {
-        return this._pieces[0];
-      }
-      return this._pieces.join("");
+    if (this._chunks.length === 0) {
+      return this._pieces.length === 1 ? this._pieces[0] : this._pieces.join("");
     }
-
-    // Has chunks - consolidate and join
-    if (piecesLen > 0) {
-      this._chunks.push(this._pieces.join(""));
-      this._pieces.length = 0;
+    if (this._pieces.length === 0) {
+      return this._chunks.length === 1 ? this._chunks[0] : this._chunks.join("");
     }
-
-    if (this._chunks.length === 1) {
-      return this._chunks[0];
-    }
-
-    return this._chunks.join("");
+    return this._chunks.join("") + this._pieces.join("");
   }
 
   /**

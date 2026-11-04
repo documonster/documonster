@@ -1,11 +1,11 @@
 import { zip } from "@archive/create-archive";
 import { extractAll } from "@archive/unzip/extract";
-import { cellFont, cellGetValue, cellNumFmt, cellOwnStyle, cellSetValue } from "@excel/core/cell";
+import { cellFont, cellGetValue, cellNumFmt, cellOwnStyle } from "@excel/core/cell";
 import type { RowData } from "@excel/core/row";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { rowGetCell } from "@excel/core/worksheet";
 import { ExcelStreamStateError } from "@excel/errors";
-import { Cell, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { describe, it, expect } from "vitest";
 
@@ -40,7 +40,7 @@ async function patchSheetXml(
     }
     archive.add(name, name === path ? patch(new TextDecoder().decode(file.data)) : file.data);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 /** Result of streaming a single worksheet */
@@ -183,11 +183,11 @@ describe("WorksheetReader", () => {
     it("returns column definitions after parsing", async () => {
       const buffer = await buildXlsxBuffer(wb => {
         const ws = Workbook.addWorksheet(wb, "Sheet1");
-        Worksheet.setColumns(ws, [
+        Column.setDefinitions(ws, [
           { header: "ID", key: "id", width: 10 },
           { header: "Name", key: "name", width: 32 }
         ]);
-        Worksheet.addRow(ws, { id: 1, name: "Alice" });
+        Row.add(ws, { id: 1, name: "Alice" });
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -407,9 +407,8 @@ describe("WorksheetReader", () => {
     it("parses row height", async () => {
       const buffer = await buildXlsxBuffer(wb => {
         const ws = Workbook.addWorksheet(wb, "Sheet1");
-        const row = Worksheet.getRow(ws, 1);
-        row.height = 30;
-        cellSetValue(rowGetCell(row, 1), "tall row");
+        Row.setHeight(ws, 1, 30);
+        Cell.setValue(ws, "A1", "tall row");
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -616,7 +615,7 @@ describe("WorksheetReader", () => {
       await Workbook.read(wb, patched);
       const ws = Workbook.getWorksheet(wb, "Sheet1")!;
       const rows: { number: number; get: (col: number) => unknown }[] = [];
-      Worksheet.eachRow(ws, (_row, number) => {
+      Row.each(ws, number => {
         rows.push({ number, get: col => Cell.getValue(ws, `${"ABCDE"[col - 1]}${number}`) });
       });
       expectAddresses(rows);
@@ -689,9 +688,9 @@ describe("WorksheetReader", () => {
     it("correctly maps cells to columns across multiple rows", async () => {
       const buffer = await buildXlsxBuffer(wb => {
         const ws = Workbook.addWorksheet(wb, "Sheet1");
-        Worksheet.addRow(ws, [1, "Alice", true]);
-        Worksheet.addRow(ws, [2, "Bob", false]);
-        Worksheet.addRow(ws, [3, "Charlie", true]);
+        Row.add(ws, [1, "Alice", true]);
+        Row.add(ws, [2, "Bob", false]);
+        Row.add(ws, [3, "Charlie", true]);
       });
       const sheet = await readFirstSheet(buffer);
 
@@ -836,7 +835,7 @@ describe("WorksheetReader", () => {
       const buffer = await buildXlsxBuffer(wb => {
         const ws = Workbook.addWorksheet(wb, "Sheet1");
         for (let i = 1; i <= 1000; i++) {
-          Worksheet.addRow(ws, [i, `name-${i}`, i * 1.5]);
+          Row.add(ws, [i, `name-${i}`, i * 1.5]);
         }
       });
       const sheet = await readFirstSheet(buffer);

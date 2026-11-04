@@ -1,4 +1,6 @@
 import type { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { AbsoluteAnchorXform } from "@excel/xlsx/xform/drawing/absolute-anchor-xform";
+import { OneCellAnchorXform } from "@excel/xlsx/xform/drawing/one-cell-anchor-xform";
 import { TwoCellAnchorXform } from "@excel/xlsx/xform/drawing/two-cell-anchor-xform";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { XmlWriter } from "@xml/writer";
@@ -65,7 +67,7 @@ describe("TwoCellAnchorXform — grouped shapes and picture geometry", () => {
   it("preserves a picture's absolute <a:xfrm> geometry through parse", async () => {
     const model: any = await parseXml(() => new TwoCellAnchorXform(), PIC_ANCHOR);
     expect(model.picture).toBeDefined();
-    expect(model.group).toBeUndefined();
+    expect(model.preserved).toBeUndefined();
     expect(model.picture.xfrmOffX).toBe(123456);
     expect(model.picture.xfrmOffY).toBe(654321);
     expect(model.picture.xfrmExtCx).toBe(1111111);
@@ -84,8 +86,8 @@ describe("TwoCellAnchorXform — grouped shapes and picture geometry", () => {
     const model: any = await parseXml(() => new TwoCellAnchorXform(), GROUP_ANCHOR);
     // The nested <xdr:pic> must NOT be promoted to the anchor's own picture.
     expect(model.picture).toBeUndefined();
-    expect(model.group).toBeDefined();
-    expect(model.group.tag).toBe("xdr:grpSp");
+    expect(model.preserved).toBeDefined();
+    expect(model.preserved.tag).toBe("xdr:grpSp");
   });
 
   it("round-trips a group verbatim, keeping its nested pic, rels and hyperlink", async () => {
@@ -126,7 +128,58 @@ describe("TwoCellAnchorXform — grouped shapes and picture geometry", () => {
         yield GROUP_ANCHOR;
       })()
     );
-    expect(groupModel.group).toBeDefined();
+    expect(groupModel.preserved).toBeDefined();
     expect(groupModel.picture).toBeUndefined();
+  });
+});
+
+describe("one-cell and absolute anchors — unmodelled objects", () => {
+  const NS =
+    'xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ' +
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+  const TEXT_BOX =
+    '<xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="3" name="TextBox 2"/><xdr:cNvSpPr txBox="1"/></xdr:nvSpPr>' +
+    "<xdr:spPr/><xdr:txBody><a:bodyPr/><a:p><a:r><a:t>Kept</a:t></a:r></a:p></xdr:txBody></xdr:sp>";
+  const CONNECTOR =
+    '<xdr:cxnSp macro=""><xdr:nvCxnSpPr><xdr:cNvPr id="4" name="Connector 3"/><xdr:cNvCxnSpPr/></xdr:nvCxnSpPr>' +
+    "<xdr:spPr/></xdr:cxnSp>";
+
+  it.each([
+    ["one-cell text box", () => new OneCellAnchorXform(), "oneCellAnchor", TEXT_BOX, "Kept"],
+    [
+      "one-cell connector",
+      () => new OneCellAnchorXform(),
+      "oneCellAnchor",
+      CONNECTOR,
+      "Connector 3"
+    ],
+    ["absolute text box", () => new AbsoluteAnchorXform(), "absoluteAnchor", TEXT_BOX, "Kept"]
+  ] as const)("keeps a %s", async (_, make, tag, object, marker) => {
+    const position =
+      tag === "oneCellAnchor"
+        ? '<xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="100" cy="100"/>'
+        : '<xdr:pos x="0" y="0"/><xdr:ext cx="100" cy="100"/>';
+    const model: any = await parseXml(
+      make as () => BaseXform<unknown>,
+      `<xdr:${tag} ${NS}>${position}${object}<xdr:clientData/></xdr:${tag}>`
+    );
+    expect(model.preserved).toBeDefined();
+    expect(render(make(), model)).toContain(marker);
+  });
+});
+
+describe("captured objects hold each node once", () => {
+  it("serialises a nested text once", async () => {
+    const xml =
+      '<xdr:oneCellAnchor xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ' +
+      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+      '<xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="1" cy="1"/>' +
+      '<xdr:sp><xdr:nvSpPr><xdr:cNvPr id="3" name="T"/><xdr:cNvSpPr/></xdr:nvSpPr><xdr:spPr/>' +
+      "<xdr:txBody><a:bodyPr/><a:p><a:r><a:rPr/><a:t>Once</a:t></a:r></a:p></xdr:txBody></xdr:sp>" +
+      "<xdr:clientData/></xdr:oneCellAnchor>";
+    const model: any = await parseXml(() => new OneCellAnchorXform() as BaseXform<unknown>, xml);
+    // Held in both `children` and `content`, every level doubled it: 2^5 copies here.
+    expect(JSON.stringify(model).match(/Once/g)).toHaveLength(1);
+    expect(render(new OneCellAnchorXform(), model)).toContain("<a:t>Once</a:t>");
   });
 });

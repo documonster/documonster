@@ -13,8 +13,17 @@
  * - `parseRevisionInfo` (w:ins/w:del/w:rPrChange/etc. revision metadata)
  */
 
+import { setAsideValue } from "@utils/unrecognized-values";
+import { WRITTEN, readToken } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
-import { attrInt, attrVal, boolToggle, findChildNs, safeParseInt } from "@word/reader/parse-utils";
+import {
+  attrInt,
+  attrOnOff,
+  attrVal,
+  boolToggle,
+  findChildNs,
+  safeParseInt
+} from "@word/reader/parse-utils";
 import type {
   Border,
   ColorSpec,
@@ -25,6 +34,7 @@ import type {
   RunProperties,
   RunPropertyChange,
   Shading,
+  TableRowProperties,
   TableWidth,
   UnderlineStyle
 } from "@word/types";
@@ -62,8 +72,9 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
     if (cs) {
       f.cs = cs;
     }
-    if (hint) {
-      f.hint = hint as FontSpec["hint"];
+    const knownHint = readToken(hint, WRITTEN.fontHint, f, "hint");
+    if (knownHint) {
+      f.hint = knownHint as FontSpec["hint"];
     }
     const asciiTheme = attrVal(fontsEl, "asciiTheme");
     if (asciiTheme) {
@@ -166,23 +177,37 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
 
   const uEl = findChildNs(rPrEl, "u");
   if (uEl) {
-    const uStyle = (attrVal(uEl, "val") ?? "single") as UnderlineStyle;
+    const uVal = attrVal(uEl, "val");
     const uColor = attrVal(uEl, "color");
-    if (uColor) {
-      rPr.underline = { style: uStyle, color: uColor };
+    if (uVal !== undefined && !WRITTEN.underline.has(uVal)) {
+      // A style outside ST_Underline is kept as read, with its colour, and the
+      // run reads as not underlined until something sets one.
+      setAsideValue(rPr, "underline", uVal, uColor ? { with: { color: uColor } } : {});
+    } else if (uColor) {
+      rPr.underline = { style: (uVal ?? "single") as UnderlineStyle, color: uColor };
     } else {
-      rPr.underline = uStyle;
+      rPr.underline = (uVal ?? "single") as UnderlineStyle;
     }
   }
 
   const highlightEl = findChildNs(rPrEl, "highlight");
   if (highlightEl) {
-    rPr.highlight = attrVal(highlightEl, "val") as RunProperties["highlight"];
+    rPr.highlight = readToken(
+      attrVal(highlightEl, "val"),
+      WRITTEN.highlight,
+      rPr,
+      "highlight"
+    ) as RunProperties["highlight"];
   }
 
   const vertAlignEl = findChildNs(rPrEl, "vertAlign");
   if (vertAlignEl) {
-    rPr.vertAlign = attrVal(vertAlignEl, "val") as RunProperties["vertAlign"];
+    rPr.vertAlign = readToken(
+      attrVal(vertAlignEl, "val"),
+      WRITTEN.vertAlign,
+      rPr,
+      "vertAlign"
+    ) as RunProperties["vertAlign"];
   }
 
   const spacingEl = findChildNs(rPrEl, "spacing");
@@ -222,12 +247,22 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
 
   const effectEl = findChildNs(rPrEl, "effect");
   if (effectEl) {
-    rPr.effect = attrVal(effectEl, "val") as RunProperties["effect"];
+    rPr.effect = readToken(
+      attrVal(effectEl, "val"),
+      WRITTEN.effect,
+      rPr,
+      "effect"
+    ) as RunProperties["effect"];
   }
 
   const emEl = findChildNs(rPrEl, "em");
   if (emEl) {
-    rPr.emphasisMark = attrVal(emEl, "val") as RunProperties["emphasisMark"];
+    rPr.emphasisMark = readToken(
+      attrVal(emEl, "val"),
+      WRITTEN.emphasisMark,
+      rPr,
+      "emphasisMark"
+    ) as RunProperties["emphasisMark"];
   }
 
   const eaLayoutEl = findChildNs(rPrEl, "eastAsianLayout");
@@ -264,30 +299,6 @@ export function parseRunProperties(rPrEl: XmlElement): RunProperties {
 // East Asian Layout
 // =============================================================================
 
-const VALID_COMBINE_BRACKETS: ReadonlySet<string> = new Set([
-  "none",
-  "round",
-  "square",
-  "angle",
-  "curly"
-]);
-
-/**
- * Interpret an OOXML on/off attribute (ECMA-376 §17.17.4): a value of
- * `"1"`, `"true"`, `"on"` or the empty string is true; `"0"`, `"false"`,
- * `"off"` is false; missing yields undefined.
- */
-function attrOnOff(el: XmlElement, name: string): boolean | undefined {
-  const v = attrVal(el, name);
-  if (v == null) {
-    return undefined;
-  }
-  if (v === "0" || v === "false" || v === "off") {
-    return false;
-  }
-  return true;
-}
-
 function parseEastAsianLayout(el: XmlElement): EastAsianLayoutSpec | undefined {
   const spec: Mutable<EastAsianLayoutSpec> = {};
 
@@ -298,8 +309,13 @@ function parseEastAsianLayout(el: XmlElement): EastAsianLayoutSpec | undefined {
   if (attrOnOff(el, "combine") === true) {
     spec.combine = true;
   }
-  const brackets = attrVal(el, "combineBrackets");
-  if (brackets && VALID_COMBINE_BRACKETS.has(brackets)) {
+  const brackets = readToken(
+    attrVal(el, "combineBrackets"),
+    WRITTEN.combineBrackets,
+    spec,
+    "combineBrackets"
+  );
+  if (brackets) {
     spec.combineBrackets = brackets as EastAsianCombineBrackets;
   }
   if (attrOnOff(el, "vert") === true) {
@@ -317,11 +333,17 @@ function parseEastAsianLayout(el: XmlElement): EastAsianLayoutSpec | undefined {
 // =============================================================================
 
 export function parseShading(el: XmlElement): Shading {
-  return {
-    pattern: attrVal(el, "val") as Shading["pattern"],
+  const shading: Mutable<Shading> = {
     color: attrVal(el, "color"),
     fill: attrVal(el, "fill") ?? "auto"
   };
+  shading.pattern = readToken(
+    attrVal(el, "val"),
+    WRITTEN.shading,
+    shading,
+    "pattern"
+  ) as Shading["pattern"];
+  return shading;
 }
 
 export function parseBorder(el: XmlElement): Border {
@@ -351,14 +373,36 @@ export function parseBorder(el: XmlElement): Border {
 }
 
 export function parseTableWidth(el: XmlElement): TableWidth {
-  return {
+  const width: Mutable<TableWidth> = {
     // Reject non-numeric values (a hostile DOCX could write
     // `<w:tblW w:w="abc"/>`); falling back to 0 keeps the model field
     // a finite number and prevents `NaN` from being serialised back to
     // the output XML, which Word rejects.
     value: safeParseInt(el.attributes["w:w"] ?? el.attributes["w"], 0),
-    type: (el.attributes["w:type"] ?? el.attributes["type"] ?? "dxa") as TableWidth["type"]
+    type: "dxa"
   };
+  width.type = readToken(
+    el.attributes["w:type"] ?? el.attributes["type"],
+    WRITTEN.tableWidthType,
+    width,
+    "type",
+    "dxa"
+  ) as TableWidth["type"];
+  return width;
+}
+
+type RowHeight = NonNullable<TableRowProperties["height"]>;
+
+/** `w:trHeight`. */
+export function parseRowHeight(el: XmlElement): RowHeight {
+  const height: Mutable<RowHeight> = { value: attrInt(el, "val") ?? 0 };
+  height.rule = readToken(
+    attrVal(el, "hRule"),
+    WRITTEN.rowHeightRule,
+    height,
+    "rule"
+  ) as RowHeight["rule"];
+  return height;
 }
 
 // =============================================================================

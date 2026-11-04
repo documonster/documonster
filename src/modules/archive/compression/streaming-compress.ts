@@ -5,7 +5,7 @@
  * Each write() immediately produces compressed output without waiting for end().
  */
 
-import type { Gunzip, Inflate } from "zlib";
+import type { Gunzip, Gzip, Inflate } from "zlib";
 import {
   createDeflateRaw,
   createInflateRaw,
@@ -41,6 +41,7 @@ type ZlibFlushable = {
   write: (chunk: Buffer, cb: (err?: Error | null) => void) => void;
   flush: (mode: number, cb: () => void) => void;
   end: (cb: () => void) => void;
+  destroy: () => void;
   on(event: "data", listener: (chunk: Buffer) => void): void;
   on(event: "error", listener: (err: Error) => void): void;
 };
@@ -79,6 +80,12 @@ class TrueStreamingZlib<T extends ZlibFlushable> extends Transform {
     this.zstream.flush(constants.Z_FINISH, () => {
       this.zstream.end(() => callback());
     });
+  }
+
+  /** Release the native zlib stream too; its error listener above stays to absorb late errors. */
+  _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+    this.zstream.destroy();
+    callback(error);
   }
 }
 
@@ -128,8 +135,25 @@ export function createGzipStream(options: StreamCompressOptions = {}): GzipStrea
 /**
  * Create a streaming GZIP decompressor
  */
-export function createGunzipStream(_options: StreamCompressOptions = {}): GunzipStream {
+export function createGunzipStream(options: StreamCompressOptions = {}): GunzipStream {
+  // `level` means nothing to a decompressor, and `useWorker` is browser-only
+  void options;
   return createGunzip();
+}
+
+/** A gzip compressor whose output does not depend on how its input was split. */
+export type GzipEncoder = Gzip;
+
+/**
+ * Create a gzip compressor for a stream that is compressed once and kept, such as a
+ * `.tar.gz`. Unlike {@link createGzipStream} it does not flush after every write: zlib's
+ * output then depends only on the bytes and the level, never on how the input was split,
+ * so streaming a buffer through it produces exactly the bytes `gzipSync` produces.
+ *
+ * @internal
+ */
+export function createGzipEncoder(options: StreamCompressOptions = {}): GzipEncoder {
+  return createGzip({ level: options.level ?? DEFAULT_COMPRESS_LEVEL });
 }
 
 // =============================================================================
@@ -150,7 +174,9 @@ export function createZlibStream(options: StreamCompressOptions = {}): ZlibStrea
 /**
  * Create a streaming Zlib decompressor
  */
-export function createUnzlibStream(_options: StreamCompressOptions = {}): UnzlibStream {
+export function createUnzlibStream(options: StreamCompressOptions = {}): UnzlibStream {
+  // `level` means nothing to a decompressor, and `useWorker` is browser-only
+  void options;
   return createInflate();
 }
 

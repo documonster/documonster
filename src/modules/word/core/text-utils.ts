@@ -7,13 +7,17 @@
  */
 
 import type {
+  DeletedRun,
+  MovedFromRun,
   Paragraph,
   ParagraphChild,
   Run,
   MathContent,
   Hyperlink,
+  HyperlinkNestedChild,
   InsertedRun,
   MovedToRun,
+  RangeMarker,
   SymbolContent
 } from "@word/types";
 
@@ -41,6 +45,123 @@ export function isRun(child: ParagraphChild): child is Run {
 /** Check if a paragraph child is a Hyperlink. */
 export function isHyperlink(child: ParagraphChild): child is Hyperlink {
   return "type" in child && (child as { type: string }).type === "hyperlink";
+}
+
+/**
+ * The content of a hyperlink in document order: its runs with its
+ * {@link Hyperlink.nestedChildren} among them. Range markers keep riding on the
+ * items they rode on; {@link Hyperlink.rangeMarkersAfter} is not included.
+ */
+export function hyperlinkContent(link: Hyperlink): ParagraphChild[] {
+  const nested = link.nestedChildren;
+  if (!nested || nested.length === 0) {
+    return [...link.children];
+  }
+  const out: ParagraphChild[] = [];
+  let next = 0;
+  link.children.forEach((run, i) => {
+    while (next < nested.length && nested[next]!.before <= i) {
+      out.push(nested[next++]!.child);
+    }
+    out.push(run);
+  });
+  while (next < nested.length) {
+    out.push(nested[next++]!.child);
+  }
+  return out;
+}
+
+/**
+ * `link` with its content replaced by `items`, in document order (the inverse
+ * of {@link hyperlinkContent}): runs become its children and everything else
+ * nested children among them. A range marker among the items rides on the
+ * item after it, or goes in front of `rangeMarkersAfter` at the end.
+ */
+export function withHyperlinkContent(
+  link: Hyperlink,
+  items: readonly (ParagraphChild | RangeMarker)[]
+): Hyperlink {
+  const children: Run[] = [];
+  const nested: HyperlinkNestedChild[] = [];
+  let pending: RangeMarker[] = [];
+  const ride = <T extends ParagraphChild>(item: T): T => {
+    if (pending.length === 0) {
+      return item;
+    }
+    const before = [...pending, ...(item.rangeMarkersBefore ?? [])];
+    pending = [];
+    return { ...item, rangeMarkersBefore: before };
+  };
+  for (const item of items) {
+    if (isRangeMarker(item)) {
+      pending.push(item);
+    } else if (isRun(item)) {
+      children.push(ride(item));
+    } else {
+      nested.push({ before: children.length, child: ride(item as Exclude<ParagraphChild, Run>) });
+    }
+  }
+  const { nestedChildren: _nested, rangeMarkersAfter, ...rest } = link;
+  const after = [...pending, ...(rangeMarkersAfter ?? [])];
+  return {
+    ...rest,
+    children,
+    ...(nested.length > 0 ? { nestedChildren: nested } : {}),
+    ...(after.length > 0 ? { rangeMarkersAfter: after } : {})
+  };
+}
+
+/** The `type` of every {@link RangeMarker} kind. */
+export const RANGE_MARKER_TYPES: readonly RangeMarker["type"][] = [
+  "bookmarkStart",
+  "bookmarkEnd",
+  "commentRangeStart",
+  "commentRangeEnd",
+  "moveFromRangeStart",
+  "moveFromRangeEnd",
+  "moveToRangeStart",
+  "moveToRangeEnd",
+  "customXmlInsRangeStart",
+  "customXmlInsRangeEnd",
+  "customXmlDelRangeStart",
+  "customXmlDelRangeEnd",
+  "customXmlMoveFromRangeStart",
+  "customXmlMoveFromRangeEnd",
+  "customXmlMoveToRangeStart",
+  "customXmlMoveToRangeEnd",
+  "permStart",
+  "permEnd",
+  "bidiStart",
+  "bidiEnd",
+  "smartTagStart",
+  "smartTagEnd"
+];
+
+const RANGE_MARKER_TYPE_SET: ReadonlySet<string> = new Set(RANGE_MARKER_TYPES);
+
+/** Check if a model node (paragraph child or body entry) is a {@link RangeMarker}. */
+export function isRangeMarker(node: object): node is RangeMarker {
+  return "type" in node && RANGE_MARKER_TYPE_SET.has((node as { type: string }).type);
+}
+
+/** A {@link RangeMarker} that stands for a wrapper element around paragraph content. */
+export type SpanMarker = Extract<RangeMarker, { type: SpanMarkerType }>;
+type SpanMarkerType = "bidiStart" | "bidiEnd" | "smartTagStart" | "smartTagEnd";
+
+const SPAN_MARKER_TYPES: ReadonlySet<string> = new Set<SpanMarkerType>([
+  "bidiStart",
+  "bidiEnd",
+  "smartTagStart",
+  "smartTagEnd"
+]);
+
+/**
+ * Whether a range marker is a span marker (`bidiStart`/`bidiEnd`,
+ * `smartTagStart`/`smartTagEnd`): it pairs by nesting rather than by id, and
+ * means nothing outside the paragraph content it was in.
+ */
+export function isSpanMarker(marker: RangeMarker): marker is SpanMarker {
+  return SPAN_MARKER_TYPES.has(marker.type);
 }
 
 // =============================================================================
@@ -86,14 +207,89 @@ export function symbolText(symbol: SymbolContent): string {
 
 /**
  * Extract concatenated plain text from a paragraph's children (runs + hyperlinks).
- * This recursively handles hyperlinks and tracked changes.
+ * This recursively handles hyperlinks and tracked changes. What lies inside
+ * a field's instruction — between the begin and separate characters of a
+ * field held in pieces (`FieldContent.fieldChar`), such as a field nested in
+ * an `IF` — is not shown, so not included.
  */
 export function extractParagraphText(para: Paragraph): string {
-  let text = "";
+  let pieces = false;
   for (const child of para.children) {
-    text += extractChildText(child);
+    if (holdsPiece(child)) {
+      pieces = true;
+      break;
+    }
   }
+  let text = "";
+  if (!pieces) {
+    for (const child of para.children) {
+      text += extractChildText(child);
+    }
+    return text;
+  }
+  // Each open field: whether its separate character has been met.
+  const open: boolean[] = [];
+  const visit = (run: Run, visible: boolean): void => {
+    for (const c of run.content) {
+      if (c.type === "field" && c.fieldChar) {
+        if (c.fieldChar === "begin") {
+          open.push(false);
+        } else if (c.fieldChar === "separate") {
+          if (open.length > 0) {
+            open[open.length - 1] = true;
+          }
+        } else {
+          open.pop();
+        }
+      } else if (visible && !open.includes(false)) {
+        text += extractRunText({ content: [c] });
+      }
+    }
+  };
+  const walk = (children: readonly ParagraphChild[]): void => {
+    for (const child of children) {
+      if (isRun(child)) {
+        visit(child, true);
+        continue;
+      }
+      const type = (child as { type: string }).type;
+      if (type === "hyperlink") {
+        walk(hyperlinkContent(child as Hyperlink));
+      } else if (type === "insertedRun" || type === "movedToRun") {
+        visit((child as InsertedRun | MovedToRun).run, true);
+      } else if (type === "deletedRun" || type === "movedFromRun") {
+        // Not visible, but its field characters still open and close fields.
+        visit((child as DeletedRun | MovedFromRun).run, false);
+      }
+    }
+  };
+  walk(para.children);
   return text;
+}
+
+function runHoldsPiece(run: Run): boolean {
+  for (const c of run.content) {
+    if (c.type === "field" && c.fieldChar) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function holdsPiece(child: ParagraphChild): boolean {
+  if (isRun(child)) {
+    return runHoldsPiece(child);
+  }
+  const type = (child as { type: string }).type;
+  if (type === "hyperlink") {
+    const link = child as Hyperlink;
+    return (
+      link.children.some(runHoldsPiece) ||
+      (link.nestedChildren?.some(n => holdsPiece(n.child)) ?? false)
+    );
+  }
+  const run = (child as { run?: Run }).run;
+  return run !== undefined && runHoldsPiece(run);
 }
 
 /**
@@ -107,10 +303,9 @@ export function extractChildText(child: ParagraphChild): string {
     const typed = child as { type: string };
     switch (typed.type) {
       case "hyperlink": {
-        const hl = child as Hyperlink;
         let text = "";
-        for (const c of hl.children) {
-          text += extractChildText(c as ParagraphChild);
+        for (const c of hyperlinkContent(child as Hyperlink)) {
+          text += extractChildText(c);
         }
         return text;
       }

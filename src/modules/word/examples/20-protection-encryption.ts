@@ -2,13 +2,14 @@
  * Word Example 20 — Document protection & encryption
  *
  * Covers:
- *   - protectDocument with various edit restrictions (readOnly / comments /
+ *   - Security.protect with various edit restrictions (readOnly / comments /
  *     trackedChanges / forms)
  *   - With and without a password (different hash algorithms / spin counts)
- *   - isDocumentProtected, getProtectionState, verifyProtectionPassword
+ *   - isDocumentProtected, getProtectionState, verifyPassword
  *   - unprotectDocument
- *   - encryptDocx — wrap a finished DOCX in MS-Agile encryption (the file
- *     can only be opened by clients that know the password)
+ *   - Io.toBuffer({ password }) — write the DOCX with MS-Agile encryption (the file
+ *     can only be opened by clients that know the password), and Io.read({ password })
+ *   - WordCrypto.encrypt — the same for package bytes you already have
  *
  * Output: tmp/word-examples/20-protection/...
  */
@@ -16,7 +17,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { WordCrypto } from "../crypto";
 import { Document, Io, Security } from "../index";
+import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -25,19 +28,19 @@ const outDir = path.resolve(
 fs.mkdirSync(outDir, { recursive: true });
 
 // Build a small base document
-function makeDoc(): ReturnType<typeof Document.build> {
+function makeDoc(): DocxDocument {
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addHeading(d, "Confidential", 1);
   Document.addParagraph(d, "This document demonstrates document protection.");
-  return Document.build(d);
+  return d;
 }
 
 // ---------------------------------------------------------------------------
 // 1. Read-only edit restriction with password (SHA-256, 100k spin)
 //
 //    NOTE on how this shows up in Word:
-//    `protectDocument({ edit: "readOnly" })` writes OOXML
+//    `Security.protect({ edit: "readOnly" })` writes OOXML
 //    <w:documentProtection> — an *editing restriction*, NOT "mark as
 //    final" and NOT whole-file encryption. Word does NOT pop up a password
 //    dialog when opening the file. Instead the document opens read-only;
@@ -55,11 +58,11 @@ const readOnlyProtected = await Security.protect(makeDoc(), {
 console.log("  isDocumentProtected:", Security.isProtected(readOnlyProtected));
 console.log("  protection state:", Security.getState(readOnlyProtected));
 console.log(
-  "  verifyProtectionPassword('swordfish'):",
+  "  verifyPassword('swordfish'):",
   await Security.verifyPassword(readOnlyProtected, "swordfish")
 );
 console.log(
-  "  verifyProtectionPassword('wrong'):",
+  "  verifyPassword('wrong'):",
   await Security.verifyPassword(readOnlyProtected, "wrong")
 );
 fs.writeFileSync(path.join(outDir, "01-readonly.docx"), await Io.toBuffer(readOnlyProtected));
@@ -101,12 +104,16 @@ fs.writeFileSync(path.join(outDir, "05-unprotected.docx"), await Io.toBuffer(noL
 // ---------------------------------------------------------------------------
 const plainBuf = await Io.toBuffer(makeDoc());
 fs.writeFileSync(path.join(outDir, "06-plain.docx"), plainBuf);
-const encrypted = await Security.encrypt(plainBuf, "topsecret", {
-  keyBits: 256,
-  hashAlgorithm: "SHA512",
-  spinCount: 100_000
+const encrypted = await Io.toBuffer(makeDoc(), {
+  password: "topsecret",
+  encryption: { keyBits: 256, hashAlgorithm: "SHA-512", spinCount: 100_000 }
 });
 fs.writeFileSync(path.join(outDir, "06-encrypted.docx"), encrypted);
 console.log(
   `  → 06-plain.docx (${plainBuf.length} bytes), 06-encrypted.docx (${encrypted.length} bytes)`
 );
+const reread = await Io.read(encrypted, { password: "topsecret" });
+console.log("  read back with the password:", reread.body.length, "block(s)");
+// The same encryption for package bytes you already have.
+const alsoEncrypted = await WordCrypto.encrypt(plainBuf, "topsecret");
+console.log("  WordCrypto.encrypt:", WordCrypto.isEncrypted(alsoEncrypted));

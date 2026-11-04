@@ -6,9 +6,9 @@
  *   - indexEntryField (XE) — mark a word for the index
  *   - indexField (INDEX) — generate the index from XE entries
  *   - noteRefField — cross-reference to a footnote/endnote
- *   - updateFields — compute every field's cachedValue (PAGE, NUMPAGES, …)
+ *   - Transform.updateFields — compute every field's cachedValue (PAGE, NUMPAGES, …)
  *     after layout
- *   - updateTableOfContents — refresh just the TOC entries
+ *   - Transform.updateTableOfContents — refresh just the TOC entries
  *
  * Output: tmp/word-examples/41-fields/...
  */
@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io } from "../index";
+import { Build, Document, Io, Transform } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -41,11 +41,11 @@ Document.addTableOfContents(d, {
     Build.paragraph([Build.text("Index\t3")])
   ]
 });
-Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(d, Build.paragraph([Build.pageBreak()]));
 
 // Chapter 1 with TC marker for fine-grained TOC entry control
 Document.addHeading(d, "Chapter 1 — Introduction", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.tcField("Special: An overlooked first principle", { level: 2 }),
@@ -56,7 +56,7 @@ Document.addParagraphElement(
   ])
 );
 const fnId = Document.addFootnote(d, "An older spelling: 'widgit'.");
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.text("See also "),
@@ -67,11 +67,11 @@ Document.addParagraphElement(
     Build.text(" for historical context.")
   ])
 );
-Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(d, Build.paragraph([Build.pageBreak()]));
 
 // Chapter 2 with another XE
 Document.addHeading(d, "Chapter 2 — Components", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.text("Each "),
@@ -85,21 +85,21 @@ Document.addParagraphElement(
 );
 
 // NOTEREF cross-reference back to the footnote
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.text("Cross-reference back to the earlier footnote: "),
     Build.noteRefField("widgit-note")
   ])
 );
-Document.addParagraphElement(d, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(d, Build.paragraph([Build.pageBreak()]));
 
 // Index page
 Document.addHeading(d, "Index", 1);
-Document.addParagraphElement(d, Build.paragraph([Build.indexField({ columns: 2 })]));
+Document.addParagraph(d, Build.paragraph([Build.indexField({ columns: 2 })]));
 
-// Page X of Y in body so we can see updateFields populate the cachedValue
-Document.addParagraphElement(
+// Page X of Y in body so we can see Transform.updateFields populate the cachedValue
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.bold("Page "),
@@ -109,25 +109,23 @@ Document.addParagraphElement(
   ])
 );
 
-const built = Document.build(d);
-
 // ---------------------------------------------------------------------------
 // 2. Save raw (cachedValues are placeholders)
 // ---------------------------------------------------------------------------
-fs.writeFileSync(path.join(outDir, "01-raw.docx"), await Io.toBuffer(built));
+fs.writeFileSync(path.join(outDir, "01-raw.docx"), await Io.toBuffer(d));
 console.log(`  → 01-raw.docx`);
 
 // ---------------------------------------------------------------------------
-// 3. updateFields — compute all field cached values via a layout pass
+// 3. Transform.updateFields — compute all field cached values via a layout pass
 // ---------------------------------------------------------------------------
-const updated = Io.updateFields(built);
+const updated = Transform.updateFields(d);
 fs.writeFileSync(path.join(outDir, "02-updated.docx"), await Io.toBuffer(updated));
 console.log(`  → 02-updated.docx (every field cached value computed)`);
 
 // ---------------------------------------------------------------------------
-// 4. updateTableOfContents — only refresh the TOC entries
+// 4. Transform.updateTableOfContents — only refresh the TOC entries
 // ---------------------------------------------------------------------------
-const tocOnly = Io.updateTableOfContents(built);
+const tocOnly = Transform.updateTableOfContents(d);
 fs.writeFileSync(path.join(outDir, "03-toc-refreshed.docx"), await Io.toBuffer(tocOnly));
 console.log(`  → 03-toc-refreshed.docx`);
 

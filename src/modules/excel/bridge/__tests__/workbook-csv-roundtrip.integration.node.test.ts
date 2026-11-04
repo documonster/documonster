@@ -2,7 +2,7 @@ import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
 import { cellGetValue, cellType } from "@excel/core/cell";
 import { ValueType } from "@excel/core/enums";
 import { getCell } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Workbook } from "@excel/index";
 import { testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
@@ -15,7 +15,7 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "blort");
 
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Col 1", key: "key", width: 25 },
         { header: "Col 2", key: "name", width: 25 },
         { header: "Col 3", key: "age", width: 21 },

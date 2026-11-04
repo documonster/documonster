@@ -70,7 +70,7 @@ async function packageWithExtraParts(): Promise<Uint8Array> {
   archive.add("xl/theme/theme1.xml", THEME);
   archive.add("xl/vbaProject.bin", new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 9, 9]));
   archive.add("xl/media/image1.png", IMAGE);
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 describe("opaque parts survive a read-modify-write", () => {
@@ -122,7 +122,7 @@ describe("opaque parts survive a read-modify-write", () => {
     await Workbook.read(workbook, await packageWithExtraParts());
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(workbook, { format: "xlsb" }));
-    expect(Cell.getValue(Workbook.getWorksheets(reopened)[0]!, "A1")).toBe(7);
+    expect(Cell.getValue(Workbook.listWorksheets(reopened)[0]!, "A1")).toBe(7);
   });
 
   it("does not preserve the parts it re-serialises", async () => {
@@ -209,7 +209,7 @@ describe("relationships a worksheet declares", () => {
       ])
     );
     archive.add("xl/media/pic.png", IMAGE);
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   it("keeps the sheet's own .rels so the part it points at is still reachable", async () => {
@@ -440,7 +440,7 @@ describe("preserved parts reached from the package root", () => {
     );
     archive.add("docProps/custom.xml", CUSTOM);
     archive.add("xl/sidecar.bin", VENDOR);
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   it("keeps the root relationship that reaches them", async () => {
@@ -464,7 +464,7 @@ describe("preserved parts reached from the package root", () => {
     // as — which is the right answer for a caller and the wrong one for this test, whose subject is what the
     // *writer* does with a `Default` that clashes with its own. Touching one cell is the smallest thing that makes
     // the package be rebuilt.
-    Cell.setValue(Workbook.getWorksheets(workbook)[0], "Z99", 1);
+    Cell.setValue(Workbook.listWorksheets(workbook)[0], "Z99", 1);
     const written = await extractAll(
       await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" })
     );
@@ -541,7 +541,7 @@ describe("opaque reachability follows what this write actually emits", () => {
         "</Relationships>"
     );
     archive.add("xl/drawings/drawing9.xml", new TextEncoder().encode("<wsDr/>"));
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   it("drops a part whose only referring sheet was deleted", async () => {

@@ -138,6 +138,14 @@ export interface WorkerPoolOptions {
    * Defaults to true.
    */
   useTransferables?: boolean;
+
+  /**
+   * How long, in milliseconds, a streaming session waits for its worker to start. A
+   * stream whose worker does not start in time — a busy device can take seconds to boot
+   * one — or fails to start continues on the main thread instead of failing; nothing has
+   * been sent to the worker by then, so no data is lost. Defaults to 5000.
+   */
+  streamStartTimeout?: number;
 }
 
 /**
@@ -198,4 +206,14 @@ export interface TaskResult {
   data: Uint8Array;
   /** Processing time in milliseconds */
   duration: number;
+}
+
+/**
+ * A streaming session bound to one worker, from `WorkerPool#openStream`. If the worker does
+ * not start, `write` / `end` reject with a `WorkerStreamStartError` and nothing was sent.
+ */
+export interface WorkerPoolStream {
+  write(data: Uint8Array): Promise<void>;
+  end(): Promise<void>;
+  abort(reason?: string): void;
 }

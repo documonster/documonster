@@ -65,14 +65,25 @@ function digit4(s: string, i: number) {
 // Using 31 for Feb; actual validation done by Date constructor
 const DAYS_IN_MONTH = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-function validateDate(y: number, m: number, d: number): Date | null {
+/**
+ * The date of a text that states no timezone: local midnight, or — with `utc` — midnight UTC, the calendar value a
+ * spreadsheet cell holds.
+ */
+function validateDate(y: number, m: number, d: number, utc: boolean): Date | null {
   // Fast bounds check using lookup table
   if (m < 1 || m > 12 || d < 1 || d > DAYS_IN_MONTH[m]) {
     return null;
   }
-  const date = new Date(y, m - 1, d);
+  const date = utc ? utcDate(y, m - 1, d, 0, 0, 0) : new Date(y, m - 1, d);
   // Check for overflow (e.g., Feb 30 -> Mar 2)
-  return date.getMonth() === m - 1 ? date : null;
+  return (utc ? date.getUTCMonth() : date.getMonth()) === m - 1 ? date : null;
+}
+
+/** `Date.UTC` for any year — it reads a year from 0 to 99 as 1900–1999, which `setUTCFullYear` does not. */
+function utcDate(y: number, mo: number, d: number, h: number, mi: number, s: number): Date {
+  const date = new Date(Date.UTC(2000, mo, d, h, mi, s));
+  date.setUTCFullYear(y, mo, d);
+  return date;
 }
 
 function validateDateTime(
@@ -81,7 +92,8 @@ function validateDateTime(
   d: number,
   h: number,
   min: number,
-  s: number
+  s: number,
+  utc: boolean
 ): Date | null {
   if (m < 1 || m > 12 || d < 1 || d > DAYS_IN_MONTH[m]) {
     return null;
@@ -89,7 +101,7 @@ function validateDateTime(
   if (h > 23 || min > 59 || s > 59) {
     return null;
   }
-  return new Date(y, m - 1, d, h, min, s);
+  return utc ? utcDate(y, m - 1, d, h, min, s) : new Date(y, m - 1, d, h, min, s);
 }
 
 // ============================================================================
@@ -111,18 +123,18 @@ function validateDateTime(
 // that were already there.
 
 // YYYY-MM-DD (10 chars)
-function parseISO(s: string): Date | null {
+function parseISO(s: string, utc = false): Date | null {
   if (s.length !== 10) {
     return null;
   }
   if (s.charCodeAt(4) !== C_DASH || s.charCodeAt(7) !== C_DASH) {
     return null;
   }
-  return validateDate(digit4(s, 0), digit2(s, 5), digit2(s, 8));
+  return validateDate(digit4(s, 0), digit2(s, 5), digit2(s, 8), utc);
 }
 
 // YYYY-MM-DDTHH:mm:ss (19 chars)
-function parseISOT(s: string): Date | null {
+function parseISOT(s: string, utc = false): Date | null {
   if (s.length !== 19) {
     return null;
   }
@@ -141,12 +153,13 @@ function parseISOT(s: string): Date | null {
     digit2(s, 8),
     digit2(s, 11),
     digit2(s, 14),
-    digit2(s, 17)
+    digit2(s, 17),
+    utc
   );
 }
 
 // YYYY-MM-DD HH:mm:ss (19 chars, space separator)
-function parseISOSpace(s: string): Date | null {
+function parseISOSpace(s: string, utc = false): Date | null {
   if (s.length !== 19) {
     return null;
   }
@@ -165,7 +178,8 @@ function parseISOSpace(s: string): Date | null {
     digit2(s, 8),
     digit2(s, 11),
     digit2(s, 14),
-    digit2(s, 17)
+    digit2(s, 17),
+    utc
   );
 }
 
@@ -223,7 +237,7 @@ function parseISOMsOffset(s: string): Date | null {
 }
 
 // MM-DD-YYYY or MM/DD/YYYY (10 chars)
-function parseUS(s: string): Date | null {
+function parseUS(s: string, utc = false): Date | null {
   if (s.length !== 10) {
     return null;
   }
@@ -231,11 +245,11 @@ function parseUS(s: string): Date | null {
   if ((sep !== C_DASH && sep !== C_SLASH) || s.charCodeAt(5) !== sep) {
     return null;
   }
-  return validateDate(digit4(s, 6), digit2(s, 0), digit2(s, 3));
+  return validateDate(digit4(s, 6), digit2(s, 0), digit2(s, 3), utc);
 }
 
 // DD-MM-YYYY or DD/MM/YYYY (10 chars)
-function parseEU(s: string): Date | null {
+function parseEU(s: string, utc = false): Date | null {
   if (s.length !== 10) {
     return null;
   }
@@ -243,11 +257,11 @@ function parseEU(s: string): Date | null {
   if ((sep !== C_DASH && sep !== C_SLASH) || s.charCodeAt(5) !== sep) {
     return null;
   }
-  return validateDate(digit4(s, 6), digit2(s, 3), digit2(s, 0));
+  return validateDate(digit4(s, 6), digit2(s, 3), digit2(s, 0), utc);
 }
 
 // MM-DD-YYYY HH:mm:ss or MM/DD/YYYY HH:mm:ss (19 chars)
-function parseUSTime(s: string): Date | null {
+function parseUSTime(s: string, utc = false): Date | null {
   if (s.length !== 19) {
     return null;
   }
@@ -268,12 +282,13 @@ function parseUSTime(s: string): Date | null {
     digit2(s, 3),
     digit2(s, 11),
     digit2(s, 14),
-    digit2(s, 17)
+    digit2(s, 17),
+    utc
   );
 }
 
 // DD-MM-YYYY HH:mm:ss or DD/MM/YYYY HH:mm:ss (19 chars)
-function parseEUTime(s: string): Date | null {
+function parseEUTime(s: string, utc = false): Date | null {
   if (s.length !== 19) {
     return null;
   }
@@ -294,7 +309,8 @@ function parseEUTime(s: string): Date | null {
     digit2(s, 0),
     digit2(s, 11),
     digit2(s, 14),
-    digit2(s, 17)
+    digit2(s, 17),
+    utc
   );
 }
 
@@ -302,7 +318,8 @@ function parseEUTime(s: string): Date | null {
 // Format dispatch tables
 // ============================================================================
 
-type Parser = (s: string) => Date | null;
+/** A parser for one form; `utc` reads a text that states no timezone as UTC rather than local time. */
+type Parser = (s: string, utc?: boolean) => Date | null;
 
 const PARSERS: Record<DateFormat, Parser> = {
   "YYYY-MM-DD": parseISO,
@@ -361,7 +378,7 @@ export interface DateParser {
 }
 
 /** Build a DateParser backed by the given parser functions */
-function makeDateParser(fns: Parser[]): DateParser {
+function makeDateParser(fns: Parser[], utc = false): DateParser {
   const single = fns.length === 1;
   const fn0 = fns[0];
 
@@ -375,11 +392,11 @@ function makeDateParser(fns: Parser[]): DateParser {
     }
     // Fast path for single parser
     if (single) {
-      return fn0(s);
+      return fn0(s, utc);
     }
     // Multi-parser path
     for (let i = 0, len = fns.length; i < len; i++) {
-      const r = fns[i](s);
+      const r = fns[i](s, utc);
       if (r) {
         return r;
       }
@@ -411,8 +428,21 @@ function makeDateParser(fns: Parser[]): DateParser {
 }
 
 /** Create parser for specific formats */
-export function createDateParser(formats: readonly DateFormat[]): DateParser {
-  return makeDateParser(formats.map(f => PARSERS[f]).filter(Boolean));
+/** Whether `value` is one of the {@link DateFormat}s a date parser knows. */
+export function isDateFormat(value: unknown): value is DateFormat {
+  return typeof value === "string" && Object.hasOwn(PARSERS, value);
+}
+
+/**
+ * A parser for `formats`, tried in order. A text that states no timezone (`2024-03-10`, `10-03-2024 14:30:00`) is read
+ * as local time, or with `utc` as that wall-clock time in UTC — the calendar value, the same on every machine. A text
+ * with `Z` or an offset is the instant it names either way.
+ */
+export function createDateParser(
+  formats: readonly DateFormat[],
+  options?: { utc?: boolean }
+): DateParser {
+  return makeDateParser(formats.map(f => PARSERS[f]).filter(Boolean), options?.utc ?? false);
 }
 
 /** Create parser for auto-detecting ISO formats */

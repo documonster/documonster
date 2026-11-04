@@ -2,8 +2,8 @@
  * Word Example 21 — Validation
  *
  * Covers:
- *   - validateDocument on a clean doc (should pass)
- *   - validateDocument on an intentionally malformed doc — exercises rules
+ *   - Validation.validate on a clean doc (should pass)
+ *   - Validation.validate on an intentionally malformed doc — exercises rules
  *     for missing IDs, broken bookmarks, broken hyperlinks, malformed
  *     numbering refs, etc.
  *   - Strict mode (warnings → errors)
@@ -17,7 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Document, Build, Io, Validation } from "../index";
-import type { DocxDocument, BodyContent } from "../index";
+import type { BodyContent, DocxDocument } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -39,7 +39,7 @@ function log(s: string): void {
   Document.useDefaultStyles(d);
   Document.addHeading(d, "Clean", 1);
   Document.addParagraph(d, "Hello world.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.bookmarkStart(0, "intro"),
@@ -48,7 +48,7 @@ function log(s: string): void {
     ])
   );
 
-  const result = Validation.document(Document.build(d));
+  const result = Validation.validate(d);
   log(`# Clean document`);
   log(`  valid: ${result.valid}`);
   log(`  errors: ${result.errorCount}, warnings: ${result.warningCount}`);
@@ -80,7 +80,7 @@ function log(s: string): void {
     })
   ];
   const malformed: DocxDocument = { body };
-  const result = Validation.document(malformed);
+  const result = Validation.validate(malformed);
   log(`\n# Malformed document`);
   log(`  valid: ${result.valid}`);
   log(`  errors: ${result.errorCount}, warnings: ${result.warningCount}`);
@@ -99,7 +99,7 @@ function log(s: string): void {
     Build.textParagraph(""),
     Build.paragraph([Build.hyperlink("dangling", { anchor: "missing" }), Build.text(" tail")])
   ];
-  const r = Validation.document({ body }, { strict: true });
+  const r = Validation.validate({ body }, { strict: true });
   log(`\n# Strict mode (warnings → errors)`);
   log(`  valid: ${r.valid}, errors: ${r.errorCount}, warnings: ${r.warningCount}`);
 }
@@ -121,7 +121,7 @@ function log(s: string): void {
     altText: "treemap"
   });
 
-  const r = Validation.document(Document.build(d), { compatibilityMode: "word2007" });
+  const r = Validation.validate(d, { compatibilityMode: "word2007" });
   log(`\n# Word 2007 compatibility`);
   log(`  valid: ${r.valid}, errors: ${r.errorCount}, warnings: ${r.warningCount}`);
   for (const issue of r.issues.slice(0, 5)) {
@@ -136,7 +136,7 @@ function log(s: string): void {
   const body: BodyContent[] = Array.from({ length: 50 }, (_, i) =>
     Build.textParagraph(`numbered ${i}`, { numbering: { numId: 999 + i, level: 0 } })
   );
-  const r = Validation.document({ body }, { maxErrors: 5 });
+  const r = Validation.validate({ body }, { maxErrors: 5 });
   log(`\n# maxErrors=5`);
   log(`  reported issues: ${r.issues.length} (capped)`);
 }
@@ -148,4 +148,4 @@ console.log(`  → 21-validation.txt`);
 const ok = Document.create();
 Document.useDefaultStyles(ok);
 Document.addParagraph(ok, "(See 21-validation.txt for the report.)");
-fs.writeFileSync(path.join(outDir, "21-validation.docx"), await Io.toBuffer(Document.build(ok)));
+fs.writeFileSync(path.join(outDir, "21-validation.docx"), await Io.toBuffer(ok));

@@ -177,7 +177,7 @@ describe("streams", () => {
     // policy is applied before the archive is finalised now, so this holds for both shapes.
     const workbook = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(workbook, "Hard"), "A1", {
-      formula: "MATCH(1,{1,2},0)",
+      formula: "SUM(Missing[Qty])",
       result: 1
     });
     const stream = Workbook.toStream(workbook, { format: "xlsb" });
@@ -197,7 +197,7 @@ describe("streams", () => {
     // for a finished one.
     const workbook = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(workbook, "Hard"), "A1", {
-      formula: "MATCH(1,{1,2},0)",
+      formula: "SUM(Missing[Qty])",
       result: 1
     } as never);
     // A collecting sink rather than a file. Two attempts with `createWriteStream` were flaky in opposite directions —
@@ -233,7 +233,9 @@ describe("content the writer cannot express", () => {
     // never recalculates — so the default is to refuse, and the message says which cells.
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Hard");
-    Cell.setValue(sheet, "A1", { formula: "MATCH(1,{1,2,3},0)", result: 1 });
+    // A structured reference to a table the workbook does not define. (An array constant was the example until
+    // `PtgArray` was written.)
+    Cell.setValue(sheet, "A1", { formula: "SUM(Missing[Qty])", result: 1 });
     // **Two features have left this test in one session.** Rich text is written now — a `RichStr` carries the
     // runs and their fonts go into the styles part — and so are the eight `BErr` error values. What remains
     // unwritable is an error with no `BErr` code at all: `#SPILL!` and the rest of the dynamic-array family
@@ -251,7 +253,7 @@ describe("content the writer cannot express", () => {
   it("writes blanks when told to ignore the loss", async () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Hard");
-    Cell.setValue(sheet, "A1", { formula: "MATCH(1,{1,2,3},0)", result: 1 });
+    Cell.setValue(sheet, "A1", { formula: "SUM(Missing[Qty])", result: 1 });
     Cell.setValue(sheet, "A2", "kept");
 
     const bytes = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
@@ -283,7 +285,7 @@ describe("round trips carry the content", () => {
     await Workbook.read(reopened, bytes);
 
     expect(describeWorkbook(reopened)).toBe(describeWorkbook(source));
-    expect(Workbook.getWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual([
       "Data",
       "Summary"
     ]);
@@ -361,7 +363,7 @@ describe("reading into a workbook that is not empty", () => {
     const target = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(target, "Existing"), "A1", "was here first");
     await Workbook.read(target, await binaryWorkbook());
-    expect(Workbook.getWorksheets(target).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(target).map(sheet => Worksheet.getName(sheet))).toEqual([
       "FromFile"
     ]);
   });
@@ -410,9 +412,9 @@ describe("reading into a workbook that is not empty", () => {
       ])
     );
     archive.add("xl/worksheets/sheet1.bin", new Uint8Array([0xff, 0xff, 0xff, 0xff]));
-    await expect(Workbook.read(target, await archive.bytes())).rejects.toThrow();
+    await expect(Workbook.read(target, await archive.toBuffer())).rejects.toThrow();
     // Nothing half-applied: the sheet, its value and the epoch are all as they were.
-    expect(Workbook.getWorksheets(target).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(target).map(sheet => Worksheet.getName(sheet))).toEqual([
       "Existing"
     ]);
     expect(Cell.getValue(Workbook.getWorksheet(target, "Existing")!, "A1")).toBe("still here");
@@ -455,7 +457,7 @@ async function packageWithUnreadableCell(): Promise<Uint8Array> {
       ["BrtEndSheet"]
     ])
   );
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 /**
@@ -475,7 +477,9 @@ describe("read diagnostics", () => {
     const workbook = Workbook.create();
     await Workbook.read(workbook, await packageWithUnreadableCell());
     // The sheet survives; only the cell it could not decode is gone.
-    expect(Workbook.getWorksheets(workbook).map(sheet => Worksheet.getName(sheet))).toEqual(["S1"]);
+    expect(Workbook.listWorksheets(workbook).map(sheet => Worksheet.getName(sheet))).toEqual([
+      "S1"
+    ]);
   });
 
   it("refuses when the caller asks it to", async () => {
@@ -521,14 +525,14 @@ describe("read diagnostics", () => {
         ["BrtEndBook"]
       ])
     );
-    const bytes = await archive.bytes();
+    const bytes = await archive.toBuffer();
     await expect(Workbook.read(Workbook.create(), bytes, { unsupported: "error" })).rejects.toThrow(
       /Ghost: worksheet part is missing from the package/
     );
     // And by default the sheet still exists, so nothing after it shifts.
     const workbook = Workbook.create();
     await Workbook.read(workbook, bytes);
-    expect(Workbook.getWorksheets(workbook).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(workbook).map(sheet => Worksheet.getName(sheet))).toEqual([
       "Ghost"
     ]);
   });
@@ -582,7 +586,7 @@ describe("read diagnostics", () => {
       ])
     );
     await expect(
-      Workbook.read(Workbook.create(), await archive.bytes(), { unsupported: "error" })
+      Workbook.read(Workbook.create(), await archive.toBuffer(), { unsupported: "error" })
     ).rejects.toThrow(/unreadable trailing bytes on 1 string/);
   });
 
@@ -624,7 +628,7 @@ describe("read diagnostics", () => {
         ["BrtEndSheet"]
       ])
     );
-    const bytes = await archive.bytes();
+    const bytes = await archive.toBuffer();
     await expect(Workbook.read(Workbook.create(), bytes, { unsupported: "error" })).rejects.toThrow(
       /S1!C1: error value/
     );
@@ -655,7 +659,7 @@ describe("a refused strict read", () => {
     await expect(
       Workbook.read(target, await packageWithUnreadableCell(), { unsupported: "error" })
     ).rejects.toThrow();
-    expect(Workbook.getWorksheets(target).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(target).map(sheet => Worksheet.getName(sheet))).toEqual([
       "Existing"
     ]);
     expect(Cell.getValue(Workbook.getWorksheet(target, "Existing")!, "A1")).toBe("still here");
@@ -722,7 +726,7 @@ describe("readWithDiagnostics", () => {
   it("returns the workbook and the report together", async () => {
     const workbook = Workbook.create();
     const report = await Workbook.readWithDiagnostics(workbook, await packageWithUnreadableCell());
-    expect(Worksheet.getName(Workbook.getWorksheets(report.workbook)[0]!)).toBe("S1");
+    expect(Worksheet.getName(Workbook.listWorksheets(report.workbook)[0]!)).toBe("S1");
     expect(report.lost).toEqual(["S1: 1 cell(s) in BrtShortReal"]);
   });
 

@@ -107,7 +107,7 @@ describe("an edited package is rebuilt", () => {
     }
     const workbook = Workbook.create();
     await Workbook.read(workbook, original);
-    Cell.setValue(Workbook.getWorksheets(workbook)[0], "ZZ999", "touched");
+    Cell.setValue(Workbook.listWorksheets(workbook)[0], "ZZ999", "touched");
     const written = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
     expect([...written]).not.toEqual([...original]);
   });
@@ -139,7 +139,7 @@ describe("an edited package is rebuilt", () => {
     }
     const workbook = Workbook.create();
     await Workbook.read(workbook, original);
-    Cell.setStyle(Workbook.getWorksheets(workbook)[0], "A1", {
+    Cell.setStyle(Workbook.listWorksheets(workbook)[0], "A1", {
       font: { bold: true }
     } as never);
     const written = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });

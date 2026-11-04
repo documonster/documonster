@@ -144,7 +144,7 @@ const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Sheet1");
 Cell.setValue(ws, "A1", 42);
 Cell.setFont(ws, "A1", { bold: true });
-Worksheet.addRow(ws, ["a", "b", "c"]);
+Row.add(ws, ["a", "b", "c"]);
 await Workbook.writeFile(wb, "out.xlsx"); // Node
 const buf = await Workbook.toBuffer(wb); // works in Node & browser
 ```
@@ -157,11 +157,11 @@ The old `workbook.xlsx.*` accessor (`readFile`, `writeFile`, `load`,
 | Old (`wb.xlsx.*`)             | New (`Workbook.*`)                         |
 | ----------------------------- | ------------------------------------------ |
 | `await wb.xlsx.writeFile(p)`  | `await Workbook.writeFile(wb, p)` _(Node)_ |
-| `await wb.xlsx.readFile(p)`   | `await Workbook.readFile(wb, p)` _(Node)_  |
+| `await wb.xlsx.readFile(p)`   | `wb = await Workbook.readFile(p)` _(Node)_ |
 | `await wb.xlsx.writeBuffer()` | `await Workbook.toBuffer(wb)`              |
-| `await wb.xlsx.load(bytes)`   | `await Workbook.read(wb, bytes)`           |
+| `await wb.xlsx.load(bytes)`   | `wb = await Workbook.read(bytes)`          |
 | `wb.xlsx.write(stream)`       | `await Workbook.writeStream(wb, stream)`   |
-| `wb.xlsx.read(stream)`        | `await Workbook.readStream(wb, stream)`    |
+| `wb.xlsx.read(stream)`        | `wb = await Workbook.readStream(stream)`   |
 
 > **`writeStream` respects backpressure — attach the consumer first.** Unlike
 > exceljs, whose zip writer ignores `write()` returning `false` and lets the
@@ -190,13 +190,12 @@ The old `workbook.xlsx.*` accessor (`readFile`, `writeFile`, `load`,
 > A terminal sink (`fs.createWriteStream`, an HTTP response, an SDK upload body
 > that starts reading immediately) needs no special handling.
 
-Reading always fills an existing workbook handle you create first:
+Reading returns a new workbook handle:
 
 ```ts
-const wb = Workbook.create();
-await Workbook.read(wb, bytes); // browser / any platform
+const wb = await Workbook.read(bytes); // browser / any platform
 // or
-await Workbook.readFile(wb, "in.xlsx"); // Node only
+const fromFile = await Workbook.readFile("in.xlsx"); // Node only
 ```
 
 ---
@@ -214,22 +213,22 @@ where noted.
 | `new Workbook()` / `new Workbook({ formulaSyntaxProbe })` | `Workbook.create()` / `Workbook.create({ formulaSyntaxProbe })`                                                           |
 | `wb.addWorksheet(name, opts)`                             | `Workbook.addWorksheet(wb, name, opts)`                                                                                   |
 | `wb.getWorksheet(id?)`                                    | `Workbook.getWorksheet(wb, id?)`                                                                                          |
-| `wb.worksheets`                                           | `Workbook.getWorksheets(wb)`                                                                                              |
+| `wb.worksheets`                                           | `Workbook.listWorksheets(wb)`                                                                                             |
 | `wb.removeWorksheet(id)`                                  | `Workbook.removeWorksheet(wb, id)`                                                                                        |
-| `wb.eachSheet(cb)`                                        | `Workbook.eachSheet(wb, cb)`                                                                                              |
-| `wb.importSheet(source, name?)`                           | `Workbook.importSheet(wb, source, name?)`                                                                                 |
-| `await wb.protect(pw?, opts?)`                            | `Workbook.protect(wb, pw?, opts?)`                                                                                        |
+| `wb.eachSheet(cb)`                                        | `Workbook.eachWorksheet(wb, cb)`                                                                                          |
+| `wb.importSheet(source, name?)`                           | `Workbook.importWorksheet(wb, source, name?)`                                                                             |
+| `await wb.protect(pw?, opts?)`                            | `Workbook.protect(wb, { password, ...opts })`                                                                             |
 | `wb.unprotect()`                                          | `Workbook.unprotect(wb)`                                                                                                  |
 | `wb.addChartsheet(name, opts)`                            | `Workbook.addChartsheet(wb, name, opts)`                                                                                  |
 | `wb.addPivotChartsheet(name, pt, opts)`                   | `Workbook.addPivotChartsheet(wb, name, pt, opts)`                                                                         |
-| `wb.chartsheets`                                          | `Workbook.getChartsheets(wb)`                                                                                             |
+| `wb.chartsheets`                                          | `Workbook.listChartsheets(wb)`                                                                                            |
 | `wb.getChartsheet(x)`                                     | `Workbook.getChartsheet(wb, x)`                                                                                           |
 | `wb.removeChartsheet(x)`                                  | `Workbook.removeChartsheet(wb, x)`                                                                                        |
-| `wb.renameChartsheet(x, name)`                            | `Workbook.renameChartsheet(wb, x, name)`                                                                                  |
+| `wb.renameChartsheet(x, name)`                            | `Chartsheet.setName(Workbook.getChartsheet(wb, x), name)`                                                                 |
 | `wb.copyChartsheet(x, name?)`                             | `Workbook.copyChartsheet(wb, x, name?)`                                                                                   |
 | `wb.replaceChartsheetChart(x, chart)`                     | `Workbook.replaceChartsheetChart(wb, x, chart)`                                                                           |
 | `wb.definedNames`                                         | `Workbook.getDefinedNames(wb)`                                                                                            |
-| `wb.registerPerson(name, userId?, provId?)`               | `Workbook.registerPerson(wb, name, userId?, provId?)`                                                                     |
+| `wb.registerPerson(name, userId?, provId?)`               | `Workbook.registerPerson(wb, name, { userId, providerId })`                                                               |
 | `wb.registerFunction(name, fn, opts?)`                    | `Workbook.registerFunction(wb, name, fn, opts?)` — see §7 for the tightened callback type and the removed `opts.volatile` |
 | `wb.unregisterFunction(name)`                             | `Workbook.unregisterFunction(wb, name)`                                                                                   |
 | `wb.addExternalLink(input)`                               | `Workbook.addExternalLink(wb, input)`                                                                                     |
@@ -237,22 +236,29 @@ where noted.
 | `wb.model` (get)                                          | `Workbook.getModel(wb)`                                                                                                   |
 | `wb.model = m` (set)                                      | `Workbook.setModel(wb, m)`                                                                                                |
 | `wb.addImage(image)`                                      | `Image.add(wb, image)` _(see §4.7)_                                                                                       |
-| `Workbook.createStreamWriter(opts)`                       | `Workbook.createStreamWriter(wb, opts)` / `new Stream.WorkbookWriter(opts)`                                               |
-| `Workbook.createStreamReader(input, opts)`                | `Workbook.createStreamReader(wb, input, opts)` / `new Stream.WorkbookReader(input, opts)`                                 |
-| `wb.calculateFormulas()`                                  | _removed from Workbook_ — use `calculateFormulas(wb)` from `documonster/excel/formula` (see §7)                           |
+| `Workbook.createStreamWriter(opts)`                       | `new Stream.WorkbookWriter(opts)`                                                                                         |
+| `Workbook.createStreamReader(input, opts)`                | `new Stream.WorkbookReader(input, opts)`                                                                                  |
+| `wb.calculateFormulas()`                                  | _removed from Workbook_ — use `ExcelFormula.calculate(wb)` from `documonster/excel/formula` (see §7)                      |
+
+> **The streaming writers keep their methods, with the document model's names.** On a
+> `Stream.WorkbookWriter`, `protect(pw?, opts?)` becomes `protect({ password, ...opts })` and
+> `defineCellStyle(name, style)` becomes `addCellStyle(name, style)` (which returns the stored entry);
+> `useBuiltInCellStyle(id)` is new. On its worksheet writer, `protect(pw?, opts?)` becomes
+> `protect({ password, ...opts })`; `getWatermark()` is unchanged. The old forms still work,
+> deprecated.
 
 **Document-property fields** (`wb.title`, `wb.creator`, `wb.created`,
-`wb.company`, `wb.properties`, `wb.views`, `wb.calcProperties`,
-`wb.protection`, `wb.media`, `wb.pivotTables`, `wb.externalLinks`,
-`wb.defaultFont`, …) that were **direct fields/getters/setters** on the class
-are now read/written through the workbook **model**:
+`wb.company`, …) and the settings `wb.properties`, `wb.views` and
+`wb.calcProperties` are still plain fields on the handle — read and assign them
+directly:
 
 ```ts
-const model = Workbook.getModel(wb);
-model.title = "Report";
-model.creator = "Me";
-Workbook.setModel(wb, model);
+wb.title = "Report";
+wb.creator = "Me";
 ```
+
+Protection, images, pivot tables and external links are managed through their
+functions (`Workbook.protect`, `Image.add`, `Pivot.add`, `Workbook.addExternalLink`, …).
 
 CSV / Markdown methods (`readCsv`, `writeCsv`, `readMarkdown`, …) — see §5.
 PDF (`workbook`→PDF) — see §6.
@@ -262,48 +268,48 @@ PDF (`workbook`→PDF) — see §6.
 Structure / lifecycle operations live on `Worksheet`; cell/row/column/chart/
 table/image/pivot operations moved to their own namespaces.
 
-| Old (`Worksheet` class)                                | New                                                                          |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `ws.name` (get) / `ws.name = n`                        | `Worksheet.getName(ws)` / `Worksheet.setName(ws, n)`                         |
-| `ws.getCell(addr)` / `ws.getCell(r, c)`                | Use `Cell.*` functions directly (see §4.3). There is no cell object to hold. |
-| `ws.getRow(r)`                                         | Use `Row.*` functions with the row number (see §4.4).                        |
-| `ws.getColumn(c)`                                      | Use `Column.*` functions with the column ref (see §4.5).                     |
-| `ws.addRow(values, style?)`                            | `Worksheet.addRow(ws, values, style?)`                                       |
-| `ws.addRows(values, style?)`                           | `Worksheet.addRows(ws, values, style?)`                                      |
-| `ws.getRows(start, len)`                               | `Worksheet.getRows(ws, start, len)`                                          |
-| `ws.findRow(r)` / `ws.findRows(s, l)`                  | `Worksheet.findRow(ws, r)` / `Worksheet.findRows(ws, s, l)`                  |
-| `ws.eachRow(cb)` / `ws.eachRow(opt, cb)`               | `Worksheet.eachRow(ws, cb)` / `Worksheet.eachRow(ws, opt, cb)`               |
-| `ws.insertRow(pos, v, style?)`                         | `Worksheet.insertRow(ws, pos, v, style?)`                                    |
-| `ws.insertRows(pos, vs, style?)`                       | `Worksheet.insertRows(ws, pos, vs, style?)`                                  |
-| `ws.duplicateRow(n, count, insert?)`                   | `Worksheet.duplicateRow(ws, n, count, insert?)`                              |
-| `ws.spliceRows(start, count, ...inserts)`              | `Worksheet.spliceRows(ws, start, count, ...inserts)`                         |
-| `ws.spliceColumns(start, count, ...inserts)`           | `Worksheet.spliceColumns(ws, start, count, ...inserts)`                      |
-| `ws.getSheetValues()`                                  | `Worksheet.getValues(ws)`                                                    |
-| `ws.mergeCells(...cells)`                              | `Worksheet.merge(ws, ...cells)`                                              |
-| `ws.mergeCellsWithoutStyle(...)`                       | `Worksheet.mergeWithoutStyle(ws, ...)`                                       |
-| `ws.unMergeCells(...)`                                 | `Worksheet.unmerge(ws, ...)`                                                 |
-| `ws.fillFormula(range, formula, results?, shareType?)` | `Worksheet.fillFormula(ws, range, formula, results?, shareType?)`            |
-| `await ws.protect(pw?, opts?)`                         | `Worksheet.protect(ws, pw?, opts?)`                                          |
-| `ws.unprotect()`                                       | `Worksheet.unprotect(ws)`                                                    |
-| `ws.destroy()`                                         | `Worksheet.destroy(ws)`                                                      |
-| `ws.autoFitColumn(c)`                                  | `Worksheet.autoFitColumn(ws, c)`                                             |
-| `ws.autoFitColumns(s?, e?)`                            | `Worksheet.autoFitColumns(ws, s?, e?)`                                       |
-| `ws.autoFitRow(n)`                                     | `Worksheet.autoFitRow(ws, n)`                                                |
-| `ws.autoFitRows(s?, e?)`                               | `Worksheet.autoFitRows(ws, s?, e?)`                                          |
-| `ws.addConditionalFormatting(cf)`                      | `Worksheet.addConditionalFormatting(ws, cf)`                                 |
-| `ws.removeConditionalFormatting(filter?)`              | `Worksheet.removeConditionalFormatting(ws, filter?)`                         |
-| `ws.toJSON(opts?)`                                     | `Worksheet.toJson(ws, opts?)`                                                |
-| `ws.addJSON(data, opts?)`                              | `Worksheet.addJson(ws, data, opts?)`                                         |
-| `ws.toAOA()`                                           | `Worksheet.toAoa(ws)`                                                        |
-| `ws.addAOA(data, opts?)`                               | `Worksheet.addAoa(ws, data, opts?)`                                          |
-| `ws.dimensions`                                        | `Worksheet.dimensions(ws)`                                                   |
-| `ws.columnCount` / `ws.actualColumnCount`              | `Worksheet.columnCount(ws)` / `Worksheet.actualColumnCount(ws)`              |
-| `ws.rowCount` / `ws.actualRowCount`                    | `Worksheet.rowCount(ws)` / `Worksheet.actualRowCount(ws)`                    |
-| `ws.hasMerges`                                         | `Worksheet.hasMerges(ws)`                                                    |
-| `ws.mergedRegions`                                     | `Worksheet.mergedRegions(ws)`                                                |
-| `ws.columns` (get) / `ws.columns = defs`               | `Worksheet.columns(ws)` / `Worksheet.setColumns(ws, defs)`                   |
-| `ws.lastColumn` / `ws.lastRow`                         | `Worksheet.lastColumn(ws)` / `Worksheet.lastRow(ws)`                         |
-| `ws.model` (get/set)                                   | `Worksheet.getModel(ws)` / `Worksheet.setModel(ws, m)`                       |
+| Old (`Worksheet` class)                                | New                                                                            |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `ws.name` (get) / `ws.name = n`                        | `Worksheet.getName(ws)` / `Worksheet.setName(ws, n)`                           |
+| `ws.getCell(addr)` / `ws.getCell(r, c)`                | Use `Cell.*` functions directly (see §4.3). There is no cell object to hold.   |
+| `ws.getRow(r)`                                         | Use `Row.*` functions with the row number (see §4.4).                          |
+| `ws.getColumn(c)`                                      | Use `Column.*` functions with the column ref (see §4.5).                       |
+| `ws.addRow(values, style?)`                            | `Row.add(ws, values, { copyStyle?, includeEmptyCells? })` → row number         |
+| `ws.addRows(values, style?)`                           | `Row.addMany(ws, values, opts?)` → row numbers                                 |
+| `ws.getRows(start, len)`                               | Use `Row.*` / `Cell.*` with row numbers `start … start + len - 1`              |
+| `ws.findRow(r)` / `ws.findRows(s, l)`                  | `Row.has(ws, r)`                                                               |
+| `ws.eachRow(cb)` / `ws.eachRow(opt, cb)`               | `Row.each(ws, rowNumber => …, opt?)`                                           |
+| `ws.insertRow(pos, v, style?)`                         | `Row.insert(ws, pos, v, { copyStyle?, includeEmptyCells? })`                   |
+| `ws.insertRows(pos, vs, style?)`                       | `Row.insertMany(ws, pos, vs, opts?)`                                           |
+| `ws.duplicateRow(n, count, insert?)`                   | `Row.duplicate(ws, n, count, { insert? })`                                     |
+| `ws.spliceRows(start, count, ...inserts)`              | `Row.splice(ws, start, count, ...inserts)`                                     |
+| `ws.spliceColumns(start, count, ...inserts)`           | `Column.splice(ws, start, count, ...inserts)`                                  |
+| `ws.getSheetValues()`                                  | `Worksheet.getValues(ws)`                                                      |
+| `ws.mergeCells(...cells)`                              | `Worksheet.merge(ws, ...cells)`                                                |
+| `ws.mergeCellsWithoutStyle(...)`                       | `Worksheet.mergeWithoutStyle(ws, ...)`                                         |
+| `ws.unMergeCells(...)`                                 | `Worksheet.unmerge(ws, ...)`                                                   |
+| `ws.fillFormula(range, formula, results?, shareType?)` | `Worksheet.fillFormula(ws, range, formula, results?, shareType?)`              |
+| `await ws.protect(pw?, opts?)`                         | `Worksheet.protect(ws, { password, ...opts })`                                 |
+| `ws.unprotect()`                                       | `Worksheet.unprotect(ws)`                                                      |
+| `ws.destroy()`                                         | `Workbook.removeWorksheet(wb, ws)`                                             |
+| `ws.autoFitColumn(c)`                                  | `Column.autoFit(ws, c)`                                                        |
+| `ws.autoFitColumns(s?, e?)`                            | `Column.autoFit(ws, { start?, end? })`                                         |
+| `ws.autoFitRow(n)`                                     | `Row.autoFit(ws, n)`                                                           |
+| `ws.autoFitRows(s?, e?)`                               | `Row.autoFit(ws, { start?, end? })`                                            |
+| `ws.addConditionalFormatting(cf)`                      | `ConditionalFormatting.add(ws, cf)`                                            |
+| `ws.removeConditionalFormatting(filter)` / `()`        | `ConditionalFormatting.remove(ws, filter)` / `ConditionalFormatting.clear(ws)` |
+| `ws.toJSON(opts?)`                                     | `Worksheet.toJson(ws, opts?)`                                                  |
+| `ws.addJSON(data, opts?)`                              | `Worksheet.addJson(ws, data, opts?)`                                           |
+| `ws.toAOA()`                                           | `Worksheet.toAoa(ws)`                                                          |
+| `ws.addAOA(data, opts?)`                               | `Worksheet.addAoa(ws, data, opts?)`                                            |
+| `ws.dimensions`                                        | `Worksheet.getDimensions(ws)`                                                  |
+| `ws.columnCount` / `ws.actualColumnCount`              | `Column.getCount(ws)` / `Column.getActualCount(ws)`                            |
+| `ws.rowCount` / `ws.actualRowCount`                    | `Row.getCount(ws)` / `Row.getActualCount(ws)`                                  |
+| `ws.hasMerges`                                         | `Worksheet.hasMerges(ws)`                                                      |
+| `ws.mergedRegions`                                     | `Worksheet.getMergedRegions(ws)`                                               |
+| `ws.columns` (get) / `ws.columns = defs`               | `Column.getDefinitions(ws)` / `Column.setDefinitions(ws, defs)`                |
+| `ws.lastColumn` / `ws.lastRow`                         | `Column.getLast(ws)` / `Row.getLast(ws)` — numbers, `undefined` when empty     |
+| `ws.model` (get/set)                                   | `Worksheet.getModel(ws)` / `Worksheet.setModel(ws, m)`                         |
 
 > **Note the JSON/AOA casing change:** `toJSON`/`addJSON`/`toAOA`/`addAOA`
 > became `toJson`/`addJson`/`toAoa`/`addAoa`.
@@ -336,7 +342,7 @@ object**. `addr` is `"A1"` or a `(row, col)` pair for `getValue`/`setValue`/
 | `cell.fill` / `= v`                     | `Cell.getFill(ws, addr)` / `Cell.setFill(ws, addr, v)`                         |
 | `cell.protection` / `= v`               | `Cell.getProtection(ws, addr)` / `Cell.setProtection(ws, addr, v)`             |
 | `cell.isMerged`                         | `Cell.isMerged(ws, addr)`                                                      |
-| `cell.master`                           | `Cell.getMergeMaster(ws, addr)`                                                |
+| `cell.master`                           | `Cell.getMergeMasterAddress(ws, addr)` — the master's address                  |
 | `cell.hyperlink`                        | `Cell.getHyperlink(ws, addr)`                                                  |
 | `cell.note` (get) / `= v`               | `Cell.getNote(ws, addr)` / `Cell.setNote(ws, addr, v)`                         |
 | `cell.comment` (get) / `= v`            | `Cell.getComment(ws, addr)` / `Cell.setComment(ws, addr, v)`                   |
@@ -355,45 +361,49 @@ object**. `addr` is `"A1"` or a `(row, col)` pair for `getValue`/`setValue`/
 
 All operations take `(ws, rowNumber)`.
 
-| Old (`row` = `ws.getRow(n)`)     | New (`Row.*`)                                                  |
-| -------------------------------- | -------------------------------------------------------------- |
-| `row.height` (get) / `= h`       | `Row.getHeight(ws, n)` / `Row.setHeight(ws, n, h)`             |
-| `row.hidden` (get) / `= b`       | `Row.getHidden(ws, n)` / `Row.setHidden(ws, n, b)`             |
-| `row.outlineLevel` (get) / `= l` | `Row.getOutlineLevel(ws, n)` / `Row.setOutlineLevel(ws, n, l)` |
-| _(assign row style)_             | `Row.getStyle(ws, n)` / `Row.setStyle(ws, n, style)`           |
-| `row.font = v`                   | `Row.setFont(ws, n, v)`                                        |
-| `row.alignment = v`              | `Row.setAlignment(ws, n, v)`                                   |
-| `row.border = v`                 | `Row.setBorder(ws, n, v)`                                      |
-| `row.fill = v`                   | `Row.setFill(ws, n, v)`                                        |
-| `row.values` (get, 1-based)      | `Row.values(ws, n)` _(1-based, leading empty slot)_            |
-| `row.getValues()` (0-based)      | `Row.getValues(ws, n)` _(0-based dense array)_                 |
-| `row.values = v`                 | `Row.setValues(ws, n, v)`                                      |
-| `row.getCell(col)`               | `Row.getCell(ws, n, col)`                                      |
-| `row.eachCell(cb)` / `(opt, cb)` | `Row.eachCell(ws, n, cb)` / `Row.eachCell(ws, n, opt, cb)`     |
-| `row.commit()`                   | `Row.commit(ws, n)`                                            |
+| Old (`row` = `ws.getRow(n)`)     | New (`Row.*`)                                                       |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `row.height` (get) / `= h`       | `Row.getHeight(ws, n)` / `Row.setHeight(ws, n, h)`                  |
+| `row.hidden` (get) / `= b`       | `Row.isHidden(ws, n)` / `Row.setHidden(ws, n, b)`                   |
+| `row.outlineLevel` (get) / `= l` | `Row.getOutlineLevel(ws, n)` / `Row.setOutlineLevel(ws, n, l)`      |
+| _(assign row style)_             | `Row.getStyle(ws, n)` / `Row.setStyle(ws, n, style)`                |
+| `row.font = v`                   | `Row.setFont(ws, n, v)`                                             |
+| `row.alignment = v`              | `Row.setAlignment(ws, n, v)`                                        |
+| `row.border = v`                 | `Row.setBorder(ws, n, v)`                                           |
+| `row.fill = v`                   | `Row.setFill(ws, n, v)`                                             |
+| `row.values` (get, 1-based)      | `Row.getValues(ws, n, { base: 1 })` _(1-based, leading empty slot)_ |
+| `row.getValues()` (0-based)      | `Row.getValues(ws, n)` _(0-based dense array)_                      |
+| `row.values = v`                 | `Row.setValues(ws, n, v)`                                           |
+| `row.getCell(col)`               | `Cell.*(ws, n, col)` — address the cell by position                 |
+| `row.eachCell(cb)` / `(opt, cb)` | `Row.eachAddress(ws, n, (address, row, col) => …, opt?)`            |
+| `row.commit()`                   | `Row.commit(ws, n)`                                                 |
+| `row.number`                     | `n` — rows are addressed by number                                  |
+| `row.hasValues`                  | `Row.hasValues(ws, n)`                                              |
+| `row.cellCount`                  | `Row.getCellCount(ws, n)`                                           |
+| `row.actualCellCount`            | `Row.getActualCellCount(ws, n)`                                     |
+| `row.dimensions`                 | `Row.getDimensions(ws, n)` _(`undefined`, not `null`)_              |
+| `row.collapsed`                  | `Row.isCollapsed(ws, n)`                                            |
+| `row.model`                      | `Row.getModel(ws, n)` _(`undefined`, not `null`)_                   |
+| `ws.findCell(addr)` + read       | `Cell.getView(ws, addr)` — read-only, creates nothing               |
 
-> **`values` vs `getValues`:** `Row.values` keeps Excel's **1-based** layout
-> (index 0 is an empty slot; column A is index 1). `Row.getValues` returns a
+> **`values` vs `getValues`:** `Row.getValues(ws, n, { base: 1 })` keeps Excel's **1-based** layout
+> (index 0 is an empty slot; column A is index 1). `Row.getValues(ws, n)` returns a
 > **0-based** dense array (column A is index 0). Old `row.values` was 1-based
-> and old `row.getValues()` was 0-based — same semantics, now as functions.
+> and old `row.getValues()` was 0-based — same semantics, now one function. `Row.setValues`
+> takes the same `{ base }`, so a read and a write with one `base` are inverses.
 
-**Is there still a row object?** Yes, but you never need one to call `Row.*`.
-`Worksheet.addRow` / `addRows` / `getRow` / `getRows` / `findRow` / `findRows` /
-`eachRow` still hand out row handles, whose type is `RowData` (also reachable as
-`Stream.RowHandle` in streaming code). The handle is opaque — read and mutate it
-through `Row.*` by row number. So a signature that used to be
+**Is there still a row object?** Not in the document model. Every row function
+takes the row number, and the ones that create rows — `Row.add`, `Row.addMany`,
+`Row.insert`, `Row.insertMany` — answer with their numbers. Row handles exist
+only in the streaming API (`Stream.RowHandle`). So a signature that used to be
 `(ws: Worksheet, row: Row)` becomes:
 
 ```typescript
 import { Row } from "documonster/excel";
-import type { RowData, Worksheet } from "documonster/excel";
+import type { Worksheet } from "documonster/excel";
 
-// preferred — address by number
 const stripe = (ws: Worksheet.Handle, rowNumber: number) =>
   Row.setFill(ws, rowNumber, { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7F7F7" } });
-
-// when you already hold a handle from Worksheet.eachRow / addRow
-const rowNumberOf = (row: RowData) => row.number;
 ```
 
 ### 4.5 `Column`
@@ -401,26 +411,28 @@ const rowNumberOf = (row: RowData) => row.number;
 All operations take `(ws, colRef)` where `colRef` is a key string, letter
 (`"A"`), or 1-based number.
 
-| Old (`col` = `ws.getColumn(c)`)  | New (`Column.*`)                                                     |
-| -------------------------------- | -------------------------------------------------------------------- |
-| `col.width` (get) / `= w`        | `Column.getWidth(ws, c)` / `Column.setWidth(ws, c, w)`               |
-| `col.header` (get) / `= h`       | `Column.getHeader(ws, c)` / `Column.setHeader(ws, c, h)`             |
-| `col.key` (get) / `= k`          | `Column.getKey(ws, c)` / `Column.setKey(ws, c, k)`                   |
-| `col.hidden` (get) / `= b`       | `Column.getHidden(ws, c)` / `Column.setHidden(ws, c, b)`             |
-| `col.outlineLevel` (get) / `= l` | `Column.getOutlineLevel(ws, c)` / `Column.setOutlineLevel(ws, c, l)` |
-| `col.style` (get)                | `Column.getStyle(ws, c)` / `Column.setStyle(ws, c, style)`           |
-| `col.values` (get) / `= v`       | `Column.values(ws, c)` / `Column.setValues(ws, c, v)`                |
-| `col.eachCell(cb)`               | No direct equivalent — see below                                     |
+| Old (`col` = `ws.getColumn(c)`)  | New (`Column.*`)                                                        |
+| -------------------------------- | ----------------------------------------------------------------------- |
+| `col.width` (get) / `= w`        | `Column.getWidth(ws, c)` / `Column.setWidth(ws, c, w)`                  |
+| `col.header` (get) / `= h`       | `Column.getHeader(ws, c)` / `Column.setHeader(ws, c, h)`                |
+| `col.key` (get) / `= k`          | `Column.getKey(ws, c)` / `Column.setKey(ws, c, k)`                      |
+| `col.hidden` (get) / `= b`       | `Column.isHidden(ws, c)` / `Column.setHidden(ws, c, b)`                 |
+| `col.outlineLevel` (get) / `= l` | `Column.getOutlineLevel(ws, c)` / `Column.setOutlineLevel(ws, c, l)`    |
+| `col.style` (get)                | `Column.getStyle(ws, c)` / `Column.setStyle(ws, c, style)`              |
+| `col.values` (get) / `= v`       | `Column.getValues(ws, c, { base: 1 })` / `Column.setValues(ws, c, v)`   |
+| `col.eachCell(cb)`               | `Column.eachAddress(ws, c, (address, row, col) => …, opt?)` — see below |
 
-Per-facet setters (`col.font = …`, etc.) are folded into
-`Column.setStyle(ws, c, { font, numFmt, ... })`.
+Per-facet setters and getters mirror `Cell` and `Row`: `Column.setFont` /
+`getFont`, `setAlignment`, `setBorder`, `setFill`, `setNumFmt`, `setProtection`, … The
+`Row` / `Column` facet getters are pure reads — they create nothing and return a copy;
+`getStyle` is the live, editable object.
 
-`Column.values` is indexed by **row number**, exactly like `col.values` was, so
+`Column.getValues(ws, c, { base: 1 })` is indexed by **row number**, exactly like `col.values` was, so
 the index composes with the `Cell` namespace:
 
 ```typescript
 const colNumber = Column.getNumber(ws, "total");
-Column.values(ws, "total").forEach((value, rowNumber) => {
+Column.getValues(ws, "total", { base: 1 }).forEach((value, rowNumber) => {
   if (typeof value === "number" && value < 0) {
     Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
   }
@@ -431,14 +443,11 @@ Column.values(ws, "total").forEach((value, rowNumber) => {
 `col.eachCell` did not, because it asked every row for a cell in the column and
 therefore created one.
 
-That loop is **not** a full replacement for `col.eachCell`, and the difference
-matters if you relied on it: it visits values, not `CellData` handles, it skips a
-cell that exists but holds no value (so a cell carrying only a style or a comment
-is invisible to it), and there is no `includeEmpty`. For the usual reason to reach
-for `eachCell` — applying a format down a column — use `Column.setStyle` or
-`Column.setNumFmt`, which write the column _and_ the cells already in it. If you
-genuinely need the handles, iterate the rows with `Worksheet.eachRow` and take the
-cell with `Row.getCell`, which is what `col.eachCell` did.
+To visit positions rather than values, `Column.eachAddress(ws, c, cb, { includeEmpty })`
+is the direct counterpart of `col.eachCell`: it hands over `(address, row, col)` and
+creates nothing. For the usual reason to reach for `eachCell` — applying a format
+down a column — use `Column.setStyle` or `Column.setNumFmt`, which write the column
+_and_ the cells already in it.
 
 ### 4.6 `Range`
 
@@ -451,84 +460,71 @@ The `Range` class became stateless geometry helpers. Handles are opaque
 | `range.contains(addr)`                 | `Range.contains(r, addr)`         |
 | `range.containsEx(address)`            | `Range.containsCell(r, address)`  |
 | `range.intersects(other)`              | `Range.intersects(r, other)`      |
-| `range.forEachAddress(cb)`             | `Range.forEachAddress(r, cb)`     |
+| `range.forEachAddress(cb)`             | `Range.eachAddress(r, cb)`        |
 | `range.expand(t, l, b, r)`             | `Range.expand(r, t, l, b, right)` |
 | `range.expandToAddress(addr)`          | `Range.expandToAddress(r, addr)`  |
 | `range.toString()` / `range.range`     | `Range.toString(r)`               |
-| `range.count`                          | `Range.count(r)`                  |
+| `range.count`                          | `Range.getCount(r)`               |
 
 ### 4.7 `Image`
 
-| Old                                      | New (`Image.*`)                                                     |
-| ---------------------------------------- | ------------------------------------------------------------------- |
-| `wb.addImage(image)` → imageId           | `Image.add(wb, image)` → imageId                                    |
-| `ws.addImage(imageId, range)`            | `Image.place(ws, imageId, range)`                                   |
-| `ws.getImages()`                         | `Image.list(ws)`                                                    |
-| `ws.addBackgroundImage(imageId)`         | `Image.setBackground(ws, imageId)`                                  |
-| `ws.getBackgroundImageId()`              | `Image.getBackground(ws)`                                           |
-| `ws.addShape(options)`                   | `Image.addShape(ws, options)`                                       |
-| `ws.getShapes()`                         | `Image.getShapes(ws)`                                               |
-| `new Image(ws, model)` / `image.clone()` | `Image.create(...)` / `Image.clone(handle)` / `Image.model(handle)` |
+| Old                                      | New (`Image.*`)                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| `wb.addImage(image)` → imageId           | `Image.add(wb, image)` → imageId                                       |
+| `ws.addImage(imageId, range)`            | `Image.place(ws, imageId, range)`                                      |
+| `ws.getImages()`                         | `Image.list(ws)`                                                       |
+| _(new)_                                  | `Image.remove(ws, image)`                                              |
+| `ws.addBackgroundImage(imageId)`         | `Image.setBackground(ws, imageId)`                                     |
+| `ws.getBackgroundImageId()`              | `Image.getBackground(ws)`                                              |
+| `ws.addShape(options)`                   | `Image.addShape(ws, options)`                                          |
+| `ws.getShapes()`                         | `Image.listShapes(ws)`                                                 |
+| `new Image(ws, model)` / `image.clone()` | `Image.create(...)` / `Image.clone(handle)` / `Image.getModel(handle)` |
 
 ### 4.8 `Chart`
 
-Chart creation methods on `Worksheet` moved to `Chart.*` and were de-verbosed
-(`addColumnChart` → `Chart.addColumn`, etc.). Chart-instance methods (formerly
+Every chart-creation method on `Worksheet` became one function, `Chart.place(ws, range, options)`, which takes the
+placement **before** the options and returns the chart's **handle** (the old methods returned the chart's part
+number; `handle.chartNumber` — `chartExNumber` for the Office 2016 types — is that number). The per-type methods
+become a `type` in the options, and presets, tables and rows have option builders. Chart-instance methods (formerly
 on the `Chart` class) are also `Chart.*` functions taking a chart handle.
 
-| Old (`ws.*` creation)                    | New (`Chart.*`)                            |
-| ---------------------------------------- | ------------------------------------------ |
-| `ws.addChart(opts, range)`               | `Chart.add(ws, opts, range)`               |
-| `ws.addColumnChart(opts, range)`         | `Chart.addColumn(ws, opts, range)`         |
-| `ws.addBarChart(...)`                    | `Chart.addBar(ws, ...)`                    |
-| `ws.addLineChart(...)`                   | `Chart.addLine(ws, ...)`                   |
-| `ws.addAreaChart(...)`                   | `Chart.addArea(ws, ...)`                   |
-| `ws.addPieChart(...)`                    | `Chart.addPie(ws, ...)`                    |
-| `ws.addDoughnutChart(...)`               | `Chart.addDoughnut(ws, ...)`               |
-| `ws.addScatterChart(...)`                | `Chart.addScatter(ws, ...)`                |
-| `ws.addBubbleChart(...)`                 | `Chart.addBubble(ws, ...)`                 |
-| `ws.addRadarChart(...)`                  | `Chart.addRadar(ws, ...)`                  |
-| `ws.addStockChart(...)`                  | `Chart.addStock(ws, ...)`                  |
-| `ws.addSurfaceChart(...)`                | `Chart.addSurface(ws, ...)`                |
-| `ws.addHistogramChart(...)`              | `Chart.addHistogram(ws, ...)`              |
-| `ws.addParetoChart(...)`                 | `Chart.addPareto(ws, ...)`                 |
-| `ws.addWaterfallChart(...)`              | `Chart.addWaterfall(ws, ...)`              |
-| `ws.addFunnelChart(...)`                 | `Chart.addFunnel(ws, ...)`                 |
-| `ws.addTreemapChart(...)`                | `Chart.addTreemap(ws, ...)`                |
-| `ws.addSunburstChart(...)`               | `Chart.addSunburst(ws, ...)`               |
-| `ws.addBoxWhiskerChart(...)`             | `Chart.addBoxWhisker(ws, ...)`             |
-| `ws.addRegionMapChart(...)`              | `Chart.addRegionMap(ws, ...)`              |
-| `ws.addComboChart(...)`                  | `Chart.addCombo(ws, ...)`                  |
-| `ws.addChartEx(...)`                     | `Chart.addEx(ws, ...)`                     |
-| `ws.addPresetChart(preset, ...)`         | `Chart.addPreset(ws, preset, ...)`         |
-| `ws.addPresetChartEx(preset, ...)`       | `Chart.addPresetEx(ws, preset, ...)`       |
-| `ws.addChartFromTable(t, opts, range)`   | `Chart.addFromTable(ws, t, opts, range)`   |
-| `ws.addChartFromRows(rows, opts, range)` | `Chart.addFromRows(ws, rows, opts, range)` |
-| `ws.addColumnChartFromRows(...)`         | `Chart.addColumnFromRows(ws, ...)`         |
-| `ws.addChartExFromTable(...)`            | `Chart.addExFromTable(ws, ...)`            |
-| `ws.addChartExFromRows(...)`             | `Chart.addExFromRows(ws, ...)`             |
-| `ws.addPivotChart(pt, opts, range)`      | `Chart.addPivot(ws, pt, opts, range)`      |
-| `ws.addPivotComboChart(...)`             | `Chart.addPivotCombo(ws, ...)`             |
-| `ws.seriesFromColumns(opts)`             | `Chart.seriesFromColumns(ws, opts)`        |
-| `ws.getCharts()`                         | `Chart.get(ws)`                            |
-| `ws.removeChart(chart)`                  | `Chart.remove(ws, chart)`                  |
+| Old (`ws.*` creation)                    | New                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `ws.addChart(opts, range)`               | `Chart.place(ws, range, opts)`                                        |
+| `ws.addColumnChart(opts, range)`         | `Chart.place(ws, range, { ...opts, type: "bar", barDir: "col" })`     |
+| `ws.addBarChart(opts, range)`            | `Chart.place(ws, range, { ...opts, type: "bar", barDir: "bar" })`     |
+| `ws.addLineChart(opts, range)`, …        | `Chart.place(ws, range, { ...opts, type: "line" })`, …                |
+| `ws.addHistogramChart(opts, range)`, …   | `Chart.place(ws, range, { ...opts, type: "histogram" })`, …           |
+| `ws.addComboChart(opts, range)`          | `Chart.place(ws, range, opts)` (`opts.groups`)                        |
+| `ws.addChartEx(opts, range)`             | `Chart.place(ws, range, opts)`                                        |
+| `ws.addPresetChart(preset, opts, range)` | `Chart.place(ws, range, Chart.applyPreset(preset, opts))`             |
+| `ws.addPresetChartEx(...)`               | `Chart.place(ws, range, Chart.applyPreset(preset, opts))`             |
+| `ws.addChartFromTable(t, opts, range)`   | `Chart.place(ws, range, Chart.createOptionsFromTable(ws, t, opts))`   |
+| `ws.addChartExFromTable(...)`            | `Chart.place(ws, range, Chart.createOptionsFromTable(ws, t, opts))`   |
+| `ws.addChartFromRows(rows, opts, range)` | `Chart.place(ws, range, Chart.createOptionsFromRows(ws, rows, opts))` |
+| `ws.addColumnChartFromRows(...)`         | the same, with `type: "bar", barDir: "col"` in `opts`                 |
+| `ws.addChartExFromRows(...)`             | `Chart.place(ws, range, Chart.createOptionsFromRows(ws, rows, opts))` |
+| `ws.addPivotChart(pt, opts, range)`      | `Chart.place(ws, range, { ...opts, pivotTable: pt })`                 |
+| `ws.addPivotComboChart(pt, opts, range)` | `Chart.place(ws, range, { ...opts, pivotTable: pt })` (`opts.groups`) |
+| `ws.seriesFromColumns(opts)`             | `Chart.createSeriesFromColumns(ws, opts)`                             |
+| `ws.getCharts()`                         | `Chart.list(ws)`                                                      |
+| `ws.removeChart(chart)`                  | `Chart.remove(ws, chart)`                                             |
 
-Chart-handle operations (`chart` is the handle): `Chart.toSVG(chart)`,
-`Chart.toPNG(chart)`, `Chart.mutate(chart, fn)`, `Chart.setStyle(chart, n)`,
-`Chart.setBuiltInStyle(...)`, `Chart.addSeries(...)`, `Chart.removeSeries(...)`,
+Chart-handle operations (`chart` is the handle): `Chart.toSvg(chart)`,
+`Chart.toPng(chart)`, `Chart.mutate(chart, fn)`, `Chart.setStyle(chart, n)`,
+`Chart.addSeries(...)`, `Chart.removeSeries(...)`,
 `Chart.getSeries(chart, i)`, `Chart.updateSeries(...)`, `Chart.setTitle(...)`,
-`Chart.title(chart)`, `Chart.legend(chart)`, `Chart.setLegend(...)`,
-`Chart.getAxis(...)`, `Chart.categoryAxis(chart)`, `Chart.valueAxis(chart)`,
-`Chart.plotArea(chart)`, `Chart.chartModel(chart)`, `Chart.anchorModel(chart)`,
-`Chart.isChartEx(chart)`, `Chart.clone(chart)`, `Chart.copyTo(...)`, etc.
-(Full list: `title`, `setTitle`, `titleRichText`, `setTitleRichText`, `mutate`,
-`mutateChartEx`, `setStyle`, `setBuiltInStyle`, `addSeries`, `removeSeries`,
-`getSeries`, `updateSeries`, `addSeriesFromOptions`, `setSeriesValues`,
-`setSeriesCategories`, `setSeriesName`, `getSeriesCount`, `totalSeriesCount`,
-`chartTypes`, `axes`, `getAxis`, `categoryAxis`, `valueAxis`, `plotArea`,
-`legend`, `setLegend`, `spPr`, `setSpPr`, `unknownElements`, `userShapesXml`,
-`setUserShapesXml`, `removeUserShapes`, `copyTo`, `clone`, `chartModel`,
-`chartExModel`, `isChartEx`, `anchorModel`, `toSVG`, `toPNG`.)
+`Chart.getTitle(chart)`, `Chart.getLegend(chart)`, `Chart.setLegend(...)`,
+`Chart.getAxis(...)`, `Chart.getCategoryAxis(chart)`, `Chart.getValueAxis(chart)`,
+`Chart.getPlotArea(chart)`, `Chart.getModel(chart)`, `Chart.getAnchorModel(chart)`,
+`Chart.isEx(chart)`, `Chart.clone(chart)`, `Chart.copyTo(...)`, etc.
+(Full list: `getTitle`, `setTitle`, `getTitleRichText`, `mutate`, `mutateEx`, `setStyle`,
+`addSeries`, `removeSeries`, `getSeries`, `updateSeries`, `addSeriesFromOptions`, `setSeriesValues`,
+`setSeriesCategories`, `setSeriesName`, `getSeriesCount`, `getTotalSeriesCount`,
+`getChartTypes`, `getAxes`, `getAxis`, `getCategoryAxis`, `getValueAxis`, `getPlotArea`,
+`getLegend`, `setLegend`, `getSpPr`, `setSpPr`, `getUnknownElements`, `getUserShapesXml`,
+`setUserShapesXml`, `removeUserShapes`, `copyTo`, `clone`, `getModel`, `getExModel`, `isEx`,
+`getAnchorModel`, `toSvg`, `toPng`.)
 
 ### 4.9 `Table`
 
@@ -541,58 +537,61 @@ Chart-handle operations (`chart` is the handle): `Chart.toSVG(chart)`,
 | `new Table(ws, model)`                    | `Table.create(...)`                                               |
 | `table.addRow(values, rowNumber?, opts?)` | `Table.addRow(t, values, rowNumber?, opts?)`                      |
 | `table.removeRows(idx, count?, opts?)`    | `Table.removeRows(t, idx, count?, opts?)`                         |
-| `table.getColumn(idx)`                    | `Table.column(t, idx)`                                            |
+| `table.getColumn(idx)`                    | `Table.getColumn(t, idx)`                                         |
 | `table.addColumn(col, values, idx?)`      | `Table.addColumn(t, col, values, idx?)`                           |
 | `table.removeColumns(idx, count?)`        | `Table.removeColumns(t, idx, count?)`                             |
 | `table.commit()`                          | `Table.commit(t)`                                                 |
-| `table.model` (get/set)                   | `Table.model(t)` / `Table.setModel(t, m)`                         |
-| `table.ref` / `= v`                       | `Table.ref(t)` / `Table.setRef(t, v)`                             |
-| `table.name` / `= v`                      | `Table.name(t)` / `Table.setName(t, v)`                           |
-| `table.displayName` / `= v`               | `Table.displayName(t)` / `Table.setDisplayName(t, v)`             |
-| `table.headerRow` / `= v`                 | `Table.headerRow(t)` / `Table.setHeaderRow(t, v)`                 |
-| `table.totalsRow` / `= v`                 | `Table.totalsRow(t)` / `Table.setTotalsRow(t, v)`                 |
-| `table.theme` / `= v`                     | `Table.theme(t)` / `Table.setTheme(t, v)`                         |
-| `table.showFirstColumn` / `= v`           | `Table.showFirstColumn(t)` / `Table.setShowFirstColumn(t, v)`     |
-| `table.showLastColumn` / `= v`            | `Table.showLastColumn(t)` / `Table.setShowLastColumn(t, v)`       |
-| `table.showRowStripes` / `= v`            | `Table.showRowStripes(t)` / `Table.setShowRowStripes(t, v)`       |
-| `table.showColumnStripes` / `= v`         | `Table.showColumnStripes(t)` / `Table.setShowColumnStripes(t, v)` |
+| `table.model` (get/set)                   | `Table.getModel(t)` / `Table.setModel(t, m)`                      |
+| `table.ref` / `= v`                       | `Table.getRef(t)` / `Table.setRef(t, v)`                          |
+| `table.name` / `= v`                      | `Table.getName(t)` / `Table.setName(t, v)`                        |
+| `table.displayName` / `= v`               | `Table.getDisplayName(t)` / `Table.setDisplayName(t, v)`          |
+| `table.headerRow` / `= v`                 | `Table.hasHeaderRow(t)` / `Table.setHeaderRow(t, v)`              |
+| `table.totalsRow` / `= v`                 | `Table.hasTotalsRow(t)` / `Table.setTotalsRow(t, v)`              |
+| `table.theme` / `= v`                     | `Table.getTheme(t)` / `Table.setTheme(t, v)`                      |
+| `table.showFirstColumn` / `= v`           | `Table.hasFirstColumnStyle(t)` / `Table.setShowFirstColumn(t, v)` |
+| `table.showLastColumn` / `= v`            | `Table.hasLastColumnStyle(t)` / `Table.setShowLastColumn(t, v)`   |
+| `table.showRowStripes` / `= v`            | `Table.hasRowStripes(t)` / `Table.setShowRowStripes(t, v)`        |
+| `table.showColumnStripes` / `= v`         | `Table.hasColumnStripes(t)` / `Table.setShowColumnStripes(t, v)`  |
 
 Table-column accessors (formerly on the table-column wrapper class) are on the
-`Table` namespace prefixed with `column`: `Table.columnName(t, idx)`,
-`Table.columnSetName(t, idx, v)`, `Table.columnFilterButton`,
-`Table.columnSetFilterButton`, `Table.columnStyle`, `Table.columnSetStyle`,
-`Table.columnTotalsRowLabel`, `Table.columnSetTotalsRowLabel`,
-`Table.columnTotalsRowFunction`, `Table.columnSetTotalsRowFunction`,
-`Table.columnTotalsRowResult`, `Table.columnSetTotalsRowResult`,
-`Table.columnTotalsRowFormula`, `Table.columnSetTotalsRowFormula`.
+`Table` namespace prefixed with `column`: `Table.getColumnName(t, idx)`,
+`Table.setColumnName(t, idx, v)`, `Table.hasColumnFilterButton`,
+`Table.setColumnFilterButton`, `Table.getColumnStyle`, `Table.setColumnStyle`,
+`Table.getColumnTotalsRowLabel`, `Table.setColumnTotalsRowLabel`,
+`Table.getColumnTotalsRowFunction`, `Table.setColumnTotalsRowFunction`,
+`Table.getColumnTotalsRowResult`, `Table.setColumnTotalsRowResult`,
+`Table.getColumnTotalsRowFormula`, `Table.setColumnTotalsRowFormula`.
 
 ### 4.10 Pivot / Sparkline / Form / Watermark / DataValidation / DefinedNames / Note / Anchor / Chartsheet / Address
 
 | Old                                                                     | New                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ws.addPivotTable(model)`                                               | `Pivot.add(ws, model)`                                                                                                                                                                                                                                           |
+| `ws.pivotTables`                                                        | `Pivot.list(ws)`                                                                                                                                                                                                                                                 |
+| _(new)_                                                                 | `Pivot.remove(ws, pivot)`                                                                                                                                                                                                                                        |
 | `ws.addSparklineGroup(opts)`                                            | `Sparkline.add(ws, opts)`                                                                                                                                                                                                                                        |
 | `ws.getSparklineGroups()`                                               | `Sparkline.list(ws)`                                                                                                                                                                                                                                             |
 | `ws.removeSparklineGroup(x)`                                            | `Sparkline.remove(ws, x)`                                                                                                                                                                                                                                        |
 | `ws.addFormCheckbox(range, opts?)`                                      | `Form.addCheckbox(ws, range, opts?)`                                                                                                                                                                                                                             |
 | `ws.getFormCheckboxes()`                                                | `Form.listCheckboxes(ws)`                                                                                                                                                                                                                                        |
-| `checkbox.checked` / `= b`                                              | `Form.checked(cb)` / `Form.setChecked(cb, b)`                                                                                                                                                                                                                    |
-| `checkbox.link` / `= v`                                                 | `Form.link(cb)` / `Form.setLink(cb, v)`                                                                                                                                                                                                                          |
-| `checkbox.text` / `= v`                                                 | `Form.text(cb)` / `Form.setText(cb, v)`                                                                                                                                                                                                                          |
+| _(new)_                                                                 | `Form.remove(ws, cb)`                                                                                                                                                                                                                                            |
+| `checkbox.checked` / `= b`                                              | `Form.isChecked(cb)` / `Form.setChecked(cb, b)`                                                                                                                                                                                                                  |
+| `checkbox.link` / `= v`                                                 | `Form.getLink(cb)` / `Form.setLink(cb, v)`                                                                                                                                                                                                                       |
+| `checkbox.text` / `= v`                                                 | `Form.getText(cb)` / `Form.setText(cb, v)`                                                                                                                                                                                                                       |
 | `ws.addWatermark(opts)`                                                 | `Watermark.add(ws, opts)`                                                                                                                                                                                                                                        |
 | `ws.getWatermark()`                                                     | `Watermark.get(ws)`                                                                                                                                                                                                                                              |
 | `ws.removeWatermark()`                                                  | `Watermark.remove(ws)`                                                                                                                                                                                                                                           |
 | `new DataValidations()`                                                 | `DataValidation.create()`                                                                                                                                                                                                                                        |
 | `dv.add(addr, rule)`                                                    | `DataValidation.add(dv, addr, rule)`                                                                                                                                                                                                                             |
 | `dv.find(addr)` / `dv.remove(addr)`                                     | `DataValidation.find(dv, addr)` / `DataValidation.remove(dv, addr)`                                                                                                                                                                                              |
-| `new DefinedNames()`                                                    | `DefinedNames.create()`                                                                                                                                                                                                                                          |
+| `new DefinedNames()`                                                    | `Workbook.getDefinedNames(wb)` — the workbook's own registry (a free-standing one cannot be attached)                                                                                                                                                            |
 | `dn.add(ref, name)`                                                     | `DefinedNames.add(dn, ref, name)`                                                                                                                                                                                                                                |
 | `dn.addFormula(name, formula)`                                          | `DefinedNames.addFormula(dn, name, formula)`                                                                                                                                                                                                                     |
 | `dn.remove(...)` / `dn.getNames()`                                      | `DefinedNames.remove(dn, ...)` / `DefinedNames.getNames(dn)`                                                                                                                                                                                                     |
-| `new Note(text, author)`                                                | `Note.create(text, author)`                                                                                                                                                                                                                                      |
+| `new Note(text, author)`                                                | `Note.create(text, { author })`                                                                                                                                                                                                                                  |
 | `Note.fromModel(model)`                                                 | `Note.fromModel(model)` _(function)_                                                                                                                                                                                                                             |
-| `new Anchor(ws, "B2")` (via Image APIs)                                 | `Anchor.create(ws, "B2")`, `Anchor.col(a)`, `Anchor.setRow(a, n)`, `Anchor.model(a)`, `Anchor.clone(a)`                                                                                                                                                          |
-| Chartsheet handle methods                                               | `Chartsheet.name(cs)`, `Chartsheet.chart(cs)`, `Chartsheet.model(cs)`, `Chartsheet.setPageSetup(cs, …)`, … (management via `Workbook.addChartsheet`/`getChartsheet`/…)                                                                                           |
+| `new Anchor(ws, "B2")` (via Image APIs)                                 | `Anchor.create(ws, "B2")`, `Anchor.getCol(a)`, `Anchor.setRow(a, n)`, `Anchor.getModel(a)`, `Anchor.clone(a)`                                                                                                                                                    |
+| Chartsheet handle methods                                               | `Chartsheet.getName(cs)`, `Chartsheet.getChart(cs)`, `Chartsheet.getModel(cs)`, `Chartsheet.setPageSetup(cs, …)`, … (management via `Workbook.addChartsheet`/`getChartsheet`/…)                                                                                  |
 | `decodeCell`, `encodeCol`, `decodeRange`… (old top-level named exports) | `Address.decodeCell`, `Address.encodeCol`, `Address.decodeRange`, `Address.encodeCell`, `Address.encodeRange`, `Address.decodeRow`, `Address.encodeRow`, `Address.quoteSheetName` — these are **no longer top-level named exports**; use the `Address` namespace |
 
 ---
@@ -600,36 +599,34 @@ Table-column accessors (formerly on the table-column wrapper class) are on the
 ## 5. CSV & Markdown moved off `Workbook`
 
 The `readCsv`/`writeCsv`/`readMarkdown`/`writeMarkdown` **methods on the
-`Workbook` class are gone.** They are now free functions in dedicated subpaths,
-taking the workbook handle as the first argument.
+`Workbook` class are gone.** They are now the `ExcelCsv` and `ExcelMarkdown`
+namespaces in dedicated subpaths, taking the workbook handle as the first argument
+(the reads also have a form that returns a new workbook — see below).
 
 ### 5.1 CSV — `documonster/excel/csv`
 
 ```ts
 import { Workbook } from "documonster/excel";
-import {
-  readCsv,
-  writeCsv,
-  writeCsvBuffer,
-  createCsvReadStream,
-  createCsvWriteStream,
-  readCsvFile,
-  writeCsvFile, // Node-only
-  type CsvInput,
-  type CsvOptions
-} from "documonster/excel/csv";
+import { ExcelCsv, type CsvInput, type CsvOptions } from "documonster/excel/csv";
+import fs from "node:fs"; // only for the file-path rows below
 ```
 
-| Old (`Workbook` method)                       | New function                          |
-| --------------------------------------------- | ------------------------------------- |
-| `await wb.readCsv(input, opts?)`              | `await readCsv(wb, input, opts?)`     |
-| `wb.writeCsv(opts?)` → string                 | `writeCsv(wb, opts?)` → string        |
-| `await wb.writeCsv(stream, opts?)`            | `await writeCsv(wb, stream, opts?)`   |
-| `await wb.writeCsvBuffer(opts?)`              | `await writeCsvBuffer(wb, opts?)`     |
-| `wb.createCsvReadStream(opts?)`               | `createCsvReadStream(wb, opts?)`      |
-| `wb.createCsvWriteStream(opts?)`              | `createCsvWriteStream(wb, opts?)`     |
-| `await wb.readCsvFile(path, opts?)` _(Node)_  | `await readCsvFile(wb, path, opts?)`  |
-| `await wb.writeCsvFile(path, opts?)` _(Node)_ | `await writeCsvFile(wb, path, opts?)` |
+| Old (`Workbook` method)                       | New                                                                         |
+| --------------------------------------------- | --------------------------------------------------------------------------- |
+| `await wb.readCsv(input, opts?)`              | `await ExcelCsv.addWorksheet(wb, input, opts?)`                             |
+| `wb.writeCsv(opts?)` → string                 | `ExcelCsv.format(wb, opts?)` → string                                       |
+| `await wb.writeCsv(stream, opts?)`            | `await ExcelCsv.writeStream(wb, stream, opts?)`                             |
+| `await wb.writeCsvBuffer(opts?)`              | `await ExcelCsv.toBuffer(wb, opts?)`                                        |
+| `wb.createCsvReadStream(opts?)`               | `ExcelCsv.toStream(wb, opts?)`                                              |
+| `wb.createCsvWriteStream(opts?)`              | `ExcelCsv.createImportStream(wb, opts?)`                                    |
+| `await wb.readCsvFile(path, opts?)` _(Node)_  | `await ExcelCsv.addWorksheet(wb, fs.createReadStream(path, "utf8"), opts?)` |
+| `await wb.writeCsvFile(path, opts?)` _(Node)_ | `await ExcelCsv.writeFile(wb, path, opts?)`                                 |
+
+The old methods added a worksheet to the workbook they were called on, which is what
+`ExcelCsv.addWorksheet` does. If you created the workbook only to read into it, read it
+directly instead: `const wb = await ExcelCsv.read(input, opts?)` and
+`const wb = await ExcelCsv.readFile(path, opts?)` return a new workbook holding one worksheet.
+(`ExcelCsv.read(wb, input)` and `ExcelCsv.readFile(wb, path)` still work as deprecated forms.)
 
 The `CsvInput` / `CsvOptions` types are now imported from
 `documonster/excel/csv` (previously re-exported from the root).
@@ -637,26 +634,24 @@ The `CsvInput` / `CsvOptions` types are now imported from
 ### 5.2 Markdown — `documonster/excel/markdown`
 
 ```ts
-import {
-  readMarkdown,
-  readMarkdownAll,
-  writeMarkdown,
-  writeMarkdownBuffer,
-  readMarkdownFile,
-  readMarkdownAllFile,
-  writeMarkdownFile // Node-only
-} from "documonster/excel/markdown";
+import { ExcelMarkdown } from "documonster/excel/markdown";
+import { readFile } from "node:fs/promises"; // only for the file-path rows below
 ```
 
-| Old (`Workbook` method)                     | New function                                 |
-| ------------------------------------------- | -------------------------------------------- |
-| `wb.readMarkdown(input, opts?)`             | `readMarkdown(wb, input, opts?)`             |
-| `wb.readMarkdownAll(input, opts?)`          | `readMarkdownAll(wb, input, opts?)`          |
-| `wb.writeMarkdown(opts?)`                   | `writeMarkdown(wb, opts?)`                   |
-| `wb.writeMarkdownBuffer(opts?)`             | `writeMarkdownBuffer(wb, opts?)`             |
-| `await wb.readMarkdownFile(path, opts?)`    | `await readMarkdownFile(wb, path, opts?)`    |
-| `await wb.readMarkdownAllFile(path, opts?)` | `await readMarkdownAllFile(wb, path, opts?)` |
-| `await wb.writeMarkdownFile(path, opts?)`   | `await writeMarkdownFile(wb, path, opts?)`   |
+| Old (`Workbook` method)                     | New                                                                                    |
+| ------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `wb.readMarkdown(input, opts?)`             | `ExcelMarkdown.addWorksheet(wb, input, opts?)`                                         |
+| `wb.readMarkdownAll(input, opts?)`          | `ExcelMarkdown.addWorksheets(wb, input, opts?)`                                        |
+| `wb.writeMarkdown(opts?)`                   | `ExcelMarkdown.format(wb, opts?)`                                                      |
+| `wb.writeMarkdownBuffer(opts?)`             | `ExcelMarkdown.toBufferSync(wb, opts?)` (or `await ExcelMarkdown.toBuffer(wb, opts?)`) |
+| `await wb.readMarkdownFile(path, opts?)`    | `ExcelMarkdown.addWorksheet(wb, await readFile(path, "utf8"), opts?)`                  |
+| `await wb.readMarkdownAllFile(path, opts?)` | `ExcelMarkdown.addWorksheets(wb, await readFile(path, "utf8"), opts?)`                 |
+| `await wb.writeMarkdownFile(path, opts?)`   | `await ExcelMarkdown.writeFile(wb, path, opts?)`                                       |
+
+As with CSV, the old methods added to an existing workbook. To start from the Markdown instead,
+`ExcelMarkdown.read(input, opts?)` returns a new workbook — the first table, or one worksheet per table with
+`{ tables: "all" }` — and `await ExcelMarkdown.readFile(path, opts?)` does the same from a file. (The form of `read`
+and `readFile` taking the workbook first still works, deprecated.)
 
 > `MarkdownOptions` (and other Markdown types) still come from
 > `documonster/markdown`.
@@ -674,24 +669,24 @@ named exports (`pdf`, `readPdf`, `excelToPdf`, `docxToPdf`,
 import { Pdf } from "documonster/pdf";
 ```
 
-| Old (`documonster/pdf`)                             | New                                          |
-| --------------------------------------------------- | -------------------------------------------- |
-| `import { pdf } ...; pdf(rows)`                     | `Pdf.create(rows)`                           |
-| `import { excelToPdf } ...; excelToPdf(wb, opts?)`  | `await Pdf.fromExcel(wb, opts?)`             |
-| `import { docxToPdf } ...; docxToPdf(doc, opts?)`   | `await Pdf.fromDocx(doc, opts?)`             |
-| `import { readPdf } ...; readPdf(bytes)`            | `Pdf.read(bytes)`                            |
-| `new PdfDocumentBuilder()`                          | `new Pdf.Builder()`                          |
-| `PdfPageBuilder`                                    | `Pdf.PageBuilder`                            |
-| `parseSvgPath`                                      | `Pdf.parseSvgPath`                           |
-| `new PdfEditor()` / `PdfEditorPage`                 | `new Pdf.Editor()` / `Pdf.EditorPage`        |
-| `PageSizes`                                         | `Pdf.PageSizes`                              |
-| Digital signatures (`signPdf`/`verifyPdfSignature`) | `Pdf.sign(...)` / `Pdf.verifySignature(...)` |
-| _(new)_ chart → PDF                                 | `await Pdf.fromChart(chartHandle, opts?)`    |
-| _(new)_ Word-chart renderer                         | `await Pdf.wordChartRenderer()`              |
+| Old (`documonster/pdf`)                             | New                                                                |
+| --------------------------------------------------- | ------------------------------------------------------------------ |
+| `import { pdf } ...; pdf(rows)`                     | `Pdf.fromTable(rows)`                                              |
+| `import { excelToPdf } ...; excelToPdf(wb, opts?)`  | `await Pdf.fromExcel(wb, opts?)`                                   |
+| `import { docxToPdf } ...; docxToPdf(doc, opts?)`   | `await Pdf.fromDocx(doc, opts?)`                                   |
+| `import { readPdf } ...; readPdf(bytes)`            | `Pdf.extract(bytes)`                                               |
+| `new PdfDocumentBuilder()`                          | `new Pdf.Builder()`                                                |
+| `PdfPageBuilder`                                    | `Pdf.PageBuilder`                                                  |
+| `parseSvgPath`                                      | `Pdf.parseSvgPath`                                                 |
+| `new PdfEditor()` / `PdfEditorPage`                 | `new Pdf.Editor()` / `Pdf.EditorPage`                              |
+| `PageSizes`                                         | `Pdf.PageSizes`                                                    |
+| Digital signatures (`signPdf`/`verifyPdfSignature`) | `Pdf.Signature.fillPlaceholder(...)` / `Pdf.Signature.verify(...)` |
+| _(new)_ chart → PDF                                 | `await Pdf.fromChart(chartHandle, opts?)`                          |
+| _(new)_ Word-chart renderer                         | `await Pdf.createWordChartRenderer()`                              |
 
 > **`excelToPdf` and `pdf` were removed as top-level named exports.** Use
-> `Pdf.fromExcel(wb, options)` / `Pdf.create(rows)`. The converters are lazily
-> loaded, so a bundle that only builds PDFs (`Pdf.create(...)`) never pulls in
+> `Pdf.fromExcel(wb, options)` / `Pdf.fromTable(rows)`. The converters are lazily
+> loaded, so a bundle that only builds PDFs (`Pdf.fromTable(...)`) never pulls in
 > the excel/word object model.
 
 `PdfError`, `PdfRenderError`, `PdfFontError`, `PdfStructureError`, `isPdfError`
@@ -700,14 +695,14 @@ remain named exports of `documonster/pdf`.
 ### Recalculation with PDF export
 
 The old `excelToPdf` auto-recalculated when the formula engine was installed.
-Now recalculation is explicit — pass `calculateFormulas`:
+Now recalculation is explicit — pass `ExcelFormula.calculate`:
 
 ```ts
 import { Workbook } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
 
-const bytes = await Pdf.fromExcel(wb, { recalculate: calculateFormulas });
+const bytes = await Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 ```
 
 The Excel-specific callback is declared on `ExcelToPdfOptions`, not on the
@@ -717,7 +712,7 @@ the annotation:
 ```ts
 import type { ExcelToPdfOptions } from "documonster/pdf";
 
-const options: ExcelToPdfOptions = { recalculate: calculateFormulas };
+const options: ExcelToPdfOptions = { recalculate: ExcelFormula.calculate };
 ```
 
 The old `PdfExportOptions.recalculate` parameter used `never`, which accepted
@@ -739,14 +734,14 @@ modules were deleted.
 
 | Old (`documonster/formula`)                                                            | New                                                                                              |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `import { installFormulaEngine } ...; installFormulaEngine(); wb.calculateFormulas();` | `import { calculateFormulas } from "documonster/excel/formula"; calculateFormulas(wb);`          |
-| `import { calculateFormulas } ...`                                                     | `calculateFormulas` from `documonster/excel/formula`                                             |
+| `import { installFormulaEngine } ...; installFormulaEngine(); wb.calculateFormulas();` | `import { ExcelFormula } from "documonster/excel/formula"; ExcelFormula.calculate(wb);`          |
+| `import { calculateFormulas } ...`                                                     | `ExcelFormula.calculate` from `documonster/excel/formula`                                        |
 | `import { tokenize } ...`                                                              | `Formula.tokenize`                                                                               |
 | `import { parse } ...`                                                                 | `Formula.parse`                                                                                  |
 | `new Workbook({ formulaSyntaxProbe })`                                                 | `Workbook.create({ formulaSyntaxProbe })` (probe factory removed; pass your own if you have one) |
 
 **0.3.0 breaking change.** `wb.calculateFormulas()` (the Workbook method) is removed. Call
-`calculateFormulas(wb)` from `documonster/excel/formula` instead.
+`ExcelFormula.calculate(wb)` from `documonster/excel/formula` instead.
 `Formula.calculate` and the old `WorkbookLike` host SPI are also removed: the
 calculation core now operates on immutable snapshots behind the Excel adapter,
 rather than requiring user data to imitate a workbook object graph. Formula
@@ -794,11 +789,11 @@ wb.calculateFormulas();
 
 ```ts
 import { Workbook } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 
 const wb = Workbook.create();
 // ... build formulas ...
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 ```
 
 ---
@@ -816,18 +811,21 @@ modules — not only the Excel/Word integrations.
 | `documonster/markdown` | `Markdown`                             | `Markdown.parse(...)`, `Markdown.format(...)` |
 | `documonster/csv`      | `Csv`                                  | `Csv.parse(...)`, `Csv.format(...)`           |
 | `documonster/formula`  | `Formula`                              | `Formula.tokenize(...)`, `Formula.parse(...)` |
-| `documonster/pdf`      | `Pdf`                                  | `Pdf.create(...)`, `Pdf.read(...)`            |
-| `documonster/word`     | `Build`, `Query`, `Io`, … (many, §8.5) | `Io.read(...)`, `Query.replaceText(...)`      |
+| `documonster/pdf`      | `Pdf`                                  | `Pdf.fromTable(...)`, `Pdf.extract(...)`      |
+| `documonster/word`     | `Build`, `Query`, `Io`, … (many, §8.5) | `Io.read(...)`, `Document.replaceText(...)`   |
 
 If you previously imported individual functions from these modules (e.g.
 `import { parseCsv } from ".../csv"`), switch to the namespace form
 (`Csv.parse`). Members were also **renamed** (de-prefixed) inside the
 namespace — see §8.2 and §8.3.
 
-The `documonster/chart`, `documonster/stream`, and `documonster/archive`
-module surfaces keep their flat free-function / class shape — only the package
-name in the import specifier changes (e.g.
-`import { gzip, gunzip } from "documonster/archive"`).
+The remaining modules are namespaced too: `documonster/archive` publishes
+`Archive`, `Compression` and (Node only) `Fs`; `documonster/chart` publishes
+`ChartClassic`, `ChartEx` and `DrawingMl`; `documonster/draw` publishes `Draw`
+and `Matrix`; `documonster/mermaid` publishes `Mermaid`. `documonster/stream`
+keeps its `node:stream`-compatible names (`Readable`, `pipeline`, …) flat and
+puts everything else in `Streams` (e.g.
+`import { Compression } from "documonster/archive"; Compression.gzip(bytes)`).
 
 ### 8.2 Standalone CSV — `documonster/csv`
 
@@ -841,22 +839,20 @@ and errors (`CsvError`, `CsvWorkerError`, `isCsvError`) plus
 | `parseCsv`                                         | `Csv.parse`                                                                 |
 | `parseCsvAsync`                                    | `Csv.parseAsync`                                                            |
 | `parseCsvRows`                                     | `Csv.parseRows`                                                             |
-| `parseCsvWithProgress`                             | `Csv.parseWithProgress`                                                     |
+| `parseCsvWithProgress`                             | `Csv.parseAsync(input, { onProgress })`                                     |
 | `formatCsv`                                        | `Csv.format`                                                                |
-| `CsvParserStream`                                  | `Csv.ParserStream`                                                          |
-| `CsvFormatterStream`                               | `Csv.FormatterStream`                                                       |
 | `createCsvParserStream`                            | `Csv.createParserStream`                                                    |
 | `createCsvFormatterStream`                         | `Csv.createFormatterStream`                                                 |
 | `csvGenerate`                                      | `Csv.generate`                                                              |
 | `csvGenerateRows`                                  | `Csv.generateRows`                                                          |
-| `csvGenerateAsync`                                 | `Csv.generateAsync`                                                         |
+| `csvGenerateAsync`                                 | `Csv.generateRowsAsync`                                                     |
 | `csvGenerateData`                                  | `Csv.generateData`                                                          |
 | `createCsvGenerator`                               | `Csv.createGenerator`                                                       |
 | `formatNumberForCsv`                               | `Csv.formatNumber`                                                          |
 | `parseNumberFromCsv`                               | `Csv.parseNumber`                                                           |
 | `detectDelimiter` / `detectLinebreak` / `stripBom` | `Csv.detectDelimiter` / `Csv.detectLinebreak` / `Csv.stripBom` (same names) |
 | `applyDynamicTyping` / `applyDynamicTypingToRow`   | `Csv.applyDynamicTyping` / `Csv.applyDynamicTypingToRow` (same names)       |
-| `isFormattedValue` / `quoted` / `unquoted`         | `Csv.isFormattedValue` / `Csv.quoted` / `Csv.unquoted` (same names)         |
+| `isFormattedValue` / `quoted` / `unquoted`         | `Csv.isFormattedValue` / `Csv.forceQuote` / `Csv.preventQuote`              |
 
 > This is the **standalone** CSV parser/formatter. It is separate from the
 > Excel↔CSV bridge at `documonster/excel/csv` (§5.1), which reads/writes
@@ -880,7 +876,7 @@ flat named exports. This is separate from the Excel↔Markdown bridge at
 The `Xml` namespace collects encode/decode, DOM + SAX parsing, writers, and
 query. Members were de-prefixed (`xmlEncode`→`Xml.encode`,
 `xmlDecode`→`Xml.decode`, `xmlEncodeAttr`→`Xml.encodeAttr`, plus
-`Xml.parse`, `Xml.query`, `Xml.encodeCData`, …). Types and errors
+`Xml.parse`, `Xml.query`, `Xml.encodeCdata`, …). Types and errors
 (`XmlError`, `XmlParseError`, `XmlWriteError`, `isXmlError`, `isXmlParseError`)
 remain flat named exports.
 
@@ -895,105 +891,111 @@ stayed flat. Apply these mappings:
 **Namespaces where members keep their old names** (just prefix with the
 namespace): `Build.*` (all run/paragraph/table/math/shape/field builders:
 `Build.text`, `Build.paragraph`, `Build.table`, `Build.heading`,
-`Build.hyperlink`, `Build.field`, `Build.checkBox`, `Build.mathFraction`,
-`Build.createRect`, …), `Units.*` (`Units.inchesToTwips`, `Units.ptToEmu`, …),
-`Query.*` (`Query.replaceText`, `Query.mailMerge`, `Query.extractText`,
-`Query.listTables`, `Query.acceptAllRevisions`, `Query.resolveStyle`,
-`Query.extractFormFields`, `Query.walkDocument`, …), `Convert.*`
-(`Convert.parseFlatOpc`, `Convert.toFlatOpc`, `Convert.readOdt`,
-`Convert.writeOdt`, `Convert.ommlToMathML`, `Convert.mathMLToOmml`,
-`Convert.docxToSemantic`, `Convert.mapDocument`, `Convert.createConversionContext`).
+`Build.hyperlink`, `Build.field`, `Build.checkbox`, `Build.mathFraction`,
+`Build.rect`, …), `Units.*` (`Units.inchesToTwips`, `Units.ptToEmu`, …),
+`Query.*` (`Query.listTables`, `Query.searchText`, …). The in-place edits moved to
+`Document` (`Document.replaceText`, `Document.mailMerge`,
+`Document.acceptAllRevisions`, …). Renamed inside `Query`: `extractText`→`getText`,
+`resolveStyle`→`getParagraphStyle`, `resolveRunStyle`→`getRunStyle`,
+`resolveTableStyle`→`getTableStyle`, `extractFormFields`→`listFormFields`,
+`walkDocument`→`walk`, `getHeadings`→`listHeadings`, `findBookmark`→`getBookmark`,
+`findComment`→`getComment`, `paragraphCount`→`countParagraphs`,
+`tableCount`→`countTables`. `Convert.*`: `parseFlatOpc`→`Convert.fromFlatOpc`,
+`toFlatOpc`→`Convert.partsToFlatOpc`, `readOdt`→`Convert.fromOdt`,
+`writeOdt`→`Convert.toOdt`, `ommlToMathML`→`Convert.ommlToMathMl`,
+`mathMLToOmml`→`Convert.mathMlToOmml`, `docxToSemantic`→`Convert.toSemantic`,
+`mapDocument`→`Transform.map`.
 
 **Renamed members** (name changed inside the namespace):
 
-| Old flat export                                                                | New access path                                                                                           |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `readDocx`                                                                     | `Io.read`                                                                                                 |
-| `packageDocx`                                                                  | `Io.package`                                                                                              |
-| `mergeDocuments`                                                               | `Io.merge`                                                                                                |
-| `splitDocument`                                                                | `Io.split`                                                                                                |
-| `editDocxIncremental`                                                          | `Io.editDocxIncremental`                                                                                  |
-| `listDocxParts` / `readDocxPart`                                               | `Io.listDocxParts` / `Io.readDocxPart`                                                                    |
-| `patchDocument` / `compileTemplate` / `patchTemplate`                          | `Io.patchDocument` / `Io.compileTemplate` / `Io.patchTemplate`                                            |
-| `updateFields` / `updateTableOfContents`                                       | `Io.updateFields` / `Io.updateTableOfContents`                                                            |
-| `toBuffer` / `toBase64`                                                        | `Io.toBuffer` / `Io.toBase64`                                                                             |
-| _(new)_ file-path IO                                                           | `Io.readFile` / `Io.writeFile`                                                                            |
-| `resolveThemeColor`                                                            | `Theme.resolveColor`                                                                                      |
-| `fillTemplate` / `fillTemplateEnhanced` / `listTemplateTags`                   | `Template.fillTemplate` / `Template.fillTemplateEnhanced` / `Template.listTemplateTags`                   |
-| `fillTemplateFromSource` / `bindChartData` / `isTemplateChart`                 | `Template.fillTemplateFromSource` / `Template.bindChartData` / `Template.isTemplateChart`                 |
-| `TemplateError`                                                                | `Template.TemplateError`                                                                                  |
-| `JsonDataSource` (class)                                                       | `Template.createJsonDataSource` (factory)                                                                 |
-| `XmlDataSource` (class)                                                        | `Template.createXmlDataSource` (factory)                                                                  |
-| `CsvDataSource` (class)                                                        | `Template.createCsvDataSource` (factory)                                                                  |
-| `CompositeDataSource` (class)                                                  | `Template.createCompositeDataSource` (factory)                                                            |
-| `embedFont`                                                                    | `Font.embed`                                                                                              |
-| `embedFontFamily`                                                              | `Font.embedFamily`                                                                                        |
-| `addEmbeddedFonts`                                                             | `Font.addEmbedded`                                                                                        |
-| `subsetFont`                                                                   | `Font.subset`                                                                                             |
-| `shapeText` / `detectScript` / `detectDirection`                               | `Font.shapeText` / `Font.detectScript` / `Font.detectDirection`                                           |
-| `createHyphenator` / `hyphenateWord` / `hyphenateText`                         | `Font.createHyphenator` / `Font.hyphenateWord` / `Font.hyphenateText`                                     |
-| `layoutDocument`                                                               | `Layout.document`                                                                                         |
-| `layoutDocumentFull`                                                           | `Layout.documentFull`                                                                                     |
-| `renderPageToSvg` / `renderDocumentToSvg` / `renderPageFromLayout`             | `Layout.renderPageToSvg` / `Layout.renderDocumentToSvg` / `Layout.renderPageFromLayout`                   |
-| `encryptDocx`                                                                  | `Security.encrypt`                                                                                        |
-| `protectDocument` / `unprotectDocument`                                        | `Security.protect` / `Security.unprotect`                                                                 |
-| `isDocumentProtected`                                                          | `Security.isProtected`                                                                                    |
-| `getProtectionState`                                                           | `Security.getState`                                                                                       |
-| `verifyProtectionPassword`                                                     | `Security.verifyPassword`                                                                                 |
-| `resolveSecurityPolicy` / `DEFAULT_SECURITY_POLICY` / `STRICT_SECURITY_POLICY` | `Security.resolveSecurityPolicy` / `Security.DEFAULT_SECURITY_POLICY` / `Security.STRICT_SECURITY_POLICY` |
-| `parseStyleMap`                                                                | `Styles.parse`                                                                                            |
-| `createStyleMap`                                                               | `Styles.create`                                                                                           |
-| `mergeStyleMaps`                                                               | `Styles.merge`                                                                                            |
-| `matchStyleMap`                                                                | `Styles.match`                                                                                            |
-| `DEFAULT_STYLE_MAP`                                                            | `Styles.DEFAULT`                                                                                          |
-| `validateDocument`                                                             | `Validation.document`                                                                                     |
-| `diffDocuments`                                                                | `Diff.documents`                                                                                          |
-| `hasVbaProject` / `getVbaProjectInfo` / `getVbaProjectData`                    | `Vba.has` / `Vba.getInfo` / `Vba.getData`                                                                 |
-| `addVbaProject` / `removeVbaProject` / `listVbaParts`                          | `Vba.add` / `Vba.remove` / `Vba.listParts`                                                                |
-| `extractOleObjects` / `hasOleObjects` / `getOleObjectData`                     | `Ole.extract` / `Ole.has` / `Ole.getData`                                                                 |
-| `createOleEmbedding` / `addOleObject`                                          | `Ole.createEmbedding` / `Ole.add`                                                                         |
-| `createBuildingBlock` / `createGlossaryDocument`                               | `Glossary.createBlock` / `Glossary.createDocument`                                                        |
-| `findBuildingBlock` / `listBuildingBlocks`                                     | `Glossary.findBlock` / `Glossary.listBlocks`                                                              |
-| `getAutoTextEntries` / `getQuickParts`                                         | `Glossary.autoTextEntries` / `Glossary.quickParts`                                                        |
-| `createRenderContext`                                                          | `RenderContext.create`                                                                                    |
-| `createIdGenerators`                                                           | `RenderContext.createIds`                                                                                 |
-| `StreamingDocxWriter` / `createDocxStream`                                     | `Streaming.StreamingDocxWriter` / `Streaming.createDocxStream`                                            |
-| _(new)_ streaming reader                                                       | `Streaming.StreamingDocxReader` / `Streaming.createDocxStreamReader`                                      |
+| Old flat export                                                    | New access path                                                                                |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `readDocx`                                                         | `Io.read`                                                                                      |
+| `packageDocx`                                                      | `Io.toBuffer`                                                                                  |
+| `mergeDocuments`                                                   | `Transform.merge`                                                                              |
+| `splitDocument`                                                    | `Transform.split`                                                                              |
+| `editDocxIncremental`                                              | `Package.edit`                                                                                 |
+| `listDocxParts` / `readDocxPart`                                   | `Package.listParts` / `Package.readPart`                                                       |
+| `patchDocument` / `compileTemplate` / `patchTemplate`              | `Package.patch` / `Package.compileTemplate` / `Package.patchTemplate`                          |
+| `updateFields` / `updateTableOfContents`                           | `Transform.updateFields` / `Transform.updateTableOfContents`                                   |
+| `toBuffer` / `toBase64`                                            | `Io.toBuffer` / `Io.toBase64`                                                                  |
+| _(new)_ file-path IO                                               | `Io.readFile` / `Io.writeFile`                                                                 |
+| `resolveThemeColor`                                                | `Theme.resolveColor`                                                                           |
+| `fillTemplate` / `fillTemplateEnhanced` / `listTemplateTags`       | `Template.fill` / `Template.fill(doc, data, { richPlaceholders: true })` / `Template.listTags` |
+| `fillTemplateFromSource` / `bindChartData`                         | `Template.fillFromSource` / `Template.bindChartData`                                           |
+| `JsonDataSource` (class)                                           | `Template.createJsonDataSource` (factory)                                                      |
+| `XmlDataSource` (class)                                            | `Template.createXmlDataSource` (factory)                                                       |
+| `CsvDataSource` (class)                                            | `Template.createCsvDataSource` (factory)                                                       |
+| `CompositeDataSource` (class)                                      | `Template.createCompositeDataSource` (factory)                                                 |
+| `embedFont`                                                        | `Font.embed`                                                                                   |
+| `embedFontFamily`                                                  | `Font.embedFamily`                                                                             |
+| `addEmbeddedFonts`                                                 | `Font.addEmbedded`                                                                             |
+| `subsetFont`                                                       | `Font.subset`                                                                                  |
+| `shapeText` / `detectScript` / `detectDirection`                   | `Font.shapeText` / `Font.detectScript` / `Font.detectDirection`                                |
+| `createHyphenator` / `hyphenateWord` / `hyphenateText`             | `Font.createHyphenator` / `Font.hyphenateWord` / `Font.hyphenateText`                          |
+| `layoutDocument`                                                   | `Layout.getPageMap`                                                                            |
+| `layoutDocumentFull`                                               | `Layout.compute`                                                                               |
+| `renderPageToSvg` / `renderDocumentToSvg` / `renderPageFromLayout` | `Layout.pageToSvg` / `Layout.toSvg` / `Layout.computedPageToSvg`                               |
+| `encryptDocx`                                                      | `WordCrypto.encrypt`                                                                           |
+| `protectDocument` / `unprotectDocument`                            | `Security.protect` / `Security.unprotect`                                                      |
+| `isDocumentProtected`                                              | `Security.isProtected`                                                                         |
+| `getProtectionState`                                               | `Security.getState`                                                                            |
+| `verifyProtectionPassword`                                         | `Security.verifyProtectionPassword`                                                            |
+| `DEFAULT_SECURITY_POLICY` / `STRICT_SECURITY_POLICY`               | `Security.DEFAULT_SECURITY_POLICY` / `Security.STRICT_SECURITY_POLICY`                         |
+| `parseStyleMap`                                                    | `Styles.parse`                                                                                 |
+| `createStyleMap`                                                   | `Styles.create`                                                                                |
+| `mergeStyleMaps`                                                   | `Styles.merge`                                                                                 |
+| `matchStyleMap`                                                    | `Styles.match`                                                                                 |
+| `DEFAULT_STYLE_MAP`                                                | `Styles.DEFAULT`                                                                               |
+| `validateDocument`                                                 | `Validation.validate`                                                                          |
+| `diffDocuments`                                                    | `Diff.compare`                                                                                 |
+| `hasVbaProject` / `getVbaProjectInfo` / `getVbaProjectData`        | `Vba.has` / `Vba.getInfo` / `Vba.getData`                                                      |
+| `addVbaProject` / `removeVbaProject` / `listVbaParts`              | `Vba.add` / `Vba.remove` / `Vba.listParts`                                                     |
+| `extractOleObjects` / `hasOleObjects` / `getOleObjectData`         | `Ole.extract` / `Ole.has` / `Ole.getData`                                                      |
+| `createOleEmbedding` / `addOleObject`                              | `Ole.createEmbedding` / `Ole.add`                                                              |
+| `createBuildingBlock` / `createGlossaryDocument`                   | `Glossary.createBlock` / `Glossary.createDocument`                                             |
+| `findBuildingBlock` / `listBuildingBlocks`                         | `Glossary.findBlock` / `Glossary.listBlocks`                                                   |
+| `getAutoTextEntries` / `getQuickParts`                             | `Glossary.listAutoTextEntries` / `Glossary.listQuickParts`                                     |
+| `StreamingDocxWriter` / `createDocxStream`                         | `Streaming.createWriter`                                                                       |
+| _(new)_ streaming reader                                           | `Streaming.createReader`                                                                       |
 
 **Unchanged (still flat):** the error classes (`DocxError`, `DocxParseError`,
 `DocxWriteError`, `DocxMissingPartError`, `DocxInvalidStructureError`,
 `DocxUnsupportedFeatureError`, `DocxEncryptedError`, `DocxDecryptionError`,
-`DocxLimitExceededError`, `isDocxError`) and every `export type` (data-model
-types, options, `DocumentHandle`, layout/IR types). The Word→HTML/Markdown/
-Excel/PDF integrations remain on their own subpaths
-(`documonster/word/html`, `documonster/word/markdown`, `documonster/word/excel`,
-and PDF via `documonster/pdf`).
+`DocxLimitExceededError`, `isDocxError`, `TemplateError`) and every `export type`
+(data-model types, options, layout/IR types). The integrations on their own
+subpaths are namespaces: `WordHtml` (`documonster/word/html`), `WordMarkdown`
+(`documonster/word/markdown`), `WordExcel` (`documonster/word/excel`) and `WordCrypto`
+(`documonster/word/crypto`). PDF conversion is `Pdf.fromDocx` in `documonster/pdf`.
 
 > **`Document`** is still imported the same way
 > (`import { Document } from "documonster/word"`), but it is now a **namespace
 > re-export** of the document-handle module rather than a single binding.
-> Members are reached as `Document.<member>`; the `DocumentHandle` **type** is
-> still a flat `export type`.
+> Members are reached as `Document.<member>`. The document object itself is
+> `DocxDocument`: `Document.create()` and `Io.read()` return the same type, so
+> a document read from disk can be edited with `Document.*`, and there is no
+> build step — pass it straight to `Io.toBuffer`.
 
 ### 8.6 Removed utility re-exports (previously on the root entry)
 
 The old root `.` entry (`@cj-tech-master/excelts`) re-exported a grab-bag of
-low-level helpers. These are **no longer exported from `documonster/excel`**
-(nor from any other public entry). Migrate as follows:
+low-level helpers. These are **no longer exported from `documonster/excel`**; most are
+not public anywhere, and the few that are live on another entry's namespace. Migrate as
+follows:
 
-| Old (root named export)                                                                               | New                                                                                                                     |
-| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `decodeCell` / `encodeCol` / `decodeRow` / `encodeRow` / `encodeCell` / `decodeRange` / `encodeRange` | `Address.*` from `documonster/excel` (§4.10)                                                                            |
-| `xmlEncode`                                                                                           | `Xml.encode` from `documonster/xml`                                                                                     |
-| `xmlDecode`                                                                                           | `Xml.decode` from `documonster/xml`                                                                                     |
-| `xmlEncodeAttr` / `validateXmlName`                                                                   | `Xml.encodeAttr` / `Xml.validateXmlName`                                                                                |
-| `createTextWatermarkImage` / `TextWatermarkImageOptions`                                              | Use `Watermark.add(ws, opts)` on a worksheet (§4.10); the standalone image generator is no longer a public export       |
-| `getCellDisplayText` / `formatCellValue` / `isDateDisplayFormat`                                      | Use `Cell.getDisplayText(ws, addr)` (§4.3); the standalone helpers are no longer public                                 |
-| `dateToExcel` / `excelToDate`                                                                         | Internal — no longer public. Compute Excel serial dates in your own code, or store JS `Date` values directly in cells.  |
-| `base64ToUint8Array` / `uint8ArrayToBase64`                                                           | Internal — no longer public. Use the platform `atob`/`btoa` or `Buffer`.                                                |
-| `concatUint8Arrays` / `toUint8Array` / `stringToUint8Array` / `uint8ArrayToString`                    | Internal — no longer public. Use `TextEncoder`/`TextDecoder` and native array ops.                                      |
-| `DateParser` / `DateFormatter` / `getSupportedFormats` / `DateFormat`                                 | Internal — no longer public.                                                                                            |
-| `BaseError` / `toError` / `errorToJSON` / `getErrorChain` / `getRootCause`                            | Internal — no longer public. Catch the module-specific error classes (`ExcelError`, `PdfError`, `XmlError`, …) instead. |
+| Old (root named export)                                                                               | New                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decodeCell` / `encodeCol` / `decodeRow` / `encodeRow` / `encodeCell` / `decodeRange` / `encodeRange` | `Address.*` from `documonster/excel` (§4.10)                                                                                                                                                             |
+| `xmlEncode`                                                                                           | `Xml.encode` from `documonster/xml`                                                                                                                                                                      |
+| `xmlDecode`                                                                                           | `Xml.decode` from `documonster/xml`                                                                                                                                                                      |
+| `xmlEncodeAttr` / `validateXmlName`                                                                   | `Xml.encodeAttr` / `Xml.validateName`                                                                                                                                                                    |
+| `createTextWatermarkImage` / `TextWatermarkImageOptions`                                              | Use `Watermark.add(ws, opts)` on a worksheet (§4.10); the standalone image generator is no longer a public export                                                                                        |
+| `getCellDisplayText` / `formatCellValue` / `isDateDisplayFormat`                                      | Use `Cell.getDisplayText(ws, addr)` (§4.3); the standalone helpers are no longer public                                                                                                                  |
+| `dateToExcel` / `excelToDate`                                                                         | Internal — no longer public. Compute Excel serial dates in your own code, or store JS `Date` values directly in cells.                                                                                   |
+| `base64ToUint8Array` / `uint8ArrayToBase64`                                                           | `Archive.base64ToUint8Array` / `Archive.uint8ArrayToBase64` from `documonster/archive`                                                                                                                   |
+| `concatUint8Arrays` / `stringToUint8Array` / `uint8ArrayToString` / `toUint8Array`                    | `Archive.concatUint8Arrays` / `Archive.stringToUint8Array` / `Archive.uint8ArrayToString` from `documonster/archive`; `toUint8Array` is no longer public — use `TextEncoder` or `new Uint8Array(buffer)` |
+| `DateParser` / `DateFormatter` / `getSupportedFormats` / `DateFormat`                                 | Internal — no longer public.                                                                                                                                                                             |
+| `BaseError` / `toError` / `errorToJSON` / `getErrorChain` / `getRootCause`                            | Internal — no longer public. Catch the module-specific error classes (`ExcelError`, `PdfError`, `XmlError`, …) instead.                                                                                  |
 
 If you depended on any of these, replace them with the namespace equivalent
 above or inline a small implementation — they were never intended as a stable
@@ -1003,14 +1005,14 @@ public surface and are not re-exported by the per-module entries.
 
 Things that used to need a workaround, or worked by accident:
 
-| Old (excelts, or the first documonster surface)                                                 | Now                                                                                                                                                                                                             |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Worksheet.addRows(ws, data as Record<string, unknown>[])`                                      | `Worksheet.addRows(ws, data)` — the keyed row type is `RowObject` (`object`), so a plain `interface` no longer needs a cast                                                                                     |
-| `ws.getColumn("total").number`, or `Worksheet.columns(ws).find(c => c.key === "total")!.number` | `Column.getNumber(ws, "total")` (and `Column.getLetter`)                                                                                                                                                        |
-| `[...ws.columns.map(c => c.defn), extra]`, or hand-copying 7 fields                             | `[...Worksheet.columnDefinitions(ws), extra]` (single column: `Column.getDefinition(ws, ref)`)                                                                                                                  |
-| `Worksheet.eachRow` + `Row.getCell` to walk one column                                          | `Column.values(ws, ref)` (row-number indexed) / `Column.getValues(ws, ref)` (0-based) / `Column.setValues(ws, ref, v)`; neither read materialises a cell, and the writer takes everything `Cell.setValue` takes |
-| `cell.value` on a handle from `Row.eachCell`                                                    | `Cell.view(cell).value` / `.text` / `.numFmt` / `.font` / `.alignment`; write with `Stream.setCell*(cell, …)`                                                                                                   |
-| `Cell.setFont(ws, "B3", …)` only                                                                | `Cell.setFont(ws, 3, 2, …)` too — every cell function takes `"A1"` **or** `(row, col)`                                                                                                                          |
+| Old (excelts, or the first documonster surface)                                      | Now                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Worksheet.addRows(ws, data as Record<string, unknown>[])`                           | `Row.addMany(ws, data)` — the keyed row type is `RowObject` (`object`), so a plain `interface` no longer needs a cast                                                                                                           |
+| `ws.getColumn("total").number`, or `ws.columns.find(c => c.key === "total")!.number` | `Column.getNumber(ws, "total")` (and `Column.getLetter`)                                                                                                                                                                        |
+| `[...ws.columns.map(c => c.defn), extra]`, or hand-copying 7 fields                  | `[...Column.getDefinitions(ws), extra]` (single column: `Column.getDefinition(ws, ref)`)                                                                                                                                        |
+| `ws.eachRow` + `row.getCell` to walk one column                                      | `Column.getValues(ws, ref, { base: 1 })` (row-number indexed) / `Column.getValues(ws, ref)` (0-based) / `Column.setValues(ws, ref, v)`; neither read materialises a cell, and the writer takes everything `Cell.setValue` takes |
+| `cell.value` on a handle from `row.eachCell`                                         | `Row.eachAddress(ws, n, address => Cell.getValue(ws, address))` — iterate positions, read and write through `Cell.*`                                                                                                            |
+| `Cell.setFont(ws, "B3", …)` only                                                     | `Cell.setFont(ws, 3, 2, …)` too — every cell function takes `"A1"` **or** `(row, col)`                                                                                                                                          |
 
 Two deliberate compile-time breaks:
 
@@ -1018,28 +1020,25 @@ Two deliberate compile-time breaks:
   type-check and silently read `"CUA1"` (`n2l(99) + "A1"`); `Cell.getValue(ws, 5)`
   used to type-check and throw `InvalidAddressError`. Both are now errors. Pass
   `"A1"` alone, or `(row, col)` together.
-- **`Worksheet.columns(ws)` is read-only.** It returns the live column handles as
-  `readonly Readonly<ColumnData>[]`, so `ws.columns[0].header = "X"` (which used
-  to work, unadvertised, and bypassed the key registry and cell styles) no longer
-  compiles. Declare columns with `Worksheet.setColumns`, change them with
-  `Column.set*`, and read them with `Worksheet.columnDefinitions`. The elements
-  are `ColumnView`s — deeply readonly, so nested writes such as
-  `ws.columns[0].style.numFmt = "0"` are rejected too.
+- **Columns are not handed out.** `ws.columns[0].header = "X"` (which used to
+  work, unadvertised, and bypassed the key registry and cell styles) has no
+  counterpart. Declare columns with `Column.setDefinitions`, change them with
+  `Column.set*`, and read them with `Column.getDefinitions`, which returns plain
+  data.
 
-`Worksheet.columnCount(ws)` is **not** `Worksheet.columns(ws).length`: it counts
-the cells actually present in rows, while `columns` / `columnDefinitions` list
+`Column.getCount(ws)` is **not** `Column.getDefinitions(ws).length`: it counts
+the cells actually present in rows, while `Column.getDefinitions` lists
 the column _records_, which also exist for columns that were merely declared or
 padded into being by a cell access. Both are documented as such now.
 
 Style getters (`Cell.getStyle`, `Cell.getFont`, `Column.getStyle`, `Row.getStyle`
-and the `font` / `alignment` on `Cell.view`) still return the cell's **live**
+and the `font` / `alignment` on `Stream.getCellView`) still return the cell's **live**
 style objects, unchanged: read-modify-write
 (`Cell.setStyle(ws, a, { ...Cell.getStyle(ws, b) })`) is a supported pattern, so
 copy before editing if you do not mean to touch the source.
 
-Cell and row **handles** stay mutable on purpose — `Stream.setCellValue(cell, …)`
-and friends take a `CellData` / `RowData`, and that is the supported way to write
-through a handle in streaming and non-streaming code alike.
+Cell and row **handles** belong to the streaming API — `Stream.setCellValue(cell, …)`
+and friends take a `Stream.CellHandle` / `Stream.RowHandle`.
 
 ### 8.8 Type imports (`Style`, `ColumnDefn`, `PageSetup`, …)
 
@@ -1077,7 +1076,7 @@ Removed, because they were unreferenced dead declarations:
 | `Media`                                    | `WorkbookMedia` (what the workbook actually stores)                                                                                                                                                                                                        |
 | `ImagePosition` / `ImageHyperlinkValue`    | Use `AddImageRange` — the range/position/hyperlink shape `Image.place` accepts. Note `documonster/excel` also exports `ImageAbsolutePosition` (`{ x, y }`, for absolute anchors); it is a different concept and deliberately **not** named `ImagePosition` |
 | `TableColumn`                              | `Required<TableColumnProperties>`                                                                                                                                                                                                                          |
-| `DefinedNamesRanges` / `DefinedNamesModel` | `DefinedNameModel[]` — one entry per defined name (`DefinedNames.model(dn)` returns the array)                                                                                                                                                             |
+| `DefinedNamesRanges` / `DefinedNamesModel` | `DefinedNameModel[]` — one entry per defined name (`DefinedNames.getModel(dn)` returns the array)                                                                                                                                                          |
 | `Buffer` (alias of `Uint8Array`)           | `Uint8Array`                                                                                                                                                                                                                                               |
 
 Streaming types moved onto the `Stream` namespace, next to the streaming classes:
@@ -1151,22 +1150,21 @@ Apply in order:
    `Namespace.setProp(obj, v)`. Watch for renamed members
    (`getSheetValues`→`getValues`, `mergeCells`→`merge`, `toJSON`→`toJson`, …).
 5. **Replace `wb.xlsx.*` I/O** with `Workbook.read` / `Workbook.readFile` /
-   `Workbook.toBuffer` / `Workbook.writeFile` (§3.3). Reading requires a
-   pre-created handle: `const wb = Workbook.create(); await Workbook.read(wb, bytes);`.
+   `Workbook.toBuffer` / `Workbook.writeFile` (§3.3). Reading returns the
+   handle: `const wb = await Workbook.read(bytes);`.
 6. **Move CSV/Markdown calls** to `documonster/excel/csv` /
-   `documonster/excel/markdown` free functions, passing `wb` first (§5).
+   `documonster/excel/markdown` (`ExcelCsv.*` / `ExcelMarkdown.*`), passing `wb` first (§5).
 7. **Replace `excelToPdf(wb, opts)`** with `await Pdf.fromExcel(wb, opts)` and
    drop any `pdf`/`excelToPdf` import in favor of `Pdf.*` (§6).
 8. **Remove `installFormulaEngine()`** and replace `wb.calculateFormulas()`
-   with `calculateFormulas(wb)` from `documonster/excel/formula` (§7).
-9. **Update document-property mutations** (`wb.title = …`, `wb.creator = …`,
-   etc.) to go through `Workbook.getModel(wb)` / `Workbook.setModel(wb, model)`
-   (§4.1).
+   with `ExcelFormula.calculate(wb)` from `documonster/excel/formula` (§7).
+9. **Keep document-property assignments** (`wb.title = …`, `wb.creator = …`)
+   as they are; other workbook-level state goes through its functions (§4.1).
 10. **Update standalone-module calls** to their namespaces: `parseCsv`→`Csv.parse`,
     `formatMarkdown`→`Markdown.format`, `xmlEncode`→`Xml.encode`, and every Word
     flat function → its namespace (`readDocx`→`Io.read`, `replaceText`→
-    `Query.replaceText`, `layoutDocument`→`Layout.document`, `encryptDocx`→
-    `Security.encrypt`, …) per §8.2–§8.5.
+    `Document.replaceText`, `layoutDocument`→`Layout.getPageMap`, `encryptDocx`→
+    `WordCrypto.encrypt`, …) per §8.2–§8.5.
 11. **Type-check.** Because the API is now function-based, TypeScript will flag
     every remaining `.method`/`.prop` on a handle and every missing named export
     — use those errors as a to-do list until the project compiles.
@@ -1210,34 +1208,32 @@ const csv = wb.writeCsv();
 **After (documonster):**
 
 ```ts
-import { Workbook, Worksheet, Cell } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { Cell, Column, Row, Workbook, Worksheet } from "documonster/excel";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
-import { writeCsv } from "documonster/excel/csv";
+import { ExcelCsv } from "documonster/excel/csv";
 
 const wb = Workbook.create();
-const model = Workbook.getModel(wb);
-model.creator = "Reports Bot";
-Workbook.setModel(wb, model);
+wb.creator = "Reports Bot";
 
 const ws = Workbook.addWorksheet(wb, "Sales");
-Worksheet.setColumns(ws, [
+Column.setDefinitions(ws, [
   { header: "Product", key: "product", width: 20 },
   { header: "Revenue", key: "revenue", width: 15 }
 ]);
-Worksheet.addRow(ws, { product: "Widget", revenue: 1000 });
-Worksheet.addRow(ws, { product: "Gadget", revenue: 2500 });
+Row.add(ws, { product: "Widget", revenue: 1000 });
+Row.add(ws, { product: "Gadget", revenue: 2500 });
 Cell.setValue(ws, "B4", 42);
 Cell.setFont(ws, "B4", { bold: true });
 Cell.setValue(ws, "C1", { formula: "SUM(B2:B3)" });
 Worksheet.merge(ws, "A6:B6");
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 await Workbook.writeFile(wb, "sales.xlsx");
-const pdfBytes = await Pdf.fromExcel(wb, { recalculate: calculateFormulas });
+const pdfBytes = await Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 
-const csv = writeCsv(wb);
+const csv = ExcelCsv.format(wb);
 ```
 
 ---

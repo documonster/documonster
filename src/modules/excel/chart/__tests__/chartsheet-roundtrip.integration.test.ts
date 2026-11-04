@@ -179,7 +179,7 @@ describe("Chartsheet round-trip", () => {
     await Workbook.read(wb2, out);
     const pie2 = getChartsheets(wb2).find(cs => chartsheetName(cs) === "Pie Chart Sheet")!;
     expect(chartsheetChart(pie2)).toBeDefined();
-    expect(Chart.title(chartsheetChart(pie2)!)).toBe("Mutated Pie Title");
+    expect(Chart.getTitle(chartsheetChart(pie2)!)).toBe("Mutated Pie Title");
     expect(chartsheetZoomScale(pie2)).toBe(80);
   });
 

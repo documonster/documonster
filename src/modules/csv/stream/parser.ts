@@ -6,13 +6,13 @@
  */
 
 import { DEFAULT_LINEBREAK_REGEX, getUtf8ByteLength } from "@csv/constants";
-import { CsvError } from "@csv/errors";
+import { CsvArgumentError, CsvError } from "@csv/errors";
 // Import shared core functionality from parse/
 import type { ParseConfig } from "@csv/parse/config";
 import { createParseConfig, toScannerConfig } from "@csv/parse/config";
 import type { DelimiterDetector } from "@csv/parse/delimiter-detector";
 import { createDelimiterDetector } from "@csv/parse/delimiter-detector";
-import { convertRowToObject, filterValidHeaders } from "@csv/parse/helpers";
+import { convertRowToObject, filterValidHeaders, textAfterQuoteError } from "@csv/parse/helpers";
 import { splitLinesWithEndings } from "@csv/parse/lines";
 import {
   processCompletedRow as processCompletedRowCore,
@@ -36,9 +36,33 @@ import type {
   CsvRecordError
 } from "@csv/types";
 import { isSyncTransform, isSyncValidate } from "@csv/types";
+import { checkParseOptions, createCsvTextDecoder } from "@csv/utils/check-options";
 import { applyFirstChunkPreprocessing } from "@csv/utils/detect";
-import { applyDynamicTypingToRow, applyDynamicTypingToArrayRow } from "@csv/utils/dynamic-typing";
+import { applyDynamicTypingToArrayRow, typeRecord } from "@csv/utils/dynamic-typing";
 import { Transform } from "@stream";
+import { scheduleMacrotask } from "@utils/yield";
+
+/**
+ * Check what {@link CsvParserStream} is given, naming `where` — the public call. `Csv.parseRows`
+ * runs on a parser stream and checks with its own name first.
+ */
+export function checkParserStreamOptions(options: CsvParseOptions, where: string): void {
+  // `objname` keys the whole result by a column, a map that only exists once every row has
+  // been read. A stream cannot produce it: it ignored the option, and `Csv.parseRows`
+  // buffered the input and yielded the map's values, losing the rows a later key replaced.
+  if (
+    typeof options === "object" &&
+    options !== null &&
+    (options as CsvParseOptions).objname !== undefined
+  ) {
+    throw new CsvArgumentError(
+      "options.objname",
+      `${where}: objname is only supported by Csv.parse and Csv.parseAsync, which return the keyed map`
+    );
+  }
+  checkParseOptions(options, where);
+  createCsvTextDecoder(options.encoding, where);
+}
 
 /**
  * Transform stream that parses CSV data row by row
@@ -157,21 +181,22 @@ export class CsvParserStream extends Transform {
 
   constructor(options: CsvParseOptions = {}) {
     // In objectMode (default), emit Row objects; when objectMode === false, emit JSON strings.
-    super({ objectMode: options.objectMode !== false });
+    super({ objectMode: options?.objectMode !== false });
+    checkParserStreamOptions(options, "Csv.createParserStream");
     this.options = options;
     this.chunkSize = options.chunkSize ?? 1000;
 
     // Reuse a single decoder instance and enable streaming decode to correctly handle
     // multi-byte characters split across chunks.
     // Use options.encoding if provided (default: utf-8)
-    this.decoder = new TextDecoder(options.encoding || "utf-8");
+    this.decoder = createCsvTextDecoder(options.encoding, "Csv.createParserStream");
 
     // Check if auto-detection is requested (delimiter === "")
     const delimiterOption = options.delimiter ?? ",";
     this.autoDetectDelimiter = delimiterOption === "";
 
     // Create unified config and state using parse-core factory
-    const { config } = createParseConfig({ options });
+    const { config } = createParseConfig({ options, where: "Csv.createParserStream" });
     this.parseConfig = config;
     this.parseState = createParseState(config);
 
@@ -416,6 +441,7 @@ export class CsvParserStream extends Transform {
       charLength: 0, // flush — no further offset tracking needed
       raw: scanResult.raw,
       quoted: scanResult.quoted,
+      textAfterQuote: scanResult.textAfterQuote,
       pendingRows,
       shouldSkipEmpty: this.options.skipEmptyLines || false,
       skipLines: this.options.skipLines ?? 0,
@@ -645,6 +671,7 @@ export class CsvParserStream extends Transform {
         charLength: rowCharLength,
         raw: rawRow,
         quoted: scanResult.quoted,
+        textAfterQuote: scanResult.textAfterQuote,
         pendingRows,
         shouldSkipEmpty,
         skipLines,
@@ -677,7 +704,11 @@ export class CsvParserStream extends Transform {
       return;
     }
 
-    const prepared = applyFirstChunkPreprocessing(this.buffer, this.options.beforeFirstChunk);
+    const prepared = applyFirstChunkPreprocessing(
+      this.buffer,
+      this.options.beforeFirstChunk,
+      "Csv.createParserStream"
+    );
     this.beforeFirstChunkApplied = true;
     this.bomStripped = true;
 
@@ -996,10 +1027,11 @@ export class CsvParserStream extends Transform {
 
       // Apply dynamicTyping and/or castDate if configured
       if (dynamicTyping || castDate) {
-        record = applyDynamicTypingToRow(
+        record = typeRecord(
           obj as Record<string, string>,
           dynamicTyping || false,
-          castDate
+          castDate,
+          this.parseConfig.decimalSeparator
         );
       } else {
         record = obj;
@@ -1013,7 +1045,8 @@ export class CsvParserStream extends Transform {
           rawRow,
           this.parseState.headerRow ? filterValidHeaders(this.parseState.headerRow) : null,
           dynamicTyping || false,
-          castDate
+          castDate,
+          this.parseConfig.decimalSeparator
         );
       } else {
         record = rawRow;
@@ -1057,6 +1090,8 @@ export class CsvParserStream extends Transform {
     charLength: number;
     raw: string | undefined;
     quoted: readonly boolean[] | undefined;
+    /** The scanner found text after a closing quote in this record. */
+    textAfterQuote?: boolean;
     pendingRows: Row[];
     shouldSkipEmpty: boolean | "greedy";
     skipLines: number;
@@ -1064,6 +1099,7 @@ export class CsvParserStream extends Transform {
   }): "continue" | "skip" | "stop" | "error" {
     const { fields, charLength, raw, quoted, pendingRows, shouldSkipEmpty, skipLines, callback } =
       input;
+    const textAfterQuote = input.textAfterQuote === true;
 
     // Save the start line BEFORE counting newlines (for accurate info.line on multi-line rows)
     const rowStartLine = this.parseState.lineNumber + 1;
@@ -1145,7 +1181,13 @@ export class CsvParserStream extends Transform {
     }
 
     // Process completed row (handles headers, skipRows, column validation, maxRows)
-    if (!this.processCompletedRow(fields, pendingRows)) {
+    if (
+      !this.processCompletedRow(
+        fields,
+        pendingRows,
+        textAfterQuote ? textAfterQuoteError(this.parseState.lineNumber, raw ?? "") : undefined
+      )
+    ) {
       this.processPendingRows(pendingRows, callback);
       return "stop";
     }
@@ -1156,14 +1198,19 @@ export class CsvParserStream extends Transform {
    * Process a completed row (shared logic for standard and fast mode)
    * Returns true if processing should continue, false if maxRows/toLine reached
    */
-  private processCompletedRow(row: string[], pendingRows: Row[]): boolean {
+  private processCompletedRow(
+    row: string[],
+    pendingRows: Row[],
+    recordError?: CsvRecordError
+  ): boolean {
     // State is now unified via accessors - no manual sync needed
     const result = processCompletedRowCore(
       row,
       this.parseState,
       this.parseConfig,
       this.parseErrorsSink,
-      this.parseState.lineNumber
+      this.parseState.lineNumber,
+      recordError
     );
 
     // Clear sink to prevent unbounded memory growth.
@@ -1263,7 +1310,7 @@ export class CsvParserStream extends Transform {
                 }
                 // Trampoline: yield to event loop periodically to prevent stack overflow
                 if (index % 1000 === 0) {
-                  setTimeout(processNextBatch, 0);
+                  scheduleMacrotask(processNextBatch);
                 } else {
                   processNextBatch();
                 }
@@ -1318,7 +1365,7 @@ export class CsvParserStream extends Transform {
                 }
                 // Continue processing after chunk flush
                 if (index % 1000 === 0) {
-                  setTimeout(processNext, 0);
+                  scheduleMacrotask(processNext);
                 } else {
                   processNext();
                 }
@@ -1339,9 +1386,9 @@ export class CsvParserStream extends Transform {
           this.emit("data-invalid", result.row, result.reason);
         }
 
-        // Use setTimeout to prevent stack overflow for large datasets
+        // A macrotask every 1000 rows unwinds the stack for large datasets
         if (index % 1000 === 0) {
-          setTimeout(processNext, 0);
+          scheduleMacrotask(processNext);
         } else {
           processNext();
         }

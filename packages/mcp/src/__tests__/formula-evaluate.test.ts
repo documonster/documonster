@@ -146,12 +146,13 @@ describe("formula_evaluate", () => {
     );
   });
 
-  it("pins the engine's LAMBDA limitation: the immediately-invoked form is unsupported", async () => {
-    // Excel accepts `LAMBDA(a,b,a+b)(2,3)`; this engine returns #NAME?. Pinned
-    // rather than hidden so the limitation is documented, and so improving the
-    // engine surfaces here as a failing test that prompts a docs update.
+  it("evaluates an immediately-invoked LAMBDA, as the help topic says", async () => {
+    // This pinned the old limitation (`#NAME?`) so that lifting it would prompt the docs update it now has.
     const config = await makeConfig();
-    expect(await evaluate(config, { formula: "=LAMBDA(a,b,a+b)(2,3)" })).toContain("#NAME?");
+    expect(await evaluate(config, { formula: "=LAMBDA(a,b,a+b)(2,3)" })).toContain("result: **5**");
+    expect(await evaluate(config, { formula: "=LAMBDA(x,LAMBDA(y,x+y))(1)(2)" })).toContain(
+      "result: **3**"
+    );
   });
 
   it("shows the formatted text alongside the raw result", async () => {

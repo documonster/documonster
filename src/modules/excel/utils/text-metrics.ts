@@ -153,6 +153,11 @@ export function calculateAutoFitWidth(
     return 0;
   }
 
+  // Targets Windows Excel: 96-dpi pixels and the default font's max digit width there (Calibri 11 → 7px). Mac
+  // Excel's AutoFit differs and is not what this models — it lays text out at 72 dpi with a 6px digit, so its widths
+  // are multiples of 1/6 character and come out narrower for the same text (measured against Excel 16 for Mac on 256
+  // font/size/text cases; notes in tmp/office-tests/fx24, `af-compare.tsv`).
+  //
   // Padding formula:
   // oneSidePadding = CEIL(textWidth * 0.03 + mdw / 4)
   // totalWidth = textWidth + 2 * oneSidePadding + 1 (gridline)

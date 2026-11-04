@@ -26,7 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -40,7 +40,7 @@ const temporal = (globalThis as { Temporal?: typeof globalThis.Temporal }).Tempo
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Dates");
-Worksheet.setColumns(sheet, [
+Column.setDefinitions(sheet, [
   { header: "How the value was written", width: 44 },
   { header: "The cell", width: 24 },
   { header: "Kind", width: 12 },
@@ -145,8 +145,7 @@ if (temporal === undefined) {
 // ---------------------------------------------------------------------------
 
 const bytes = await Workbook.toBuffer(workbook);
-const reopened = Workbook.create();
-await Workbook.read(reopened, bytes);
+const reopened = await Workbook.read(bytes);
 const reread = Workbook.getWorksheet(reopened, "Dates")!;
 
 console.log(`TZ=${process.env.TZ ?? "(system default)"}  —  what each cell became:\n`);

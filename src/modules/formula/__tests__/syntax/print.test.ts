@@ -94,13 +94,26 @@ describe("references", () => {
   it("quotes a sheet name that needs it, and only then", () => {
     // A name with a space must be quoted or the tokenizer reads it as an intersection.
     expect(expectRoundTrip("'My Sheet'!A1")).toBe("'My Sheet'!A1");
-    expect(expectRoundTrip("Sheet_1.2!A1")).toBe("Sheet_1.2!A1");
+    // Excel's rule (shared with Address.quoteSheetName): only ASCII word characters go
+    // unquoted, so a dot is quoted. This used to print unquoted.
+    expect(expectRoundTrip("'Sheet_1.2'!A1")).toBe("'Sheet_1.2'!A1");
+    expect(expectRoundTrip("'A1'!B2")).toBe("'A1'!B2");
   });
 
   it("prints whole-column and whole-row ranges", () => {
     expect(expectRoundTrip("A:B")).toBe("A:B");
     expect(expectRoundTrip("1:3")).toBe("1:3");
     expect(expectRoundTrip("Sheet1!A:B")).toBe("Sheet1!A:B");
+  });
+
+  it("keeps the absolute markers on a whole-column or whole-row range", () => {
+    // They change what the formula computes once it is copied — `$A:$A` stays put, `A:A` moves — and the parser
+    // used to strip them, so `$1:$1` printed back as `1:1`.
+    expect(expectRoundTrip("$A:$B")).toBe("$A:$B");
+    expect(expectRoundTrip("$A:B")).toBe("$A:B");
+    expect(expectRoundTrip("$1:$3")).toBe("$1:$3");
+    expect(expectRoundTrip("1:$3")).toBe("1:$3");
+    expect(expectRoundTrip("Sheet1!$A:$A")).toBe("Sheet1!$A:$A");
   });
 
   it("prints a reference union with the parentheses that make it one", () => {
@@ -111,6 +124,10 @@ describe("references", () => {
   it("prints structured references in the bracket form the parser accepts", () => {
     expect(expectRoundTrip("Table1[Column]")).toBe("Table1[Column]");
     expect(expectRoundTrip("Table1[[#Data],[Column]]")).toBe("Table1[[#Data],[Column]]");
+    // Two columns are a span, which Excel spells with a colon; `[[Qty],[Note]]` is not a reference it accepts.
+    expect(expectRoundTrip("Table1[[Qty]:[Note]]")).toBe("Table1[[Qty]:[Note]]");
+    expect(expectRoundTrip("Tb[[#Headers],[x]:[y]]")).toBe("Tb[[#Headers],[x]:[y]]");
+    expect(expectRoundTrip("Tb[@[x]:[y]]")).toBe("Tb[[#This Row],[x]:[y]]");
   });
 });
 

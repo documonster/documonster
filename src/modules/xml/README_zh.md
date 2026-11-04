@@ -36,7 +36,7 @@ w.leafNode("item", { id: "1" }, "hello");
 w.leafNode("item", { id: "2" }, "world");
 w.closeNode();
 
-console.log(w.xml);
+console.log(w.toString());
 // <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 // <root version="1.0"><item id="1">hello</item><item id="2">world</item></root>
 ```
@@ -66,6 +66,7 @@ const parser = new Xml.SaxParser();
 parser.on("opentag", tag => console.log("open:", tag.name, tag.attributes));
 parser.on("text", text => console.log("text:", text));
 parser.on("closetag", tag => console.log("close:", tag.name));
+// 每个事件只有一个处理函数：再次调用 `on("text", …)` 会替换前一个。
 parser.write('<root><item id="1">hello</item></root>');
 parser.close();
 ```
@@ -77,8 +78,8 @@ import { Xml } from "documonster/xml";
 
 const doc = Xml.parse('<root><item id="1">hello</item></root>');
 const item = Xml.findChild(doc.root, "item");
-console.log(Xml.attr(item!, "id")); // "1"
-console.log(Xml.textContent(item!)); // "hello"
+console.log(Xml.getAttr(item!, "id")); // "1"
+console.log(Xml.getText(item!)); // "hello"
 ```
 
 ### XML 转换为普通对象
@@ -145,9 +146,9 @@ Xml.decode("&lt;hello&gt;"); // "<hello>"
 src/modules/xml/
 ├── types.ts              # 核心类型（XmlNode、XmlSink、SaxTag 等）
 ├── errors.ts             # XmlError、XmlParseError、XmlWriteError
-├── encode.ts             # Xml.encode、Xml.decode、Xml.validateXmlName、Xml.encodeCData 等
+├── encode.ts             # Xml.encode、Xml.decode、Xml.validateName、Xml.encodeCData 等
 ├── writer.ts             # Xml.Writer（缓冲式，支持回滚）
-├── stream-writer.ts      # Xml.StreamWriter（流式，写入 WritableTarget）
+├── stream-writer.ts      # Xml.StreamWriter（流式，写入 XmlWritableTarget）
 ├── sax.ts                # Xml.SaxParser（事件驱动）+ Xml.parseSax（异步生成器）
 ├── dom.ts                # Xml.parse + DOM 查询辅助函数 + Xml.toPlainObject
 ├── to-object.ts          # Xml.parseToObject（SAX 直接转换，单次遍历）
@@ -165,7 +166,7 @@ XmlSink（接口）
 │                      支持回滚/事务（save/commit/rollback）
 │                      适用于：中小型 XML、试探性写入
 │
-└── Xml.StreamWriter  — 直接写入 WritableTarget
+└── Xml.StreamWriter  — 直接写入 XmlWritableTarget
                        O(1) 内存 — 不持有完整文档
                        适用于：大型 XML（10万+ 行的工作表）
 ```
@@ -173,7 +174,7 @@ XmlSink（接口）
 ### 读取路径
 
 ```
-Xml.SaxParser        — 事件驱动的流式解析器
+Xml.SaxParser  — 事件驱动的流式解析器
 │                      通过 write() 输入数据块，事件同步触发
 │                      适用于：大型 XML、只需特定元素时
 │
@@ -198,35 +199,39 @@ Xml.SaxParser        — 事件驱动的流式解析器
 
 ### Xml.Writer
 
-| 方法                            | 描述                      |
-| ------------------------------- | ------------------------- |
-| `openXml(attrs?)`               | 写入 `<?xml ...?>` 声明   |
-| `openNode(name, attrs?)`        | 打开一个元素              |
-| `closeNode()`                   | 关闭最近打开的元素        |
-| `leafNode(name, attrs?, text?)` | 一次调用写入一个完整元素  |
-| `addAttribute(name, value)`     | 为当前打开的元素添加属性  |
-| `addAttributes(attrs)`          | 添加多个属性              |
-| `writeText(text)`               | 写入转义后的文本内容      |
-| `writeRaw(xml)`                 | 写入预转义的 XML          |
-| `writeCData(text)`              | 写入 `<![CDATA[...]]>` 节 |
-| `writeComment(text)`            | 写入 `<!--...-->` 注释    |
-| `closeAll()`                    | 关闭所有打开的元素        |
-| `toString()` / `xml`            | 获取构建的 XML 字符串     |
-| `save()`                        | 保存回滚快照              |
-| `commit()`                      | 丢弃快照（保留更改）      |
-| `rollback()`                    | 恢复到快照（丢弃更改）    |
-| `reset()`                       | 清除所有内容              |
-| `depth`                         | 当前嵌套深度              |
-| `currentElement`                | 最内层打开的元素名        |
-| `cursor`                        | 单调递增位置计数器        |
+由 `new Xml.Writer()` 创建。
+
+| 方法                            | 描述                            |
+| ------------------------------- | ------------------------------- |
+| `openXml(attrs?)`               | 写入 `<?xml ...?>` 声明(须最先) |
+| `openNode(name, attrs?)`        | 打开一个元素                    |
+| `closeNode()`                   | 关闭最近打开的元素              |
+| `leafNode(name, attrs?, text?)` | 一次调用写入一个完整元素        |
+| `addAttribute(name, value)`     | 为当前打开的元素添加属性        |
+| `addAttributes(attrs)`          | 添加多个属性                    |
+| `writeText(text)`               | 写入转义后的文本内容            |
+| `writeRaw(xml)`                 | 写入预转义的 XML(字符串)        |
+| `writeCData(text)`              | 写入 `<![CDATA[...]]>` 节       |
+| `writeComment(text)`            | 写入 `<!--...-->` 注释          |
+| `closeAll()`                    | 关闭所有打开的元素              |
+| `toString()`                    | 获取构建的 XML 字符串           |
+| `save()`                        | 保存回滚快照                    |
+| `commit()`                      | 丢弃快照（保留更改）            |
+| `rollback()`                    | 恢复到快照（丢弃更改）          |
+| `reset()`                       | 清除所有内容                    |
+| `depth`                         | 当前嵌套深度                    |
+| `currentElement`                | 最内层打开的元素名              |
+| `cursor`                        | 随写入增长,回滚时回退           |
 
 ### Xml.StreamWriter
 
-与 `Xml.Writer` 方法相同（都实现 `XmlSink`），区别在于：
+由 `new Xml.StreamWriter(target)` 创建。与 `Xml.Writer` 方法相同（都实现 `XmlSink`），区别在于：
 
-- 无 `toString()` / `xml` — 内容已写入目标
+- 无 `toString()` — 内容已写入目标
 - 无 `save()` / `commit()` / `rollback()` — 流式写入不可逆
 - 无 `cursor` — 流式模式不适用
+
+两种写入器在已写出任何内容后都拒绝 `openXml`(`XmlWriteError`):XML 只允许声明出现在文档最开头。`Xml.parse` 在这一点上是宽松的,会静默丢弃位置不对的 `<?xml …?>`,因为它要读取其他程序写出的文件。
 
 ### Xml.SaxParser
 
@@ -288,24 +293,25 @@ Xml.parse(xml: string, options?: XmlParseOptions): XmlDocument;
 | `root`        | `XmlElement`                                    | 第一个（或唯一的）根元素                      |
 | `roots`       | `XmlElement[]`                                  | 所有根级元素（fragment 模式下有用）           |
 | `declaration` | `Record<string, string> \| undefined`           | XML 声明属性（version、encoding、standalone） |
-| `prologue`    | `Array<XmlComment \| XmlProcessingInstruction>` | 顶级注释和处理指令（通过选项启用时）          |
+| `prologue`    | `Array<XmlComment \| XmlProcessingInstruction>` | 根元素之前的顶级注释和处理指令（启用时）      |
+| `epilogue`    | `Array<XmlComment \| XmlProcessingInstruction>` | 根元素之后的顶级注释和处理指令（启用时）      |
 
 ### DOM 辅助函数
 
-| 函数                         | 描述                   |
-| ---------------------------- | ---------------------- |
-| `Xml.findChild(el, name)`    | 按名称查找第一个子元素 |
-| `Xml.findChildren(el, name)` | 按名称查找所有子元素   |
-| `Xml.textContent(node)`      | 递归获取文本内容       |
-| `Xml.attr(el, name)`         | 获取属性值             |
-| `Xml.walk(el, visitor)`      | 深度优先遍历           |
+| 函数                           | 描述                   |
+| ------------------------------ | ---------------------- |
+| `Xml.findChild(el, name)`      | 按名称查找第一个子元素 |
+| `Xml.listChildren(el, name)`   | 按名称查找所有子元素   |
+| `Xml.getText(node)`            | 递归获取文本内容       |
+| `Xml.getAttr(el, name)`        | 获取属性值             |
+| `Xml.eachElement(el, visitor)` | 深度优先遍历           |
 
 ### Xml.toPlainObject
 
 ```text
 Xml.toPlainObject(
   element: XmlElement,
-  options?: ToPlainObjectOptions
+  options?: XmlToPlainObjectOptions
 ): Record<string, unknown>;
 ```
 
@@ -314,7 +320,7 @@ Xml.toPlainObject(
 ### Xml.parseToObject
 
 ```text
-Xml.parseToObject(xml: string, options?: ParseXmlToObjectOptions): Record<string, unknown>;
+Xml.parseToObject(xml: string, options?: XmlParseToObjectOptions): Record<string, unknown>;
 ```
 
 将 XML 字符串在单次 SAX 遍历中直接转换为普通 JavaScript 对象。中大型 XML 比 `Xml.parse()` + `Xml.toPlainObject()` 快约 1.6 倍。
@@ -353,9 +359,12 @@ import { Xml } from "documonster/xml";
 | `a/*/c`        | 通配符：该层级的任意元素名         |
 | `a//c`         | 递归下降：`a` 下任意深度的 `c`     |
 | `a/b[0]`       | 索引：每个父级 `a` 下的第一个 `b`  |
+| `//c`          | 上下文元素下任意深度的 `c`         |
 
 - `Xml.query(element, path)` — 第一个匹配项或 `undefined`
-- `Xml.queryAll(element, path)` — 所有匹配项（可能为空）
+- `Xml.queryAll(element, path)` — 所有匹配项（可能为空），每个节点只出现一次，按文档顺序
+
+其他写法——绝对路径（`/a`）、空步骤（`a/`）、`.`/`..`、或上表之外的谓词（`[@id]`、`[last()]`）——会抛出 `XmlError`，而不是静默地匹配不到。索引从 0 开始，与 XPath 不同。
 
 索引过滤器使用**逐父级语义**：`a/b[0]` 返回每个 `a` 下的第一个 `b`，而非全局第一个 `b`。
 
@@ -366,7 +375,7 @@ import { Xml } from "documonster/xml";
 | `Xml.encode(text)`              | 编码 XML 内容中的文本（`<`、`>`、`&`、`"`、`'`） |
 | `Xml.decode(text)`              | 将 XML 实体解码回文本                            |
 | `Xml.encodeAttr(value)`         | 编码属性值（与 `Xml.encode` 相同）               |
-| `Xml.validateXmlName(name)`     | 验证 XML 元素/属性名                             |
+| `Xml.validateName(name)`        | 验证 XML 元素/属性名                             |
 | `Xml.validateCommentText(text)` | 验证 XML 注释内容文本                            |
 | `Xml.encodeCData(text)`         | 编码 CDATA 节的文本（拆分 `]]>`）                |
 
@@ -401,9 +410,12 @@ import { Xml } from "documonster/xml";
 ## 安全
 
 - **实体扩展限制** — 防止 XML 炸弹攻击（可通过 `maxEntityExpansions` 配置）
+- **不处理 DTD** — 接受 `<!DOCTYPE>`，但跳过而不读取其内部子集：其中声明的实体（`<!ENTITY e "x">`）、外部实体和参数实体
+  都不会被定义或获取。引用这类实体会报告 `undefined entity: e (entities declared in a DOCTYPE internal subset are not
+supported)`。五个预定义实体和字符引用始终可用；调用方可通过解析器的 `ENTITIES` 映射添加其他实体。
 - **嵌套深度限制** — 防止深度嵌套 XML 导致的栈溢出（可通过 `maxDepth` 配置）
 - **重复属性拒绝** — XML 1.0 §3.1 WFC: Unique Att Spec（报告错误，以最后一个值恢复）
-- **名称注入防护** — 写入器通过 `Xml.validateXmlName()` 验证元素和属性名
+- **名称注入防护** — 写入器通过 `Xml.validateName()` 验证元素和属性名
 - **注释/CDATA 安全** — `Xml.validateCommentText()` 拒绝 `--`，`Xml.encodeCData()` 拆分 `]]>`
 - **BOM 处理** — 输入开头的 UTF-8 BOM 被静默去除
 - **原型污染防护** — DOM 属性映射使用空原型对象并过滤危险键

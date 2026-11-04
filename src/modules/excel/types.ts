@@ -753,7 +753,19 @@ interface DataValidationBase {
 
 /** Data validation that requires formulae and operator */
 export interface DataValidationWithFormulae extends DataValidationBase {
+  /**
+   * The rule type.
+   *
+   * The XLSX reader may also return `"time"`, the file format's type for a time-of-day bound, which this union does
+   * not list; its bounds are kept as the file's text (`"0.5"` is noon). Both writers accept it and write it back as
+   * `time`.
+   */
   type: "list" | "whole" | "decimal" | "date" | "textLength" | "custom";
+  /**
+   * The bounds, as `<formula1>` and `<formula2>`. For `whole`, `decimal`, `textLength` and `date` a bound the file
+   * states as a number is read as a number (a `date` bound as a `Date`); anything else — `A1`, `$B$1+1`, a defined
+   * name, `Sheet2!$A$1` — is the formula text. Every other type's bounds are text.
+   */
   formulae: (string | number | Date)[];
   operator?: DataValidationOperator;
 }
@@ -1053,7 +1065,7 @@ export type DecodedAddress = {
 // Row and Column Types
 // ============================================================================
 /**
- * A keyed row: every column's `key` (set via `Worksheet.setColumns` or
+ * A keyed row: every column's `key` (set via `Column.setDefinitions` or
  * `Column.setKey`) is looked up on this object, so only the keyed properties are
  * read. Dotted keys (`"address.city"`) walk nested objects.
  *
@@ -1160,6 +1172,10 @@ export interface Top10RuleType extends ConditionalFormattingBaseRule {
 export interface AboveAverageRuleType extends ConditionalFormattingBaseRule {
   type: "aboveAverage";
   aboveAverage?: boolean;
+  /** Include values equal to the average. */
+  equalAverage?: boolean;
+  /** Format only values this many standard deviations from the average (1–3). */
+  stdDev?: number;
 }
 
 export interface ColorScaleRuleType extends ConditionalFormattingBaseRule {
@@ -1177,15 +1193,30 @@ export interface IconSetRuleType extends ConditionalFormattingBaseRule {
   cfvo?: Cfvo[];
 }
 
+/**
+ * The text-matching family.
+ *
+ * Readers return the rules XLSX names `containsText`, `containsBlanks`, `notContainsBlanks`, `containsErrors` and
+ * `notContainsErrors` in this shape, with the XLSX type in `operator`. **They may also return three shapes this
+ * union does not describe**, spelled as XLSX spells them: `{ type: "notContainsText", operator: "notContains" }`,
+ * `{ type: "beginsWith", operator: "beginsWith" }` and `{ type: "endsWith", operator: "endsWith" }` — each with the
+ * same `text` and `formulae` fields. Both writers accept all of these, and the two runtime-only rule types
+ * `{ type: "uniqueValues" }` and `{ type: "duplicateValues" }`, which readers also return.
+ */
 export interface ContainsTextRuleType extends ConditionalFormattingBaseRule {
   type: "containsText";
   operator?: ContainsTextOperators;
+  /** The search string, for `containsText` (and the runtime-only text conditions above). */
   text?: string;
+  /** The formula a reader found in the file; a writer derives it from `operator` and `text` when absent. */
+  formulae?: (string | number)[];
 }
 
 export interface TimePeriodRuleType extends ConditionalFormattingBaseRule {
   type: "timePeriod";
   timePeriod?: TimePeriodTypes;
+  /** The formula a reader found in the file; a writer derives it from `timePeriod` when absent. */
+  formulae?: (string | number)[];
 }
 
 export interface DataBarRuleType extends ConditionalFormattingBaseRule {
@@ -1207,6 +1238,12 @@ export interface DataBarRuleType extends ConditionalFormattingBaseRule {
   axisColor?: Partial<Color>;
 }
 
+/**
+ * A conditional-formatting rule.
+ *
+ * Readers can also return rules outside this union — the text conditions `notContainsText`, `beginsWith` and
+ * `endsWith`, and `uniqueValues` / `duplicateValues` — see {@link ContainsTextRuleType}. Writers accept them.
+ */
 export type ConditionalFormattingRule =
   | ExpressionRuleType
   | CellIsRuleType

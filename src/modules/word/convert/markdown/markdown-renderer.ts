@@ -6,10 +6,14 @@
  * footnotes, code spans, horizontal rules, and more.
  */
 
-import { extractMathText, isRun, symbolText } from "@word/core/text-utils";
+import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { withDisplayFields } from "@word/core/field-view";
+import { imageKeys } from "@word/core/image-keys";
+import { extractMathText, hyperlinkContent, isRun, symbolText } from "@word/core/text-utils";
 import { finalViewRun, isHiddenRun } from "@word/query/final-view";
 import { createNumberingCounter } from "@word/query/numbering-counter";
 import type { NumberingCounter } from "@word/query/numbering-counter";
+import type { StyleResolveContext } from "@word/query/style-resolve";
 import { createStyleResolver } from "@word/query/style-resolver";
 import type { StyleResolver } from "@word/query/style-resolver";
 import type {
@@ -46,6 +50,12 @@ export interface MarkdownRenderOptions {
  * @returns Markdown string.
  */
 export function renderToMarkdown(doc: DocxDocument, options?: MarkdownRenderOptions): string {
+  checkHandle(doc, "document", "doc", "WordMarkdown.fromDocx");
+  checkRecord(options, "options", "WordMarkdown.fromDocx", { optional: true });
+  // What a field's instruction holds is not shown.
+  doc = withDisplayFields(doc);
+  // Not finalized (`finalizeDocument`): all it adds is a proofing language and
+  // an East Asian face in `docDefaults`, and Markdown can express neither.
   const opts: Required<MarkdownRenderOptions> = {
     includeImages: options?.includeImages ?? true,
     includeNotes: options?.includeNotes ?? true,
@@ -298,13 +308,22 @@ function renderTable(state: MdRenderState, table: Table): void {
 
   // Build cell text grid
   const grid: string[][] = [];
-  for (const row of table.rows) {
+  const totalCols = Math.max(
+    0,
+    ...table.rows.map(r => r.cells.reduce((n, c) => n + (c.properties?.gridSpan ?? 1), 0))
+  );
+  for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
+    const row = table.rows[rowIndex]!;
     const rowTexts: string[] = [];
+    let gridCol = 0;
     for (const cell of row.cells) {
+      // Cell text resolves in the table's style (the default one, if it names none).
+      const context = state.styles.cellContext(table, rowIndex, gridCol, totalCols);
+      gridCol += cell.properties?.gridSpan ?? 1;
       const cellParts: string[] = [];
       for (const block of cell.content) {
         if (block.type === "paragraph") {
-          cellParts.push(renderParagraphText(state, block).trim());
+          cellParts.push(renderParagraphText(state, block, false, context).trim());
         }
       }
       // Escape pipe characters to prevent table structure corruption.
@@ -405,10 +424,15 @@ function renderSdt(state: MdRenderState, sdt: StructuredDocumentTag): void {
 // =============================================================================
 
 /** Render a paragraph's inline content with its style's run properties in scope. */
-function renderParagraphText(state: MdRenderState, para: Paragraph, isHeading = false): string {
+function renderParagraphText(
+  state: MdRenderState,
+  para: Paragraph,
+  isHeading = false,
+  context?: StyleResolveContext
+): string {
   const outer = state.paragraphRunProperties;
   const outerHeading = state.headingRunProperties;
-  const paragraphRunProperties = state.styles.paragraph(para).runProperties;
+  const paragraphRunProperties = state.styles.paragraph(para, context).runProperties;
   state.paragraphRunProperties = paragraphRunProperties;
   state.headingRunProperties = isHeading ? paragraphRunProperties : undefined;
   const text = renderInlineChildren(state, para.children);
@@ -432,7 +456,7 @@ function renderInlineChildren(state: MdRenderState, children: readonly Paragraph
 }
 
 function renderHyperlink(state: MdRenderState, link: Hyperlink): string {
-  const text = renderInlineChildren(state, link.children);
+  const text = renderInlineChildren(state, hyperlinkContent(link));
   const url = link.url ?? (link.anchor ? `#${link.anchor}` : "");
   if (url) {
     return `[${text}](${url})`;
@@ -523,7 +547,7 @@ function renderRunContent(state: MdRenderState, content: RunContent): string {
     case "image":
       if (state.options.includeImages) {
         const alt = content.altText ?? "image";
-        const imgDef = state.doc.images?.find(img => img.rId === content.rId);
+        const imgDef = state.doc.images?.find(img => imageKeys(img).includes(content.rId));
         const filename = imgDef?.fileName ?? content.rId;
         return `![${alt}](${filename})`;
       }

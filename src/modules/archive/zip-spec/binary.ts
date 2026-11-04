@@ -9,6 +9,7 @@
  * fixed-width header parser the unzip path is written against.
  */
 
+import { ZipParseError } from "@archive/core/errors";
 import { decodeCp437 } from "@archive/core/text";
 import {
   BinaryReader as LittleEndianReader,
@@ -28,6 +29,11 @@ export { readUint16LE, readUint32LE, writeUint16LE, writeUint32LE } from "@utils
 export class BinaryReader extends LittleEndianReader {
   constructor(data: Uint8Array, offset = 0, label = "zip stream") {
     super(data, offset, label);
+  }
+
+  /** A header field that points past the data is a malformed archive, not a programming error. */
+  protected override outOfBounds(detail: string): Error {
+    return new ZipParseError(`${this.label}: ${detail}`);
   }
 
   readString(length: number, utf8 = true): string {

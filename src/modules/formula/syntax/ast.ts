@@ -51,6 +51,17 @@ export interface BooleanNode {
 export interface ErrorNode {
   type: NodeType.Error;
   value: string;
+  /**
+   * The text of an external-workbook reference (`[1]Sheet1!A1`). It evaluates as `value`
+   * (`#REF!`) because other workbooks are not loaded; `Formula.format` writes this text back,
+   * so a parse → format round trip does not turn the reference into `#REF!`.
+   */
+  externalReference?: string;
+  /**
+   * The sheet a `#REF!` was qualified with — `Sheet2!#REF!`, which is what a reference becomes once the cells it
+   * named are deleted. The value is still the error; the sheet is kept so the text survives.
+   */
+  sheet?: string;
 }
 
 export interface CellRefNode {
@@ -96,6 +107,13 @@ export interface FunctionCallNode {
   type: NodeType.FunctionCall;
   name: string;
   args: AstNode[];
+  /**
+   * Argument lists applied, in order, to the call's result — `LAMBDA(n,n*2)(3)` is the `LAMBDA` call with
+   * `[[3]]`, and the curried `LAMBDA(x,LAMBDA(y,x+y))(1)(2)` has `[[1], [2]]`. Excel accepts this after any call whose
+   * result is a lambda, including one through a `LET`-bound name. Absent when nothing is applied, which is almost
+   * always: a consumer that reads `name` and `args` alone is reading the inner call, not the whole expression.
+   */
+  invocations?: AstNode[][];
 }
 
 export interface ArrayNode {
@@ -112,6 +130,11 @@ export interface PercentNode {
 export interface NameNode {
   type: NodeType.Name;
   name: string;
+  /**
+   * The sheet a name was qualified with — `Sheet2!Total`, which names the name scoped to that sheet (or the
+   * workbook's own, when the sheet defines none).
+   */
+  sheet?: string;
 }
 
 export interface ColRangeRefNode {
@@ -120,6 +143,10 @@ export interface ColRangeRefNode {
   startCol: string;
   /** End column (e.g. "B") */
   endCol: string;
+  /** `$` before the start column: the column does not move when the formula is copied. */
+  startAbsolute?: boolean;
+  /** `$` before the end column. */
+  endAbsolute?: boolean;
   /** Optional sheet name */
   sheet?: string;
   /** Optional end sheet name for 3D references */
@@ -132,6 +159,10 @@ export interface RowRangeRefNode {
   startRow: number;
   /** End row (1-based) */
   endRow: number;
+  /** `$` before the start row: the row does not move when the formula is copied. */
+  startAbsolute?: boolean;
+  /** `$` before the end row. */
+  endAbsolute?: boolean;
   /** Optional sheet name */
   sheet?: string;
   /** Optional end sheet name for 3D references */
@@ -169,6 +200,10 @@ export interface UnionRefNode {
 // Discriminated Union
 // ============================================================================
 
+/**
+ * A node of a parsed formula, as `Formula.parse` returns it: a union discriminated by `type`
+ * ({@link NodeType}). `Formula.format` turns one back into formula text.
+ */
 export type AstNode =
   | NumberNode
   | StringNode

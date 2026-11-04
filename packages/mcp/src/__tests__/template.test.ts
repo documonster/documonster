@@ -60,7 +60,7 @@ async function makeTemplate(fx: Fixture, name = "invoice.docx"): Promise<string>
     "{{#if overdue}}PAYMENT OVERDUE{{else}}Thank you for your business{{/if}}"
   );
   Document.addParagraph(doc, "{{#each items}}{{.name}} — {{.amount}}{{/each}}");
-  await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+  await Io.writeFile(doc, path.join(fx.root, name));
   return name;
 }
 
@@ -107,7 +107,7 @@ describe("template_inspect", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "An ordinary document.");
-    await Io.writeFile(Document.build(doc), path.join(fx.root, "plain.docx"));
+    await Io.writeFile(doc, path.join(fx.root, "plain.docx"));
 
     const text = await run(templateInspectTool, fx, { path: "plain.docx" });
     expect(text).toContain("no placeholders");
@@ -143,7 +143,7 @@ describe("template_fill", () => {
       })
     );
     await run(templateFillTool, fx, { template: file, out: "filled.docx", dataFrom: "data.json" });
-    const text = Query.extractText(await Io.readFile(path.join(fx.root, "filled.docx")));
+    const text = Query.getText(await Io.readFile(path.join(fx.root, "filled.docx")));
     expect(text).toContain("INV-FROM-FILE");
     expect(text).toContain("Item 499");
 
@@ -177,7 +177,7 @@ describe("template_fill", () => {
     expect(report).toContain("every placeholder was filled");
 
     const filled = await Io.readFile(path.join(fx.root, "filled.docx"));
-    const text = Query.extractText(filled);
+    const text = Query.getText(filled);
     expect(text).toContain("Invoice INV-2026-014");
     expect(text).toContain("Acme Pty Ltd");
     expect(text).toContain("ap@acme.example");
@@ -202,7 +202,7 @@ describe("template_fill", () => {
       }
     });
 
-    const text = Query.extractText(await Io.readFile(path.join(fx.root, "ok.docx")));
+    const text = Query.getText(await Io.readFile(path.join(fx.root, "ok.docx")));
     expect(text).toContain("Thank you for your business");
     expect(text).not.toContain("PAYMENT OVERDUE");
   });
@@ -248,7 +248,7 @@ describe("template_fill", () => {
     });
 
     expect(report).toContain("allowMissing");
-    const text = Query.extractText(await Io.readFile(path.join(fx.root, "loose.docx")));
+    const text = Query.getText(await Io.readFile(path.join(fx.root, "loose.docx")));
     expect(text).toContain("Invoice INV-9");
     // The absent client name became empty, and left no placeholder behind.
     expect(text).not.toContain("{{");
@@ -271,8 +271,8 @@ describe("template_fill", () => {
     });
 
     const template = await Io.readFile(path.join(fx.root, file));
-    expect(Template.listTemplateTags(template).length).toBeGreaterThan(0);
-    expect(Query.extractText(template)).toContain("{{invoice.number}}");
+    expect(Template.listTags(template).length).toBeGreaterThan(0);
+    expect(Query.getText(template)).toContain("{{invoice.number}}");
   });
 
   it("can be run twice with different data", async () => {
@@ -291,8 +291,8 @@ describe("template_fill", () => {
       data: { ...base, invoice: { number: "B-2" } }
     });
 
-    expect(Query.extractText(await Io.readFile(path.join(fx.root, "a.docx")))).toContain("A-1");
-    expect(Query.extractText(await Io.readFile(path.join(fx.root, "b.docx")))).toContain("B-2");
+    expect(Query.getText(await Io.readFile(path.join(fx.root, "a.docx")))).toContain("A-1");
+    expect(Query.getText(await Io.readFile(path.join(fx.root, "b.docx")))).toContain("B-2");
   });
 
   it("creates the parent directory", async () => {
@@ -328,7 +328,7 @@ describe("template_fill", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Nothing to fill.");
-    await Io.writeFile(Document.build(doc), path.join(fx.root, "plain.docx"));
+    await Io.writeFile(doc, path.join(fx.root, "plain.docx"));
 
     await expect(
       templateFillTool.handler(

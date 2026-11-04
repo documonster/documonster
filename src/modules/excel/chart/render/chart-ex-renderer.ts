@@ -8,7 +8,7 @@
  * neutral utilities from `chart-utils` — so neither imports the other.
  */
 
-import { cssColour } from "@draw/colour";
+import { cssColor } from "@draw/colour";
 import { renderNode } from "@draw/render";
 import type { DrawSurface } from "@draw/surface";
 import { SvgSurface } from "@draw/svg";
@@ -21,6 +21,7 @@ import type {
   ChartExSeries
 } from "@excel/chart/model/chart-ex-types";
 import type { ChartTitle, ShapeProperties } from "@excel/chart/model/types";
+import { chartAreaNode, resolveChartArea } from "@excel/chart/render/chart-area";
 import {
   boxWhiskerNodes,
   columnNodes,
@@ -46,11 +47,16 @@ import type {
 } from "@excel/chart/render/chart-renderer";
 import { renderSvgToPng } from "@excel/chart/render/chart-renderer";
 import { rasterizeDrawList } from "@excel/chart/render/draw-raster-png";
+import {
+  chartBackground,
+  checkChartRenderOptions,
+  requestsFontControl
+} from "@excel/chart/render/render-options";
 import type { ResolvedRing, TopologyLike } from "@excel/chart/render/topojson";
 import { resolveTopologyObject } from "@excel/chart/render/topojson";
-import type { ChartRect } from "@excel/chart/shared/chart-utils";
+import type { ChartRect, ChartThemeColors } from "@excel/chart/shared/chart-utils";
 import {
-  COLORS,
+  automaticSeriesColor,
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
   TEXT_LINE_HEIGHT_EM,
@@ -100,7 +106,8 @@ interface ChartExSeriesLayer {
 interface ChartExPlan {
   readonly width: number;
   readonly height: number;
-  readonly backgroundColor: string;
+  /** The chart area — `cx:chartSpace/cx:spPr`, or Office's automatic one — drawn first. */
+  readonly area?: DrawNode;
   readonly title?: DrawNode;
   readonly series: readonly ChartExSeriesLayer[];
   readonly legend: readonly DrawNode[];
@@ -138,9 +145,11 @@ function chartExPlan(
   // rebuild it on every call, and the region-map paths called it a second time.
   const dataById = new Map(model.chartSpace.chartData.data.map(entry => [entry.id, entry]));
 
+  // The workbook's theme colours, for every scheme colour the chart names.
+  const colors = options.themeColors;
   const series: ChartExSeriesLayer[] = [];
   seriesList.forEach((entry, index) => {
-    const nodes = chartExSeriesNodes(model, entry, plot, index, dataById, axis);
+    const nodes = chartExSeriesNodes(colors, model, entry, plot, index, dataById, axis);
     if (nodes) {
       series.push({ nodes });
       return;
@@ -159,26 +168,70 @@ function chartExPlan(
   return {
     width: boxWidth,
     height: boxHeight,
-    backgroundColor: options.backgroundColor ?? "#fff",
+    ...areaOf(model, options, boxWidth, boxHeight),
     ...(title ? { title: chartExTitleNode(title, boxWidth) } : {}),
     series,
     legend: legend
-      ? chartExLegendNodes(seriesList, boxWidth, boxHeight, titleLineCount, legend.legendPos)
+      ? chartExLegendNodes(
+          colors,
+          seriesList,
+          boxWidth,
+          boxHeight,
+          titleLineCount,
+          legend.legendPos
+        )
       : []
   };
 }
 
-export function renderChartExSvg(model: ChartExModel, options: ChartRenderOptions = {}): string {
+/** The plan's chart-area node, when it paints anything. Office 2016 charts have square corners. */
+function areaOf(
+  model: ChartExModel,
+  options: ChartRenderOptions,
+  width: number,
+  height: number
+): { area?: DrawNode } {
+  const area = chartAreaNode(
+    resolveChartArea({
+      spPr: model.chartSpace.spPr,
+      rounded: false,
+      themeColors: options.themeColors
+    }),
+    width,
+    height,
+    chartBackground(options)
+  );
+  return area === undefined ? {} : { area };
+}
+
+/** Refuse something that is not an Office 2016 chart model, rather than fail inside the renderer. */
+export function checkChartExModel(where: string, model: unknown): void {
+  const space = (model as { chartSpace?: unknown } | null)?.chartSpace;
+  if (model === null || typeof model !== "object" || space === null || typeof space !== "object") {
+    throw new ChartOptionsError(
+      "model",
+      `${where}: model must be an Office 2016 chart model, an object with a \`chartSpace\` — build one with ChartEx.createModel.`
+    );
+  }
+}
+
+export function renderChartExSvg(
+  model: ChartExModel,
+  options: ChartRenderOptions = {},
+  where = "ChartEx.toSvg"
+): string {
+  checkChartExModel(where, model);
+  checkChartRenderOptions(where, options);
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
   const plan = chartExPlan(model, options, width, height);
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
   ];
-  if (plan.backgroundColor !== "transparent") {
-    // `width="100%"` rather than a node: the background is the document's, not a mark
-    // in the picture, and the percentage keeps it correct under any viewBox.
-    parts.push(`<rect width="100%" height="100%" fill="${escapeXmlAttr(plan.backgroundColor)}"/>`);
+  if (plan.area) {
+    // The chart area is a mark in the picture — its border with it — and is the node the
+    // display list draws, so SVG, PNG and PDF agree on it.
+    parts.push(nodesToSvg([plan.area]));
   }
   if (plan.title) {
     parts.push(nodesToSvg([plan.title]));
@@ -200,8 +253,11 @@ export function renderChartExSvg(model: ChartExModel, options: ChartRenderOption
 
 export async function renderChartExPng(
   model: ChartExModel,
-  options: ChartRenderOptions = {}
+  options: ChartRenderOptions = {},
+  where = "ChartEx.toPng"
 ): Promise<Uint8Array> {
+  checkChartExModel(where, model);
+  checkChartRenderOptions(where, options);
   const width = options.width ?? DEFAULT_WIDTH;
   const height = options.height ?? DEFAULT_HEIGHT;
   // In a browser, hand the SVG to the platform: its own engine beats the built-in
@@ -212,8 +268,12 @@ export async function renderChartExPng(
   // which is the round trip the classic path abandoned — and it lost the same
   // things: a multi-paragraph title arrived as `<tspan>`s the scanner could not
   // place, so all of its lines landed on one baseline, on top of each other.
-  if (typeof document !== "undefined" && typeof Image !== "undefined") {
-    return renderSvgToPng(renderChartExSvg(model, { ...options, width, height }), {
+  if (
+    typeof document !== "undefined" &&
+    typeof Image !== "undefined" &&
+    !requestsFontControl(options)
+  ) {
+    return renderSvgToPng(renderChartExSvg(model, { ...options, width, height }, where), {
       width,
       height,
       scale: options.scale,
@@ -223,9 +283,25 @@ export async function renderChartExPng(
   return rasterizeDrawList(chartExDrawList(model, { ...options, width, height }), {
     width,
     height,
+    ...(options.fonts === undefined ? {} : { fonts: options.fonts }),
+    ...(options.useSystemFonts === undefined ? {} : { useSystemFonts: options.useSystemFonts }),
     ...(options.scale === undefined ? {} : { scale: options.scale }),
     ...(options.dpi === undefined ? {} : { dpi: options.dpi })
   });
+}
+
+/**
+ * An Office 2016 chart model as a display list — what `toPng` rasterises — for a caller
+ * drawing it with `documonster/draw` (`Draw.toRgba` with its own fonts, say).
+ */
+export function renderChartExDrawList(
+  model: ChartExModel,
+  options: ChartRenderOptions = {},
+  where = "ChartEx.toDrawList"
+): DrawList {
+  checkChartExModel(where, model);
+  checkChartRenderOptions(where, options);
+  return chartExDrawList(model, options);
 }
 
 /**
@@ -241,10 +317,8 @@ function chartExDrawList(model: ChartExModel, options: ChartRenderOptions): Draw
   const height = options.height ?? DEFAULT_HEIGHT;
   const plan = chartExPlan(model, options, width, height);
   const children: DrawNode[] = [];
-  if (plan.backgroundColor !== "transparent") {
-    children.push(
-      rectNode({ x: 0, y: 0, width, height }, { fill: cssColour(plan.backgroundColor) })
-    );
+  if (plan.area) {
+    children.push(plan.area);
   }
   if (plan.title) {
     children.push(plan.title);
@@ -311,6 +385,21 @@ export function canRenderChartExAsVectorPdf(model: ChartExModel): boolean {
 }
 
 /**
+ * Options for the deprecated `drawChartExPdf`. The destination box is its `rect` argument.
+ *
+ * Narrower than `PdfChartRenderOptions`: a ChartEx chart draws its own plan, so only the
+ * title override and the region-map data are taken.
+ */
+export interface ChartExDrawPdfOptions {
+  /** Title to draw instead of the model's own. */
+  title?: string;
+  /** Topology and matching rules for a region-map chart. */
+  regionMap?: RegionMapDataOptions;
+  /** The workbook's theme colours (`ChartRenderOptions.themeColors`). */
+  themeColors?: ChartThemeColors;
+}
+
+/**
  * Draw a ChartEx chart as vector content onto a
  * {@link ChartPdfDrawingSurface}. All layout IDs listed in
  * {@link VECTOR_PDF_CHART_EX_LAYOUT_IDS} are supported — the
@@ -328,49 +417,27 @@ export function drawChartExPdf(
   surface: ChartPdfDrawingSurface,
   model: ChartExModel,
   rect: { x: number; y: number; width: number; height: number },
-  options: { title?: string; regionMap?: RegionMapDataOptions } = {}
+  options: ChartExDrawPdfOptions = {}
 ): ChartPdfDrawingSurface {
-  // The same plan the SVG and raster paths draw, sized to the destination box. The
-  // plot rectangle used to be computed separately here, which is what let the legend
-  // cover the data and left the no-legend case on different margins entirely.
-  const plan = chartExPlan(
-    model,
-    {
-      ...(options.title === undefined ? {} : { title: options.title }),
-      ...(options.regionMap === undefined ? {} : { regionMap: options.regionMap })
-    },
-    rect.width,
-    rect.height
-  );
-
-  // Page background: a light frame. Unlike the SVG background this carries a border,
-  // which is what marks the chart's extent on a page that is not its own canvas.
-  surface.drawRect({
-    x: rect.x,
-    y: rect.y,
+  // The display list `ChartEx.toDrawList` returns for the destination box, chart area
+  // included — one picture on every route. This used to paint its own frame (white, with a
+  // fixed grey border, whatever the chart said) in place of the chart's background, so a PDF
+  // showed a border SVG and PNG did not, and none of the chart's own.
+  const list = chartExDrawList(model, {
+    ...(options.title === undefined ? {} : { title: options.title }),
+    ...(options.regionMap === undefined ? {} : { regionMap: options.regionMap }),
+    ...(options.themeColors === undefined ? {} : { themeColors: options.themeColors }),
     width: rect.width,
-    height: rect.height,
-    fill: { r: 1, g: 1, b: 1 },
-    stroke: { r: 0.85, g: 0.85, b: 0.85 }
+    height: rect.height
   });
-
   // One adapter owns the flip. This used to wrap the page in a hand-written flipping
   // surface and *then* ask the shared adapter not to flip — two implementations of the
   // same reflection, which is how a rotated label or a cubic control point could come
   // out mirrored on one path and not the other.
-  const target = createChartPdfDrawSurface(surface, rect.x, rect.y, rect.height);
-  if (plan.title) {
-    renderNodesToChartPdf(target, [plan.title]);
-  }
-  for (const layer of plan.series) {
-    // A content stream has nowhere to record a region map's mode, so only the nodes
-    // carry over; the picture is the same one the SVG path draws.
-    renderNodesToChartPdf(target, layer.nodes);
-  }
-  // Legend last so its swatches sit above the plot, matching the SVG draw order. The
-  // vector PDF path used to omit the legend entirely, so an authored `legendPos`
-  // appeared in SVG and PNG but never in a PDF.
-  renderNodesToChartPdf(target, plan.legend);
+  renderNodesToChartPdf(
+    createChartPdfDrawSurface(surface, rect.x, rect.y, rect.height),
+    list.children
+  );
   return surface;
 }
 
@@ -422,6 +489,7 @@ function nodesToSvg(nodes: readonly DrawNode[]): string {
  * per-backend emitter.
  */
 function chartExSeriesNodes(
+  colors: ChartThemeColors | undefined,
   model: ChartExModel,
   series: ChartExSeries,
   plot: SvgRect,
@@ -435,35 +503,41 @@ function chartExSeriesNodes(
     refs.categories.length > 0 ? refs.categories : values.map((_, i) => String(i + 1));
   switch (series.layoutId) {
     case "funnel":
-      return funnelLayoutNodes(values, categories, series, plot);
+      return funnelLayoutNodes(colors, values, categories, series, plot);
     case "waterfall":
-      return waterfallLayoutNodes(values, categories, series, plot, axis);
+      return waterfallLayoutNodes(colors, values, categories, series, plot, axis);
     case "clusteredColumn":
       // Both `histogram` and `pareto` live under clusteredColumn after builder
       // normalisation; a single runtime flag distinguishes them.
       return series.layoutPr?.paretoLine
-        ? paretoLayoutNodes(values, categories, plot, axis, { drawColumns: true })
-        : histogramLayoutNodes(values, series, plot, axis);
+        ? paretoLayoutNodes(colors, values, categories, plot, axis, { drawColumns: true })
+        : histogramLayoutNodes(colors, values, series, plot, axis);
     case "paretoLine":
       // A valid layoutId distinct from `clusteredColumn` + `layoutPr.paretoLine`.
       // Excel stores a paired Pareto as two sibling series — a `clusteredColumn`
       // for the bars and a `paretoLine` for the curve — so this variant must emit
       // only the overlay.
-      return paretoLayoutNodes(values, categories, plot, axis, { drawColumns: false });
+      return paretoLayoutNodes(colors, values, categories, plot, axis, { drawColumns: false });
     case "boxWhisker":
-      return boxWhiskerLayoutNodes(values, categories, series, plot, axis);
+      return boxWhiskerLayoutNodes(colors, values, categories, series, plot, axis);
     case "treemap":
       return treemapNodes(
-        collectTreemapCells(buildHierarchy(refs.hierarchy, categories, values), plot)
+        collectTreemapCells(colors, buildHierarchy(refs.hierarchy, categories, values), plot)
       );
     case "sunburst":
       return sunburstNodes(
-        collectSunburstSlices(buildHierarchy(refs.hierarchy, categories, values), plot)
+        collectSunburstSlices(colors, buildHierarchy(refs.hierarchy, categories, values), plot)
       );
     case "regionMap":
       return undefined;
     default:
-      return columnLayoutNodes(values, categories, plot, COLORS[seriesIndex % COLORS.length], axis);
+      return columnLayoutNodes(
+        values,
+        categories,
+        plot,
+        automaticSeriesColor(seriesIndex, colors),
+        axis
+      );
   }
 }
 
@@ -583,6 +657,7 @@ function columnLayoutNodes(
 
 /** Nodes for a histogram: bin the values, then draw them as columns. */
 function histogramLayoutNodes(
+  colors: ChartThemeColors | undefined,
   values: number[],
   series: ChartExSeries,
   plot: SvgRect,
@@ -593,7 +668,7 @@ function histogramLayoutNodes(
     bins.map(bin => bin.count),
     bins.map(bin => bin.label),
     plot,
-    COLORS[0],
+    automaticSeriesColor(0, colors),
     axis
   );
 }
@@ -606,6 +681,7 @@ function histogramLayoutNodes(
  * set of sorted bars on top of the companion's.
  */
 function paretoLayoutNodes(
+  colors: ChartThemeColors | undefined,
   values: number[],
   categories: string[],
   plot: SvgRect,
@@ -628,17 +704,18 @@ function paretoLayoutNodes(
         sortedValues,
         sorted.map(item => item.category),
         plot,
-        COLORS[0],
+        automaticSeriesColor(0, colors),
         axis
       )
     );
   }
-  nodes.push(...paretoOverlayNodes(sortedValues, plot));
+  nodes.push(...paretoOverlayNodes(colors, sortedValues, plot));
   return nodes;
 }
 
 /** Nodes for a waterfall: cumulative spans, subtotals, and the connectors. */
 function waterfallLayoutNodes(
+  colors: ChartThemeColors | undefined,
   values: number[],
   categories: string[],
   series: ChartExSeries,
@@ -691,10 +768,10 @@ function waterfallLayoutNodes(
     colour: span.gap
       ? "#BFBFBF"
       : span.total
-        ? shapeFillColor(series.layoutPr?.totalSpPr, COLORS[2])
+        ? shapeFillColor(colors, series.layoutPr?.totalSpPr, automaticSeriesColor(2, colors))
         : span.value >= 0
-          ? shapeFillColor(series.layoutPr?.increaseSpPr, "#70AD47")
-          : shapeFillColor(series.layoutPr?.decreaseSpPr, "#C00000")
+          ? shapeFillColor(colors, series.layoutPr?.increaseSpPr, "#70AD47")
+          : shapeFillColor(colors, series.layoutPr?.decreaseSpPr, "#C00000")
   }));
   const nodes = waterfallNodes(resolved, categories, plot, range);
   if (series.layoutPr?.connectorLines !== false) {
@@ -705,6 +782,7 @@ function waterfallLayoutNodes(
 
 /** Nodes for a funnel, honouring per-point fill overrides. */
 function funnelLayoutNodes(
+  colors: ChartThemeColors | undefined,
   values: number[],
   categories: string[],
   series: ChartExSeries,
@@ -717,13 +795,16 @@ function funnelLayoutNodes(
   const pointFills = new Map<number, string>();
   for (const point of series.dataPt ?? []) {
     if (point.spPr) {
-      pointFills.set(point.idx, shapeFillColor(point.spPr, COLORS[point.idx % COLORS.length]));
+      pointFills.set(
+        point.idx,
+        shapeFillColor(colors, point.spPr, automaticSeriesColor(point.idx, colors))
+      );
     }
   }
   return funnelNodes(
     values,
     plot,
-    index => pointFills.get(index) ?? COLORS[index % COLORS.length],
+    index => pointFills.get(index) ?? automaticSeriesColor(index, colors),
     (index, value) =>
       chartExDataLabelText(series, {
         category: categories[index] ?? String(index + 1),
@@ -735,6 +816,7 @@ function funnelLayoutNodes(
 
 /** Nodes for a box-and-whisker chart, one box per category group. */
 function boxWhiskerLayoutNodes(
+  colors: ChartThemeColors | undefined,
   values: number[],
   categories: string[],
   series: ChartExSeries,
@@ -748,6 +830,7 @@ function boxWhiskerLayoutNodes(
   const range = valueRange(Array.from(groups.values()).flat(), axis);
   const method = series.layoutPr?.quartileMethod ?? "exclusive";
   return boxWhiskerNodes(
+    colors,
     Array.from(groups.keys()).map(key => ({
       key,
       stats: boxStats(groups.get(key) ?? [], method)
@@ -787,7 +870,11 @@ export interface TreemapCell {
   label: string | undefined;
 }
 
-export function collectTreemapCells(root: HierarchyNode, plot: SvgRect): TreemapCell[] {
+export function collectTreemapCells(
+  colors: ChartThemeColors | undefined,
+  root: HierarchyNode,
+  plot: SvgRect
+): TreemapCell[] {
   const nodes = root.children.length > 0 ? root.children : [{ ...root, name: "Values" }];
   const entries = squarify(nodes, plot);
   // Drop degenerate cells (zero-value nodes produce zero-width or
@@ -801,7 +888,7 @@ export function collectTreemapCells(root: HierarchyNode, plot: SvgRect): Treemap
     .filter(entry => entry.rect.width > 0.5 && entry.rect.height > 0.5)
     .map((entry, i) => ({
       rect: entry.rect,
-      color: COLORS[i % COLORS.length],
+      color: automaticSeriesColor(i, colors),
       label: entry.rect.width > 40 && entry.rect.height > 18 ? entry.node.name : undefined
     }));
 }
@@ -831,7 +918,11 @@ export interface SunburstSlice {
   color: string;
 }
 
-export function collectSunburstSlices(root: HierarchyNode, plot: SvgRect): SunburstSlice[] {
+export function collectSunburstSlices(
+  colors: ChartThemeColors | undefined,
+  root: HierarchyNode,
+  plot: SvgRect
+): SunburstSlice[] {
   const slices: SunburstSlice[] = [];
   const cx = plot.x + plot.width / 2;
   const cy = plot.y + plot.height / 2;
@@ -848,14 +939,27 @@ export function collectSunburstSlices(root: HierarchyNode, plot: SvgRect): Sunbu
   // Seed `colorIndex = -1` so the root's "consumed" palette slot (which
   // the recursive emitter reserves via `colorIndex + 1` pre-increment)
   // lands on index `0`. The old `colorIndex = 0` made the root eat
-  // `COLORS[0]`, then its first visible child drew at `COLORS[1]` —
+  // `automaticSeriesColor(0, colors)`, then its first visible child drew at `automaticSeriesColor(1, colors)` —
   // every sunburst started with orange instead of the accent-1 blue
   // that every other ChartEx type uses.
-  collectSunburstSlicesRecursive(slices, root, cx, cy, 0, Math.PI * 2, 0, maxDepth, radius, -1);
+  collectSunburstSlicesRecursive(
+    colors,
+    slices,
+    root,
+    cx,
+    cy,
+    0,
+    Math.PI * 2,
+    0,
+    maxDepth,
+    radius,
+    -1
+  );
   return slices;
 }
 
 function collectSunburstSlicesRecursive(
+  colors: ChartThemeColors | undefined,
   out: SunburstSlice[],
   node: HierarchyNode,
   cx: number,
@@ -877,7 +981,7 @@ function collectSunburstSlicesRecursive(
       inner: ring * (depth - 1),
       start: startAngle,
       end: endAngle,
-      color: COLORS[colorIndex % COLORS.length]
+      color: automaticSeriesColor(colorIndex, colors)
     });
   }
   const total = node.children.reduce((sum, c) => sum + Math.max(0, c.value), 0) || 1;
@@ -896,6 +1000,7 @@ function collectSunburstSlicesRecursive(
         ? endAngle
         : angle + (Math.max(0, child.value) / total) * (endAngle - startAngle);
     nextColorIndex = collectSunburstSlicesRecursive(
+      colors,
       out,
       child,
       cx,
@@ -933,6 +1038,7 @@ function chartExTitleNode(title: string, width: number): DrawNode {
 
 /** The legend: a swatch and a label per entry, from the shared layout. */
 function chartExLegendNodes(
+  colors: ChartThemeColors | undefined,
   series: ChartExSeries[],
   width: number,
   height: number,
@@ -940,7 +1046,7 @@ function chartExLegendNodes(
   legendPos: "b" | "l" | "r" | "t" | "tr" | undefined
 ): DrawNode[] {
   const nodes: DrawNode[] = [];
-  for (const entry of layoutChartExLegend(series, width, height, titleLines, legendPos)) {
+  for (const entry of layoutChartExLegend(colors, series, width, height, titleLines, legendPos)) {
     nodes.push(
       rectNode(
         {
@@ -949,7 +1055,7 @@ function chartExLegendNodes(
           width: entry.swatchSize,
           height: entry.swatchSize
         },
-        { fill: cssColour(entry.color) }
+        { fill: cssColor(entry.color) }
       )
     );
     nodes.push(
@@ -970,7 +1076,7 @@ function chartExLegendNodes(
 function regionMapPanelNode(plot: SvgRect): DrawNode {
   return rectNode(
     plot,
-    { fill: cssColour("#F7FBFF"), stroke: cssColour("#C7DFF2"), strokeWidth: 1 },
+    { fill: cssColor("#F7FBFF"), stroke: cssColor("#C7DFF2"), strokeWidth: 1 },
     14
   );
 }
@@ -1080,8 +1186,8 @@ function regionMapLayers(
       rx: radius,
       ry: radius,
       paint: {
-        fill: { ...cssColour(interpolateColor("#D9EAF7", "#2F75B5", t)), a: 0.92 },
-        stroke: { ...cssColour("#FFFFFF"), a: 0.92 },
+        fill: { ...cssColor(interpolateColor("#D9EAF7", "#2F75B5", t)), a: 0.92 },
+        stroke: { ...cssColor("#FFFFFF"), a: 0.92 },
         strokeWidth: 1.5
       }
     });
@@ -1129,12 +1235,18 @@ function tryRegionMapTopologyNodes(
   range: { min: number; max: number },
   mapOptions: RegionMapDataOptions
 ): DrawNode[] | undefined {
-  let features: ReturnType<typeof resolveTopologyObject>;
-  try {
-    features = resolveTopologyObject(mapOptions.topology as TopologyLike, mapOptions.objectName);
-  } catch {
-    return undefined;
-  }
+  // A topology that cannot be read is the caller's mistake and is refused, naming the path
+  // (the public entries check it first, with their own name); only a topology that matches
+  // nothing falls back to the preview. Swallowing the error here used to turn a missing
+  // object or a malformed arc table into a silent centroid preview.
+  const features = resolveTopologyObject(
+    mapOptions.topology as TopologyLike,
+    mapOptions.objectName,
+    {
+      topology: "options.regionMap.topology",
+      objectName: "options.regionMap.objectName"
+    }
+  );
   if (features.length === 0) {
     return undefined;
   }
@@ -1233,8 +1345,8 @@ function tryRegionMapTopologyNodes(
         kind: "path",
         commands,
         paint: {
-          fill: cssColour(fill),
-          stroke: cssColour(stroke),
+          fill: cssColor(fill),
+          stroke: cssColor(stroke),
           strokeWidth: 0.5
         }
       });
@@ -1727,7 +1839,7 @@ const NORMALISED_REGION_COORDINATES: Map<string, RegionCoordinate> = new Map(
 
 /** The map graticule: three meridians and two parallels, inset from the frame. */
 function regionMapGraticuleNodes(plot: SvgRect): DrawNode[] {
-  const paint: DrawPaint = { stroke: cssColour("#E5F0FA"), strokeWidth: 1 };
+  const paint: DrawPaint = { stroke: cssColor("#E5F0FA"), strokeWidth: 1 };
   const nodes: DrawNode[] = [];
   for (let i = 1; i < 4; i++) {
     const x = plot.x + (plot.width * i) / 4;
@@ -1945,8 +2057,8 @@ function regionMapTileFallbackNodes(
     const t = clamp01((record.value - range.min) / Math.max(1e-9, range.max - range.min));
     nodes.push(
       polygonNode(hexagonPoints(cx, cy, radius), {
-        fill: cssColour(interpolateColor("#D9EAF7", "#2F75B5", t)),
-        stroke: cssColour("#FFFFFF"),
+        fill: cssColor(interpolateColor("#D9EAF7", "#2F75B5", t)),
+        stroke: cssColor("#FFFFFF"),
         strokeWidth: 1
       })
     );
@@ -2007,6 +2119,7 @@ function buildHistogramBins(
   // with `binCount === 0`.
   if (!(rawSize > 0) || !Number.isFinite(rawSize)) {
     throw new ChartOptionsError(
+      "model",
       `Histogram bin size must be a positive finite number; got ${rawSize}.`
     );
   }
@@ -2033,6 +2146,7 @@ function buildHistogramBins(
   const expectedBinCount = Math.ceil((end - start) / rawSize);
   if (expectedBinCount > HISTOGRAM_BIN_CAP) {
     throw new ChartOptionsError(
+      "model",
       `Histogram would produce ${expectedBinCount} bins with binSize=${rawSize} over [${start}, ${end}]; ` +
         `the renderer caps at ${HISTOGRAM_BIN_CAP}. Widen the bin size or narrow the data range.`
     );
@@ -2479,6 +2593,7 @@ const CHART_EX_LEGEND_COLOR = "#555";
 type ChartExLegendPosition = "b" | "l" | "r" | "t" | "tr";
 
 function layoutChartExLegend(
+  colors: ChartThemeColors | undefined,
   series: ChartExSeries[],
   width: number,
   height: number,
@@ -2502,7 +2617,7 @@ function layoutChartExLegend(
   // single-line by construction — flatten it rather than let each backend
   // mishandle the newline in its own way.
   const labels = series.map((s, i) => singleLineLabel(seriesLabelText(s) ?? `Series ${i + 1}`));
-  const colorOf = (i: number): string => COLORS[i % COLORS.length];
+  const colorOf = (i: number): string => automaticSeriesColor(i, colors);
 
   if (pos === "b" || pos === "t") {
     // Horizontal row. `b` sits at the bottom of the canvas, `t` immediately
@@ -2834,6 +2949,10 @@ function chartTitleText(title: ChartTitle | undefined): string | undefined {
  * `spPr?.fill` directly, which is `undefined` for the `_rawXml` path
  * and dropped the authored colour back to the caller's fallback.
  */
-function shapeFillColor(spPr: ShapeProperties | undefined, fallback: string): string {
-  return previewShapeFillColor(spPr ? getSpPrFill(spPr) : undefined, fallback);
+function shapeFillColor(
+  colors: ChartThemeColors | undefined,
+  spPr: ShapeProperties | undefined,
+  fallback: string
+): string {
+  return previewShapeFillColor(spPr ? getSpPrFill(spPr) : undefined, fallback, colors);
 }

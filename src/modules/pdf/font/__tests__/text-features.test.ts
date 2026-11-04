@@ -32,7 +32,7 @@ async function warningsFor(text: string, font: Uint8Array): Promise<string[]> {
   const builder = new PdfDocumentBuilder({ fonts: { default: { regular: font } } });
   builder.onWarning(message => warnings.push(message));
   builder.addPage().drawText(text, { x: 72, y: 700 });
-  await builder.build();
+  await builder.toBuffer();
   return warnings;
 }
 
@@ -73,7 +73,7 @@ describe("unsupported text feature diagnostics", () => {
     for (let i = 0; i < 50; i++) {
       page.drawText("مرحبا", { x: 72, y: 700 - i * 12 });
     }
-    await builder.build();
+    await builder.toBuffer();
     expect(warnings.filter(w => w.includes("GSUB/GPOS"))).toHaveLength(1);
   });
 
@@ -104,7 +104,7 @@ describe("unsupported text feature diagnostics", () => {
     builder.onWarning(message => warnings.push(message));
     builder.embedFont(font);
     builder.addPage().drawText("مرحبا", { x: 72, y: 700 });
-    await builder.build();
+    await builder.toBuffer();
 
     expect(warnings.some(w => w.includes("GSUB/GPOS"))).toBe(true);
     expect(warnings.some(w => w.includes("right-to-left"))).toBe(true);

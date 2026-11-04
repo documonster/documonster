@@ -26,7 +26,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { crc32, unzlibSync } from "documonster/archive";
+import { Archive, Compression } from "documonster/archive";
 import type { MermaidDiagram } from "documonster/mermaid";
 import { z } from "zod";
 
@@ -530,7 +530,7 @@ function pngDamage(bytes: Uint8Array, size: IntrinsicSize): string | undefined {
     const type = new TextDecoder("latin1").decode(bytes.subarray(offset + 4, offset + 8));
     // The CRC covers the type and the payload, but not the length.
     const expected = view.getUint32(end - 4);
-    if (crc32(bytes.subarray(offset + 4, end - 4)) !== expected) {
+    if (Archive.crc32(bytes.subarray(offset + 4, end - 4)) !== expected) {
       return `the ${type} chunk fails its CRC, so the file is corrupt`;
     }
     if (type === "IHDR") {
@@ -560,7 +560,7 @@ function pngDamage(bytes: Uint8Array, size: IntrinsicSize): string | undefined {
   // length assertion is skipped.
   const expectedBytes = interlaced ? undefined : expectedRawSize(bytes, size);
   try {
-    const inflated = unzlibSync(concat(idat));
+    const inflated = Compression.unzlibSync(concat(idat));
     if (expectedBytes !== undefined && inflated.length !== expectedBytes) {
       return `its image data inflates to ${inflated.length} bytes where ${expectedBytes} are needed for ${size.width}×${size.height}`;
     }

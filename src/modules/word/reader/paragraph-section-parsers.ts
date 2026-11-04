@@ -6,6 +6,7 @@
  * embed section properties); they're co-located here.
  */
 
+import { WRITTEN, readToken } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
 import {
   attrInt,
@@ -51,7 +52,12 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
 
   const jcEl = findChildNs(pPrEl, "jc");
   if (jcEl) {
-    pPr.alignment = attrVal(jcEl, "val") as ParagraphProperties["alignment"];
+    pPr.alignment = readToken(
+      attrVal(jcEl, "val"),
+      WRITTEN.alignment,
+      pPr,
+      "alignment"
+    ) as ParagraphProperties["alignment"];
   }
 
   if (findChildNs(pPrEl, "keepNext")) {
@@ -119,7 +125,12 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
 
   const textAlignEl = findChildNs(pPrEl, "textAlignment");
   if (textAlignEl) {
-    pPr.textAlignment = attrVal(textAlignEl, "val") as ParagraphProperties["textAlignment"];
+    pPr.textAlignment = readToken(
+      attrVal(textAlignEl, "val"),
+      WRITTEN.textAlignment,
+      pPr,
+      "textAlignment"
+    ) as ParagraphProperties["textAlignment"];
   }
 
   const outlineLvlEl = findChildNs(pPrEl, "outlineLvl");
@@ -129,14 +140,19 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
 
   const textDirEl = findChildNs(pPrEl, "textDirection");
   if (textDirEl) {
-    pPr.textDirection = attrVal(textDirEl, "val") as ParagraphProperties["textDirection"];
+    pPr.textDirection = readToken(
+      attrVal(textDirEl, "val"),
+      WRITTEN.textDirection,
+      pPr,
+      "textDirection"
+    ) as ParagraphProperties["textDirection"];
   }
 
   // Paragraph frame
   const framePrEl = findChildNs(pPrEl, "framePr");
   if (framePrEl) {
     const f: Partial<Mutable<ParagraphFrame>> = {};
-    const dropCap = attrVal(framePrEl, "dropCap");
+    const dropCap = readToken(attrVal(framePrEl, "dropCap"), WRITTEN.dropCap, f, "dropCap");
     if (dropCap) {
       f.dropCap = dropCap as ParagraphFrame["dropCap"];
     }
@@ -160,15 +176,15 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
     if (vSpace !== undefined) {
       f.vSpace = vSpace;
     }
-    const wrap = attrVal(framePrEl, "wrap");
+    const wrap = readToken(attrVal(framePrEl, "wrap"), WRITTEN.frameWrap, f, "wrap");
     if (wrap) {
       f.wrap = wrap as ParagraphFrame["wrap"];
     }
-    const hAnchor = attrVal(framePrEl, "hAnchor");
+    const hAnchor = readToken(attrVal(framePrEl, "hAnchor"), WRITTEN.frameAnchor, f, "hAnchor");
     if (hAnchor) {
       f.hAnchor = hAnchor as ParagraphFrame["hAnchor"];
     }
-    const vAnchor = attrVal(framePrEl, "vAnchor");
+    const vAnchor = readToken(attrVal(framePrEl, "vAnchor"), WRITTEN.frameAnchor, f, "vAnchor");
     if (vAnchor) {
       f.vAnchor = vAnchor as ParagraphFrame["vAnchor"];
     }
@@ -176,7 +192,7 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
     if (x !== undefined) {
       f.x = x;
     }
-    const xAlign = attrVal(framePrEl, "xAlign");
+    const xAlign = readToken(attrVal(framePrEl, "xAlign"), WRITTEN.frameXAlign, f, "xAlign");
     if (xAlign) {
       f.xAlign = xAlign as ParagraphFrame["xAlign"];
     }
@@ -184,7 +200,7 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
     if (y !== undefined) {
       f.y = y;
     }
-    const yAlign = attrVal(framePrEl, "yAlign");
+    const yAlign = readToken(attrVal(framePrEl, "yAlign"), WRITTEN.frameYAlign, f, "yAlign");
     if (yAlign) {
       f.yAlign = yAlign as ParagraphFrame["yAlign"];
     }
@@ -210,7 +226,14 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
     const before = attrInt(spacingEl, "before");
     const after = attrInt(spacingEl, "after");
     const line = attrInt(spacingEl, "line");
-    const lineRule = attrVal(spacingEl, "lineRule");
+    // Per ECMA-376, w:lineRule defaults to "auto" when line is set
+    const lineRule = readToken(
+      attrVal(spacingEl, "lineRule"),
+      WRITTEN.lineRule,
+      spacing,
+      "lineRule",
+      line !== undefined ? "auto" : undefined
+    );
     if (before !== undefined) {
       spacing.before = before;
     }
@@ -219,9 +242,8 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
     }
     if (line !== undefined) {
       spacing.line = line;
-      // Per ECMA-376, w:lineRule defaults to "auto" when line is set
-      spacing.lineRule = (lineRule ?? "auto") as LineSpacing["lineRule"];
-    } else if (lineRule) {
+    }
+    if (lineRule) {
       spacing.lineRule = lineRule as LineSpacing["lineRule"];
     }
     const beforeAuto = attrVal(spacingEl, "beforeAutospacing");
@@ -282,11 +304,21 @@ function parseParagraphProperties(pPrEl: XmlElement): ParagraphProperties {
   if (tabsEl) {
     const tabs: TabStop[] = [];
     for (const tabEl of findChildrenNs(tabsEl, "tab")) {
-      tabs.push({
-        type: (attrVal(tabEl, "val") ?? "left") as TabStop["type"],
-        position: attrInt(tabEl, "pos") ?? 0,
-        leader: attrVal(tabEl, "leader") as TabStop["leader"]
-      });
+      const tab: Mutable<TabStop> = { type: "left", position: attrInt(tabEl, "pos") ?? 0 };
+      tab.type = readToken(
+        attrVal(tabEl, "val"),
+        WRITTEN.tabType,
+        tab,
+        "type",
+        "left"
+      ) as TabStop["type"];
+      tab.leader = readToken(
+        attrVal(tabEl, "leader"),
+        WRITTEN.tabLeader,
+        tab,
+        "leader"
+      ) as TabStop["leader"];
+      tabs.push(tab);
     }
     if (tabs.length > 0) {
       pPr.tabs = tabs;
@@ -384,7 +416,12 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
 
   const typeEl = findChildNs(sectPrEl, "type");
   if (typeEl) {
-    sect.breakType = attrVal(typeEl, "val") as SectionProperties["breakType"];
+    sect.breakType = readToken(
+      attrVal(typeEl, "val"),
+      WRITTEN.sectionBreak,
+      sect,
+      "breakType"
+    ) as SectionProperties["breakType"];
   }
 
   const colsEl = findChildNs(sectPrEl, "cols");
@@ -432,15 +469,30 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
         pb[side] = parseBorder(sideEl);
       }
     }
-    const display = attrVal(pgBordersEl, "display");
+    const display = readToken(
+      attrVal(pgBordersEl, "display"),
+      WRITTEN.pageBorderDisplay,
+      pb,
+      "display"
+    );
     if (display) {
       pb.display = display as PageBorders["display"];
     }
-    const offsetFrom = attrVal(pgBordersEl, "offsetFrom");
+    const offsetFrom = readToken(
+      attrVal(pgBordersEl, "offsetFrom"),
+      WRITTEN.pageBorderOffset,
+      pb,
+      "offsetFrom"
+    );
     if (offsetFrom) {
       pb.offsetFrom = offsetFrom as PageBorders["offsetFrom"];
     }
-    const zOrder = attrVal(pgBordersEl, "zOrder");
+    const zOrder = readToken(
+      attrVal(pgBordersEl, "zOrder"),
+      WRITTEN.pageBorderZOrder,
+      pb,
+      "zOrder"
+    );
     if (zOrder) {
       pb.zOrder = zOrder as PageBorders["zOrder"];
     }
@@ -450,13 +502,23 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
   // Vertical alignment
   const vAlignEl = findChildNs(sectPrEl, "vAlign");
   if (vAlignEl) {
-    sect.verticalAlign = attrVal(vAlignEl, "val") as SectionProperties["verticalAlign"];
+    sect.verticalAlign = readToken(
+      attrVal(vAlignEl, "val"),
+      WRITTEN.pageVerticalAlign,
+      sect,
+      "verticalAlign"
+    ) as SectionProperties["verticalAlign"];
   }
 
   // Text direction
   const textDirEl = findChildNs(sectPrEl, "textDirection");
   if (textDirEl) {
-    sect.textDirection = attrVal(textDirEl, "val") as SectionProperties["textDirection"];
+    sect.textDirection = readToken(
+      attrVal(textDirEl, "val"),
+      WRITTEN.textDirection,
+      sect,
+      "textDirection"
+    ) as SectionProperties["textDirection"];
   }
 
   // Bidi
@@ -491,7 +553,12 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
     if (charSpace !== undefined) {
       dg.charSpace = charSpace;
     }
-    const gridType = attrVal(docGridEl, "type") as DocGrid["type"];
+    const gridType = readToken(
+      attrVal(docGridEl, "type"),
+      WRITTEN.docGrid,
+      dg,
+      "type"
+    ) as DocGrid["type"];
     if (gridType) {
       dg.type = gridType;
     }
@@ -511,7 +578,12 @@ function parseSectionProperties(sectPrEl: XmlElement): SectionProperties {
     if (start !== undefined) {
       ln.start = start;
     }
-    const restart = attrVal(lnNumEl, "restart") as LineNumbers["restart"];
+    const restart = readToken(
+      attrVal(lnNumEl, "restart"),
+      WRITTEN.lineNumberRestart,
+      ln,
+      "restart"
+    ) as LineNumbers["restart"];
     if (restart) {
       ln.restart = restart;
     }

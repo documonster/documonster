@@ -315,10 +315,19 @@ describe("a sparkline added through the public API reaches the file", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Broken");
     Worksheet.addAoa(sheet, [["a"], [1]]);
-    Sparkline.add(sheet, {
-      type: "column",
-      sparklines: [{ dataRef: "not a range at all", cellRef: "still not" }]
-    });
+    // `Sparkline.add` refuses such a member, so it is put into the model directly, as a hand-built model reaches the
+    // writer.
+    expect(() =>
+      Sparkline.add(sheet, {
+        type: "column",
+        sparklines: [{ dataRef: "not a range at all", cellRef: "still not" }]
+      })
+    ).toThrow(/cellRef/);
+    Sparkline.add(sheet, { type: "column", sparklines: [{ dataRef: "Broken!A2", cellRef: "B2" }] });
+    Sparkline.list(sheet)[0]!.sparklines[0] = {
+      dataRef: "not a range at all",
+      cellRef: "still not"
+    };
 
     const parts = await extractAll(
       await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" })

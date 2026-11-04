@@ -2,7 +2,7 @@ import { Writable } from "node:stream";
 
 import { cellSetValue } from "@excel/core/cell";
 import { rowCommit, rowGetCell } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 /**
  * Large-streaming correctness under a paced (slow) sink.
@@ -96,7 +96,7 @@ describe("WorkbookWriter large streaming under a slow sink", () => {
     const readBack = Workbook.create();
     await Workbook.read(readBack, xlsx);
     const sheet = Workbook.getWorksheet(readBack, "Big")!;
-    expect(Worksheet.rowCount(sheet)).toBe(ROWS);
+    expect(Row.getCount(sheet)).toBe(ROWS);
     expect(Cell.getValue(sheet, "A1")).toBe(big);
     expect(Cell.getValue(sheet, `J${ROWS}`)).toBe(big);
   }, 120_000);

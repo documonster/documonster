@@ -4,37 +4,24 @@
  * Renders TOC as a structured document tag (SDT) with field codes.
  */
 
-import type { TableOfContents } from "@word/types";
+import { isRun } from "@word/core/text-utils";
+import { buildTocInstruction, findTocFieldPieces } from "@word/core/toc-instruction";
+import type { TocFieldPieces } from "@word/core/toc-instruction";
+import type { FieldContent, Paragraph, ParagraphChild, Run, TableOfContents } from "@word/types";
 import { renderParagraph } from "@word/writer/paragraph-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
 import type { XmlSink } from "@xml/types";
 
-/** Build TOC field instruction from properties. */
-function buildTocInstruction(toc: TableOfContents): string {
-  const parts: string[] = ["TOC"];
-
-  if (toc.headingStyleRange) {
-    parts.push(`\\o "${toc.headingStyleRange}"`);
-  }
-  if (toc.hyperlink) {
-    parts.push("\\h");
-  }
-  if (toc.stylesWithLevels && toc.stylesWithLevels.length > 0) {
-    // Format: "Style1,Level1;Style2,Level2;..."
-    const entries = toc.stylesWithLevels.map(s => `${s.styleName},${s.level}`).join(";");
-    parts.push(`\\t "${entries}"`);
-  }
-  if (toc.captionLabel) {
-    parts.push(`\\c "${toc.captionLabel}"`);
-  }
-  if (toc.sequenceFieldIdentifier) {
-    parts.push(`\\s "${toc.sequenceFieldIdentifier}"`);
-  }
-
-  return ` ${parts.join(" ")} `;
-}
-
-/** Render a Table of Contents block. */
-export function renderTableOfContents(xml: XmlSink, toc: TableOfContents): void {
+/**
+ * Render a Table of Contents block. `helpers` are the surrounding part's, so
+ * the cached entries' bookmarks and hyperlinks resolve against the same maps
+ * as the rest of the part.
+ */
+export function renderTableOfContents(
+  xml: XmlSink,
+  toc: TableOfContents,
+  helpers?: RenderHelpers
+): void {
   const instruction = buildTocInstruction(toc);
 
   // Wrap in SDT for proper Word handling
@@ -48,35 +35,53 @@ export function renderTableOfContents(xml: XmlSink, toc: TableOfContents): void 
 
   xml.openNode("w:sdtContent");
 
-  // Begin field paragraph
-  xml.openNode("w:p");
-  xml.openNode("w:r");
-  xml.leafNode("w:fldChar", { "w:fldCharType": "begin" });
-  xml.closeNode();
-  xml.openNode("w:r");
-  xml.openNode("w:instrText", { "xml:space": "preserve" });
-  xml.writeText(instruction);
-  xml.closeNode();
-  xml.closeNode();
-  xml.openNode("w:r");
-  xml.leafNode("w:fldChar", { "w:fldCharType": "separate" });
-  xml.closeNode();
-  xml.closeNode();
-
-  // Cached paragraphs (placeholder content until Word updates the field)
-  if (toc.cachedParagraphs && toc.cachedParagraphs.length > 0) {
-    for (const para of toc.cachedParagraphs) {
-      renderParagraph(xml, para);
+  // The entries holding the field (or a block with none): as they are.
+  const inline =
+    toc.field === "entries" ? findTocFieldPieces(toc.cachedParagraphs ?? []) : undefined;
+  if (inline || toc.field === "none") {
+    const paragraphs = inline
+      ? withTocInstruction(toc.cachedParagraphs!, inline, instruction)
+      : (toc.cachedParagraphs ?? []);
+    if (paragraphs.length > 0) {
+      for (const para of paragraphs) {
+        renderParagraph(xml, para, helpers);
+      }
+    } else {
+      xml.leafNode("w:p");
     }
-  } else {
-    // Default placeholder
-    xml.openNode("w:p");
-    xml.openNode("w:r");
-    xml.openNode("w:t");
-    xml.writeText("Update this table of contents by right-clicking and selecting 'Update Field'");
-    xml.closeNode();
-    xml.closeNode();
-    xml.closeNode();
+    xml.closeNode(); // w:sdtContent
+    xml.closeNode(); // w:sdt
+    return;
+  }
+
+  // The field opens in the first entry's paragraph and closes in a paragraph
+  // of its own after the last, which is how Word writes a table of contents it
+  // generated. Opening it in a paragraph of its own instead left a blank line
+  // above the entries that Word removes when it updates the field, so every
+  // page number after it moved.
+  const begin: Run = { content: [{ type: "field", fieldChar: "begin", instruction }] };
+  const separate: Run = { content: [{ type: "field", fieldChar: "separate", instruction: "" }] };
+  const [first, ...rest]: readonly Paragraph[] =
+    toc.cachedParagraphs && toc.cachedParagraphs.length > 0
+      ? toc.cachedParagraphs
+      : [
+          {
+            type: "paragraph",
+            children: [
+              {
+                content: [
+                  {
+                    type: "text",
+                    text: "Update this table of contents by right-clicking and selecting 'Update Field'"
+                  }
+                ]
+              }
+            ]
+          }
+        ];
+  renderParagraph(xml, { ...first!, children: [begin, separate, ...first!.children] }, helpers);
+  for (const para of rest) {
+    renderParagraph(xml, para, helpers);
   }
 
   // End field paragraph
@@ -88,4 +93,37 @@ export function renderTableOfContents(xml: XmlSink, toc: TableOfContents): void 
 
   xml.closeNode(); // w:sdtContent
   xml.closeNode(); // w:sdt
+}
+
+/**
+ * `paragraphs` with the TOC field they hold in pieces given `instruction`:
+ * unchanged while it is the field's own, otherwise written beside its begin.
+ */
+function withTocInstruction(
+  paragraphs: readonly Paragraph[],
+  field: TocFieldPieces,
+  instruction: string
+): readonly Paragraph[] {
+  if (instruction === field.instruction) {
+    return paragraphs;
+  }
+  const replaced = new Map<FieldContent, FieldContent>([
+    [field.begin, { ...field.begin, instruction }]
+  ]);
+  if (field.next) {
+    replaced.set(field.next, { ...field.next, instruction: "" });
+  }
+  const touched = (child: ParagraphChild): boolean =>
+    isRun(child) && child.content.some(c => replaced.has(c as FieldContent));
+  return paragraphs.map(para => {
+    if (!para.children.some(touched)) {
+      return para;
+    }
+    const children = para.children.map((child): ParagraphChild =>
+      isRun(child) && touched(child)
+        ? { ...child, content: child.content.map(c => replaced.get(c as FieldContent) ?? c) }
+        : child
+    );
+    return { ...para, children };
+  });
 }

@@ -1,6 +1,7 @@
 import { cellGetValue } from "@excel/core/cell";
-import { getColumn, getCell } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { getColumn, getCell, getLastColumn, getLastRow } from "@excel/core/worksheet";
+import { getRow } from "@excel/core/worksheet-core";
+import { Workbook } from "@excel/index";
 import { makeTestDataPath } from "@test/utils";
 import { describe, it, expect, beforeAll } from "vitest";
 
@@ -35,8 +36,8 @@ describe("Workbook", () => {
           text: "documonster"
         });
 
-        expect(Worksheet.lastColumn(ws)).toBe(getColumn(ws, 2));
-        expect(Worksheet.lastRow(ws)).toBe(Worksheet.getRow(ws, 6));
+        expect(getLastColumn(ws)).toBe(getColumn(ws, 2));
+        expect(getLastRow(ws)).toBe(getRow(ws, 6));
       });
     });
   });

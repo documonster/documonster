@@ -20,7 +20,7 @@ async function rewriteEntry(
     }
     archive.add(name, name === path ? patch(new TextDecoder().decode(file.data)) : file.data);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 async function roundTrip(buffer: Uint8Array) {

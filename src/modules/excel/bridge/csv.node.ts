@@ -1,55 +1,64 @@
 /**
  * `documonster/excel/csv` — Node entry.
  *
- * Re-exports the cross-platform CSV functions plus the Node-only file-path
- * variants (`readCsvFile` / `writeCsvFile`), and types `createCsvReadStream` as
- * the Node stream it actually returns.
+ * The cross-platform `ExcelCsv` members plus the Node-only file-path variants
+ * (`ExcelCsv.readFile` / `ExcelCsv.writeFile`), with `ExcelCsv.toStream` typed
+ * as the Node stream it actually returns.
  */
 
-import type { Readable } from "node:stream";
-
-import type { CsvOptions } from "@excel/bridge/csv-bridge";
-import { createCsvByteStream } from "@excel/bridge/csv-bridge";
-import type { Workbook } from "@excel/core/workbook.browser";
-import type { IReadable } from "@stream/types";
-
-export {
-  readCsv,
-  writeCsv,
-  writeCsvBuffer,
-  createCsvWriteStream,
-  type CsvInput,
-  type CsvOptions
+import {
+  createCsvWriteStream as createCsvWriteStreamImpl,
+  readCsv as readCsvImpl,
+  writeCsv as writeCsvImpl,
+  writeCsvBuffer as writeCsvBufferImpl
 } from "@excel/bridge/csv-bridge";
-export { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
+import {
+  createCsvReadStream as createCsvReadStreamImpl,
+  readCsvFile as readCsvFileImpl,
+  writeCsvFile as writeCsvFileImpl
+} from "@excel/bridge/csv-bridge.node";
 
+export * as ExcelCsv from "@excel/bridge/excel-csv.node";
+
+// The errors this entry's functions throw — the same class objects `documonster/excel` and `documonster/csv`
+// export, so `instanceof` and the guards agree whichever entry a caller imports them from. An argument the bridge
+// cannot use is an `ExcelArgumentError`; text the CSV parser cannot read keeps its `CsvError`.
+export {
+  ExcelArgumentError,
+  ExcelDownloadError,
+  ExcelError,
+  ExcelFileError,
+  InvalidValueTypeError,
+  isExcelError,
+  WorksheetNameError
+} from "@excel/errors";
+export type { ExcelFileErrorOptions, InvalidValueTypeErrorOptions } from "@excel/errors";
+export { CsvError, isCsvError } from "@csv/errors";
+export type { BaseErrorOptions } from "@utils/errors";
+export type {
+  CsvInput,
+  CsvOptions,
+  CsvReadOptions,
+  CsvWriteOptions
+} from "@excel/bridge/csv-bridge";
+
+/** @deprecated Use {@link ExcelCsv.addWorksheet}. Removed in 1.0. */
+export const readCsv = readCsvImpl;
 /**
- * Create a readable stream that outputs the worksheet as CSV.
- *
- * Same stream as the cross-platform export, typed as the `stream.Readable` Node
- * actually returns, so it goes straight into `stream.pipeline()`,
- * `Readable.toWeb()`, or an SDK upload body — no `as unknown as Readable`.
- *
- * There is no type assertion here: on the Node build `CsvFormatterStream extends
- * Transform extends Readable`, so the compiler verifies the narrowing on the
- * return statement below. Intersecting with `Readable` rather than with the
- * concrete `CsvFormatterStream` is what keeps `write()` / `end()` off the public
- * surface — the stream is already attached to a producer, so a caller who wrote
- * to it would inject rows into the CSV.
- *
- * `IReadable<Uint8Array>` stays first in the intersection so `for await` keeps
- * yielding `Uint8Array` instead of the `any` Node's own declaration returns.
- *
- * Leaving `for await` early has the same Node-level caveat as
- * `Workbook.toStream`: `break` lets Node's async iterator destroy the stream with
- * an `AbortError`, which sets `errored` and reaches any attached `'error'`
- * listener, while calling `destroy()` yourself is silent. Destroy before breaking,
- * or iterate via `stream.iterator({ destroyOnReturn: false })` and destroy in a
- * `finally`.
+ * @deprecated Use {@link ExcelCsv.format} for a string or
+ * {@link ExcelCsv.writeStream} for a stream. Removed in 1.0.
  */
-export function createCsvReadStream(
-  workbook: Workbook,
-  options?: CsvOptions
-): IReadable<Uint8Array> & Readable {
-  return createCsvByteStream(workbook, options);
-}
+export const writeCsv = writeCsvImpl;
+/** @deprecated Use {@link ExcelCsv.toBuffer}. Removed in 1.0. */
+export const writeCsvBuffer = writeCsvBufferImpl;
+/** @deprecated Use {@link ExcelCsv.toStream}. Removed in 1.0. */
+export const createCsvReadStream = createCsvReadStreamImpl;
+/** @deprecated Use {@link ExcelCsv.createImportStream}. Removed in 1.0. */
+export const createCsvWriteStream = createCsvWriteStreamImpl;
+/**
+ * @deprecated Use {@link ExcelCsv.readFile} for a new workbook, or {@link ExcelCsv.addWorksheet} with a
+ * file stream to add the sheet to one you have. Removed in 1.0.
+ */
+export const readCsvFile = readCsvFileImpl;
+/** @deprecated Use {@link ExcelCsv.writeFile}. Removed in 1.0. */
+export const writeCsvFile = writeCsvFileImpl;

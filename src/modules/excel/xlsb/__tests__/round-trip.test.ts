@@ -275,17 +275,19 @@ describe("record choice is deliberate", () => {
 describe("the limits are pinned, not implied", () => {
   it("writes a formula it can encode, and reports one it cannot", async () => {
     // Formulas are written now, so what remains unsupported is a *specific* construct rather
-    // than the whole feature — an array constant needs a token whose payload lives in the
-    // record's extra data. The distinction matters to a caller: "formulas do not work" and
-    // "this formula uses an array constant" lead to different decisions.
+    // than the whole feature — here a structured reference to a table the workbook does not define. The distinction
+    // matters to a caller: "formulas do not work" and "this formula names a missing table" lead to different
+    // decisions. (An array constant was the example until `PtgArray` and its `RgbExtra` were written.)
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Formulas");
     Cell.setValue(sheet, "A1", 2);
     Cell.setValue(sheet, "A2", { formula: "A1*2", result: 4 });
-    Cell.setValue(sheet, "A3", { formula: "MATCH(1,{1,2,3},0)", result: 1 });
+    Cell.setValue(sheet, "A3", { formula: "SUM(Missing[Qty])", result: 1 });
 
     const { unsupported, sheets } = await roundTrip(workbook);
-    expect(unsupported).toEqual(["Formulas!A3: formula (an array constant is not supported yet)"]);
+    expect(unsupported).toEqual([
+      "Formulas!A3: formula (a structured reference to the unknown table Missing is not supported yet)"
+    ]);
     expect(sheets[0]!.cells.get("A1")).toBe(2);
     // The one it could encode round-trips with its cached result.
     expect(sheets[0]!.cells.get("A2")).toBe(4);
@@ -447,7 +449,7 @@ describe("a sheet's part comes from its relationship, not from its position", ()
     // guarantee being asserted is that a chartsheet's stream is *never* interpreted as a grid,
     // whatever it contains.
     archive.add("xl/chartsheets/sheet1.bin", sheetPart(999));
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   const RELS =
@@ -461,7 +463,7 @@ describe("a sheet's part comes from its relationship, not from its position", ()
   it("puts each sheet's data on the sheet that declared it", async () => {
     const workbook = Workbook.create();
     await Workbook.read(workbook, await workbookWithChartsheetInTheMiddle(RELS));
-    const sheets = Workbook.getWorksheets(workbook);
+    const sheets = Workbook.listWorksheets(workbook);
 
     expect(sheets.map(sheet => Worksheet.getName(sheet))).toEqual(["First", "TheChart", "Third"]);
     expect(Cell.getValue(sheets[0]!, "A1")).toBe(111);
@@ -476,7 +478,7 @@ describe("a sheet's part comes from its relationship, not from its position", ()
     // keeping the sheet present means nothing after it shifts position.
     const workbook = Workbook.create();
     await Workbook.read(workbook, await workbookWithChartsheetInTheMiddle(RELS));
-    expect(Cell.getValue(Workbook.getWorksheets(workbook)[1]!, "A1")).toBeNull();
+    expect(Cell.getValue(Workbook.listWorksheets(workbook)[1]!, "A1")).toBeNull();
   });
 
   it("falls back to the positional guess when the rels file is unusable", async () => {
@@ -484,7 +486,7 @@ describe("a sheet's part comes from its relationship, not from its position", ()
     // the shape this library's own writer produces.
     const workbook = Workbook.create();
     await Workbook.read(workbook, await workbookWithChartsheetInTheMiddle("<not-relationships/>"));
-    const sheets = Workbook.getWorksheets(workbook);
+    const sheets = Workbook.listWorksheets(workbook);
     expect(sheets).toHaveLength(3);
     expect(Cell.getValue(sheets[0]!, "A1")).toBe(111);
   });
@@ -536,14 +538,14 @@ describe("records this reader has no name for", () => {
     );
 
     const workbook = Workbook.create();
-    const diagnostics = await readXlsbPackage(workbook, await archive.bytes());
+    const diagnostics = await readXlsbPackage(workbook, await archive.toBuffer());
     expect([...diagnostics.unknownRecords.entries()].sort((a, b) => a[0] - b[0])).toEqual([
       [0x3ffd, 1],
       [0x3ffe, 2]
     ]);
     // Framing is unaffected — each record's length prefix is honoured whether or not it has a
     // name — so the cell sitting between two unknown records still reads.
-    expect(Cell.getValue(Workbook.getWorksheets(workbook)[0]!, "A1")).toBe(7);
+    expect(Cell.getValue(Workbook.listWorksheets(workbook)[0]!, "A1")).toBe(7);
   });
 });
 

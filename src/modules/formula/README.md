@@ -2,7 +2,7 @@
 
 [中文](README_zh.md)
 
-Excel-compatible formula tokenizer, parser, compiler, evaluator, dependency graph, dynamic-array spill materialiser, and 448 built-in functions. Zero runtime dependencies.
+Excel-compatible formula tokenizer, parser, compiler, evaluator, dependency graph, dynamic-array spill materialiser, and 467 built-in functions. Zero runtime dependencies.
 
 ## Usage
 
@@ -10,10 +10,10 @@ Workbook recalculation is exposed by `documonster/excel/formula`. Syntax
 inspection is exposed by `documonster/formula`. Both are direct calls with
 **no install or registration step**.
 
-| Task                          | Entry point                                              |
-| ----------------------------- | -------------------------------------------------------- |
-| Recalculate an Excel workbook | `calculateFormulas(wb)` from `documonster/excel/formula` |
-| Tokenize / parse syntax       | `Formula.tokenize` / `Formula.parse` from `/formula`     |
+| Task                          | Entry point                                                   |
+| ----------------------------- | ------------------------------------------------------------- |
+| Recalculate an Excel workbook | `ExcelFormula.calculate(wb)` from `documonster/excel/formula` |
+| Tokenize / parse syntax       | `Formula.tokenize` / `Formula.parse` from `/formula`          |
 
 ## Features
 
@@ -27,7 +27,7 @@ inspection is exposed by `documonster/formula`. Both are direct calls with
 - **Defined names** — scoped, formula-based, range unions
 - **Cross-sheet references** — `Sheet2!A1`, 3D ranges `Sheet1:Sheet3!A1`
 - **R1C1 addressing** — both A1 and R1C1 modes via `INDIRECT`
-- **448 built-in Excel functions** across 11 categories
+- **467 built-in Excel functions** across 11 categories
 - **Zero runtime dependencies** — no npm deps, no polyfills
 
 ## Function Coverage
@@ -54,7 +54,7 @@ See `functions/` for the full list; `runtime/function-registry.ts` is the regist
 
 ```typescript
 import { Workbook, Cell } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Sheet1");
@@ -63,7 +63,7 @@ Cell.setValue(ws, "A2", 20);
 Cell.setValue(ws, "A3", 30);
 Cell.setValue(ws, "A4", { formula: "SUM(A1:A3)" });
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 console.log(Cell.getResult(ws, "A4")); // 60
 ```
 
@@ -74,11 +74,10 @@ functionally. There is no install or registration step.
 
 ```typescript
 import { Workbook } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 
-const wb = Workbook.create();
-await Workbook.read(wb, buffer);
-calculateFormulas(wb); // defined names classified and formulas recalculated
+const wb = await Workbook.read(buffer);
+ExcelFormula.calculate(wb); // defined names classified and formulas recalculated
 ```
 
 ### Tokenise / parse without evaluating
@@ -99,11 +98,11 @@ cost.
 
 The subpaths give you these tree-shaking outcomes:
 
-| Imports                                   | Excel module | Formula engine |
-| ----------------------------------------- | ------------ | -------------- |
-| `Workbook` from `/excel` only             | ✓            | ✗              |
-| `Formula.tokenize` from `/formula`        | ✗            | syntax only    |
-| `calculateFormulas` from `/excel/formula` | ✓            | ✓              |
+| Imports                                        | Excel module | Formula engine |
+| ---------------------------------------------- | ------------ | -------------- |
+| `Workbook` from `/excel` only                  | ✓            | ✗              |
+| `Formula.tokenize` from `/formula`             | ✗            | syntax only    |
+| `ExcelFormula.calculate` from `/excel/formula` | ✓            | ✓              |
 
 Keeping recalculation on its own subpath — rather than as a member of the
 `Workbook` namespace — is what makes "no engine unless you ask for it"
@@ -118,7 +117,7 @@ split on rolldown and rspack.
 > `dist/iife/documonster.formula.iife.min.js` contains the tokenizer and parser
 > only, and `dist/iife/documonster.excel.iife.min.js` is unchanged by this
 > subpath. Script-tag users who need to recalculate a workbook must switch to
-> ESM/CJS and import `calculateFormulas` from `documonster/excel/formula`.
+> ESM/CJS and import `ExcelFormula.calculate` from `documonster/excel/formula`.
 
 ## Examples
 
@@ -159,7 +158,7 @@ it sits in the overall module graph):
 ┌─ syntax/        tokenizer → parser → AST
 ├─ compile/       binder, dependency analysis, compiled form
 ├─ runtime/       evaluator, function registry, RuntimeValue
-├─ functions/     448 function implementations (11 category files)
+├─ functions/     467 function implementations (11 category files)
 ├─ materialize/   spill engine, ghost-cell tracking, writeback plan
 └─ integration/   immutable snapshot, calculate pipeline
 ```
@@ -172,7 +171,7 @@ after every write operation succeeds.
 
 ## API Surface
 
-### `calculateFormulas(workbook: Workbook.Handle): void`
+### `ExcelFormula.calculate(workbook: Workbook.Handle): void`
 
 From `documonster/excel/formula`. Captures an immutable snapshot, runs the
 engine, and writes results back into the real cells. This is the sole public
@@ -181,16 +180,16 @@ evaluation entry, including for workbooks loaded from XLSX.
 ### PDF export recalculation
 
 `Pdf.fromExcel` does not depend on the formula engine. To recompute
-formulas before rendering, inject `calculateFormulas` via the
+formulas before rendering, inject `ExcelFormula.calculate` via the
 `recalculate` option — only opt-in callers pull the ~200 KB engine into
 their bundle. Without it, the cached XLSX results are used (the safe
 default for files written by Excel itself).
 
 ```typescript
 import { Pdf } from "documonster/pdf";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 
-const bytes = await Pdf.fromExcel(wb, { recalculate: calculateFormulas });
+const bytes = await Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 ```
 
 ### Custom functions
@@ -238,7 +237,7 @@ import { Formula } from "documonster/formula";
 
 const probe = (text: string): boolean => {
   try {
-    Formula.parse(Formula.tokenize(text));
+    Formula.parse(text);
     return true;
   } catch {
     return false;
@@ -251,21 +250,36 @@ const wb = Workbook.create({ formulaSyntaxProbe: probe });
 ### `Formula.tokenize(source: string): Token[]`
 
 Pure lexer — accepts a formula string (with or without leading `=`) and
-returns a flat token stream. Throws on invalid characters.
+returns a flat token stream. Throws a `FormulaParseError` on a character no
+token starts with and on an error value Excel does not have (`#FOOBAR!`). The
+spill-range operator `A1#` is an `Operator` token with the value `"#"`; it is
+recognised straight after a cell reference only.
 
-### `Formula.parse(tokens: Token[]): AstNode`
+### `Formula.parse(source: string | Token[]): AstNode`
 
-Pratt parser — builds a typed AST from a token stream. Throws on
-structural errors.
+Pratt parser — builds a typed AST from formula text (tokenized for you) or
+from a token stream. Throws on structural errors. `A1#` is a `UnaryOp` with
+`op: "#"` around the cell reference; `_xlfn.ANCHORARRAY(A1)`, the form a file
+stores, stays a function call. Each prints back as written, and the
+calculation engine evaluates both as the range the anchor spills into.
+
+### `Formula.format(ast: AstNode): string`
+
+The inverse of `parse`: prints an AST back to formula text (no leading `=`),
+with minimal parentheses.
 
 ### Errors
 
-`FormulaError` (base), `FormulaParseError` (carries an optional 0-based
-`position`), and the `isFormulaError` type guard.
+`FormulaError` (base), `FormulaParseError` (carries the 0-based character
+offset `position` when the source was text; given tokens, the message names the
+token instead), and the `isFormulaError` type guard. An argument of the wrong
+type, or a tree `Formula.format` cannot print, is a `FormulaError`.
 
 ### Exported types
 
-From `documonster/formula`: `Token`, `TokenType`, `AstNode`, `NodeType`.
+From `documonster/formula`: `Token`, `TokenType`, `AstNode`, `NodeType`, and
+every member of the two unions, with the `Formula` prefix (`FormulaCellRefNode`,
+`FormulaFunctionCallNode`, `FormulaCellRefToken`, …).
 
 From `documonster/excel/formula`: `FormulaFunction`, `FormulaValue`, and the
 `FormulaValueKind` tag map used to build custom-function values.
@@ -275,9 +289,44 @@ From `documonster/excel/formula`: `FormulaFunction`, `FormulaValue`, and the
 - **Date system** — honours the workbook's 1900 / 1904 setting, including
   the 1900 leap-year bug.
 - **Error propagation** — matches Excel's precedence (`#N/A > #VALUE! > ...`).
-- **Implicit intersection** — applied at non-dynamic-array sites, exactly
-  where Excel 365 applies it.
+- **Implicit intersection** — an ordinary (non-array) formula in a workbook is
+  computed as Excel computes it: each range Excel intersects with the
+  formula's row or column is intersected, and outside the range the answer is
+  `#VALUE!`. A formula set through the API that Excel would compute
+  differently that way is written as a dynamic array instead, and computed
+  over arrays.
+- **Which formulas spill** — a formula spills when it produces an array: a call
+  to a function that returns one (`SEQUENCE`, `FILTER`, `TRANSPOSE`, `MAP`, …,
+  from the function table's return classes), a multi-element array constant
+  (`={1,2,3}`), the spill operator `A1#`, or what a `LET` / invoked `LAMBDA`
+  returns — directly or through an operator or value parameter
+  (`=SEQUENCE(3)*2`). Where only the evaluation can tell (`XLOOKUP` returning
+  one column or two), it counts as an array: a dynamic array with one value is
+  that value. A reference at the root (`=A1:A3`, `=INDEX(A1:C3,0,1)`) does not
+  spill; it is intersected, as Excel intersects it in an ordinary formula. A
+  host decides per cell with `isDynamicArray` — `false` keeps an ordinary
+  formula ordinary even when it produces an array, which is how a file's
+  ordinary `=SEQUENCE(3)` computes its top-left value, as in Excel. The Excel
+  writers store a formula as a dynamic array exactly when the engine spills it.
+  A host function (`FormulaFunction`, `Workbook.registerFunction`) returns an
+  array when it says so with `returnsArray: true`; its declaration wins over a
+  built-in of the same name, and one that does not say so returns one value.
+- **Empty results are 0** — a formula whose result is an empty cell holds 0, as
+  Excel stores and shows it: `=A9` over an empty A9, `=INDEX(A1:A3,2)`, and each
+  empty element of a spilled array (`=A1:A3` with A2 empty spills `1, 0, 3`).
+  This is the cell's value, so another formula reading that cell sees 0 too:
+  `ISBLANK` is FALSE, `=""` is FALSE, and `COUNTBLANK` does not count it.
+  Inside an expression an empty cell stays empty: `A9=""`, `A9=0` and
+  `ISBLANK(A9)` are TRUE, `LEN(A9)` is 0, and `A9&"x"` is `"x"`. A formula
+  that returns the empty string `""` keeps it. The engine converts the result
+  where it becomes the cell's value, so the writeback plan carries 0 and every
+  host receives Excel's value without converting it.
+- **Element-wise functions** — a function of one value given an array
+  (`LEN(B1:B5)`, `ABS(A1:A5)`, `ROUND(A1:A5,{0,1})`) is applied to each
+  element, as in Excel; which arguments take one value follows Excel's
+  operand classes.
 - **Iterative calc** — disabled by default; enable via
   `workbook.calcProperties = { iterate: true, iterateCount: 100, iterateDelta: 0.001 }`.
-- **External references** — `[book.xlsx]Sheet!A1` is parsed as `#REF!`;
-  cached values are not followed.
+- **External references** — `[book.xlsx]Sheet!A1` is parsed as an `#REF!`
+  error node that keeps the reference text in `externalReference`, so
+  `Formula.format` writes it back unchanged; cached values are not followed.

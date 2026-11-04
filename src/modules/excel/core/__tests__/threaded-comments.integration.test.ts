@@ -32,8 +32,14 @@ describe("threaded comments round-trip", () => {
     Cell.setValue(ws, "A1", "Discuss this");
 
     // Register two commenters.
-    const aliceId = Workbook.registerPerson(wb, "Alice", "alice@example.com", "AD");
-    const bobId = Workbook.registerPerson(wb, "Bob", "bob@example.com", "AD");
+    const aliceId = Workbook.registerPerson(wb, "Alice", {
+      userId: "alice@example.com",
+      providerId: "AD"
+    });
+    const bobId = Workbook.registerPerson(wb, "Bob", {
+      userId: "bob@example.com",
+      providerId: "AD"
+    });
 
     const top: ThreadedComment = {
       id: "{11111111-1111-1111-1111-111111111111}",
@@ -99,7 +105,7 @@ describe("threaded comments round-trip", () => {
     const wb1 = Workbook.create();
     const ws = Workbook.addWorksheet(wb1, "Sheet1");
     Cell.setValue(ws, "A1", 42);
-    const personId = Workbook.registerPerson(wb1, "Loader", "loader@example.com");
+    const personId = Workbook.registerPerson(wb1, "Loader", { userId: "loader@example.com" });
     ws.threadedComments.push({
       ref: "A1",
       comment: { personId, text: "Inspected", date: "2024-06-01T00:00:00Z" }
@@ -176,12 +182,12 @@ describe("threaded comments round-trip", () => {
 
   it("registerPerson deduplicates identical (displayName, userId) pairs", () => {
     const wb = Workbook.create();
-    const a = Workbook.registerPerson(wb, "Alice", "alice@example.com");
-    const b = Workbook.registerPerson(wb, "Alice", "alice@example.com");
+    const a = Workbook.registerPerson(wb, "Alice", { userId: "alice@example.com" });
+    const b = Workbook.registerPerson(wb, "Alice", { userId: "alice@example.com" });
     expect(a).toBe(b);
     expect(getPersons(wb)).toHaveLength(1);
 
-    const c = Workbook.registerPerson(wb, "Alice", "alice@other.com");
+    const c = Workbook.registerPerson(wb, "Alice", { userId: "alice@other.com" });
     expect(c).not.toBe(a);
     expect(getPersons(wb)).toHaveLength(2);
   });

@@ -2,29 +2,23 @@
  * Example: Archive Module — Functional TAR API, tar.gz & Error Handling
  *
  * Fills coverage gaps promised by archive-complete.ts but not demonstrated there:
- * - Functional (non-class) TAR API: Archive.tarSync / Archive.parseTar /
- *   Archive.untar and the Archive.TarReader streaming reader.
- * - Functional gzipped TAR: targz() to build a .tar.gz and untargz() to read it
- *   back into a Map (these live on the Node entrypoint, not the Archive namespace).
+ * - Functional (non-class) TAR API: Archive.packTarSync / Archive.parseTar /
+ *   Archive.unpackTar and the Archive.TarReader streaming reader.
+ * - Functional gzipped TAR: Archive.packTarGz() to build a .tar.gz, Archive.unpackTarGz()
+ *   to read it back into a Map and Archive.openTarGz() to stream its entries.
+ * - Functional ZIP, the same shape: Archive.packZip / Archive.packZipSync to build,
+ *   Archive.unpackZip / Archive.unpackZipSync to read back into a Map.
  * - Error class handling: deliberately trigger and catch ZipParseError,
  *   Crc32MismatchError, and PasswordRequiredError.
  *
  * Usage: pnpm example --filter archive-functional-tar-errors
- * Output: tmp/archive-examples/functional.tar, functional.tar.gz
+ * Output: tmp/archive-examples/functional.tar, functional.tar.gz, functional.zip
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  Archive,
-  ArchiveFile,
-  targz,
-  untargz,
-  ZipParseError,
-  Crc32MismatchError,
-  PasswordRequiredError
-} from "../index";
+import { Archive, ZipParseError, Crc32MismatchError, PasswordRequiredError } from "../index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -35,14 +29,14 @@ fs.mkdirSync(outDir, { recursive: true });
 const decoder = new TextDecoder();
 
 // =============================================================================
-// 1. Functional TAR creation — Archive.tarSync
+// 1. Functional TAR creation — Archive.packTarSync
 // =============================================================================
 //
 // tarSync() accepts a Map<name, content> (or an iterable of [name, source]).
 
-console.log("1. Functional TAR (Archive.tarSync):");
+console.log("1. Functional TAR (Archive.packTarSync):");
 
-const tarBytes = Archive.tarSync(
+const tarBytes = Archive.packTarSync(
   new Map<string, string | Uint8Array>([
     ["readme.txt", "Functional TAR built with tarSync()."],
     ["nested/data.json", JSON.stringify({ ok: true, count: 3 })],
@@ -65,12 +59,12 @@ for (const entry of parsed) {
 }
 
 // =============================================================================
-// 3. Functional TAR extract-to-Map — Archive.untar
+// 3. Functional TAR extract-to-Map — Archive.unpackTar
 // =============================================================================
 
-console.log("\n3. Functional extract (Archive.untar):");
+console.log("\n3. Functional extract (Archive.unpackTar):");
 
-const tarMap = await Archive.untar(tarBytes);
+const tarMap = await Archive.unpackTar(tarBytes);
 console.log(`  untar() returned ${tarMap.size} entries`);
 const readmeEntry = tarMap.get("readme.txt");
 if (readmeEntry) {
@@ -83,7 +77,7 @@ if (readmeEntry) {
 
 console.log("\n4. Streaming reader (Archive.TarReader):");
 
-const tarReader = new Archive.TarReader(tarBytes);
+const tarReader = Archive.openTar(tarBytes);
 for await (const entry of tarReader.entries()) {
   console.log(`  ${entry.path}: ${entry.info.size} bytes (isDirectory=${entry.isDirectory})`);
 }
@@ -95,15 +89,12 @@ if (dataEntry) {
 }
 
 // =============================================================================
-// 5. Functional gzipped TAR — targz() / untargz()
+// 5. Functional gzipped TAR — Archive.packTarGz() / Archive.unpackTarGz()
 // =============================================================================
-//
-// targz / untargz are Node-only (require zlib) and exported from the package
-// entrypoint rather than the platform-agnostic Archive namespace.
 
-console.log("\n5. Functional tar.gz (targz / untargz):");
+console.log("\n5. Functional tar.gz (Archive.packTarGz / Archive.unpackTarGz):");
 
-const tgzBytes = await targz(
+const tgzBytes = await Archive.packTarGz(
   new Map<string, string>([
     ["log.txt", "Compressible log line. ".repeat(200)],
     ["meta.json", JSON.stringify({ compressed: true })]
@@ -112,11 +103,46 @@ const tgzBytes = await targz(
 fs.writeFileSync(path.join(outDir, "functional.tar.gz"), tgzBytes);
 console.log(`  functional.tar.gz: ${tgzBytes.length} bytes (gzipped)`);
 
-const tgzMap = await untargz(tgzBytes);
-console.log(`  untargz() returned ${tgzMap.size} entries`);
+const tgzMap = await Archive.unpackTarGz(tgzBytes);
+console.log(`  Archive.unpackTarGz() returned ${tgzMap.size} entries`);
 for (const [name, { data }] of tgzMap) {
   console.log(`    ${name}: ${data.length} bytes`);
 }
+
+// The tar.gz reader streams entries like the TAR one
+for await (const entry of Archive.openTarGz(tgzBytes).entries()) {
+  console.log(`  Archive.openTarGz entry: ${entry.path}`);
+}
+
+// =============================================================================
+// 5b. Functional ZIP — Archive.packZip() / Archive.unpackZip()
+// =============================================================================
+
+console.log("\n5b. Functional ZIP (Archive.packZip / Archive.unpackZip):");
+
+const zipEntries: [string, string][] = [
+  ["readme.txt", "Same entries, ZIP container."],
+  ["nested/data.json", JSON.stringify({ zip: true })]
+];
+const functionalZip = await Archive.packZip(zipEntries, { level: 9 });
+fs.writeFileSync(path.join(outDir, "functional.zip"), functionalZip);
+console.log(`  functional.zip: ${functionalZip.length} bytes`);
+
+const zipMap = await Archive.unpackZip(functionalZip);
+for (const [name, { info, data }] of zipMap) {
+  console.log(
+    `    ${name}: ${data.length} bytes (${info.compressionMethod === 0 ? "stored" : "deflated"})`
+  );
+}
+
+// Synchronous forms, for in-memory sources
+const syncZip = Archive.packZipSync(zipEntries);
+const syncMap = Archive.unpackZipSync(syncZip);
+console.log(`  packZipSync → unpackZipSync: ${syncMap.size} entries`);
+const syncTar = Archive.unpackTarSync(Archive.packTarSync(zipEntries));
+console.log(`  packTarSync → unpackTarSync: ${syncTar.size} entries`);
+const syncTgz = Archive.unpackTarGzSync(Archive.packTarGzSync(zipEntries));
+console.log(`  packTarGzSync → unpackTarGzSync: ${syncTgz.size} entries`);
 
 // =============================================================================
 // 6. Error handling — ZipParseError
@@ -129,7 +155,7 @@ console.log("\n6. Error handling:");
 
 try {
   const junk = new Uint8Array(64).fill(0x42); // not a ZIP — no EOCD
-  const reader = Archive.unzip(junk);
+  const reader = Archive.openZip(junk);
   for await (const _entry of reader.entries()) {
     // force parsing
     void _entry;
@@ -148,12 +174,12 @@ try {
 //
 // Build a STORED (uncompressed) ZIP so we can flip a payload byte without
 // breaking decompression, then read it back with CRC checking enabled. The
-// RemoteZipReader.extract({ checkCrc32: true }) path validates the checksum and
+// RemoteZipReader.extract(path, { checkCrc32: true }) path validates the checksum and
 // throws Crc32MismatchError on mismatch.
 
 try {
   const marker = "ZZZUNIQUEPAYLOADZZZ";
-  const goodZip = await Archive.zip({ level: 0 }).add("payload.txt", marker).bytes();
+  const goodZip = await Archive.createZip({ level: 0 }).add("payload.txt", marker).toBuffer();
 
   // Locate the stored payload by its unique marker and flip one of its bytes.
   const corrupted = goodZip.slice();
@@ -195,7 +221,7 @@ try {
 // random-access reader, which routes through the decrypt path and throws.
 
 try {
-  const af = new ArchiveFile({
+  const af = new Archive.ArchiveFile({
     format: "zip",
     encryptionMethod: "aes-256",
     password: "pw"

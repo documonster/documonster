@@ -96,8 +96,31 @@ export interface ClassDef {
   readonly strokeDasharray?: readonly number[];
 }
 
+/**
+ * A statement the parser could not read, or read only in part, and so left out of the
+ * diagram. Mermaid itself refuses such a source; this parser draws what it understood and
+ * reports the rest here, so a typo does not silently become a different picture.
+ */
+export interface MermaidSkippedStatement {
+  /** The statement as written (trimmed). */
+  readonly text: string;
+  /** 1-based line in the source. */
+  readonly line: number;
+  /** 1-based column where the statement starts. */
+  readonly column: number;
+}
+
+/** What every parsed diagram carries besides its own content. */
+export interface MermaidParseReport {
+  /**
+   * The statements that were skipped, in source order. Absent when every statement was
+   * understood, so a clean source parses to exactly the tree it always did.
+   */
+  readonly skipped?: readonly MermaidSkippedStatement[];
+}
+
 /** A parsed flowchart. */
-export interface FlowchartDiagram {
+export interface FlowchartDiagram extends MermaidParseReport {
   readonly kind: "flowchart";
   readonly direction: FlowDirection;
   readonly title?: string;
@@ -114,7 +137,7 @@ export interface PieSlice {
 }
 
 /** A parsed pie chart. */
-export interface PieDiagram {
+export interface PieDiagram extends MermaidParseReport {
   readonly kind: "pie";
   readonly title?: string;
   /** `pie showData` prints each slice's value beside its name. */
@@ -187,7 +210,7 @@ export interface SequenceSection {
 export type SequenceEntry = SequenceMessageEntry | SequenceNote | SequenceBlock;
 
 /** A parsed sequence diagram. */
-export interface SequenceDiagram {
+export interface SequenceDiagram extends MermaidParseReport {
   readonly kind: "sequence";
   readonly title?: string;
   readonly participants: readonly SequenceParticipant[];
@@ -214,7 +237,7 @@ export interface SequenceDiagram {
  * they wrote; the conversion happens on the way to layout, not on the way out of the
  * parser.
  */
-export interface StateDiagram {
+export interface StateDiagram extends MermaidParseReport {
   readonly kind: "state";
   readonly direction: FlowDirection;
   readonly title?: string;
@@ -288,7 +311,7 @@ export interface ClassLink {
 }
 
 /** A parsed class diagram. */
-export interface ClassDiagram {
+export interface ClassDiagram extends MermaidParseReport {
   readonly kind: "class";
   readonly direction: FlowDirection;
   readonly title?: string;
@@ -332,7 +355,7 @@ export interface EntityRelation {
 }
 
 /** A parsed entity-relationship diagram. */
-export interface ErDiagram {
+export interface ErDiagram extends MermaidParseReport {
   readonly kind: "er";
   readonly direction: FlowDirection;
   readonly title?: string;
@@ -357,7 +380,7 @@ export interface GanttTask {
 }
 
 /** A parsed Gantt chart. */
-export interface GanttDiagram {
+export interface GanttDiagram extends MermaidParseReport {
   readonly kind: "gantt";
   readonly title?: string;
   /** Section names in the order they were declared. */
@@ -374,7 +397,7 @@ export interface TimelinePeriod {
 }
 
 /** A parsed timeline. */
-export interface TimelineDiagram {
+export interface TimelineDiagram extends MermaidParseReport {
   readonly kind: "timeline";
   readonly title?: string;
   readonly sections: readonly string[];
@@ -391,7 +414,7 @@ export interface JourneyTask {
 }
 
 /** A parsed user journey. */
-export interface JourneyDiagram {
+export interface JourneyDiagram extends MermaidParseReport {
   readonly kind: "journey";
   readonly title?: string;
   readonly sections: readonly string[];
@@ -409,7 +432,7 @@ export interface MindNode {
 }
 
 /** A parsed mind map. */
-export interface MindmapDiagram {
+export interface MindmapDiagram extends MermaidParseReport {
   readonly kind: "mindmap";
   readonly title?: string;
   readonly root?: MindNode;
@@ -429,7 +452,7 @@ export interface GitCommit {
 }
 
 /** A parsed git graph. */
-export interface GitGraphDiagram {
+export interface GitGraphDiagram extends MermaidParseReport {
   readonly kind: "git";
   readonly title?: string;
   /** Branch names in the order they first appear, which is the order of the lanes. */
@@ -445,7 +468,7 @@ export interface QuadrantPoint {
 }
 
 /** A parsed quadrant chart. */
-export interface QuadrantDiagram {
+export interface QuadrantDiagram extends MermaidParseReport {
   readonly kind: "quadrant";
   readonly title?: string;
   /** Axis captions, low end first. */
@@ -464,7 +487,7 @@ export interface XySeries {
 }
 
 /** A parsed XY chart. */
-export interface XyDiagram {
+export interface XyDiagram extends MermaidParseReport {
   readonly kind: "xy";
   readonly title?: string;
   readonly horizontal: boolean;
@@ -485,7 +508,7 @@ export interface SankeyLink {
 }
 
 /** A parsed Sankey diagram. */
-export interface SankeyDiagram {
+export interface SankeyDiagram extends MermaidParseReport {
   readonly kind: "sankey";
   readonly title?: string;
   readonly links: readonly SankeyLink[];
@@ -518,7 +541,7 @@ export interface RequirementLink {
 }
 
 /** A parsed requirement diagram. */
-export interface RequirementDiagram {
+export interface RequirementDiagram extends MermaidParseReport {
   readonly kind: "requirement";
   readonly title?: string;
   readonly requirements: readonly Requirement[];
@@ -556,7 +579,7 @@ export interface C4Relation {
 }
 
 /** A parsed C4 diagram. */
-export interface C4Diagram {
+export interface C4Diagram extends MermaidParseReport {
   readonly kind: "c4";
   readonly title?: string;
   readonly elements: readonly C4Element[];
@@ -576,7 +599,7 @@ export interface BlockCell {
 }
 
 /** A parsed block diagram. */
-export interface BlockDiagram {
+export interface BlockDiagram extends MermaidParseReport {
   readonly kind: "block";
   readonly title?: string;
   readonly columns: number;
@@ -592,7 +615,7 @@ export interface PacketField {
 }
 
 /** A parsed packet diagram. */
-export interface PacketDiagram {
+export interface PacketDiagram extends MermaidParseReport {
   readonly kind: "packet";
   readonly title?: string;
   /** Bits per row; Mermaid's default is 32. */
@@ -617,7 +640,7 @@ export interface KanbanColumn {
 }
 
 /** A parsed kanban board. */
-export interface KanbanDiagram {
+export interface KanbanDiagram extends MermaidParseReport {
   readonly kind: "kanban";
   readonly title?: string;
   readonly columns: readonly KanbanColumn[];
@@ -630,7 +653,7 @@ export interface RadarSeries {
 }
 
 /** A parsed radar chart. */
-export interface RadarDiagram {
+export interface RadarDiagram extends MermaidParseReport {
   readonly kind: "radar";
   readonly title?: string;
   readonly axes: readonly string[];
@@ -659,7 +682,7 @@ export interface ArchitectureEdge {
 }
 
 /** A parsed architecture diagram. */
-export interface ArchitectureDiagram {
+export interface ArchitectureDiagram extends MermaidParseReport {
   readonly kind: "architecture";
   readonly title?: string;
   readonly nodes: readonly ArchitectureNode[];

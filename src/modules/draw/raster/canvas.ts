@@ -13,6 +13,7 @@
  * it without each one needing its own check.
  */
 
+import { DrawArgumentError } from "@draw/errors";
 import type { GlyphOutline, RasterFont, RasterFontSource } from "@draw/raster/glyph-outline";
 import { fontHasGlyph, parseInjectedFonts } from "@draw/raster/glyph-outline";
 import { rasterizeGlyph } from "@draw/raster/glyph-rasterizer";
@@ -156,6 +157,17 @@ export class BasicRasterCanvas {
     readonly width: number,
     readonly height: number
   ) {
+    for (const [field, value] of [
+      ["width", width],
+      ["height", height]
+    ] as const) {
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new DrawArgumentError(
+          field,
+          `new Draw.Backend.BasicRasterCanvas: ${field} must be a positive integer number of pixels, got ${String(value)}`
+        );
+      }
+    }
     this.data = new Uint8Array(width * height * 4);
   }
 
@@ -221,7 +233,7 @@ export class BasicRasterCanvas {
   }
 
   drawPolyline(
-    points: RasterPoint[],
+    points: readonly RasterPoint[],
     color: string | undefined,
     width = 1,
     dash?: readonly number[],
@@ -714,7 +726,7 @@ export class BasicRasterCanvas {
     }
   }
 
-  fillPolygon(points: RasterPoint[], color: string | undefined): void {
+  fillPolygon(points: readonly RasterPoint[], color: string | undefined): void {
     this.fillRings([points], color, "nonzero");
   }
 
@@ -732,7 +744,7 @@ export class BasicRasterCanvas {
    * wherever the sum is not zero.
    */
   fillRings(
-    rings: readonly RasterPoint[][],
+    rings: readonly (readonly RasterPoint[])[],
     color: string | undefined,
     fillRule: "nonzero" | "evenodd"
   ): void {
@@ -921,15 +933,20 @@ export class BasicRasterCanvas {
 
   /** Warnings about text this canvas drew but could not lay out correctly. */
   textWarnings(): string[] {
-    return this.textFeatures.warnings("This rasteriser", {
-      contextualForms: true,
-      visualOrder: true
-    });
+    return [
+      ...this.fontWarnings,
+      ...this.textFeatures.warnings("This rasteriser", {
+        contextualForms: true,
+        visualOrder: true
+      })
+    ];
   }
 
   /** Faces this canvas draws with, ahead of anything discovered on the host. */
   private ownFonts: readonly RasterFont[] = [];
   private ownUseSystemFonts = true;
+  /** What {@link setFonts} could not use as given, reported by {@link textWarnings}. */
+  private fontWarnings: readonly string[] = [];
 
   /**
    * Use these fonts for this canvas, instead of the process-wide registry.
@@ -947,7 +964,9 @@ export class BasicRasterCanvas {
     fonts: readonly RasterFontSource[],
     options: { readonly useSystemFonts?: boolean } = {}
   ): void {
-    this.ownFonts = parseInjectedFonts(fonts);
+    const injected = parseInjectedFonts(fonts);
+    this.ownFonts = injected.fonts;
+    this.fontWarnings = injected.warnings;
     this.ownUseSystemFonts = options.useSystemFonts ?? true;
   }
 

@@ -4,6 +4,7 @@
  * Get and set the Word compatibility mode of a document.
  */
 
+import { checkHandle, invalidArgument } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
 import type { DocxDocument, DocumentSettings } from "@word/types";
 
@@ -13,6 +14,8 @@ import type { DocxDocument, DocumentSettings } from "@word/types";
 
 /** Word compatibility mode versions. */
 export type CompatibilityMode = 11 | 12 | 14 | 15;
+
+const COMPATIBILITY_MODES: readonly unknown[] = [11, 12, 14, 15] satisfies CompatibilityMode[];
 
 // =============================================================================
 // Public API
@@ -32,6 +35,7 @@ export type CompatibilityMode = 11 | 12 | 14 | 15;
  * @returns The compatibility mode version number.
  */
 export function getCompatibilityMode(doc: DocxDocument): CompatibilityMode {
+  checkHandle(doc, "document", "doc", "Query.getCompatibilityMode");
   const settings = doc.settings;
   if (!settings) {
     return 15;
@@ -61,8 +65,13 @@ export function getCompatibilityMode(doc: DocxDocument): CompatibilityMode {
  *
  * @param doc - The document to modify (mutated in place).
  * @param mode - The target compatibility mode (11=Word 2003, 12=Word 2007, 14=Word 2010, 15=Word 2013+).
+ * @throws {DocxArgumentError} If `mode` is not one of these.
  */
 export function setCompatibilityMode(doc: DocxDocument, mode: CompatibilityMode): void {
+  checkHandle(doc, "document", "doc", "Document.setCompatibilityMode");
+  if (!COMPATIBILITY_MODES.includes(mode)) {
+    invalidArgument("Document.setCompatibilityMode", "mode", "one of 11, 12, 14, 15", mode);
+  }
   const settings: Mutable<DocumentSettings> = doc.settings ? { ...doc.settings } : {};
   settings.compatibilityMode = mode;
 

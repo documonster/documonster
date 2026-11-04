@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Column, Pivot, Table, Workbook, Worksheet } from "@excel/index";
+import { Column, Pivot, Row, Table, Workbook } from "@excel/index";
 /**
  * Pivot Table Examples — 25 variations showcasing all supported features
  * Usage: pnpm example --filter pivot-tables
@@ -149,7 +149,7 @@ async function main() {
     }
   }
 
-  Worksheet.addRows(dataSheet2, [empHeaders, ...empRows]);
+  Row.addMany(dataSheet2, [empHeaders, ...empRows]);
 
   // ==========================================================================
   // 25 Pivot Table Variations

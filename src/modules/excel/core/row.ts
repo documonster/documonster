@@ -8,6 +8,7 @@ import {
   setFacetShared
 } from "@excel/core/cell";
 import { Enums } from "@excel/core/enums";
+import { isStoredSpillCell } from "@excel/core/stored-spills";
 import { invalidateSharedCellStyle, sharedCellFacet } from "@excel/core/style-sharing";
 import type { Worksheet } from "@excel/core/worksheet";
 import type {
@@ -22,7 +23,8 @@ import type {
   RowBreak
 } from "@excel/types";
 
-interface RowDimensions {
+/** The first and last column of a row that hold a value. */
+export interface RowDimensions {
   min: number;
   max: number;
 }
@@ -179,7 +181,7 @@ export function rowNumFmt(r: RowData): string | NumFmt | undefined {
   return r.style.numFmt;
 }
 
-export function rowSetNumFmt(r: RowData, value: string | undefined): void {
+export function rowSetNumFmt(r: RowData, value: string | NumFmt | undefined): void {
   applyStyle(r, "numFmt", value);
 }
 
@@ -254,6 +256,26 @@ export function rowCollapsed(r: RowData): boolean {
   return !!(r.outlineLevel && r.outlineLevel >= (r.worksheet.properties.outlineLevelRow ?? 0));
 }
 
+/**
+ * Whether a row says something with no cells in it: a height, a style for its empty cells, hidden, or an outline level.
+ *
+ * Only the height used to count, so a row formatted as a whole — `<row s="150" customFormat="1"/>`, which is how Excel
+ * stores a row whose every empty cell is shaded — was dropped on write and its cells took the column's look instead.
+ */
+export function rowCarriesSettings(r: {
+  readonly height?: number | null;
+  readonly style?: Partial<Style>;
+  readonly hidden?: boolean;
+  readonly outlineLevel?: number;
+}): boolean {
+  return (
+    r.height != null ||
+    r.hidden === true ||
+    (r.outlineLevel ?? 0) > 0 ||
+    (r.style !== undefined && Object.values(r.style).some(facet => facet !== undefined))
+  );
+}
+
 export function rowGetModel(r: RowData): RowModel | null {
   const cells: CellModel[] = [];
   let min = 0;
@@ -262,10 +284,12 @@ export function rowGetModel(r: RowData): RowModel | null {
     // Spill ghosts are derived values, not independent worksheet cells. Do
     // not persist their derived value; the dynamic-array master reconstructs
     // it after load. Preserve style/comment metadata as an empty cell model.
+    // The exception is a ghost inside its master's stored `ref` — the spill a file carried, which Excel stores as
+    // plain cached values beside a master whose range covers them (see `stored-spills.ts`).
     if (cell) {
       const original = cellGetModel(cell);
       const cellModel =
-        cell._formulaGhostOwner === undefined
+        cell._formulaGhostOwner === undefined || isStoredSpillCell(cell)
           ? original
           : ({
               address: original.address,
@@ -285,7 +309,7 @@ export function rowGetModel(r: RowData): RowModel | null {
     }
   });
 
-  return r.height != null || cells.length
+  return cells.length || rowCarriesSettings(r)
     ? {
         cells,
         number: r.number,

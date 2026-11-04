@@ -17,4 +17,4 @@ export { createFormatConfig } from "@csv/format/config";
 // Formatting
 // =============================================================================
 
-export { formatCsv, formatRowWithLookup } from "@csv/format/formatter";
+export { formatCsv, formatRowWithLookup, headerNames } from "@csv/format/formatter";

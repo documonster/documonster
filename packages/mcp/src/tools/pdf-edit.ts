@@ -6,7 +6,7 @@
  * pages, rotate, append another PDF. That is exactly the set a model can drive
  * safely, because getting them wrong is visible rather than subtle.
  *
- * The diagram operation is the reason `createPdfDrawSurface` is published from
+ * The diagram operation is the reason `Pdf.createDrawSurface` is published from
  * `documonster/pdf`: a `PdfEditorPage` already puts down the six marks a
  * `PdfDrawPage` names, so a display list draws onto an existing page as **vectors**
  * with no rasterising step. A diagram stamped this way stays sharp at any zoom,
@@ -18,13 +18,16 @@
  * How the file is saved depends on what was asked for, and it matters:
  *
  * - **Overlay-only** edits (watermark, page numbers, stamp, diagram) are saved as
- *   an incremental update where the format allows it, which appends to the
- *   original bytes and therefore keeps bookmarks, form fields and any signature
- *   intact.
+ *   an incremental update, which appends to the original bytes — classic or
+ *   cross-reference-stream alike — and therefore keeps bookmarks, form fields and
+ *   any signature intact.
  * - **Structural** edits (delete/keep pages, rotate, append) require a full
- *   rebuild. That renumbers objects, invalidates signatures and may drop
- *   document-level structures the rebuilder does not carry over. The result says
- *   so rather than leaving the caller to discover it.
+ *   rebuild. That renumbers objects and may drop document-level structures the
+ *   rebuilder does not carry over.
+ *
+ * A rebuild would break a signature, so on a signed file the editor refuses it and
+ * this tool reports that and writes nothing. The report of how the file was saved is
+ * read off the output (`saveKind`), not predicted from the input.
  *
  * Deliberately absent: extracting or reflowing text into a new PDF, which no
  * faithful implementation exists for.
@@ -32,8 +35,8 @@
 
 import { readFile } from "node:fs/promises";
 
-import { renderDrawList } from "documonster/draw";
-import { Pdf, createPdfDrawSurface } from "documonster/pdf";
+import { Draw } from "documonster/draw";
+import { Pdf, PdfSignatureInvalidationError } from "documonster/pdf";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -46,7 +49,7 @@ import {
   summariseDiagram,
   toRenderOptions
 } from "./diagram.js";
-import { parsePages, supportsIncrementalUpdate } from "./document.js";
+import { parsePages, saveKind } from "./document.js";
 import {
   assertReadableSize,
   assertUnchanged,
@@ -183,7 +186,13 @@ const opSchema = z.discriminatedUnion("op", [
     pages: z
       .union([z.array(z.number().int().positive()), z.string()])
       .optional()
-      .describe("Pages of that PDF to append. Omit for all of them.")
+      .describe("Pages of that PDF to append. Omit for all of them."),
+    formFields: z
+      .enum(["copy", "drop"])
+      .optional()
+      .describe(
+        'Defaults to "copy": the pages keep their form fields, and a field name the PDF already has is refused. "drop" appends the pages without their fields (other annotations kept), e.g. to append the same form twice.'
+      )
   })
 ]);
 
@@ -192,7 +201,7 @@ export const pdfEditTool = defineTool({
   group: "pdf",
   title: "Edit an existing PDF",
   description:
-    "Apply operations to a PDF: watermark, page numbers, a positioned stamp, a Mermaid diagram drawn as vectors, delete or keep pages, rotate, or append another PDF. Overlays are drawn over the original content, which is never rewritten. Use dryRun to see the effect described before writing. There is no text extraction into a new PDF and no PDF→Word.",
+    "Apply operations to a PDF: watermark, page numbers, a positioned stamp, a Mermaid diagram drawn as vectors, delete or keep pages, rotate, or append another PDF. Overlays are drawn over the original content, which is never rewritten. Operations apply in order, and page numbers are 1-based and refer to the document as the earlier operations left it — so pages appended earlier in the call can be deleted, rotated or drawn on by their new numbers. Use dryRun to see the effect described before writing. There is no text extraction into a new PDF and no PDF→Word.",
   inputSchema: {
     path: z.string().min(1).describe("PDF to edit, relative to the server root."),
     ops: z.array(opSchema).min(1).describe("Operations, applied in order."),
@@ -225,7 +234,7 @@ export const pdfEditTool = defineTool({
     const inputVersion = await fingerprint(resolved);
     const bytes = new Uint8Array(await readFile(resolved));
 
-    const info = await Pdf.read(bytes, { extractText: false, extractImages: false }).catch(
+    const info = await Pdf.extract(bytes, { extractText: false, extractImages: false }).catch(
       (cause: unknown) => {
         throw toolError.unsupported(
           `could not read ${args.path} as a PDF`,
@@ -246,10 +255,10 @@ export const pdfEditTool = defineTool({
       );
     }
 
-    // Editor.load is synchronous despite the async surroundings.
-    let editor: ReturnType<typeof Pdf.Editor.load>;
+    // Editor.read is synchronous despite the async surroundings.
+    let editor: ReturnType<typeof Pdf.Editor.read>;
     try {
-      editor = Pdf.Editor.load(bytes);
+      editor = Pdf.Editor.read(bytes);
     } catch (cause) {
       throw toolError.unsupported(`could not open ${args.path} for editing`, undefined, { cause });
     }
@@ -266,16 +275,18 @@ export const pdfEditTool = defineTool({
       break;
     }
 
-    // Page count changes as pages are removed, so it is tracked through the
-    // operation list rather than read once.
+    // The editor's index for each current 1-based page number. Pages are removed and
+    // appended as the operations run, so the order is tracked rather than read once;
+    // appended pages take the editor's indices `pageCount…` in the order added.
     const pageMap = Array.from({ length: pageCount }, (_, index) => index);
+    const pageState = { pageMap, nextAddedIndex: editor.pageCount };
     const applied: string[] = [];
     // Structural operations force a full rebuild; overlay-only edits do not.
     const structural = args.ops.some(op => STRUCTURAL_OPS.has(op.op));
 
     for (const [index, op] of args.ops.entries()) {
       try {
-        const result = await applyOp(editor, op, pageMap, config);
+        const result = await applyOp(editor, op, pageState, config);
         applied.push(result.description);
       } catch (cause) {
         if (cause instanceof Error && cause.name === "McpToolError") {
@@ -294,7 +305,7 @@ export const pdfEditTool = defineTool({
         config,
         [
           `**Dry run** — nothing was written to ${args.path}.`,
-          `- pages: ${pageCount} → ${pageMap.length}`,
+          `- pages: ${pageCount} → ${editor.outputPageCount}`,
           "",
           "Would apply:",
           ...applied.map((line, index) => `${index + 1}. ${line}`),
@@ -311,13 +322,30 @@ export const pdfEditTool = defineTool({
     const target = writeTarget.path;
     const inPlace = isSameFile(target, resolved);
 
-    const backupPath = inPlace && (args.backup ?? true) ? await backupOnce(writeTarget) : undefined;
+    // Overlay-only: the incremental path, so bookmarks, form fields and signatures
+    // survive. Where the editor cannot append it rewrites instead — and on a signed file
+    // refuses, rather than silently break the signature.
+    let out: Uint8Array;
+    try {
+      out = structural ? await editor.toBuffer() : await editor.toBuffer({ incremental: true });
+    } catch (cause) {
+      if (cause instanceof PdfSignatureInvalidationError) {
+        throw toolError.unsupported(
+          `${args.path} is digitally signed, and ${structural ? "this structural edit" : "this edit"} would rewrite it and invalidate the signature`,
+          structural
+            ? "Nothing was written. Deleting, keeping, rotating or appending pages always rebuilds the file. Work on an unsigned copy, or re-sign afterwards."
+            : "Nothing was written. This file could not take an appended update. Work on an unsigned copy, or re-sign afterwards.",
+          { cause }
+        );
+      }
+      throw cause;
+    }
+    // Read off the output: whether the original bytes survive is a fact about the file
+    // written, not something to predict from the input.
+    const saved = saveKind(bytes, out);
 
-    // Overlay-only: prefer the incremental path so bookmarks, form fields and
-    // signatures survive. `saveIncremental` itself falls back to a rebuild for
-    // xref-stream files, so the report is based on what was actually possible.
-    const incrementalPossible = !structural && supportsIncrementalUpdate(bytes);
-    const out = incrementalPossible ? await editor.saveIncremental() : await editor.save();
+    // Only once the save has succeeded, so a refused edit leaves no backup behind.
+    const backupPath = inPlace && (args.backup ?? true) ? await backupOnce(writeTarget) : undefined;
     if (inPlace) {
       await writeFileAtomic(target, out);
     } else {
@@ -325,7 +353,7 @@ export const pdfEditTool = defineTool({
     }
 
     // Re-read so the reported page count is the file's, not the editor's idea.
-    const verified = await Pdf.read(new Uint8Array(out), {
+    const verified = await Pdf.extract(new Uint8Array(out), {
       extractText: false,
       extractImages: false
     });
@@ -335,12 +363,14 @@ export const pdfEditTool = defineTool({
       [
         `Edited **${args.path}** — ${applied.length} operation(s) applied.`,
         `- written to ${writeTarget.display}${inPlace ? " (in place)" : ""} (${formatBytes(out.byteLength)})`,
-        `- pages: ${pageCount} → ${verified.metadata?.pageCount ?? pageMap.length}`,
-        incrementalPossible
+        `- pages: ${pageCount} → ${verified.metadata?.pageCount ?? editor.outputPageCount}`,
+        saved === "appended"
           ? "- saved as an incremental update: bookmarks, form fields and original signature bytes are preserved; a certified signature may still report the document as modified if its DocMDP permissions forbid this edit"
-          : structural
-            ? "- **structural change, so the file was rebuilt**: any signature is now invalid, and document-level extras such as bookmarks may not survive"
-            : "- rebuilt rather than appended (this PDF uses a cross-reference stream), so any signature is now invalid",
+          : saved === "unchanged"
+            ? "- the output is byte-identical to the input: the operations changed nothing that needed saving"
+            : structural
+              ? "- **structural change, so the file was rebuilt**: document-level extras such as bookmarks may not survive (no signature was detected — a file with one is refused rather than rebuilt)"
+              : "- rebuilt rather than appended (the editor could not append an update to this file); no signature was detected, so none was affected",
         ...describeBackup(writeTarget.display, backupPath),
         "",
         ...applied.map((line, index) => `${index + 1}. ${line}`),
@@ -352,17 +382,18 @@ export const pdfEditTool = defineTool({
 });
 
 async function applyOp(
-  editor: ReturnType<typeof Pdf.Editor.load>,
+  editor: ReturnType<typeof Pdf.Editor.read>,
   op: z.infer<typeof opSchema>,
-  pageMap: number[],
+  state: { pageMap: number[]; nextAddedIndex: number },
   config: ServerConfig
 ): Promise<{ description: string }> {
+  const { pageMap } = state;
   const pageCount = pageMap.length;
   switch (op.op) {
     case "watermark": {
       const pages = resolvePages(op.pages, pageCount);
       for (const page of pages) {
-        editor.getPage(requireOriginalPage(pageMap, page)).drawText(op.text, {
+        editor.getPage(editorIndex(pageMap, page)).drawText(op.text, {
           x: 120,
           y: 360,
           fontSize: op.fontSize ?? 48,
@@ -387,7 +418,7 @@ async function applyOp(
         const label = template
           .replace(/\{page\}/g, String(index + startAt))
           .replace(/\{total\}/g, String(pageCount + startAt - 1));
-        editor.getPage(requireOriginalPage(pageMap, index + 1)).drawText(label, {
+        editor.getPage(editorIndex(pageMap, index + 1)).drawText(label, {
           x: position === "bottom-left" ? 60 : position === "bottom-center" ? 260 : 460,
           y: 28,
           fontSize
@@ -401,7 +432,7 @@ async function applyOp(
     case "stamp": {
       const pages = resolvePages(op.pages, pageCount);
       for (const page of pages) {
-        editor.getPage(requireOriginalPage(pageMap, page)).drawText(op.text, {
+        editor.getPage(editorIndex(pageMap, page)).drawText(op.text, {
           x: op.x,
           y: op.y,
           fontSize: op.fontSize ?? 12,
@@ -428,7 +459,7 @@ async function applyOp(
 
       let placement = "";
       for (const page of pages) {
-        const target = editor.getPage(requireOriginalPage(pageMap, page));
+        const target = editor.getPage(editorIndex(pageMap, page));
         const boxWidth = op.width ?? Math.max(1, target.width - DIAGRAM_MARGIN * 2);
         const boxHeight = op.height ?? Math.max(1, target.height - DIAGRAM_MARGIN * 2);
         const room = Math.min(boxWidth / list.width, boxHeight / list.height);
@@ -442,9 +473,13 @@ async function applyOp(
         // Vectors, not a raster: `PdfEditorPage` puts down exactly the six marks
         // `PdfDrawPage` names, so the shared walker draws straight onto the
         // existing page and the diagram stays sharp at any zoom.
-        renderDrawList(
+        Draw.render(
           list,
-          createPdfDrawSurface(target, { x, y, width: drawnWidth, height: drawnHeight }, fit)
+          Pdf.createDrawSurface(
+            target,
+            { x, y, width: drawnWidth, height: drawnHeight },
+            { scale: fit }
+          )
         );
         placement = `${Math.round(drawnWidth)}×${Math.round(drawnHeight)} pt at (${Math.round(x)}, ${Math.round(y)})`;
       }
@@ -464,11 +499,8 @@ async function applyOp(
       }
       // Descending, so each removal cannot shift the index of the next.
       for (const page of [...pages].sort((a, b) => b - a)) {
-        const [original] = pageMap.splice(page - 1, 1);
-        if (original === undefined || original < 0) {
-          throw toolError.invalidInput("an appended page cannot be removed in the same call");
-        }
-        editor.removePage(original);
+        editor.removePage(editorIndex(pageMap, page));
+        pageMap.splice(page - 1, 1);
       }
       return {
         description: `deleted page(s) ${pages.join(", ")}`
@@ -487,11 +519,8 @@ async function applyOp(
         }
       }
       for (const page of remove.toSorted((a, b) => b - a)) {
-        const [original] = pageMap.splice(page - 1, 1);
-        if (original === undefined || original < 0) {
-          throw toolError.invalidInput("an appended page cannot be removed in the same call");
-        }
-        editor.removePage(original);
+        editor.removePage(editorIndex(pageMap, page));
+        pageMap.splice(page - 1, 1);
       }
       return {
         description: `kept page(s) ${[...keep].toSorted((a, b) => a - b).join(", ")}, removed ${remove.length}`
@@ -501,7 +530,7 @@ async function applyOp(
     case "rotate": {
       const pages = resolvePages(op.pages, pageCount);
       for (const page of pages) {
-        editor.rotatePage(requireOriginalPage(pageMap, page), op.degrees);
+        editor.rotatePage(editorIndex(pageMap, page), op.degrees);
       }
       return { description: `set ${pages.length} page(s) to ${op.degrees}° rotation` };
     }
@@ -509,7 +538,7 @@ async function applyOp(
     case "append": {
       const source = await resolveInRoot(config, op.path, { mustExist: true });
       const sourceBytes = new Uint8Array(await readFile(source));
-      const sourceInfo = await Pdf.read(sourceBytes, {
+      const sourceInfo = await Pdf.extract(sourceBytes, {
         extractText: false,
         extractImages: false
       }).catch((cause: unknown) => {
@@ -518,36 +547,33 @@ async function applyOp(
       const sourcePageCount = sourceInfo.metadata?.pageCount ?? 0;
       const wanted = op.pages === undefined ? undefined : resolvePages(op.pages, sourcePageCount);
 
-      editor.copyPagesFrom(
-        sourceBytes,
-        wanted === undefined ? undefined : wanted.map(page => page - 1)
-      );
+      // `formFields` is passed only when given, so the library's default ("copy") applies.
+      editor.copyPagesFrom(sourceBytes, {
+        ...(wanted === undefined ? {} : { pageIndices: wanted.map(page => page - 1) }),
+        ...(op.formFields === undefined ? {} : { formFields: op.formFields })
+      });
 
       const added = wanted === undefined ? sourcePageCount : wanted.length;
-      // Copied pages are not addressable through getPage/removePage until the
-      // rebuilt document is loaded again. Keep sentinels so a later operation
-      // gets an honest error instead of silently touching an original page.
-      pageMap.push(...Array.from({ length: added }, () => -1));
+      // The editor names copied pages `pageCount…` in the order added, so later
+      // operations in this call can edit or remove them like any other page.
+      pageMap.push(...Array.from({ length: added }, (_, offset) => state.nextAddedIndex + offset));
+      state.nextAddedIndex += added;
       return {
-        description: `appended ${added} page(s) from ${op.path}`
+        description: `appended ${added} page(s) from ${op.path}${
+          op.formFields === "drop" ? " without their form fields" : ""
+        }`
       };
     }
   }
 }
 
-/** Original editor index corresponding to a current 1-based page number. */
-function requireOriginalPage(pageMap: readonly number[], page: number): number {
-  const original = pageMap[page - 1];
-  if (original === undefined) {
+/** The editor's index for a current 1-based page number. */
+function editorIndex(pageMap: readonly number[], page: number): number {
+  const index = pageMap[page - 1];
+  if (index === undefined) {
     throw toolError.invalidInput(`page ${page} does not exist`);
   }
-  if (original < 0) {
-    throw toolError.invalidInput(
-      `page ${page} was appended earlier in this call and cannot be edited until the PDF is saved and reopened`,
-      "Put append last, or make a second pdf_edit call for the appended pages."
-    );
-  }
-  return original;
+  return index;
 }
 
 /** Resolve a page selector against the live page count, or every page. */

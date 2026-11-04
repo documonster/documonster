@@ -406,14 +406,17 @@ database functions. Dynamic arrays spill into neighbouring cells, and
 Higher-order functions work: \`MAP\`, \`REDUCE\`, \`SCAN\`, \`BYROW\`, \`BYCOL\`,
 \`MAKEARRAY\`.
 
-## Known limitation
+A \`LAMBDA\` can be called inline or through a name, and a call that returns a
+lambda can be called again:
 
-\`LAMBDA\` must be **bound to a name** before it is called. Excel accepts the
-immediately-invoked form, this engine does not:
-
-- \`LAMBDA(a,b,a+b)(2,3)\` → \`#NAME?\`
+- \`LAMBDA(a,b,a+b)(2,3)\` → \`5\` ✓
+- \`LAMBDA(x,LAMBDA(y,x+y))(1)(2)\` → \`3\` ✓
 - \`LET(f,LAMBDA(a,b,a+b),f(2,3))\` → \`5\` ✓
 - \`REDUCE(0,{1,2,3},LAMBDA(acc,x,acc+x))\` → \`6\` ✓
+
+Saving an inline call (\`LAMBDA(…)(…)\`) to **.xlsb** is reported as unsupported:
+the binary format documents no token for it. Bind the lambda to a name with
+\`LET\`, or save as .xlsx.
 
 ## Errors are answers
 

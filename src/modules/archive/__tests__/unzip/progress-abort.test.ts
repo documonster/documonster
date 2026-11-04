@@ -18,7 +18,7 @@ describe("unzip progress + abort", () => {
       .add("a.txt", new TextEncoder().encode("hello"))
       .add("b.txt", new TextEncoder().encode("world"));
 
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const events: Array<{ bytesIn: number; entriesEmitted: number; phase: string }> = [];
 
@@ -46,7 +46,7 @@ describe("unzip progress + abort", () => {
 
   it("should abort while parsing a streaming source", async () => {
     const z = zip({ level: 0 }).add("big.bin", new Uint8Array(1024 * 1024));
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const reader = unzip(chunkBytes(zipBytes, 128));
     const op = reader.operation({ progressIntervalMs: 0 });
@@ -82,7 +82,7 @@ describe("unzip progress + abort", () => {
     const z = zip({ level: 0 })
       .add("a.bin", new Uint8Array(1024 * 128))
       .add("b.bin", new Uint8Array(1024 * 128));
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const reader = unzip(chunkBytes(zipBytes, 4096));
     const op = reader.operation({ progressIntervalMs: 0 });
@@ -110,7 +110,7 @@ describe("unzip progress + abort", () => {
       const z = zip({ level: 0 })
         .add("a.bin", new Uint8Array(1024 * 256))
         .add("b.bin", new Uint8Array(1024 * 16));
-      const zipBytes = await z.bytes();
+      const zipBytes = await z.toBuffer();
 
       const reader = unzip(chunkBytes(zipBytes, 4096));
       const op = reader.operation({ progressIntervalMs: 0 });
@@ -145,7 +145,7 @@ describe("unzip progress + abort", () => {
     const z = zip({ level: 0 })
       .add("a.txt", new TextEncoder().encode("hello"))
       .add("b.txt", new TextEncoder().encode("world"));
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const reader = unzip(zipBytes);
     const op = reader.operation({ progressIntervalMs: 0 });
@@ -164,7 +164,7 @@ describe("unzip progress + abort", () => {
 
   it("abort() should be idempotent and keep the first reason", async () => {
     const z = zip({ level: 0 }).add("a.bin", new Uint8Array(1024 * 128));
-    const zipBytes = await z.bytes();
+    const zipBytes = await z.toBuffer();
 
     const reader = unzip(chunkBytes(zipBytes, 128));
     const op = reader.operation({ progressIntervalMs: 0 });

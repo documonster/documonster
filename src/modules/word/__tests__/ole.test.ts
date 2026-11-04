@@ -23,7 +23,7 @@ function makeBaseDoc(): DocxDocument {
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "Body with an OLE object.");
-  return Document.build(d);
+  return d;
 }
 
 function makeDoc(opaqueParts?: any[]): DocxDocument {
@@ -161,6 +161,34 @@ describe("OLE embedded objects", () => {
       expect(Ole.getData(reread, ole.oleRId)).toEqual(OLE2_HEADER);
       // The OLE binary's rId never collides with the preview's rId.
       expect(Ole.extract(reread).objects[0]!.rId).toBe(ole.oleRId);
+    });
+
+    it("gives a second copy of the same embedding its own relationship and part", async () => {
+      const ole = Ole.createEmbedding(OLE2_HEADER, "Package", {
+        previewImage: PNG_1X1,
+        previewContentType: "image/png"
+      });
+      const doc = Ole.add(Ole.add(makeBaseDoc(), ole), ole);
+      const [first, second] = doc.oleObjects!;
+      expect(second!.rId).not.toBe(first!.rId);
+      expect(second!.path).not.toBe(first!.path);
+      expect(second!.previewRId).not.toBe(first!.previewRId);
+      expect(second!.previewPath).not.toBe(first!.previewPath);
+
+      const reread = await Io.read(await Io.toBuffer(doc));
+      const objects = Ole.extract(reread).objects;
+      expect(objects).toHaveLength(2);
+      expect(objects.map(o => o.rId).sort()).toEqual([first!.rId, second!.rId].sort());
+    });
+
+    it("does not reuse an rId or part a read document already has", async () => {
+      const ole = Ole.createEmbedding(OLE2_HEADER, "Package");
+      const reread = await Io.read(await Io.toBuffer(Ole.add(makeBaseDoc(), ole)));
+      // An embedding minted elsewhere (another process) with the same names.
+      const doc = Ole.add(reread, { ...ole, olePart: { ...ole.olePart, data: PNG_1X1 } });
+      expect(doc.oleObjects).toHaveLength(2);
+      const again = await Io.read(await Io.toBuffer(doc));
+      expect(Ole.extract(again).objects).toHaveLength(2);
     });
 
     it("strips OLE binaries when preserveOleObjects is false", async () => {

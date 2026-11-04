@@ -23,11 +23,13 @@ const { results, dropped } = await writeBoth(workbook, "xlsb-tables");
 
 report("tables after a round trip", results, reloaded => {
   const sheet = Workbook.getWorksheet(reloaded, "Data");
-  // `Table.list` yields *handles*, not models — the name comes from `Table.name`. Reading `.name` off the
+  // `Table.list` yields *handles*, not models — the name comes from `Table.getName`. Reading `.name` off the
   // handle gives `undefined`, which is how the first version of this printed "(unnamed)" for a table that was
   // perfectly intact. An example that reports the wrong thing is worse than one that reports nothing.
   const tables = Table.list(sheet!);
-  return tables.length === 0 ? "none survived" : tables.map(table => Table.name(table)).join(", ");
+  return tables.length === 0
+    ? "none survived"
+    : tables.map(table => Table.getName(table)).join(", ");
 });
 
 // **The range, not just the name.** `ref` is the anchor the caller passed and `tableRef` is the range the table

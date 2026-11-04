@@ -33,7 +33,8 @@ import type { DefinedNameSnapshot, WorkbookSnapshot } from "@formula/integration
 import { resolveDefinedName as resolveDefinedNameFromSnapshot } from "@formula/integration/workbook-snapshot";
 import type { AstNode, CellRefNode, RangeRefNode } from "@formula/syntax/ast";
 import { NodeType } from "@formula/syntax/ast";
-import { stripFunctionPrefix } from "@formula/syntax/token-types";
+import { SPILL_OPERATOR, stripFunctionPrefix } from "@formula/syntax/token-types";
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
 
 // ============================================================================
 // Binding Context
@@ -155,7 +156,16 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
       };
 
     case NodeType.FunctionCall:
-      return bindFunctionCall(node.name, node.args, ctx);
+      // Each applied argument list calls whatever the expression so far produced: `f(1)(2)` is `(f(1))(2)`.
+      return (node.invocations ?? []).reduce<BoundExpr>(
+        (callee, args) => ({
+          kind: BoundExprKind.Call,
+          name: "",
+          args: args.map(arg => bind(arg, ctx)),
+          callee
+        }),
+        bindFunctionCall(node.name, node.args, ctx)
+      );
 
     case NodeType.Array:
       return {
@@ -164,7 +174,7 @@ export function bind(node: AstNode, ctx: BindingContext): BoundExpr {
       };
 
     case NodeType.Name:
-      return bindName(node.name, ctx);
+      return bindName(node.name, ctx, node.sheet);
 
     case NodeType.StructuredRef:
       return bindStructuredRef(node.tableName, node.columns, node.specials, ctx);
@@ -218,7 +228,7 @@ function bindCellRef(node: CellRefNode, ctx: BindingContext): BoundExpr {
   }
 
   // Validate sheet exists
-  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+  if (!ctx.snapshot.worksheetsByName.has(sheetNameKey(sheet))) {
     return boundErrorLiteral("#REF!");
   }
 
@@ -261,7 +271,7 @@ function bindRangeRef(node: RangeRefNode, ctx: BindingContext): BoundExpr {
   // `bindColRangeRef` / `bindRowRangeRef` perform. Without this, a range
   // like `NoSuchSheet!A1:B2` would silently bind to an empty-read at
   // runtime instead of surfacing as `#REF!` at compile time.
-  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+  if (!ctx.snapshot.worksheetsByName.has(sheetNameKey(sheet))) {
     return boundErrorLiteral("#REF!");
   }
 
@@ -286,7 +296,7 @@ function bindColRangeRef(
   }
 
   // Validate sheet exists
-  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+  if (!ctx.snapshot.worksheetsByName.has(sheetNameKey(sheet))) {
     return boundErrorLiteral("#REF!");
   }
 
@@ -328,7 +338,7 @@ function bindRowRangeRef(
   }
 
   // Validate sheet exists
-  if (!ctx.snapshot.worksheetsByName.has(sheet.toLowerCase())) {
+  if (!ctx.snapshot.worksheetsByName.has(sheetNameKey(sheet))) {
     return boundErrorLiteral("#REF!");
   }
 
@@ -378,19 +388,28 @@ function bindUnionRef(node: { areas: AstNode[] }, ctx: BindingContext): BoundExp
 // Name Binding
 // ============================================================================
 
-function bindName(name: string, ctx: BindingContext): BoundExpr {
+function bindName(
+  name: string,
+  ctx: BindingContext,
+  /** The sheet a `Sheet2!Total` qualifier names: its own scope is searched, then the workbook's. */
+  sheet?: string
+): BoundExpr {
   // A lambda parameter (or other compile-time local) shadows any
   // workbook-level defined name. Without this short-circuit,
   // `LAMBDA(x, x*2)(10)` would pick up a defined name called `x` that
   // resolves to a cell reference, computing the cell's value × 2
   // instead of the lambda argument × 2.
-  if (ctx.localNames && ctx.localNames.has(name.toUpperCase())) {
+  if (ctx.localNames && ctx.localNames.has(sheetNameKey(name))) {
     return boundNameExpr(name);
   }
 
   // Try to resolve as a defined name that maps to a cell/range.
   // Respects scope precedence: sheet-local > workbook-global.
-  const dn = resolveDefinedNameFromSnapshot(ctx.snapshot.definedNames, name, ctx.currentSheet);
+  const dn = resolveDefinedNameFromSnapshot(
+    ctx.snapshot.definedNames,
+    name,
+    sheet ?? ctx.currentSheet
+  );
   if (dn) {
     return resolveDefinedName(dn, ctx);
   }
@@ -506,7 +525,7 @@ function findTable(snapshot: WorkbookSnapshot, tableName: string): TableWithShee
   // `ResolvedTable` already matches our `TableWithSheet` shape (same
   // `{ table, sheetName }` pair), so we can return it directly instead
   // of wrapping every hit in a fresh object.
-  return snapshot.tablesByName.get(tableName.toLowerCase()) ?? null;
+  return snapshot.tablesByName.get(excelNameKey(tableName)) ?? null;
 }
 
 function resolveStructuredRefBounds(
@@ -573,6 +592,16 @@ function bindFunctionCall(name: string, args: AstNode[], ctx: BindingContext): B
     return boundSpecialCall(specialName, boundArgs);
   }
 
+  // `_xlfn.SINGLE(x)` is how a file stores the implicit-intersection operator `@x`: one meaning, one evaluation.
+  if (args.length === 1 && stripFunctionPrefix(upperName) === "SINGLE") {
+    return { kind: BoundExprKind.UnaryOp, op: "@", operand: bind(args[0]!, ctx) };
+  }
+
+  // `_xlfn.ANCHORARRAY(A1)` is how a file stores the spill-range operator `A1#`: one meaning, one evaluation.
+  if (args.length === 1 && stripFunctionPrefix(upperName) === "ANCHORARRAY") {
+    return { kind: BoundExprKind.UnaryOp, op: SPILL_OPERATOR, operand: bind(args[0]!, ctx) };
+  }
+
   // Reference functions that need AST-level access (ROW, COLUMN, ROWS, COLUMNS)
   // are bound as regular calls — the evaluator handles the AST → BoundExpr
   // mapping for these since they work the same way with BoundExpr.
@@ -616,7 +645,7 @@ function bindLet(args: AstNode[], ctx: BindingContext): BoundExpr {
     // The just-bound name is now available to subsequent value slots
     // and to the body.
     if (nameNode.type === NodeType.Name) {
-      locals.add(nameNode.name.toUpperCase());
+      locals.add(sheetNameKey(nameNode.name));
     }
   }
   const bodyCtx: BindingContext = { ...ctx, localNames: locals };
@@ -641,7 +670,7 @@ function bindLambda(args: AstNode[], ctx: BindingContext): BoundExpr {
     if (pNode.type !== NodeType.Name) {
       return boundErrorLiteral("#VALUE!");
     }
-    const upper = pNode.name.toUpperCase();
+    const upper = sheetNameKey(pNode.name);
     if (seen.has(upper)) {
       return boundErrorLiteral("#VALUE!");
     }
@@ -675,8 +704,8 @@ function getSheetsInRange(
   endSheet: string
 ): string[] | null {
   const allSheets = snapshot.worksheets;
-  const startIdx = allSheets.findIndex(s => s.name.toLowerCase() === startSheet.toLowerCase());
-  const endIdx = allSheets.findIndex(s => s.name.toLowerCase() === endSheet.toLowerCase());
+  const startIdx = allSheets.findIndex(s => sheetNameKey(s.name) === sheetNameKey(startSheet));
+  const endIdx = allSheets.findIndex(s => sheetNameKey(s.name) === sheetNameKey(endSheet));
   if (startIdx === -1 || endIdx === -1) {
     return null;
   }

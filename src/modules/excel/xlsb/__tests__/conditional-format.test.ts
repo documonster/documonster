@@ -8,7 +8,7 @@ import { extractAll } from "@archive/unzip/extract";
  * a `containsText` rule written as `CF_TYPE_CELLIS` is read as a value comparison against the search
  * string — so every mapping below is asserted against the specification's own table.
  */
-import { Workbook, Worksheet } from "@excel";
+import { ConditionalFormatting, Workbook, Worksheet } from "@excel";
 import { iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { borderStyleValue } from "@excel/xlsb/border";
 import { collectDxfs, conditionalFormattingRecords } from "@excel/xlsb/conditional-format";
@@ -58,18 +58,20 @@ describe("the iType/iTemplate pair", () => {
     expect(template("notContainsErrors")).toBe(0x0c);
   });
 
-  it("maps each time period to its own template, and repeats it in iParam", () => {
-    // `iParam` for a time-period rule is a `CFDateOper` that MUST equal the template — the specification
-    // says so for each of the twelve, which is why one value serves both.
-    for (const [period, template] of [
-      ["today", 0x0f],
-      ["yesterday", 0x11],
-      ["last7Days", 0x12],
-      ["thisMonth", 0x18]
+  it("maps each time period to its own template, and to its CFDateOper in iParam", () => {
+    // `iParam` for a time-period rule is "a CFDateOper that MUST be CF_TIMEPERIOD_…" (MS-XLSB 2.4.23) — a value
+    // of *that* enumeration (2.5.12), which starts at 0 and runs in its own order. This test used to assert that
+    // `iParam` repeated the `CFTemp` value, which is the misreading the writer had.
+    for (const [period, template, dateOper] of [
+      ["today", 0x0f, 0],
+      ["yesterday", 0x11, 1],
+      ["last7Days", 0x12, 2],
+      ["tomorrow", 0x10, 6],
+      ["thisMonth", 0x18, 9]
     ] as const) {
       const view = ruleOf({ type: "timePeriod", timePeriod: period })!;
       expect(view.getUint32(4, true), period).toBe(template);
-      expect(view.getUint32(16, true), period).toBe(template);
+      expect(view.getUint32(16, true), period).toBe(dateOper);
     }
   });
 
@@ -379,7 +381,7 @@ describe("through a workbook", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [[1], [5], [9]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A1:A3",
       rules: [
         { type: "cellIs", operator: "greaterThan", formulae: ["3"], priority: 1 },
@@ -430,7 +432,7 @@ describe("BrtDXF, the differential format a rule applies", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [[1], [9]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A1:A2",
       rules: [{ type: "cellIs", operator: "greaterThan", formulae: ["5"], priority: 1, style }]
     } as never);
@@ -544,7 +546,7 @@ describe("BrtDXF, the differential format a rule applies", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [[1]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A1",
       rules: [{ type: "expression", formulae: ["A1"], priority: 1 }]
     } as never);
@@ -563,7 +565,7 @@ describe("XFPropBorder — the border a rule applies", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [[1], [9]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A1:A2",
       rules: [{ type: "cellIs", operator: "greaterThan", formulae: ["5"], priority: 1, style }]
     } as never);
@@ -662,7 +664,7 @@ describe("XFPropBorder — the border a rule applies", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Worksheet.addAoa(sheet, [[1]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A1",
       rules: [
         {
@@ -691,7 +693,7 @@ describe("the graphical rules survive a round trip", () => {
     const source = Workbook.create();
     const sheet = Workbook.addWorksheet(source, "Graphical");
     Worksheet.addAoa(sheet, [["n"], [1], [2], [3]]);
-    Worksheet.addConditionalFormatting(sheet, {
+    ConditionalFormatting.add(sheet, {
       ref: "A2:A4",
       rules: [
         {
@@ -732,8 +734,11 @@ describe("the graphical rules survive a round trip", () => {
     // would invent a threshold the file does not state.
     expect(rules?.[0]?.cfvo).toEqual([{ type: "min" }, { type: "max" }]);
     expect(rules?.[0]?.color).toEqual([{ argb: "FFF8696B" }, { argb: "FF63BE7B" }]);
-    // Excel's data bar defaults, which the record carries explicitly.
-    expect(rules?.[1]).toMatchObject({ minLength: 10, maxLength: 90, showValue: true });
+    // Excel's data bar defaults, which the record carries explicitly and the model leaves out — as Excel's own XLSX
+    // does, so the two readers agree on the same rule.
+    expect(rules?.[1]).not.toHaveProperty("minLength");
+    expect(rules?.[1]).not.toHaveProperty("maxLength");
+    expect(rules?.[1]).not.toHaveProperty("showValue");
     expect(rules?.[2]).toMatchObject({ iconSet: "3TrafficLights1" });
     expect(rules?.[2]?.cfvo).toEqual([
       { type: "percent", value: 0 },

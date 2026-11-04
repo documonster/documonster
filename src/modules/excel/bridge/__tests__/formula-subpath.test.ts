@@ -13,13 +13,13 @@
  * emitted-artifact resolution are verified separately by
  * `scripts/treeshake-verify.ts` and `pnpm build:verify`.
  */
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
-describe("documonster/excel/formula — calculateFormulas (public surface)", () => {
+describe("documonster/excel/formula — ExcelFormula.calculate (public surface)", () => {
   it("is exposed as a function", () => {
-    expect(typeof calculateFormulas).toBe("function");
+    expect(typeof ExcelFormula.calculate).toBe("function");
   });
 
   it("recalculates a workbook built through the public API", () => {
@@ -30,7 +30,7 @@ describe("documonster/excel/formula — calculateFormulas (public surface)", () 
     Cell.setValue(ws, "A3", 30);
     Cell.setValue(ws, "A4", { formula: "SUM(A1:A3)" });
 
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
 
     expect(Cell.getResult(ws, "A4")).toBe(60);
   });
@@ -41,12 +41,12 @@ describe("documonster/excel/formula — calculateFormulas (public surface)", () 
     Cell.setValue(ws, "A1", 2);
     Cell.setValue(ws, "B1", { formula: "A1*10" });
 
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
     expect(Cell.getResult(ws, "B1")).toBe(20);
 
     // Mutate an input: the cached result is now stale until calc runs again.
     Cell.setValue(ws, "A1", 5);
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
     expect(Cell.getResult(ws, "B1")).toBe(50);
   });
 
@@ -63,7 +63,7 @@ describe("documonster/excel/formula — calculateFormulas (public surface)", () 
     const ws = Workbook.getWorksheet(loaded, "Data")!;
 
     Cell.setValue(ws, "A2", 40);
-    calculateFormulas(loaded);
+    ExcelFormula.calculate(loaded);
 
     expect(Cell.getResult(ws, "A3")).toBe(41);
   });
@@ -73,7 +73,7 @@ describe("documonster/excel/formula — calculateFormulas (public surface)", () 
     const ws = Workbook.addWorksheet(wb, "Spill");
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)" });
 
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
 
     expect(Cell.getResult(ws, "A1")).toBe(1);
     expect(Cell.getValue(ws, "A2")).toBe(2);
@@ -84,13 +84,13 @@ describe("documonster/excel/formula — calculateFormulas (public surface)", () 
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Spill");
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)" });
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
 
     expect(Cell.getValue(ws, "A2")).toBe(2);
     expect(Cell.getValue(ws, "A3")).toBe(3);
 
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(1)" });
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
 
     expect(Cell.getResult(ws, "A1")).toBe(1);
     expect(Cell.getValue(ws, "A2")).toBeNull();
@@ -101,14 +101,14 @@ describe("documonster/excel/formula — calculateFormulas (public surface)", () 
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Spill");
     Cell.setValue(ws, "A1", { formula: "SEQUENCE(3)" });
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
     expect(Cell.getValue(ws, "A3")).toBe(3);
 
     // The user types a brand-new formula over a former ghost. It has no cached
     // result yet, so it must still be treated as user content: the spill has to
     // report #SPILL! and the formula must survive untouched.
     Cell.setValue(ws, "A3", { formula: "1+1" });
-    calculateFormulas(wb);
+    ExcelFormula.calculate(wb);
 
     expect(Cell.getFormula(ws, "A3")).toBe("1+1");
     expect(Cell.getResult(ws, "A3")).toBe(2);

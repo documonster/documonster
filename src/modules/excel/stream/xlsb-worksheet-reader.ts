@@ -37,8 +37,9 @@ import type { WorksheetData } from "@excel/core/worksheet";
 import { rowSetModel } from "@excel/core/worksheet-core";
 import { streamBiffRecordBatches } from "@excel/stream/xlsb-record-stream";
 import { encodeCol } from "@excel/utils/address";
+import { XlsbReader } from "@excel/xlsb/binary";
 import { errorTextOf } from "@excel/xlsb/error-values";
-import { BinaryReader } from "@utils/binary";
+import type { BinaryReader } from "@utils/binary";
 import { excelToDate, isDateFmt } from "@utils/utils";
 
 /** The sheet's last column, zero-based. `encodeCol` refuses anything past it, and so does this reader. */
@@ -120,7 +121,7 @@ export async function* streamXlsbRows(
         if (previous !== undefined) {
           yield previous;
         }
-        currentRow = new BinaryReader(record.payload, 0, part).readUint32();
+        currentRow = new XlsbReader(record.payload, 0, part).readUint32();
         continue;
       }
       const cell = decodeCell(record, context, part);
@@ -165,7 +166,7 @@ function decodeCell(
   //
   // Measured cost of not decoding them: the seven ids appear **zero** times across the twenty-three pinned corpus
   // workbooks, eighteen of them Excel-authored.
-  const reader = new BinaryReader(record.payload, 0, part);
+  const reader = new XlsbReader(record.payload, 0, part);
   const column = reader.readUint32();
   // **A column past the sheet's last is refused here rather than at the point the address is built.**
   //

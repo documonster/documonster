@@ -12,14 +12,14 @@
 
 import { readFile, stat } from "node:fs/promises";
 
-import { ExcelNotSupportedError, Workbook, Worksheet } from "documonster/excel";
-import { readCsvFile, writeCsvFile } from "documonster/excel/csv";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelNotSupportedError, Row, Workbook, Worksheet } from "documonster/excel";
+import { ExcelCsv } from "documonster/excel/csv";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf } from "documonster/pdf";
 import type { CjkLanguage } from "documonster/pdf";
 import { Convert, Io } from "documonster/word";
-import { renderToHtml } from "documonster/word/html";
-import { markdownToDocx, renderToMarkdown } from "documonster/word/markdown";
+import { WordHtml } from "documonster/word/html";
+import { WordMarkdown } from "documonster/word/markdown";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -201,11 +201,11 @@ async function convert(
     const doc = await readWord(source);
     switch (to) {
       case "md":
-        await writeFileAtomic(target, renderToMarkdown(doc));
+        await writeFileAtomic(target, WordMarkdown.fromDocx(doc));
         return ["- headings, lists and tables preserved as Markdown"];
       case "html": {
         // renderToHtml returns { html, warnings, images } — not a string.
-        const rendered = renderToHtml(doc);
+        const rendered = WordHtml.fromDocx(doc);
         await writeFileAtomic(target, rendered.html);
         return rendered.warnings.length > 0
           ? [
@@ -215,7 +215,7 @@ async function convert(
       }
       case "txt": {
         const { Query } = await import("documonster/word");
-        await writeFileAtomic(target, Query.extractText(doc));
+        await writeFileAtomic(target, Query.getText(doc));
         return ["- **formatting discarded** — plain text only"];
       }
       case "pdf": {
@@ -227,7 +227,7 @@ async function convert(
         return ["- paginated by the Word layout engine, so page breaks are real", ...fonts.notes()];
       }
       case "odt": {
-        await writeFileAtomic(target, await Convert.writeOdt(doc));
+        await writeFileAtomic(target, await Convert.toOdt(doc));
         return ["- OpenDocument Text, readable by LibreOffice and Word"];
       }
       default:
@@ -236,7 +236,7 @@ async function convert(
   }
 
   if (from === "odt") {
-    const doc = await Convert.readOdt(new Uint8Array(await readFile(source))).catch(
+    const doc = await Convert.fromOdt(new Uint8Array(await readFile(source))).catch(
       (cause: unknown) => {
         throw toolError.unsupported(
           "could not read the source as an OpenDocument Text file",
@@ -250,7 +250,7 @@ async function convert(
       return ["- OpenDocument mapped to WordprocessingML"];
     }
     if (to === "md") {
-      await writeFileAtomic(target, renderToMarkdown(doc));
+      await writeFileAtomic(target, WordMarkdown.fromDocx(doc));
       return ["- structure preserved as Markdown"];
     }
     if (to === "pdf") {
@@ -269,7 +269,7 @@ async function convert(
       args.renderDiagrams === true
         ? await prepareMarkdownDiagrams(markdown, {}, diagramFontOptions(args.config))
         : { markdown, notes: [] as readonly string[] };
-    const doc = await markdownToDocx(prepared.markdown, {
+    const doc = await WordMarkdown.toDocx(prepared.markdown, {
       ...("resolveImage" in prepared && prepared.resolveImage !== undefined
         ? { resolveImage: prepared.resolveImage }
         : {})
@@ -293,10 +293,8 @@ async function convert(
   }
 
   if (from === "xlsx" || from === "xlsb") {
-    const wb = Workbook.create();
     // `readWithDiagnostics` rather than `readFile`, so what the *reader* could not recover is available to report. The
     // plain read discards it, which is why a conversion could call itself lossless while content had already gone.
-    let readLosses: readonly string[] = [];
     const bytes = await readFile(source).catch((cause: unknown) => {
       throw toolError.unsupported(
         `could not read the source as a workbook`,
@@ -304,25 +302,27 @@ async function convert(
         { cause }
       );
     });
-    readLosses = await Workbook.readWithDiagnostics(wb, new Uint8Array(bytes))
-      .then(report => report.lost)
-      .catch((cause: unknown) => {
+    const report = await Workbook.readWithDiagnostics(new Uint8Array(bytes)).catch(
+      (cause: unknown) => {
         throw toolError.unsupported(
           `could not read the source as a workbook`,
           "Run doc_inspect to confirm the file type.",
           { cause }
         );
-      });
+      }
+    );
+    const wb = report.workbook;
+    const readLosses = report.lost;
 
     if (to === "csv") {
       // writeCsvFile takes the workbook and selects the sheet by name — passing
       // a worksheet handle does not type-check and would not work.
       const ws = requireSheet(wb, args.sheet);
       await replaceAtomically(target, temporary =>
-        writeCsvFile(wb, temporary, { sheetName: sheetName(ws) })
+        ExcelCsv.writeFile(wb, temporary, { sheetName: sheetName(ws) })
       );
       return [
-        `- exported sheet ${JSON.stringify(sheetName(ws))} of ${Workbook.getWorksheets(wb).length}`,
+        `- exported sheet ${JSON.stringify(sheetName(ws))} of ${Workbook.listWorksheets(wb).length}`,
         "- **only one sheet** — CSV has no concept of multiple sheets",
         "- formulas exported as their cached values"
       ];
@@ -333,12 +333,12 @@ async function convert(
       const bytes = await Pdf.fromExcel(wb, {
         ...fonts.options,
         ...textLanguageOption(args),
-        recalculate: calculateFormulas
+        recalculate: ExcelFormula.calculate
       });
       fonts.assertDrawable(args.allowMissingGlyphs);
       await writeFileAtomic(target, bytes);
       return [
-        `- all ${Workbook.getWorksheets(wb).length} sheet(s) rendered, honouring each sheet's print setup`,
+        `- all ${Workbook.listWorksheets(wb).length} sheet(s) rendered, honouring each sheet's print setup`,
         "- formulas recalculated before rendering",
         ...fonts.notes()
       ];
@@ -374,12 +374,12 @@ async function convert(
   }
 
   if (from === "csv" && (to === "xlsx" || to === "xlsb")) {
-    const wb = Workbook.create();
-    const ws = await readCsvFile(wb, source);
+    const wb = await ExcelCsv.readFile(source);
+    const ws = requireSheet(wb, undefined);
     Worksheet.setModel(ws, { ...Worksheet.getModel(ws), name: "Sheet1" });
     await replaceAtomically(target, temporary => Workbook.writeFile(wb, temporary, { format: to }));
     return [
-      `- ${Worksheet.actualRowCount(ws)} row(s) imported into sheet "Sheet1"`,
+      `- ${Row.getActualCount(ws)} row(s) imported into sheet "Sheet1"`,
       ...(to === "xlsb" ? ["- written as XLSB, which opens faster for large sheets"] : [])
     ];
   }

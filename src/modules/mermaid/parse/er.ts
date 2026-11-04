@@ -8,7 +8,7 @@
  * from being parsed as "one" plus a stray circle.
  */
 
-import { decodeLabel, splitStatements, unquote } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, splitStatementsAt, unquote } from "@mermaid/parse/lex";
 import type {
   Cardinality,
   Entity,
@@ -51,7 +51,9 @@ export function parseEr(source: string, direction: FlowDirection): ErDiagram {
     return entry;
   };
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^erDiagram\b/i.test(text)) {
       continue;
     }
@@ -64,6 +66,8 @@ export function parseEr(source: string, direction: FlowDirection): ErDiagram {
       const attribute = readAttribute(text);
       if (attribute) {
         touch(open).attributes.push(attribute);
+      } else {
+        skipped.add(statement);
       }
       continue;
     }
@@ -112,7 +116,12 @@ export function parseEr(source: string, direction: FlowDirection): ErDiagram {
     const bare = /^([A-Za-z0-9_"'-]+)$/.exec(text);
     if (bare) {
       touch(bare[1]);
+      continue;
     }
+    if (/^(direction|style|classDef|class|accTitle|accDescr)\b/i.test(text)) {
+      continue;
+    }
+    skipped.add(statement);
   }
 
   const list: Entity[] = [...entities].map(([id, entry]) => ({
@@ -126,7 +135,8 @@ export function parseEr(source: string, direction: FlowDirection): ErDiagram {
     direction,
     ...(title === undefined ? {} : { title }),
     entities: list,
-    relations
+    relations,
+    ...skipped.report()
   };
 }
 

@@ -5,14 +5,23 @@
  */
 
 import { NS_V, NS_O, NS_W10, NS_W } from "@word/constants";
+import { MODEL_CHECK } from "@word/core/argument-checks";
+import { assertDrawingNumber } from "@word/core/drawing-geometry";
 import type { TextBox } from "@word/types";
 import { renderParagraph } from "@word/writer/paragraph-writer";
+import type { RenderHelpers } from "@word/writer/render-context";
 import type { XmlSink } from "@xml/types";
 
-/** Render a text box as a VML shape within a paragraph. */
-export function renderTextBox(xml: XmlSink, textBox: TextBox): void {
+/**
+ * Render a text box as a VML shape within a paragraph. `helpers` are the
+ * surrounding part's, so the box's bookmarks, images and hyperlinks resolve
+ * against the same maps as the rest of the part.
+ */
+export function renderTextBox(xml: XmlSink, textBox: TextBox, helpers?: RenderHelpers): void {
   const width = textBox.width ?? 4680; // default ~3.25 inches
   const height = textBox.height ?? 1440; // default 1 inch
+  assertDrawingNumber(width, "width", MODEL_CHECK);
+  assertDrawingNumber(height, "height", MODEL_CHECK);
   // Convert twips to points for VML style
   const widthPt = width / 20;
   const heightPt = height / 20;
@@ -51,7 +60,7 @@ export function renderTextBox(xml: XmlSink, textBox: TextBox): void {
   xml.openNode("w:txbxContent", { "xmlns:w": NS_W });
 
   for (const para of textBox.content) {
-    renderParagraph(xml, para);
+    renderParagraph(xml, para, helpers);
   }
 
   xml.closeNode(); // w:txbxContent

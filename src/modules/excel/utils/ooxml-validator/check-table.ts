@@ -23,6 +23,16 @@
  *      totals row itself is semantically invalid and Excel rejects
  *      the table.
  *
+ *   4. **autoFilter on a table without a header row.** A filter's
+ *      buttons live in the header row, so `headerRowCount="0"` with an
+ *      `<autoFilter>` has nowhere to put them; Excel refuses to open the
+ *      workbook. A header-less table Excel saves has no `<autoFilter>`.
+ *
+ *   6. **A table named like a defined name** (a warning, workbook-wide).
+ *
+ *   5. **Repeated column names.** `tableColumn/@name` is unique within a
+ *      table, compared without case; Excel refuses a part that repeats one.
+ *
  * These are some of the most common "Excel cannot open" symptoms in
  * production xlsx from other tooling too — catching them up front is a
  * high-value check.
@@ -34,6 +44,7 @@ import {
   findChildLocal,
   findChildrenLocal
 } from "@excel/utils/ooxml-validator/xml-utils";
+import { excelNameKey } from "@utils/name-key";
 import type { XmlElement } from "@xml/types";
 
 const TABLE_PATH_RE = /^xl\/tables\/table\d+\.xml$/;
@@ -51,6 +62,7 @@ const BUILTIN_TOTALS_FUNCTIONS = new Set([
 ]);
 
 export function checkTables(ctx: ValidationContext): void {
+  const tablePaths: string[] = [];
   for (const [path, entry] of ctx.files()) {
     if (ctx.reporter.capped) {
       return;
@@ -58,7 +70,46 @@ export function checkTables(ctx: ValidationContext): void {
     if (entry.type === "directory" || !TABLE_PATH_RE.test(path)) {
       continue;
     }
+    tablePaths.push(path);
     checkSingleTable(ctx, path);
+  }
+  checkTableNamesAgainstDefinedNames(ctx, tablePaths);
+}
+
+/**
+ * Tables and defined names share one namespace, compared as Excel compares names. Excel's UI refuses a defined name
+ * that is a table's name (and the reverse), and a file holding both is ambiguous: a formula's `Name` could mean either.
+ * A warning, because whether Excel repairs such a file is not established; the library keeps it as read.
+ */
+function checkTableNamesAgainstDefinedNames(
+  ctx: ValidationContext,
+  tablePaths: readonly string[]
+): void {
+  if (tablePaths.length === 0) {
+    return;
+  }
+  const workbook = ctx.readDom("xl/workbook.xml");
+  const definedNames = workbook ? findChildLocal(workbook.root, "definedNames") : undefined;
+  if (!definedNames) {
+    return;
+  }
+  const names = new Set(
+    findChildrenLocal(definedNames, "definedName").map(element =>
+      excelNameKey(attrByLocalName(element, "name") ?? "")
+    )
+  );
+  for (const path of tablePaths) {
+    const root = ctx.readDom(path)?.root;
+    const name = root
+      ? (attrByLocalName(root, "displayName") ?? attrByLocalName(root, "name"))
+      : undefined;
+    if (name !== undefined && names.has(excelNameKey(name))) {
+      ctx.reporter.warning(
+        "table-name-is-defined-name",
+        `${path}: table "${name}" has the name of a defined name; tables and defined names share one namespace.`,
+        path
+      );
+    }
   }
 }
 
@@ -72,6 +123,40 @@ function checkSingleTable(ctx: ValidationContext, path: string): void {
   checkRedundantFilterColumns(ctx, path, root);
   checkTotalsRowFormula(ctx, path, root);
   checkAutoFilterRange(ctx, path, root);
+  checkHeaderlessAutoFilter(ctx, path, root);
+  checkDuplicateColumnNames(ctx, path, root);
+}
+
+function checkDuplicateColumnNames(ctx: ValidationContext, path: string, root: XmlElement): void {
+  const columns = findChildLocal(root, "tableColumns");
+  if (!columns) {
+    return;
+  }
+  const seen = new Set<string>();
+  for (const column of findChildrenLocal(columns, "tableColumn")) {
+    const name = excelNameKey(attrByLocalName(column, "name") ?? "");
+    if (seen.has(name)) {
+      ctx.reporter.error(
+        "table-duplicate-column-name",
+        `${path}: tableColumn name "${attrByLocalName(column, "name")}" repeats; names must be unique as Excel compares them.`,
+        path
+      );
+      return;
+    }
+    seen.add(name);
+  }
+}
+
+function checkHeaderlessAutoFilter(ctx: ValidationContext, path: string, root: XmlElement): void {
+  if (attrByLocalName(root, "headerRowCount") !== "0" || !findChildLocal(root, "autoFilter")) {
+    return;
+  }
+  ctx.reporter.error(
+    "table-headerless-autoFilter",
+    `${path}: a table with headerRowCount="0" must not carry an <autoFilter>; ` +
+      `its filter buttons would have no header row to sit in.`,
+    path
+  );
 }
 
 // -----------------------------------------------------------------------------

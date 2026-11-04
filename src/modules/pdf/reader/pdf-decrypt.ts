@@ -275,7 +275,7 @@ function tryUserPasswordV5(
 
   // Decrypt UE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
-  return aesCbcDecryptRaw(ueValue.subarray(0, 32), keyHash, zeroIv);
+  return aesCbcDecryptRaw(fileKeyBlocks(ueValue, "UE"), keyHash, zeroIv);
 }
 
 /**
@@ -308,7 +308,20 @@ function tryOwnerPasswordV5(
 
   // Decrypt OE with this key using AES-256-CBC with zero IV
   const zeroIv = new Uint8Array(16);
-  return aesCbcDecryptRaw(oeValue.subarray(0, 32), keyHash, zeroIv);
+  return aesCbcDecryptRaw(fileKeyBlocks(oeValue, "OE"), keyHash, zeroIv);
+}
+
+/**
+ * The two AES blocks of `/UE` or `/OE` that hold the 32-byte file key. Checked only once the
+ * password has matched the hash that leads to it: a user password never reads `/OE`, so a
+ * damaged `/OE` must not stop a file the user password opens. A shorter value is not a whole
+ * number of blocks, which the AES decryptor would reject with a platform error.
+ */
+function fileKeyBlocks(value: Uint8Array, key: "UE" | "OE"): Uint8Array {
+  if (value.length < 32) {
+    throw new PdfStructureError(`Invalid /${key} length for V=5 encryption`);
+  }
+  return value.subarray(0, 32);
 }
 
 /** Password hash of Algorithm 2.A: `hash(password, salt, userData)`. */

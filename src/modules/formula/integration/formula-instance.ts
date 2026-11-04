@@ -61,6 +61,11 @@ export interface FormulaInstance {
    * (from the XLSX `isDynamicArray` attribute).
    */
   readonly isDynamicArray: boolean;
+  /**
+   * Whether the host decided {@link isDynamicArray} — the snapshot carried `true` or `false` — so nothing is inferred
+   * from the formula. Absent (`false`) when the snapshot left it out.
+   */
+  readonly isDynamicArrayDeclared?: boolean;
 }
 
 // ============================================================================
@@ -130,6 +135,7 @@ function normalizeCell(ws: WorksheetSnapshot, cell: CellSnapshot): FormulaInstan
     sourceText: formula,
     kind: cell.formulaKind,
     targetRef: cell.ref,
-    isDynamicArray: cell.isDynamicArray ?? false
+    isDynamicArray: cell.isDynamicArray ?? false,
+    isDynamicArrayDeclared: cell.isDynamicArray !== undefined
   };
 }

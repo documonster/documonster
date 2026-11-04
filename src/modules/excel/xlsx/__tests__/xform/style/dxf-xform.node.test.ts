@@ -1,5 +1,5 @@
 import { extractAll } from "@archive/unzip/extract";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, ConditionalFormatting, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -24,7 +24,7 @@ describe("dxf numFmt round-trip", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     Cell.setValue(ws, "A1", 5);
-    Worksheet.addConditionalFormatting(ws, {
+    ConditionalFormatting.add(ws, {
       ref: "A1:A10",
       rules: [
         {

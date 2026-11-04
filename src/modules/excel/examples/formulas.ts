@@ -16,21 +16,25 @@ const filename = process.argv[2] ?? path.join(outDir, "formulas.xlsx");
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Foo");
 
-Worksheet.fillFormula(ws, "A1:B2", "ROW()+COLUMN()", [
-  [2, 3],
-  [3, 4]
-]);
+Worksheet.fillFormula(ws, "A1:B2", "ROW()+COLUMN()", {
+  results: [
+    [2, 3],
+    [3, 4]
+  ]
+});
 
-Worksheet.fillFormula(ws, "A4:B5", "A1", [
-  [2, 3],
-  [3, 4]
-]);
+Worksheet.fillFormula(ws, "A4:B5", "A1", {
+  results: [
+    [2, 3],
+    [3, 4]
+  ]
+});
 
 for (let i = 1; i <= 4; i++) {
   Cell.setValue(ws, `D${i}`, { formula: "ROW()", result: i });
 }
 
-Worksheet.fillFormula(ws, "E1:E4", "D1", [1, 1, 1, 1], "array");
+Worksheet.fillFormula(ws, "E1:E4", "D1", { results: [1, 1, 1, 1], shareType: "array" });
 
 // manual fill formula
 Cell.setValue(ws, "F1", { formula: "ROW()", result: 1 });
@@ -40,7 +44,7 @@ Cell.setValue(ws, "F4", { sharedFormula: "F1", result: 4 });
 
 // function fill
 Cell.setValue(ws, "H1", 1);
-Worksheet.fillFormula(ws, "H2:H20", "H1+1", row => row);
+Worksheet.fillFormula(ws, "H2:H20", "H1+1", { results: row => row });
 
 // array formula
 

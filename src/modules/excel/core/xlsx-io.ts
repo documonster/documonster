@@ -14,17 +14,36 @@ import {
   formatFromPath,
   normalizeBytes,
   readXlsbInto,
+  writeBytesToStream,
   writeXlsbBytes,
   writeXlsbToStream
 } from "@excel/core/workbook-format";
-import { readWorkbookWithDiagnostics } from "@excel/core/workbook-io-types";
-import type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
+import {
+  checkIoOptions,
+  blobBytes,
+  checkReadData,
+  isReadTarget,
+  readWorkbookStream,
+  readWorkbookWithDiagnostics,
+  splitCreateOptions,
+  workbookDecryption
+} from "@excel/core/workbook-io-types";
+import { createWorkbook } from "@excel/core/workbook.browser";
+import type { XlsxReadable } from "@excel/core/xlsx-io-types";
+import {
+  isWebWritable,
+  nodeSink,
+  workbookSink,
+  type WorkbookWritable
+} from "@excel/core/xlsx-sink";
 import type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 import { createXlsxByteStream } from "@excel/core/xlsx-stream";
-import { ExcelFileError } from "@excel/errors";
+import type { ExcelFileError } from "@excel/errors";
+import { encryptWorkbookPackage, openWorkbookPackage } from "@excel/utils/container-errors";
+import { checkFilePath, fileSystemError } from "@excel/utils/file-path";
 import type { XlsxReadOptions } from "@excel/xlsx/types";
 import { writeXlsxBytes, writeXlsxToStream } from "@excel/xlsx/write/package";
-import { createReadStream, createWriteStream, fileExists } from "@utils/fs";
+import { createReadStream, createWriteStream } from "@utils/fs";
 
 export type {
   WorkbookDiagnosticReadOptions,
@@ -34,9 +53,11 @@ export type {
 } from "@excel/core/workbook-io-types";
 
 import type {
+  WorkbookCreateOptions,
   WorkbookDiagnosticReadOptions,
   WorkbookReadOptions,
   WorkbookReadReport,
+  WorkbookStreamInput,
   WorkbookWriteOptions
 } from "@excel/core/workbook-io-types";
 
@@ -78,31 +99,90 @@ function loadXlsxReader() {
  * development-mode figure is roughly **3.3× the real one** and is not distributed
  * across the write in the way a profile suggests. Pass `{ validate: false }` to
  * suppress it explicitly; see `XlsxWriteOptions.validate`.
+ *
+ * With `{ password }` the package is encrypted — Agile Encryption in an OLE compound file, what Excel writes for
+ * "Encrypt with Password" — and `Workbook.read(bytes, { password })` reads it back; `encryption` tunes it.
  */
 export async function toBuffer(wb: WorkbookData, options?: WorkbookWriteOptions): Promise<Buffer> {
-  const bytes =
-    options?.format === "xlsb"
-      ? await writeXlsbBytes(wb, options)
-      : await writeXlsxBytes(wb, options);
+  checkIoOptions("Workbook.toBuffer", options, "write");
+  const bytes = await packageBytes(wb, options);
   return Buffer.isBuffer(bytes)
     ? bytes
     : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
 /**
- * Read workbook bytes into a workbook (mutates and returns `wb`).
+ * The package `toBuffer` returns: XLSX or XLSB, encrypted with `options.password` when one is given. The encryption
+ * code is loaded only then.
+ */
+async function packageBytes(
+  wb: WorkbookData,
+  options: WorkbookWriteOptions | undefined
+): Promise<Uint8Array> {
+  const bytes =
+    options?.format === "xlsb"
+      ? await writeXlsbBytes(wb, options)
+      : await writeXlsxBytes(wb, options);
+  return encryptWorkbookPackage(bytes, options);
+}
+
+/**
+ * Read a workbook from its bytes — or from base64 text with `{ base64: true }` — and return it.
  *
- * The format is detected from the package contents unless `options.format` says otherwise.
+ * The format is detected from the package contents unless `options.format` says otherwise. An encrypted workbook is
+ * read with `options.password`, as Word's `Io.read` reads an encrypted document.
  * Detection reads the ZIP central directory; a base64 string is decoded once and the bytes
  * are reused by whichever loader runs, so an XLSX read pays for one directory scan and not
  * for a second decode.
  */
 export async function read(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
+  options?: WorkbookReadOptions & WorkbookCreateOptions
+): Promise<WorkbookData>;
+/**
+ * @deprecated Use `read(data, options)`, which returns a new workbook. This form replaces everything
+ * `wb` already holds — its sheets, names and properties — with what it reads. Removed in 1.0.
+ */
+export async function read(
   wb: WorkbookData,
-  data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
+  options?: WorkbookReadOptions
+): Promise<WorkbookData>;
+export async function read(
+  first: WorkbookData | Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
+  second?:
+    | Uint8Array
+    | ArrayBuffer
+    | ArrayBufferView
+    | Blob
+    | string
+    | (WorkbookReadOptions & WorkbookCreateOptions),
+  third?: WorkbookReadOptions
+): Promise<WorkbookData> {
+  if (isReadTarget(first)) {
+    return readInto(
+      first,
+      second as Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
+      third
+    );
+  }
+  const { create, read: options } = splitCreateOptions(
+    second as (WorkbookReadOptions & WorkbookCreateOptions) | undefined
+  );
+  return readInto(createWorkbook(create), first, options);
+}
+
+async function readInto(
+  wb: WorkbookData,
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
   options?: WorkbookReadOptions
 ): Promise<WorkbookData> {
-  const bytes = normalizeBytes(data, options?.base64);
+  checkIoOptions("Workbook.read", options, "read");
+  data = await blobBytes(data);
+  checkReadData("Workbook.read", data, options?.base64);
+  const raw = normalizeBytes(data, options?.base64);
+  // An encrypted workbook is decrypted with `options.password` first, so its package's format is the one detected.
+  const bytes = raw && (await openWorkbookPackage(raw, workbookDecryption(options)));
   const format = resolveReadFormat(bytes, options?.format);
   if (format === "xlsb") {
     if (!bytes) {
@@ -115,34 +195,90 @@ export async function read(
 }
 
 /**
- * Read a workbook and return what could not be recovered alongside it.
+ * Read a workbook and return what could not be recovered alongside it, as `report.workbook`.
  *
  * `read` throws away the diagnostics and `{ unsupported: "error" }` turns them into a rejection; this
- * is the third combination, and the one a converter actually wants — read the file, then report. The
- * workbook is replaced exactly as `read` replaces it.
+ * is the third combination, and the one a converter actually wants — read the file, then report.
+ */
+export async function readWithDiagnostics(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
+  options?: WorkbookDiagnosticReadOptions & WorkbookCreateOptions
+): Promise<WorkbookReadReport>;
+/**
+ * @deprecated Use `readWithDiagnostics(data, options)`, which reads into a new workbook. This form
+ * replaces everything `wb` already holds. Removed in 1.0.
  */
 export async function readWithDiagnostics(
   wb: WorkbookData,
-  data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
   options?: WorkbookDiagnosticReadOptions
+): Promise<WorkbookReadReport>;
+export async function readWithDiagnostics(
+  first: WorkbookData | Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
+  second?:
+    | Uint8Array
+    | ArrayBuffer
+    | ArrayBufferView
+    | Blob
+    | string
+    | (WorkbookDiagnosticReadOptions & WorkbookCreateOptions),
+  third?: WorkbookDiagnosticReadOptions
 ): Promise<WorkbookReadReport> {
+  let wb: WorkbookData;
+  let data: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string;
+  let options: WorkbookDiagnosticReadOptions | undefined;
+  if (isReadTarget(first)) {
+    wb = first;
+    data = second as Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string;
+    options = third;
+  } else {
+    const split = splitCreateOptions(
+      second as (WorkbookDiagnosticReadOptions & WorkbookCreateOptions) | undefined
+    );
+    wb = createWorkbook(split.create);
+    data = first;
+    options = split.read;
+  }
   // The shared body — see `readWorkbookWithDiagnostics`. This was 26 lines duplicated between the two platform
   // variants, in the one file pair where every other shared piece had already been extracted.
   return readWorkbookWithDiagnostics(wb, data, options, {
-    read,
+    read: readInto,
     normalizeBytes,
     resolveReadFormat
   });
 }
 
-/** Read a workbook from a parse stream (mutates and returns `wb`). */
+/**
+ * Read a workbook from a readable stream of its bytes — a Node `Readable`, a web `ReadableStream`, or an (async)
+ * iterable of chunks — and return it. An XLSX package is read as it streams. An XLSB one is read when
+ * `options.format` is `"xlsb"`: a stream cannot be inspected before it is consumed, so the package is collected and
+ * read as {@link read} reads bytes.
+ */
+export async function readStream(
+  stream: WorkbookStreamInput,
+  options?: WorkbookReadOptions & WorkbookCreateOptions
+): Promise<WorkbookData>;
+/**
+ * @deprecated Use `readStream(stream, options)`, which returns a new workbook. This form replaces
+ * everything `wb` already holds. Removed in 1.0.
+ */
 export async function readStream(
   wb: WorkbookData,
   stream: unknown,
   options?: XlsxReadOptions
+): Promise<WorkbookData>;
+export async function readStream(
+  first: unknown,
+  second?: unknown,
+  third?: XlsxReadOptions
 ): Promise<WorkbookData> {
-  const { readXlsxStreamInto } = await import("@excel/xlsx/read/stream");
-  return readXlsxStreamInto(wb, stream as never, options);
+  if (isReadTarget(first)) {
+    return readWorkbookStream(first, second, third, { read: readInto });
+  }
+  const { create, read } = splitCreateOptions(
+    second as (WorkbookReadOptions & WorkbookCreateOptions) | undefined
+  );
+  return readWorkbookStream(createWorkbook(create), first, read, { read: readInto });
 }
 
 /**
@@ -186,18 +322,29 @@ export async function readStream(
  */
 export async function writeStream(
   wb: WorkbookData,
-  stream: XlsxWritable,
+  stream: WorkbookWritable,
   options?: WorkbookWriteOptions
 ): Promise<void> {
-  if (options?.format === "xlsb") {
+  checkIoOptions("Workbook.writeStream", options, "write");
+  // A Web `WritableStream` is driven as the Node-style writable the serializers expect; anything else is refused here.
+  // A Node-style writable is checked and used in this tick, so a sink that fails straight away is observed; only a
+  // Web stream waits for the adapter to load.
+  const { sink, finished } = isWebWritable(stream)
+    ? await workbookSink("Workbook.writeStream", stream)
+    : nodeSink("Workbook.writeStream", stream);
+  if (options?.password !== undefined) {
+    // An encrypted package is one encrypted stream with its size up front: assembled, encrypted, then written.
+    await writeBytesToStream(sink, await packageBytes(wb, options));
+  } else if (options?.format === "xlsb") {
     // **Streamed part by part**, through the same `writeXlsbPackage` the buffered path uses. This used to
     // assemble the whole package and hand it over in one write, on the stated grounds that "there is nothing
     // to stream incrementally" — which was wrong: `sharedStrings.bin` is the ninth part produced for a
     // three-sheet workbook, and the eight before it are finished bytes.
-    await writeXlsbToStream(wb, stream, options);
-    return;
+    await writeXlsbToStream(wb, sink, options);
+  } else {
+    await writeXlsxToStream(wb, sink, options);
   }
-  await writeXlsxToStream(wb, stream, options);
+  await finished;
 }
 
 /**
@@ -284,6 +431,14 @@ export function toStream(
   wb: WorkbookData,
   options?: XlsxStreamOptions & WorkbookWriteOptions
 ): XlsxReadable & Readable {
+  checkIoOptions("Workbook.toStream", options, "write");
+  if (options?.password !== undefined) {
+    // An encrypted package is assembled and encrypted before its first byte can be handed out.
+    return createXlsxByteStream(
+      async sink => writeBytesToStream(sink, await packageBytes(wb, options)),
+      options
+    ) as XlsxReadable & Readable;
+  }
   if (options?.format === "xlsb") {
     // **Through the same bridge the XLSX branch uses, because the reason for not doing so was false.**
     //
@@ -317,6 +472,7 @@ export function toStream(
 }
 
 export type { XlsxReadable, XlsxWritable } from "@excel/core/xlsx-io-types";
+export type { WorkbookWritable } from "@excel/core/xlsx-sink";
 export type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
 export type { XlsxStreamOptions } from "@excel/core/xlsx-stream";
 export type { WorkbookFormat } from "@excel/core/workbook-format";
@@ -326,23 +482,75 @@ export type { WorkbookFormat } from "@excel/core/workbook-format";
 // =============================================================================
 
 /**
- * Node-only: read a workbook from a file path (mutates and returns `wb`).
+ * Node-only: read a workbook from a file path and return it.
  *
  * The format comes from the extension: `.xlsb` reads the binary format, anything else keeps
  * the XLSX path — which streams the ZIP rather than buffering it, and giving that up to sniff
  * the tail of every file would be a poor trade. An explicit `options.format` overrides.
  */
 export async function readFile(
+  filename: string,
+  options?: WorkbookReadOptions & WorkbookCreateOptions
+): Promise<WorkbookData>;
+/**
+ * @deprecated Use `readFile(filename, options)`, which returns a new workbook. This form replaces
+ * everything `wb` already holds. Removed in 1.0.
+ */
+export async function readFile(
+  wb: WorkbookData,
+  filename: string,
+  options?: WorkbookReadOptions
+): Promise<WorkbookData>;
+export async function readFile(
+  first: WorkbookData | string,
+  second?: string | (WorkbookReadOptions & WorkbookCreateOptions),
+  third?: WorkbookReadOptions
+): Promise<WorkbookData> {
+  if (isReadTarget(first)) {
+    return readFileInto(first, second as string, third);
+  }
+  const { create, read: options } = splitCreateOptions(
+    second as (WorkbookReadOptions & WorkbookCreateOptions) | undefined
+  );
+  return readFileInto(createWorkbook(create), first, options);
+}
+
+/** The `ExcelFileError` for a file the system would not let us read, with its error as the cause. */
+function fileReadError(filename: string, error: unknown): ExcelFileError {
+  return fileSystemError(filename, "read", error);
+}
+
+async function readFileInto(
   wb: WorkbookData,
   filename: string,
   options?: WorkbookReadOptions
 ): Promise<WorkbookData> {
+  checkFilePath("Workbook.readFile", filename);
+  checkIoOptions("Workbook.readFile", options, "read");
   if ((options?.format ?? formatFromPath(filename)) === "xlsb") {
     const { readFile: readFileBytes } = await import("node:fs/promises");
-    return readXlsbInto(wb, await readFileBytes(filename), filename, options);
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFileBytes(filename);
+    } catch (error) {
+      throw fileReadError(filename, error);
+    }
+    const opened = await openWorkbookPackage(bytes, workbookDecryption(options, filename));
+    // An encrypted file's package is read as the format it is, whatever the file is called.
+    if (opened !== bytes && resolveReadFormat(opened, options?.format) === "xlsx") {
+      const workbook = await (await loadXlsxReader()).readXlsxInto(wb, opened, options);
+      workbook.sourceFilePath = filename;
+      return workbook;
+    }
+    return readXlsbInto(wb, opened, filename, options);
   }
-  if (!(await fileExists(filename))) {
-    throw new ExcelFileError(filename, "read", "File not found");
+  // Asked of the file system rather than tested for existence, so its own error — `ENOENT`, `EACCES` — is kept as the
+  // cause instead of being reduced to "File not found".
+  const { stat } = await import("node:fs/promises");
+  try {
+    await stat(filename);
+  } catch (error) {
+    throw fileReadError(filename, error);
   }
   // The reader clears stale origin metadata for every read. Set the path only after a successful
   // parse, so a failed read leaves the previously loaded workbook's origin in place.
@@ -363,9 +571,13 @@ export async function writeFile(
   filename: string,
   options?: WorkbookWriteOptions
 ): Promise<void> {
-  if ((options?.format ?? formatFromPath(filename)) === "xlsb") {
+  checkFilePath("Workbook.writeFile", filename);
+  checkIoOptions("Workbook.writeFile", options, "write");
+  const format = options?.format ?? formatFromPath(filename);
+  if (format === "xlsb" || options?.password !== undefined) {
+    // XLSB is written whole, and so is an encrypted package of either format.
     const { writeFile: writeFileBytes } = await import("node:fs/promises");
-    await writeFileBytes(filename, await writeXlsbBytes(wb, options));
+    await writeFileBytes(filename, await packageBytes(wb, { ...options, format }));
     return;
   }
   const stream = createWriteStream(filename);

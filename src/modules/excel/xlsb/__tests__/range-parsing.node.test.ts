@@ -16,7 +16,10 @@
  * malformed `ref` or `sharedFormula` took the whole write down with `InvalidAddressError` instead of degrading to the
  * reported loss the code claimed.
  */
-import { Cell, Workbook, Worksheet } from "@excel";
+import { Workbook, Worksheet } from "@excel";
+import { cellSetModel } from "@excel/core/cell";
+import { ValueType } from "@excel/core/enums";
+import { getCell } from "@excel/core/worksheet-core";
 import { tryDecodeRange } from "@excel/xlsb/binary";
 import { mergesFromModel } from "@excel/xlsb/write/model-adapter";
 import { describe, expect, it } from "vitest";
@@ -71,6 +74,10 @@ describe("what merges add on top of it", () => {
   });
 });
 
+function injectFormula(ws: ReturnType<typeof Workbook.addWorksheet>, value: object): void {
+  cellSetModel(getCell(ws, "A1"), { address: "A1", type: ValueType.Formula, ...value } as never);
+}
+
 describe("a malformed reference degrades instead of crashing the write", () => {
   it.each([
     [
@@ -82,13 +89,15 @@ describe("a malformed reference degrades instead of crashing the write", () => {
   ])("survives %s", async (_label, value) => {
     // Each of these threw `InvalidAddressError` out of `Workbook.toBuffer` — not a reported loss, the entire write.
     const workbook = Workbook.create();
-    Cell.setValue(Workbook.addWorksheet(workbook, "S"), "A1", value as never);
+    // `Cell.setValue` refuses a malformed shared formula at the call now; the writer still has to survive one a model
+    // carries, so the value comes in through the cell model, which keeps what it is given.
+    injectFormula(Workbook.addWorksheet(workbook, "S"), value);
     const bytes = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
     expect(bytes.length).toBeGreaterThan(0);
     // And the package is still readable, so "degraded" means degraded rather than corrupted.
     const reopened = Workbook.create();
     await Workbook.read(reopened, bytes);
-    expect(Workbook.getWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual(["S"]);
+    expect(Workbook.listWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual(["S"]);
   });
 
   it("reports the loss rather than passing silently", async () => {
@@ -98,10 +107,7 @@ describe("a malformed reference degrades instead of crashing the write", () => {
     // giving a cell both makes it an ordinary formula cell that never reaches the branch. `"@@"` rather than `""`
     // because `Cell.setValue` treats the empty string as an absent field, so it never reaches the writer either.
     const workbook = Workbook.create();
-    Cell.setValue(Workbook.addWorksheet(workbook, "S"), "A1", {
-      result: 3,
-      sharedFormula: "@@"
-    } as never);
+    injectFormula(Workbook.addWorksheet(workbook, "S"), { result: 3, sharedFormula: "@@" });
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(/shared formula/);
   });
 });

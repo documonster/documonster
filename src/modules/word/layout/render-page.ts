@@ -8,7 +8,17 @@
  * @stability experimental
  */
 
-import { parseSvgAttributes, parseSvgNumberList } from "@utils/svg-lex";
+import { checkBackgroundWith } from "@utils/background-check";
+import { isNoPaintColor, parseSvgAttributes, parseSvgNumberList } from "@utils/svg-lex";
+import type { Rgba01 } from "@utils/svg-lex";
+import {
+  checkFinite,
+  checkHandle,
+  checkInteger,
+  checkRecord,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
 import { bytesToBase64 } from "@word/core/internal-utils";
 import { SCRIPT_BASELINE_SHIFT_FACTOR } from "@word/layout/layout-constants";
 import { layoutDocumentFull } from "@word/layout/layout-full";
@@ -30,7 +40,7 @@ import type {
   PageContent,
   PageGeometry
 } from "@word/layout/layout-model";
-import type { DocxDocument } from "@word/types";
+import type { DocxDocument, HexColor, ThemeColorName } from "@word/types";
 import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 
 // =============================================================================
@@ -45,7 +55,17 @@ export interface RenderOptions {
   readonly height?: number;
   /** Font family mapping: document font name → SVG font-family value. */
   readonly fonts?: ReadonlyMap<string, string>;
-  /** Background color (CSS color string). Default: "white". */
+  /**
+   * The page background, as `Draw.toSvg`, `Mermaid.toSvg` and the chart renderers take it: a
+   * CSS colour string (`#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `hsl()`, a colour name,
+   * `transparent` or `none`) or an `{ r, g, b, a }` colour with channels from 0 to 1. Default:
+   * white. A fully transparent colour, `transparent` or `none` draws no background.
+   */
+  readonly background?: string | Rgba01;
+  /**
+   * @deprecated Use {@link background}, which also takes an `{ r, g, b, a }` colour and wins
+   * over this one. Removed in 1.0.
+   */
   readonly backgroundColor?: string;
   /** Scale factor for the output. Default: 1.0. */
   readonly scale?: number;
@@ -60,14 +80,67 @@ export interface RenderOptions {
    * nothing on the normal layout path ever populated it, so
    * `renderDocumentToSvg` could not produce a chart at all.
    *
-   * Pass `renderWordChartSvg` from `documonster/word/excel` to get real charts.
+   * Pass `WordExcel.toChartSvg` from `documonster/word/excel` to get real charts.
    * The fragment is inlined inside a `<g transform="translate(x y)">`, so it
    * should be authored at the origin with the chart's own width/height. Return
    * `undefined` to keep the placeholder.
    *
-   * Consulted by all SVG entry points, which share the positioned layout.
+   * Consulted by all SVG entry points, which share the positioned layout. `Layout.toSvg` and
+   * `Layout.pageToSvg` also pass the document's theme colours as `context.themeColors`, for
+   * `WordExcel.toChartSvg(chart, { themeColors })`: a chart's automatic and scheme colours are
+   * the document theme's.
    */
-  readonly renderChart?: (chart: LayoutChart) => string | undefined;
+  readonly renderChart?: (chart: LayoutChart, context?: RenderChartContext) => string | undefined;
+}
+
+/** What `RenderOptions.renderChart` is told about the document a chart is in. */
+export interface RenderChartContext {
+  /** The document theme's colour scheme (`doc.theme.colorScheme.colors`), when it has one. */
+  readonly themeColors?: Readonly<Record<ThemeColorName, HexColor>>;
+}
+
+/** `options` whose `renderChart` is handed the document's {@link RenderChartContext}. */
+function withChartContext(
+  options: RenderOptions | undefined,
+  doc: DocxDocument
+): RenderOptions | undefined {
+  const renderChart = options?.renderChart;
+  if (renderChart === undefined) {
+    return options;
+  }
+  const colors = doc.theme?.colorScheme?.colors;
+  const context: RenderChartContext = colors === undefined ? {} : { themeColors: colors };
+  return { ...options, renderChart: chart => renderChart(chart, context) };
+}
+
+/**
+ * A background as `Draw.toSvg`, `Mermaid.toSvg` and the chart renderers take it — the one
+ * check (`checkBackgroundWith`), refused here with `DocxArgumentError` in the same words.
+ */
+function checkBackground(value: unknown, field: string, where: string): void {
+  if (value !== undefined) {
+    checkBackgroundWith(where, field, value, invalidArgument);
+  }
+}
+
+function checkRenderOptions(options: unknown, where: string): void {
+  if (options === undefined) {
+    return;
+  }
+  checkRecord(options, "options", where);
+  const o = options as RenderOptions;
+  const positive = { optional: true, positive: true } as const;
+  checkFinite(o.width, "options.width", where, positive);
+  checkFinite(o.height, "options.height", where, positive);
+  checkFinite(o.scale, "options.scale", where, positive);
+  checkBackground(o.background, "options.background", where);
+  checkString(o.backgroundColor, "options.backgroundColor", where, { optional: true });
+  if (o.fonts !== undefined && !(o.fonts instanceof Map)) {
+    invalidArgument(where, "options.fonts", "a Map", o.fonts);
+  }
+  if (o.renderChart !== undefined && typeof o.renderChart !== "function") {
+    invalidArgument(where, "options.renderChart", "a function", o.renderChart);
+  }
 }
 
 /** Sanitize a string into a valid 6-digit hex color, or undefined. */
@@ -145,6 +218,10 @@ function svgFontFamily(fontName: string, fonts?: ReadonlyMap<string, string>): s
  * @param options - Rendering options
  * @returns SVG string for the specified page
  *
+ * Each call lays the whole document out. To render several pages, compute
+ * the layout once (`Layout.compute`) and render each page from it
+ * (`Layout.computedPageToSvg`).
+ *
  * @stability experimental
  */
 export function renderPageToSvg(
@@ -152,6 +229,9 @@ export function renderPageToSvg(
   pageNumber: number,
   options?: RenderOptions
 ): string {
+  checkHandle(doc, "document", "doc", "Layout.pageToSvg");
+  checkInteger(pageNumber, "pageNumber", "Layout.pageToSvg");
+  checkRenderOptions(options, "Layout.pageToSvg");
   // Use the same positioned layout as `renderDocumentToSvg` and the PDF
   // bridge. The old estimate-driven renderer had its own paragraph/table
   // implementation, so exact-line clipping, scripts, inline-image baselines,
@@ -162,7 +242,7 @@ export function renderPageToSvg(
   // measure as regular, so later runs on the line overlapped it.
   const layout = layoutDocumentFull(doc);
 
-  return renderPageFromLayout(layout, pageNumber, options);
+  return renderPageFromLayout(layout, pageNumber, withChartContext(options, doc));
 }
 
 /**
@@ -175,6 +255,8 @@ export function renderPageToSvg(
  * @stability experimental
  */
 export function renderDocumentToSvg(doc: DocxDocument, options?: RenderOptions): string[] {
+  checkHandle(doc, "document", "doc", "Layout.toSvg");
+  checkRenderOptions(options, "Layout.toSvg");
   // Rendered from the positioned layout, the same model the PDF renderer
   // consumes. The previous route went straight from the document through the
   // paginating *estimate* and a deliberately simplified cell renderer, so its
@@ -189,10 +271,36 @@ export function renderDocumentToSvg(doc: DocxDocument, options?: RenderOptions):
   const layout = layoutDocumentFull(doc);
 
   const svgPages: string[] = [];
+  const pageOptions = withChartContext(options, doc);
   for (let page = 1; page <= layout.totalPages; page++) {
-    svgPages.push(renderPageFromLayout(layout, page, options));
+    svgPages.push(renderPageFromLayout(layout, page, pageOptions));
   }
   return svgPages;
+}
+
+/**
+ * The fill attributes of the page's background rectangle, or `undefined` for none:
+ * `background`, else the deprecated `backgroundColor` (written as given, as it always was),
+ * else white. An `{ r, g, b, a }` is `fill` and `fill-opacity`, as `Draw.toSvg` writes it.
+ */
+function backgroundAttrs(options: RenderOptions | undefined): string | undefined {
+  const background = options?.background;
+  if (background === undefined) {
+    return ` fill="${xmlEncodeAttr(options?.backgroundColor ?? "white")}"`;
+  }
+  if (typeof background === "string") {
+    return isNoPaintColor(background) ? undefined : ` fill="${xmlEncodeAttr(background)}"`;
+  }
+  if (background.a <= 0) {
+    return undefined;
+  }
+  const channel = (component: number): string =>
+    Math.max(0, Math.min(255, Math.round(component * 255)))
+      .toString(16)
+      .padStart(2, "0");
+  const fill = `#${channel(background.r)}${channel(background.g)}${channel(background.b)}`;
+  const opacity = background.a < 1 ? ` fill-opacity="${Math.round(background.a * 100) / 100}"` : "";
+  return ` fill="${fill}"${opacity}`;
 }
 
 /** Build the final SVG document string from rendered elements. */
@@ -203,7 +311,6 @@ function buildSvgDocument(
   options: RenderOptions | undefined
 ): string {
   const scale = options?.scale ?? 1.0;
-  const bgColor = options?.backgroundColor ?? "white";
 
   // Determine output dimensions
   let outputWidth: number;
@@ -226,7 +333,10 @@ function buildSvgDocument(
   const viewBox = `0 0 ${pageWidthPt.toFixed(2)} ${pageHeightPt.toFixed(2)}`;
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth.toFixed(2)}" height="${outputHeight.toFixed(2)}" viewBox="${viewBox}">\n`;
-  svg += `  <rect width="100%" height="100%" fill="${xmlEncodeAttr(bgColor)}"/>\n`;
+  const background = backgroundAttrs(options);
+  if (background !== undefined) {
+    svg += `  <rect width="100%" height="100%"${background}/>\n`;
+  }
 
   for (const element of elements) {
     svg += `  ${element}\n`;
@@ -256,6 +366,10 @@ export function renderPageFromLayout(
   pageNumber: number,
   options?: RenderOptions
 ): string {
+  // Out of range stays a RangeError, as it always was; not a page number at all is an argument
+  // error, which `NaN` used to slip past (`NaN < 1` is false) to fail on `undefined`.
+  checkInteger(pageNumber, "pageNumber", "Layout.computedPageToSvg");
+  checkRenderOptions(options, "Layout.computedPageToSvg");
   if (pageNumber < 1 || pageNumber > layout.totalPages) {
     throw new RangeError(
       `Page number ${pageNumber} out of range. Document has ${layout.totalPages} page(s).`
@@ -441,7 +555,8 @@ function renderLayoutParagraphToSvg(
       // Justification slack from `w:jc="both"`, distributed by the layout engine
       // between characters (East Asian, which has no spaces to widen) or between
       // words (Latin). Without these the SVG drew justified text left-aligned.
-      if (run.charSpacing !== undefined && run.charSpacing > 0) {
+      // `w:spacing` adds to it, and may be negative.
+      if (run.charSpacing !== undefined && run.charSpacing !== 0) {
         attrs += ` letter-spacing="${run.charSpacing.toFixed(3)}"`;
       }
       if (run.wordSpacing !== undefined && run.wordSpacing > 0) {
@@ -502,12 +617,13 @@ function renderParagraphDecorationToSvg(
   };
   const right = x + box.width;
   const bottom = y + box.height;
+  // A rule's thickness lies outside its space, so its centre line is half of it further out.
   if (borders.top) {
-    const ty = y - borders.top.space;
+    const ty = y - borders.top.space - (borders.top.extent ?? borders.top.width) / 2;
     line(borders.top, x, ty, right, ty);
   }
   if (borders.bottom) {
-    const by = bottom + borders.bottom.space;
+    const by = bottom + borders.bottom.space + (borders.bottom.extent ?? borders.bottom.width) / 2;
     line(borders.bottom, x, by, right, by);
   }
   if (borders.left) {

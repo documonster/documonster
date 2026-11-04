@@ -12,6 +12,15 @@
  * - Text body formatting within shapes
  */
 
+import {
+  checkOneOf,
+  checkRecord,
+  checkRgbColor,
+  invalidArgument,
+  under
+} from "@word/core/argument-checks";
+import type { FieldName } from "@word/core/argument-checks";
+import { assertDrawingNumber, assertDrawingNumbers } from "@word/core/drawing-geometry";
 import type {
   DrawingShape,
   Paragraph,
@@ -428,9 +437,13 @@ export interface CreateShapeOptions {
   readonly name?: string;
   /** Rotation in 60,000ths of a degree. */
   readonly rotation?: number;
-  /** Flip horizontally. */
+  /** Flip horizontally (`a:xfrm/@flipH`). */
+  readonly flipHorizontal?: boolean;
+  /** Flip vertically (`a:xfrm/@flipV`). */
+  readonly flipVertical?: boolean;
+  /** @deprecated Use {@link flipHorizontal}, as the shape node names it. Removed in 1.0. */
   readonly flipH?: boolean;
-  /** Flip vertically. */
+  /** @deprecated Use {@link flipVertical}, as the shape node names it. Removed in 1.0. */
   readonly flipV?: boolean;
   /** Horizontal position. */
   readonly horizontalPosition?: {
@@ -469,6 +482,34 @@ export interface CreateShapeOptions {
  * @returns A DrawingShape element for the document body.
  */
 export function createShape(options: CreateShapeOptions): DrawingShape {
+  checkRecord(options, "options", "Build.shape");
+  return buildShape(options, "Build.shape", under("options"));
+}
+
+/** A shape's `width` / `height` are parameters of the helper; the rest are its options. */
+const sizedField: FieldName = path =>
+  path === "width" || path === "height" ? path : `options.${path}`;
+
+/**
+ * A shape a helper (`Build.rect`, `Build.star`, …) builds: `width` × `height`,
+ * its own `defaults` under the caller's options.
+ */
+function sizedShape(
+  where: string,
+  shapeType: CreateShapeOptions["shapeType"],
+  width: Emu,
+  height: Emu,
+  options: Partial<Omit<CreateShapeOptions, "shapeType" | "width" | "height">> | undefined,
+  defaults: Partial<CreateShapeOptions> = {}
+): DrawingShape {
+  checkRecord(options, "options", where, { optional: true });
+  return buildShape({ ...defaults, ...options, shapeType, width, height }, where, sizedField);
+}
+
+/** {@link createShape} in the name of `where`, its fields named by `field`. */
+function buildShape(options: CreateShapeOptions, where: string, field: FieldName): DrawingShape {
+  assertShapeNumbers(options, where, field);
+  assertShapeColors(options, where, field);
   // Convert fill to simple properties for the DrawingShape interface
   let fillColor: HexColor | undefined;
   let noFill = false;
@@ -514,12 +555,111 @@ export function createShape(options: CreateShapeOptions): DrawingShape {
     wrap: options.wrap,
     behindDoc: options.behindDoc,
     rotation: options.rotation,
-    flipHorizontal: options.flipH,
-    flipVertical: options.flipV,
+    flipHorizontal: options.flipHorizontal ?? options.flipH,
+    flipVertical: options.flipVertical ?? options.flipV,
     rawXml: rawXml.length > 0 ? rawXml : undefined,
     _advancedFillXml: advanced.fillXml,
     _advancedEffectsXml: advanced.effectsXml
   };
+}
+
+/**
+ * Check every colour a shape will write. Each becomes an `a:srgbClr`, whose
+ * value is `RRGGBB` — a `#` or a name would be written as given and the shape
+ * refused.
+ */
+function assertShapeColors(options: CreateShapeOptions, where: string, field: FieldName): void {
+  const fill = options.fill;
+  if (fill?.type === "solid") {
+    checkRgbColor(fill.color, field("fill.color"), where);
+  } else if (fill?.type === "gradient") {
+    fill.stops.forEach((stop, i) =>
+      checkRgbColor(stop.color, field(`fill.stops[${i}].color`), where)
+    );
+  } else if (fill?.type === "pattern") {
+    checkRgbColor(fill.foregroundColor, field("fill.foregroundColor"), where);
+    checkRgbColor(fill.backgroundColor, field("fill.backgroundColor"), where);
+  }
+  checkRgbColor(options.outline?.color, field("outline.color"), where, { optional: true });
+  const fx = options.effects;
+  if (fx?.shadow) {
+    checkRgbColor(fx.shadow.color, field("effects.shadow.color"), where);
+  }
+  if (fx?.glow) {
+    checkRgbColor(fx.glow.color, field("effects.glow.color"), where);
+  }
+  checkRgbColor(fx?.effect3d?.extrusionColor, field("effects.effect3d.extrusionColor"), where, {
+    optional: true
+  });
+}
+
+/**
+ * Check every number a shape will write — its frame and the effect geometry
+ * {@link serializeAdvancedProperties} interpolates into markup.
+ */
+function assertShapeNumbers(options: CreateShapeOptions, where: string, field: FieldName): void {
+  assertDrawingNumbers(where, options, field);
+  const nonNegative = { sign: "nonNegative", optional: true } as const;
+  const any = { optional: true } as const;
+  assertDrawingNumber(options.outline?.width, field("outline.width"), where, nonNegative);
+  const fill = options.fill;
+  if (fill?.type === "gradient") {
+    fill.stops.forEach((stop, i) => {
+      assertDrawingNumber(stop.position, field(`fill.stops[${i}].position`), where);
+      assertDrawingNumber(stop.transparency, field(`fill.stops[${i}].transparency`), where, any);
+    });
+    assertDrawingNumber(fill.angle, field("fill.angle"), where, any);
+  } else if (fill?.type === "solid") {
+    assertDrawingNumber(fill.transparency, field("fill.transparency"), where, any);
+  }
+  const fx = options.effects;
+  if (fx?.shadow) {
+    assertDrawingNumber(
+      fx.shadow.blurRadius,
+      field("effects.shadow.blurRadius"),
+      where,
+      nonNegative
+    );
+    assertDrawingNumber(fx.shadow.distance, field("effects.shadow.distance"), where, nonNegative);
+    assertDrawingNumber(fx.shadow.direction, field("effects.shadow.direction"), where, any);
+    assertDrawingNumber(fx.shadow.transparency, field("effects.shadow.transparency"), where, any);
+  }
+  if (fx?.glow) {
+    assertDrawingNumber(fx.glow.radius, field("effects.glow.radius"), where, {
+      sign: "nonNegative"
+    });
+    assertDrawingNumber(fx.glow.transparency, field("effects.glow.transparency"), where, any);
+  }
+  if (fx?.reflection) {
+    const r = fx.reflection;
+    assertDrawingNumber(r.blurRadius, field("effects.reflection.blurRadius"), where, nonNegative);
+    assertDrawingNumber(r.startOpacity, field("effects.reflection.startOpacity"), where, any);
+    assertDrawingNumber(r.endOpacity, field("effects.reflection.endOpacity"), where, any);
+    assertDrawingNumber(r.distance, field("effects.reflection.distance"), where, nonNegative);
+    assertDrawingNumber(r.direction, field("effects.reflection.direction"), where, any);
+    assertDrawingNumber(r.fadeDirection, field("effects.reflection.fadeDirection"), where, any);
+  }
+  assertDrawingNumber(fx?.softEdges, field("effects.softEdges"), where, nonNegative);
+  const e = fx?.effect3d;
+  if (e) {
+    assertDrawingNumber(e.rotX, field("effects.effect3d.rotX"), where, any);
+    assertDrawingNumber(e.rotY, field("effects.effect3d.rotY"), where, any);
+    assertDrawingNumber(e.rotZ, field("effects.effect3d.rotZ"), where, any);
+    assertDrawingNumber(
+      e.extrusionDepth,
+      field("effects.effect3d.extrusionDepth"),
+      where,
+      nonNegative
+    );
+    for (const key of ["bevelTop", "bevelBottom"] as const) {
+      const bevel = e[key];
+      if (bevel) {
+        const required = { sign: "nonNegative" } as const;
+        assertDrawingNumber(bevel.width, field(`effects.effect3d.${key}.width`), where, required);
+        assertDrawingNumber(bevel.height, field(`effects.effect3d.${key}.height`), where, required);
+      }
+    }
+  }
 }
 
 /**
@@ -542,10 +682,10 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
     const stops = gf.stops
       .map(
         s =>
-          `<a:gs pos="${s.position}"><a:srgbClr val="${xmlEncodeAttr(s.color)}"${s.transparency ? ` alpha="${Math.round((100 - s.transparency) * 1000)}"` : ""}/></a:gs>`
+          `<a:gs pos="${Math.round(s.position)}"><a:srgbClr val="${xmlEncodeAttr(s.color)}"${s.transparency ? ` alpha="${Math.round((100 - s.transparency) * 1000)}"` : ""}/></a:gs>`
       )
       .join("");
-    const angle = gf.angle !== undefined ? ` ang="${gf.angle}"` : "";
+    const angle = gf.angle !== undefined ? ` ang="${Math.round(gf.angle)}"` : "";
     fillParts.push(
       `<a:gradFill><a:gsLst>${stops}</a:gsLst><a:lin${angle} scaled="1"/></a:gradFill>`
     );
@@ -566,13 +706,13 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
     const s = options.effects.shadow;
     const attrs: string[] = [];
     if (s.blurRadius) {
-      attrs.push(`blurRad="${s.blurRadius}"`);
+      attrs.push(`blurRad="${Math.round(s.blurRadius)}"`);
     }
     if (s.distance) {
-      attrs.push(`dist="${s.distance}"`);
+      attrs.push(`dist="${Math.round(s.distance)}"`);
     }
     if (s.direction !== undefined) {
-      attrs.push(`dir="${s.direction}"`);
+      attrs.push(`dir="${Math.round(s.direction)}"`);
     }
     const alpha =
       s.transparency !== undefined
@@ -591,7 +731,7 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
         ? `<a:alpha val="${Math.round((100 - g.transparency) * 1000)}"/>`
         : "";
     effectChildren.push(
-      `<a:glow rad="${g.radius}"><a:srgbClr val="${xmlEncodeAttr(g.color)}">${alpha}</a:srgbClr></a:glow>`
+      `<a:glow rad="${Math.round(g.radius)}"><a:srgbClr val="${xmlEncodeAttr(g.color)}">${alpha}</a:srgbClr></a:glow>`
     );
   }
 
@@ -599,7 +739,7 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
     const r = options.effects.reflection;
     const attrs: string[] = [];
     if (r.blurRadius) {
-      attrs.push(`blurRad="${r.blurRadius}"`);
+      attrs.push(`blurRad="${Math.round(r.blurRadius)}"`);
     }
     if (r.startOpacity !== undefined) {
       attrs.push(`stA="${Math.round(r.startOpacity * 1000)}"`);
@@ -608,19 +748,19 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
       attrs.push(`endA="${Math.round(r.endOpacity * 1000)}"`);
     }
     if (r.distance) {
-      attrs.push(`dist="${r.distance}"`);
+      attrs.push(`dist="${Math.round(r.distance)}"`);
     }
     if (r.direction !== undefined) {
-      attrs.push(`dir="${r.direction}"`);
+      attrs.push(`dir="${Math.round(r.direction)}"`);
     }
     if (r.fadeDirection !== undefined) {
-      attrs.push(`fadeDir="${r.fadeDirection}"`);
+      attrs.push(`fadeDir="${Math.round(r.fadeDirection)}"`);
     }
     effectChildren.push(`<a:reflection ${attrs.join(" ")}/>`);
   }
 
   if (options.effects?.softEdges) {
-    effectChildren.push(`<a:softEdge rad="${options.effects.softEdges}"/>`);
+    effectChildren.push(`<a:softEdge rad="${Math.round(options.effects.softEdges)}"/>`);
   }
 
   if (effectChildren.length > 0) {
@@ -633,13 +773,13 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
     const camera = e.camera ?? "orthographicFront";
     const rotAttrs: string[] = [];
     if (e.rotX !== undefined) {
-      rotAttrs.push(`lat="${e.rotX}"`);
+      rotAttrs.push(`lat="${Math.round(e.rotX)}"`);
     }
     if (e.rotY !== undefined) {
-      rotAttrs.push(`lon="${e.rotY}"`);
+      rotAttrs.push(`lon="${Math.round(e.rotY)}"`);
     }
     if (e.rotZ !== undefined) {
-      rotAttrs.push(`rev="${e.rotZ}"`);
+      rotAttrs.push(`rev="${Math.round(e.rotZ)}"`);
     }
     const rot = rotAttrs.length > 0 ? `<a:rot ${rotAttrs.join(" ")}/>` : "";
     effectParts.push(
@@ -649,12 +789,14 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
     const sp3dChildren: string[] = [];
     if (e.bevelTop) {
       const preset = e.bevelTop.preset ? ` prst="${xmlEncodeAttr(e.bevelTop.preset)}"` : "";
-      sp3dChildren.push(`<a:bevelT w="${e.bevelTop.width}" h="${e.bevelTop.height}"${preset}/>`);
+      sp3dChildren.push(
+        `<a:bevelT w="${Math.round(e.bevelTop.width)}" h="${Math.round(e.bevelTop.height)}"${preset}/>`
+      );
     }
     if (e.bevelBottom) {
       const preset = e.bevelBottom.preset ? ` prst="${xmlEncodeAttr(e.bevelBottom.preset)}"` : "";
       sp3dChildren.push(
-        `<a:bevelB w="${e.bevelBottom.width}" h="${e.bevelBottom.height}"${preset}/>`
+        `<a:bevelB w="${Math.round(e.bevelBottom.width)}" h="${Math.round(e.bevelBottom.height)}"${preset}/>`
       );
     }
     if (e.extrusionColor) {
@@ -662,7 +804,7 @@ function serializeAdvancedProperties(options: CreateShapeOptions): {
         `<a:extrusionClr><a:srgbClr val="${xmlEncodeAttr(e.extrusionColor)}"/></a:extrusionClr>`
       );
     }
-    const extDepth = e.extrusionDepth ? ` extrusionH="${e.extrusionDepth}"` : "";
+    const extDepth = e.extrusionDepth ? ` extrusionH="${Math.round(e.extrusionDepth)}"` : "";
     effectParts.push(`<a:sp3d${extDepth}>${sp3dChildren.join("")}</a:sp3d>`);
   }
 
@@ -680,7 +822,7 @@ export function createRect(
   height: Emu,
   options?: Partial<Omit<CreateShapeOptions, "shapeType" | "width" | "height">>
 ): DrawingShape {
-  return createShape({ shapeType: "rect", width, height, ...options });
+  return sizedShape("Build.rect", "rect", width, height, options);
 }
 
 /**
@@ -691,7 +833,7 @@ export function createRoundRect(
   height: Emu,
   options?: Partial<Omit<CreateShapeOptions, "shapeType" | "width" | "height">>
 ): DrawingShape {
-  return createShape({ shapeType: "roundRect", width, height, ...options });
+  return sizedShape("Build.roundRect", "roundRect", width, height, options);
 }
 
 /**
@@ -702,7 +844,7 @@ export function createEllipse(
   height: Emu,
   options?: Partial<Omit<CreateShapeOptions, "shapeType" | "width" | "height">>
 ): DrawingShape {
-  return createShape({ shapeType: "ellipse", width, height, ...options });
+  return sizedShape("Build.ellipse", "ellipse", width, height, options);
 }
 
 /**
@@ -713,13 +855,7 @@ export function createLine(
   height: Emu,
   options?: Partial<Omit<CreateShapeOptions, "shapeType" | "width" | "height">>
 ): DrawingShape {
-  return createShape({
-    shapeType: "line",
-    width,
-    height,
-    fill: { type: "none" },
-    ...options
-  });
+  return sizedShape("Build.line", "line", width, height, options, { fill: { type: "none" } });
 }
 
 /**
@@ -737,7 +873,9 @@ export function createArrow(
     up: "upArrow",
     down: "downArrow"
   };
-  return createShape({ shapeType: shapeMap[direction]!, width, height, ...options });
+  const where = "Build.arrow";
+  checkOneOf(direction, new Set(Object.keys(shapeMap)), "direction", where);
+  return sizedShape(where, shapeMap[direction]!, width, height, options);
 }
 
 /**
@@ -758,7 +896,9 @@ export function createFlowchartShape(
     connector: "flowChartConnector",
     preparation: "flowChartPreparation"
   };
-  return createShape({ shapeType: shapeMap[kind]!, width, height, ...options });
+  const where = "Build.flowchartShape";
+  checkOneOf(kind, new Set(Object.keys(shapeMap)), "kind", where);
+  return sizedShape(where, shapeMap[kind]!, width, height, options);
 }
 
 /**
@@ -776,8 +916,12 @@ export function createCallout(
     ellipse: "wedgeEllipseCallout",
     cloud: "cloudCallout"
   };
-  return createShape({ shapeType: shapeMap[style]!, width, height, ...options });
+  const where = "Build.callout";
+  checkOneOf(style, new Set(Object.keys(shapeMap)), "style", where);
+  return sizedShape(where, shapeMap[style]!, width, height, options);
 }
+
+const STAR_POINTS: ReadonlySet<number> = new Set([4, 5, 6, 7, 8, 10, 12, 16, 24, 32]);
 
 /**
  * Create a star shape.
@@ -788,5 +932,9 @@ export function createStar(
   height: Emu,
   options?: Partial<Omit<CreateShapeOptions, "shapeType" | "width" | "height">>
 ): DrawingShape {
-  return createShape({ shapeType: `star${points}`, width, height, ...options });
+  const where = "Build.star";
+  if (!STAR_POINTS.has(points)) {
+    invalidArgument(where, "points", `one of ${[...STAR_POINTS].join(", ")}`, points);
+  }
+  return sizedShape(where, `star${points}`, width, height, options);
 }

@@ -1,6 +1,6 @@
 import { anchorCreate, anchorModel } from "@excel/core/anchor";
 import type { CellData } from "@excel/core/cell";
-import { cellMerge } from "@excel/core/cell";
+import { cellMerge, checkCellValue } from "@excel/core/cell";
 import type { ColumnData, ColumnDefn } from "@excel/core/column";
 import { columnToModel } from "@excel/core/column";
 import type { DataValidationsData } from "@excel/core/data-validations";
@@ -10,7 +10,7 @@ import { rangeCreate, rangeIntersects, rangeRange } from "@excel/core/range";
 import type { RowData } from "@excel/core/row";
 import { rowCreate, rowFindCell, rowGetModel, rowHasValues } from "@excel/core/row";
 import type { WorkbookFormat } from "@excel/core/workbook-format";
-import type { WorksheetData } from "@excel/core/worksheet";
+import type { ProtectSheetOptions, WorksheetData } from "@excel/core/worksheet";
 import {
   columnCreate,
   columnSetDefn,
@@ -18,9 +18,12 @@ import {
   rowGetCellEx,
   rowSetValues
 } from "@excel/core/worksheet";
+import { checkColumnNumber } from "@excel/core/worksheet-core";
 import {
+  ExcelArgumentError,
   ExcelStreamStateError,
   ImageError,
+  InvalidAddressError,
   MergeConflictError,
   RowOutOfBoundsError
 } from "@excel/errors";
@@ -29,13 +32,24 @@ import { SheetRelsWriter } from "@excel/stream/sheet-rels-writer";
 import type { Medium as WriterMedium } from "@excel/stream/workbook-writer";
 import {
   StreamedXlsbWorksheet,
+  streamedHyperlinkRelId,
   streamedWorksheetPath,
   type StreamedXlsbTables,
   xlsbSheetOptionsFromModel
 } from "@excel/stream/xlsb-writer";
+import {
+  argumentChecks,
+  checkProtectCall,
+  normalizeReference,
+  SHEET_PROTECTION_FLAGS
+} from "@excel/utils/arguments";
+import { needsArrayEvaluation, unwritableFormulaReason } from "@excel/utils/array-evaluation";
+import { overlappingArrayReason, type ArrayRange } from "@excel/utils/array-ranges";
 import { colCache } from "@excel/utils/col-cache";
+import { checkConditionalFormatting } from "@excel/utils/conditional-formatting-checks";
 import type { DrawingAnchor, DrawingRel } from "@excel/utils/drawing-utils";
 import { buildDrawingAnchorsAndRels, isExternalImage } from "@excel/utils/drawing-utils";
+import { hasUnnamedThisRow, withFormulaNames } from "@excel/utils/future-functions";
 import { applyMergeBorders, collectMergeBorders } from "@excel/utils/merge-borders";
 import {
   drawingRelTargetFromWorksheet,
@@ -44,10 +58,25 @@ import {
 } from "@excel/utils/ooxml-paths";
 import type { PackageSink } from "@excel/utils/package-sink";
 import type { SharedStrings } from "@excel/utils/shared-strings";
-import { buildSheetProtection } from "@excel/utils/sheet-protection";
+import { buildSheetProtection, splitPasswordOptions } from "@excel/utils/sheet-protection";
+import { checkSheetSettings } from "@excel/utils/sheet-settings-checks";
 import type { StreamBuf } from "@excel/utils/stream-buf";
+import { tableNameAt } from "@excel/utils/table-at";
+import {
+  writableConditionalFormattings,
+  writableDataValidations
+} from "@excel/utils/unwritable-formulas";
+import type { VmlShapeIdSpace } from "@excel/utils/vml-shape-ids";
 import type { SheetComment } from "@excel/xlsb/comments";
-import { commentsFromModel, sheetRowsFromModel } from "@excel/xlsb/write/model-adapter";
+import { rowFormulas, sheetLevelFormulas } from "@excel/xlsb/write/future-names";
+import {
+  commentsFromModel,
+  hyperlinksFromModel,
+  sheetRowsFromModel,
+  withFollowers,
+  type HyperlinkLike
+} from "@excel/xlsb/write/model-adapter";
+import type { SheetRow } from "@excel/xlsb/write/types";
 import type { WriteWorksheetPartOptions } from "@excel/xlsb/write/worksheet";
 import { RelType } from "@excel/xlsx/rel-type";
 import type { CommentModel } from "@excel/xlsx/xform/comment/comment-xform";
@@ -75,6 +104,7 @@ import type {
 // Xforms
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { AutoFilterXform } from "@excel/xlsx/xform/sheet/auto-filter-xform";
+import { overlappedArrayRange, writesDynamicArray } from "@excel/xlsx/xform/sheet/cell-xform";
 import { ConditionalFormattingsXform } from "@excel/xlsx/xform/sheet/cf/conditional-formattings-xform";
 import { ColBreaksXform } from "@excel/xlsx/xform/sheet/col-breaks-xform";
 import { ColXform } from "@excel/xlsx/xform/sheet/col-xform";
@@ -147,6 +177,8 @@ export interface WorkbookWriterLike {
   dynamicArrayCount: number;
   /** Lookup a media (image/chart) by registered id. */
   getImage(id: number): WriterMedium | undefined;
+  /** The workbook-wide VML shape-id space, created by the first sheet that needs one. */
+  vmlShapeIds?: VmlShapeIdSpace;
   /** Accumulated comment-part references (for the content-types manifest). */
   commentRefs: { commentName: string; vmlDrawing: string }[];
   /** Open a streaming entry in the output zip for the given path. */
@@ -169,6 +201,12 @@ export interface WorkbookWriterLike {
    * that does not model the setting would want.
    */
   date1904Flag?: () => boolean;
+  /**
+   * The workbook's defined names, upper-cased, as `toFileFormula` takes them — a bare function name passed as an
+   * argument is written `_xleta.SUM` unless the workbook defines it. Optional like `date1904Flag`; absent means such
+   * a name is written as given.
+   */
+  formulaNames?: () => ReadonlySet<string>;
   /** Which container is being written. `"xlsb"` sends rows through the binary encoder. */
   readonly format: WorkbookFormat;
   /** The workbook-wide interning tables for a streamed XLSB. Absent for XLSX. */
@@ -190,7 +228,7 @@ interface WorksheetWriterOptions {
   headerFooter?: Partial<HeaderFooter>;
 }
 
-/** Internal model for an image added via addImage(). */
+/** An image placed by `WorksheetWriter#addImage`, as `WorksheetWriter#getImages` lists it. */
 interface WriterImageModel {
   type: "image";
   imageId: string;
@@ -209,6 +247,14 @@ interface WriterImageModel {
   opacity?: number;
 }
 
+/** A streamed sheet's tables, as the this-row lookup sees them: none (`WorksheetWriter.tables` is always empty). */
+const STREAMED_SHEET_TABLES = tableNameAt(undefined);
+
+/**
+ * One sheet of a streaming workbook writer, from `WorkbookWriter.addWorksheet`. Rows are added in order and written
+ * when committed (`Stream.commitRow`, or `commit` for the rest); a committed row, and a committed sheet, take no more
+ * edits.
+ */
 class WorksheetWriter {
   id: number;
   name: string;
@@ -243,6 +289,17 @@ class WorksheetWriter {
    * construction: one entry per annotated cell, not per row.
    */
   readonly _retainedComments: SheetComment[] = [];
+  /**
+   * Hyperlinks collected as rows were committed, for the sheet part's `BrtHLink` records and the sheet's `.rels` —
+   * named so `getSheetModel` reads it, as `_retainedComments`. One entry per linked cell.
+   */
+  readonly _retainedHyperlinks: HyperlinkLike[] = [];
+  /** Shared formulas being written cell by cell in XLSB, kept across rows — see `sheetRowsFromModel`. */
+  private readonly _unsharedFormulas = new Map<string, string>();
+  /** Array ranges written in XLSB, kept across rows so a later master inside one is reported. */
+  private readonly _arrayRanges: ArrayRange[] = [];
+  /** XLSB rows an array range's followers fall in, held until that row is written — see `_writeRowXlsb`. */
+  private readonly _pendingRows = new Map<number, SheetRow>();
   private _dimensions: RangeData;
   private _rowZero: number;
   private _rowOffset: number;
@@ -337,11 +394,28 @@ class WorksheetWriter {
    * sheet is already in the ZIP and its rows are gone, so `writeXlsbPackage` sees nothing to report. The result was a
    * cross-sheet formula silently becoming an empty cell with `xlsbUnsupported` reading `[]`.
    *
-   * `WorkbookWriter.commit()` folds this into `xlsbUnsupported`, which is where a caller looks.
+   * `WorkbookWriter.commit()` folds this into `WorkbookWriter.unsupported` (and, as before, the deprecated
+   * `xlsbUnsupported`), which is where a caller looks.
    */
   get xlsbUnsupported(): readonly string[] {
     return this._xlsbLosses;
   }
+  /**
+   * What this sheet's rows could not express, in either format, once `commit()` has run — each as `Sheet!A1: reason`,
+   * the form the buffered writers report. `WorkbookWriter.commit()` folds it into `WorkbookWriter.unsupported`.
+   */
+  get unsupported(): readonly string[] {
+    const losses = this._xlsb === undefined ? this._xlsxLosses : this._xlsbLosses;
+    return losses.map(loss => `${this.name}!${loss}`);
+  }
+  /** What the XLSX row writer could not express: an unnamed this-row reference, written as its cached value. */
+  private readonly _xlsxLosses: string[] = [];
+  /** The conditional formats `_writeConditionalFormatting` wrote, which `_writeExtLst` writes the extensions of. */
+  private _writtenConditionalFormatting: ConditionalFormattingOptions[] = [];
+  /** The masters written as their cached value because Excel would not open their formula; their dependents follow. */
+  private readonly _xlsxUnwritableMasters = new Set<string>();
+  /** The XLSX array ranges written so far, so a master inside one is written as its cached result and reported. */
+  private readonly _xlsxArrayRanges: ArrayRange[] = [];
   /** Drawing model — populated during commit if images were added */
   private _drawing?: {
     rId: string;
@@ -352,6 +426,7 @@ class WorksheetWriter {
   /** Relationship Id - assigned by WorkbookWriter */
   rId?: string;
 
+  /** @internal Sheets are made by `WorkbookWriter.addWorksheet`, which is the only caller. */
   constructor(options: WorksheetWriterOptions) {
     // in a workbook, each sheet will have a number
     this.id = options.id;
@@ -513,7 +588,9 @@ class WorksheetWriter {
         this._workbook.packageSink(),
         streamedWorksheetPath(this.id),
         this._workbook.xlsbTables!,
-        () => this._xlsbSheetOptions()
+        () => this._xlsbSheetOptions(),
+        () =>
+          sheetLevelFormulas(getSheetModel(this as unknown as Parameters<typeof getSheetModel>[0]))
       );
     } else {
       this._writeOpenWorksheet();
@@ -558,6 +635,7 @@ class WorksheetWriter {
     if (this.committed) {
       return;
     }
+    this._checkSettings();
     // commit all rows
     for (let i = this._rowOffset; i < this._rows!.length; i++) {
       const cRow = this._rows![i];
@@ -573,6 +651,8 @@ class WorksheetWriter {
       // The epilogue reads the sheet's metadata — merges, conditional formats, panes, page setup — at this moment
       // rather than when the part was opened, which is what makes it legal for a caller to keep setting those
       // while rows arrive. Nothing after this point touches the rows.
+      // A range may reach past the last row the caller committed.
+      this._flushPendingRows();
       const { unsupported } = this._xlsb.end();
       this._xlsbLosses = unsupported;
       this._sheetCommentsWriter.commit();
@@ -679,14 +759,17 @@ class WorksheetWriter {
   // are created.
   getColumn(c: string | number): ColumnData {
     if (typeof c === "string") {
-      // if it matches a key'd column, return that
-      const col = this._keys[c];
+      // if it matches a key'd column, return that — an own key only, not `Object.prototype.toString`
+      const col = Object.hasOwn(this._keys, c) ? this._keys[c] : undefined;
       if (col) {
         return col;
       }
 
       // otherwise, assume letter
       c = colCache.l2n(c);
+    } else {
+      // Checked before any column is created, as the document model's `getColumn` does.
+      c = checkColumnNumber(c);
     }
     if (c > this._columns.length) {
       let n = this._columns.length + 1;
@@ -719,6 +802,10 @@ class WorksheetWriter {
       opts = options;
     }
 
+    if (this._rows === null) {
+      // Committed: no row is left to visit.
+      return;
+    }
     if (opts && opts.includeEmpty) {
       const n = this._nextRow;
       for (let i = this._rowZero; i < n; i++) {
@@ -769,13 +856,64 @@ class WorksheetWriter {
     return undefined;
   }
 
+  /**
+   * Refuse an edit once the sheet is committed: its part is closed, so whatever the call added was lost — a row with a
+   * raw `TypeError`, a merge, a format or a picture with no error at all.
+   */
+  private _checkOpen(operation: string): void {
+    if (this.committed || this._rows === null) {
+      throw new ExcelStreamStateError(
+        operation,
+        `worksheet "${this.name}" has been committed; nothing more can be written to it`
+      );
+    }
+  }
+
+  /** The image `imageId` of the workbook, refused when there is none — a picture that names none was dropped. */
+  private _checkImage(where: string, imageId: unknown): void {
+    if (
+      (typeof imageId !== "string" && typeof imageId !== "number") ||
+      this._workbook.getImage(Number(imageId)) === undefined
+    ) {
+      throw new ImageError(
+        `${where}: the workbook has no image ${JSON.stringify(imageId)}; add it with WorkbookWriter.addImage first.`
+      );
+    }
+  }
+
+  /**
+   * @internal Whether row `rowNumber` has been written — by `commitRow`, or with the sheet. Its handles then refuse
+   * edits: they used to be accepted and to change nothing in the file.
+   */
+  isRowCommitted(rowNumber: number): boolean {
+    return this.committed || this._rows === null || rowNumber < this._rowZero;
+  }
+
+  /**
+   * Whether the sheet's column definitions have been written: they go out with the first committed row, so a width set
+   * after that cannot reach the file.
+   *
+   * @internal
+   */
+  areColumnsWritten(): boolean {
+    return (
+      this.committed ||
+      this._rows === null ||
+      (this._xlsb !== undefined ? this._xlsb.isOpen : this.startedData)
+    );
+  }
+
   // find a row (if exists) by row number
   findRow(rowNumber: number): RowData | undefined {
     const index = rowNumber - this._rowZero + this._rowOffset;
-    return this._rows![index];
+    return this._rows?.[index];
   }
 
   getRow(rowNumber: number): RowData {
+    this._checkOpen("get a row");
+    if (!Number.isInteger(rowNumber) || rowNumber < 1 || rowNumber > 1048576) {
+      throw new RowOutOfBoundsError(rowNumber, "Excel rows are whole numbers from 1 to 1048576");
+    }
     const index = rowNumber - this._rowZero + this._rowOffset;
 
     // may fail if rows have been comitted
@@ -790,14 +928,29 @@ class WorksheetWriter {
   }
 
   addRow(value: RowValues): RowData {
+    this._checkOpen("add a row");
+    checkStreamRow("WorksheetWriter.addRow", "value", value);
+    return this._addCheckedRow(value);
+  }
+
+  addRows(values: RowValues[]): RowData[] {
+    this._checkOpen("add a row");
+    if (!Array.isArray(values)) {
+      throw new ExcelArgumentError(
+        "values",
+        `WorksheetWriter.addRows: values must be an array of rows; got ${typeof values}.`
+      );
+    }
+    // Every row is checked before the first is added, so a refused value adds nothing.
+    values.forEach((value, i) => checkStreamRow("WorksheetWriter.addRows", `values[${i}]`, value));
+    return values.map(value => this._addCheckedRow(value));
+  }
+
+  private _addCheckedRow(value: RowValues): RowData {
     const row = rowCreate(this._asWorksheet, this._nextRow);
     this._rows![row.number - this._rowZero + this._rowOffset] = row;
     rowSetValues(row, value);
     return row;
-  }
-
-  addRows(values: RowValues[]): RowData[] {
-    return values.map(value => this.addRow(value));
   }
 
   // ================================================================================
@@ -812,14 +965,22 @@ class WorksheetWriter {
 
   // return the cell at [r,c] or address given by r. If not found, create a new one.
   getCell(r: string | number, c?: number): CellData {
+    if (typeof r === "string" && c === undefined) {
+      argumentChecks("WorksheetWriter.getCell").reference("address", r);
+      r = normalizeReference(r);
+    }
     const address = colCache.getAddress(r, c);
     const row = this.getRow(address.row);
     return rowGetCellEx(row, address);
   }
 
   mergeCells(...cells: (string | number)[]): void {
-    // may fail if rows have been comitted
-    const dimensions = rangeCreate(cells);
+    this._checkOpen("merge cells");
+    const dimensions = this._mergeRange(cells);
+    // A single cell is left as it is, as `Worksheet.merge` leaves it: Excel stores no such merge.
+    if (dimensions.top === dimensions.bottom && dimensions.left === dimensions.right) {
+      return;
+    }
 
     // check cells aren't already merged
     this._merges.forEach(merge => {
@@ -852,10 +1013,47 @@ class WorksheetWriter {
     this._merges.push(dimensions);
   }
 
+  /**
+   * The range a merge names, checked as `Worksheet.merge` checks it: an `A1:B2` string (any case), its two corners or
+   * four numbers, inside the grid and on this sheet. A sheet name was written into `<mergeCell ref>`, which Excel
+   * repairs, and a range that was none failed with `Row NaN`.
+   */
+  private _mergeRange(cells: (string | number)[]): RangeData {
+    const check = argumentChecks("WorksheetWriter.mergeCells");
+    const describe = () => cells.map(cell => String(cell)).join(", ");
+    if (cells.length === 1 || cells.length === 2) {
+      cells.forEach((cell, i) => {
+        check.required(`cells[${i}]`, cell);
+        check.reference(`cells[${i}]`, cell, { range: cells.length === 1 });
+      });
+      cells = cells.map(cell => normalizeReference(cell as string));
+    }
+    const range = rangeCreate(cells);
+    const bounds = [range.top, range.left, range.bottom, range.right];
+    if (
+      !bounds.every(n => Number.isInteger(n) && n >= 1) ||
+      range.bottom > 1048576 ||
+      range.right > 16384
+    ) {
+      throw new InvalidAddressError(
+        describe(),
+        "WorksheetWriter.mergeCells: the range must name cells inside A1:XFD1048576"
+      );
+    }
+    return range;
+  }
+
   // ===========================================================================
   // Conditional Formatting
+  /**
+   * Add a block of conditional-formatting rules, checked as `ConditionalFormatting.add` checks them; a copy is kept.
+   * A rule Excel cannot use was silently left out of the written sheet.
+   */
   addConditionalFormatting(cf: ConditionalFormattingOptions): void {
-    this.conditionalFormatting.push(cf);
+    this._checkOpen("add conditional formatting");
+    checkConditionalFormatting("WorksheetWriter.addConditionalFormatting", cf);
+    // Stored canonical, as `ConditionalFormatting.add` stores it: `a1:b2` is `A1:B2` in the file.
+    this.conditionalFormatting.push({ ...structuredClone(cf), ref: normalizeReference(cf.ref) });
   }
 
   removeConditionalFormatting(
@@ -873,7 +1071,10 @@ class WorksheetWriter {
 
   // =========================================================================
 
+  /** Use the workbook image `imageId` as the sheet's background. @throws {ImageError} when there is no such image. */
   addBackgroundImage(imageId: string | number): void {
+    this._checkOpen("add a background image");
+    this._checkImage("WorksheetWriter.addBackgroundImage", imageId);
     const bookImage = this._workbook.getImage(Number(imageId));
     if (bookImage && isExternalImage(bookImage)) {
       throw new ImageError(
@@ -899,6 +1100,8 @@ class WorksheetWriter {
    * embed an image within the worksheet to cover a range.
    */
   addImage(imageId: string | number, range: AddImageRange): void {
+    this._checkOpen("add an image");
+    this._checkImage("WorksheetWriter.addImage", imageId);
     const model = this._parseImageRange(String(imageId), range);
     this._media.push(model);
   }
@@ -925,6 +1128,7 @@ class WorksheetWriter {
    * @throws {ImageError} If `mode: "header"` is used with an external (linked) image.
    */
   addWatermark(options: WatermarkOptions): void {
+    this._checkOpen("add a watermark");
     const mode = options.mode ?? "overlay";
 
     // Validate BEFORE mutating any state: VML header/footer images use
@@ -944,6 +1148,8 @@ class WorksheetWriter {
           "Use a regular Workbook worksheet, or use overlay mode when streaming."
       );
     }
+
+    this._checkImage("WorksheetWriter.addWatermark", options.imageId);
 
     // Remove existing watermark entries (both stored type tags)
     this._media = this._media.filter(m => m._watermarkTag !== true);
@@ -980,7 +1186,7 @@ class WorksheetWriter {
   }
 
   /**
-   * Get the current watermark configuration.
+   * Get the current watermark configuration, or `null` when the sheet has none.
    */
   getWatermark(): WatermarkOptions | null {
     return this._watermark;
@@ -1055,7 +1261,28 @@ class WorksheetWriter {
 
   // =========================================================================
   // Worksheet Protection
-  async protect(password?: string, options?: Partial<WorksheetProtection>): Promise<void> {
+  /**
+   * Protect the sheet, optionally with a password — the same options object
+   * `Worksheet.protect(ws, { password, ...flags })` takes.
+   */
+  protect(options?: ProtectSheetOptions): Promise<void>;
+  /**
+   * @deprecated Pass the password in the options object: `protect({ password, ...options })`.
+   * Removed in 1.0.
+   */
+  protect(password: string | undefined, options?: Partial<WorksheetProtection>): Promise<void>;
+  async protect(
+    passwordOrOptions?: string | ProtectSheetOptions,
+    legacyOptions?: Partial<WorksheetProtection>
+  ): Promise<void> {
+    // Checked as `Worksheet.protect` checks it: `{ password: 42 }` used to be hashed as the text "42".
+    checkProtectCall(
+      "WorksheetWriter.protect",
+      passwordOrOptions,
+      legacyOptions,
+      SHEET_PROTECTION_FLAGS
+    );
+    const [password, options] = splitPasswordOptions(passwordOrOptions, legacyOptions);
     // Synchronous pre-set so callers that don't await still see sheetProtection
     // before commit() (the original code was synchronous on the no-password path).
     this.sheetProtection = { sheet: true };
@@ -1110,7 +1337,13 @@ class WorksheetWriter {
     xmlBuf.addText(xform.sheetFormatProperties.toXml(sheetFormatPropertiesModel));
   }
 
+  /** Refuse a plain setting (`pageSetup`, `views`, …) the format cannot hold before any of it is written. */
+  private _checkSettings(): void {
+    checkSheetSettings(`Write XLSX (worksheet ${JSON.stringify(this.name)})`, this);
+  }
+
   private _writeOpenWorksheet(): void {
+    this._checkSettings();
     xmlBuffer.reset();
 
     xmlBuffer.addText('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
@@ -1150,9 +1383,26 @@ class WorksheetWriter {
    * `tables` above. That is the whole reason there is no second adapter here: merges, panes, views, page setup,
    * conditional formats, hyperlinks and the rest are read by `worksheetPartOptionsFromModel`, the same function
    * the buffered writer uses, so a field added there reaches this path without an edit.
+   *
+   * @internal This sheet's model as the XLSB package reads it.
+   *
+   * `getSheetModel` sees `_media`, the placed pictures. A background is kept apart in `_background`, because the XLSX
+   * path writes it as a `<picture>` of its own; the binary writer finds it among the media, as it does for a buffered
+   * sheet, so it is added here — or the medium is written and nothing in the sheet names it.
    */
-  private _xlsbSheetOptions(): Omit<WriteWorksheetPartOptions, "rows" | "omitDimension"> {
+  xlsbModel(): ReturnType<typeof getSheetModel> {
     const model = getSheetModel(this as unknown as Parameters<typeof getSheetModel>[0]);
+    const imageId = this._background?.imageId;
+    return imageId === undefined
+      ? model
+      : {
+          ...model,
+          media: [...(model.media ?? []), { type: "background", imageId: String(imageId) }]
+        };
+  }
+
+  private _xlsbSheetOptions(): Omit<WriteWorksheetPartOptions, "rows" | "omitDimension"> {
+    const model = this.xlsbModel();
     // The formula context comes from the workbook, not from this sheet: an `ixti` indexes the workbook's sheet list.
     // Fetched per call rather than captured, because `addWorksheet` runs between sheet commits — see
     // `WorkbookWriter.xlsbFormulaContext`.
@@ -1191,14 +1441,54 @@ class WorksheetWriter {
     this._retainedComments.push(
       ...commentsFromModel({ rows: [model] } as unknown as Parameters<typeof commentsFromModel>[0])
     );
+    // **Hyperlinks too, and for the same reason.** `BrtHLink` is written after the rows, and the rows are gone by then.
+    // An external link's relationship id is claimed here, because the record naming it is inside this part.
+    let external = this._retainedHyperlinks.filter(link => link.location === undefined).length;
+    for (const link of hyperlinksFromModel({ rows: [model] } as unknown as Parameters<
+      typeof hyperlinksFromModel
+    >[0])) {
+      this._retainedHyperlinks.push(
+        link.location === undefined
+          ? { ...link, relationshipId: streamedHyperlinkRelId(external++) }
+          : link
+      );
+    }
+    // The names this row's formulas call have to be in the defined-name list before they are encoded.
+    this._xlsb!.names(rowFormulas([model] as never));
     for (const sheetRow of sheetRowsFromModel(
       { rows: [model] } as unknown as Parameters<typeof sheetRowsFromModel>[0],
       // **The workbook's date system, not a literal `false`.** A serial is four years and a day out under the wrong
       // epoch, and the workbook part written at commit states the real setting — so the package disagreed with itself.
       // See `WorkbookWriter.date1904Flag`.
-      this._workbook.date1904Flag?.() ?? false
+      this._workbook.date1904Flag?.() ?? false,
+      this._unsharedFormulas,
+      this._arrayRanges
     )) {
-      this._xlsb!.row(sheetRow);
+      // The followers of an array range over later rows: written with their row, never ahead of it, because
+      // MS-XLSB wants each row once and in ascending order.
+      if (sheetRow.row !== model.number - 1) {
+        const pending = this._pendingRows.get(sheetRow.row);
+        this._pendingRows.set(
+          sheetRow.row,
+          pending === undefined ? sheetRow : withFollowers(pending, sheetRow)
+        );
+        continue;
+      }
+      this._flushPendingRows(sheetRow.row);
+      const pending = this._pendingRows.get(sheetRow.row);
+      this._pendingRows.delete(sheetRow.row);
+      this._xlsb!.row(pending === undefined ? sheetRow : withFollowers(sheetRow, pending));
+    }
+  }
+
+  /** Write the held rows above `before` (all of them when omitted), in ascending order. */
+  private _flushPendingRows(before = Infinity): void {
+    for (const row of [...this._pendingRows.keys()].sort((left, right) => left - right)) {
+      if (row >= before) {
+        break;
+      }
+      this._xlsb!.row(this._pendingRows.get(row)!);
+      this._pendingRows.delete(row);
     }
   }
 
@@ -1231,15 +1521,52 @@ class WorksheetWriter {
         // serial against the 1900 epoch while the workbook part declared 1904 — four years and a day of silent
         // error, in the direction that makes the file wrong rather than merely different. The XLSB branch of
         // this class already reads it; see `WorkbookWriter.date1904Flag`.
-        date1904: this._workbook.date1904Flag?.() ?? false
+        date1904: this._workbook.date1904Flag?.() ?? false,
+        // A streamed sheet holds no table, so an unnamed this-row reference is outside every table: `CellXform` writes
+        // the cell's cached value without the formula, and the loss is reported below — the buffered writer's rule,
+        // through the same lookup.
+        tableNameAt: STREAMED_SHEET_TABLES,
+        // Kept across rows: the master that claims a cell may have arrived rows earlier.
+        arrayRanges: this._xlsxArrayRanges,
+        // A formula Excel would intersect where this library does not is written as a dynamic array — see `CellXform`.
+        needsArrayEvaluation,
+        // A formula Excel will not open is written as its cached value, and reported below — see `CellXform`.
+        unwritableFormula: unwritableFormulaReason
       };
+      for (const cell of model.cells ?? []) {
+        const formula = (cell as { formula?: unknown } | undefined)?.formula;
+        if (typeof formula === "string" && hasUnnamedThisRow(formula)) {
+          this._xlsxLosses.push(
+            `${(cell as { address: string }).address}: formula (an unnamed this-row reference outside any table)`
+          );
+        }
+        const address = (cell as { address: string } | undefined)?.address;
+        const reason = typeof formula === "string" ? unwritableFormulaReason(formula) : undefined;
+        const master = (cell as { sharedFormula?: unknown } | undefined)?.sharedFormula;
+        if (reason !== undefined && address !== undefined) {
+          this._xlsxUnwritableMasters.add(address);
+          this._xlsxLosses.push(`${address}: ${reason}`);
+        } else if (typeof master === "string" && this._xlsxUnwritableMasters.has(master)) {
+          this._xlsxLosses.push(
+            `${address}: formula (its shared master ${master} cannot be written)`
+          );
+        }
+      }
       xform.row.prepare(model, options);
-      this.stream.write(xform.row.toXml(model));
+      for (const cell of model.cells ?? []) {
+        const outer = cell === undefined ? undefined : overlappedArrayRange(cell);
+        if (outer !== undefined) {
+          this._xlsxLosses.push(
+            `${(cell as { address: string }).address}: ${overlappingArrayReason(outer)}`
+          );
+        }
+      }
+      this.stream.write(this._withFormulaNames(() => xform.row.toXml(model)));
 
       // Count dynamic array formula cells for metadata generation
       if (model.cells) {
         for (const cell of model.cells) {
-          if (cell && cell.isDynamicArray) {
+          if (cell && writesDynamicArray(cell)) {
             this._workbook.dynamicArrayCount++;
           }
         }
@@ -1285,12 +1612,25 @@ class WorksheetWriter {
     // section is rendered, because the primary <cfRule> references the ext
     // via <x14:id>. This mirrors the non-streaming path where
     // WorkSheetXform.prepare() calls both chains sequentially.
-    xform.conditionalFormattings.prepare(this.conditionalFormatting, options);
-    const extModel = { conditionalFormattings: this.conditionalFormatting };
+    // A rule whose formula Excel would not open is left out and reported, as the buffered writer does.
+    this._writtenConditionalFormatting = writableConditionalFormattings(
+      this.conditionalFormatting,
+      unwritableFormulaReason,
+      "",
+      this._xlsxLosses
+    );
+    const written = this._writtenConditionalFormatting;
+    xform.conditionalFormattings.prepare(written, options);
+    const extModel = { conditionalFormattings: written };
     xform.extLst.prepare(extModel);
 
     // Render primary section (position: after hyperlinks, before dataValidations)
-    this.stream.write(xform.conditionalFormattings.toXml(this.conditionalFormatting));
+    this.stream.write(this._withFormulaNames(() => xform.conditionalFormattings.toXml(written)));
+  }
+
+  /** Render with the workbook's defined names in force — see `WorkbookWriterLike.formulaNames`. */
+  private _withFormulaNames<T>(render: () => T): T {
+    return withFormulaNames(this._workbook.formulaNames?.(), render);
   }
 
   /**
@@ -1302,8 +1642,8 @@ class WorksheetWriter {
    * The prepare phase was already done in _writeConditionalFormatting().
    */
   private _writeExtLst(): void {
-    const model = { conditionalFormattings: this.conditionalFormatting };
-    this.stream.write(xform.extLst.toXml(model));
+    const model = { conditionalFormattings: this._writtenConditionalFormatting };
+    this.stream.write(this._withFormulaNames(() => xform.extLst.toXml(model)));
   }
 
   private _writeIgnoredErrors(): void {
@@ -1326,10 +1666,17 @@ class WorksheetWriter {
     // was still converting `type: "date"` bounds against 1900 while its own cells used 1904 — the bound landed
     // 1,462 days from the cells it constrained. `toXml` cannot carry the argument, so the render is done here.
     const writer = new XmlWriter();
-    xform.dataValidations.render(
-      writer,
-      this.dataValidations.model,
-      this._workbook.date1904Flag?.() ?? false
+    this._withFormulaNames(() =>
+      xform.dataValidations.render(
+        writer,
+        writableDataValidations(
+          this.dataValidations.model,
+          unwritableFormulaReason,
+          "",
+          this._xlsxLosses
+        ),
+        this._workbook.date1904Flag?.() ?? false
+      )
     );
     this.stream.write(writer.xml);
   }
@@ -1452,3 +1799,26 @@ class WorksheetWriter {
 
 export { WorksheetWriter };
 export type { WriterImageModel };
+
+/**
+ * A streamed row is a list (by column), an object (by column key), or nothing — as `Row.add` takes it — and each value
+ * is one a cell can hold. Checked before the row exists: a bare number or string used to add an empty row and lose the
+ * value, and a refused value used to leave a half-written row behind.
+ */
+function checkStreamRow(where: string, argument: string, value: unknown): void {
+  if (value === null || value === undefined) {
+    return;
+  }
+  if (typeof value !== "object" || value instanceof Date) {
+    throw new ExcelArgumentError(
+      argument,
+      `${where}: ${argument} must be an array of cell values, an object keyed by column key, or nothing; got ${typeof value}.`
+    );
+  }
+  for (const [key, cell] of Object.entries(value)) {
+    checkCellValue(cell, {
+      where,
+      field: Array.isArray(value) ? `${argument}[${key}]` : `${argument}.${key}`
+    });
+  }
+}

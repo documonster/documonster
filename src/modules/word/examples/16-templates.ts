@@ -7,9 +7,10 @@
  *   - `{{#each items}} … {{/each}}` loops with `{{this}}` and item paths
  *   - Custom delimiters
  *   - Image / rich-text / sub-document / chart / HTML chunk placeholders
- *   - listTemplateTags() — introspection
- *   - fillTemplateFromSource using createJsonDataSource / createXmlDataSource / createCsvDataSource
- *   - patchDocument (the lower-level placeholder API)
+ *   - Template.listTags() — introspection
+ *   - Template.fillFromSource using createJsonDataSource / createXmlDataSource / createCsvDataSource
+ *   - Package.patch (the lower-level placeholder API)
+ *   - Template.isChart — tell a chart value from other rich values
  *   - Edge case: missing variable in non-strict mode, nested loops, deep paths
  *
  * Output: tmp/word-examples/16-templates/...
@@ -18,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Template, Units } from "../index";
+import { Document, Build, Io, Package, Template, TemplateError, Units } from "../index";
 import type { DocxDocument } from "../index";
 
 const outDir = path.resolve(
@@ -64,7 +65,7 @@ function buildTemplate(): DocxDocument {
 
   Document.addHeading(d, "Notes", 2);
   // Image, rich-text and HTML-chunk placeholders are recognised by
-  // fillTemplateEnhanced only when they occupy a paragraph on their own.
+  // `Template.fill` with `richPlaceholders: true` only when they occupy a paragraph on their own.
   //   {{%path}} → image (TemplateImage)
   //   {{&path}} → rich text (Run[])
   //   {{!path}} → HTML chunk (TemplateHtmlChunk)
@@ -73,7 +74,7 @@ function buildTemplate(): DocxDocument {
   Document.addParagraph(d, "Custom rich text:");
   Document.addParagraph(d, "{{&greeting}}");
   Document.addParagraph(d, "{{? missing }}"); // non-strict resolves to empty
-  return Document.build(d);
+  return d;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,10 +82,10 @@ function buildTemplate(): DocxDocument {
 // ---------------------------------------------------------------------------
 {
   const tpl = buildTemplate();
-  // listTemplateTags requires the template to use simple {{...}}; placeholders
+  // Template.listTags requires the template to use simple {{...}}; placeholders
   // with leading '%' / '!' / '?' are still tags, so the listing helps when
   // designing the data shape.
-  const tags = Template.listTemplateTags(tpl);
+  const tags = Template.listTags(tpl);
   console.log(
     `  detected ${tags.length} template tags, types: ${[...new Set(tags.map(t => t.type))].join(", ")}`
   );
@@ -99,7 +100,7 @@ function buildTemplate(): DocxDocument {
   const tax = +(subtotal * 0.1).toFixed(2);
   const grandTotal = +(subtotal + tax).toFixed(2);
 
-  const filled = Template.fillTemplate(
+  const filled = Template.fill(
     tpl,
     {
       customer: { name: "Acme Corp" },
@@ -111,25 +112,25 @@ function buildTemplate(): DocxDocument {
       tax,
       grandTotal
       // %logo and !greeting are richer placeholder kinds only supported by
-      // fillTemplateEnhanced (see test 2 below). The basic fillTemplate
+      // `richPlaceholders: true` (see test 2 below). The basic fill
       // engine does plain text substitution only — passing them here would
       // serialise the object as JSON into the document body.
     },
-    { strict: false }
+    { strict: false, richPlaceholders: true }
   );
 
   const buf = await Io.toBuffer(filled);
-  fs.writeFileSync(path.join(outDir, "01-fillTemplate.docx"), buf);
-  console.log(`  → 01-fillTemplate.docx (${buf.length} bytes)`);
+  fs.writeFileSync(path.join(outDir, "01-Template.fill.docx"), buf);
+  console.log(`  → 01-Template.fill.docx (${buf.length} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
-// 2. fillTemplateEnhanced — supports image / richText / subDocument /
-//    chart / HTML chunk values that the basic fillTemplate doesn't.
+// 2. Template.fill with richPlaceholders — supports image / richText / subDocument /
+//    chart / HTML chunk values that the basic fill doesn't.
 // ---------------------------------------------------------------------------
 {
   const tpl = buildTemplate();
-  const result = Template.fillTemplateEnhanced(
+  const result = Template.fill(
     tpl,
     {
       customer: { name: "Sparse Co." },
@@ -165,11 +166,7 @@ function buildTemplate(): DocxDocument {
   Document.useDefaultStyles(d);
   Document.addHeading(d, "Hello <% who %>", 1);
   Document.addParagraph(d, "Today is <% date %>.");
-  const filled = Template.fillTemplate(
-    Document.build(d),
-    { who: "World", date: "Friday" },
-    { delimiters: ["<%", "%>"] }
-  );
+  const filled = Template.fill(d, { who: "World", date: "Friday" }, { delimiters: ["<%", "%>"] });
   const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "03-custom-delimiters.docx"), buf);
   console.log(`  → 03-custom-delimiters.docx (${buf.length} bytes)`);
@@ -190,7 +187,7 @@ function buildTemplate(): DocxDocument {
     tax: 1,
     grandTotal: 11
   });
-  const filled = Template.fillTemplateFromSource(tpl, json, { strict: false });
+  const filled = Template.fillFromSource(tpl, json, { strict: false });
   const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "04-json-source.docx"), buf);
   console.log(`  → 04-json-source.docx (${buf.length} bytes)`);
@@ -208,7 +205,7 @@ function buildTemplate(): DocxDocument {
       <tax>2</tax>
       <grandTotal>22</grandTotal>
     </root>`);
-  const filled = Template.fillTemplateFromSource(tpl, xml, { strict: false });
+  const filled = Template.fillFromSource(tpl, xml, { strict: false });
   const buf = await Io.toBuffer(filled);
   fs.writeFileSync(path.join(outDir, "05-xml-source.docx"), buf);
   console.log(`  → 05-xml-source.docx (${buf.length} bytes)`);
@@ -225,7 +222,7 @@ function buildTemplate(): DocxDocument {
   );
   const data = csvSource.getData();
   const tpl = buildTemplate();
-  const filled = Template.fillTemplate(
+  const filled = Template.fill(
     tpl,
     {
       customer: { name: "CSV Co." },
@@ -245,13 +242,13 @@ function buildTemplate(): DocxDocument {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Round-trip: package the template, then patchDocument with the
+// 5. Round-trip: package the template, then Package.patch with the
 //    lower-level (non-template) placeholder API to replace simple text
 //    placeholders. This shows the alternative pathway used by some
 //    integrations that need a flat string-replacement model.
 // ---------------------------------------------------------------------------
 {
-  // Use a template whose ONLY placeholders are the ones we patch — patchDocument
+  // Use a template whose ONLY placeholders are the ones we patch — Package.patch
   // is a flat literal-string replacement API and does not understand template
   // control syntax ({{#if}}, {{#each}}, …). Feeding it the full invoice template
   // would leave all the control/loop tags unresolved in the output (they would
@@ -262,22 +259,21 @@ function buildTemplate(): DocxDocument {
   Document.addHeading(d, "Invoice for {{customer.name}}", 1);
   Document.addParagraph(d, "Date: {{date}}");
   Document.addParagraph(d, "Project: {{project}}");
-  const tpl = Document.build(d);
-  const tplBuf = await Io.toBuffer(tpl);
+  const tplBuf = await Io.toBuffer(d);
   // Round-trip: read it back, then patch with named placeholders that
-  // happen to match the {{...}} tokens. patchDocument doesn't understand
+  // happen to match the {{...}} tokens. Package.patch doesn't understand
   // template syntax — we treat each `{{tag}}` as a literal string. This
   // demonstrates that the same .docx is a valid input to both workflows.
   const round = await Io.read(tplBuf);
-  void round; // unused; kept to demonstrate readDocx works on the template
+  void round; // unused; kept to demonstrate Io.read works on the template
 
-  const out = await Io.patchDocument(tplBuf, [
+  const out = await Package.patch(tplBuf, [
     { placeholder: "{{customer.name}}", content: { type: "text", text: "Patch Co." } },
     { placeholder: "{{date}}", content: { type: "text", text: "patch-date" } },
     { placeholder: "{{project}}", content: { type: "text", text: "patched project" } }
   ]);
-  fs.writeFileSync(path.join(outDir, "07-patchDocument.docx"), out);
-  console.log(`  → 07-patchDocument.docx (${out.length} bytes)`);
+  fs.writeFileSync(path.join(outDir, "07-Package.patch.docx"), out);
+  console.log(`  → 07-Package.patch.docx (${out.length} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +292,7 @@ function buildTemplate(): DocxDocument {
   Document.addParagraph(d, "{{/each}}");
   Document.addParagraph(d, "{{/each}}");
 
-  const filled = Template.fillTemplate(Document.build(d), {
+  const filled = Template.fill(d, {
     regions: [
       {
         name: "North",
@@ -325,10 +321,10 @@ function buildTemplate(): DocxDocument {
 {
   const tpl = buildTemplate();
   try {
-    Template.fillTemplate(tpl, { customer: { name: "Strict Co." } /* most fields missing */ });
+    Template.fill(tpl, { customer: { name: "Strict Co." } /* most fields missing */ });
     console.log("  ERROR: expected TemplateError to be thrown in strict mode");
   } catch (err) {
-    if (err instanceof Template.TemplateError) {
+    if (err instanceof TemplateError) {
       console.log(
         `  TemplateError caught: placeholder=${JSON.stringify(err.placeholder)}, location=${err.location}, tagName=${err.tagName ?? "(none)"}`
       );
@@ -339,9 +335,9 @@ function buildTemplate(): DocxDocument {
 }
 
 // ---------------------------------------------------------------------------
-// 8. isTemplateChart guard — when feeding fillTemplateEnhanced an opaque
-//    `unknown` map, this guard distinguishes a chart-shaped value from
-//    other rich values.
+// 8. Template.isChart guard — when feeding `Template.fill(…, { richPlaceholders:
+//    true })` an opaque `unknown` map, this guard distinguishes a chart-shaped
+//    value from other rich values.
 // ---------------------------------------------------------------------------
 {
   const candidates: unknown[] = [
@@ -351,8 +347,6 @@ function buildTemplate(): DocxDocument {
     "plain string"
   ];
   for (const c of candidates) {
-    console.log(
-      `  isTemplateChart(${JSON.stringify(c).slice(0, 50)}…) → ${Template.isTemplateChart(c)}`
-    );
+    console.log(`  Template.isChart(${JSON.stringify(c).slice(0, 50)}…) → ${Template.isChart(c)}`);
   }
 }

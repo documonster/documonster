@@ -1,5 +1,5 @@
 import { calculateFormulas } from "@excel/core/formula-adapter";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import { createRng } from "@test/rng";
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +29,8 @@ describe("formula workbook state-machine fuzz", () => {
       expect(Cell.getResult(ws, "H1"), `seed ${seed}: SCC`).toBeCloseTo(expectedFixedPoint, 2);
 
       const selected = Cell.getValue(ws, Cell.getValue(ws, "E1") === 1 ? "A3" : "C3");
-      const expectedDynamic = typeof selected === "number" ? selected : undefined;
+      // A formula whose result is an empty cell holds 0, as in Excel.
+      const expectedDynamic = typeof selected === "number" ? selected : 0;
       expect(Cell.getResult(ws, "F1"), `seed ${seed}: dynamic branch`).toBe(expectedDynamic);
 
       const blockRow = rng.int(2, Math.max(2, leftRows));
@@ -49,11 +50,11 @@ describe("formula workbook state-machine fuzz", () => {
       expect(Cell.getResult(ws, "A1"), `seed ${seed}: spill restored`).toBe(1);
 
       if (rng.bool()) {
-        Worksheet.spliceRows(ws, 1, 0, []);
+        Row.splice(ws, 1, 0, []);
         calculateFormulas(wb);
         expect(Cell.getResult(ws, "A2"), `seed ${seed}: row splice`).toBe(1);
       } else {
-        Worksheet.spliceColumns(ws, 1, 0, []);
+        Column.splice(ws, 1, 0, []);
         calculateFormulas(wb);
         expect(Cell.getResult(ws, "B1"), `seed ${seed}: column splice`).toBe(1);
       }

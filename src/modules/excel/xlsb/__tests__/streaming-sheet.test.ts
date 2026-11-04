@@ -24,7 +24,12 @@ import { recordSpec } from "@excel/xlsb/spec/records";
 import { CellFormatTable } from "@excel/xlsb/styles";
 import { SharedStringTable } from "@excel/xlsb/write/shared-strings";
 import type { SheetRow } from "@excel/xlsb/write/types";
-import { encodeRowRecords, sortedRows, writeWorksheetPart } from "@excel/xlsb/write/worksheet";
+import {
+  createMasterLedger,
+  encodeRowRecords,
+  sortedRows,
+  writeWorksheetPart
+} from "@excel/xlsb/write/worksheet";
 import { describe, expect, it } from "vitest";
 
 /** The record names in a serialised sheet part, in order. */
@@ -100,12 +105,14 @@ describe("encodeRowRecords", () => {
     const formats = new CellFormatTable();
     const unsupported: string[] = [];
     const found: string[] = [];
+    const masters = createMasterLedger();
     for (const row of sortedRows(rows)) {
       for (const emitted of encodeRowRecords(row, {
         strings,
         formats,
         formulaContext: {},
-        unsupported
+        unsupported,
+        masters
       })) {
         found.push(recordSpec(emitted.id)?.name ?? `?${emitted.id}`);
       }
@@ -167,7 +174,8 @@ describe("encodeRowRecords", () => {
         strings: new SharedStringTable(),
         formats: new CellFormatTable(),
         formulaContext: {},
-        unsupported
+        unsupported,
+        masters: createMasterLedger()
       }
     );
     expect(unsupported.length).toBeGreaterThan(0);

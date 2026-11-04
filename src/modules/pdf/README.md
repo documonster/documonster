@@ -2,17 +2,17 @@
 
 [中文](README_zh.md)
 
-A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with `Pdf.create()` or the `Pdf.fromExcel()` bridge. **Read** any PDF with `Pdf.read()` — extract text, images, and metadata from all major PDF versions. **Build** free-form PDFs with `Pdf.Builder` — text, vector graphics, SVG paths, annotations, and form fields. **Edit** existing PDFs with `Pdf.Editor` — overlay content, fill forms, add/remove/rotate pages, merge documents, and sign digitally. All APIs are async and yield to the event loop between pages to avoid blocking.
+A full-featured, zero-dependency PDF engine built from scratch in pure TypeScript. **Write** PDFs with `Pdf.fromTable()` or the `Pdf.fromExcel()` bridge. **Read** any PDF with `Pdf.extract()` — extract text, images, and metadata from all major PDF versions. **Build** free-form PDFs with `Pdf.Builder` — text, vector graphics, SVG paths, annotations, and form fields. **Edit** existing PDFs with `Pdf.Editor` — overlay content, fill forms, add/remove/rotate pages, merge documents, and sign digitally. All APIs are async and yield to the event loop between pages to avoid blocking.
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-// Write — standalone:      Pdf.create(rows)
+// Write — standalone:      Pdf.fromTable(rows)
 // Write — from Excel:      await Pdf.fromExcel(workbook)
-// Read — text/images/meta: Pdf.read(bytes)
+// Read — text/images/meta: Pdf.extract(bytes)
 // Build — free-form:       new Pdf.Builder()
-// Edit — overlay/forms:    new Pdf.Editor() / Pdf.Editor.load(bytes)
-// Sign — digital sigs:     Pdf.sign(...) / Pdf.verifySignature(...)
+// Edit — overlay/forms:    Pdf.Editor.read(bytes)
+// Sign — digital sigs:     builder.sign(...) / Pdf.verifySignatures(bytes)
 ```
 
 ## Features
@@ -21,7 +21,7 @@ import { Pdf } from "documonster/pdf";
 
 - **Zero Dependencies** — Pure TypeScript PDF generation, no external libraries
 - **PDF 2.0** — Writes modern PDF 2.0 format
-- **Standalone Engine** — Use `Pdf.create()` with plain arrays and objects, no Excel dependency
+- **Standalone Engine** — Use `Pdf.fromTable()` with plain arrays and objects, no Excel dependency
 - **Excel Bridge** — One-line `Pdf.fromExcel(workbook)` for Excel-to-PDF conversion
 - **Cross-Platform** — Same API in Node.js and browsers
 - **Full Styling** — Fonts, colors, borders, fills, alignment, merged cells
@@ -81,7 +81,7 @@ import { Pdf } from "documonster/pdf";
 
 ### Digital Signatures
 
-- **Signature Verification** — Verify RSA PKCS#1 v1.5 + SHA-256 signatures with full PKCS#7/CMS parsing
+- **Signature Verification** — `Pdf.verifySignatures(bytes)` finds every signature field and checks each one's integrity (digest, RSA, `/ByteRange`, whole-file coverage) and reports the certificate it carries — no trust evaluation; `Pdf.Signature.verify` checks one signature you located yourself
 - **Signature Creation** — Create CMS SignedData signatures with ByteRange placeholder/backfill
 - **ASN.1 DER Codec** — Parse and encode ASN.1 structures (shared by verify and sign)
 - **X.509 Certificate** — Extract public keys from DER-encoded certificates
@@ -98,7 +98,7 @@ import { Pdf } from "documonster/pdf";
 import { readFileSync } from "fs";
 
 const bytes = readFileSync("document.pdf");
-const result = await Pdf.read(bytes);
+const result = await Pdf.extract(bytes);
 
 // All text
 console.log(result.text);
@@ -141,26 +141,26 @@ for (const bm of result.bookmarks) {
 ### Read Encrypted PDF
 
 ```typescript
-const result = await Pdf.read(bytes, { password: "secret" });
+const result = await Pdf.extract(bytes, { password: "secret" });
 ```
 
 ### Selective Extraction
 
 ```typescript
 // Only pages 1 and 3, text only (no images)
-const result = await Pdf.read(bytes, {
+const result = await Pdf.extract(bytes, {
   pages: [1, 3],
   extractImages: false
 });
 
 // Extract bookmarks (outline tree)
-const result = await Pdf.read(bytes, { extractBookmarks: true });
+const result = await Pdf.extract(bytes, { extractBookmarks: true });
 for (const bm of result.bookmarks) {
   console.log(bm.title, `→ page ${bm.pageIndex + 1}`);
 }
 
 // Extract tables (heuristic text-position detection)
-const result = await Pdf.read(bytes, { extractTables: true });
+const result = await Pdf.extract(bytes, { extractTables: true });
 for (const page of result.pages) {
   for (const table of page.tables) {
     for (const row of table.rows) {
@@ -180,12 +180,12 @@ import { Pdf } from "documonster/pdf";
 
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Sales");
-Worksheet.setColumns(sheet, [
+Column.setDefinitions(sheet, [
   { header: "Product", key: "product", width: 20 },
   { header: "Revenue", key: "revenue", width: 15 }
 ]);
-Worksheet.addRow(sheet, { product: "Widget", revenue: 1000 });
-Worksheet.addRow(sheet, { product: "Gadget", revenue: 2500 });
+Row.add(sheet, { product: "Widget", revenue: 1000 });
+Row.add(sheet, { product: "Gadget", revenue: 2500 });
 Column.setStyle(sheet, "revenue", { numFmt: "$#,##0.00" });
 
 const pdf = await Pdf.fromExcel(workbook);
@@ -206,8 +206,7 @@ window.open(url);
 import { Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
-const workbook = Workbook.create();
-await Workbook.readFile(workbook, "report.xlsx");
+const workbook = await Workbook.readFile("report.xlsx");
 
 const pdf = await Pdf.fromExcel(workbook, {
   showGridLines: true,
@@ -224,14 +223,14 @@ Generate PDFs from plain data — no Excel module, no Map objects, no boilerplat
 import { Pdf } from "documonster/pdf";
 
 // Simplest — pass a 2D array
-const bytes = await Pdf.create([
+const bytes = await Pdf.fromTable([
   ["Product", "Revenue"],
   ["Widget", 1000],
   ["Gadget", 2500]
 ]);
 
 // With options
-const bytes = await Pdf.create(
+const bytes = await Pdf.fromTable(
   [
     ["Name", "Score"],
     ["Alice", 95],
@@ -241,7 +240,7 @@ const bytes = await Pdf.create(
 );
 
 // Multiple sheets
-const bytes = await Pdf.create({
+const bytes = await Pdf.fromTable({
   sheets: [
     {
       name: "Sales",
@@ -261,7 +260,7 @@ const bytes = await Pdf.create({
 });
 
 // Column widths + styled cells
-const bytes = await Pdf.create({
+const bytes = await Pdf.fromTable({
   name: "Report",
   columns: [{ width: 25 }, { width: 15 }],
   data: [
@@ -275,13 +274,18 @@ const bytes = await Pdf.create({
 });
 ```
 
+A `Date` cell is shown from its UTC fields, as `Pdf.fromExcel` shows a date cell with no
+number format: `2024-01-15` at midnight UTC, `2024-01-15 13:05:09` otherwise — the same on
+every machine (it used to be `toLocaleDateString()`, which varied by locale and, west of UTC,
+by day). Build dates with `Date.UTC(…)`.
+
 ### Watermarks
 
-Add text or image watermarks to any PDF generated via `Pdf.create()` or `Pdf.fromExcel()`:
+Add text or image watermarks to any PDF generated via `Pdf.fromTable()` or `Pdf.fromExcel()`:
 
 ```text
 // Text watermark — centered, semi-transparent, rotated
-const bytes = await Pdf.create(data, {
+const bytes = await Pdf.fromTable(data, {
   watermark: {
     type: "text",
     text: "CONFIDENTIAL",
@@ -309,7 +313,7 @@ const bytes = await Pdf.fromExcel(workbook, {
 });
 
 // Watermark on specific pages or sheets only
-const bytes = await Pdf.create(data, {
+const bytes = await Pdf.fromTable(data, {
   watermark: {
     type: "text",
     text: "DRAFT",
@@ -321,6 +325,12 @@ const bytes = await Pdf.create(data, {
   }
 });
 ```
+
+A `watermark.sheets` name is compared as Excel compares names (ignoring case), and one that names
+no sheet is refused with `PdfArgumentError` — as an unknown name in `sheets` is — rather than
+leaving every page without the watermark. A `watermark.pages` number past the last page matches
+no page and is skipped, as a page number past the end in `Pdf.extract({ pages })` is. `sheets: []`
+selects every visible sheet, like leaving `sheets` out.
 
 ### Build Free-Form PDFs (PdfDocumentBuilder)
 
@@ -365,7 +375,7 @@ page.addFormField({
 // Encryption
 doc.setEncryption({ ownerPassword: "admin", userPassword: "reader" });
 
-const bytes = await doc.build();
+const bytes = await doc.toBuffer();
 ```
 
 ### Edit Existing PDFs (PdfEditor)
@@ -375,7 +385,7 @@ Overlay content, fill forms, merge documents, and manipulate pages:
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-const editor = Pdf.Editor.load(existingPdfBytes);
+const editor = Pdf.Editor.read(existingPdfBytes);
 
 // Overlay text and shapes on page 1
 const page = editor.getPage(0);
@@ -395,54 +405,166 @@ editor.setFormField("name", "Jane Doe");
 editor.setFormField("agree", "Yes");
 
 // Page manipulation
-editor.removePage(2); // Remove page 3
+editor.removePage(2); // Remove page 3 — idempotent; indices name the pages as read and never shift
 editor.rotatePage(0, 90); // Rotate page 1
 editor.addPage(); // Add blank page
 
-// Copy pages from another PDF
+// Copy pages from another PDF — with their annotations and form fields
 editor.copyPagesFrom(otherPdfBytes);
 
+// Document properties: /Info and the XMP packet are updated together
+editor.setMetadata({ title: "Q3 report", author: "Ann; Bob", keywords: "finance, Q3" });
+editor.setMetadata({ subject: null }); // null removes a property (a JSON merge patch)
+
 // Save (full rebuild or incremental append)
-const result = await editor.save();
-const incremental = await editor.saveIncremental(); // preserves original bytes
+const result = await editor.toBuffer();
+const incremental = await editor.toBuffer({ incremental: true }); // preserves original bytes
 ```
 
-On a signed document (`editor.hasSignatures`), `save()`, `sign()` and a
-`saveIncremental()` that must fall back to a full rewrite throw
+On a signed document (`editor.hasSignatures`), `toBuffer()`, `sign()` and a
+`toBuffer({ incremental: true })` that must fall back to a full rewrite throw
 `PdfSignatureInvalidationError` unless you pass `{ invalidateSignatures: true }`.
 (The builder's `doc.setMetadata({ creationDate, modDate })` and the export options of the
-same names fix the dates for reproducible output; the editor keeps the original /CreationDate.)
+same names fix the dates for reproducible output.)
+
+`editor.setMetadata` takes a `PdfMetadataUpdate` — a JSON merge patch: a value sets a field,
+`null` removes it (the `/Info` entry and the XMP property, in whatever form the packet holds
+it), and a field left out is kept. It changes only the fields it is given, in `/Info` and in
+the XMP packet alike; the editor never adds a `/Creator` or `/Producer` of its own, and no date changes
+unless you pass it (pass `modDate` to record the edit). The XMP packet is edited as XML: only
+the `x-default` entry of a title or description is replaced, `author` is split on `;` into
+`dc:creator` entries, and `xmp:MetadataDate` is updated. A packet that cannot be decoded or is
+not XMP is left untouched. A copied page keeps its MediaBox origin, inherited rotation and
+crop box, and its annotations; its form fields join the document's form, and a field name the
+document already uses is refused with `PdfArgumentError` when it is written.
 
 A document counts as signed when a signature field (`/FT /Sig`, possibly
 inherited from a parent field) has a value with `/ByteRange` and `/Contents`;
-`/SigFlags` alone does not. `saveIncremental()` leaves the signed byte range
+`/SigFlags` alone does not. `toBuffer({ incremental: true })` leaves the signed byte range
 intact, but certification (DocMDP) and FieldMDP permissions are **not**
 evaluated — an update a certifying signature forbids is still written.
 
-Encrypted documents: `saveIncremental()` encrypts the appended objects with the
-file's own security handler (RC4, AES-128 or AES-256 R5/R6), so the result opens
-with the same passwords; `save()` writes a **decrypted** copy without `/Encrypt`.
+Encrypted documents stay encrypted, with the file's own security handler (RC4, AES-128 or
+AES-256 R5/R6): `toBuffer({ incremental: true })` encrypts the appended objects with it,
+and a full rewrite — `toBuffer()`, `sign()`, `splitPages()`, or an update that falls back
+— encrypts every object again under the original `/Encrypt` dictionary, key and `/ID`. The
+result opens with the same user and owner passwords and grants the same permissions,
+whichever password the editor was opened with. To write a **decrypted** copy without
+`/Encrypt`, pass `{ encryption: "remove" }`; an update cannot drop encryption, so with
+`incremental: true` that rewrites the file, and with `incremental: "required"` it throws
+`PdfIncrementalUpdateError`. If the `/Encrypt` dictionary is unreadable, a rewrite throws
+`PdfEncryptionError` rather than write the document unencrypted.
+
+The deprecated `save()` writes a decrypted copy, as before — and so does the deprecated
+`saveIncremental()` when it falls back to it; `toBuffer()` keeps the encryption by default.
+Pass `{ encryption: "keep" }` to either to keep it.
+
+A write reflects the edits made before it was called: an edit made while it is in flight,
+or queued behind another write on the same editor, belongs to the next write.
+
+Page indices are 0-based, and one index names each page for the editor's lifetime: `0` to
+`pageCount - 1` are the pages the document was read with, and the pages added with `addPage()`
+or `copyPagesFrom()` are numbered after them, in the order added. `getPage`, `removePage`,
+`rotatePage`, `isPageRemoved` and `splitPages` all take the whole range; any index that names
+no page — out of range, fractional, `NaN`, not a number — throws `PdfStructureError`. Removing
+a page renumbers nothing. `pageCount` stays the number of pages the document was read with;
+`outputPageCount` is the number a write produces now. `getPage` returns one handle per page:
+for a read or copied page it draws over the page's content, for a page added with `addPage()`
+onto that page (the builder `addPage()` returned draws onto it too). Removing an added page
+leaves it out of the output; rotating one sets its `/Rotate`.
+`splitPages({ pageIndices })` and `copyPagesFrom(source, { pageIndices })` name pages, so an
+index that names none — out of range, removed, not an integer — is refused with
+`PdfArgumentError` (field `options.pageIndices[i]`) before anything is written or copied;
+`splitPages` returns one part per index, in order. (Their deprecated positional forms keep
+skipping an index out of range.) A removed page cannot be edited:
+`getPage` and `rotatePage` refuse it, and a page handle — or the builder `addPage()` returned —
+held from before the removal refuses every drawing call, with `PdfArgumentError` — what was drawn on it used to vanish. A form field name
+already in use (in the document, added, or brought by a copied page) is refused by the
+`addFormField` or `copyPagesFrom` call that introduces it; to merge the same form twice (or
+two forms sharing field names), copy with `{ formFields: "drop" }`, which copies the pages and
+their other annotations without the form fields. The readers (`Pdf.extract`,
+`Pdf.Editor.read`, `copyPagesFrom`, `Pdf.verifySignatures` and `Pdf.Signature.*`) take a
+`Uint8Array`, any other `ArrayBufferView` (a Node `Buffer`, a `DataView`) or an `ArrayBuffer`,
+viewed rather than copied.
+
+Text drawn on an editor page is embedded as the builder embeds it: `Pdf.Editor.read` takes the
+builder's font options — `fonts`, `preferSystemFonts`, `textLanguage`,
+`disableFontAutoDiscovery` and `onWarning` — with the same meaning. Without them, characters
+the standard faces cannot encode (Chinese, say) are drawn with a system face found on the host,
+and `onWarning` reports that choice, and any character no face could draw:
+
+```typescript
+const editor = Pdf.Editor.read(existingPdfBytes, {
+  fonts: { default: { regular: notoSansScBytes } },
+  onWarning: message => console.warn(message)
+});
+editor.getPage(0).drawText("机密", { x: 72, y: 72 });
+```
+
+A full rewrite (`toBuffer()`, a removed page, each part of `splitPages()`) keeps the
+document-level entries of the catalog — bookmarks, named destinations, page labels, the open
+action, viewer preferences, optional content, output intents, attachments, the language — and
+adjusts the ones that name pages to the pages written:
+
+| Entry                                        | After a full rewrite                                                                                                                                       |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/Outlines` (bookmarks)                      | A bookmark to a removed page loses its destination; it stays while a bookmark beneath it survives, and is dropped otherwise. Counts and links are rebuilt. |
+| `/Dests`, `/Names /Dests`                    | Named destinations to removed pages are dropped.                                                                                                           |
+| `/PageLabels`                                | Every page keeps its label; an added page continues the numbering before it.                                                                               |
+| `/OpenAction`                                | Dropped when it goes to a removed page.                                                                                                                    |
+| `/ViewerPreferences`                         | Kept; `/PrintPageRange` is renumbered, and dropped when none of its pages is left.                                                                         |
+| `/Threads`                                   | Beads on removed pages are removed and the rest relinked; a thread with no bead left is dropped. Each page keeps its `/B`.                                 |
+| `/StructTreeRoot`, `/MarkInfo`, `/DPartRoot` | Kept while no page is removed, dropped when one is.                                                                                                        |
+| `/Perms`, `/Legal`                           | Dropped: they concern signatures, which a rewrite invalidates.                                                                                             |
+| Everything else                              | Copied as it is.                                                                                                                                           |
+
+A part of `splitPages()` keeps only the bookmarks that lead to its page, with their ancestors.
 
 Cross-reference chains: the update's `/Prev` is the `startxref` offset the reader
 actually parsed. Files whose latest section is an xref stream get an xref-stream
 update; hybrid-reference files (classic trailer with `/XRefStm`) get a classic
 section chained to that trailer, so objects listed only in the `/XRefStm` stream stay
 reachable (ISO 32000-1 §7.5.8.4). If the cross-reference data had to be
-reconstructed (`PdfDocument.xrefRecovered` — e.g. a wrong or damaged `startxref`),
-there is no reliable section to chain onto, so `saveIncremental()` falls back to a
-full `save()` — subject to the same signature guard.
+reconstructed (`PdfDocument.xrefRecovered` — e.g. a wrong or damaged `startxref`, or an
+entry that does not point at the object it names),
+there is no reliable section to chain onto, so `toBuffer({ incremental: true })` falls back to a
+full `toBuffer()` — subject to the same signature guard.
+
+To make any fallback an error instead, pass `{ incremental: "required" }`: it appends
+exactly as `true` does when it can, and otherwise throws `PdfIncrementalUpdateError`
+with the reason, writing nothing.
+
+Filling a field also sets the AcroForm's `/NeedAppearances true` (even where the file
+said `false`). In a **hybrid** form — AcroForm fields plus an XFA packet — it **removes
+`/XFA`**, so XFA-aware viewers show the values the AcroForm now holds rather than the
+stale XFA data. A **dynamic** XFA form (`/NeedsRendering true`, or XFA with no AcroForm
+field tree) is defined only by its XFA, so it is never stripped: saving edited values
+into one throws `PdfXfaFormError` and writes nothing. A save with no edited values keeps
+`/XFA` and `/NeedsRendering` unchanged.
+
+`setFormField` and `setFormFields` take a field the document has — as `getFormFields()`
+lists it — and throw `PdfArgumentError` for one it does not, or for a checkbox or radio
+state its widgets cannot show (`"Off"` or the button's own value). A button is set by its
+appearance state and a name value, so it is drawn checked, not only reported so. A field
+added through the editor must have a name of its own: one the document already uses, or
+two added fields with one name, make the write throw `PdfArgumentError`. The builder
+applies the same rule across its pages.
 
 ### Digital Signatures
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-// Verify a signature
-const result = await Pdf.verifySignature(pdfBytes, signatureHex, byteRange);
-console.log(result.valid, result.coversWholeFile);
+// Verify every signature in a file
+for (const sig of await Pdf.verifySignatures(pdfBytes)) {
+  console.log(sig.fieldName, sig.claimedSigner, sig.intact, sig.coversWholeFile);
+}
 
-// Sign a PDF (requires DER-encoded certificate + PKCS#8 private key)
-const signed = await Pdf.sign(pdfWithPlaceholder, certificate, privateKey);
+// Verify one signature whose /Contents and /ByteRange you already have
+const result = await Pdf.Signature.verify(pdfBytes, signatureHex, byteRange);
+
+// Complete a signature placeholder already in the file (DER certificate + PKCS#8 key)
+const signed = await Pdf.Signature.fillPlaceholder(pdfWithPlaceholder, { certificate, privateKey });
 ```
 
 ---
@@ -484,7 +606,7 @@ src/modules/pdf/
 │   ├── table-extractor — Heuristic table detection from text positions
 │   ├── metadata-reader — Info dict + XMP metadata
 │   ├── reader-utils    — shared reader utility functions
-│   └── pdf-reader      — public API: Pdf.read()
+│   └── pdf-reader      — public API: Pdf.extract()
 ├── types.ts            # PdfWorkbook, PdfSheetData, PdfCellData, etc.
 ├── excel-bridge.ts     # Excel Workbook → PdfWorkbook conversion (ONLY @excel dependency)
 └── index.ts
@@ -499,16 +621,16 @@ The entire PDF engine (core, font, render, reader) has **zero imports from the E
 
 ## Writer Options
 
-`Pdf.create()` accepts `PdfExportOptions`. `Pdf.fromExcel()` accepts
+`Pdf.fromTable()` accepts `PdfExportOptions`. `Pdf.fromExcel()` accepts
 `ExcelToPdfOptions`, which extends the same writer options with an optional,
 strongly typed formula recalculation hook:
 
 ```typescript
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Pdf, type ExcelToPdfOptions } from "documonster/pdf";
 
 const options: ExcelToPdfOptions = {
-  recalculate: calculateFormulas,
+  recalculate: ExcelFormula.calculate,
   fitToPage: true
 };
 const bytes = await Pdf.fromExcel(workbook, options);
@@ -544,18 +666,21 @@ interface PdfExportOptions {
   draft?: boolean; // Omit images and charts (default: sheet's pageSetup)
   errors?: "displayed" | "blank" | "dash" | "NA"; // How error cells print (default: sheet's pageSetup)
   cellComments?: "none" | "atEnd" | "asDisplayed"; // Print comments (default: sheet's pageSetup)
-  sheets?: (string | number)[]; // Select specific sheets by name or 1-based index
+  sheets?: (string | number)[]; // Sheet names; numeric positions are deprecated (see below)
   ignorePrintArea?: boolean; // Export the full used range, ignoring each sheet's print area (default: false)
 
   // Headers & footers
   showSheetNames?: boolean; // Show sheet name at top of each page
   showPageNumbers?: boolean; // Show "Page X of Y" at bottom of each page
 
-  // Metadata
-  title?: string;
-  author?: string;
-  subject?: string;
-  creator?: string; // PDF producer string (default: "documonster")
+  // Metadata — shared by every converter (PdfDocumentOptions, below)
+  title?: string; // Default: the workbook's title
+  author?: string; // Default: the workbook's creator
+  subject?: string; // Default: the workbook's subject
+  keywords?: string; // Default: the workbook's keywords
+  creator?: string; // /Creator (default: "documonster")
+  creationDate?: Date; // Fix it for byte-reproducible output (default: the time of export)
+  modDate?: Date;
 
   // Font
   font?: Uint8Array; // Legacy single TrueType font shortcut
@@ -581,6 +706,43 @@ interface PdfExportOptions {
 }
 ```
 
+### Options every converter shares
+
+`Pdf.fromTable`, `Pdf.fromExcel`, `Pdf.fromDocx` and `Pdf.fromChart` all take
+`PdfDocumentOptions` — `title`, `author`, `subject`, `keywords`, `creator`, `creationDate`,
+`modDate`, `encryption`, `fonts`, `preferSystemFonts`, `disableFontAutoDiscovery`,
+`textLanguage` and `onWarning` — with the same names, meanings and checks. So a Word
+document or a single chart can be encrypted, carry metadata, and come out byte-for-byte
+reproducible (fix `creationDate`) just like a workbook:
+
+```typescript
+import { Pdf, type PdfDocumentOptions } from "documonster/pdf";
+
+const common: PdfDocumentOptions = {
+  author: "Finance",
+  keywords: "q3, report",
+  creationDate: new Date("2026-01-01T00:00:00Z"),
+  encryption: { ownerPassword: "owner", userPassword: "open" },
+  disableFontAutoDiscovery: true
+};
+await Pdf.fromExcel(workbook, common);
+await Pdf.fromDocx(doc, { ...common, margins: { top: 54 }, defaultFontFamily: "Times-Roman" });
+await Pdf.fromChart(chart, { ...common, title: "Revenue" });
+```
+
+Each metadata field `Pdf.fromExcel` leaves out comes from the workbook's own properties, and
+each `Pdf.fromDocx` leaves out from the document's core properties (`title`, `creator`,
+`subject`, `keywords`). `Pdf.fromDocx` takes its margins as one `margins: { top, right,
+bottom, left }` object and its default face as `defaultFontFamily`, as `Pdf.fromExcel` does.
+`Pdf.fromChart`'s `title` is the PDF's title: the chart keeps drawing its own on every path.
+
+Select sheets by **name** (`sheets: ["Summary", "Q1"]`, compared ignoring case; an unknown
+name throws `PdfArgumentError`). Numeric positions are deprecated (removed in 1.0): they are
+1-based here but 0-based in `WordExcel.toDocx` and sheet ids in `Workbook.getWorksheet`, so the
+same number picks a different sheet in each. They still work exactly as before; a call
+passing a number is struck through in an editor, while options typed as the published
+`ExcelToPdfOptions` are not (they may hold only names).
+
 ## Reader Options
 
 ```typescript
@@ -599,8 +761,18 @@ interface ReadPdfOptions {
 ```
 
 Hitting `maxDecodedBytes`, the /Filter chain limit (16) or the object nesting limit throws
-`PdfLimitExceededError` (a `PdfStructureError`) from `Pdf.read`; it is never
-downgraded to a page warning, so a result is never silently truncated.
+`PdfLimitExceededError` (a `PdfStructureError`) from `Pdf.extract`; it is never
+downgraded to a page warning, so a result is never silently truncated. Its `limit` says
+which one fired (`"maxDecodedBytes"`, `"filterChain"` or `"depth"`) and `allowed` its value.
+`maxDecodedBytes` itself must be a number `>= 0` (or `Infinity`); anything else is refused
+with `PdfArgumentError` (field `options.maxDecodedBytes`).
+
+`Pdf.extract` and `Pdf.verifySignatures` read a `Blob` — a browser `File` — as well as bytes
+(`Uint8Array`, another `ArrayBufferView`, an `ArrayBuffer`):
+
+```typescript
+const result = await Pdf.extract(input.files[0]);
+```
 
 ### Reader Result
 
@@ -974,7 +1146,7 @@ The reader automatically detects and decrypts:
 
 ```typescript
 // Automatically detects encryption type
-const result = await Pdf.read(encryptedBytes, { password: "secret" });
+const result = await Pdf.extract(encryptedBytes, { password: "secret" });
 ```
 
 ---
@@ -1020,7 +1192,7 @@ The same configuration is accepted by every writing bridge and the builder:
 
 ```typescript
 // Standalone data or Excel workbook
-const tablePdf = await Pdf.create(rows, { fonts });
+const tablePdf = await Pdf.fromTable(rows, { fonts });
 const workbookPdf = await Pdf.fromExcel(workbook, { fonts });
 
 // Word document; the same fonts drive layout measurement and PDF rendering
@@ -1035,7 +1207,7 @@ const page = builder.addPage();
 page.drawText("Report", { x: 72, y: 760, fontFamily: "Noto Sans CJK SC" });
 ```
 
-`font?: Uint8Array` remains available on `Pdf.create()` and `Pdf.fromExcel()` as the legacy single-font shortcut. It behaves as one default regular face and cannot be combined with `fonts`. `Builder.embedFont(bytes)` is the corresponding compatibility method; it replaces any prior Builder font configuration. `embedFont()` and `embedFonts()` must run before the first text command across all pages. Calling `addPage()` first is allowed if no text has yet been drawn.
+`font?: Uint8Array` remains available on `Pdf.fromTable()` and `Pdf.fromExcel()` as the legacy single-font shortcut. It behaves as one default regular face and cannot be combined with `fonts`. `Builder.embedFont(bytes)` is the corresponding compatibility method; it replaces any prior Builder font configuration. `embedFont()` and `embedFonts()` must run before the first text command across all pages. Calling `addPage()` first is allowed if no text has yet been drawn.
 
 If no configured face covers a character, the PDF displays that face's `.notdef` glyph, but retains the original Unicode sequence in ToUnicode for copy, search, accessibility, and extraction. One embedded face can encode at most 65,535 distinct Unicode sequences per PDF.
 
@@ -1094,7 +1266,7 @@ Selection is therefore by language first, coverage second:
 
 ```typescript
 await Pdf.fromExcel(workbook, { textLanguage: "zh-Hans" }); // or zh-Hant, ja, ko
-new Pdf.Builder().textLanguage("zh-Hant");
+new Pdf.Builder().setTextLanguage("zh-Hant");
 ```
 
 Left unset, the language is inferred from the content: a single kana settles
@@ -1231,7 +1403,7 @@ pnpm example --filter pdf-signatures
 
 ## API Reference
 
-### `Pdf.read(data, options?)`
+### `Pdf.extract(data, options?)`
 
 Read a PDF file and extract text, images, and metadata. Returns `Promise<ReadPdfResult>`.
 
@@ -1239,7 +1411,7 @@ Read a PDF file and extract text, images, and metadata. Returns `Promise<ReadPdf
 import { Pdf } from "documonster/pdf";
 
 // Basic
-const result = await Pdf.read(pdfBytes);
+const result = await Pdf.extract(pdfBytes);
 console.log(result.text);
 console.log(result.pages[0].images);
 console.log(result.pages[0].annotations);
@@ -1247,32 +1419,32 @@ console.log(result.formFields);
 console.log(result.metadata);
 
 // Encrypted
-const result = await Pdf.read(pdfBytes, { password: "secret" });
+const result = await Pdf.extract(pdfBytes, { password: "secret" });
 
 // Selective
-const result = await Pdf.read(pdfBytes, {
+const result = await Pdf.extract(pdfBytes, {
   pages: [1, 3],
   extractImages: false,
   extractMetadata: false
 });
 ```
 
-### `Pdf.create(input, options?)`
+### `Pdf.fromTable(input, options?)`
 
 Generate a PDF from plain data. Returns `Promise<Uint8Array>`.
 
 ```typescript
 // 2D array
-await Pdf.create([
+await Pdf.fromTable([
   ["Name", "Age"],
   ["Alice", 30]
 ]);
 
 // Single sheet with column widths
-await Pdf.create({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
+await Pdf.fromTable({ name: "Report", columns: [{ width: 25 }, 15], data: [["A", "B"]] });
 
 // Multiple sheets
-await Pdf.create({
+await Pdf.fromTable({
   sheets: [
     { name: "S1", data: [["A"]] },
     { name: "S2", data: [["B"]] }
@@ -1280,7 +1452,7 @@ await Pdf.create({
 });
 
 // With options
-await Pdf.create([["A", 1]], { showGridLines: true, pageSize: "A4" });
+await Pdf.fromTable([["A", 1]], { showGridLines: true, pageSize: "A4" });
 ```
 
 ### `Pdf.fromExcel(workbook, options?)`
@@ -1304,7 +1476,7 @@ Build free-form PDFs with text, vector graphics, annotations, and form fields.
 import { Pdf } from "documonster/pdf";
 
 const doc = new Pdf.Builder();
-doc.setMetadata({ title, author, subject, creator });
+doc.setMetadata({ title, author, subject, keywords, creator, producer });
 doc.setEncryption({ ownerPassword, userPassword?, permissions? });
 doc.setPdfACompliance();       // Enable PDF/A-1b
 doc.embedFont(fontBytes);      // Legacy single-default-font compatibility API
@@ -1327,7 +1499,7 @@ page.addFormField({ type, name, rect, ...options });
 doc.addBookmark(title, pageIndex, parent?);
 doc.generateTableOfContents({ title?, fontSize?, indent? });
 
-const bytes = await doc.build(); // Returns Promise<Uint8Array>
+const bytes = await doc.toBuffer(); // Returns Promise<Uint8Array>
 ```
 
 ### `Pdf.Editor`
@@ -1335,11 +1507,11 @@ const bytes = await doc.build(); // Returns Promise<Uint8Array>
 Edit existing PDFs — overlay content, fill forms, merge, split, and sign.
 
 ```text
-const editor = Pdf.Editor.load(pdfBytes, { password? });
+const editor = Pdf.Editor.read(pdfBytes, { password? });
 
 // Page access
 const page = editor.getPage(index);    // Returns PdfEditorPage
-const count = editor.pageCount;         // getter, not a method
+const count = editor.pageCount;         // pages as read (getter); outputPageCount: pages written
 
 // PdfEditorPage methods (same drawing API as PdfPageBuilder):
 page.drawText(text, options);
@@ -1354,43 +1526,85 @@ page.addFormField(options);
 
 // Page manipulation
 editor.addPage(options?);              // Returns Pdf.PageBuilder
-editor.removePage(index);
+editor.removePage(index);             // any page, read or added; idempotent, others keep their index
+editor.isPageRemoved(index);
 editor.rotatePage(index, degrees);     // 90, 180, 270
-editor.copyPagesFrom(otherPdfBytes);
+editor.copyPagesFrom(otherPdfBytes, { pageIndices: [0, 2] });
 
 // Form filling
 editor.setFormField(name, value);
 editor.setFormFields({ name: value, ... });
 
 // Save
-const full = await editor.save();             // Full rebuild
-const incr = await editor.saveIncremental();  // Append-only
-const pages = await editor.splitPages();      // Split into individual PDFs
+const full = await editor.toBuffer();             // Full rebuild
+const incr = await editor.toBuffer({ incremental: true });  // Append-only
+const pages = await editor.splitPages();      // One PDF per page of what toBuffer() would write
 ```
 
-### `Pdf.verifySignature(pdfData, signatureHex, byteRange)`
+### `Pdf.verifySignatures(pdfData, options?)`
 
-Verify a digital signature. Returns `Promise<SignatureVerificationResult>`.
+Find every signature in a PDF and verify each one. Returns
+`Promise<PdfSignatureReport[]>` — one entry per signature field, `[]` for an unsigned
+file. Signatures are located through the AcroForm field tree (a `/FT /Sig` field whose
+value carries `/ByteRange` and `/Contents`), not by searching the bytes.
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
-const result = await Pdf.verifySignature(pdfBytes, sigHex, [0, off1, off2, len2]);
-// result.valid            — boolean
-// result.coversWholeFile  — boolean (no unsigned gaps)
-// result.digestAlgorithm  — OID string
-// result.reason           — failure reason (if !valid)
+const reports = await Pdf.verifySignatures(pdfBytes, { password: "optional" });
+for (const r of reports) {
+  // r.fieldName        — qualified field name, e.g. "Signature1"
+  // r.intact           — digest matches and the signature verifies with the embedded
+  //                      certificate the SignerInfo names (integrity, not trust)
+  // r.byteRangeValid   — ranges start at 0, stay in the file, and enclose exactly /Contents
+  // r.coversWholeFile  — false when bytes were appended after signing (an incremental update)
+  // r.certificate      — the signer's certificate (DER), for your own trust evaluation
+  // r.claimedSigner    — its common name — a claim until you trust the certificate
+  // r.certificateValidity — { notBefore, notAfter } as the certificate declares them
+  // r.name / r.reason / r.location / r.contactInfo / r.signingTime
+  //                    — from the signature dictionary (unauthenticated)
+  // r.failure          — why the signature is not intact (if !intact)
+}
 ```
 
-### `Pdf.sign(pdfBytes, certificate, privateKey)`
+**No trust is evaluated.** `intact` does not build a certificate chain, check revocation,
+honour a timestamp or judge the validity period — a self-signed certificate can carry any
+name. Evaluate `r.certificate` against your own trust store before believing
+`claimedSigner`.
 
-Sign a PDF containing a signature placeholder. Returns `Promise<Uint8Array>`.
+A signature that is `intact` but not `coversWholeFile` signed an earlier revision: the
+signed bytes are unchanged, and whatever follows them is unsigned. Whether that later
+update was permitted by `/DocMDP` or `/FieldMDP` is not evaluated.
+
+### `Pdf.Signature.verify(pdfData, signatureHex, byteRange)`
+
+Verify a digital signature. Returns `Promise<PdfSignatureCheck>`, which uses the same
+field names as a `Pdf.verifySignatures` report.
+
+```typescript
+import { Pdf } from "documonster/pdf";
+
+const result = await Pdf.Signature.verify(pdfBytes, sigHex, [0, off1, off2, len2]);
+// result.intact           — boolean
+// result.coversWholeFile  — boolean (no unsigned gaps)
+// result.digestAlgorithm  — OID string
+// result.failure          — why it is not intact (if !intact)
+```
+
+### `Pdf.Signature.fillPlaceholder(pdfBytes, { certificate, privateKey })`
+
+Complete the signature placeholder already in a PDF — the last step of signing only.
+Returns `Promise<Uint8Array>`; throws `PdfSignaturePlaceholderMissingError` (a
+`PdfStructureError`) when the file has no placeholder, and `PdfArgumentError` when the
+certificate is not DER X.509 or the key is not DER PKCS#8 RSA — `Pdf.Builder#sign` and
+`Pdf.Editor#sign` check the same when they are called. `Pdf.Builder#sign` and
+`Pdf.Editor#sign` write and fill the placeholder in one call.
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
 // Step 1: Build placeholder
-const { dictString, placeholder } = Pdf.buildSignatureDictPlaceholder({
+const { dictString, placeholder } = Pdf.Signature.buildDictPlaceholder({
   name: "Alice",
   reason: "Approval",
   location: "London",
@@ -1398,7 +1612,24 @@ const { dictString, placeholder } = Pdf.buildSignatureDictPlaceholder({
 });
 
 // Step 2: Sign (certificate = DER X.509, privateKey = DER PKCS#8)
-const signed = await Pdf.sign(pdfWithPlaceholder, certificate, privateKey);
+const signed = await Pdf.Signature.fillPlaceholder(pdfWithPlaceholder, { certificate, privateKey });
+```
+
+### `Pdf.createDrawSurface(page, rect, options?)`
+
+The PDF backend for `documonster/draw`: draws a display list onto a page, its top-left
+corner at `rect`'s top-left (PDF points; `y` is the bottom edge). `options.scale`
+multiplies the list's coordinates. Nothing is clipped or fitted to `rect` — a content
+stream has to balance its `q`/`Q` and a surface is never told the list has ended — so size
+the rect as the list's size times the scale.
+
+```typescript
+import { Draw } from "documonster/draw";
+import { Pdf } from "documonster/pdf";
+
+const doc = new Pdf.Builder();
+const page = doc.addPage();
+Draw.render(list, Pdf.createDrawSurface(page, { x: 72, y: 500, width: 200, height: 100 }));
 ```
 
 ### `Pdf.parseSvgPath(d)`
@@ -1420,9 +1651,18 @@ import {
   PdfRenderError, // Layout/rendering failures
   PdfFontError, // Font parsing/embedding failures
   PdfStructureError, // PDF structure assembly failures
+  PdfPasswordError, // A PdfStructureError: an encrypted file the password given does not open
+  PdfLimitExceededError, // A PdfStructureError: a read hit a resource limit (.limit, .allowed)
+  PdfSignaturePlaceholderMissingError, // A PdfStructureError: no signature placeholder to fill
+  PdfArgumentError, // A builder/editor/converter argument with no valid form (.field names it)
   isPdfError // Type guard: (err: unknown) => err is PdfError
 } from "documonster/pdf";
 ```
+
+A `PdfArgumentError`'s message starts with the call as you wrote it (`Pdf.fromExcel: …`,
+`Pdf.PageBuilder#drawText: …`, `Pdf.Editor#splitPages: …`), and its `field` is the path from
+that call's parameter name: `options.fontSize`, `options.watermark.pages[0]`, `metadata.title`,
+`data`.
 
 All errors extend `BaseError` with `cause` chain support:
 

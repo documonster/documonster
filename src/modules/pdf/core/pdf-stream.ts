@@ -10,11 +10,37 @@
  */
 
 import { pdfNumber } from "@pdf/core/pdf-object";
+import { PdfArgumentError } from "@pdf/errors";
 import type { PdfColor } from "@pdf/types";
 
 // =============================================================================
 // Content Stream Builder
 // =============================================================================
+
+/**
+ * A resource name as an operand: regular characters only (ISO 32000-2 §7.3.5 — no
+ * whitespace, no delimiter, no `#`). A name is written as `/name` with nothing escaped, so a
+ * `)`, a space or a `/` in one used to end the name early and write the rest as operators —
+ * `setFont("F1) Tj (", 12)` put a text-showing operator into the stream.
+ */
+function checkResourceName(where: string, name: unknown, field = "name"): void {
+  if (typeof name !== "string" || !/^[!-~]+$/.test(name) || /[()<>[\]{}/%#]/.test(name)) {
+    throw new PdfArgumentError(
+      field,
+      `${where}: ${field} must be printable ASCII without spaces, delimiters or #, got ${JSON.stringify(name)}`
+    );
+  }
+}
+
+/** A style operand from 0 to `max`; anything else is not an operand the format defines. */
+function checkStyleIndex(where: string, field: string, value: unknown, max: number): void {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max) {
+    throw new PdfArgumentError(
+      field,
+      `${where}: ${field} must be an integer from 0 to ${max}, got ${String(value)}`
+    );
+  }
+}
 
 /**
  * Builds a PDF content stream using graphics and text operators.
@@ -32,7 +58,7 @@ export class PdfContentStream {
    * its body is only evaluated at serialization time. This is required for
    * text whose final byte encoding depends on font decisions (embedded
    * CIDFont vs. Type1/WinAnsi vs. Type3 fallback) that are not finalised
-   * until `PdfDocumentBuilder.build()`. Deferring keeps the fragment at its
+   * until `PdfDocumentBuilder.toBuffer()`. Deferring keeps the fragment at its
    * exact draw-order position (preserving z-order) while letting the actual
    * encoding run after the font manager's state is settled.
    */
@@ -136,6 +162,7 @@ export class PdfContentStream {
    * Used for transparency (alpha), blend modes, etc.
    */
   setGraphicsState(name: string): this {
+    checkResourceName("PdfContentStream#setGraphicsState", name);
     this.parts.push(`/${name} gs`);
     return this;
   }
@@ -173,7 +200,7 @@ export class PdfContentStream {
    * @param dashArray - Array of dash/gap lengths. Empty = solid line.
    * @param phase - Starting phase offset.
    */
-  setDashPattern(dashArray: number[], phase = 0): this {
+  setDashPattern(dashArray: readonly number[], phase = 0): this {
     const arr = dashArray.map(pdfNumber).join(" ");
     this.parts.push(`[${arr}] ${pdfNumber(phase)} d`);
     return this;
@@ -184,6 +211,7 @@ export class PdfContentStream {
    * 0 = butt cap, 1 = round cap, 2 = projecting square cap
    */
   setLineCap(style: 0 | 1 | 2): this {
+    checkStyleIndex("PdfContentStream#setLineCap", "style", style, 2);
     this.parts.push(`${style} J`);
     return this;
   }
@@ -193,6 +221,7 @@ export class PdfContentStream {
    * 0 = miter join, 1 = round join, 2 = bevel join
    */
   setLineJoin(style: 0 | 1 | 2): this {
+    checkStyleIndex("PdfContentStream#setLineJoin", "style", style, 2);
     this.parts.push(`${style} j`);
     return this;
   }
@@ -356,6 +385,7 @@ export class PdfContentStream {
    * @param size - Font size in points
    */
   setFont(fontName: string, size: number): this {
+    checkResourceName("PdfContentStream#setFont", fontName, "fontName");
     this.parts.push(`/${fontName} ${pdfNumber(size)} Tf`);
     return this;
   }
@@ -487,6 +517,7 @@ export class PdfContentStream {
 
   /** Set PDF text rendering mode (`Tr`): fill, stroke, or fill-and-stroke. */
   setTextRenderingMode(mode: 0 | 1 | 2): this {
+    checkStyleIndex("PdfContentStream#setTextRenderingMode", "mode", mode, 2);
     this.parts.push(`${mode} Tr`);
     return this;
   }
@@ -533,6 +564,7 @@ export class PdfContentStream {
    * Invoke a named XObject (Do operator).
    */
   doXObject(name: string): this {
+    checkResourceName("PdfContentStream#doXObject", name);
     this.parts.push(`/${name} Do`);
     return this;
   }
@@ -558,7 +590,7 @@ export class PdfContentStream {
     y2: number,
     color: PdfColor,
     lineWidth: number,
-    dashPattern: number[] = []
+    dashPattern: readonly number[] = []
   ): this {
     this.save().setStrokeColor(color).setLineWidth(lineWidth);
     if (dashPattern.length > 0) {

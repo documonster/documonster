@@ -18,7 +18,7 @@ describe("parse.browser - createParse streaming", () => {
     for (const f of files) {
       z.add(f.name, encoder.encode(f.content));
     }
-    return z.bytesSync();
+    return z.toBufferSync();
   }
 
   it("should parse entries and get buffer content", async () => {

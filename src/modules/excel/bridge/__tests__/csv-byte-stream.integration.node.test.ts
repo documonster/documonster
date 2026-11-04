@@ -1,5 +1,5 @@
 /**
- * `createCsvReadStream` must be a real byte stream.
+ * `ExcelCsv.toStream` must be a real byte stream.
  *
  * It used to emit `string` chunks from an object-mode readable side, which made
  * it indistinguishable by type from `Workbook.toStream()` while being unusable
@@ -11,27 +11,27 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { writeCsv } from "@excel/bridge/csv-bridge";
-import { createCsvReadStream } from "@excel/bridge/csv.node";
-import { Workbook, Worksheet } from "@excel/index";
+import { ExcelCsv } from "@excel/bridge/csv.node";
+import { ExcelArgumentError, Row, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 /** A sheet big enough to span several chunks, with quoting and multi-byte text. */
 function buildSheet(rows = 3000): Workbook.Handle {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "S");
-  Worksheet.addRow(ws, ["name", "qty", "note"]);
+  Row.add(ws, ["name", "qty", "note"]);
   for (let i = 0; i < rows; i++) {
     // Embedded comma + quote force the formatter's quoting path; the Hebrew and
     // emoji text spans multiple UTF-8 bytes per character.
-    Worksheet.addRow(ws, [`a,"${i}"`, i, `משהו שכתוב בעברית ${i} 🧮`]);
+    Row.add(ws, [`a,"${i}"`, i, `משהו שכתוב בעברית ${i} 🧮`]);
   }
   return wb;
 }
 
-describe("createCsvReadStream", () => {
+describe("ExcelCsv.toStream", () => {
   it("emits bytes, not strings", async () => {
     const wb = buildSheet(200);
-    const stream = createCsvReadStream(wb);
+    const stream = ExcelCsv.toStream(wb);
 
     // The Node entry types this as a nominal `stream.Readable`; check the runtime
     // actually is one, so the declaration cannot drift from reality.
@@ -51,7 +51,7 @@ describe("createCsvReadStream", () => {
     const wb = buildSheet();
 
     const chunks: Uint8Array[] = [];
-    for await (const chunk of createCsvReadStream(wb)) {
+    for await (const chunk of ExcelCsv.toStream(wb)) {
       chunks.push(chunk);
     }
 
@@ -69,7 +69,7 @@ describe("createCsvReadStream", () => {
 
     // `Buffer.concat` threw `must be an instance of Buffer or Uint8Array` before.
     const collected: Uint8Array[] = [];
-    await pipeline(createCsvReadStream(wb), async source => {
+    await pipeline(ExcelCsv.toStream(wb), async source => {
       for await (const chunk of source) {
         collected.push(chunk as Uint8Array);
       }
@@ -77,20 +77,22 @@ describe("createCsvReadStream", () => {
     expect(Buffer.concat(collected).toString("utf8")).toBe(expected);
 
     // `Readable.toWeb` used to hand out a stream of strings.
-    const web = Readable.toWeb(createCsvReadStream(wb));
+    const web = Readable.toWeb(ExcelCsv.toStream(wb));
     const reader = web.getReader();
     const first = await reader.read();
     expect(first.value).toBeInstanceOf(Uint8Array);
     await reader.cancel();
   });
 
-  it("still ends cleanly when the workbook has no matching worksheet", async () => {
+  it("ends cleanly for a workbook with no worksheet, and refuses a worksheet it does not have", async () => {
     const wb = Workbook.create();
     const chunks: Uint8Array[] = [];
-    for await (const chunk of createCsvReadStream(wb, { sheetName: "missing" })) {
+    for await (const chunk of ExcelCsv.toStream(wb)) {
       chunks.push(chunk);
     }
     expect(chunks).toEqual([]);
+    // A misspelt name used to give an empty stream without a word.
+    expect(() => ExcelCsv.toStream(wb, { sheetName: "missing" })).toThrow(ExcelArgumentError);
   });
 
   it("does not let a caller inject rows through the underlying Transform", async () => {
@@ -100,7 +102,7 @@ describe("createCsvReadStream", () => {
     // through would land in the output. The cast reaches past the public type on
     // purpose, to prove what the type is protecting against.
     const wb = buildSheet(20000);
-    const stream = createCsvReadStream(wb);
+    const stream = ExcelCsv.toStream(wb);
     (stream as unknown as { write(row: unknown): boolean }).write(["INJECTED", "ROW"]);
 
     const chunks: Uint8Array[] = [];

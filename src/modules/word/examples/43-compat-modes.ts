@@ -36,8 +36,7 @@ fs.mkdirSync(outDir, { recursive: true });
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, "Default compatibility mode demo.");
-  const built = Document.build(d);
-  console.log(`  default getCompatibilityMode: ${Query.getCompatibilityMode(built)}`);
+  console.log(`  default getCompatibilityMode: ${Query.getCompatibilityMode(d)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -48,11 +47,10 @@ for (const mode of modes) {
   const d = Document.create();
   Document.useDefaultStyles(d);
   Document.addParagraph(d, `Targeting compatibility mode ${mode}.`);
-  const model = Document.build(d);
-  Query.setCompatibilityMode(model, mode);
-  console.log(`  set/get mode ${mode}: ${Query.getCompatibilityMode(model)}`);
+  Document.setCompatibilityMode(d, mode);
+  console.log(`  set/get mode ${mode}: ${Query.getCompatibilityMode(d)}`);
 
-  const bytes = await Io.toBuffer(model);
+  const bytes = await Io.toBuffer(d);
   fs.writeFileSync(path.join(outDir, `compat-${mode}.docx`), bytes);
 
   // Re-read and verify the chosen mode survives a full write/read round-trip.
@@ -78,10 +76,9 @@ for (const mode of modes) {
   ];
   const settings: DocumentSettings = { compatFlags: flags };
   Document.setSettings(d, settings);
-  const built = Document.build(d);
-  Query.setCompatibilityMode(built, 14);
+  Document.setCompatibilityMode(d, 14);
 
-  const bytes = await Io.toBuffer(built);
+  const bytes = await Io.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "with-compat-flags.docx"), bytes);
   const reread = await Io.read(bytes);
   console.log(

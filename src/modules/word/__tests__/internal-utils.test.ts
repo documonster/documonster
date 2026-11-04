@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { generateGuid, sanitizeUrl } from "../core/internal-utils";
+import { cloneModel, generateGuid, sanitizeUrl } from "../core/internal-utils";
 
 describe("sanitizeUrl", () => {
   describe("nullish & empty", () => {
@@ -140,5 +140,25 @@ describe("generateGuid", () => {
 
   it("differs across calls", () => {
     expect(generateGuid()).not.toBe(generateGuid());
+  });
+});
+
+describe("cloneModel", () => {
+  it("returns what structuredClone returns for model content, sharing nothing", () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const model = {
+      type: "paragraph",
+      children: [{ content: [{ type: "text", text: "a" }] }, { type: "bookmarkStart", id: 1 }],
+      properties: { alignment: "center", spacing: undefined },
+      data: bytes,
+      parts: new Map([["k", { v: [1, 2] }]])
+    };
+    const copy = cloneModel(model);
+    expect(copy).toEqual(structuredClone(model));
+    expect(Object.keys(copy.properties)).toEqual(["alignment", "spacing"]);
+    expect(copy.children[0]).not.toBe(model.children[0]);
+    expect(copy.data).not.toBe(bytes);
+    expect(copy.data).toBeInstanceOf(Uint8Array);
+    expect(copy.parts.get("k")).not.toBe(model.parts.get("k"));
   });
 });

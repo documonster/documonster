@@ -99,7 +99,7 @@ describe("ZIP Encryption End-to-End", () => {
           encryptionMethod: "aes-256",
           password: "test"
         })
-      ).toThrow(/async API/i);
+      ).toThrow(/asynchronous API/i);
     });
   });
 

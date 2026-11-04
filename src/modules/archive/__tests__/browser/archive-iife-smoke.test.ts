@@ -14,19 +14,20 @@ describe("Documonster.Archive IIFE bundle", () => {
     Archive = await loadIife("archive", "Archive");
   }, 60000);
 
-  it("exposes core compression helpers", () => {
-    for (const member of ["gzip", "gunzip", "crc32", "Archive"]) {
+  it("exposes the Archive and Compression namespaces", () => {
+    for (const member of ["Archive", "Compression"]) {
       expect(Archive[member], `Documonster.Archive.${member}`).toBeTruthy();
     }
+    expect(typeof Archive.Archive.crc32).toBe("function");
   });
 
   it("round-trips data through gzip → gunzip", async () => {
     const input = new TextEncoder().encode("Documonster archive IIFE round-trip");
-    const compressed: Uint8Array = await Archive.gzip(input);
+    const compressed: Uint8Array = await Archive.Compression.gzip(input);
     expect(compressed).toBeInstanceOf(Uint8Array);
     expect(compressed.byteLength).toBeGreaterThan(0);
 
-    const restored: Uint8Array = await Archive.gunzip(compressed);
+    const restored: Uint8Array = await Archive.Compression.gunzip(compressed);
     expect(new TextDecoder().decode(restored)).toBe("Documonster archive IIFE round-trip");
   });
 });

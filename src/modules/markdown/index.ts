@@ -2,7 +2,7 @@
  * Markdown Module - Public API
  *
  * Pure Markdown table parsing/formatting functionality with no Excel dependencies.
- * For Markdown-Worksheet integration, use Workbook.readMarkdown/writeMarkdown methods instead.
+ * For Markdown-Worksheet integration, use `ExcelMarkdown` from `documonster/excel/markdown` instead.
  *
  * Design principles:
  * - Only export types and functions that are part of the PUBLIC API
@@ -40,4 +40,12 @@ export * as Markdown from "@markdown/surface/markdown";
 // Errors
 // =============================================================================
 
-export { MarkdownError, MarkdownParseError, isMarkdownError } from "@markdown/errors";
+export {
+  MarkdownError,
+  MarkdownArgumentError,
+  MarkdownParseError,
+  isMarkdownError
+} from "@markdown/errors";
+
+// The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
+export type { BaseErrorOptions } from "@utils/errors";

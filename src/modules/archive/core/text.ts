@@ -12,8 +12,13 @@
 
 import { crc32 } from "@archive/compression/crc32";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
+import { ArchiveArgumentError } from "@archive/core/errors";
 import type { ZipExtraFields } from "@archive/zip-spec/zip-extra-fields";
-import { stringToUint8Array as encodeUtf8, uint8ArrayToString as decodeUtf8 } from "@utils/binary";
+import {
+  getTextDecoder,
+  stringToUint8Array as encodeUtf8,
+  uint8ArrayToString as decodeUtf8
+} from "@utils/binary";
 
 // =============================================================================
 // CP437 Decoding
@@ -182,7 +187,22 @@ export function resolveZipStringCodec(encoding?: ZipStringEncoding): ZipStringCo
     return CP437_CODEC;
   }
 
-  const codec = encoding as ZipStringCodec;
+  // A label other than the two built-in ones, or an object that is not a codec, used to be
+  // taken for a codec and failed with a `TypeError` only once a name was encoded.
+  if (
+    typeof encoding !== "object" ||
+    encoding === null ||
+    typeof (encoding as Partial<ZipStringCodec>).encode !== "function" ||
+    typeof (encoding as Partial<ZipStringCodec>).decode !== "function"
+  ) {
+    throw new ArchiveArgumentError(
+      "encoding",
+      `encoding must be "utf-8", "cp437" or a codec { encode, decode }, got ${
+        typeof encoding === "string" ? JSON.stringify(encoding) : String(encoding)
+      }`
+    );
+  }
+  const codec = encoding;
   const cached = CUSTOM_CODEC_CACHE.get(codec);
   if (cached) {
     return cached;
@@ -334,4 +354,31 @@ export function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   }
   // Otherwise, create a copy to get a clean ArrayBuffer
   return data.slice().buffer as ArrayBuffer;
+}
+
+/**
+ * Decode an entry's bytes as text in `encoding`, refusing a label the decoder does not know
+ * with an {@link ArchiveArgumentError} naming the option.
+ *
+ * `labels: "shared"` resolves through the shared decoder cache, which also takes Node's
+ * aliases (`utf8`, `binary`, …) and treats `null` and `""` as UTF-8 — the reading
+ * `UnzipEntry.text` and a TAR entry's `text` have always had. `labels: "whatwg"` hands the
+ * label to `TextDecoder` itself, as `ArchiveFile.readAsText` always has.
+ */
+export function decodeEntryText(
+  bytes: Uint8Array,
+  encoding: string | undefined,
+  labels: "shared" | "whatwg" = "shared"
+): string {
+  let decoder: TextDecoder;
+  try {
+    decoder = labels === "shared" ? getTextDecoder(encoding) : new TextDecoder(encoding);
+  } catch (cause) {
+    throw new ArchiveArgumentError(
+      "encoding",
+      `encoding must be a label TextDecoder supports, got ${encoding === null ? "null" : JSON.stringify(encoding)}`,
+      { cause }
+    );
+  }
+  return decoder.decode(bytes);
 }

@@ -31,7 +31,8 @@ describe("xmlEncode", () => {
   it("should preserve valid whitespace", () => {
     expect(xmlEncode("hello\nworld")).toBe("hello\nworld");
     expect(xmlEncode("hello\tworld")).toBe("hello\tworld");
-    expect(xmlEncode("hello\rworld")).toBe("hello\rworld");
+    // A literal CR is read back as LF (XML 1.0 §2.11); this used to pin it raw.
+    expect(xmlEncode("hello\rworld")).toBe("hello&#xD;world");
   });
 });
 

@@ -136,8 +136,7 @@ for (const part of interesting.filter(name => name.endsWith(".xml") || name.ends
 // And that they survive being read and written again.
 // ---------------------------------------------------------------------------
 
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
+const reopened = await Workbook.readFile(filename);
 const rewritten = await extractAll(
   await Workbook.toBuffer(reopened, { format: "xlsb", unsupported: "ignore" })
 );
@@ -146,7 +145,7 @@ console.log(
   `after a read-modify-write: ${lost.length === 0 ? "every image part survived" : `lost ${lost.join(", ")}`}`
 );
 console.log(
-  `sheets: ${Workbook.getWorksheets(reopened)
+  `sheets: ${Workbook.listWorksheets(reopened)
     .map(sheet => Worksheet.getName(sheet))
     .join(", ")}`
 );

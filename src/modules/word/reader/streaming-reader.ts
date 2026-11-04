@@ -43,18 +43,38 @@
  *   buffer the large one.)
  */
 
+import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
 import { RelType } from "@word/constants";
+import { isFlatOpc, parseFlatOpc } from "@word/convert/flat-opc";
+import { checkBytes, checkLimit, invalidArgument } from "@word/core/argument-checks";
 import { utf8Decoder } from "@word/core/internal-utils";
 import { getPartRelsPath } from "@word/core/opc-paths";
-import { DocxError, DocxMissingPartError, DocxParseError } from "@word/errors";
-import { parseBodyChild, type ReadDocxOptions } from "@word/reader/docx-reader";
+import { withRangeMarkersBefore } from "@word/core/range-markers";
+import {
+  DocxError,
+  DocxLimitExceededError,
+  DocxMissingPartError,
+  DocxParseError
+} from "@word/errors";
+import {
+  checkReadOptions,
+  parseBodyChild,
+  type ReadDocxOptions,
+  watermarkHeadersToDrop,
+  withoutHeaderReferences
+} from "@word/reader/docx-reader";
 import { parseNumberingXml } from "@word/reader/numbering-parser";
 import { parseSectionProperties } from "@word/reader/paragraph-section-parsers";
-import { attrVal, resolveRelTarget } from "@word/reader/parse-utils";
+import { attrVal, resolvePartPath, resolveRelTarget, stripWPrefix } from "@word/reader/parse-utils";
+import { parseContentPartXml, unwrapCustomXml } from "@word/reader/part-xml";
+import { takeRangeMarker } from "@word/reader/range-markers";
 import type { ParsedRelationship } from "@word/reader/reader-context";
 import { createReaderContext, parseRelationships } from "@word/reader/reader-context";
+import { parseSettingsXml } from "@word/reader/settings-parser";
 import { parseStyles } from "@word/reader/styles-parser";
+import { findWatermark } from "@word/reader/watermark-parser";
+import { decryptIfEncrypted } from "@word/security/package-encryption";
 import { resolveSecurityPolicy } from "@word/security/policy";
 import type { WordSecurityPolicy } from "@word/security/policy";
 import type {
@@ -62,6 +82,7 @@ import type {
   DocDefaults,
   DocumentBackground,
   NumberingInstance,
+  RangeMarker,
   SectionProperties,
   StyleDef
 } from "@word/types";
@@ -72,7 +93,11 @@ import type { XmlElement, XmlNode, SaxTag } from "@xml/types";
 // Public Types
 // =============================================================================
 
-/** Options for {@link createDocxStreamReader} / {@link StreamingDocxReader}. */
+/**
+ * Options for {@link createDocxStreamReader} / {@link StreamingDocxReader}: those of
+ * `Io.read` — an encrypted package is decrypted with `password` before its body is
+ * streamed, as `Io.read` decrypts it — plus the streaming limits below.
+ */
 export interface StreamingReadOptions extends ReadDocxOptions {
   /**
    * The maximum number of bytes a single body-level element may occupy while
@@ -119,7 +144,7 @@ export interface StreamingDocxMetadata {
  *
  * @example
  * ```ts
- * const reader = createDocxStreamReader(bytes);
+ * const reader = Streaming.createReader(bytes);
  * for await (const item of reader) {
  *   if (item.type === "paragraph") { ... }
  * }
@@ -128,7 +153,7 @@ export interface StreamingDocxMetadata {
  * ```
  */
 export class StreamingDocxReader implements AsyncIterable<BodyContent> {
-  private readonly _source: Uint8Array;
+  private _source: Uint8Array;
   private readonly _options: StreamingReadOptions;
   private readonly _policy: Required<WordSecurityPolicy>;
 
@@ -139,9 +164,22 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
     numberingInstances: []
   };
   private _sectionProperties: SectionProperties | undefined;
+  private _pendingMarkers: RangeMarker[] = [];
+  /** The headers whose references `readDocx` drops (see `_read`). */
+  private _droppedHeaders: ReadonlySet<string> = new Set();
 
-  constructor(source: Uint8Array, options: StreamingReadOptions = {}) {
-    this._source = source;
+  constructor(
+    source: Uint8Array | ArrayBuffer | ArrayBufferView,
+    options: StreamingReadOptions = {}
+  ) {
+    const where = "Streaming.createReader";
+    const bytes = checkBytes(source, "source", where);
+    checkReadOptions(options, where);
+    checkLimit(options.maxElementBytes, "options.maxElementBytes", where, { optional: true });
+    if (options.onProgress !== undefined && typeof options.onProgress !== "function") {
+      invalidArgument(where, "options.onProgress", "a function", options.onProgress);
+    }
+    this._source = bytes;
     this._options = options;
     this._policy = resolveSecurityPolicy(options.securityPolicy);
   }
@@ -187,6 +225,15 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
     return this._sectionProperties;
   }
 
+  /**
+   * Range markers after the last body element (`DocxDocument.bodyRangeMarkersAfter`).
+   * Only populated once the body has been fully consumed; markers between
+   * elements arrive on the element that follows them.
+   */
+  get bodyRangeMarkersAfter(): readonly RangeMarker[] | undefined {
+    return this._pendingMarkers.length > 0 ? this._pendingMarkers : undefined;
+  }
+
   /** All metadata loaded up-front, as a single immutable record. */
   get metadata(): StreamingDocxMetadata {
     return this._metadata;
@@ -200,29 +247,56 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
     return this._iterate();
   }
 
+  /**
+   * The body, failing as `Io.read` does: a damaged package — a ZIP
+   * that ends early, a corrupt entry, malformed XML — is a `DocxParseError`
+   * with the archive's or parser's error as its `cause`, never a bare
+   * `RangeError` from deep in the reader.
+   */
   private async *_iterate(): AsyncGenerator<BodyContent> {
-    // CFB-encrypted packages cannot be streamed (the whole container must be
-    // decrypted first). Surface a clear error rather than failing deep in the
-    // ZIP parser.
-    if (isCfb(this._source)) {
-      if (this._options.password == null) {
-        throw new DocxError(
-          "Encrypted DOCX cannot be read with the streaming reader. Use readDocx() with a password."
-        );
+    try {
+      yield* this._read();
+    } catch (e) {
+      if (e instanceof DocxError) {
+        throw e;
       }
-      throw new DocxError(
-        "Encrypted DOCX is not supported by the streaming reader. Use readDocx() to decrypt first."
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new DocxParseError(`Failed to read DOCX: ${msg}`, { cause: e });
+    }
+  }
+
+  private async *_read(): AsyncGenerator<BodyContent> {
+    // The input as given is held to the package-size limit first, as `Io.read`
+    // holds it.
+    if (this._source.length > this._policy.maxPackageSize) {
+      throw new DocxLimitExceededError(
+        "packageSize",
+        this._policy.maxPackageSize,
+        this._source.length,
+        "compressed input larger than maxPackageSize"
       );
     }
-
-    if (this._source.length > this._policy.maxPackageSize) {
-      throw new DocxParseError(
-        `compressed input larger than maxPackageSize (${this._policy.maxPackageSize})`
-      );
+    // An encrypted package is decrypted first, as `Io.read` does: the source
+    // is already whole in memory, so this costs one copy, and the decrypted
+    // package then streams like any other.
+    this._source = await decryptIfEncrypted(
+      this._source,
+      this._options.password,
+      this._policy.maxPackageSize
+    );
+    // A Flat OPC document is the same package as one XML file, read as
+    // `Io.read` reads it: as the ZIP of its parts.
+    if (isFlatOpc(this._source)) {
+      const archive = zip({ level: 0 });
+      for (const [path, data] of parseFlatOpc(this._source)) {
+        archive.add(path, data);
+      }
+      this._source = await archive.toBuffer();
     }
 
     // ---- Phase 1: collect small metadata parts (rels, styles, numbering) ----
-    const { documentPartPath, relMap } = await this._collectMetadata();
+    const { documentPartPath, relMap, watermarkHeaders, evenAndOddHeaders } =
+      await this._collectMetadata();
 
     // ---- Phase 2: stream document.xml's body element-by-element ----
     const ctx = createReaderContext(this._policy);
@@ -230,6 +304,25 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
 
     const documentEntryFound = { value: false };
     const maxElementBytes = this._options.maxElementBytes ?? this._policy.maxPartSize;
+
+    // A header holding the document's watermark and nothing else is dropped
+    // by `readDocx`, references and all, where the writer would give the
+    // section one again. Where that is depends on every section, so the
+    // section breaks are read first — only when some header holds a watermark.
+    if (watermarkHeaders.size > 0) {
+      for await (const entry of unzip(this._source).entries()) {
+        if (normalizePath(entry.path) === documentPartPath) {
+          const sections = await scanSections(entry.stream());
+          this._droppedHeaders = watermarkHeadersToDrop(
+            sections,
+            evenAndOddHeaders,
+            watermarkHeaders,
+            createReaderContext(this._policy)
+          );
+          break;
+        }
+      }
+    }
 
     const reader = unzip(this._source);
     for await (const entry of reader.entries()) {
@@ -255,6 +348,9 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
   private async _collectMetadata(): Promise<{
     documentPartPath: string;
     relMap: Map<string, ParsedRelationship>;
+    /** The header parts that draw a watermark, parsed. */
+    watermarkHeaders: Map<string, { readonly root: XmlElement }>;
+    evenAndOddHeaders: boolean;
   }> {
     const decoder = utf8Decoder;
     const wanted = new Set<string>(["_rels/.rels"]);
@@ -280,7 +376,9 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
       const isRels = path.endsWith(".rels");
       const isStyles = path.endsWith("/styles.xml") || path === "word/styles.xml";
       const isNumbering = path.endsWith("/numbering.xml") || path === "word/numbering.xml";
-      if (!isRels && !isStyles && !isNumbering && !wanted.has(path)) {
+      // Headers and settings decide where the watermark lives (see `_read`).
+      const isHeaderOrSettings = /(?:^|\/)(?:header[^/]*|settings)\.xml$/.test(path);
+      if (!isRels && !isStyles && !isNumbering && !isHeaderOrSettings && !wanted.has(path)) {
         continue;
       }
       const data = await entry.bytes();
@@ -351,7 +449,40 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
       numberingInstances
     };
 
-    return { documentPartPath, relMap };
+    // The header parts drawing a watermark. A header part named otherwise
+    // than `header*.xml` is not buffered, and is taken to draw none.
+    const watermarkHeaders = new Map<string, { readonly root: XmlElement }>();
+    for (const rel of docRels) {
+      if (rel.type !== RelType.Header) {
+        continue;
+      }
+      const xml = getText(resolvePartPath(documentPartPath, rel.target));
+      if (!xml) {
+        continue;
+      }
+      try {
+        const root = parseContentPartXml(xml, this._policy.maxXmlDepth).root;
+        if (findWatermark(root)) {
+          watermarkHeaders.set(rel.id, { root });
+        }
+      } catch {
+        // A malformed header is skipped, as `readDocx` skips it.
+      }
+    }
+    const settingsXml = getText(
+      resolveRelTarget(docRels, RelType.Settings, documentPartPath) ?? "word/settings.xml"
+    );
+    let evenAndOddHeaders = false;
+    if (settingsXml && watermarkHeaders.size > 0) {
+      try {
+        evenAndOddHeaders =
+          parseSettingsXml(settingsXml, this._policy.maxXmlDepth).evenAndOddHeaders === true;
+      } catch {
+        // Non-fatal, as in `readDocx`.
+      }
+    }
+
+    return { documentPartPath, relMap, watermarkHeaders, evenAndOddHeaders };
   }
 
   /**
@@ -386,7 +517,7 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
       }
 
       for (const el of builder.drain()) {
-        yield* this._emit(el, ctx);
+        yield* this._emit(el, ctx, builder);
       }
     }
     parser.write(decoder.decode());
@@ -397,23 +528,126 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
     }
 
     for (const el of builder.drain()) {
-      yield* this._emit(el, ctx);
+      yield* this._emit(el, ctx, builder);
     }
   }
 
   private *_emit(
     el: XmlElement,
-    ctx: ReturnType<typeof createReaderContext>
+    ctx: ReturnType<typeof createReaderContext>,
+    builder: BodySubtreeBuilder
   ): Generator<BodyContent> {
-    const name = el.name.replace(/^w:/, "");
+    const name = stripWPrefix(el.name);
     if (name === "sectPr") {
-      this._sectionProperties = parseSectionProperties(el);
+      this._sectionProperties = this._withHeaderReferences(parseSectionProperties(el));
       return;
     }
-    for (const item of parseBodyChild(el, ctx)) {
-      yield item;
+    if (takeRangeMarker(el, this._pendingMarkers)) {
+      return;
+    }
+    if (builder.holdsCustomXml(el)) {
+      unwrapCustomXml(el);
+    }
+    for (const parsed of parseBodyChild(el, ctx)) {
+      const markers = this._pendingMarkers;
+      if (markers.length > 0) {
+        this._pendingMarkers = [];
+      }
+      let item = parsed;
+      const sect = item.type === "paragraph" ? item.properties?.sectionProperties : undefined;
+      if (item.type === "paragraph" && sect) {
+        const next = this._withHeaderReferences(sect);
+        if (next !== sect) {
+          item = { ...item, properties: { ...item.properties, sectionProperties: next } };
+        }
+      }
+      yield withRangeMarkersBefore(item, markers);
     }
   }
+
+  /** `sect` without its references to the headers `readDocx` drops. */
+  private _withHeaderReferences(sect: SectionProperties): SectionProperties {
+    const dropped = this._droppedHeaders;
+    return dropped.size > 0 && sect.headers?.some(h => dropped.has(h.rId))
+      ? withoutHeaderReferences(sect, dropped)
+      : sect;
+  }
+}
+
+/**
+ * The section properties of `document.xml` — of each paragraph's section
+ * break, in document order, then the body's own — read off the SAX events
+ * alone: nothing but the `w:sectPr` subtrees is built.
+ */
+async function scanSections(chunks: AsyncIterable<Uint8Array>): Promise<SectionProperties[]> {
+  const parser = new SaxParser({ position: false });
+  const decoder = new TextDecoder("utf-8");
+  /** Local names of the open elements, `w:customXml` wrappers left out. */
+  const path: string[] = [];
+  /** The `w:sectPr` subtree being built, innermost element last. */
+  let capture: XmlElement[] = [];
+  let capturingFinal = false;
+  const inner: SectionProperties[] = [];
+  let final: SectionProperties | undefined;
+  const done = (el: XmlElement): void => {
+    const sect = parseSectionProperties(el);
+    if (capturingFinal) {
+      final = sect;
+    } else {
+      inner.push(sect);
+    }
+  };
+  parser.on("opentag", tag => {
+    if (capture.length > 0) {
+      const el = makeElement(tag);
+      capture[capture.length - 1]!.children.push(el);
+      if (!tag.isSelfClosing) {
+        capture.push(el);
+      }
+      return;
+    }
+    const local = stripWPrefix(tag.name);
+    const at = path.join("/");
+    if (local === "sectPr" && (at === "document/body" || at === "document/body/p/pPr")) {
+      capturingFinal = at === "document/body";
+      const el = makeElement(tag);
+      if (tag.isSelfClosing) {
+        done(el);
+      } else {
+        capture = [el];
+      }
+      return;
+    }
+    if (!tag.isSelfClosing && local !== "customXml") {
+      path.push(local);
+    }
+  });
+  parser.on("closetag", tag => {
+    if (tag.isSelfClosing) {
+      return;
+    }
+    if (capture.length > 0) {
+      const el = capture.pop()!;
+      if (capture.length === 0) {
+        done(el);
+      }
+      return;
+    }
+    if (stripWPrefix(tag.name) !== "customXml") {
+      path.pop();
+    }
+  });
+  const text = (value: string): void => {
+    capture[capture.length - 1]?.children.push({ type: "text", value });
+  };
+  parser.on("text", text);
+  parser.on("cdata", text);
+  for await (const chunk of chunks) {
+    parser.write(decoder.decode(chunk, { stream: true }));
+  }
+  parser.write(decoder.decode());
+  parser.close();
+  return [...inner, final ?? {}];
 }
 
 /**
@@ -423,7 +657,7 @@ export class StreamingDocxReader implements AsyncIterable<BodyContent> {
  * @param options - Read + streaming options.
  */
 export function createDocxStreamReader(
-  source: Uint8Array,
+  source: Uint8Array | ArrayBuffer | ArrayBufferView,
   options?: StreamingReadOptions
 ): StreamingDocxReader {
   return new StreamingDocxReader(source, options);
@@ -457,6 +691,15 @@ class BodySubtreeBuilder {
   private _inBody = false;
   private _approxBytes = 0;
   private readonly _maxElementBytes: number;
+  /**
+   * Open `w:customXml` elements around body blocks. They are not collected as
+   * subtrees: their content is read as body children in its own right, as the
+   * batch reader does (see `unwrapCustomXml`), which keeps one wrapper around
+   * the whole body from becoming one element held in memory.
+   */
+  private _customXmlDepth = 0;
+  /** Subtrees with a `w:customXml` inside, which have to be unwrapped. */
+  private readonly _customXmlRoots = new WeakSet<XmlElement>();
 
   constructor(maxElementBytes: number) {
     this._maxElementBytes = maxElementBytes;
@@ -469,6 +712,11 @@ class BodySubtreeBuilder {
     parser.on("cdata", text => this._text(text));
   }
 
+  /** Whether the completed subtree `root` contains a `w:customXml` element. */
+  holdsCustomXml(root: XmlElement): boolean {
+    return this._customXmlRoots.has(root);
+  }
+
   /** Take and clear all completed body-level subtrees. */
   drain(): XmlElement[] {
     if (this._ready.length === 0) {
@@ -478,7 +726,7 @@ class BodySubtreeBuilder {
   }
 
   private _open(tag: SaxTag): void {
-    const localName = tag.name.replace(/^w:/, "");
+    const localName = stripWPrefix(tag.name);
 
     if (!this._inBody) {
       // We are still scanning the document prologue (<w:document>, optional
@@ -502,6 +750,12 @@ class BodySubtreeBuilder {
     }
 
     // Inside <w:body>.
+    if (this._stack.length === 0 && localName === "customXml") {
+      if (!tag.isSelfClosing) {
+        this._customXmlDepth++;
+      }
+      return;
+    }
     if (this._stack.length === 0) {
       // Starting a new body-level element.
       this._approxBytes = 0;
@@ -512,7 +766,7 @@ class BodySubtreeBuilder {
   }
 
   private _close(tag: SaxTag): void {
-    const localName = tag.name.replace(/^w:/, "");
+    const localName = stripWPrefix(tag.name);
 
     if (!this._inBody) {
       // Closing the <w:background> subtree.
@@ -536,6 +790,9 @@ class BodySubtreeBuilder {
     }
 
     if (this._stack.length === 0) {
+      if (localName === "customXml" && this._customXmlDepth > 0) {
+        this._customXmlDepth--;
+      }
       return;
     }
 
@@ -600,6 +857,9 @@ class BodySubtreeBuilder {
       );
     }
     this._stack[this._stack.length - 1].children.push(elem);
+    if (tag.name === "w:customXml" || tag.name === "customXml") {
+      this._customXmlRoots.add(this._stack[0]!);
+    }
     if (!tag.isSelfClosing) {
       this._stack.push(elem);
     }
@@ -622,20 +882,6 @@ function makeElement(tag: SaxTag): XmlElement {
 
 function normalizePath(path: string): string {
   return path.replace(/^\//, "").replace(/\\/g, "/");
-}
-
-function isCfb(buffer: Uint8Array): boolean {
-  return (
-    buffer.length >= 8 &&
-    buffer[0] === 0xd0 &&
-    buffer[1] === 0xcf &&
-    buffer[2] === 0x11 &&
-    buffer[3] === 0xe0 &&
-    buffer[4] === 0xa1 &&
-    buffer[5] === 0xb1 &&
-    buffer[6] === 0x1a &&
-    buffer[7] === 0xe1
-  );
 }
 
 /** Parse a captured `<w:background>` element into a {@link DocumentBackground}. */

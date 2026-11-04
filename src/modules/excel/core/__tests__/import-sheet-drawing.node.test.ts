@@ -18,7 +18,7 @@ describe("importSheet — issue #189: drawing aliasing / duplicate Content_Types
     await Workbook.read(wb, onDisk);
     const source = Workbook.getWorksheet(wb, "Sheet1")!;
 
-    Workbook.importSheet(wb, source, "Sheet1 Copy");
+    Workbook.importWorksheet(wb, source, "Sheet1 Copy");
 
     const buffer = await Workbook.toBuffer(wb);
     const report = await validateXlsxBuffer(buffer, { maxProblems: 50 });
@@ -39,7 +39,7 @@ describe("importSheet — issue #189: drawing aliasing / duplicate Content_Types
     const wb = Workbook.create();
     await Workbook.read(wb, onDisk);
     const source = Workbook.getWorksheet(wb, "Sheet1")!;
-    const copy = Workbook.importSheet(wb, source, "Sheet1 Copy");
+    const copy = Workbook.importWorksheet(wb, source, "Sheet1 Copy");
 
     // Both sheets still have their image and the file round-trips cleanly.
     const buffer = await Workbook.toBuffer(wb);

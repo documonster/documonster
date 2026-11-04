@@ -14,6 +14,8 @@
  * @stability experimental
  */
 
+import { checkRecord, checkString, invalidArgument } from "@word/core/argument-checks";
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -49,6 +51,8 @@ export function createHyphenator(
   patterns: HyphenationPatterns,
   options?: HyphenationOptions
 ): (word: string) => number[] {
+  checkRecord(patterns, "patterns", "Font.createHyphenator");
+  checkRecord(options, "options", "Font.createHyphenator", { optional: true });
   const minLeft = options?.minLeft ?? 2;
   const minRight = options?.minRight ?? 2;
 
@@ -91,6 +95,7 @@ export function hyphenateWord(
   hyphenator: (w: string) => number[],
   hyphenChar?: string
 ): string {
+  checkHyphenationArguments(word, "word", hyphenator, hyphenChar, "Font.hyphenateWord");
   const hChar = hyphenChar ?? "\u00AD";
   const points = hyphenator(word);
   if (points.length === 0) {
@@ -120,6 +125,7 @@ export function hyphenateText(
   hyphenator: (w: string) => number[],
   hyphenChar?: string
 ): string {
+  checkHyphenationArguments(text, "text", hyphenator, hyphenChar, "Font.hyphenateText");
   const hChar = hyphenChar ?? "\u00AD";
   // Split on word boundaries while keeping separators
   return text.replace(/[a-zA-Z\u00C0-\u024F]+/g, word => {
@@ -4279,4 +4285,18 @@ function computeHyphenPoints(
   }
 
   return points;
+}
+
+function checkHyphenationArguments(
+  text: unknown,
+  field: string,
+  hyphenator: unknown,
+  hyphenChar: unknown,
+  where: string
+): void {
+  checkString(text, field, where);
+  if (typeof hyphenator !== "function") {
+    invalidArgument(where, "hyphenator", "a function from Font.createHyphenator", hyphenator);
+  }
+  checkString(hyphenChar, "hyphenChar", where, { optional: true });
 }

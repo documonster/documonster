@@ -1,7 +1,7 @@
 import { readCsv, writeCsv, writeCsvBuffer } from "@excel/bridge/csv-bridge";
 import { readCsvFile, writeCsvFile } from "@excel/bridge/csv-bridge.node";
 import { getSheetName } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, ExcelArgumentError, Row, Workbook } from "@excel/index";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
@@ -13,14 +13,15 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const worksheet = await readCsvFile(wb, csvTestDataPath("date-vs-leading-zeros.csv"));
 
-      expect(Cell.getValue(worksheet, "A1")!.toString()).toBe(
-        new Date("2019-11-04T00:00:00").toString()
+      // A text with no timezone is the calendar value, as a cell holds it: UTC wall-clock time.
+      expect((Cell.getValue(worksheet, "A1") as Date).toISOString()).toBe(
+        "2019-11-04T00:00:00.000Z"
       );
-      expect(Cell.getValue(worksheet, "A2")!.toString()).toBe(
-        new Date("2019-11-04T00:00:00").toString()
+      expect((Cell.getValue(worksheet, "A2") as Date).toISOString()).toBe(
+        "2019-11-04T00:00:00.000Z"
       );
-      expect(Cell.getValue(worksheet, "A3")!.toString()).toBe(
-        new Date("2019-11-04T10:17:55").toString()
+      expect((Cell.getValue(worksheet, "A3") as Date).toISOString()).toBe(
+        "2019-11-04T10:17:55.000Z"
       );
       expect(Cell.getValue(worksheet, "A4")).toBe("00210PRG1");
       expect(Cell.getValue(worksheet, "A5")).toBe("1234-5thisisnotadate");
@@ -47,14 +48,14 @@ describe("Workbook", () => {
 
         const wb = Workbook.create();
         const ws = Workbook.addWorksheet(wb, "Data");
-        Worksheet.addRow(ws, ["Name", "Age"]);
-        Worksheet.addRow(ws, ["Alice", 30]);
+        Row.add(ws, ["Name", "Age"]);
+        Row.add(ws, ["Alice", 30]);
 
         await writeCsvFile(wb, TEST_FILE, { append: true });
 
         const wb2 = Workbook.create();
         const ws2 = await readCsvFile(wb2, TEST_FILE);
-        expect(Worksheet.rowCount(ws2)).toBe(2);
+        expect(Row.getCount(ws2)).toBe(2);
         expect(Cell.getValue(ws2, "A1")).toBe("Name");
         expect(Cell.getValue(ws2, "A2")).toBe("Alice");
       });
@@ -65,20 +66,20 @@ describe("Workbook", () => {
         // First write - creates file with headers
         const wb1 = Workbook.create();
         const ws1 = Workbook.addWorksheet(wb1, "Data");
-        Worksheet.addRow(ws1, ["Name", "Age"]);
-        Worksheet.addRow(ws1, ["Alice", 30]);
+        Row.add(ws1, ["Name", "Age"]);
+        Row.add(ws1, ["Alice", 30]);
         await writeCsvFile(wb1, TEST_FILE);
 
         // Second write - append mode (only add data rows, no header)
         const wb2 = Workbook.create();
         const ws2 = Workbook.addWorksheet(wb2, "Data");
-        Worksheet.addRow(ws2, ["Bob", 25]); // Data only, no header row
+        Row.add(ws2, ["Bob", 25]); // Data only, no header row
         await writeCsvFile(wb2, TEST_FILE, { append: true });
 
         // Read and verify
         const wb3 = Workbook.create();
         const ws3 = await readCsvFile(wb3, TEST_FILE);
-        expect(Worksheet.rowCount(ws3)).toBe(3); // Header + Alice + Bob
+        expect(Row.getCount(ws3)).toBe(3); // Header + Alice + Bob
         expect(Cell.getValue(ws3, "A1")).toBe("Name");
         expect(Cell.getValue(ws3, "A2")).toBe("Alice");
         expect(Cell.getValue(ws3, "A3")).toBe("Bob");
@@ -90,26 +91,26 @@ describe("Workbook", () => {
         // Initial file with header
         const wb1 = Workbook.create();
         const ws1 = Workbook.addWorksheet(wb1, "Log");
-        Worksheet.addRow(ws1, ["Time", "Event"]);
-        Worksheet.addRow(ws1, ["10:00", "start"]);
+        Row.add(ws1, ["Time", "Event"]);
+        Row.add(ws1, ["10:00", "start"]);
         await writeCsvFile(wb1, TEST_FILE);
 
         // Append batch 1 (data only)
         const wb2 = Workbook.create();
         const ws2 = Workbook.addWorksheet(wb2, "Log");
-        Worksheet.addRow(ws2, ["10:05", "process"]);
+        Row.add(ws2, ["10:05", "process"]);
         await writeCsvFile(wb2, TEST_FILE, { append: true });
 
         // Append batch 2 (data only)
         const wb3 = Workbook.create();
         const ws3 = Workbook.addWorksheet(wb3, "Log");
-        Worksheet.addRow(ws3, ["10:10", "end"]);
+        Row.add(ws3, ["10:10", "end"]);
         await writeCsvFile(wb3, TEST_FILE, { append: true });
 
         // Verify
         const wb4 = Workbook.create();
         const ws4 = await readCsvFile(wb4, TEST_FILE);
-        expect(Worksheet.rowCount(ws4)).toBe(4); // Header + 3 data rows
+        expect(Row.getCount(ws4)).toBe(4); // Header + 3 data rows
         expect(Cell.getValue(ws4, "A1")).toBe("Time");
         expect(Cell.getValue(ws4, "B2")).toBe("start");
         expect(Cell.getValue(ws4, "B3")).toBe("process");
@@ -122,20 +123,20 @@ describe("Workbook", () => {
         // Create file with CRLF line endings
         const wb1 = Workbook.create();
         const ws1 = Workbook.addWorksheet(wb1, "Data");
-        Worksheet.addRow(ws1, ["A", "B"]);
-        Worksheet.addRow(ws1, [1, 2]);
+        Row.add(ws1, ["A", "B"]);
+        Row.add(ws1, [1, 2]);
         await writeCsvFile(wb1, TEST_FILE, { lineEnding: "\r\n" });
 
         // Append with same line ending
         const wb2 = Workbook.create();
         const ws2 = Workbook.addWorksheet(wb2, "Data");
-        Worksheet.addRow(ws2, [3, 4]);
+        Row.add(ws2, [3, 4]);
         await writeCsvFile(wb2, TEST_FILE, { append: true, lineEnding: "\r\n" });
 
         // Read and verify
         const wb3 = Workbook.create();
         const ws3 = await readCsvFile(wb3, TEST_FILE);
-        expect(Worksheet.rowCount(ws3)).toBe(3);
+        expect(Row.getCount(ws3)).toBe(3);
         expect(Cell.getValue(ws3, "A3")).toBe(3);
       });
     });
@@ -300,13 +301,13 @@ describe("Workbook", () => {
           expect(csv).toBe("second");
         });
 
-        it("should return empty string for non-existent worksheet", () => {
+        it("should refuse a worksheet the workbook does not have", () => {
           const wb = Workbook.create();
           Workbook.addWorksheet(wb, "Test");
 
-          const csv = writeCsv(wb, { sheetName: "NonExistent" });
-
-          expect(csv).toBe("");
+          // It used to return "", so a misspelt name produced an empty CSV without a word.
+          expect(() => writeCsv(wb, { sheetName: "NonExistent" })).toThrow(ExcelArgumentError);
+          expect(writeCsv(Workbook.create())).toBe("");
         });
       });
 

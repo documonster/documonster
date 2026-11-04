@@ -24,7 +24,7 @@ import { readFile } from "node:fs/promises";
 
 import { Cell, Workbook, Worksheet } from "@excel";
 import { modelHash, sameHash } from "@excel/xlsb/model-hash";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 /** A workbook with text and a format, so both artefacts have something to attach to. */
 function build(): Workbook.Handle {
@@ -57,6 +57,10 @@ function stamp(model: ReturnType<typeof Workbook.getModel>): void {
 }
 
 describe("the fields modelHash ignores", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("hashes the same with and without them", () => {
     const workbook = build();
     const before = modelHash(Workbook.getModel(workbook));
@@ -70,13 +74,16 @@ describe("the fields modelHash ignores", () => {
     // nothing at all.
     const workbook = build();
     const before = modelHash(Workbook.getModel(workbook));
-    Cell.setValue(Workbook.getWorksheets(workbook)[0]!, "A1", "changed");
+    Cell.setValue(Workbook.listWorksheets(workbook)[0]!, "A1", "changed");
     expect(sameHash(before, modelHash(Workbook.getModel(workbook)))).toBe(false);
   });
 
   it("produces identical XLSB bytes whether or not they are present", async () => {
     // **The assumption, checked.** If `writeXlsbPackage` ever begins reading `ssId` or `styleId`, these two packages
     // diverge and this fails — which is the signal that the exception in `modelHash` has stopped being true.
+    // The XLSB writer stamps each ZIP entry with the time of the write and has no option to fix it, so the clock
+    // is frozen: two writes either side of a two-second boundary would otherwise differ in their entry headers.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2024-01-01T00:00:00Z") });
     const workbook = build();
     const left = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
     const model = Workbook.getModel(workbook);

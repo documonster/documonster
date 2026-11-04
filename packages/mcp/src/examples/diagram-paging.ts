@@ -39,7 +39,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { Io } from "documonster/word";
-import { markdownToDocx } from "documonster/word/markdown";
+import { WordMarkdown } from "documonster/word/markdown";
 
 import {
   fitToColumn,
@@ -180,7 +180,7 @@ for (const note of prepared.notes) {
   console.log(`  ${note}`);
 }
 
-const doc = await markdownToDocx(prepared.markdown, {
+const doc = await WordMarkdown.toDocx(prepared.markdown, {
   ...(prepared.resolveImage === undefined ? {} : { resolveImage: prepared.resolveImage })
 });
 const file = path.join(out, "diagram-paging.docx");

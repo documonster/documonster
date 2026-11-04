@@ -8,7 +8,7 @@
  * already-loaded module is not reliable.
  */
 
-import { PdfLimitExceededError } from "@pdf/errors";
+import { PdfArgumentError, PdfLimitExceededError } from "@pdf/errors";
 import { PdfDocument } from "@pdf/reader/pdf-document";
 import type { PdfStream } from "@pdf/reader/pdf-parser";
 import { describe, it, expect } from "vitest";
@@ -70,23 +70,25 @@ describe("limit errors fail fast", () => {
     expect(() => doc.getStreamData(first, contentObj(0))).toThrow(hit as Error);
   });
 
-  it("Pdf.read rejects instead of returning truncated pages", async () => {
-    await expect(Pdf.read(manyBombPages(20), { maxDecodedBytes: 100 })).rejects.toThrow(
+  it("Pdf.extract rejects instead of returning truncated pages", async () => {
+    await expect(Pdf.extract(manyBombPages(20), { maxDecodedBytes: 100 })).rejects.toThrow(
       PdfLimitExceededError
     );
   });
 
-  it.each([Number.NaN, -1])("rejects maxDecodedBytes %s as a RangeError", async bad => {
-    await expect(Pdf.read(manyBombPages(1), { maxDecodedBytes: bad })).rejects.toThrow(RangeError);
+  it.each([Number.NaN, -1])("rejects maxDecodedBytes %s as a PdfArgumentError", async bad => {
+    await expect(Pdf.extract(manyBombPages(1), { maxDecodedBytes: bad })).rejects.toThrow(
+      PdfArgumentError
+    );
   });
 
   it("accepts Infinity as an unbounded maxDecodedBytes", async () => {
-    const result = await Pdf.read(manyBombPages(1), { maxDecodedBytes: Infinity });
+    const result = await Pdf.extract(manyBombPages(1), { maxDecodedBytes: Infinity });
     expect(result.pages).toHaveLength(1);
   });
 
   it("still reads every page when no limit is hit", async () => {
-    const result = await Pdf.read(manyBombPages(3));
+    const result = await Pdf.extract(manyBombPages(3));
     expect(result.pages).toHaveLength(3);
   });
 });

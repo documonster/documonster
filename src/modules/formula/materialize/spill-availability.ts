@@ -1,5 +1,6 @@
 import type { WorkbookSnapshot } from "@formula/integration/workbook-snapshot";
 import { snapshotCellKey } from "@formula/integration/workbook-snapshot";
+import { sheetNameKey } from "@utils/name-key";
 
 export interface SpillAvailabilityOptions {
   readonly snapshot: WorkbookSnapshot;
@@ -14,7 +15,7 @@ export interface SpillAvailabilityOptions {
 
 export function isSpillAvailable(options: SpillAvailabilityOptions): boolean {
   const { snapshot, sheetName, sourceRow, sourceCol, rows, cols } = options;
-  const ws = snapshot.worksheetsByName.get(sheetName.toLowerCase());
+  const ws = snapshot.worksheetsByName.get(sheetNameKey(sheetName));
   if (!ws || sourceRow + rows - 1 > 1048576 || sourceCol + cols - 1 > 16384) {
     return false;
   }

@@ -8,7 +8,16 @@
  * @stability experimental
  */
 
-import { DocxError } from "@word/errors";
+import {
+  checkArray,
+  checkFiniteArray,
+  checkHandle,
+  checkRecord,
+  checkRgbColor,
+  checkString,
+  checkStringArray,
+  invalidArgument
+} from "@word/core/argument-checks";
 import type {
   DocxDocument,
   BodyContent,
@@ -28,7 +37,7 @@ export interface ChartSeriesData {
   /** Series name (legend label). */
   readonly name: string;
   /** Numeric data values. */
-  readonly values: number[];
+  readonly values: readonly number[];
   /** Optional series color (6-digit hex RGB). */
   readonly color?: string;
 }
@@ -38,9 +47,9 @@ export interface ChartBinding {
   /** Chart index (0-based) or chart name. */
   readonly chartRef: number | string;
   /** New series data. */
-  readonly series: ChartSeriesData[];
+  readonly series: readonly ChartSeriesData[];
   /** New category labels (X-axis). */
-  readonly categories?: string[];
+  readonly categories?: readonly string[];
   /** Chart title override. */
   readonly title?: string;
 }
@@ -48,7 +57,7 @@ export interface ChartBinding {
 /** Aggregate template data for chart bindings. */
 export interface ChartTemplateData {
   /** Array of chart bindings to apply. */
-  readonly charts: ChartBinding[];
+  readonly charts: readonly ChartBinding[];
 }
 
 // =============================================================================
@@ -88,28 +97,36 @@ const BASIC_CHART_TYPES: ReadonlySet<string> = new Set<ChartType>([
  * Only basic chart types (bar, column, line, pie and their variants) are
  * supported. Bindings that reference unsupported chart types are skipped.
  *
+ * A binding whose `chartRef` names no chart in the body — an index past the
+ * last chart, or a name no chart has — is skipped, so one set of bindings can
+ * be applied to documents that lack some of the charts. To tell which were
+ * applied, compare the result's charts with the bindings.
+ *
+ * Every binding is checked before any is applied: `chartRef` must be an
+ * integer ≥ 0 or a non-empty string, and values must be finite numbers, one
+ * per category when the binding gives `categories`.
+ *
+ * Does not modify `doc`; the result may share unchanged nodes with it — see
+ * `Document.clone`.
+ *
  * @param doc - The DocxDocument to modify.
  * @param chartBindings - Array of chart bindings to apply.
  * @returns A new DocxDocument with chart data replaced.
+ * @throws {DocxArgumentError} If a binding is malformed (including a
+ * `chartRef` that is neither an integer ≥ 0 nor a non-empty string), a value
+ * is not a finite number, or a series' values do not match the categories.
  *
  * @stability experimental
  */
-export function bindChartData(doc: DocxDocument, chartBindings: ChartBinding[]): DocxDocument {
+export function bindChartData(
+  doc: DocxDocument,
+  chartBindings: readonly ChartBinding[]
+): DocxDocument {
+  checkHandle(doc, "document", "doc", "Template.bindChartData");
+  const where = "Template.bindChartData";
+  checkChartBindings(chartBindings, where);
   if (chartBindings.length === 0) {
     return doc;
-  }
-
-  // Validate bindings: series values length must match categories length when both provided
-  for (const binding of chartBindings) {
-    if (binding.categories && binding.categories.length > 0) {
-      for (const series of binding.series) {
-        if (series.values.length !== binding.categories.length) {
-          throw new DocxError(
-            `Chart binding "${String(binding.chartRef)}": series "${series.name}" has ${series.values.length} values but ${binding.categories.length} categories were provided. Lengths must match.`
-          );
-        }
-      }
-    }
   }
 
   // Build a map of chart index -> binding and name -> binding for fast lookup
@@ -145,6 +162,56 @@ export function bindChartData(doc: DocxDocument, chartBindings: ChartBinding[]):
   }
 
   return { ...doc, body: newBody };
+}
+
+/** The bindings' shape and values, before any is applied. */
+function checkChartBindings(chartBindings: readonly ChartBinding[], where: string): void {
+  checkArray(chartBindings, "chartBindings", where);
+  chartBindings.forEach((binding, i) => {
+    const at = `chartBindings[${i}]`;
+    checkRecord(binding, at, where);
+    const ref = binding.chartRef;
+    if (
+      !(typeof ref === "string" && ref !== "") &&
+      !(Number.isInteger(ref) && (ref as number) >= 0)
+    ) {
+      invalidArgument(
+        where,
+        `${at}.chartRef`,
+        "a chart index (an integer ≥ 0) or a chart name",
+        ref
+      );
+    }
+    checkStringArray(binding.categories, `${at}.categories`, where, { optional: true });
+    checkString(binding.title, `${at}.title`, where, { optional: true });
+    checkArray(binding.series, `${at}.series`, where);
+    binding.series.forEach((series, j) => {
+      const sAt = `${at}.series[${j}]`;
+      checkRecord(series, sAt, where);
+      checkString(series.name, `${sAt}.name`, where);
+      checkFiniteArray(series.values, `${sAt}.values`, where);
+      checkRgbColor(series.color, `${sAt}.color`, where, { optional: true });
+      if (binding.categories && binding.categories.length > 0) {
+        checkSeriesLength(series, binding.categories.length, sAt, where);
+      }
+    });
+  });
+}
+
+function checkSeriesLength(
+  series: ChartSeriesData,
+  categories: number,
+  field: string,
+  where: string
+): void {
+  if (series.values.length !== categories) {
+    invalidArgument(
+      where,
+      `${field}.values`,
+      `${categories} value(s), one per category`,
+      series.values
+    );
+  }
 }
 
 // =============================================================================
@@ -222,7 +289,7 @@ function extractOriginalCategories(chart: Chart): string[] {
 /**
  * Build a ChartSeries from binding data and resolved categories.
  */
-function buildChartSeries(data: ChartSeriesData, categories: string[]): ChartSeries {
+function buildChartSeries(data: ChartSeriesData, categories: readonly string[]): ChartSeries {
   const series: ChartSeries = {
     name: data.name,
     categories: categories,

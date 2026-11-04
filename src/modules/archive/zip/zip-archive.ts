@@ -6,12 +6,19 @@ import {
   DEFAULT_ZIP_TIMESTAMPS,
   REPRODUCIBLE_ZIP_MOD_TIME
 } from "@archive/core/defaults";
-import { throwIfAborted, ArchiveError } from "@archive/core/errors";
+import {
+  checkArchiveSource,
+  checkEntryName,
+  checkString,
+  checkZipEntryOptions,
+  checkZipOptions
+} from "@archive/core/entry-checks";
+import { ArchiveArgumentError, throwIfAborted, ArchiveError } from "@archive/core/errors";
 import type { ZipStringEncoding } from "@archive/core/text";
 import { encodeZipString } from "@archive/core/text";
 import type { ArchiveFormat } from "@archive/core/types";
 import type { ArchiveSink } from "@archive/io/archive-sink";
-import { collect, pipeIterableToSink } from "@archive/io/archive-sink";
+import { checkSinkArgument, collect, pipeIterableToSink } from "@archive/io/archive-sink";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import {
   toAsyncIterable,
@@ -23,6 +30,7 @@ import {
 import type { TarArchiveProgress } from "@archive/tar/tar-archive";
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import type { ZipPathOptions } from "@archive/zip-spec/zip-path";
+import { normalizeZipPath } from "@archive/zip-spec/zip-path";
 import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildDataDescriptor,
@@ -39,6 +47,8 @@ import {
   writeCentralDirectoryAndEocdInto
 } from "@archive/zip/writer-core";
 import { createZip, createZipSync } from "@archive/zip/zip-bytes";
+import type { ZipEntry } from "@archive/zip/zip-bytes";
+import { resolveZipExternalAttributesAndVersionMadeBy } from "@archive/zip/zip-entry-attributes";
 import { buildZipEntryMetadata } from "@archive/zip/zip-entry-metadata";
 import { buildZipDeflateFileOptions } from "@archive/zip/zip-entry-options";
 import { createZipOperation } from "@archive/zip/zip-output-pipeline";
@@ -49,7 +59,7 @@ import { isNode } from "@utils/env";
 export interface ZipOptions {
   /**
    * Archive format: "zip" (default) or "tar".
-   * Note: format dispatch is handled by `zip()`.
+   * Read only by the deprecated `Archive.zip`; `Archive.createZip` and `Archive.createTar` name the format instead.
    */
   format?: ArchiveFormat;
 
@@ -191,9 +201,12 @@ export class ZipArchive {
     progressIntervalMs?: number;
   };
   private readonly _entries: ZipInput[] = [];
+  // The names entries are stored under, to refuse a second entry of one name
+  private readonly _names = new Set<string>();
   private _sealed = false;
 
   constructor(options: ZipOptions = {}) {
+    checkZipOptions("Archive.createZip", options);
     const reproducible = options.reproducible ?? false;
     this._options = {
       level: options.level ?? DEFAULT_ZIP_LEVEL,
@@ -213,6 +226,31 @@ export class ZipArchive {
     };
   }
 
+  /**
+   * The in-memory builder's form of an entry, carrying every {@link ZipEntryOptions} field the
+   * streaming writer reads (see `buildZipDeflateFileOptions`), so `toBuffer()`,
+   * `toBufferSync()` and `stream()` write the same headers.
+   */
+  private _toBuildEntry(entry: ZipInput, data: Uint8Array): ZipEntry {
+    const options = entry.options;
+    return {
+      name: entry.name,
+      data,
+      level: options?.level,
+      modTime: options?.modTime,
+      atime: options?.atime,
+      ctime: options?.ctime,
+      birthTime: options?.birthTime,
+      comment: options?.comment,
+      encoding: options?.encoding ?? this._options.encoding,
+      mode: options?.mode,
+      msDosAttributes: options?.msDosAttributes,
+      externalAttributes: options?.externalAttributes,
+      versionMadeBy: options?.versionMadeBy,
+      zip64: options?.zip64
+    };
+  }
+
   private _getCreateZipOptions() {
     return {
       level: this._options.level,
@@ -222,17 +260,43 @@ export class ZipArchive {
       smartStore: this._options.smartStore,
       zip64: this._options.zip64,
       encoding: this._options.encoding,
+      // The in-memory fast path writes through here; without it, `path` applied to
+      // `stream()` and was ignored by `toBuffer()` / `toBufferSync()`.
+      path: this._options.path,
       noSort: this._options.noSort
     };
   }
 
+  /**
+   * Add an entry. A ZIP holds one entry per name, so a name already added is refused
+   * (`ArchiveArgumentError`, field `name`): readers disagree about which of two same-named
+   * entries they return, and an editor keeps only one.
+   */
   add(name: string, source: ArchiveSource, options?: ZipEntryOptions): this {
+    return this._addAt("Archive.ZipArchive#add", name, source, options);
+  }
+
+  /** @internal {@link add}, naming `where` — the public call — in what it refuses. */
+  _addAt(where: string, name: string, source: ArchiveSource, options?: ZipEntryOptions): this {
     if (this._sealed) {
-      throw new ArchiveError("Cannot add entries after output has started");
+      throw new ArchiveError(`${where}: cannot add entries after output has started`);
     }
     if (!name) {
-      throw new ArchiveError("Entry name is required");
+      throw new ArchiveArgumentError("name", `${where}: name must be a non-empty string`);
     }
+    if (this._options.path === false) {
+      checkEntryName(where, name);
+    }
+    checkArchiveSource(where, "source", source);
+    checkZipEntryOptions(where, options);
+    const stored = this._options.path ? normalizeZipPath(name, this._options.path) : name;
+    if (this._names.has(stored)) {
+      throw new ArchiveArgumentError(
+        "name",
+        `${where}: the archive already has an entry named ${JSON.stringify(stored)}; a ZIP holds one entry per name`
+      );
+    }
+    this._names.add(stored);
     this._entries.push({ name, source, options });
     return this;
   }
@@ -243,8 +307,11 @@ export class ZipArchive {
    * Unified API consistent with TarArchive.
    */
   addDirectory(name: string, options?: Omit<ZipEntryOptions, "level">): this {
-    const dirName = name.endsWith("/") ? name : name + "/";
-    return this.add(dirName, new Uint8Array(0), { ...options, level: 0 });
+    const dirName = typeof name === "string" && !name.endsWith("/") ? name + "/" : name;
+    return this._addAt("Archive.ZipArchive#addDirectory", dirName, new Uint8Array(0), {
+      ...options,
+      level: 0
+    });
   }
 
   /**
@@ -253,7 +320,8 @@ export class ZipArchive {
    * Unified API consistent with TarArchive.
    */
   addSymlink(name: string, target: string, options?: Omit<ZipEntryOptions, "level">): this {
-    return this.add(name, encodeUtf8(target), {
+    checkString("Archive.ZipArchive#addSymlink", "target", target);
+    return this._addAt("Archive.ZipArchive#addSymlink", name, encodeUtf8(target), {
       ...options,
       level: 0,
       mode: options?.mode ?? 0o120777
@@ -355,8 +423,18 @@ export class ZipArchive {
       const level = input.options?.level ?? this._options.level;
       const deflate = level > 0;
 
+      const name = this._options.path
+        ? normalizeZipPath(input.name, this._options.path)
+        : input.name;
+      const attrs = resolveZipExternalAttributesAndVersionMadeBy({
+        name,
+        mode: input.options?.mode,
+        msDosAttributes: input.options?.msDosAttributes,
+        externalAttributes: input.options?.externalAttributes,
+        versionMadeBy: input.options?.versionMadeBy
+      });
       const meta = buildZipEntryMetadata({
-        name: input.name,
+        name,
         comment: input.options?.comment,
         modTime: input.options?.modTime ?? this._options.modTime,
         atime: input.options?.atime,
@@ -467,7 +545,8 @@ export class ZipArchive {
         dosDate: meta.dosDate,
         localHeaderOffset,
         zip64: false,
-        externalAttributes: 0
+        externalAttributes: attrs.externalAttributes,
+        versionMadeBy: attrs.versionMadeBy
       });
     }
 
@@ -496,7 +575,10 @@ export class ZipArchive {
     return out.read(out.length);
   }
 
-  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+  /**
+   * Build the archive and return the complete ZIP bytes.
+   */
+  async toBuffer(options: ZipStreamOptions = {}): Promise<Uint8Array> {
     this._sealed = true;
 
     const signalOpt = options.signal ?? this._streamDefaults.signal;
@@ -524,7 +606,9 @@ export class ZipArchive {
         hasBlobSource,
         allSourcesInMemory,
         smartStore: this._options.smartStore,
-        zip64Requested: this._options.zip64 === true,
+        // This path writes no ZIP64 records, so any entry asking for them goes elsewhere.
+        zip64Requested:
+          this._options.zip64 === true || this._entries.some(e => e.options?.zip64 === true),
         needsDeflate,
         hasDeflateRawCompressionStream
       })
@@ -541,27 +625,17 @@ export class ZipArchive {
       // Prefer the sync builder when possible (Node.js hot path): it avoids
       // async/Promise overhead and uses zlib sync fast paths.
       if (!hasBlobSource) {
-        const entries = this._entries.map(entry => ({
-          name: entry.name,
-          data: toUint8ArraySync(toSyncSource(entry.source)),
-          level: entry.options?.level,
-          modTime: entry.options?.modTime,
-          comment: entry.options?.comment,
-          encoding: entry.options?.encoding ?? this._options.encoding
-        }));
+        const entries = this._entries.map(entry =>
+          this._toBuildEntry(entry, toUint8ArraySync(toSyncSource(entry.source)))
+        );
 
         return createZipSync(entries, this._getCreateZipOptions());
       }
 
       const entries = await Promise.all(
-        this._entries.map(async entry => ({
-          name: entry.name,
-          data: await toUint8Array(toInMemorySource(entry.source)),
-          level: entry.options?.level,
-          modTime: entry.options?.modTime,
-          comment: entry.options?.comment,
-          encoding: entry.options?.encoding ?? this._options.encoding
-        }))
+        this._entries.map(async entry =>
+          this._toBuildEntry(entry, await toUint8Array(toInMemorySource(entry.source)))
+        )
       );
 
       return createZip(entries, this._getCreateZipOptions());
@@ -570,26 +644,46 @@ export class ZipArchive {
     return collect(this.stream());
   }
 
+  /**
+   * @deprecated Use {@link toBuffer}. Removed in 1.0.
+   */
+  async bytes(options: ZipStreamOptions = {}): Promise<Uint8Array> {
+    return this.toBuffer(options);
+  }
+
+  /**
+   * @deprecated Use {@link toBufferSync}. Removed in 1.0.
+   */
   bytesSync(): Uint8Array {
+    return this._buildSync("bytesSync");
+  }
+
+  /**
+   * Build the archive synchronously (in-memory sources only).
+   */
+  toBufferSync(): Uint8Array {
+    return this._buildSync("toBufferSync");
+  }
+
+  /** Build synchronously; `method` names the public entry point in error messages. */
+  protected _buildSync(method: string): Uint8Array {
     this._sealed = true;
 
     const entries = this._entries.map(entry => {
       if (!isSyncArchiveSource(entry.source)) {
-        throw new ArchiveError("bytesSync() only supports Uint8Array/ArrayBuffer/string sources");
+        throw new ArchiveArgumentError(
+          "source",
+          `Archive.ZipArchive#${method}: a source must be bytes or a string to be written synchronously (a Blob or a stream needs toBuffer)`
+        );
       }
-      return {
-        name: entry.name,
-        data: toUint8ArraySync(entry.source),
-        modTime: entry.options?.modTime,
-        comment: entry.options?.comment,
-        encoding: entry.options?.encoding ?? this._options.encoding
-      };
+      return this._toBuildEntry(entry, toUint8ArraySync(entry.source));
     });
 
     return createZipSync(entries, this._getCreateZipOptions());
   }
 
   async pipeTo(sink: ArchiveSink, options: ZipStreamOptions = {}): Promise<void> {
+    checkSinkArgument("Archive.ZipArchive#pipeTo", sink);
     await pipeIterableToSink(this.stream(options), sink);
   }
 }
@@ -604,7 +698,10 @@ function toSyncSource(source: ArchiveSource): Uint8Array | ArrayBuffer | string 
   if (isSyncArchiveSource(source)) {
     return source;
   }
-  throw new ArchiveError("Expected a synchronous archive source (Uint8Array/ArrayBuffer/string)");
+  throw new ArchiveArgumentError(
+    "source",
+    "Expected a synchronous archive source (Uint8Array/ArrayBuffer/string)"
+  );
 }
 
 /**
@@ -614,7 +711,8 @@ function toInMemorySource(source: ArchiveSource): Uint8Array | ArrayBuffer | str
   if (isInMemoryArchiveSource(source)) {
     return source;
   }
-  throw new ArchiveError(
+  throw new ArchiveArgumentError(
+    "source",
     "Expected an in-memory archive source (Uint8Array/ArrayBuffer/string/Blob)"
   );
 }

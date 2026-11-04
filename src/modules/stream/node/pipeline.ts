@@ -52,17 +52,42 @@ const runPipeline = createPipeline((stages, options) => {
   return (options ? run(...checked, options) : run(...checked)).then(() => undefined);
 });
 
+/**
+ * Pipe `streams` together. With a trailing callback it is called once every stage is done
+ * (or with the first error) and the last stage is returned, as `node:stream`'s `pipeline`
+ * does; without one, a promise settles instead.
+ */
+export function pipeline<D extends PipelineStageLike>(
+  ...args:
+    | [...PipelineStageLike[], D, PipelineCallback]
+    | [...PipelineStageLike[], D, PipelineOptions, PipelineCallback]
+): D;
+export function pipeline(
+  ...args: [...PipelineStageLike[], PipelineOptions] | PipelineStageLike[]
+): Promise<void>;
 export function pipeline(
   ...args: [...PipelineStageLike[], PipelineOptions | PipelineCallback] | PipelineStageLike[]
-): Promise<void> {
+): Promise<void> | PipelineStageLike {
   return runPipeline(...args);
 }
 
+/**
+ * Wait for `stream` to finish, error or close early. With a callback it is called then and
+ * a function that removes the listeners is returned, as `node:stream`'s `finished` does;
+ * without one, a promise settles instead.
+ */
+export function finished(stream: PipelineStreamLike, callback: PipelineCallback): () => void;
+export function finished(
+  stream: PipelineStreamLike,
+  options: FinishedOptions | undefined,
+  callback: PipelineCallback
+): () => void;
+export function finished(stream: PipelineStreamLike, options?: FinishedOptions): Promise<void>;
 export function finished(
   stream: PipelineStreamLike,
   optionsOrCallback?: FinishedOptions | PipelineCallback,
   callback?: PipelineCallback
-): Promise<void> {
+): Promise<void> | (() => void) {
   let options: FinishedOptions | undefined;
   let cb: PipelineCallback | undefined;
   if (typeof optionsOrCallback === "function") {
@@ -72,23 +97,18 @@ export function finished(
     cb = callback;
   }
 
-  const promise = new Promise<void>((resolve, reject) => {
-    const run = nodeFinished as (
-      target: unknown,
-      opts: FinishedOptions,
-      done: (err?: Error | null) => void
-    ) => void;
-    run(stream, options ?? {}, err => (err ? reject(err) : resolve()));
-  });
-
+  const run = nodeFinished as (
+    target: unknown,
+    opts: FinishedOptions,
+    done: (err?: Error | null) => void
+  ) => () => void;
   if (cb) {
     const done = cb;
-    promise.then(
-      () => done(),
-      err => done(err)
-    );
+    return run(stream, options ?? {}, err => (err ? done(err) : done()));
   }
-  return promise;
+  return new Promise<void>((resolve, reject) => {
+    run(stream, options ?? {}, err => (err ? reject(err) : resolve()));
+  });
 }
 
 export const finishedAll = createFinishedAll(finished);

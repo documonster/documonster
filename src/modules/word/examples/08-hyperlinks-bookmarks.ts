@@ -36,7 +36,7 @@ Document.addHeading(doc, "Word — Hyperlinks & Bookmarks", 1);
 // 1. External link via w:hyperlink element (the most common form)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "1. External link", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Visit "),
@@ -49,7 +49,7 @@ Document.addParagraphElement(
 );
 
 // External link via the HYPERLINK field form (alternative representation)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("(field form) "),
@@ -62,7 +62,7 @@ Document.addParagraphElement(
 );
 
 // Email link
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Contact: "),
@@ -74,7 +74,7 @@ Document.addParagraphElement(
 // references the FollowedHyperlink character style (and emits the standard
 // visited purple as direct formatting), so the link renders purple, in
 // contrast to the blue unvisited links above.
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("This link is styled as visited (purple): "),
@@ -89,8 +89,8 @@ Document.addHeading(doc, "2. Internal navigation", 2);
 
 // Allocate stable bookmark IDs from the document handle so they don't clash
 // with auto-assigned IDs the writer might emit elsewhere.
-const introId = Document.nextBookmarkId(doc);
-const detailsId = Document.nextBookmarkId(doc);
+const introId = Document.allocateBookmarkId(doc);
+const detailsId = Document.allocateBookmarkId(doc);
 
 // Cross-references via REF / PAGEREF fields. ECMA-376 §17.16.5.57 says
 // the \h flag tells Word to render the result as a hyperlink — but the
@@ -107,7 +107,7 @@ function wrapAsLink(anchor: string, run: ReturnType<typeof Build.refField>) {
   };
 }
 
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Jump to: "),
@@ -124,10 +124,10 @@ Document.addParagraphElement(
 );
 
 // Force a page break so PAGEREF resolves to something different at runtime
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // "Introduction" — wrapped in a bookmark range
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     [Build.bookmarkStart(introId, "intro"), Build.text("Introduction"), Build.bookmarkEnd(introId)],
@@ -139,10 +139,10 @@ Document.addParagraphElement(
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(40));
 
 // Force another page break
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // "Details" — bookmark wrapping a heading
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     [
@@ -161,7 +161,7 @@ Document.addParagraph(doc, "Sed ut perspiciatis… ".repeat(40));
 // 3. Hyperlink with rich formatting (bold, italic, custom color)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "3. Rich-formatted link content", 2);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("A "),
@@ -181,7 +181,7 @@ Document.addParagraphElement(
 // ---------------------------------------------------------------------------
 // 4. Tooltip / target frame
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("With target frame _blank: "),
@@ -199,20 +199,17 @@ Document.addParagraphElement(
 Document.addHeading(doc, "Edge cases", 2);
 
 // Hyperlink with neither url nor anchor — degraded to plain text by writers
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.text("Broken link (no url/anchor): "), Build.hyperlink("plain text", {})])
 );
 
 // Empty link text
-Document.addParagraphElement(
-  doc,
-  Build.paragraph([Build.hyperlink("", { url: "https://example.com" })])
-);
+Document.addParagraph(doc, Build.paragraph([Build.hyperlink("", { url: "https://example.com" })]));
 
 // Bookmark with empty name — written but flagged at validation time
-const emptyBookmarkId = Document.nextBookmarkId(doc);
-Document.addParagraphElement(
+const emptyBookmarkId = Document.allocateBookmarkId(doc);
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bookmarkStart(emptyBookmarkId, ""),
@@ -222,13 +219,13 @@ Document.addParagraphElement(
 );
 
 // Bookmark wrapping multiple paragraphs (range straddles paragraph boundary)
-const rangeId = Document.nextBookmarkId(doc);
-Document.addParagraphElement(
+const rangeId = Document.allocateBookmarkId(doc);
+Document.addParagraph(
   doc,
   Build.paragraph([Build.bookmarkStart(rangeId, "multi"), Build.text("First paragraph in range.")])
 );
 Document.addParagraph(doc, "Second paragraph in range.");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.text("Last paragraph; bookmark ends here. "), Build.bookmarkEnd(rangeId)])
 );
@@ -238,7 +235,7 @@ Document.addParagraphElement(
 // always renders correctly we use the equivalent <w:hyperlink w:anchor>
 // element instead. (The REF/PAGEREF field examples in section 2 above
 // already cover the field-level form.)
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Reference into the multi-paragraph bookmark: "),
@@ -246,6 +243,6 @@ Document.addParagraphElement(
   ])
 );
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "08-hyperlinks-bookmarks.docx"), buf);
 console.log(`  → 08-hyperlinks-bookmarks.docx (${buf.length} bytes)`);

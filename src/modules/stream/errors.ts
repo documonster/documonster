@@ -42,32 +42,64 @@ export class StreamStateError extends StreamError {
   }
 }
 
+/** Options for {@link StreamTypeError} and {@link UnsupportedStreamTypeError}. */
+export interface StreamErrorOptions extends BaseErrorOptions {
+  /**
+   * The argument or option at fault, when the error is about one: the path from the parameter
+   * name in the public signature (`stream`, `options.highWaterMark`).
+   */
+  field?: string;
+  /**
+   * The public call that refused the argument (`Streams.fromString`), which a
+   * {@link StreamTypeError} message then starts with.
+   */
+  where?: string;
+}
+
 /**
- * Error thrown when data type conversion fails.
+ * Error thrown when data type conversion fails, or when an argument is of the wrong type —
+ * then `field` names the argument or option.
  */
 export class StreamTypeError extends StreamError {
   override name = "StreamTypeError";
+  /** The argument or option at fault; absent when the error is about a stream's contents. */
+  readonly field?: string;
 
   constructor(
     public readonly expectedType: string,
     public readonly actualType: string,
-    options?: BaseErrorOptions
+    options?: StreamErrorOptions
   ) {
-    super(`Expected ${expectedType}, got ${actualType}`, options);
+    super(
+      options?.where === undefined
+        ? `Expected ${expectedType}, got ${actualType}`
+        : `${options.where}: expected ${expectedType}, got ${actualType}`,
+      options
+    );
+    if (options?.field !== undefined) {
+      this.field = options.field;
+    }
   }
 }
 
 /**
- * Error thrown when a stream type is not supported.
+ * Error thrown when a stream type is not supported. `operation` is the public call that was
+ * given it (`Streams.bytes`), which the message starts with.
  */
 export class UnsupportedStreamTypeError extends StreamError {
   override name = "UnsupportedStreamTypeError";
 
+  /** The argument at fault, when the error is about one; absent for a stream's contents. */
+  readonly field?: string;
+
   constructor(
     public readonly operation: string,
     public readonly streamType: string,
-    options?: BaseErrorOptions
+    options?: StreamErrorOptions
   ) {
     super(`${operation}: unsupported stream type "${streamType}"`, options);
+    if (options?.field !== undefined) {
+      this.field = options.field;
+    }
   }
 }

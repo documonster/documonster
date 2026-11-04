@@ -5,7 +5,7 @@ import type { RowData } from "@excel/core/row";
 import { rowCellCount } from "@excel/core/row";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import { rowGetCell } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import type { WorkbookReaderOptions } from "@excel/stream/workbook-reader.browser";
 import { describe, it, expect } from "vitest";
@@ -64,7 +64,7 @@ describe("WorkbookReader", () => {
           start(controller) {
             const chunkSize = 64 * 1024;
             for (let i = 0; i < data.length; i += chunkSize) {
-              controller.enqueue(data.slice(i, i + chunkSize));
+              controller.enqueue(new Uint8Array(data.subarray(i, i + chunkSize)));
             }
             controller.close();
           }
@@ -301,10 +301,10 @@ describe("WorkbookReader", () => {
     it("reads worksheets that have different column structures", async () => {
       const buffer = await buildXlsxBuffer(wb => {
         const ws1 = Workbook.addWorksheet(wb, "Numbers");
-        Worksheet.addRow(ws1, [1, 2, 3]);
+        Row.add(ws1, [1, 2, 3]);
 
         const ws2 = Workbook.addWorksheet(wb, "Strings");
-        Worksheet.addRow(ws2, ["a", "b", "c", "d", "e"]);
+        Row.add(ws2, ["a", "b", "c", "d", "e"]);
       });
 
       const reader = new WorkbookReader(buffer, {
@@ -735,7 +735,7 @@ describe("WorkbookReader never stalls on a part left unread", () => {
     for (const [name, file] of entries) {
       archive.add(name, file.data);
     }
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   const ROWS = 5000;

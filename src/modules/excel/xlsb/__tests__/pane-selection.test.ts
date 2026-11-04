@@ -49,7 +49,7 @@ async function selections(
 describe("BrtSel across pane arrangements", () => {
   it("keeps every selection at A1 for a frozen view", async () => {
     const result = await selections(sheet => {
-      Worksheet.freeze(sheet, 0, 1);
+      Worksheet.freeze(sheet, { rows: 1 });
     });
     expect(result.length).toBeGreaterThan(0);
     for (const selection of result) {
@@ -59,9 +59,9 @@ describe("BrtSel across pane arrangements", () => {
 
   it("selects the top-left cell in the active pane of a split view", async () => {
     const result = await selections(sheet => {
-      // `Worksheet.split(ws, x, y)` takes positions and no `topLeftCell`, so the view is set directly — which is also
+      // `Worksheet.split(ws, { x, y })` takes positions and no `topLeftCell`, so the view is set directly — which is also
       // what reading a file produces.
-      Worksheet.split(sheet, 2000, 1200);
+      Worksheet.split(sheet, { x: 2000, y: 1200 });
       const model = Worksheet.getModel(sheet) as unknown as Record<string, unknown>;
       const views = (model["views"] as Record<string, unknown>[]) ?? [];
       Worksheet.setModel(sheet, {
@@ -79,9 +79,9 @@ describe("BrtSel across pane arrangements", () => {
   it("leaves the other panes of a split view at A1", async () => {
     // Without this the previous test passes for an implementation that puts the cell on every pane.
     const result = await selections(sheet => {
-      // `Worksheet.split(ws, x, y)` takes positions and no `topLeftCell`, so the view is set directly — which is also
+      // `Worksheet.split(ws, { x, y })` takes positions and no `topLeftCell`, so the view is set directly — which is also
       // what reading a file produces.
-      Worksheet.split(sheet, 2000, 1200);
+      Worksheet.split(sheet, { x: 2000, y: 1200 });
       const model = Worksheet.getModel(sheet) as unknown as Record<string, unknown>;
       const views = (model["views"] as Record<string, unknown>[]) ?? [];
       Worksheet.setModel(sheet, {

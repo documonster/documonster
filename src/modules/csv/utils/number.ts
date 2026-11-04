@@ -5,6 +5,9 @@
  * with support for different decimal separators (e.g., European format).
  */
 
+import { CsvArgumentError } from "@csv/errors";
+import { describeValue } from "@csv/utils/check-options";
+
 /**
  * Decimal separator type.
  * - "." - Standard decimal point (default)
@@ -39,7 +42,7 @@ export function formatNumberForCsv(value: number, decimalSeparator: DecimalSepar
  *
  * @param value - The string value to parse
  * @param decimalSeparator - The decimal separator used in the value
- * @returns Parsed number (may be NaN if invalid)
+ * @returns Parsed number; NaN when the text is not a number, including an empty or blank one
  *
  * @example
  * parseNumberFromCsv("3.14", ".") // 3.14
@@ -47,6 +50,10 @@ export function formatNumberForCsv(value: number, decimalSeparator: DecimalSepar
  */
 export function parseNumberFromCsv(value: string, decimalSeparator: DecimalSeparator): number {
   const trimmed = value.trim();
+  // `Number("")` is 0: an empty or blank field holds no number.
+  if (trimmed === "") {
+    return NaN;
+  }
 
   if (decimalSeparator !== ",") {
     return Number(trimmed);
@@ -59,4 +66,56 @@ export function parseNumberFromCsv(value: string, decimalSeparator: DecimalSepar
   }
 
   return Number(trimmed);
+}
+
+function checkDecimalSeparator(where: string, decimalSeparator: unknown): void {
+  if (decimalSeparator !== "." && decimalSeparator !== ",") {
+    throw new CsvArgumentError(
+      "decimalSeparator",
+      `${where}: decimalSeparator must be "." or ",", got ${describeValue(decimalSeparator)}`
+    );
+  }
+}
+
+/**
+ * Format a number with the given decimal separator — {@link formatNumberForCsv}, checking its
+ * arguments. Published as `Csv.formatNumber`.
+ *
+ * @example
+ * ```ts
+ * import { Csv } from "documonster/csv";
+ * Csv.formatNumber(3.14, ","); // "3,14"
+ * ```
+ */
+export function formatNumber(value: number, decimalSeparator: DecimalSeparator): string {
+  if (typeof value !== "number") {
+    throw new CsvArgumentError(
+      "value",
+      `Csv.formatNumber: value must be a number, got ${describeValue(value)}`
+    );
+  }
+  checkDecimalSeparator("Csv.formatNumber", decimalSeparator);
+  return formatNumberForCsv(value, decimalSeparator);
+}
+
+/**
+ * Parse a number written with the given decimal separator — {@link parseNumberFromCsv},
+ * checking its arguments. `NaN` when the text is not a number, including an empty one.
+ * Published as `Csv.parseNumber`.
+ *
+ * @example
+ * ```ts
+ * import { Csv } from "documonster/csv";
+ * Csv.parseNumber("3,14", ","); // 3.14
+ * ```
+ */
+export function parseNumber(value: string, decimalSeparator: DecimalSeparator): number {
+  if (typeof value !== "string") {
+    throw new CsvArgumentError(
+      "value",
+      `Csv.parseNumber: value must be a string, got ${describeValue(value)}`
+    );
+  }
+  checkDecimalSeparator("Csv.parseNumber", decimalSeparator);
+  return parseNumberFromCsv(value, decimalSeparator);
 }

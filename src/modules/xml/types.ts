@@ -93,6 +93,12 @@ export interface XmlDocument {
    * options are enabled.
    */
   prologue: Array<XmlComment | XmlProcessingInstruction>;
+  /**
+   * Top-level comments and processing instructions after the root element (in fragment mode,
+   * after the first root element). Like `prologue`, only populated when `comments` or
+   * `processingInstructions` are enabled; always present on a parsed document.
+   */
+  epilogue?: Array<XmlComment | XmlProcessingInstruction>;
 }
 
 // =============================================================================
@@ -215,7 +221,7 @@ export interface SaxHandlers {
  * - `"skip"` — Silently remove the invalid character from the output.
  * - `"replace"` — Replace the invalid character with U+FFFD (REPLACEMENT CHARACTER).
  */
-export type InvalidCharHandling = "error" | "skip" | "replace";
+export type XmlInvalidCharHandling = "error" | "skip" | "replace";
 
 /** SAX parser options. */
 export interface SaxOptions {
@@ -245,7 +251,7 @@ export interface SaxOptions {
    *
    * @default "error"
    */
-  invalidCharHandling?: InvalidCharHandling;
+  invalidCharHandling?: XmlInvalidCharHandling;
 }
 
 // =============================================================================
@@ -269,7 +275,7 @@ export interface SaxOptions {
  *
  *   1. Wrap the target so `write()` buffers into a bounded queue and
  *      pause your XML production loop when the queue is full.
- *   2. Use a small in-memory buffer as the `WritableTarget`, then ship
+ *   2. Use a small in-memory buffer as the `XmlWritableTarget`, then ship
  *      the assembled bytes to the slow sink with proper backpressure
  *      (e.g. via `pipeline()`).
  *
@@ -281,7 +287,7 @@ export interface SaxOptions {
  * is the practical bound on how much a slow user sink can buffer behind
  * the xlsx writer.
  */
-export interface WritableTarget {
+export interface XmlWritableTarget {
   write(chunk: string | Uint8Array): void;
 }
 
@@ -295,7 +301,7 @@ export interface WritableTarget {
  * Controls how an {@link XmlElement} DOM tree is converted to a plain
  * JavaScript object.
  */
-export interface ToPlainObjectOptions {
+export interface XmlToPlainObjectOptions {
   /**
    * When true, discard all attributes entirely. Takes precedence over
    * `attributePrefix` — when `ignoreAttributes` is true, no attribute keys
@@ -347,10 +353,10 @@ export interface ToPlainObjectOptions {
 /**
  * Options for `parseXmlToObject()`.
  *
- * Extends {@link ToPlainObjectOptions} with SAX parser settings, since
+ * Extends {@link XmlToPlainObjectOptions} with SAX parser settings, since
  * `parseXmlToObject` handles both parsing and conversion in a single pass.
  */
-export interface ParseXmlToObjectOptions extends ToPlainObjectOptions {
+export interface XmlParseToObjectOptions extends XmlToPlainObjectOptions {
   /** Parse as fragment (no root element required). Default: false */
   fragment?: boolean;
   /** Maximum element nesting depth. Default: 256. */
@@ -358,7 +364,7 @@ export interface ParseXmlToObjectOptions extends ToPlainObjectOptions {
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
   /** How to handle invalid XML characters. Default: "error". */
-  invalidCharHandling?: InvalidCharHandling;
+  invalidCharHandling?: XmlInvalidCharHandling;
 }
 
 // =============================================================================
@@ -382,5 +388,14 @@ export interface XmlParseOptions {
   /** Maximum total entity expansions. Default: 10000. */
   maxEntityExpansions?: number;
   /** How to handle invalid XML characters. Default: "error". */
-  invalidCharHandling?: InvalidCharHandling;
+  invalidCharHandling?: XmlInvalidCharHandling;
 }
+
+/** @deprecated Use {@link XmlToPlainObjectOptions}. Removed in 1.0. */
+export type ToPlainObjectOptions = XmlToPlainObjectOptions;
+/** @deprecated Use {@link XmlParseToObjectOptions}. Removed in 1.0. */
+export type ParseXmlToObjectOptions = XmlParseToObjectOptions;
+/** @deprecated Use {@link XmlInvalidCharHandling}. Removed in 1.0. */
+export type InvalidCharHandling = XmlInvalidCharHandling;
+/** @deprecated Use {@link XmlWritableTarget}. Removed in 1.0. */
+export type WritableTarget = XmlWritableTarget;

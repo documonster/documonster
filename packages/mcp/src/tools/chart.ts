@@ -126,28 +126,28 @@ export function addChart(ws: SheetHandle, spec: ChartSpec): string {
   try {
     switch (spec.type) {
       case "column":
-        Chart.addColumn(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "bar", barDir: "col" });
         break;
       case "bar":
-        Chart.addBar(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "bar", barDir: "bar" });
         break;
       case "line":
-        Chart.addLine(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "line" });
         break;
       case "area":
-        Chart.addArea(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "area" });
         break;
       case "pie":
-        Chart.addPie(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "pie" });
         break;
       case "doughnut":
-        Chart.addDoughnut(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "doughnut" });
         break;
       case "scatter":
-        Chart.addScatter(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "scatter" });
         break;
       case "radar":
-        Chart.addRadar(ws, options, anchor);
+        Chart.place(ws, anchor, { ...options, type: "radar" });
         break;
     }
   } catch (cause) {
@@ -190,7 +190,8 @@ function qualify(sheet: string, range: string, field: string): string {
 
 /** Place a chart clear of the data when the caller does not choose. */
 function defaultAnchor(ws: SheetHandle, seriesCount: number): string {
-  const dimensions = Worksheet.dimensions(ws);
+  // An empty sheet has no used range: place the chart as if the data ended before A1.
+  const dimensions = Worksheet.getDimensions(ws) ?? { right: 0, bottom: 0 };
   const height = Math.max(15, seriesCount * 6);
   const roomOnRight = dimensions.right + 8 <= MAX_EXCEL_COLUMNS;
   const left = roomOnRight ? Math.max(1, dimensions.right + 2) : 1;

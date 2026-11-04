@@ -40,7 +40,7 @@ describe("chart drawing extent round-trip", () => {
     });
     Document.addContent(h, ch);
 
-    const bytes = await Io.package(Document.build(h));
+    const bytes = await Io.toBuffer(h);
     const reread = await Io.read(bytes);
 
     const reChart = reread.body.find(b => b.type === "chart") as ChartContent | undefined;

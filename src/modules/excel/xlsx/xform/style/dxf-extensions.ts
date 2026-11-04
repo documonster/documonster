@@ -1,5 +1,3 @@
-import { xmlEncodeAttr } from "@xml/encode";
-
 /**
  * A differential format's `<extLst>`, carried through a round trip as XML.
  *
@@ -29,41 +27,4 @@ export function dxfExtensionsOf(style: object | undefined): string | undefined {
 /** Attach a preserved `<extLst>` to a differential format. */
 export function setDxfExtensions(style: object, xml: string): void {
   (style as WithExtensions)[DXF_EXTENSIONS] = xml;
-}
-
-/**
- * Make a preserved fragment's namespace prefixes resolvable wherever it is written.
- *
- * An extension's elements are prefixed (`x14:…`), and the prefix may be declared on an ancestor — the source's
- * `<styleSheet>` — rather than inside the fragment. This writer emits its own `<styleSheet>` with its own
- * declarations, so a prefix the source declared there would be written unbound, and the part would not be
- * well-formed XML. Each prefix the fragment uses and its root element does not declare is therefore declared on
- * that root, from `inherited`. A redundant declaration is harmless; a missing one is not.
- */
-export function withInheritedNamespaces(
-  xml: string,
-  inherited: Readonly<Record<string, string>>
-): string {
-  const rootEnd = xml.search(/\/?>/);
-  if (rootEnd < 0) {
-    return xml;
-  }
-  const root = xml.slice(0, rootEnd);
-  const used = new Set<string>();
-  for (const match of xml.matchAll(
-    /<\/?([A-Za-z_][\w.-]*):[\w.-]+|\s([A-Za-z_][\w.-]*):[\w.-]+\s*=/g
-  )) {
-    const prefix = match[1] ?? match[2]!;
-    if (prefix !== "xmlns" && prefix !== "xml") {
-      used.add(prefix);
-    }
-  }
-  let declarations = "";
-  for (const prefix of used) {
-    const uri = inherited[prefix];
-    if (uri !== undefined && !new RegExp(`\\sxmlns:${prefix}\\s*=`).test(root)) {
-      declarations += ` xmlns:${prefix}="${xmlEncodeAttr(uri)}"`;
-    }
-  }
-  return declarations === "" ? xml : root + declarations + xml.slice(rootEnd);
 }

@@ -46,6 +46,7 @@ import {
   Cell,
   Chart,
   Column,
+  ConditionalFormatting,
   Row,
   Sparkline,
   Table,
@@ -220,7 +221,7 @@ async function main(): Promise<void> {
   Column.setWidth(rawSheet, 4, 14);
 
   // Conditional formatting — 3-colour scale on response.
-  Worksheet.addConditionalFormatting(rawSheet, {
+  ConditionalFormatting.add(rawSheet, {
     ref: `D2:D${samples.length + 1}`,
     rules: [
       {
@@ -234,7 +235,7 @@ async function main(): Promise<void> {
 
   // Custom-formula conditional formatting: flag rows where response is
   // more than 2 sd above the overall mean.
-  Worksheet.addConditionalFormatting(rawSheet, {
+  ConditionalFormatting.add(rawSheet, {
     ref: `A2:D${samples.length + 1}`,
     rules: [
       {
@@ -248,7 +249,7 @@ async function main(): Promise<void> {
     ]
   });
 
-  console.log(`Samples table created: ${Table.model(samplesTable).name}`);
+  console.log(`Samples table created: ${Table.getModel(samplesTable).name}`);
 
   // =========================================================================
   // Sheet 3 — Summary statistics (formulas that query the Samples Table)
@@ -357,7 +358,7 @@ async function main(): Promise<void> {
   });
 
   // Data bars on the Mean column
-  Worksheet.addConditionalFormatting(summary, {
+  ConditionalFormatting.add(summary, {
     ref: `C3:C${2 + GROUPS.length}`,
     rules: [
       {
@@ -394,48 +395,39 @@ async function main(): Promise<void> {
   // ---- 4.1 Histogram — all responses
   Cell.setValue(dist, "A3", "Histogram of all responses");
   Cell.setStyle(dist, "A3", { font: { bold: true } });
-  Chart.addHistogram(
-    dist,
-    {
-      title: "Response distribution (all groups)",
-      series: [{ name: "Response", values: responseRange }],
-      binning: { binType: "auto" }
-    },
-    "A4:F22"
-  );
+  Chart.place(dist, "A4:F22", {
+    type: "histogram",
+    title: "Response distribution (all groups)",
+    series: [{ name: "Response", values: responseRange }],
+    binning: { binType: "auto" }
+  });
 
   // ---- 4.2 Pareto — same data, with cumulative curve
   Cell.setValue(dist, "G3", "Pareto — frequency + cumulative");
   Cell.setStyle(dist, "G3", { font: { bold: true } });
-  Chart.addPareto(
-    dist,
-    {
-      title: "Response Pareto",
-      series: [{ name: "Response", values: responseRange }],
-      binning: { binType: "binCount", binCount: 12 }
-    },
-    "G4:L22"
-  );
+  Chart.place(dist, "G4:L22", {
+    type: "pareto",
+    title: "Response Pareto",
+    series: [{ name: "Response", values: responseRange }],
+    binning: { binType: "binCount", binCount: 12 }
+  });
 
   // ---- 4.3 Box-whisker per group
   Cell.setValue(dist, "A25", "Box-whisker of response by group");
   Cell.setStyle(dist, "A25", { font: { bold: true } });
-  Chart.addBoxWhisker(
-    dist,
-    {
-      title: "Response box-whisker by group",
-      categories: groupRange,
-      series: [{ name: "Response", values: responseRange }],
-      layout: {
-        quartileMethod: "inclusive",
-        showMeanLine: true,
-        showMeanMarker: true,
-        showInnerPoints: false,
-        showOutlierPoints: true
-      }
-    },
-    "A26:L50"
-  );
+  Chart.place(dist, "A26:L50", {
+    type: "boxWhisker",
+    title: "Response box-whisker by group",
+    categories: groupRange,
+    series: [{ name: "Response", values: responseRange }],
+    layout: {
+      quartileMethod: "inclusive",
+      showMeanLine: true,
+      showMeanMarker: true,
+      showInnerPoints: false,
+      showOutlierPoints: true
+    }
+  });
 
   // =========================================================================
   // Sheet 5 — Regression (scatter + 4 simultaneous trendlines)
@@ -500,43 +492,39 @@ async function main(): Promise<void> {
   Cell.setValue(regr, "A6", "Scatter + 4 simultaneous model fits");
   Cell.setStyle(regr, "A6", { font: { bold: true } });
   const doseRange = `Samples!$C$2:$C$${samples.length + 1}`;
-  Chart.add(
-    regr,
-    {
-      type: "scatter",
-      scatterStyle: "marker",
-      title: {
-        paragraphs: [
-          {
-            runs: [
-              {
-                text: "Dose-response regression",
-                properties: { bold: true, size: 1600, color: { srgb: "1F3864" } }
-              }
-            ]
-          }
-        ]
-      } as ChartRichText,
-      series: [
+  Chart.place(regr, "A7:L30", {
+    type: "scatter",
+    scatterStyle: "marker",
+    title: {
+      paragraphs: [
         {
-          name: "Samples",
-          xValues: doseRange,
-          values: responseRange,
-          marker: { symbol: "circle", size: 5, fill: "5B9BD5", border: "FFFFFF" },
-          trendline: trendlines,
-          errorBars: {
-            direction: "y",
-            barDir: "both",
-            type: "stdErr",
-            line: "A6A6A6"
-          }
+          runs: [
+            {
+              text: "Dose-response regression",
+              properties: { bold: true, size: 1600, color: { srgb: "1F3864" } }
+            }
+          ]
         }
-      ],
-      categoryAxis: { title: "Dose (mg/kg)", min: 0, max: 50 },
-      valueAxis: { title: "Response" }
-    },
-    "A7:L30"
-  );
+      ]
+    } as ChartRichText,
+    series: [
+      {
+        name: "Samples",
+        xValues: doseRange,
+        values: responseRange,
+        marker: { symbol: "circle", size: 5, fill: "5B9BD5", border: "FFFFFF" },
+        trendline: trendlines,
+        errorBars: {
+          direction: "y",
+          barDir: "both",
+          type: "stdErr",
+          line: "A6A6A6"
+        }
+      }
+    ],
+    categoryAxis: { title: "Dose (mg/kg)", min: 0, max: 50 },
+    valueAxis: { title: "Response" }
+  });
 
   // Per-group regression
   Cell.setValue(regr, "A32", "Per-group slope / intercept / R²");
@@ -634,21 +622,17 @@ async function main(): Promise<void> {
   });
 
   // Radar chart comparing all groups across the metrics.
-  Chart.add(
-    compSheet,
-    {
-      type: "radar",
-      radarStyle: "marker",
-      title: "Per-metric comparison",
-      series: GROUPS.map((g, i) => ({
-        name: g.name,
-        categories: `Comparison!$A$4:$A$${3 + metrics.length}`,
-        values: `Comparison!$${String.fromCharCode(66 + i)}$4:$${String.fromCharCode(66 + i)}$${3 + metrics.length}`,
-        marker: { symbol: "circle", size: 6 }
-      }))
-    },
-    "A13:L32"
-  );
+  Chart.place(compSheet, "A13:L32", {
+    type: "radar",
+    radarStyle: "marker",
+    title: "Per-metric comparison",
+    series: GROUPS.map((g, i) => ({
+      name: g.name,
+      categories: `Comparison!$A$4:$A$${3 + metrics.length}`,
+      values: `Comparison!$${String.fromCharCode(66 + i)}$4:$${String.fromCharCode(66 + i)}$${3 + metrics.length}`,
+      marker: { symbol: "circle", size: 6 }
+    }))
+  });
 
   // Surface — a synthetic 2D parameter sweep.
   Cell.setValue(compSheet, "A35", "Parameter sweep — dose × time → response");
@@ -671,21 +655,17 @@ async function main(): Promise<void> {
     });
   });
 
-  Chart.add(
-    compSheet,
-    {
-      type: "surface3D",
-      title: "Response surface — dose × time",
-      view3D: { rotX: 20, rotY: 30, perspective: 30 },
-      wireframe: false,
-      series: times.map((t, ti) => ({
-        name: `t=${t}h`,
-        categories: `Comparison!$B$36:$${String.fromCharCode(66 + doses.length - 1)}$36`,
-        values: `Comparison!$B$${37 + ti}:$${String.fromCharCode(66 + doses.length - 1)}$${37 + ti}`
-      }))
-    },
-    "A46:L67"
-  );
+  Chart.place(compSheet, "A46:L67", {
+    type: "surface3D",
+    title: "Response surface — dose × time",
+    view3D: { rotX: 20, rotY: 30, perspective: 30 },
+    wireframe: false,
+    series: times.map((t, ti) => ({
+      name: `t=${t}h`,
+      categories: `Comparison!$B$36:$${String.fromCharCode(66 + doses.length - 1)}$36`,
+      values: `Comparison!$B$${37 + ti}:$${String.fromCharCode(66 + doses.length - 1)}$${37 + ti}`
+    }))
+  });
 
   // =========================================================================
   // Sheet 7 — Trend sparklines per group
@@ -775,13 +755,13 @@ async function main(): Promise<void> {
 
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  sheets      : ${Workbook.getWorksheets(wb).length}`);
+  console.log(`  sheets      : ${Workbook.listWorksheets(wb).length}`);
   console.log(`  samples     : ${samples.length} rows across ${GROUPS.length} groups`);
   console.log(
-    `  charts      : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
+    `  charts      : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Chart.list(ws).length, 0)}`
   );
   console.log(
-    `  sparklines  : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)} groups`
+    `  sparklines  : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)} groups`
   );
 }
 

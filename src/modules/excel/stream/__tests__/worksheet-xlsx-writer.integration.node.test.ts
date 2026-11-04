@@ -592,7 +592,12 @@ describe("WorksheetWriter", () => {
       ws.autoFilter = { from: "A1", to: "C1" };
 
       // Set sheet protection
-      await ws.protect("test", { formatColumns: true, formatRows: true, autoFilter: true });
+      await ws.protect({
+        password: "test",
+        formatColumns: true,
+        formatRows: true,
+        autoFilter: true
+      });
 
       ws.commit();
       await wb.commit();
@@ -635,11 +640,7 @@ describe("WorksheetWriter", () => {
       });
       rowCommit(row);
 
-      expect(sheet.protect).toBeDefined();
-
-      await sheet.protect("password", {
-        spinCount: 1
-      });
+      await sheet.protect({ password: "password", spinCount: 1 });
 
       sheet.commit();
       await workbook.commit();

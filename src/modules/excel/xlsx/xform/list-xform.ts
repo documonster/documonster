@@ -42,6 +42,8 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
   declare protected childXform: ListChildXform<TChild>;
   declare protected maxItems?: number;
   declare public parser?: ListChildXform<TChild>;
+  /** Depth inside an element the child parser declined, whose subtree is skipped. */
+  private skipping = 0;
 
   constructor(options: ListXformOptions) {
     super();
@@ -89,12 +91,23 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
       this.parser.parseOpen(node);
       return true;
     }
+    if (this.skipping > 0) {
+      this.skipping++;
+      return true;
+    }
     if (node.name === this.tag) {
       this.model = [];
       return true;
     }
     if (this.childXform.parseOpen(node)) {
       this.parser = this.childXform;
+      return true;
+    }
+    // **An element the child does not take is skipped with its subtree**, once the list is open. Declining it
+    // (`false`) left its closing tag to arrive here with no child parser, where it read as the list's own close —
+    // ending `<sheetData>` at the first stray `</c>` and handing the rest of the rows to whatever parsed next.
+    if (this.model !== undefined) {
+      this.skipping = 1;
       return true;
     }
     return false;
@@ -121,6 +134,10 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
       }
       return true;
     }
+    if (this.skipping > 0) {
+      this.skipping--;
+      return true;
+    }
 
     return false;
   }
@@ -136,6 +153,7 @@ class ListXform<TChild = unknown> extends BaseXform<TChild[]> {
 
   reset(): void {
     super.reset();
+    this.skipping = 0;
     if (this.childXform) {
       this.childXform.reset();
     }

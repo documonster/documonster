@@ -14,10 +14,11 @@
 
 import { parseXml, findChild, findChildren, textContent, attr, walk } from "@xml/dom";
 import { xmlEncode, xmlDecode } from "@xml/encode";
+import { XmlError } from "@xml/errors";
 import { query, queryAll } from "@xml/query";
 import { SaxParser, parseSax } from "@xml/sax";
 import { XmlStreamWriter } from "@xml/stream-writer";
-import type { SaxTag, WritableTarget } from "@xml/types";
+import type { SaxTag, XmlWritableTarget } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
@@ -54,6 +55,26 @@ describe("Entity handling edge cases", () => {
     parser.write("<root>&nonexistent;</root>");
     parser.close();
     expect(errors.some(e => e.includes("undefined entity"))).toBe(true);
+  });
+
+  it("names the unsupported internal DTD subset when one of its entities is referenced", () => {
+    const parse = (xml: string): string[] => {
+      const parser = new SaxParser();
+      const errors: string[] = [];
+      parser.on("error", err => errors.push(err.message));
+      parser.write(xml);
+      parser.close();
+      return errors;
+    };
+    expect(parse('<!DOCTYPE r [<!ENTITY e "x">]><r>&e;</r>')).toEqual([
+      expect.stringContaining(
+        "undefined entity: e (entities declared in a DOCTYPE internal subset are not supported)"
+      )
+    ]);
+    // Without an internal subset there is nowhere such an entity could have come from.
+    expect(parse("<!DOCTYPE r><r>&e;</r>")).toEqual([
+      expect.not.stringContaining("internal subset")
+    ]);
   });
 
   it("should handle all 5 predefined entities", () => {
@@ -142,7 +163,9 @@ describe("Unicode edge cases", () => {
   });
 
   it("should preserve valid whitespace in encoding", () => {
-    expect(xmlEncode("a\tb\nc\rd")).toBe("a\tb\nc\rd");
+    // CR is written as a reference: a parser reads a literal CR as LF (XML 1.0 §2.11), which
+    // this test used to pin.
+    expect(xmlEncode("a\tb\nc\rd")).toBe("a\tb\nc&#xD;d");
   });
 });
 
@@ -485,7 +508,7 @@ describe("Writer edge cases", () => {
 
   it("should handle XmlStreamWriter parity for all content types", () => {
     const chunks: string[] = [];
-    const target: WritableTarget = { write: (c: string | Uint8Array) => chunks.push(String(c)) };
+    const target: XmlWritableTarget = { write: (c: string | Uint8Array) => chunks.push(String(c)) };
     const sw = new XmlStreamWriter(target);
     const w = new XmlWriter();
 
@@ -514,8 +537,8 @@ describe("Query edge cases", () => {
 
   it("should handle empty path gracefully", () => {
     const doc = parseXml(xml);
-    // Empty path — implementation-defined, should not crash
-    expect(() => queryAll(doc.root, "")).not.toThrow();
+    // An empty path has no step; it is refused with the module's own error, not a crash.
+    expect(() => queryAll(doc.root, "")).toThrow(XmlError);
   });
 
   it("should handle path with only wildcard", () => {
@@ -916,7 +939,7 @@ describe("Writer round-trip through parseXml", () => {
 describe("Writer parity for CDATA splitting", () => {
   it("should produce identical CDATA-split output from both writers", () => {
     const chunks: string[] = [];
-    const target: WritableTarget = { write: (c: string | Uint8Array) => chunks.push(String(c)) };
+    const target: XmlWritableTarget = { write: (c: string | Uint8Array) => chunks.push(String(c)) };
     const sw = new XmlStreamWriter(target);
     const w = new XmlWriter();
 

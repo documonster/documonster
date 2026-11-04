@@ -12,7 +12,7 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 import { Cell, Workbook, Worksheet } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
 
@@ -254,7 +254,7 @@ describe("archive — extraction cannot escape", () => {
     await mkdir(path.join(fx.root, "out"), { recursive: true });
     await symlink(fx.outside, path.join(fx.root, "out/link"), "junction");
 
-    const zip = new ArchiveFile();
+    const zip = new Archive.ArchiveFile();
     zip.addText("PWNED", "link/pwn.txt");
     await zip.writeToFile(path.join(fx.root, "evil.zip"));
 
@@ -270,7 +270,9 @@ describe("archive — extraction cannot escape", () => {
 
   it("refuses a traversal entry name", async () => {
     const fx = await fixture();
-    const zip = new ArchiveFile();
+    // The library refuses a traversal name unless a `path` mode is chosen explicitly;
+    // "legacy" is the default mode, so the archive is the one this test always built.
+    const zip = new Archive.ArchiveFile({ path: { mode: "legacy" } });
     zip.addText("PWNED", "../../escaped.txt");
     await zip.writeToFile(path.join(fx.root, "evil.zip"));
 
@@ -284,7 +286,7 @@ describe("archive — extraction cannot escape", () => {
 
   it("does not materialise symlink entries", async () => {
     const fx = await fixture();
-    const zip = new ArchiveFile();
+    const zip = new Archive.ArchiveFile();
     zip.addText("fine", "regular.txt");
     zip.symlink("escape.txt", "/etc/passwd");
     await zip.writeToFile(path.join(fx.root, "link.zip"));
@@ -302,7 +304,7 @@ describe("archive — extraction cannot escape", () => {
     // A gzip bomb is inflated during the open call, so the on-disk size has to
     // be the gate.
     const fx = await fixture(["--max-file-size", "64"]);
-    const zip = new ArchiveFile();
+    const zip = new Archive.ArchiveFile();
     zip.addText("x".repeat(4096), "big.txt");
     await zip.writeToFile(path.join(fx.root, "big.zip"));
 
@@ -576,7 +578,7 @@ describe("PDF page operations keep live page numbering", () => {
     const builder = new Pdf.Builder();
     builder.addPage().drawText("OLD PAGE ONE", { x: 60, y: 700 });
     builder.addPage().drawText("OLD PAGE TWO", { x: 60, y: 700 });
-    await writeFile(path.join(fx.root, "two.pdf"), await builder.build());
+    await writeFile(path.join(fx.root, "two.pdf"), await builder.toBuffer());
 
     await pdfEditTool.handler(
       {
@@ -589,9 +591,12 @@ describe("PDF page operations keep live page numbering", () => {
       { config: fx.config }
     );
 
-    const result = await Pdf.read(new Uint8Array(await readFile(path.join(fx.root, "two.pdf"))), {
-      extractText: true
-    });
+    const result = await Pdf.extract(
+      new Uint8Array(await readFile(path.join(fx.root, "two.pdf"))),
+      {
+        extractText: true
+      }
+    );
     expect(result.pages).toHaveLength(1);
     expect(result.pages[0]?.text).toContain("OLD PAGE TWO");
     expect(result.pages[0]?.text).toContain("NEW PAGE ONE");
@@ -605,7 +610,7 @@ describe("failed form fills have no backup side effects", () => {
     // Ordinary PDF: no fields; the write path should fail before backup.
     const builder = new Pdf.Builder();
     builder.addPage().drawText("plain", { x: 60, y: 700 });
-    await writeFile(path.join(fx.root, "plain.pdf"), await builder.build());
+    await writeFile(path.join(fx.root, "plain.pdf"), await builder.toBuffer());
 
     await expect(
       formFillTool.handler({ path: "plain.pdf", values: { nope: "x" } }, { config: fx.config })

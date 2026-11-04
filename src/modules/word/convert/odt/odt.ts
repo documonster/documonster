@@ -16,7 +16,16 @@
 
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
+import { finalizeDocument } from "@word/builder/document-finalize";
+import { checkBytes, checkHandle } from "@word/core/argument-checks";
+import { withDisplayFields } from "@word/core/field-view";
+import { mediaTypeForExtension } from "@word/core/image-media";
 import { sanitizeUrl, utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
+import {
+  foldRangeMarkers,
+  foldTableRangeMarkers,
+  spellOutRangeMarkers
+} from "@word/core/range-markers";
 import { isRun, symbolText } from "@word/core/text-utils";
 import { DocxParseError } from "@word/errors";
 import { finalViewRun, isHiddenRun } from "@word/query/final-view";
@@ -33,6 +42,7 @@ import type {
   NumberingLevel,
   Paragraph,
   ParagraphChild,
+  RangeMarker,
   ParagraphProperties,
   Run,
   RunProperties,
@@ -52,11 +62,11 @@ import type {
   PageMargins,
   CoreProperties,
   ImageDef,
-  ImageMediaType,
   InlineImageContent
 } from "@word/types";
 import { EMU_PER_CM, EMU_PER_INCH, EMU_PER_POINT, EMU_PER_PX } from "@word/units";
 import { parseXml, findChild, findChildren, textContent } from "@xml/dom";
+import { xmlValue } from "@xml/encode";
 import type { XmlElement } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
@@ -563,10 +573,37 @@ function parseTextSpan(el: XmlElement, styles: Map<string, OdfStyle>): Run {
   };
 }
 
+/**
+ * Numbers ODF bookmarks for the model. ODF names a range by `text:name` on
+ * both its start and its end and has no ids, so each start gets the next id
+ * and each end takes the id of the most recent open start of the same name.
+ * An end with no open start of its name closes nothing and is dropped.
+ */
+class OdtBookmarkIds {
+  private next = 0;
+  private readonly open = new Map<string, number[]>();
+
+  start(name: string): number {
+    const id = this.next++;
+    const stack = this.open.get(name);
+    if (stack) {
+      stack.push(id);
+    } else {
+      this.open.set(name, [id]);
+    }
+    return id;
+  }
+
+  end(name: string): number | undefined {
+    return this.open.get(name)?.pop();
+  }
+}
+
 /** Parse a text:p or text:h element into a Paragraph. */
 function parseParagraph(
   el: XmlElement,
   styles: Map<string, OdfStyle>,
+  bookmarks: OdtBookmarkIds,
   listContext?: ListParseContext
 ): Paragraph {
   const styleName = nsAttr(el, "text", "style-name");
@@ -664,9 +701,20 @@ function parseParagraph(
         }
       } else if (local === "bookmark-start") {
         const bkName = nsAttr(child, "text", "name") ?? "";
-        children.push({ type: "bookmarkStart", id: 0, name: bkName });
+        children.push({ type: "bookmarkStart", id: bookmarks.start(bkName), name: bkName });
       } else if (local === "bookmark-end") {
-        children.push({ type: "bookmarkEnd", id: 0 });
+        const bkName = nsAttr(child, "text", "name") ?? "";
+        const id = bookmarks.end(bkName);
+        if (id !== undefined) {
+          children.push({ type: "bookmarkEnd", id, name: bkName });
+        }
+      } else if (local === "bookmark") {
+        // A point bookmark: a range that starts and ends at the same place.
+        const bkName = nsAttr(child, "text", "name") ?? "";
+        const id = bookmarks.start(bkName);
+        bookmarks.end(bkName);
+        children.push({ type: "bookmarkStart", id, name: bkName });
+        children.push({ type: "bookmarkEnd", id, name: bkName });
       } else if (local === "note") {
         // Footnote/endnote — extract text content
         const noteBodyEl = findNsChild(child, "text", "note-body");
@@ -723,6 +771,7 @@ function parseList(
   styles: Map<string, OdfStyle>,
   parentLevel: number,
   registry: OdtNumberingRegistry,
+  bookmarks: OdtBookmarkIds,
   parentNumId?: number
 ): Paragraph[] {
   const listStyleName = nsAttr(el, "text", "style-name");
@@ -755,10 +804,10 @@ function parseList(
       const local = getLocalName(child.name);
       if (local === "p" || local === "h") {
         registry.noteLevel(numId, level);
-        paragraphs.push(parseParagraph(child, styles, { listStyleName, level, numId }));
+        paragraphs.push(parseParagraph(child, styles, bookmarks, { listStyleName, level, numId }));
       } else if (local === "list") {
         // Nested list — inherit the enclosing list's numId.
-        paragraphs.push(...parseList(child, styles, level + 1, registry, numId));
+        paragraphs.push(...parseList(child, styles, level + 1, registry, bookmarks, numId));
       }
     }
   }
@@ -770,7 +819,8 @@ function parseList(
 function parseTable(
   el: XmlElement,
   styles: Map<string, OdfStyle>,
-  registry: OdtNumberingRegistry
+  registry: OdtNumberingRegistry,
+  bookmarks: OdtBookmarkIds
 ): Table {
   const tableStyleName = nsAttr(el, "table", "style-name");
   const tableStyle = tableStyleName ? styles.get(tableStyleName) : undefined;
@@ -826,11 +876,11 @@ function parseTable(
         }
         const cellChildLocal = getLocalName(cellChild.name);
         if (cellChildLocal === "p" || cellChildLocal === "h") {
-          cellContent.push(parseParagraph(cellChild, styles));
+          cellContent.push(parseParagraph(cellChild, styles, bookmarks));
         } else if (cellChildLocal === "table") {
-          cellContent.push(parseTable(cellChild, styles, registry));
+          cellContent.push(parseTable(cellChild, styles, registry, bookmarks));
         } else if (cellChildLocal === "list") {
-          cellContent.push(...parseList(cellChild, styles, 0, registry));
+          cellContent.push(...parseList(cellChild, styles, 0, registry, bookmarks));
         }
       }
 
@@ -870,7 +920,8 @@ function parseTable(
 function parseDocumentBody(
   bodyEl: XmlElement,
   styles: Map<string, OdfStyle>,
-  registry: OdtNumberingRegistry
+  registry: OdtNumberingRegistry,
+  bookmarks: OdtBookmarkIds
 ): BodyContent[] {
   const content: BodyContent[] = [];
 
@@ -881,14 +932,14 @@ function parseDocumentBody(
     const local = getLocalName(child.name);
 
     if (local === "p" || local === "h") {
-      content.push(parseParagraph(child, styles));
+      content.push(parseParagraph(child, styles, bookmarks));
     } else if (local === "table") {
-      content.push(parseTable(child, styles, registry));
+      content.push(parseTable(child, styles, registry, bookmarks));
     } else if (local === "list") {
-      content.push(...parseList(child, styles, 0, registry));
+      content.push(...parseList(child, styles, 0, registry, bookmarks));
     } else if (local === "section") {
       // Sections in ODF are logical containers; flatten their content
-      content.push(...parseDocumentBody(child, styles, registry));
+      content.push(...parseDocumentBody(child, styles, registry, bookmarks));
     }
   }
 
@@ -1409,15 +1460,22 @@ function resolveNumIdLevels(doc: DocxDocument, numId: number): OdtListLevel[] {
  *
  * @stability experimental
  */
-export async function readOdt(buffer: Uint8Array): Promise<DocxDocument> {
+export async function readOdt(
+  buffer: Uint8Array | ArrayBuffer | ArrayBufferView
+): Promise<DocxDocument> {
+  const bytes = checkBytes(buffer, "buffer", "Convert.fromOdt");
   // Extract ZIP contents
-  const reader = unzip(buffer);
   const entries = new Map<string, Uint8Array>();
-
-  for await (const entry of reader.entries()) {
-    const data = await entry.bytes();
-    const path = entry.path.replace(/^\//, "").replace(/\\/g, "/");
-    entries.set(path, data);
+  try {
+    for await (const entry of unzip(bytes).entries()) {
+      const data = await entry.bytes();
+      const path = entry.path.replace(/^\//, "").replace(/\\/g, "/");
+      entries.set(path, data);
+    }
+  } catch (e) {
+    // Bytes that are not a ZIP are a parse error, as `Io.read` reports them.
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new DocxParseError(`Failed to read ODT: ${msg}`, { cause: e });
   }
 
   const decoder = utf8Decoder;
@@ -1549,7 +1607,7 @@ export async function readOdt(buffer: Uint8Array): Promise<DocxDocument> {
   }
   const registry = new OdtNumberingRegistry(collectOdfListStyles(listStyleRoots));
 
-  const body = parseDocumentBody(textEl, allStyles, registry);
+  const body = parseDocumentBody(textEl, allStyles, registry, new OdtBookmarkIds());
 
   // Convert styles to StyleDef[]
   const styleDefs = convertStylesToStyleDefs(allStyles);
@@ -1561,43 +1619,17 @@ export async function readOdt(buffer: Uint8Array): Promise<DocxDocument> {
   const images: ImageDef[] = [];
   for (const [path, data] of entries) {
     if (path.startsWith("Pictures/") && data.length > 0) {
-      const ext = path.substring(path.lastIndexOf(".") + 1).toLowerCase();
-      let mediaType: string;
-      switch (ext) {
-        case "png":
-          mediaType = "image/png";
-          break;
-        case "jpg":
-        case "jpeg":
-          mediaType = "image/jpeg";
-          break;
-        case "gif":
-          mediaType = "image/gif";
-          break;
-        case "svg":
-          mediaType = "image/svg+xml";
-          break;
-        case "emf":
-          mediaType = "image/x-emf";
-          break;
-        case "wmf":
-          mediaType = "image/x-wmf";
-          break;
-        case "tiff":
-        case "tif":
-          mediaType = "image/tiff";
-          break;
-        case "bmp":
-          mediaType = "image/bmp";
-          break;
-        default:
-          mediaType = "application/octet-stream";
-          break;
+      // A picture whose extension names no image type cannot become a typed
+      // `word/media` part (StarView `.svm`, for one); it is left out like an
+      // unresolved link rather than written without a content type.
+      const mediaType = mediaTypeForExtension(path.substring(path.lastIndexOf(".") + 1));
+      if (!mediaType) {
+        continue;
       }
       images.push({
         rId: path,
         data,
-        mediaType: mediaType as ImageMediaType,
+        mediaType,
         fileName: path.substring(path.lastIndexOf("/") + 1)
       });
     }
@@ -1628,7 +1660,9 @@ export async function readOdt(buffer: Uint8Array): Promise<DocxDocument> {
  * `xlink:href`, which is a real vector for confusing downstream ODT
  * readers and tooling that resolves relative paths.
  */
-function buildOdtImagePathMap(images: readonly { rId?: string; fileName?: string }[] | undefined): {
+function buildOdtImagePathMap(
+  images: readonly { rId?: string; aliasRIds?: readonly string[]; fileName?: string }[] | undefined
+): {
   byRId: Map<string, string>;
   byFileName: Map<string, string>;
 } {
@@ -1667,8 +1701,12 @@ function buildOdtImagePathMap(images: readonly { rId?: string; fileName?: string
   };
   for (const image of images) {
     const path = allocate(image.fileName ?? image.rId);
-    if (image.rId) {
-      byRId.set(image.rId, path);
+    // Every key the image answers to: content in a header or note may name
+    // it by an alias.
+    for (const key of [image.rId, ...(image.aliasRIds ?? [])]) {
+      if (key && !byRId.has(key)) {
+        byRId.set(key, path);
+      }
     }
     if (image.fileName) {
       // Two distinct images might share a fileName (the inputs are
@@ -1728,6 +1766,10 @@ function sanitizeOdtPictureName(raw: string | undefined): string {
  * @stability experimental
  */
 export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
+  checkHandle(doc, "document", "doc", "Convert.toOdt");
+  // ODF records the proofing language and East Asian face like DOCX does, so
+  // a document that asked for them to be derived gets them here too.
+  doc = withDisplayFields(finalizeDocument(doc));
   const encoder = utf8Encoder;
   // `noSort: true` preserves insertion order. The ODF spec (OpenDocument
   // v1.2 part 3, §3.3) requires the `mimetype` entry to be the FIRST entry in
@@ -1780,7 +1822,7 @@ export async function writeOdt(doc: DocxDocument): Promise<Uint8Array> {
   const manifestXml = generateManifestXml(imagePaths);
   archive.add("META-INF/manifest.xml", encoder.encode(manifestXml));
 
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 // =============================================================================
@@ -1801,13 +1843,14 @@ interface OdtWriteContext {
   /** Counter for generating unique style names */
   nextRunStyleId: number;
   /**
-   * Map from bookmark `id` → bookmark `name`. Populated as we encounter
-   * `bookmarkStart` markers so the matching `bookmarkEnd` can reference the
-   * same name (ODF requires `text:bookmark-end` to carry the same name as
-   * its `text:bookmark-start`; emitting an empty name turns every bookmark
-   * range into an isolated point in compliant readers).
+   * Bookmark `id` → names of the open bookmarks carrying it, most recent last.
+   * Populated as we encounter `bookmarkStart` markers so the matching
+   * `bookmarkEnd` can reference the same name (ODF requires
+   * `text:bookmark-end` to carry the same name as its `text:bookmark-start`;
+   * emitting an empty name turns every bookmark range into an isolated point
+   * in compliant readers). A stack per id, because a model may reuse an id.
    */
-  readonly bookmarkNames: Map<number, string>;
+  readonly bookmarkNames: Map<number, string[]>;
   /**
    * Map from image rId → sanitised `Pictures/<safe>.<ext>` path. Built up
    * front by `writeOdt` and consumed by inline-image writers so the
@@ -1922,7 +1965,7 @@ function generateContentXml(
   const bodyWriter = new XmlWriter();
   bodyWriter.openNode("office:body");
   bodyWriter.openNode("office:text");
-  writeBlocks(bodyWriter, doc.body, doc, imagePaths, ctx);
+  writeBlocks(bodyWriter, doc.body, doc, imagePaths, ctx, doc.bodyRangeMarkersAfter);
   bodyWriter.closeNode(); // office:text
   bodyWriter.closeNode(); // office:body
   const bodyXml = bodyWriter.xml;
@@ -2007,15 +2050,17 @@ function writeListStyleDef(w: XmlWriter, numId: number, levels: readonly OdtList
     const start = levels[idx]?.start;
     if (format === "bullet") {
       w.openNode("text:list-level-style-bullet", {
-        "text:level": String(level),
+        "text:level": xmlValue(level, "text:level"),
         "text:bullet-char": ODT_BULLET_CHARS[idx] ?? "•"
       });
     } else {
       w.openNode("text:list-level-style-number", {
-        "text:level": String(level),
+        "text:level": xmlValue(level, "text:level"),
         "style:num-format": numberFormatToOdf(format),
         "style:num-suffix": ".",
-        ...(start !== undefined && start !== 1 ? { "text:start-value": String(start) } : {})
+        ...(start !== undefined && start !== 1
+          ? { "text:start-value": xmlValue(start, "text:start-value") }
+          : {})
       });
     }
     w.openNode("style:list-level-properties", {
@@ -2113,6 +2158,52 @@ function writeParagraphPropertiesOdf(w: XmlWriter, props: ParagraphProperties): 
   }
 }
 
+/**
+ * The name to write on a `text:bookmark-end` closing model id `id`, removing
+ * it from the open bookmarks. An end that names its bookmark closes the most
+ * recent open start of that name; otherwise the most recent open start with
+ * the id (the same pairing the DOCX writer applies). `undefined` when no
+ * open bookmark carries the id: the end closes nothing and is not written.
+ */
+function closeOdtBookmark(
+  open: Map<number, string[]>,
+  id: number,
+  name: string | undefined
+): string | undefined {
+  const stack = open.get(id);
+  if (!stack || stack.length === 0) {
+    return undefined;
+  }
+  const at = name === undefined ? -1 : stack.lastIndexOf(name);
+  return stack.splice(at < 0 ? stack.length - 1 : at, 1)[0];
+}
+
+/**
+ * Split a BCP 47 tag (`zh-Hans-CN`) into ODF's separate language, script and
+ * country attributes. Variants and extensions have no ODF counterpart.
+ */
+function writeOdfLanguage(
+  attrs: Record<string, string>,
+  tag: string | undefined,
+  languageAttr: string,
+  scriptAttr: string,
+  countryAttr: string
+): void {
+  const [language, ...rest] = (tag ?? "").split(/[-_]/);
+  if (!language || !/^[A-Za-z]{2,8}$/.test(language)) {
+    return;
+  }
+  attrs[languageAttr] = language.toLowerCase();
+  for (const part of rest) {
+    if (/^[A-Za-z]{4}$/.test(part) && !attrs[scriptAttr]) {
+      attrs[scriptAttr] = part[0]!.toUpperCase() + part.slice(1).toLowerCase();
+    } else if (/^(?:[A-Za-z]{2}|\d{3})$/.test(part)) {
+      attrs[countryAttr] = part.toUpperCase();
+      break;
+    }
+  }
+}
+
 /** Write run/text properties as ODF elements. */
 function writeTextPropertiesOdf(w: XmlWriter, props: RunProperties): void {
   const attrs: Record<string, string> = {};
@@ -2122,6 +2213,31 @@ function writeTextPropertiesOdf(w: XmlWriter, props: RunProperties): void {
     if (fontName) {
       attrs["style:font-name"] = fontName;
     }
+    if (typeof props.font !== "string") {
+      if (props.font.eastAsia) {
+        attrs["style:font-name-asian"] = props.font.eastAsia;
+      }
+      if (props.font.cs) {
+        attrs["style:font-name-complex"] = props.font.cs;
+      }
+    }
+  }
+  if (props.language) {
+    writeOdfLanguage(attrs, props.language.val, "fo:language", "fo:script", "fo:country");
+    writeOdfLanguage(
+      attrs,
+      props.language.eastAsia,
+      "style:language-asian",
+      "style:script-asian",
+      "style:country-asian"
+    );
+    writeOdfLanguage(
+      attrs,
+      props.language.bidi,
+      "style:language-complex",
+      "style:script-complex",
+      "style:country-complex"
+    );
   }
   if (props.size !== undefined) {
     attrs["fo:font-size"] = halfPointsToPt(props.size);
@@ -2214,8 +2330,12 @@ function writeBlocks(
   blocks: readonly BodyContent[],
   doc: DocxDocument,
   imagePaths: string[],
-  ctx: OdtWriteContext
+  ctx: OdtWriteContext,
+  after?: readonly RangeMarker[]
 ): void {
+  // ODF has bookmarks only inside a paragraph (`text:bookmark-start` is
+  // paragraph content), so markers between blocks move into the nearest one.
+  blocks = foldRangeMarkers(spellOutRangeMarkers(blocks, after));
   let i = 0;
   while (i < blocks.length) {
     const block = blocks[i];
@@ -2372,7 +2492,7 @@ function writeParagraph(
     const level = heading.level;
     w.openNode("text:h", {
       ...(styleName ? { "text:style-name": styleName } : {}),
-      "text:outline-level": String(level)
+      "text:outline-level": xmlValue(level, "text:outline-level")
     });
   } else {
     w.openNode("text:p", {
@@ -2434,21 +2554,23 @@ function writeParagraphChild(
       w.closeNode();
       break;
     }
-    case "bookmarkStart":
-      ctx.bookmarkNames.set(child.id, child.name);
+    case "bookmarkStart": {
+      const open = ctx.bookmarkNames.get(child.id);
+      if (open) {
+        open.push(child.name);
+      } else {
+        ctx.bookmarkNames.set(child.id, [child.name]);
+      }
       w.leafNode("text:bookmark-start", { "text:name": child.name });
       break;
+    }
     case "bookmarkEnd": {
-      const name = ctx.bookmarkNames.get(child.id);
+      const name = closeOdtBookmark(ctx.bookmarkNames, child.id, child.name);
+      // Emit the matching name so range-aware ODT readers can pair the
+      // start/end markers correctly. A stray end closes nothing; written with
+      // an empty name it would be a dangling marker, so it is dropped.
       if (name !== undefined) {
-        // Emit the matching name so range-aware ODT readers can pair the
-        // start/end markers correctly.
         w.leafNode("text:bookmark-end", { "text:name": name });
-      } else {
-        // Stray end without a known start (shouldn't happen for documents
-        // produced by this library) — emit with an empty name to keep the
-        // XML well-formed.
-        w.leafNode("text:bookmark-end", { "text:name": "" });
       }
       break;
     }
@@ -2597,7 +2719,7 @@ function writeOdfText(w: XmlWriter, text: string): void {
     // First space is implicit, rest use text:s
     w.writeText(" ");
     if (spaceCount > 1) {
-      w.leafNode("text:s", { "text:c": String(spaceCount - 1) });
+      w.leafNode("text:s", { "text:c": xmlValue(spaceCount - 1, "text:c") });
     }
     i = j;
   }
@@ -2611,6 +2733,7 @@ function writeTable(
   imagePaths: string[],
   ctx: OdtWriteContext
 ): void {
+  table = foldTableRangeMarkers(table);
   w.openNode("table:table", {
     ...(table.properties?.style ? { "table:style-name": table.properties.style } : {})
   });
@@ -2658,10 +2781,16 @@ function writeTableCell(
   const attrs: Record<string, string> = {};
 
   if (cell.properties?.gridSpan && cell.properties.gridSpan > 1) {
-    attrs["table:number-columns-spanned"] = String(cell.properties.gridSpan);
+    attrs["table:number-columns-spanned"] = xmlValue(
+      cell.properties.gridSpan,
+      "table:number-columns-spanned"
+    );
   }
   if (cell.properties?.rowSpan && cell.properties.rowSpan > 1) {
-    attrs["table:number-rows-spanned"] = String(cell.properties.rowSpan);
+    attrs["table:number-rows-spanned"] = xmlValue(
+      cell.properties.rowSpan,
+      "table:number-rows-spanned"
+    );
   }
 
   if (cell.properties?.verticalMerge === "continue") {

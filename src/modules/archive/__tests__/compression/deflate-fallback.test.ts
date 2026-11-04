@@ -621,7 +621,7 @@ describe("DEFLATE Fallback", () => {
       const compressed = deflateRawSync(original);
 
       // Truncate the compressed data
-      const truncated = new Uint8Array(compressed.slice(0, compressed.length - 5));
+      const truncated = new Uint8Array(compressed.subarray(0, compressed.length - 5));
 
       expect(() => inflateRaw(truncated)).toThrow();
     });
@@ -637,6 +637,41 @@ describe("DEFLATE Fallback", () => {
       ]);
 
       expect(() => inflateRaw(invalidData)).toThrow("Invalid stored block length");
+    });
+
+    /** A fixed-Huffman block (BFINAL=1, BTYPE=01) from Huffman codes written MSB-first. */
+    function fixedBlock(codes: ReadonlyArray<readonly [code: number, bits: number]>): Uint8Array {
+      const bits: number[] = [1, 1, 0];
+      for (const [code, length] of codes) {
+        for (let i = length - 1; i >= 0; i--) {
+          bits.push((code >> i) & 1);
+        }
+      }
+      const out = new Uint8Array(Math.ceil(bits.length / 8) + 4);
+      bits.forEach((bit, i) => (out[i >> 3] |= bit << (i & 7)));
+      return out;
+    }
+    const LITERAL_A: readonly [number, number] = [0x30 + 0x41, 8];
+    const LENGTH_3: readonly [number, number] = [0b0000001, 7];
+
+    // RFC 1951 §3.2.6: distance codes 30-31 and length codes 286-287 "will never actually
+    // occur in the compressed data". Looking them up found no extra-bit count, the bit
+    // counter became NaN, every later read returned without consuming input, and 80 bytes
+    // of noise decoded until the output limit — 256 MiB in a PDF stream.
+    it.each([30, 31])("rejects distance code %i", distCode => {
+      const data = fixedBlock([LITERAL_A, LENGTH_3, [distCode, 5]]);
+      expect(() => inflateRaw(data, 1 << 20)).toThrow("Invalid DEFLATE distance code");
+    });
+
+    it.each([286, 287])("rejects length code %i", symbol => {
+      const data = fixedBlock([LITERAL_A, [0b11000000 + (symbol - 280), 8], [0, 5]]);
+      expect(() => inflateRaw(data, 1 << 20)).toThrow("Invalid DEFLATE length code");
+    });
+
+    it("rejects a distance reaching back before the start of the output", () => {
+      // Literal "A", then length 3 at distance 2 (code 1) with only one byte written.
+      const data = fixedBlock([LITERAL_A, LENGTH_3, [1, 5], [0, 7]]);
+      expect(() => inflateRaw(data, 1 << 20)).toThrow("Invalid DEFLATE distance too far back");
     });
   });
 

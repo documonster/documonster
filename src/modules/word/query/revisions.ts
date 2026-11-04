@@ -4,10 +4,14 @@
  * Functions for accepting or rejecting tracked changes in a DocxDocument.
  */
 
+import { checkHandle, checkInteger } from "@word/core/argument-checks";
 import type { Mutable } from "@word/core/internal-utils";
+import { arrangeParagraphChildren, spellOutRangeMarkers } from "@word/core/range-markers";
+import { hyperlinkContent, withHyperlinkContent } from "@word/core/text-utils";
 import type {
   DocxDocument,
   BodyContent,
+  Hyperlink,
   Paragraph,
   ParagraphChild,
   Run,
@@ -21,8 +25,125 @@ import type {
   InsertedRun,
   DeletedRun,
   MovedFromRun,
-  MovedToRun
+  MovedToRun,
+  RangeMarker
 } from "@word/types";
+
+/**
+ * Give `para` (in place) the children `items`, re-attaching the range markers
+ * spelled out among them (see {@link arrangeParagraphChildren}).
+ */
+function setParagraphChildren(para: Paragraph, items: readonly ParagraphChild[]): void {
+  const arranged = arrangeParagraphChildren(items);
+  const target = para as Mutable<Paragraph>;
+  target.children = arranged.children;
+  if (arranged.rangeMarkersAfter) {
+    target.rangeMarkersAfter = [...arranged.rangeMarkersAfter, ...(para.rangeMarkersAfter ?? [])];
+  }
+}
+
+// =============================================================================
+// Range markers between blocks
+// =============================================================================
+
+function isMoveRangeMarker(node: { type?: string }): boolean {
+  return (
+    node.type === "moveFromRangeStart" ||
+    node.type === "moveFromRangeEnd" ||
+    node.type === "moveToRangeStart" ||
+    node.type === "moveToRangeEnd"
+  );
+}
+
+/**
+ * Remove the move-range markers between the blocks of `body` (in place), as
+ * accepting or rejecting does for those inside a paragraph. Returns the number
+ * removed.
+ */
+function dropBodyMoveRanges(body: readonly BodyContent[]): number {
+  let removed = 0;
+  for (const block of body) {
+    removed += dropMoveRanges(block as Mutable<BodyContent>, "rangeMarkersBefore");
+  }
+  return removed;
+}
+
+/** Remove the move-range markers from the marker list `owner[key]` (in place). */
+function dropMoveRanges<T extends object>(owner: T, key: keyof T & string): number {
+  const [rest, dropped] = withoutMoveRanges(
+    (owner as Record<string, readonly RangeMarker[] | undefined>)[key]
+  );
+  if (dropped > 0) {
+    if (rest) {
+      (owner as Record<string, unknown>)[key] = rest;
+    } else {
+      delete (owner as Record<string, unknown>)[key];
+    }
+  }
+  return dropped;
+}
+
+/** `markers` without move-range markers, and how many were removed. */
+function withoutMoveRanges(
+  markers: readonly RangeMarker[] | undefined
+): [readonly RangeMarker[] | undefined, number] {
+  if (!markers) {
+    return [undefined, 0];
+  }
+  const kept = markers.filter(m => !isMoveRangeMarker(m));
+  return [kept.length > 0 ? kept : undefined, markers.length - kept.length];
+}
+
+/**
+ * Replace the rows of `table` with `keptRows` (in place) without losing the
+ * range markers of the rows taken out — a bookmark starting before a deleted
+ * row must still start somewhere — by moving them before the next kept row,
+ * or after the table's rows. With `dropMoves`, move-range markers are removed
+ * from the table, as accepting or rejecting all revisions does inside a
+ * paragraph. Returns the number of markers removed.
+ */
+function replaceTableRows(
+  table: Mutable<Table>,
+  keptRows: readonly TableRow[],
+  dropMoves: boolean
+): number {
+  const keep = new Set(keptRows);
+  let count = 0;
+  let carried: RangeMarker[] = [];
+  const settle = <T extends object>(owner: T, key: keyof T & string): void => {
+    if (dropMoves) {
+      count += dropMoveRanges(owner, key);
+    }
+  };
+  const kept: TableRow[] = [];
+  for (const row of table.rows) {
+    const mrow = row as Mutable<TableRow>;
+    settle(mrow, "rangeMarkersBefore");
+    settle(mrow, "rangeMarkersAfter");
+    for (const cell of row.cells) {
+      settle(cell as Mutable<TableCell>, "rangeMarkersBefore");
+    }
+    if (!keep.has(row)) {
+      carried.push(
+        ...(row.rangeMarkersBefore ?? []),
+        ...row.cells.flatMap(cell => cell.rangeMarkersBefore ?? []),
+        ...(row.rangeMarkersAfter ?? [])
+      );
+      continue;
+    }
+    if (carried.length > 0) {
+      mrow.rangeMarkersBefore = [...carried, ...(row.rangeMarkersBefore ?? [])];
+      carried = [];
+    }
+    kept.push(row);
+  }
+  settle(table, "rangeMarkersAfter");
+  if (carried.length > 0) {
+    table.rangeMarkersAfter = [...carried, ...(table.rangeMarkersAfter ?? [])];
+  }
+  table.rows = kept;
+  return count;
+}
 
 // =============================================================================
 // Public API
@@ -40,8 +161,10 @@ import type {
  * @returns Number of revisions accepted.
  */
 export function acceptAllRevisions(doc: DocxDocument): number {
+  checkHandle(doc, "document", "doc", "Document.acceptAllRevisions");
   let count = 0;
   const processBody = (body: BodyContent[]): void => {
+    count += dropBodyMoveRanges(body);
     for (const block of body) {
       if (block.type === "paragraph") {
         count += acceptRevisionsInParagraph(block);
@@ -96,7 +219,7 @@ export function acceptAllRevisions(doc: DocxDocument): number {
           }
           newRows.push(row);
         }
-        (block as Mutable<Table>).rows = newRows;
+        count += replaceTableRows(block as Mutable<Table>, newRows, true);
       } else if (block.type === "sdt") {
         const filtered = block.content.filter(
           c => "type" in c && (c.type === "paragraph" || c.type === "table")
@@ -118,6 +241,7 @@ export function acceptAllRevisions(doc: DocxDocument): number {
     }
   };
   processBody(doc.body as BodyContent[]);
+  count += dropMoveRanges(doc as Mutable<DocxDocument>, "bodyRangeMarkersAfter");
 
   // Process headers/footers
   if (doc.headers) {
@@ -163,8 +287,10 @@ export function acceptAllRevisions(doc: DocxDocument): number {
  * @returns Number of revisions rejected.
  */
 export function rejectAllRevisions(doc: DocxDocument): number {
+  checkHandle(doc, "document", "doc", "Document.rejectAllRevisions");
   let count = 0;
   const processBody = (body: BodyContent[]): void => {
+    count += dropBodyMoveRanges(body);
     for (const block of body) {
       if (block.type === "paragraph") {
         count += rejectRevisionsInParagraph(block);
@@ -231,7 +357,7 @@ export function rejectAllRevisions(doc: DocxDocument): number {
           }
           newRows.push(row);
         }
-        (block as Mutable<Table>).rows = newRows;
+        count += replaceTableRows(block as Mutable<Table>, newRows, true);
       } else if (block.type === "sdt") {
         const filtered = block.content.filter(
           c => "type" in c && (c.type === "paragraph" || c.type === "table")
@@ -253,6 +379,7 @@ export function rejectAllRevisions(doc: DocxDocument): number {
     }
   };
   processBody(doc.body as BodyContent[]);
+  count += dropMoveRanges(doc as Mutable<DocxDocument>, "bodyRangeMarkersAfter");
 
   // Process headers/footers
   if (doc.headers) {
@@ -292,7 +419,9 @@ export function rejectAllRevisions(doc: DocxDocument): number {
 /** Accept revisions in a single paragraph — returns count of revisions accepted. */
 function acceptRevisionsInParagraph(para: Paragraph): number {
   let count = 0;
-  const children = para.children as ParagraphChild[];
+  // Markers riding on a child (range permissions) are spelled out first so
+  // they survive the child being dropped or unwrapped, then re-attached.
+  const children = spellOutRangeMarkers(para.children) as ParagraphChild[];
   const newChildren: ParagraphChild[] = [];
 
   for (const child of children) {
@@ -334,16 +463,13 @@ function acceptRevisionsInParagraph(para: Paragraph): number {
           // changes — recurse via a synthetic paragraph so we re-use the
           // same accept logic. Other revision APIs (replaceText, fillFormFields)
           // already descend into hyperlinks; revisions must agree.
-          const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
+          const hl = child as Hyperlink;
           const synth: Paragraph = {
             type: "paragraph",
-            children: [...hl.children]
+            children: hyperlinkContent(hl)
           };
           count += acceptRevisionsInParagraph(synth);
-          newChildren.push({
-            ...(hl as object),
-            children: synth.children
-          } as ParagraphChild);
+          newChildren.push(withHyperlinkContent(hl, synth.children));
           break;
         }
         default:
@@ -356,7 +482,7 @@ function acceptRevisionsInParagraph(para: Paragraph): number {
   }
 
   // Replace children array
-  (para as Mutable<Paragraph>).children = newChildren;
+  setParagraphChildren(para, newChildren);
 
   // Remove paragraph property change if present
   if (para.properties?.propertyChange) {
@@ -372,7 +498,9 @@ function acceptRevisionsInParagraph(para: Paragraph): number {
 /** Reject revisions in a single paragraph — returns count of revisions rejected. */
 function rejectRevisionsInParagraph(para: Paragraph): number {
   let count = 0;
-  const children = para.children as ParagraphChild[];
+  // Markers riding on a child (range permissions) are spelled out first so
+  // they survive the child being dropped or unwrapped, then re-attached.
+  const children = spellOutRangeMarkers(para.children) as ParagraphChild[];
   const newChildren: ParagraphChild[] = [];
 
   for (const child of children) {
@@ -409,16 +537,13 @@ function rejectRevisionsInParagraph(para: Paragraph): number {
           count++;
           break;
         case "hyperlink": {
-          const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
+          const hl = child as Hyperlink;
           const synth: Paragraph = {
             type: "paragraph",
-            children: [...hl.children]
+            children: hyperlinkContent(hl)
           };
           count += rejectRevisionsInParagraph(synth);
-          newChildren.push({
-            ...(hl as object),
-            children: synth.children
-          } as ParagraphChild);
+          newChildren.push(withHyperlinkContent(hl, synth.children));
           break;
         }
         default:
@@ -430,7 +555,7 @@ function rejectRevisionsInParagraph(para: Paragraph): number {
     }
   }
 
-  (para as Mutable<Paragraph>).children = newChildren;
+  setParagraphChildren(para, newChildren);
 
   // Restore previous paragraph properties on rejection.
   if (para.properties?.propertyChange) {
@@ -486,6 +611,7 @@ export interface RevisionEntry {
  * @returns Array of revision entries.
  */
 export function listRevisions(doc: DocxDocument): RevisionEntry[] {
+  checkHandle(doc, "document", "doc", "Query.listRevisions");
   const result: RevisionEntry[] = [];
   const seenIds = new Set<string>();
 
@@ -562,8 +688,11 @@ export function listRevisions(doc: DocxDocument): RevisionEntry[] {
       } else if (typed.type === "hyperlink") {
         // Recurse into hyperlink — its run children may carry tracked
         // changes that the bulk acceptAll/rejectAll already process.
-        const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] };
-        visitParagraph({ type: "paragraph", children: [...hl.children] } as Paragraph);
+        const hl = child as Hyperlink;
+        visitParagraph({
+          type: "paragraph",
+          children: hyperlinkContent(hl)
+        } as Paragraph);
       }
     }
   };
@@ -709,6 +838,8 @@ export function listRevisions(doc: DocxDocument): RevisionEntry[] {
  * @returns true if the revision was found and accepted, false otherwise.
  */
 export function acceptRevision(doc: DocxDocument, revisionId: number): boolean {
+  checkHandle(doc, "document", "doc", "Document.acceptRevision");
+  checkInteger(revisionId, "revisionId", "Document.acceptRevision");
   return processSingleRevision(doc, revisionId, "accept");
 }
 
@@ -720,6 +851,8 @@ export function acceptRevision(doc: DocxDocument, revisionId: number): boolean {
  * @returns true if the revision was found and rejected, false otherwise.
  */
 export function rejectRevision(doc: DocxDocument, revisionId: number): boolean {
+  checkHandle(doc, "document", "doc", "Document.rejectRevision");
+  checkInteger(revisionId, "revisionId", "Document.rejectRevision");
   return processSingleRevision(doc, revisionId, "reject");
 }
 
@@ -731,7 +864,7 @@ function processSingleRevision(
   let found = false;
 
   const processParagraph = (para: Paragraph): void => {
-    const children = para.children as ParagraphChild[];
+    const children = spellOutRangeMarkers(para.children) as ParagraphChild[];
     const newChildren: ParagraphChild[] = [];
     for (const child of children) {
       if (!("type" in child)) {
@@ -795,23 +928,20 @@ function processSingleRevision(
         case "hyperlink": {
           // Hyperlinks can wrap tracked-change runs. Recurse via a
           // synthetic paragraph so the same id-matching logic applies.
-          const hl = child as { type: "hyperlink"; children: readonly ParagraphChild[] } & object;
+          const hl = child as Hyperlink;
           const synth: Paragraph = {
             type: "paragraph",
-            children: [...hl.children]
+            children: hyperlinkContent(hl)
           };
           processParagraph(synth);
-          newChildren.push({
-            ...(hl as object),
-            children: synth.children
-          } as ParagraphChild);
+          newChildren.push(withHyperlinkContent(hl, synth.children));
           break;
         }
         default:
           newChildren.push(child);
       }
     }
-    (para as Mutable<Paragraph>).children = newChildren;
+    setParagraphChildren(para, newChildren);
 
     // Paragraph property change
     if (para.properties?.propertyChange?.revision.id === revisionId) {
@@ -896,7 +1026,7 @@ function processSingleRevision(
           }
           newRows.push(row);
         }
-        (block as Mutable<Table>).rows = newRows;
+        replaceTableRows(block as Mutable<Table>, newRows, false);
       } else if (block.type === "sdt") {
         const filtered = block.content.filter(
           c => "type" in c && (c.type === "paragraph" || c.type === "table")

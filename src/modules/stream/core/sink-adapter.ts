@@ -27,6 +27,7 @@
  */
 
 import { createEventWaiter } from "@stream/core/event-utils";
+import { UnsupportedStreamTypeError } from "@stream/errors";
 import type { EventEmitterLike } from "@stream/types";
 
 /**
@@ -103,6 +104,21 @@ export class SinkAdapter {
       this._nodeSink = sink;
       this._attachErrorListener(sink);
     } else {
+      const duck = sink as Partial<DuckSinkLike> | null;
+      if (
+        typeof duck !== "object" ||
+        duck === null ||
+        typeof duck.write !== "function" ||
+        typeof duck.end !== "function"
+      ) {
+        throw new UnsupportedStreamTypeError(
+          "Streams.LowLevel.SinkAdapter",
+          sink === null ? "null" : typeof sink,
+          {
+            field: "sink"
+          }
+        );
+      }
       this._kind = "duck";
       this._duckSink = sink as DuckSinkLike;
       this._attachErrorListener(sink as DuckSinkLike);

@@ -80,6 +80,8 @@ type ZipCentralDirectoryProcessedEntry = {
   modTime: number;
   modDate: number;
   offset: number;
+  /** Written as ZIP64 because this entry asked for it (a per-entry `zip64: true`). */
+  zip64?: boolean;
   externalAttributes: number;
   versionMadeBy?: number;
 };
@@ -165,7 +167,7 @@ function normalizeCentralDirEntry(
       dosTime: e.modTime,
       dosDate: e.modDate,
       localHeaderOffset: e.offset,
-      zip64: undefined,
+      zip64: e.zip64,
       externalAttributes: e.externalAttributes,
       versionMadeBy: e.versionMadeBy
     };
@@ -231,9 +233,13 @@ export function measureCentralDirectoryAndEocd(
     const localHeaderOffset = entry.localHeaderOffset;
     const zip64 = entry.zip64;
 
+    // An entry written as ZIP64 — the whole archive forced, or this entry asked for it — masks
+    // all three fields with 0xFFFFFFFF, so all three must be in its extra field. Only the
+    // archive-level case carried them, so a per-entry `zip64: true` produced a record whose
+    // sizes read as 4 GiB.
+    const allZip64Fields = forceZip64 || zip64 === true;
     const needsZip64Entry =
-      forceZip64 ||
-      zip64 === true ||
+      allZip64Fields ||
       localHeaderOffset > UINT32_MAX ||
       compressedSize > UINT32_MAX ||
       uncompressedSize > UINT32_MAX;
@@ -243,7 +249,7 @@ export function measureCentralDirectoryAndEocd(
       fileName.length +
       extraFieldBase.length +
       zip64ExtraLength(
-        forceZip64,
+        allZip64Fields,
         uncompressedSize,
         compressedSize,
         localHeaderOffset,
@@ -309,9 +315,13 @@ export function buildCentralDirectoryAndEocd(
     externalAttributes: number,
     versionMadeBy: number | undefined
   ): void => {
+    // An entry written as ZIP64 — the whole archive forced, or this entry asked for it — masks
+    // all three fields with 0xFFFFFFFF, so all three must be in its extra field. Only the
+    // archive-level case carried them, so a per-entry `zip64: true` produced a record whose
+    // sizes read as 4 GiB.
+    const allZip64Fields = forceZip64 || zip64 === true;
     const needsZip64Entry =
-      forceZip64 ||
-      zip64 === true ||
+      allZip64Fields ||
       localHeaderOffset > UINT32_MAX ||
       compressedSize > UINT32_MAX ||
       uncompressedSize > UINT32_MAX;
@@ -319,10 +329,11 @@ export function buildCentralDirectoryAndEocd(
     const zip64Extra = needsZip64Entry
       ? buildZip64ExtraField({
           uncompressedSize:
-            forceZip64 || uncompressedSize > UINT32_MAX ? uncompressedSize : undefined,
-          compressedSize: forceZip64 || compressedSize > UINT32_MAX ? compressedSize : undefined,
+            allZip64Fields || uncompressedSize > UINT32_MAX ? uncompressedSize : undefined,
+          compressedSize:
+            allZip64Fields || compressedSize > UINT32_MAX ? compressedSize : undefined,
           localHeaderOffset:
-            forceZip64 || localHeaderOffset > UINT32_MAX ? localHeaderOffset : undefined
+            allZip64Fields || localHeaderOffset > UINT32_MAX ? localHeaderOffset : undefined
         })
       : EMPTY_UINT8ARRAY;
     const extraField =
@@ -418,7 +429,7 @@ export function buildCentralDirectoryAndEocd(
         entry.modTime,
         entry.modDate,
         entry.offset,
-        undefined,
+        entry.zip64,
         entry.externalAttributes,
         entry.versionMadeBy
       );
@@ -511,9 +522,13 @@ export function writeCentralDirectoryAndEocdInto(
     const externalAttributes = entry.externalAttributes;
     const versionMadeBy = entry.versionMadeBy;
 
+    // An entry written as ZIP64 — the whole archive forced, or this entry asked for it — masks
+    // all three fields with 0xFFFFFFFF, so all three must be in its extra field. Only the
+    // archive-level case carried them, so a per-entry `zip64: true` produced a record whose
+    // sizes read as 4 GiB.
+    const allZip64Fields = forceZip64 || zip64 === true;
     const needsZip64Entry =
-      forceZip64 ||
-      zip64 === true ||
+      allZip64Fields ||
       localHeaderOffset > UINT32_MAX ||
       compressedSize > UINT32_MAX ||
       uncompressedSize > UINT32_MAX;
@@ -521,10 +536,11 @@ export function writeCentralDirectoryAndEocdInto(
     const zip64Extra = needsZip64Entry
       ? buildZip64ExtraField({
           uncompressedSize:
-            forceZip64 || uncompressedSize > UINT32_MAX ? uncompressedSize : undefined,
-          compressedSize: forceZip64 || compressedSize > UINT32_MAX ? compressedSize : undefined,
+            allZip64Fields || uncompressedSize > UINT32_MAX ? uncompressedSize : undefined,
+          compressedSize:
+            allZip64Fields || compressedSize > UINT32_MAX ? compressedSize : undefined,
           localHeaderOffset:
-            forceZip64 || localHeaderOffset > UINT32_MAX ? localHeaderOffset : undefined
+            allZip64Fields || localHeaderOffset > UINT32_MAX ? localHeaderOffset : undefined
         })
       : EMPTY_UINT8ARRAY;
     const extraField =

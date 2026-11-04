@@ -45,6 +45,7 @@ export interface ExtractedImage {
    * - "jpx" — JPEG 2000 data
    * - "raw" — raw pixel data (RGB/CMYK/Gray, decompressed)
    * - "ccitt" — CCITT fax compressed data
+   * - "jbig2" — JBIG2 compressed data
    */
   format: "jpeg" | "jpx" | "raw" | "ccitt" | "jbig2";
   /** The image data */

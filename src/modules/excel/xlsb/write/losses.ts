@@ -31,6 +31,7 @@
  * to report it. `writeStyles` now applies it at font index 0.
  */
 import type { WorkbookModel } from "@excel/core/workbook.browser";
+import { findKeptSheetSettings } from "@excel/utils/sheet-settings-checks";
 import { filterCriteriaRecords } from "@excel/xlsb/filter-criteria";
 import type { CellLike } from "@excel/xlsb/write/types";
 
@@ -156,6 +157,11 @@ export function worksheetLosses(worksheet: unknown): readonly string[] {
     if (actual !== undefined && actual !== expected) {
       losses.push(`page setup ${field}`);
     }
+  }
+  // A setting a reader kept as read because it is outside the format's vocabulary: BIFF12 stores these as codes and
+  // numbers, so there is no record to put the text in.
+  for (const { path, value } of findKeptSheetSettings(worksheet as object)) {
+    losses.push(`${path} ${JSON.stringify(value)}, kept as read from a file`);
   }
   return losses;
 }

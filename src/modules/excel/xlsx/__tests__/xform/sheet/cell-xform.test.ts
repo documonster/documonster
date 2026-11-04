@@ -175,8 +175,8 @@ const expectations = [
       type: Enums.ValueType.String,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       }
     },
@@ -185,19 +185,19 @@ const expectations = [
       type: Enums.ValueType.String,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       }
     },
-    xml: '<c r="A1" t="inlineStr"><is><r><rPr><color rgb="FF0000"/></rPr><t>red</t></r><r><rPr><color rgb="00FF00"/></rPr><t>green</t></r></is></c>',
+    xml: '<c r="A1" t="inlineStr"><is><r><rPr><color rgb="FFFF0000"/></rPr><t>red</t></r><r><rPr><color rgb="FF00FF00"/></rPr><t>green</t></r></is></c>',
     parsedModel: {
       address: "A1",
       type: Enums.ValueType.String,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       }
     },
@@ -206,8 +206,8 @@ const expectations = [
       type: Enums.ValueType.RichText,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       }
     },
@@ -249,8 +249,8 @@ const expectations = [
       type: Enums.ValueType.RichText,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       }
     },
@@ -259,8 +259,8 @@ const expectations = [
       type: Enums.ValueType.RichText,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       },
       ssId: 0
@@ -276,8 +276,8 @@ const expectations = [
       type: Enums.ValueType.RichText,
       value: {
         richText: [
-          { font: { color: { argb: "FF0000" } }, text: "red" },
-          { font: { color: { argb: "00FF00" } }, text: "green" }
+          { font: { color: { argb: "FFFF0000" } }, text: "red" },
+          { font: { color: { argb: "FF00FF00" } }, text: "green" }
         ]
       }
     },

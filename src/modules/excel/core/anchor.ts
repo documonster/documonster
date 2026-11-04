@@ -1,4 +1,5 @@
 import { columnIsCustomWidth } from "@excel/core/column";
+import { checkAnchor } from "@excel/core/feature-handles";
 import type { WorksheetData as Worksheet } from "@excel/core/worksheet-core";
 import { colCache } from "@excel/utils/col-cache";
 
@@ -59,6 +60,7 @@ export function isAnchorData(value: unknown): value is AnchorData {
 
 /** Column width (EMU) at the anchor's native column, or the default 640000. */
 export function anchorColWidth(a: AnchorData): number {
+  checkAnchor(a);
   // Read `_columns` directly — `getColumn` extends the array as a side effect,
   // and this is a getter reached from read-only paths (`Anchor.col`, PDF export).
   // A column that does not exist has no custom width, which is the default case.
@@ -68,12 +70,14 @@ export function anchorColWidth(a: AnchorData): number {
 
 /** Row height (EMU) at the anchor's native row, or the default 180000. */
 export function anchorRowHeight(a: AnchorData): number {
+  checkAnchor(a);
   const height = a.worksheet?._rows[a.nativeRow]?.height;
   return height ? Math.floor(height * 10000) : 180000;
 }
 
 /** Fractional column position (native col + offset fraction). */
 export function anchorCol(a: AnchorData): number {
+  checkAnchor(a);
   return a.nativeColOff === 0
     ? a.nativeCol
     : a.nativeCol + Math.min(anchorColWidth(a) - 1, a.nativeColOff) / anchorColWidth(a);
@@ -81,6 +85,7 @@ export function anchorCol(a: AnchorData): number {
 
 /** Set the fractional column position, deriving native col + offset. */
 export function anchorSetCol(a: AnchorData, v: number): void {
+  checkAnchor(a);
   a.nativeCol = Math.floor(v);
   const fraction = v - a.nativeCol;
   a.nativeColOff = fraction === 0 ? 0 : Math.floor(fraction * anchorColWidth(a));
@@ -88,6 +93,7 @@ export function anchorSetCol(a: AnchorData, v: number): void {
 
 /** Fractional row position (native row + offset fraction). */
 export function anchorRow(a: AnchorData): number {
+  checkAnchor(a);
   return a.nativeRowOff === 0
     ? a.nativeRow
     : a.nativeRow + Math.min(anchorRowHeight(a) - 1, a.nativeRowOff) / anchorRowHeight(a);
@@ -95,6 +101,7 @@ export function anchorRow(a: AnchorData): number {
 
 /** Set the fractional row position, deriving native row + offset. */
 export function anchorSetRow(a: AnchorData, v: number): void {
+  checkAnchor(a);
   a.nativeRow = Math.floor(v);
   const fraction = v - a.nativeRow;
   a.nativeRowOff = fraction === 0 ? 0 : Math.floor(fraction * anchorRowHeight(a));
@@ -123,7 +130,8 @@ export function anchorCreate(
     return a;
   }
   if (typeof address === "string") {
-    const decoded = colCache.decodeAddress(address);
+    // Upper-cased: the decoder reads upper-case column letters only, and `b2` is the cell `B2` to Excel.
+    const decoded = colCache.decodeAddress(address.toUpperCase());
     a.nativeCol = decoded.col + offset;
     a.nativeRow = decoded.row + offset;
   } else if (isAnchorModel(address)) {
@@ -153,6 +161,7 @@ export function anchorAsInstance(
 
 /** Serialize an anchor to its persisted {@link AnchorModel}. */
 export function anchorModel(a: AnchorData): AnchorModel {
+  checkAnchor(a);
   return {
     nativeCol: a.nativeCol,
     nativeColOff: a.nativeColOff,
@@ -163,6 +172,7 @@ export function anchorModel(a: AnchorData): AnchorModel {
 
 /** Apply a persisted {@link AnchorModel} onto an anchor record in place. */
 export function anchorSetModel(a: AnchorData, value: AnchorModel): void {
+  checkAnchor(a);
   a.nativeCol = value.nativeCol;
   a.nativeColOff = value.nativeColOff;
   a.nativeRow = value.nativeRow;
@@ -171,5 +181,6 @@ export function anchorSetModel(a: AnchorData, value: AnchorModel): void {
 
 /** Clone an anchor record, optionally rebinding it to a different worksheet. */
 export function anchorClone(a: AnchorData, worksheet?: Worksheet): AnchorData {
+  checkAnchor(a);
   return anchorCreate(worksheet ?? a.worksheet, anchorModel(a));
 }

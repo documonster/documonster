@@ -22,11 +22,11 @@ import { xmlEncode, xmlDecode } from "@xml/encode";
 import { query, queryAll } from "@xml/query";
 import { SaxParser, parseSax } from "@xml/sax";
 import { XmlStreamWriter } from "@xml/stream-writer";
-import type { SaxTag, WritableTarget } from "@xml/types";
+import type { SaxTag, XmlWritableTarget } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 import { describe, it, expect } from "vitest";
 
-function capture(): WritableTarget & { output(): string } {
+function capture(): XmlWritableTarget & { output(): string } {
   const chunks: string[] = [];
   return {
     write: (c: string | Uint8Array) => chunks.push(String(c)),

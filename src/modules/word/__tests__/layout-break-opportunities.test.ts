@@ -32,7 +32,10 @@ const NARROW: SectionProperties = {
   margins: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
 };
 
-const MONO: RunProperties = { font: "Courier New" };
+// The PDF standard Courier, exactly 600/1000 em: Courier New's own advance is
+// 1229/2048 em, which the layout now measures it by, and twenty of those run
+// 0.02pt past this measure.
+const MONO: RunProperties = { font: "Courier" };
 
 const run = (text: string, properties: RunProperties = MONO): Run => ({
   properties,

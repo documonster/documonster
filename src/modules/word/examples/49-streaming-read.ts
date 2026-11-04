@@ -7,7 +7,7 @@
  * incrementally — peak memory is O(largest single body element).
  *
  * Covers:
- *   - Streaming.createDocxStreamReader(bytes)   — factory
+ *   - Streaming.createReader(bytes)   — factory
  *   - new Streaming.StreamingDocxReader(bytes, opts) — class form, with the
  *     onProgress callback (reports cumulative uncompressed document.xml bytes)
  *   - `for await (const item of reader)`        — async iteration over body
@@ -36,7 +36,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // ---------------------------------------------------------------------------
 // 1. Produce a DOCX buffer with the streaming writer (write side, à la #22)
 // ---------------------------------------------------------------------------
-const writer = Streaming.createDocxStream({
+const writer = Streaming.createWriter({
   styles: [
     { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true, qFormat: true },
     {
@@ -81,7 +81,7 @@ console.log(`  → 49-streaming-read-source.docx (${(sourceBuf.length / 1024).to
 // 2. Read it back with the factory createDocxStreamReader + for-await
 // ---------------------------------------------------------------------------
 {
-  const reader = Streaming.createDocxStreamReader(sourceBuf);
+  const reader = Streaming.createReader(sourceBuf);
   let paragraphs = 0;
   let tables = 0;
   let firstConsumed = -1;

@@ -3,11 +3,11 @@
  *
  * ```ts
  * import { Workbook } from "documonster/excel";
- * import { calculateFormulas } from "documonster/excel/formula";
+ * import { ExcelFormula } from "documonster/excel/formula";
  *
  * const wb = Workbook.create();
  * // … populate cells …
- * calculateFormulas(wb); // results written back in place
+ * ExcelFormula.calculate(wb); // results written back in place
  * ```
  *
  * ## Why its own subpath
@@ -27,10 +27,20 @@
  * no install or registration step.
  */
 
-export { calculateFormulas } from "@excel/core/formula-adapter";
+import { calculateFormulas as calculateFormulasImpl } from "@excel/core/formula-adapter";
+import type { RVKind } from "@formula/runtime/values";
+
+export * as ExcelFormula from "@excel/bridge/excel-formula";
+
+// The errors `ExcelFormula.calculate` throws — the same class objects `documonster/excel` exports, so `instanceof`
+// and `isExcelError` agree whichever entry a caller imports them from.
+export { ExcelArgumentError, ExcelError, isExcelError } from "@excel/errors";
+export type { BaseErrorOptions } from "@utils/errors";
+
+/** @deprecated Use {@link ExcelFormula.calculate}. Removed in 1.0. */
+export const calculateFormulas = calculateFormulasImpl;
 export type { FormulaFunction } from "@formula/integration/calculate-formulas";
 export type { RuntimeValue as FormulaValue } from "@formula/runtime/values";
-import type { RVKind } from "@formula/runtime/values";
 
 /**
  * Value tags used by `FormulaValue`.

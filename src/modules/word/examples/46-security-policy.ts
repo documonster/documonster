@@ -9,9 +9,10 @@
  *
  * Covers:
  *   - DEFAULT_SECURITY_POLICY / STRICT_SECURITY_POLICY constants
- *   - resolveSecurityPolicy — fill missing fields with defaults
- *   - readDocx({ securityPolicy }) — enforced limits during read
- *   - createIdGenerators / createRenderContext — used when writing
+ *   - Security.resolvePolicy — fill missing fields with defaults
+ *   - A partial policy — unspecified fields fall back to the defaults
+ *   - Io.read(bytes, { securityPolicy }) — enforced limits during read
+ *   - RenderContext.createIds / RenderContext.create — used when writing
  *     auxiliary parts manually (not common, but the public surface is
  *     here for advanced consumers)
  *
@@ -48,11 +49,11 @@ for (const [k, v] of Object.entries(Security.STRICT_SECURITY_POLICY)) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. resolveSecurityPolicy fills in missing fields
+// 2. Security.resolvePolicy fills in missing fields
 // ---------------------------------------------------------------------------
-const partial = Security.resolveSecurityPolicy({ maxPackageSize: 1024 * 1024 }); // 1 MB cap
+const partial = Security.resolvePolicy({ maxPackageSize: 1024 * 1024 }); // 1 MB cap
 log(
-  `\n  resolveSecurityPolicy({ maxPackageSize: 1MB }) merged with defaults: maxPackageSize=${partial.maxPackageSize}, preserveVbaProject=${partial.preserveVbaProject}, allowExternalTargets=${partial.allowExternalTargets}`
+  `\n  resolvePolicy({ maxPackageSize: 1MB }) merged with defaults: maxPackageSize=${partial.maxPackageSize}, preserveVbaProject=${partial.preserveVbaProject}, allowExternalTargets=${partial.allowExternalTargets}`
 );
 
 // ---------------------------------------------------------------------------
@@ -61,43 +62,44 @@ log(
 const d = Document.create();
 Document.useDefaultStyles(d);
 Document.addParagraph(d, "Tiny doc");
-const bytes = await Io.toBuffer(Document.build(d));
+const bytes = await Io.toBuffer(d);
 fs.writeFileSync(path.join(outDir, "46-policy.docx"), bytes);
 
 // Default policy: succeeds
 const defaultRead = await Io.read(bytes, { securityPolicy: Security.DEFAULT_SECURITY_POLICY });
-log(`\n  readDocx(DEFAULT) body length: ${defaultRead.body.length}`);
+log(`\n  Io.read(DEFAULT) body length: ${defaultRead.body.length}`);
 
 // Strict policy: still succeeds for this benign file
 const strictRead = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
-log(`  readDocx(STRICT)  body length: ${strictRead.body.length}`);
+log(`  Io.read(STRICT)  body length: ${strictRead.body.length}`);
 
-// Custom policy with a comically tight cap forces a rejection
-const tightPolicy = Security.resolveSecurityPolicy({ maxPackageSize: 100 });
+// A partial policy with a comically tight cap forces a rejection; every field
+// it leaves out keeps its default.
+const tightPolicy = { maxPackageSize: 100 };
 try {
   await Io.read(bytes, { securityPolicy: tightPolicy });
   log(`  ERROR: expected size-cap to throw`);
 } catch (err) {
   if (isDocxError(err)) {
-    log(`  readDocx({maxPackageSize:100}) → ${err.constructor.name}: "${err.message}"`);
+    log(`  Io.read({maxPackageSize:100}) → ${err.constructor.name}: "${err.message}"`);
   } else {
     throw err;
   }
 }
 
 // ---------------------------------------------------------------------------
-// 4. createIdGenerators — incrementing counters with optional seed
+// 4. RenderContext.createIds — incrementing counters with optional seed
 // ---------------------------------------------------------------------------
 const ids = RenderContext.createIds({ drawingId: 100, sdtId: 50 });
 log(
-  `\n  createIdGenerators(drawing=100, sdt=50): drawing=${ids.nextDrawingId()}, sdt=${ids.nextSdtId()}, bookmark=${ids.nextBookmarkId()}, docPr=${ids.nextDocPrId()}, chart=${ids.nextChartId()}, image=${ids.nextImagePartId()}`
+  `\n  RenderContext.createIds(drawing=100, sdt=50): drawing=${ids.nextDrawingId()}, sdt=${ids.nextSdtId()}, bookmark=${ids.nextBookmarkId()}, docPr=${ids.nextDocPrId()}, chart=${ids.nextChartId()}, image=${ids.nextImagePartId()}`
 );
 log(
-  `  next round increments:                  drawing=${ids.nextDrawingId()}, sdt=${ids.nextSdtId()}`
+  `  next round increments:                       drawing=${ids.nextDrawingId()}, sdt=${ids.nextSdtId()}`
 );
 
 // ---------------------------------------------------------------------------
-// 5. createRenderContext — usually used internally; exposed for advanced
+// 5. RenderContext.create — usually used internally; exposed for advanced
 //    callers that build auxiliary parts manually.
 // ---------------------------------------------------------------------------
 const ctx = RenderContext.create({
@@ -106,7 +108,7 @@ const ctx = RenderContext.create({
   ids
 });
 log(
-  `\n  createRenderContext: part=${ctx.partName}, rawXmlPolicy=${ctx.rawXmlPolicy}, securityPolicy.preserveVbaProject=${ctx.securityPolicy.preserveVbaProject}`
+  `\n  RenderContext.create: part=${ctx.partName}, rawXmlPolicy=${ctx.rawXmlPolicy}, securityPolicy.preserveVbaProject=${ctx.securityPolicy.preserveVbaProject}`
 );
 
 fs.writeFileSync(path.join(outDir, "46-policy.txt"), lines.join("\n"));

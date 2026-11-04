@@ -19,7 +19,8 @@ import {
   tableSetTotalsRow
 } from "@excel/core/table";
 import { getCell, getTable, removeTable, rowGetCell } from "@excel/core/worksheet";
-import { Cell, Table, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Table, TableError, Workbook } from "@excel/index";
 import { colCache } from "@excel/utils/col-cache";
 import { describe, it, expect } from "vitest";
 
@@ -77,7 +78,7 @@ function checkTable(ref: string, ws: any, testValues: any[]) {
   for (let i = -1; i <= testValues.length + 1; i++) {
     const vRow = testValues[i];
     const nRow = i + a.row;
-    const row = nRow >= 1 && Worksheet.getRow(ws, nRow);
+    const row = nRow >= 1 && getRow(ws, nRow);
     if (!row) {
       continue;
     }
@@ -239,7 +240,7 @@ describe("Worksheet", () => {
         rows: [["a1", { formula: "[@A]" }]]
       });
 
-      const cellValue = cellGetValue(rowGetCell(Worksheet.getRow(ws, 2), 2));
+      const cellValue = cellGetValue(rowGetCell(getRow(ws, 2), 2));
       expect(cellValue).toEqual({ formula: "[@A]" });
     });
 
@@ -256,7 +257,7 @@ describe("Worksheet", () => {
         rows: [["a1", { formula: "[@A]" }]]
       });
 
-      const cellValue = cellGetValue(rowGetCell(Worksheet.getRow(ws, 2), 2));
+      const cellValue = cellGetValue(rowGetCell(getRow(ws, 2), 2));
       expect(cellValue).toEqual({ formula: "TestTable[[#This Row],[A]]" });
     });
 
@@ -283,7 +284,10 @@ describe("Worksheet", () => {
       expect(match).toBeTruthy();
 
       const formula = match![1];
-      expect(formula).toBe("CONCAT([@A])");
+      // `CONCAT` is a future function: the file spells it `_xlfn.CONCAT`, or Excel reads a user-defined function.
+      // **The this-row reference names its table.** This pinned `_xlfn.CONCAT([@A])`, the unnamed form, which Excel
+      // reads as `#REF!` in a cell; Excel itself stores `table[[#This Row],[A]]` (`table-this-row.excel.xlsx`).
+      expect(formula).toBe("_xlfn.CONCAT(table[[#This Row],[A]])");
       expect(formula.startsWith("@")).toBe(false);
     });
 
@@ -341,7 +345,7 @@ describe("Worksheet", () => {
       const ws2: any = Workbook.getWorksheet(wb2, "Data")!;
       expect(ws2).toBeDefined();
 
-      const table2 = Table.get(ws2, "CalcTable");
+      const table2 = Table.get(ws2, "CalcTable")!;
       expect(table2).toBeDefined();
       expect(table2.table.columns).toHaveLength(3);
       expect(table2.table.columns[0].name).toBe("Value");
@@ -354,7 +358,7 @@ describe("Worksheet", () => {
       const wb3 = Workbook.create();
       await Workbook.read(wb3, buffer2);
       const ws3: any = Workbook.getWorksheet(wb3, "Data")!;
-      const table3 = Table.get(ws3, "CalcTable");
+      const table3 = Table.get(ws3, "CalcTable")!;
       expect(table3.table.columns[1].calculatedColumnFormula).toBe("[Value]*2");
     });
 
@@ -389,6 +393,32 @@ describe("Worksheet", () => {
       const wb3 = Workbook.create();
       await Workbook.read(wb3, await Workbook.toBuffer(wb2));
       expect(Cell.getResult(Workbook.getWorksheet(wb3, "S")!, "B4")).toBe(8);
+    });
+
+    it("gives a first column with a totals function its SUBTOTAL, not the default label", async () => {
+      // Excel labels the first column "Total" when a totals row is switched on, and replaces the label with the
+      // function when one is chosen for it: `totalsRowFunction="sum"`, no `totalsRowLabel`, `SUBTOTAL(109,…)`.
+      const wb = Workbook.create();
+      const ws = Workbook.addWorksheet(wb, "S");
+      Table.add(ws, {
+        name: "First",
+        ref: "A1",
+        totalsRow: true,
+        columns: [
+          { name: "Qty", totalsRowFunction: "sum" },
+          { name: "Note", totalsRowLabel: "n/a" }
+        ],
+        rows: [
+          [3, "x"],
+          [5, "y"]
+        ]
+      });
+      expect(Cell.getValue(ws, "A4")).toEqual({ formula: "SUBTOTAL(109,First[Qty])" });
+      expect(Cell.getValue(ws, "B4")).toBe("n/a");
+      const files = await extractAll(await Workbook.toBuffer(wb));
+      const xml = new TextDecoder().decode(files.get("xl/tables/table1.xml")!.data);
+      expect(xml).toMatch(/<tableColumn id="1" name="Qty" totalsRowFunction="sum"\s*\/>/);
+      expect(xml).toMatch(/<tableColumn id="2" name="Note" totalsRowLabel="n\/a"\s*\/>/);
     });
 
     it("Table.add never adopts a result cached in the sheet, even under the same formula", () => {
@@ -542,132 +572,63 @@ describe("Worksheet", () => {
   // ========================================================================
   // Issue #91: table names with spaces should be auto-sanitized
   // ========================================================================
-  describe("table name sanitization integration", () => {
-    it("sanitizes table name with spaces on addTable", () => {
+  describe("table names Excel would not accept", () => {
+    const table = (name: string, extra: Record<string, unknown> = {}) => ({
+      name,
+      ref: "A1",
+      headerRow: true,
+      columns: [{ name: "A" }],
+      rows: [[1]],
+      ...extra
+    });
+
+    it.each([
+      ["T1", "cannot read as a cell reference", "_T1"],
+      ["R1C1", "cannot read as a cell reference", "_R1C1"],
+      ["My Table", "has no spaces", "My_Table"],
+      ["Sales-2024", "letters, digits, underscores and periods only", "Sales2024"],
+      ["1st", "starts with a letter, an underscore or a backslash", "_1st"]
+    ])(
+      "refuses %j rather than storing another name, and names one Excel accepts",
+      (name, reason, valid) => {
+        const wb = Workbook.create();
+        const ws = Workbook.addWorksheet(wb, "test");
+        const error = (() => {
+          try {
+            Table.add(ws, table(name));
+          } catch (e) {
+            return e as Error;
+          }
+          throw new Error("accepted");
+        })();
+        expect(error).toBeInstanceOf(TableError);
+        expect(error.message).toContain(reason);
+        expect(error.message).toContain(JSON.stringify(valid));
+        expect(Table.list(ws)).toEqual([]);
+        // The suggested name is accepted as it is.
+        expect(Table.getName(Table.add(ws, table(valid)))).toBe(valid);
+      }
+    );
+
+    it("refuses an invalid display name, and an invalid name given to a setter or to setModel", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
-      const table = Table.add(ws, {
-        name: "test table",
-        ref: "A1",
-        headerRow: true,
-        totalsRow: false,
-        columns: [
-          { name: "A", filterButton: true },
-          { name: "B", filterButton: true },
-          { name: "C", filterButton: true }
-        ],
-        rows: [
-          ["test", 2, "a4f"],
-          ["test 2", 1, "a4f"],
-          ["test 3", 6, "a4f"]
-        ]
-      });
-
-      // Name should have been sanitized
-      expect(tableName(table)).toBe("test_table");
-      expect(tableDisplayName(table)).toBe("test_table");
-
-      // Should be retrievable by sanitized name
-      expect(getTable(ws, "test_table")).toBe(table);
+      expect(() => Table.add(ws, table("Sales", { displayName: "My Display" }))).toThrow(
+        /displayName "My Display"/
+      );
+      const t = Table.add(ws, table("Sales"));
+      expect(() => tableSetName(t, "new name")).toThrow(TableError);
+      expect(() => tableSetDisplayName(t, "B2")).toThrow(TableError);
+      expect(() => Table.setModel(t, { ...Table.getModel(t), name: "C3" })).toThrow(TableError);
+      expect(tableName(t)).toBe("Sales");
+      expect(tableDisplayName(t)).toBe("Sales");
     });
 
-    it("table-name sanitization: writeBuffer produces valid OOXML", async () => {
-      const columns = ["A", "B", "C"];
-      const data = [
-        ["test", 2, "a4f"],
-        ["test 2", 1, "a4f"],
-        ["test 3", 6, "a4f"]
-      ];
-
-      const workbook = Workbook.create();
-      const sheet = Workbook.addWorksheet(workbook, "test");
-      Table.add(sheet, {
-        columns: columns.map(i => ({ name: i, filterButton: true })),
-        headerRow: true,
-        name: "test table",
-        ref: "A1",
-        rows: data,
-        totalsRow: false
-      });
-
-      const buffer = await Workbook.toBuffer(workbook);
-
-      // Verify the table XML has sanitized name
-      const entries = await extractAll(new Uint8Array(buffer));
-      const tableEntry = entries.get("xl/tables/table1.xml");
-      expect(tableEntry).toBeDefined();
-      const tableXml = new TextDecoder().decode(tableEntry!.data);
-
-      // Must NOT contain spaces in name/displayName
-      expect(tableXml).toContain('name="test_table"');
-      expect(tableXml).toContain('displayName="test_table"');
-      expect(tableXml).not.toContain('name="test table"');
-      expect(tableXml).not.toContain('displayName="test table"');
-    });
-
-    it("sanitizes displayName independently when provided", () => {
-      const wb = Workbook.create();
-      const ws = Workbook.addWorksheet(wb, "test");
-      const table = Table.add(ws, {
-        name: "my table",
-        displayName: "My Display Name",
-        ref: "A1",
-        headerRow: true,
-        totalsRow: false,
-        columns: [{ name: "Col1" }],
-        rows: [["val"]]
-      });
-
-      expect(tableName(table)).toBe("my_table");
-      expect(tableDisplayName(table)).toBe("My_Display_Name");
-    });
-
-    it("sanitizes name when set via setter", () => {
-      const wb = Workbook.create();
-      const ws = Workbook.addWorksheet(wb, "test");
-      const table = Table.add(ws, {
-        name: "ValidName",
-        ref: "A1",
-        headerRow: true,
-        totalsRow: false,
-        columns: [{ name: "Col1" }],
-        rows: [["val"]]
-      });
-
-      tableSetName(table, "new name with spaces");
-      expect(tableName(table)).toBe("new_name_with_spaces");
-
-      tableSetDisplayName(table, "another display name");
-      expect(tableDisplayName(table)).toBe("another_display_name");
-    });
-
-    it("sanitized name survives round-trip (write + load)", async () => {
+    it("keeps a valid name exactly, totals-row formulas included", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "test");
       Table.add(ws, {
-        name: "my table",
-        ref: "A1",
-        headerRow: true,
-        totalsRow: false,
-        columns: [{ name: "X", filterButton: true }],
-        rows: [["val1"], ["val2"]]
-      });
-
-      const buffer = await Workbook.toBuffer(wb);
-      const wb2 = Workbook.create();
-      await Workbook.read(wb2, buffer);
-
-      const ws2 = Workbook.getWorksheet(wb2, "test")!;
-      const table2 = Table.get(ws2, "my_table");
-      expect(table2).toBeDefined();
-      expect(tableName(table2)).toBe("my_table");
-    });
-
-    it("totalsRow formulas use sanitized table name", () => {
-      const wb = Workbook.create();
-      const ws = Workbook.addWorksheet(wb, "test");
-      Table.add(ws, {
-        name: "sales data",
+        name: "sales_data",
         ref: "A1",
         headerRow: true,
         totalsRow: true,
@@ -680,14 +641,8 @@ describe("Worksheet", () => {
           ["B", 20]
         ]
       });
-
-      // The totals row formula cell should reference the sanitized name
-      // Row 1 = header, rows 2-3 = data, row 4 = totals
-      const totalsCell = getCell(ws, "B4");
-      expect(cellGetValue(totalsCell)).toBeDefined();
-      const formula = (cellGetValue(totalsCell) as any).formula;
-      expect(formula).toContain("sales_data");
-      expect(formula).not.toContain("sales data");
+      const formula = (cellGetValue(getCell(ws, "B4")) as { formula: string }).formula;
+      expect(formula).toContain("sales_data[Amount]");
     });
   });
 

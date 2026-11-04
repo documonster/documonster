@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -80,7 +80,7 @@ Cell.setValue(ws, "I3", { formula: 'CELL("col", A8)' }); // 1
 Cell.setValue(ws, "I4", { formula: 'CELL("contents", A1)' }); // 42
 Cell.setValue(ws, "I5", { formula: 'CELL("type", A2)' }); // "l" (label/text)
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 const groups: Record<string, string[]> = {
   "Type predicates": ["B1", "B2", "B3", "B4", "B5"],

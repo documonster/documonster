@@ -164,7 +164,7 @@ export function checkWorkbook(ctx: ValidationContext): void {
         WORKBOOK_PATH
       );
     }
-    const lower = name.toLowerCase();
+    const lower = sheetNameKey(name);
     if (seenNamesLower.has(lower)) {
       ctx.reporter.error(
         "workbook-sheet-name-duplicate",
@@ -181,6 +181,7 @@ export function checkWorkbook(ctx: ValidationContext): void {
 // Element order validation
 // =============================================================================
 
+import { sheetNameKey } from "@utils/name-key";
 import type { XmlElement } from "@xml/types";
 
 /**

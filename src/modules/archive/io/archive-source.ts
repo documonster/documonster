@@ -1,8 +1,12 @@
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { createAbortError, ArchiveError } from "@archive/core/errors";
+import { ArchiveArgumentError, createAbortError, toError } from "@archive/core/errors";
 import { isAsyncIterable, isReadableStream } from "@stream/core/type-guards";
 import { stringToUint8Array as encodeUtf8, concatUint8Arrays } from "@utils/binary";
 
+/**
+ * Anything an archive can be read from, or an entry's content taken from. A string is content,
+ * encoded as UTF-8 — never a file path or URL.
+ */
 export type ArchiveSource =
   | Uint8Array
   | ArrayBuffer
@@ -17,11 +21,15 @@ export type ArchiveSource =
  *
  * This is a convenience adapter for environments where consumers expect
  * `ReadableStream` instead of `AsyncIterable`.
+ *
+ * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
+ *   read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
  */
 export function toReadableStream(
-  source: ArchiveSource,
+  source: ArchiveSource | ArchiveBytes,
   options: { signal?: AbortSignal } = {}
 ): ReadableStream<Uint8Array> {
+  checkSourceArgument("Archive.toReadableStream", source);
   const iterable = toAsyncIterable(source, options);
   const iterator = iterable[Symbol.asyncIterator]();
 
@@ -44,14 +52,65 @@ export function toReadableStream(
   });
 }
 
+/**
+ * Bytes held in memory, recognised as the platform's own readers recognise them: any
+ * `ArrayBufferView` (a `Uint8Array`, a Node `Buffer`, a `DataView`, another typed array) or an
+ * `ArrayBuffer`, including one from another realm, which fails `instanceof`.
+ */
+export type ArchiveBytes = ArrayBufferView | ArrayBuffer;
+
+/** Whether `value` is {@link ArchiveBytes}. */
+export function isArchiveBytes(value: unknown): value is ArchiveBytes {
+  return ArrayBuffer.isView(value) || isArrayBufferLike(value);
+}
+
+function isArrayBufferLike(value: unknown): value is ArrayBuffer {
+  if (value instanceof ArrayBuffer) {
+    return true;
+  }
+  const tag = Object.prototype.toString.call(value);
+  return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]";
+}
+
+/** {@link ArchiveBytes} as a `Uint8Array` over the same memory (no copy). */
+export function archiveBytesToUint8Array(bytes: ArchiveBytes): Uint8Array {
+  if (bytes instanceof Uint8Array) {
+    return bytes;
+  }
+  if (ArrayBuffer.isView(bytes)) {
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+  return new Uint8Array(bytes);
+}
+
 export function isInMemoryArchiveSource(
-  source: ArchiveSource
+  source: ArchiveSource | ArchiveBytes
 ): source is Uint8Array | ArrayBuffer | string | Blob {
   return (
-    source instanceof Uint8Array ||
-    source instanceof ArrayBuffer ||
+    isArchiveBytes(source) ||
     typeof source === "string" ||
     (typeof Blob !== "undefined" && source instanceof Blob)
+  );
+}
+
+/** Refuse, where it is given, a value that is not an {@link ArchiveSource}. */
+export function checkSourceArgument(where: string, source: unknown): void {
+  if (!isArchiveSource(source)) {
+    throw new ArchiveArgumentError(
+      "source",
+      `${where}: source must be a Uint8Array, ArrayBuffer, string, Blob, ReadableStream or async iterable, got ${
+        source === null ? "null" : typeof source
+      }`
+    );
+  }
+}
+
+/** `true` for every value {@link toAsyncIterable} can read: the {@link ArchiveSource} union. */
+export function isArchiveSource(value: unknown): value is ArchiveSource {
+  return (
+    isInMemoryArchiveSource(value as ArchiveSource) ||
+    isReadableStream(value) ||
+    isAsyncIterable(value)
   );
 }
 
@@ -88,32 +147,24 @@ function normalizeChunk(value: unknown): Uint8Array | null {
 }
 
 export function toUint8ArraySync(source: Uint8Array | ArrayBuffer | string): Uint8Array {
-  if (source instanceof Uint8Array) {
-    return source;
-  }
   if (typeof source === "string") {
     return encodeUtf8(source);
   }
-  return new Uint8Array(source);
+  return archiveBytesToUint8Array(source);
 }
 
 export function isSyncArchiveSource(source: unknown): source is Uint8Array | ArrayBuffer | string {
-  return (
-    source instanceof Uint8Array || source instanceof ArrayBuffer || typeof source === "string"
-  );
+  return isArchiveBytes(source) || typeof source === "string";
 }
 
 export async function toUint8Array(
   source: Uint8Array | ArrayBuffer | string | Blob
 ): Promise<Uint8Array> {
-  if (source instanceof Uint8Array) {
-    return source;
-  }
   if (typeof source === "string") {
     return encodeUtf8(source);
   }
-  if (source instanceof ArrayBuffer) {
-    return new Uint8Array(source);
+  if (isArchiveBytes(source)) {
+    return archiveBytesToUint8Array(source);
   }
   const buf = await source.arrayBuffer();
   return new Uint8Array(buf);
@@ -130,7 +181,7 @@ export async function toUint8Array(
  * @returns Complete buffer containing all source data
  */
 export async function resolveArchiveSourceToBuffer(
-  source: ArchiveSource,
+  source: ArchiveSource | ArchiveBytes,
   options: { signal?: AbortSignal } = {}
 ): Promise<Uint8Array> {
   // Fast path for in-memory sources
@@ -166,8 +217,15 @@ export async function collectUint8ArrayStream(
   return resolveArchiveSourceToBuffer(stream, options);
 }
 
+/**
+ * The bytes of any archive source, as `Uint8Array` chunks. Leaving early releases a caller's
+ * Web stream (it stays theirs) and cancels a stream opened from a `Blob`.
+ *
+ * @param source - A string is the archive's content, encoded as UTF-8 — never a file path or URL;
+ *   read a file's bytes first (in Node, or open it with `ArchiveFile.fromFile`).
+ */
 export async function* toAsyncIterable(
-  source: ArchiveSource,
+  source: ArchiveSource | ArchiveBytes,
   options: { signal?: AbortSignal; onChunk?: (chunk: Uint8Array) => void } = {}
 ): AsyncIterable<Uint8Array> {
   const { signal, onChunk } = options;
@@ -180,23 +238,9 @@ export async function* toAsyncIterable(
 
   checkAborted();
 
-  if (source instanceof Uint8Array) {
-    if (onChunk) {
-      onChunk(source);
-    }
-    yield source;
-    return;
-  }
-  if (typeof source === "string") {
-    const bytes = encodeUtf8(source);
-    if (onChunk) {
-      onChunk(bytes);
-    }
-    yield bytes;
-    return;
-  }
-  if (source instanceof ArrayBuffer) {
-    const bytes = new Uint8Array(source);
+  if (isArchiveBytes(source) || typeof source === "string") {
+    const bytes =
+      typeof source === "string" ? encodeUtf8(source) : archiveBytesToUint8Array(source);
     if (onChunk) {
       onChunk(bytes);
     }
@@ -209,8 +253,21 @@ export async function* toAsyncIterable(
     // `Blob.stream` may be missing on very old runtimes despite the type, so probe it.
     const maybeStream: unknown = source.stream;
     if (typeof maybeStream === "function") {
+      // This stream is ours, not the caller's: leaving early (or failing) cancels it once the
+      // inner read has released it, where a caller's stream is only released. Read to its
+      // end, there is nothing to cancel.
       const stream = source.stream();
-      yield* toAsyncIterable(stream, options);
+      let ended = false;
+      try {
+        yield* toAsyncIterable(stream, options);
+        ended = true;
+      } finally {
+        if (!ended) {
+          await stream.cancel().catch(() => {
+            // Already cancelled by an abort, or errored: nothing left to let go of
+          });
+        }
+      }
       return;
     }
 
@@ -276,6 +333,11 @@ export async function* toAsyncIterable(
           // ignore
         }
       }
+      // Released, not cancelled, when the consumer stops early: the stream is the
+      // caller's, and handing it back unlocked lets them keep reading it or cancel it
+      // themselves. Only an abort cancels it, above. (A reader that owns the whole
+      // parse, such as `unzip(stream)` or Excel's streaming workbook reader, cancels
+      // the source itself once it is done with it.)
       try {
         reader.releaseLock();
       } catch {
@@ -298,5 +360,45 @@ export async function* toAsyncIterable(
     return;
   }
 
-  throw new ArchiveError("Unsupported archive source");
+  throw new ArchiveArgumentError("source", "Unsupported archive source");
+}
+
+/**
+ * Convert an AsyncIterable to a WHATWG ReadableStream.
+ */
+export function asyncIterableToReadableStream<T>(
+  iterable: AsyncIterable<T>,
+  onCancel?: (reason: unknown) => void
+): ReadableStream<T> {
+  const iterator = iterable[Symbol.asyncIterator]();
+  let cancelled = false;
+
+  return new ReadableStream<T>({
+    async pull(controller) {
+      if (cancelled) {
+        controller.close();
+        return;
+      }
+
+      try {
+        const { value, done } = await iterator.next();
+        if (done) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (e) {
+        controller.error(toError(e));
+      }
+    },
+    async cancel(reason) {
+      cancelled = true;
+      try {
+        await iterator.return?.();
+      } catch {
+        // ignore
+      }
+      onCancel?.(reason);
+    }
+  });
 }

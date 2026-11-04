@@ -54,7 +54,12 @@ import {
   C15_DATA_LABELS_RANGE_EXT_URI,
   C16_PIVOT_OPTIONS16_EXT_URI
 } from "@excel/xlsx/xform/chart/chart-space-constants";
-import { renderChartSpace } from "@excel/xlsx/xform/chart/chart-space-render";
+import {
+  CHART_SPACE_ATTRIBUTES,
+  renderChartSpace
+} from "@excel/xlsx/xform/chart/chart-space-render";
+import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import {
   parseXsdBoolean as sharedParseXsdBoolean,
   parseXsdInt as sharedParseXsdInt,
@@ -76,16 +81,25 @@ class RawXmlCapture {
   private rootTag = "";
   /** Track self-closing tags so the subsequent parseClose is skipped */
   private skipNextClose = false;
+  /** Text views and the declarations the fragment needs — see `fragment-namespaces.ts`. */
+  private namespaces = new FragmentNamespaces();
+
+  /** A self-closing element captured on its own, as namespace-correct text. */
+  static selfClosed(node: ParseOpenTag): string {
+    const namespaces = new FragmentNamespaces();
+    return namespaces.finish(RawXmlCapture.tag(namespaces.open(node), "/>"));
+  }
 
   start(node: ParseOpenTag): void {
+    this.namespaces = new FragmentNamespaces();
     this.rootTag = node.name;
     this.depth = 1;
-    this.parts = [this._openTag(node)];
+    this.parts = [RawXmlCapture.tag(this.namespaces.open(node), ">")];
   }
 
   handleOpen(node: ParseOpenTag): void {
     this.depth++;
-    this.parts.push(this._openTag(node));
+    this.parts.push(RawXmlCapture.tag(this.namespaces.open(node), ">"));
   }
 
   handleText(text: string): void {
@@ -96,33 +110,30 @@ class RawXmlCapture {
     // SAX fires closetag for self-closing elements too — skip those
     if (this.skipNextClose) {
       this.skipNextClose = false;
+      this.namespaces.close(name);
       return true;
     }
     this.depth--;
-    if (this.depth === 0) {
-      this.parts.push(`</${name}>`);
-      return false; // done
-    }
-    this.parts.push(`</${name}>`);
-    return true; // still capturing
+    this.parts.push(`</${this.namespaces.close(name)}>`);
+    return this.depth !== 0;
   }
 
   handleSelfClose(node: ParseOpenTag): void {
     // For self-closing tags encountered during capture.
     // SAX will also fire a closetag event — flag to skip it.
-    this.parts.push(this._selfCloseTag(node));
+    this.parts.push(RawXmlCapture.tag(this.namespaces.open(node), "/>"));
     this.skipNextClose = true;
   }
 
   get xml(): string {
-    return this.parts.join("");
+    return this.namespaces.finish(this.parts.join(""));
   }
 
   get active(): boolean {
     return this.depth > 0;
   }
 
-  private _openTag(node: ParseOpenTag): string {
+  private static tag(node: ParseOpenTag, end: string): string {
     let s = `<${node.name}`;
     if (node.attributes) {
       for (const [k, v] of Object.entries(node.attributes)) {
@@ -133,18 +144,7 @@ class RawXmlCapture {
         s += ` ${k}="${escapeXmlAttr(String(v))}"`;
       }
     }
-    s += ">";
-    return s;
-  }
-
-  private _selfCloseTag(node: ParseOpenTag): string {
-    let s = `<${node.name}`;
-    if (node.attributes) {
-      for (const [k, v] of Object.entries(node.attributes)) {
-        s += ` ${k}="${escapeXmlAttr(String(v))}"`;
-      }
-    }
-    return s + "/>";
+    return s + end;
   }
 }
 
@@ -468,7 +468,17 @@ function decodeXmlText(value: string): string {
 // ChartSpaceXform
 // ============================================================================
 
+/** The chart writer declares `c`, `a` and `r`, and every other prefix the source's root declared. */
+const CHART_WRITER_NAMESPACES: WriterNamespaces = {
+  fixed: CHART_SPACE_ATTRIBUTES,
+  preservesDocumentPrefixes: true
+};
+
 class ChartSpaceXform extends BaseXform<ChartModel> {
+  get writerNamespaces(): WriterNamespaces {
+    return CHART_WRITER_NAMESPACES;
+  }
+
   private stateStack: ParseState[] = [];
   private rawCapture: RawXmlCapture | null = null;
   private textBuf = "";
@@ -634,13 +644,7 @@ class ChartSpaceXform extends BaseXform<ChartModel> {
         // `<c:protection/>`) must still be captured and attached so
         // they survive round-trip. Build the self-closing tag inline
         // and route through `_attachRawXml` like the normal path.
-        let selfCloseXml = `<${node.name}`;
-        if (node.attributes) {
-          for (const [k, v] of Object.entries(node.attributes)) {
-            selfCloseXml += ` ${k}="${escapeXmlAttr(String(v))}"`;
-          }
-        }
-        selfCloseXml += "/>";
+        const selfCloseXml = RawXmlCapture.selfClosed(node);
         // Determine the correct rawXmlTarget for routing (mirrors the
         // non-self-closing path below). For `c:tx` we need the
         // context-qualified target name.

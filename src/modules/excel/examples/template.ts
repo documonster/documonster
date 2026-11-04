@@ -23,8 +23,7 @@ fs.mkdirSync(outDir, { recursive: true });
 const inputFile = path.join(exampleDir, "data/table.xlsx");
 const outputFile = path.join(outDir, "template-out.xlsx");
 
-const workbook = Workbook.create();
-Workbook.readFile(workbook, inputFile)
+Workbook.readFile(inputFile)
   .then(loaded => {
     const options = {
       useSharedStrings: true,

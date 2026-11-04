@@ -98,7 +98,7 @@ async function workbookWithPivotParts(): Promise<Uint8Array> {
         `<Relationship Id="rId1" Type="${RELATIONSHIPS}/pivotCacheRecords" Target="pivotCacheRecords1.bin"/></Relationships>`
     )
   );
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 describe.runIf(corpus("poi-Simple.xlsb") !== undefined)(

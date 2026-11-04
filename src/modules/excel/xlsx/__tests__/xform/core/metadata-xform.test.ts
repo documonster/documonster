@@ -41,6 +41,17 @@ describe("MetadataXform", () => {
       expect(xml).toContain('<rc t="1" v="0"');
     });
 
+    it("declares XLDAPR with exactly the flags Excel writes — no `adjust`", () => {
+      // Excel 16.114 refuses a workbook whose XLDAPR declaration carries adjust="1"; removing that
+      // one attribute is enough for it to open. This is the declaration Excel itself writes.
+      const xml = new MetadataXform().toXml({ dynamicArrayCount: 1 });
+      expect(xml).toContain(
+        '<metadataType name="XLDAPR" minSupportedVersion="120000" copy="1" pasteAll="1" ' +
+          'pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" ' +
+          'clearComments="1" assign="1" coerce="1" cellMeta="1"/>'
+      );
+    });
+
     it("should produce empty output when dynamicArrayCount is 0", () => {
       const xform = new MetadataXform();
       const xml = xform.toXml({ dynamicArrayCount: 0 });

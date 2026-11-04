@@ -126,7 +126,7 @@ const REPO_VOCABULARY_FILE = "src/modules/excel/types.ts";
  * utils is implementation detail that never surfaces. That assumption broke when
  * `documonster/draw` made `Rgba01` — declared in `utils/svg-lex.ts` — the colour
  * type of its public IR: the type leaked into `DrawPaint`, `DrawTextStyle` and the
- * return of `cssColour`, a consumer could assign one but not declare one, and the
+ * return of `Draw.parseColor`, a consumer could assign one but not declare one, and the
  * check said nothing because of the blanket skip.
  *
  * An allowlist keeps the one pre-existing hole visible instead of hiding a whole
@@ -144,8 +144,24 @@ const REPO_UNEXPOSED_UTILS_TYPES = new Set(["BaseErrorOptions @ utils/errors.ts"
  * Format: `"TypeName @ src-relative/decl/file.ts"`.
  */
 const REPO_PRIVATE_MEMBER_TYPES = new Set([
-  // pdf — `PdfEditor.#copiedPages`
+  // pdf — `PdfEditor.#appendedPages`, the pages added or copied in, in order
+  "AppendedPage @ modules/pdf/builder/pdf-editor.ts",
   "CopiedPage @ modules/pdf/builder/pdf-editor.ts",
+  // pdf — `PdfEditor.#writeEdits`, the edits a running write serializes
+  "EditorEdits @ modules/pdf/builder/pdf-editor.ts",
+  // pdf — `PdfEditor.#cloneQueue` and `#kidsOverride`, a full rewrite's clone bookkeeping
+  "PendingClone @ modules/pdf/builder/pdf-editor.ts",
+  "PdfObject @ modules/pdf/reader/pdf-parser.ts",
+  // pdf — `PdfEditor.#pageIndex` and `#pruning`, what a rewrite leaving pages out drops
+  "PageIndex @ modules/pdf/builder/page-index.ts",
+  "Pruning @ modules/pdf/builder/page-index.ts",
+  // pdf — `PdfEditor.#threadPlan`, the article threads a rewrite leaving pages out writes
+  "ThreadPlan @ modules/pdf/builder/catalog-rewrite.ts",
+  // pdf — `PdfEditorPage._owner`, its private constructor and the `@internal` `_create` the editor
+  // makes pages with; none of the three reaches the published declarations
+  "EditorPageOwner @ modules/pdf/builder/pdf-editor.ts",
+  // word — `StreamingDocxWriter._documentRels` and its private image registrars
+  "RelationshipsState @ modules/word/writer/relationships.ts",
   // csv — private parser/formatter state on CsvParserStream / CsvFormatterStream
   "ParseConfig @ modules/csv/parse/config.ts",
   "ParseState @ modules/csv/parse/state.ts",
@@ -157,6 +173,16 @@ const REPO_PRIVATE_MEMBER_TYPES = new Set([
   "ArchiveZipState @ modules/archive/fs/archive-file.ts",
   "PendingTask @ modules/archive/compression/worker-pool/pool.browser.ts",
   "PoolWorker @ modules/archive/compression/worker-pool/pool.browser.ts",
+  // archive — `ArchiveFile`'s private edit view: the pending log replayed over the opened entries, which every
+  // read and write resolves through (`_zipView`, `_tarViewSteps`, `_zipEntryOf`, `_extractZip…`)
+  "TarViewEntry @ modules/archive/fs/archive-file.ts",
+  "ViewResolution @ modules/archive/fs/archive-file.ts",
+  "ZipEntry @ modules/archive/zip/zip-bytes.ts",
+  "ZipExtractItem @ modules/archive/fs/archive-file.ts",
+  "ZipPendingBufferEntry @ modules/archive/fs/archive-file.ts",
+  "ZipPendingStreamEntry @ modules/archive/fs/archive-file.ts",
+  "ZipPendingSymlinkEntry @ modules/archive/fs/archive-file.ts",
+  "ZipViewEntry @ modules/archive/fs/archive-file.ts",
   // archive — private pending-entry queues on ArchiveFile / TarArchive
   "TarInput @ modules/archive/tar/tar-archive.ts",
   // archive — `UnzipEntry.#parseEntry`, the streaming parser's own entry stream
@@ -284,6 +310,31 @@ function isFile(p: string): boolean {
   }
 }
 
+/**
+ * The platform whose module graph is being read. A browser build resolves every module
+ * that has a `.browser.ts` sibling to the sibling (`#platform/*` in `dist`,
+ * `preferBrowserFilesPlugin` when bundling from source), so a shared surface file that
+ * imports `@archive/compression/compress` reaches different declarations per platform.
+ * Reading the browser entries with Node resolution would report the Node declarations.
+ */
+let resolvePlatform: "node" | "browser" = "node";
+
+function withPlatform<T>(platform: "node" | "browser", fn: () => T): T {
+  const previous = resolvePlatform;
+  resolvePlatform = platform;
+  try {
+    return fn();
+  } finally {
+    resolvePlatform = previous;
+  }
+}
+
+function preferPlatformVariant(file: string): string {
+  if (resolvePlatform !== "browser" || file.includes(".browser.")) return file;
+  const sibling = file.replace(/\.ts$/, ".browser.ts");
+  return isFile(sibling) ? sibling : file;
+}
+
 function resolveSpec(spec: string, fromFile: string): string | undefined {
   let p: string | undefined;
   if (spec.startsWith(".")) {
@@ -302,21 +353,78 @@ function resolveSpec(spec: string, fromFile: string): string | undefined {
   }
   if (!p) return undefined;
   for (const candidate of [p, p + ".ts", path.join(p, "index.ts")]) {
-    if (isFile(candidate)) return candidate;
+    if (isFile(candidate)) return preferPlatformVariant(candidate);
   }
   return undefined;
 }
 
 const sources = new Map<string, string>();
 
+/**
+ * Remove comments while leaving string, template and regex literals intact.
+ *
+ * Two regex passes used to do this, and they cannot: a line comment that
+ * mentions `surface/*.ts` opened a "block comment" that ran to the next `*\/`
+ * in the file, hiding every export in between — `export * as Build` among
+ * them — so types reachable only through those namespaces were reported as
+ * unnameable, and the exports were never checked at all.
+ */
+function stripComments(src: string): string {
+  let out = "";
+  let i = 0;
+  let lastSignificant = "";
+  while (i < src.length) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const end = src.indexOf("*/", i + 2);
+      i = end < 0 ? src.length : end + 2;
+      out += " ";
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const start = i++;
+      while (i < src.length && src[i] !== ch) {
+        if (src[i] === "\\") i++;
+        else if (ch !== "`" && src[i] === "\n") break;
+        i++;
+      }
+      i++;
+      out += src.slice(start, i);
+      lastSignificant = ch;
+      continue;
+    }
+    if (ch === "/" && (lastSignificant === "" || "(,=:[!&|?{};".includes(lastSignificant))) {
+      const start = i++;
+      let inClass = false;
+      while (i < src.length && src[i] !== "\n") {
+        if (src[i] === "\\") i++;
+        else if (src[i] === "[") inClass = true;
+        else if (src[i] === "]") inClass = false;
+        else if (src[i] === "/" && !inClass) break;
+        i++;
+      }
+      i++;
+      out += src.slice(start, i);
+      lastSignificant = "/";
+      continue;
+    }
+    out += ch;
+    if (!/\s/.test(ch)) lastSignificant = ch;
+    i++;
+  }
+  return out;
+}
+
 /** Read a file with comments stripped (so `{@link Foo}` never counts as a use). */
 function read(file: string): string {
   let s = sources.get(file);
   if (s === undefined) {
-    s = fs
-      .readFileSync(file, "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+    s = stripComments(fs.readFileSync(file, "utf8"));
     sources.set(file, s);
   }
   return s;
@@ -346,7 +454,8 @@ interface Module {
 const modules = new Map<string, Module>();
 
 function parse(file: string): Module {
-  const cached = modules.get(file);
+  const cacheKey = `${resolvePlatform}|${file}`;
+  const cached = modules.get(cacheKey);
   if (cached) return cached;
 
   const mod: Module = {
@@ -357,7 +466,7 @@ function parse(file: string): Module {
     localTypes: new Set(),
     importedTypes: new Map()
   };
-  modules.set(file, mod);
+  modules.set(cacheKey, mod);
   const src = read(file);
 
   for (const m of src.matchAll(/export\s+\*\s+as\s+(\w+)\s+from\s+["']([^"']+)["']/g)) {
@@ -686,15 +795,26 @@ function main(): void {
       return false;
     });
 
+  const groupsOf = (platform: "node" | "browser" | "both"): Array<"node" | "browser"> =>
+    platform === "both" ? ["node", "browser"] : [platform];
+
+  // Keyed by `label|group`: an entry shared by both builds is read once per platform.
   const perEntry = new Map<string, Map<string, string>>();
-  for (const { label, file } of entryFiles) perEntry.set(label, nameableFrom(file));
+  for (const { label, file, platform } of entryFiles) {
+    for (const group of groupsOf(platform)) {
+      perEntry.set(
+        `${label}|${group}`,
+        withPlatform(group, () => nameableFrom(file))
+      );
+    }
+  }
 
   /** Everything nameable from the entries a single platform build can resolve. */
   const platformNameable = (platform: "node" | "browser"): Map<string, string> => {
     const merged = new Map<string, string>();
     for (const { label, platform: p } of entryFiles) {
       if (p !== platform && p !== "both") continue;
-      for (const [k, v] of perEntry.get(label)!)
+      for (const [k, v] of perEntry.get(`${label}|${platform}`)!)
         if (!merged.has(k)) merged.set(k, `${label} → ${v}`);
     }
     return merged;
@@ -712,7 +832,8 @@ function main(): void {
     ...read(vocabularyFile).matchAll(/^export\s+(?:type|interface|enum|const)\s+(\w+)/gm)
   ].map(m => m[1]);
   for (const entryLabel of VOCABULARY_ENTRIES) {
-    const nameable = perEntry.get(entryLabel);
+    const entry = ENTRIES[entryLabel];
+    const nameable = entry && perEntry.get(`${entryLabel}|${groupsOf(entry.platform)[0]}`);
     if (!nameable) continue;
     for (const name of vocabulary) {
       const id = origin(vocabularyFile, name);
@@ -727,10 +848,9 @@ function main(): void {
 
   // R2 — no type in a public signature may be unnameable within its platform.
   for (const { label, file, platform } of entryFiles) {
-    const groups: Array<"node" | "browser"> =
-      platform === "both" ? ["node", "browser"] : [platform];
-    for (const group of groups) {
-      for (const hole of signatureHoles(file, nameableByPlatform[group])) {
+    for (const group of groupsOf(platform)) {
+      const holes = withPlatform(group, () => signatureHoles(file, nameableByPlatform[group]));
+      for (const hole of holes) {
         failures.push(
           `R2  ${label} exposes \`${hole.name}\` (declared in ${hole.decl}) via ${hole.where},` +
             ` but no ${group} entry exports it`
@@ -748,7 +868,7 @@ function main(): void {
     const nodeEntry = path.join(ROOT, ENTRIES[pairKeys[0]].file);
     const browserEntry = path.join(ROOT, ENTRIES[pairKeys[1]].file);
     const nodeNames = topLevelNames(nodeEntry);
-    const browserNames = topLevelNames(browserEntry);
+    const browserNames = withPlatform("browser", () => topLevelNames(browserEntry));
     for (const name of nodeNames) {
       if (!browserNames.has(name)) {
         failures.push(`R3  documonster/excel exports \`${name}\`, but the browser entry does not`);
@@ -760,7 +880,7 @@ function main(): void {
       }
     }
     const nodeNs = namespaceMembers(nodeEntry);
-    const browserNs = namespaceMembers(browserEntry);
+    const browserNs = withPlatform("browser", () => namespaceMembers(browserEntry));
     for (const [ns, members] of nodeNs) {
       const other = browserNs.get(ns);
       if (!other) continue;

@@ -3,12 +3,12 @@
  *
  * Picks up the smaller-but-useful query helpers that 18-read-modify only
  * skimmed:
- *   - findBookmark — locate a bookmark range by name (returns surrounding
+ *   - Query.getBookmark — locate a bookmark range by name (returns surrounding
  *     paragraph index + range)
- *   - findComment — locate a CommentDef by id
+ *   - Query.getComment — locate a CommentDef by id
  *   - searchByFormat with the full FormatCriteria surface
  *     (paragraphStyle / characterStyle / textMatch / multiple flags AND'd)
- *   - getUsedFormats — distinct RunProperties shapes encountered
+ *   - Query.listUsedFormats — distinct RunProperties shapes encountered
  *
  * Output: tmp/word-examples/44-queries.txt
  */
@@ -43,7 +43,7 @@ Document.addStyle(d, {
 });
 
 Document.addHeading(d, "Section A", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.bookmarkStart(0, "intro"),
@@ -59,7 +59,7 @@ Document.addParagraphElement(
 );
 
 const cId = Document.addComment(d, "Reviewer", "Important note", { initials: "RV" });
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.commentRangeStart(cId),
@@ -70,7 +70,7 @@ Document.addParagraphElement(
 );
 
 Document.addHeading(d, "Section B", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph([
     Build.bookmarkStart(1, "TODO"),
@@ -80,55 +80,54 @@ Document.addParagraphElement(
 );
 Document.addParagraph(d, "TODO: also reconcile the figures.");
 
-const doc = Document.build(d);
-fs.writeFileSync(path.join(outDir, "44-queries.docx"), await Io.toBuffer(doc));
+fs.writeFileSync(path.join(outDir, "44-queries.docx"), await Io.toBuffer(d));
 
 // ---------------------------------------------------------------------------
-// 1. findBookmark — returns { bookmark, paragraphIndex, childIndex }
+// 1. Query.getBookmark — returns { bookmark, paragraphIndex, childIndex }
 // ---------------------------------------------------------------------------
-const bm = Query.findBookmark(doc, "intro");
+const bm = Query.getBookmark(d, "intro");
 log(
-  `  findBookmark("intro"): ${bm ? `id=${bm.bookmark.id}, paragraphIndex=${bm.paragraphIndex}, childIndex=${bm.childIndex}` : "missing"}`
+  `  Query.getBookmark("intro"): ${bm ? `id=${bm.bookmark.id}, paragraphIndex=${bm.paragraphIndex}, childIndex=${bm.childIndex}` : "missing"}`
 );
-const bm2 = Query.findBookmark(doc, "TODO");
-log(`  findBookmark("TODO"): ${bm2 ? `id=${bm2.bookmark.id}` : "missing"}`);
-const bmMissing = Query.findBookmark(doc, "no-such");
-log(`  findBookmark("no-such"): ${bmMissing}`);
+const bm2 = Query.getBookmark(d, "TODO");
+log(`  Query.getBookmark("TODO"): ${bm2 ? `id=${bm2.bookmark.id}` : "missing"}`);
+const bmMissing = Query.getBookmark(d, "no-such");
+log(`  Query.getBookmark("no-such"): ${bmMissing}`);
 
 // ---------------------------------------------------------------------------
-// 2. findComment
+// 2. Query.getComment
 // ---------------------------------------------------------------------------
-const c0 = Query.findComment(doc, cId);
-log(`  findComment(${cId}): author=${c0?.author}, initials=${c0?.initials}`);
-const cMissing = Query.findComment(doc, 999);
-log(`  findComment(999): ${cMissing}`);
+const c0 = Query.getComment(d, cId);
+log(`  Query.getComment(${cId}): author=${c0?.author}, initials=${c0?.initials}`);
+const cMissing = Query.getComment(d, 999);
+log(`  Query.getComment(999): ${cMissing}`);
 
 // ---------------------------------------------------------------------------
 // 3. searchByFormat — multiple criteria AND-ed
 // ---------------------------------------------------------------------------
 log(`\n  searchByFormat:`);
-log(`    bold:                ${Query.searchByFormat(doc, { bold: true }).length}`);
-log(`    italic:              ${Query.searchByFormat(doc, { italic: true }).length}`);
-log(`    color FF0000:        ${Query.searchByFormat(doc, { color: "FF0000" }).length}`);
+log(`    bold:                ${Query.searchByFormat(d, { bold: true }).length}`);
+log(`    italic:              ${Query.searchByFormat(d, { italic: true }).length}`);
+log(`    color FF0000:        ${Query.searchByFormat(d, { color: "FF0000" }).length}`);
 log(
-  `    size 36 (=18pt):     ${Query.searchByFormat(doc, { size: Units.ptToHalfPoint(18) }).length}`
+  `    size 36 (=18pt):     ${Query.searchByFormat(d, { size: Units.ptToHalfPoint(18) }).length}`
 );
 log(
-  `    bold AND TODO regex: ${Query.searchByFormat(doc, { bold: true, textMatch: /^TODO:/ }).length}`
+  `    bold AND TODO regex: ${Query.searchByFormat(d, { bold: true, textMatch: /^TODO:/ }).length}`
 );
-log(`    Strong char style:   ${Query.searchByFormat(doc, { characterStyle: "Strong" }).length}`);
-log(`    Heading1 para style: ${Query.searchByFormat(doc, { paragraphStyle: "Heading1" }).length}`);
+log(`    Strong char style:   ${Query.searchByFormat(d, { characterStyle: "Strong" }).length}`);
+log(`    Heading1 para style: ${Query.searchByFormat(d, { paragraphStyle: "Heading1" }).length}`);
 
 // ---------------------------------------------------------------------------
 // 4. countByFormat (no allocations)
 // ---------------------------------------------------------------------------
-log(`\n  countByFormat({ bold:true }):  ${Query.countByFormat(doc, { bold: true })}`);
-log(`  countByFormat({ italic:true }): ${Query.countByFormat(doc, { italic: true })}`);
+log(`\n  countByFormat({ bold:true }):  ${Query.getCountByFormat(d, { bold: true })}`);
+log(`  countByFormat({ italic:true }): ${Query.getCountByFormat(d, { italic: true })}`);
 
 // ---------------------------------------------------------------------------
-// 5. getUsedFormats — distinct property shapes
+// 5. Query.listUsedFormats — distinct property shapes
 // ---------------------------------------------------------------------------
-const used = Query.getUsedFormats(doc);
+const used = Query.listUsedFormats(d);
 log(`\n  getUsedFormats: ${used.length} distinct shapes`);
 for (const f of used.slice(0, 10)) {
   log(`    · ${JSON.stringify(f)}`);
@@ -138,7 +137,7 @@ for (const f of used.slice(0, 10)) {
 // 6. Edge: regex with no matches still returns array
 // ---------------------------------------------------------------------------
 log(
-  `\n  searchByFormat regex with no matches: ${Query.searchByFormat(doc, { textMatch: /XYZNEVER/ }).length}`
+  `\n  searchByFormat regex with no matches: ${Query.searchByFormat(d, { textMatch: /XYZNEVER/ }).length}`
 );
 
 fs.writeFileSync(path.join(outDir, "44-queries.txt"), lines.join("\n"));

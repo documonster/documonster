@@ -35,7 +35,7 @@ describe("OOXML _xHHHH_ escape in table column headers", () => {
     const ws = getWorksheets(wb)[0]!;
 
     // Table column name must have the decoded newline
-    const table = getTable(ws, "Table1_1");
+    const table = getTable(ws, "Table1_1")!;
     expect(table).toBeDefined();
     expect(table.table.columns[2].name).toBe("Col3\nnew line");
 
@@ -69,7 +69,7 @@ describe("OOXML _xHHHH_ escape in table column headers", () => {
     await Workbook.read(wb2, buffer as Buffer);
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
-    const table = getTable(ws2, "TestTable");
+    const table = getTable(ws2, "TestTable")!;
     expect(table.table.columns[2].name).toBe("Col3\nnew line");
     expect(Cell.getValue(ws2, "C1")).toBe("Col3\nnew line");
   });

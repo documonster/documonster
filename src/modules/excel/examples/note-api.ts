@@ -4,7 +4,7 @@
  * Most examples only use `Note.create`. This one covers the rest of the
  * `Note` namespace:
  * - Note.create     — build a NoteData handle (text + author)
- * - Note.model      — convert a NoteData into its serialisable NoteModel
+ * - Note.getModel      — convert a NoteData into its serialisable NoteModel
  * - Note.fromModel  — rebuild a NoteData from a NoteModel
  * - Note.isNote     — type-guard a value as NoteData
  *
@@ -32,7 +32,7 @@ fs.mkdirSync(outDir, { recursive: true });
 const filename = process.argv[2] ?? path.join(outDir, "note-api.xlsx");
 
 // 1. create — a plain-text note with an author
-const note = Note.create("Reviewed and approved.", "Alice");
+const note = Note.create("Reviewed and approved.", { author: "Alice" });
 console.log("created note:", note);
 
 // 2. isNote — type guard
@@ -41,7 +41,7 @@ console.log("isNote({}):", Note.isNote({})); // false
 console.log("isNote('text'):", Note.isNote("text")); // false
 
 // 3. model — serialisable NoteModel (texts + author + display config)
-const model = Note.model(note);
+const model = Note.getModel(note);
 console.log("note model author:", model.author);
 console.log("note model texts:", JSON.stringify(model.note.texts));
 

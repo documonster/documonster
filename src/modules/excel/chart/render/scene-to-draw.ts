@@ -25,7 +25,7 @@
  * be) passes while a moved coordinate does not.
  */
 
-import { cssColour, translucent } from "@draw/colour";
+import { cssColor, translucent } from "@draw/colour";
 import { rectNode } from "@draw/types";
 import type {
   DrawList,
@@ -35,6 +35,7 @@ import type {
   DrawPoint,
   DrawTextStyle
 } from "@draw/types";
+import { chartAreaNode } from "@excel/chart/render/chart-area";
 import type {
   ChartScene,
   ChartSceneAdornment,
@@ -54,13 +55,14 @@ import {
   splitTextLines,
   withAlpha
 } from "@excel/chart/shared/chart-utils";
+import { isNoPaintColor } from "@utils/svg-lex";
 
 /** Opaque black, the fallback for an unparseable colour token. */
 /** Convert a scene text node to its display-list equivalent. */
 function textNode(text: ChartSceneText): DrawNode {
   const style: DrawTextStyle = {
     size: text.fontSize,
-    fill: cssColour(text.color),
+    fill: cssColor(text.color),
     anchor: text.anchor ?? "start",
     family: text.fontFamily ?? "Arial",
     ...(text.bold ? { bold: true } : {}),
@@ -89,7 +91,7 @@ function lineNode(line: ChartSceneLine): DrawNode {
       { x: line.x1, y: line.y1 },
       { x: line.x2, y: line.y2 }
     ],
-    paint: { stroke: cssColour(line.color), strokeWidth: line.width ?? 1 }
+    paint: { stroke: cssColor(line.color), strokeWidth: line.width ?? 1 }
   };
 }
 
@@ -127,7 +129,7 @@ function sliceNode(slice: ChartScenePieSlice): DrawNode {
     innerRadius: slice.innerRadius,
     startAngle: slice.startAngle,
     endAngle: slice.endAngle,
-    paint: { fill: cssColour(slice.color) }
+    paint: { fill: cssColor(slice.color) }
   };
 }
 
@@ -149,7 +151,7 @@ function bar3DNodes(
   const { dx, dy } = projection;
   // Mixed towards white rather than made translucent: this is a lighting cue, so
   // the background must not show through the face.
-  const paint = (mix: number): DrawPaint => ({ fill: cssColour(withAlpha(color, mix)) });
+  const paint = (mix: number): DrawPaint => ({ fill: cssColor(withAlpha(color, mix)) });
   return [
     {
       kind: "polyline",
@@ -173,15 +175,15 @@ function bar3DNodes(
       ],
       paint: paint(0.75)
     },
-    rectNode(bar, { fill: cssColour(color) })
+    rectNode(bar, { fill: cssColor(color) })
   ];
 }
 
 /** A marker glyph. */
 function markerNodes(marker: ChartSceneMarker): DrawNode[] {
   const r = marker.size / 2;
-  const fill: DrawPaint = { fill: cssColour(marker.color) };
-  const stroke: DrawPaint = { stroke: cssColour(marker.color), strokeWidth: 2 };
+  const fill: DrawPaint = { fill: cssColor(marker.color) };
+  const stroke: DrawPaint = { stroke: cssColor(marker.color), strokeWidth: 2 };
   switch (marker.symbol) {
     case "square":
       return [
@@ -269,7 +271,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
         if (series.depth && series.projection3D) {
           nodes.push(...bar3DNodes(bar, series.projection3D, series.color));
         } else {
-          nodes.push(rectNode(bar, { fill: cssColour(series.color) }));
+          nodes.push(rectNode(bar, { fill: cssColor(series.color) }));
         }
       }
       return nodes;
@@ -298,7 +300,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
         nodes.push({
           kind: "polyline",
           points: run,
-          paint: { stroke: cssColour(series.color), strokeWidth: 2 }
+          paint: { stroke: cssColor(series.color), strokeWidth: 2 }
         });
       }
       return nodes;
@@ -308,7 +310,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
     case "scatter": {
       if (series.showLine !== false) {
         const paint: DrawPaint = {
-          stroke: cssColour(series.color),
+          stroke: cssColor(series.color),
           strokeWidth: 2,
           // Round joins and caps suit a curve, and are what the old SVG emitter used to
           // stand in for one.
@@ -338,7 +340,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
           cy: point.y,
           rx: 3,
           ry: 3,
-          paint: { fill: cssColour(series.color) }
+          paint: { fill: cssColor(series.color) }
         });
       }
       return nodes;
@@ -354,7 +356,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
           ry: bubble.radius,
           paint: {
             fill: translucent(series.color, 0.55),
-            stroke: cssColour(series.color),
+            stroke: cssColor(series.color),
             strokeWidth: 1
           }
         });
@@ -379,7 +381,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
         cy: series.center.y,
         rx: series.radius,
         ry: series.radius,
-        paint: { stroke: cssColour(GRID_COLOR), strokeWidth: 1 }
+        paint: { stroke: cssColor(GRID_COLOR), strokeWidth: 1 }
       });
       const runs = finiteRuns(series.points);
       const fill = series.filled ? translucent(series.color, 0.35) : undefined;
@@ -396,7 +398,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
           ...(unbroken ? { closed: true } : {}),
           paint: {
             ...(fill ? { fill } : {}),
-            stroke: cssColour(series.color),
+            stroke: cssColor(series.color),
             strokeWidth: 2
           }
         });
@@ -412,7 +414,7 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
             { x: candle.x, y: candle.highY },
             { x: candle.x, y: candle.lowY }
           ],
-          paint: { stroke: cssColour("#555"), strokeWidth: 1 }
+          paint: { stroke: cssColor("#555"), strokeWidth: 1 }
         });
         // A body needs both endpoints. Falling back to one of them collapses it to
         // a 1px strip that reads as a real candle but is an artefact.
@@ -426,8 +428,8 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
                 height: Math.max(1, Math.abs(candle.closeY - candle.openY))
               },
               {
-                fill: cssColour(candle.up ? "#70AD47" : "#C00000"),
-                stroke: cssColour("#555"),
+                fill: cssColor(candle.up ? "#70AD47" : "#C00000"),
+                stroke: cssColor("#555"),
                 strokeWidth: 1
               }
             )
@@ -447,8 +449,8 @@ function seriesShapes(series: ChartSceneSeries): DrawNode[] {
           rectNode(
             cell,
             series.wireframe
-              ? { fill: cssColour(cell.color), stroke: cssColour("#555"), strokeWidth: 1 }
-              : { fill: cssColour(cell.color) }
+              ? { fill: cssColor(cell.color), stroke: cssColor("#555"), strokeWidth: 1 }
+              : { fill: cssColor(cell.color) }
           )
         );
       }
@@ -479,7 +481,7 @@ function adornmentNodes(series: ChartSceneAdornment): DrawNode[] {
         kind: "polyline",
         points: run,
         paint: {
-          stroke: cssColour(trendline.color),
+          stroke: cssColor(trendline.color),
           strokeWidth: trendline.width ?? 1.5,
           ...(trendline.dash ? { dash: [4, 3] } : {})
         }
@@ -508,7 +510,7 @@ function dataTableNodes(table: ChartSceneDataTable): DrawNode[] {
   return [
     // Borders first so cell text paints over them.
     ...table.borders.map(lineNode),
-    ...table.legendSwatches.map(swatch => rectNode(swatch, { fill: cssColour(swatch.color) })),
+    ...table.legendSwatches.map(swatch => rectNode(swatch, { fill: cssColor(swatch.color) })),
     ...table.cells.map(textNode)
   ];
 }
@@ -520,7 +522,7 @@ function legendNodes(legend: ChartSceneLegend): DrawNode[] {
   }
   const fontSize = legend.textStyle?.fontSize ?? 10;
   const fontFamily = legend.textStyle?.fontFamily ?? "Arial";
-  const textColour = cssColour(legend.textStyle?.color ?? "#555");
+  const textColour = cssColor(legend.textStyle?.color ?? "#555");
   const bold = legend.textStyle?.bold;
   const italic = legend.textStyle?.italic;
   const swatchSize = 10;
@@ -536,7 +538,7 @@ function legendNodes(legend: ChartSceneLegend): DrawNode[] {
     const x = legend.orientation === "horizontal" ? cursorX : legend.rect.x;
     const y = legend.orientation === "horizontal" ? legend.rect.y : legend.rect.y + index * 18;
     nodes.push(
-      rectNode({ x, y, width: swatchSize, height: swatchSize }, { fill: cssColour(item.color) })
+      rectNode({ x, y, width: swatchSize, height: swatchSize }, { fill: cssColor(item.color) })
     );
     nodes.push({
       kind: "text",
@@ -567,16 +569,24 @@ function legendNodes(legend: ChartSceneLegend): DrawNode[] {
  * Convert a chart scene to a display list.
  *
  * @param scene - The scene produced by `buildChartScene`.
- * @param backgroundColor - Background fill; `"transparent"` omits the rect.
+ * @param background - The caller's fill, replacing the chart area's own; `"transparent"`
+ *   paints none. A scene without a `chartArea` (one built by hand) gets this fill, white by
+ *   default, and no border.
  */
-export function sceneToDrawList(scene: ChartScene, backgroundColor = "#fff"): DrawList {
+export function sceneToDrawList(scene: ChartScene, background?: string): DrawList {
   const children: DrawNode[] = [];
 
-  if (backgroundColor !== "transparent") {
+  if (scene.chartArea) {
+    const area = chartAreaNode(scene.chartArea, scene.width, scene.height, background);
+    if (area) {
+      children.push(area);
+    }
+  } else if (background !== "transparent") {
+    const backgroundColor = background ?? "#fff";
     children.push(
       rectNode(
         { x: 0, y: 0, width: scene.width, height: scene.height },
-        { fill: cssColour(backgroundColor) }
+        { fill: cssColor(backgroundColor) }
       )
     );
   }
@@ -584,10 +594,13 @@ export function sceneToDrawList(scene: ChartScene, backgroundColor = "#fff"): Dr
     children.push(textNode(scene.title));
   }
   for (const gridline of scene.gridlines) {
-    children.push(lineNode(gridline));
+    // A gridline or axis drawn with `<a:ln><a:noFill/>` has no line to put down.
+    if (!isNoPaintColor(gridline.color)) {
+      children.push(lineNode(gridline));
+    }
   }
   for (const axis of [scene.axes.x, scene.axes.y, scene.axes.x2, scene.axes.y2]) {
-    if (axis) {
+    if (axis && !isNoPaintColor(axis.color)) {
       children.push(lineNode(axis));
     }
   }

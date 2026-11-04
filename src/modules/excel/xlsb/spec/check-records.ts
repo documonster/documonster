@@ -266,7 +266,9 @@ export function checkRecordTable(): string[] {
     if (
       /^Brt(Cell|Short|Fmla)[A-Z]/.test(record.name) &&
       record.category !== "cell" &&
-      record.name !== "BrtCellIgnoreEC"
+      record.name !== "BrtCellIgnoreEC" &&
+      // Likewise `BrtCellMeta`: a cell-metadata index that precedes the cell record it annotates.
+      record.name !== "BrtCellMeta"
     ) {
       fail(`${record.name}: looks like a cell record but is not categorised as one`);
     }

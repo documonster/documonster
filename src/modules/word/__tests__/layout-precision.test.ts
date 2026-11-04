@@ -14,6 +14,7 @@
 import { getFontAscent, getFontDescent, styledFontVariant } from "@utils/font-metrics";
 import { describe, it, expect } from "vitest";
 
+import { faceExtents } from "../layout/font-face";
 import { layoutDocument } from "../layout/layout";
 import { SCRIPT_BASELINE_SHIFT_FACTOR } from "../layout/layout-constants";
 import { layoutDocumentFull } from "../layout/layout-full";
@@ -136,8 +137,20 @@ describe("layoutDocumentFull — paragraph placement", () => {
     expect(firstLine.baseline).toBeLessThanOrEqual(firstLine.height);
   });
 
-  it("splits a line box's leading evenly above and below the ink", () => {
-    const doc: DocxDocument = { body: [makeParagraph("Hello gjpqy")] };
+  it("sets the extra of auto line spacing below the text, as Word does", () => {
+    // One and a half lines, so the box has room beyond its text: a single
+    // Calibri line is exactly its face's ascent over its descent. Word for Mac
+    // 16.114 sets the text where a single line would have it and leaves the
+    // extra below (pages2 P7: a 1.5-line paragraph's baseline is the single
+    // line's, 3.2pt above the middle of the box).
+    const doc: DocxDocument = {
+      body: [
+        {
+          ...makeParagraph("Hello gjpqy"),
+          properties: { spacing: { line: 360, lineRule: "auto" } }
+        }
+      ]
+    };
     const out = layoutDocumentFull(doc);
     const para = out.pages[0]!.content.find(c => c.type === "paragraph");
     if (!para || para.type !== "paragraph") {
@@ -145,19 +158,9 @@ describe("layoutDocumentFull — paragraph placement", () => {
     }
     const line = para.lines[0]!;
 
-    const face = styledFontVariant("Calibri", false, false);
-    const ascent = getFontAscent(face, 12);
-    const descent = getFontDescent(face, 12);
-
-    // `baseline` is measured from the top of the line box, so the space above
-    // the ascent and below the descender are the two halves of the leading and
-    // must match. Deriving the baseline from a fraction of the box height
-    // instead (it used to be 0.8) leaves almost nothing under the descender,
-    // and the text sinks against the following line.
-    const above = line.baseline - ascent;
-    const below = line.height - line.baseline + descent;
-    expect(above).toBeCloseTo(below, 6);
-    expect(line.baseline).toBeCloseTo((line.height - (ascent - descent)) / 2 + ascent, 6);
+    const { ascent, descent } = faceExtents("Calibri", 12)!;
+    expect(line.height - (ascent - descent)).toBeGreaterThan(1);
+    expect(line.baseline).toBeCloseTo(ascent, 6);
   });
 
   it("uses text-aware metrics and keeps exact line spacing exact", () => {
@@ -312,14 +315,16 @@ describe("layoutDocumentFull — style resolution", () => {
     }
 
     // Heading1 contributes 480 twips (24pt) of space before. The engine folds
-    // it into the paragraph's own box, so the heading's first line sits 24pt
-    // below the top of that box — and the box starts at the previous bottom.
+    // it into the paragraph's own box, so the heading's first line sits below
+    // the top of that box — and the box starts at the previous bottom. The
+    // body paragraph above already leaves its 160 twips (8pt) after: Word
+    // separates two paragraphs by the larger of the two spaces, so 16pt more.
     expect(heading.rect.y).toBeCloseTo(first.rect.y + first.rect.height, 1);
-    expect(heading.lines[0]!.y).toBeCloseTo(24, 1);
+    expect(heading.lines[0]!.y).toBeCloseTo(24 - 8, 1);
 
     // …and 120 twips (6pt) after, on top of its single line box.
     const trailing = heading.rect.height - heading.lines[0]!.height;
-    expect(trailing).toBeCloseTo(24 + 6, 1);
+    expect(trailing).toBeCloseTo(24 - 8 + 6, 1);
   });
 
   it("honours indent supplied by the paragraph style", () => {
@@ -365,9 +370,10 @@ describe("layoutDocumentFull — style resolution", () => {
     if (a?.type !== "paragraph" || b?.type !== "paragraph") {
       throw new Error("expected paragraphs");
     }
-    // 20pt text → 24pt natural line; line=480 (2×) → 48pt.
-    expect(a.lines[0]!.height).toBeCloseTo(24, 1);
-    expect(b.lines[0]!.height).toBeCloseTo(48, 1);
+    // 20pt Calibri → its own 1.2207em line (2500/2048, as Word sets it), 24.41pt;
+    // line=480 (2×) → 48.83pt.
+    expect(a.lines[0]!.height).toBeCloseTo((20 * 2500) / 2048, 1);
+    expect(b.lines[0]!.height).toBeCloseTo((40 * 2500) / 2048, 1);
   });
 
   it("resolves a run's character style chain (w:rStyle)", () => {
@@ -410,8 +416,9 @@ describe("layoutDocumentFull — style resolution", () => {
       fontSize: 24,
       color: "FF0000"
     });
-    // The 24pt character-styled run must also drive the line box.
-    expect(para.lines[0]!.height).toBeCloseTo(28.8, 1);
+    // The 24pt character-styled run must also drive the line box: Courier New's
+    // ascent over its descent, (1705 + 615) / 2048 em.
+    expect(para.lines[0]!.height).toBeCloseTo((24 * 2320) / 2048, 1);
 
     // The first pagination pass resolves that same character style. If it read
     // raw run properties, the metrics callback would see 11pt Calibri instead
@@ -543,14 +550,16 @@ describe("layoutDocumentFull — style resolution", () => {
     const loose = heights(false);
     const tight = heights(true);
 
-    // Without the flag all three list items carry before+after (10pt each).
-    expect(loose[1]).toBeCloseTo(loose[2]!, 1);
+    // Without the flag every item carries its 10pt after; the first its 10pt
+    // before too, while the others' before is the space the item above already
+    // leaves (Word separates paragraphs by the larger of the two spaces).
+    expect(loose[1]).toBeCloseTo(loose[2]! + 10, 1);
     expect(loose[2]).toBeCloseTo(loose[3]!, 1);
     // With it, the middle item loses both, the first keeps its space-before
     // (the paragraph above uses a different style) and the last its space-after.
     expect(tight[2]).toBeLessThan(tight[1]!);
     expect(tight[2]).toBeLessThan(tight[3]!);
-    expect(tight[2]).toBeCloseTo(loose[2]! - 20, 1);
+    expect(tight[2]).toBeCloseTo(loose[2]! - 10, 1);
   });
 
   it("gives full-width text a full em so it cannot overlap what follows", () => {
@@ -636,8 +645,31 @@ describe("layoutDocumentFull — style resolution", () => {
       return { x: cell.rect.x + block.rect.x, height: cell.rect.height };
     };
 
-    // Word's default: 108 twips = 5.4pt left, nothing top/bottom.
-    expect(textX(table()).x).toBeCloseTo(5.4, 3);
+    // No margins anywhere and no default table style: Word draws the cells
+    // flush (Word for Mac 16.114). This pinned 5.4pt, which is what Word's
+    // default table style `Normal Table` gives — a document without one
+    // does not get it.
+    expect(textX(table()).x).toBeCloseTo(0, 3);
+    // A default table style supplies its margins: 108 twips = 5.4pt left.
+    expect(
+      textX({
+        ...table(),
+        styles: [
+          {
+            type: "table",
+            styleId: "TableNormal",
+            name: "Normal Table",
+            isDefault: true,
+            tableProperties: {
+              cellMargins: {
+                left: { value: 108, type: "dxa" },
+                right: { value: 108, type: "dxa" }
+              }
+            }
+          }
+        ]
+      }).x
+    ).toBeCloseTo(5.4, 3);
 
     // A declared `w:tblCellMar` wins over the default, on all four sides.
     const declared = textX(
@@ -651,8 +683,8 @@ describe("layoutDocumentFull — style resolution", () => {
       })
     );
     expect(declared.x).toBeCloseTo(10, 3);
-    // 13.2pt line + 10pt top + 10pt bottom.
-    expect(declared.height).toBeCloseTo(33.2, 1);
+    // One 11pt Calibri line (2500/2048 em, 13.43pt) + 10pt top + 10pt bottom.
+    expect(declared.height).toBeCloseTo((11 * 2500) / 2048 + 20, 1);
 
     // `type: "nil"` is an explicit zero, not "unset".
     expect(
@@ -1258,13 +1290,14 @@ describe("layoutDocumentFull — paragraph decoration and indents", () => {
       throw new Error("expected paragraph");
     }
     expect(laid.lines).toHaveLength(0);
-    // 240 twips above + 240 below = 24pt, and nothing else.
-    expect(laid.rect.height).toBeCloseTo(24, 1);
+    // 240 twips above + 240 below = 24pt, and the 1pt rule itself — a drawn
+    // rule takes its thickness in Word — and nothing else.
+    expect(laid.rect.height).toBeCloseTo(25, 1);
     const insets = laid.decorationInsets!;
     expect(laid.rect.height - insets.top - insets.bottom).toBeCloseTo(0, 3);
   });
 
-  it("collapses the space above the document's first block only", () => {
+  it("keeps the space above the document's first block, as Word does", () => {
     const heading = (text: string): Paragraph => ({
       type: "paragraph",
       properties: { style: "H" },
@@ -1289,11 +1322,12 @@ describe("layoutDocumentFull — paragraph decoration and indents", () => {
       }
       return block.lines[0]!.y;
     };
-    // CSS collapses a container's first child's top margin — which is why the
-    // stylesheet can say `h1 { margin-top: 0 }` and still give the others air.
+    // Word sets the first heading of a document its space before (Word for Mac
+    // 16 puts a Heading 1 with 12pt before at 84pt on a 72pt top margin); it is
+    // not CSS, which collapses a container's first margin.
     expect(blocks[0]!.rect.y).toBeCloseTo(0, 3);
-    expect(leadOf(0)).toBeCloseTo(0, 3);
-    // The mid-document heading keeps its 480 twips = 24pt.
+    expect(leadOf(0)).toBeCloseTo(24, 1);
+    // A mid-document heading keeps its 480 twips = 24pt too.
     expect(leadOf(2)).toBeCloseTo(24, 1);
   });
 
@@ -1940,5 +1974,38 @@ describe("layoutDocumentFull — custom text measurement", () => {
     );
 
     expect(fonts).toContainEqual({ name: "Times New Roman", bold: true, italic: true });
+  });
+});
+
+describe("layoutDocumentFull — justified lines by compatibility mode", () => {
+  // Word 2013+ (mode 15) narrows a justified line's spaces by up to a quarter to
+  // take one word more; modes 12 and 14 never do (pages2 P16–P18).
+  const text = Array.from({ length: 40 }, (_, i) => `aeee${String(i).padStart(2, "0")}`).join(" ");
+  const lines = (mode: number, alignment: "both" | "left"): string[] => {
+    const doc: DocxDocument = {
+      body: [
+        {
+          type: "paragraph",
+          properties: { alignment },
+          children: [
+            { properties: { font: "Times New Roman", size: 24 }, content: [{ type: "text", text }] }
+          ]
+        }
+      ],
+      settings: { compatibilityMode: mode }
+    };
+    const para = layoutDocumentFull(doc).pages[0]!.content[0]!;
+    if (para.type !== "paragraph") {
+      throw new Error("expected paragraph");
+    }
+    return para.lines.map(line =>
+      line.runs.map(run => (run.type === "image" ? "" : run.text)).join("")
+    );
+  };
+
+  it("fits more words on a justified line in mode 15 only", () => {
+    expect(lines(14, "both")).toEqual(lines(14, "left"));
+    expect(lines(15, "left")).toEqual(lines(14, "left"));
+    expect(lines(15, "both")[0]!.length).toBeGreaterThan(lines(14, "both")[0]!.length);
   });
 });

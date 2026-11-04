@@ -1,3 +1,4 @@
+import { ArchiveArgumentError } from "@archive/core/errors";
 import { createEventWaiter } from "@stream/core/event-utils";
 import { isWritableStream } from "@stream/core/type-guards";
 import { concatUint8Arrays } from "@utils/binary";
@@ -15,10 +16,42 @@ export type ArchiveSink =
       removeListener?(event: string, listener: (...args: unknown[]) => void): unknown;
     };
 
+/**
+ * Options for `UnzipEntry#pipeTo` / `TarReaderEntry#pipeTo` into a Web `WritableStream`: the DOM's `StreamPipeOptions`,
+ * spelled out so the declarations need no DOM types.
+ */
+export type ArchivePipeToOptions = {
+  preventClose?: boolean;
+  preventAbort?: boolean;
+  preventCancel?: boolean;
+  signal?: AbortSignal;
+};
+
+/**
+ * Refuse, where it is given, a sink that is neither a Web `WritableStream` nor something with
+ * a `write` method (a Node-style Writable or a duck-typed sink).
+ */
+export function checkSinkArgument(where: string, sink: unknown): void {
+  if (
+    !isWritableStream(sink) &&
+    (typeof sink !== "object" ||
+      sink === null ||
+      typeof (sink as { write?: unknown }).write !== "function")
+  ) {
+    throw new ArchiveArgumentError(
+      "sink",
+      `${where}: sink must be a WritableStream or a writable with a write() method, got ${
+        sink === null ? "null" : typeof sink
+      }`
+    );
+  }
+}
+
 export async function pipeIterableToSink(
   iterable: AsyncIterable<Uint8Array>,
   sink: ArchiveSink
 ): Promise<void> {
+  checkSinkArgument("pipeTo", sink);
   if (isWritableStream(sink)) {
     const writer = sink.getWriter();
     try {

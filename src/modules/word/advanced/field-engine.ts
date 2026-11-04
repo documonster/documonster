@@ -10,11 +10,26 @@
  * modified portions of the tree).
  */
 
+import { planTableOfContents } from "@word/advanced/toc-update";
+import type { TocPlan } from "@word/advanced/toc-update";
+import { checkBoolean, checkHandle, checkRecord } from "@word/core/argument-checks";
+import { builtInStyle, tocStyle } from "@word/core/builtin-styles";
+import { formatFieldResult, tokenizeFieldCode } from "@word/core/field-format";
+import { evaluateIfField } from "@word/core/field-if";
+import {
+  evaluateSplitFields,
+  forEachField,
+  resolveSplitFields,
+  rewriteSplitFields
+} from "@word/core/field-view";
+import type { Mutable } from "@word/core/internal-utils";
+import { collectRangeMarkers, settleRangeMarkers } from "@word/core/range-markers";
 import { extractParagraphText, isRun } from "@word/core/text-utils";
+import { buildTocInstruction } from "@word/core/toc-instruction";
 import { walkBlocks } from "@word/core/walker";
 import type { LayoutOptions, LayoutResult } from "@word/layout/layout";
 import { layoutDocument } from "@word/layout/layout";
-import { resolveHeadingLevel } from "@word/query/heading";
+import { checkLayoutOptions, layoutFootprint, paginateDocument } from "@word/layout/layout-full";
 import {
   collectSectionProperties,
   displayedPageNumbers,
@@ -22,8 +37,6 @@ import {
   type PageSectionSlot,
   parsePageField
 } from "@word/query/page-field";
-import { indexStyles } from "@word/query/style-resolve";
-import type { StyleIndex } from "@word/query/style-resolve";
 import type {
   BodyContent,
   BookmarkStart,
@@ -68,15 +81,37 @@ export interface FieldUpdateOptions {
  *
  * 执行分页布局，然后遍历所有字段更新其缓存值。
  * 对于 TOC 字段，会生成完整的目录段落。
+ * 嵌套字段先于外层字段计算（`IF` 比较的是嵌套字段的新结果）；结果按字段的
+ * 通用开关（`\\*`、`\\#`、`\\@`，见 `formatFieldResult`）格式化。
+ *
+ * 页码（PAGE、NUMPAGES、SECTIONPAGES、PAGEREF、INDEX、目录条目）来自本库的
+ * 分页布局（目录按其新条目参与分页）。不会设置 `settings.updateFieldsOnOpen`。
+ *
+ * Does not modify `doc`; the result may share unchanged nodes with it — see
+ * `Document.clone`.
  *
  * @param doc - 文档模型（不会被修改，返回新对象）
  * @param options - 更新选项
  * @returns 更新后的文档模型
  */
+function checkFieldUpdateOptions(options: unknown, where: string): void {
+  checkRecord(options, "options", where, { optional: true });
+  const o = options as FieldUpdateOptions | undefined;
+  checkLayoutOptions(o?.layoutOptions, "options.layoutOptions", where);
+  for (const key of [
+    "updateToc",
+    "updatePageFields",
+    "updateReferences",
+    "updateSequences"
+  ] as const) {
+    checkBoolean(o?.[key], `options.${key}`, where, { optional: true });
+  }
+}
+
 export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): DocxDocument {
-  const opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & {
-    layoutOptions?: LayoutOptions;
-  } = {
+  checkHandle(doc, "document", "doc", "Transform.updateFields");
+  checkFieldUpdateOptions(options, "Transform.updateFields");
+  const opts: ResolvedFieldOptions = {
     layoutOptions: options?.layoutOptions,
     updateToc: options?.updateToc ?? true,
     updatePageFields: options?.updatePageFields ?? true,
@@ -84,35 +119,42 @@ export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): D
     updateSequences: options?.updateSequences ?? true
   };
 
-  // Perform layout pass
-  const layout = layoutDocument(doc, opts.layoutOptions);
+  // The tables of contents first: they bookmark what they list, which the
+  // layout then places.
+  const tocInstructions = opts.updateToc ? listTocInstructions(doc) : [];
+  const plan = tocInstructions.length > 0 ? planTableOfContents(doc, tocInstructions) : undefined;
+  const { doc: source, layout } = plan
+    ? settleTableOfContents(plan, tocInstructions, opts.layoutOptions)
+    : { doc, layout: paginateDocument(doc, opts.layoutOptions) };
 
-  // Build bookmark info map
-  const bookmarkInfo = opts.updateReferences ? collectBookmarkInfo(doc, layout) : new Map();
-
-  // Build SEQ counters
-  const seqValues = opts.updateSequences ? computeSeqValues(doc) : new Map();
-
-  // Build style → paragraphs index for STYLEREF
-  const styleIndex = buildStyleIndex(doc);
-
-  // Collect INDEX entries (XE fields) from all body content
-  const indexEntries = collectIndexEntries(doc, layout);
+  const env: UpdateEnv = {
+    doc: source,
+    layout,
+    // Build bookmark info map
+    bookmarkInfo: opts.updateReferences ? collectBookmarkInfo(source, layout) : new Map(),
+    // Build SEQ counters
+    seqValues: opts.updateSequences ? computeSeqValues(source) : new Map(),
+    // Build style → paragraphs index for STYLEREF
+    styleIndex: buildStyleIndex(source),
+    // Collect INDEX entries (XE fields) from all body content
+    indexEntries: collectIndexEntries(source, layout),
+    opts,
+    toc: plan
+  };
 
   // Update body content
-  const newBody = updateBody(doc, layout, bookmarkInfo, seqValues, styleIndex, indexEntries, opts);
+  const newBody = updateBody(env);
 
   // If TOC was updated, register the TOC1..TOCn paragraph styles so the
   // cached TOC entries don't reference undefined styles. Only do this when
-  // the document actually contains a <toc> — otherwise we'd mutate doc
+  // the document actually contains a TOC — otherwise we'd mutate doc
   // shape for no reason and break === comparisons in callers.
-  let nextDoc: DocxDocument = doc;
-  if (newBody !== doc.body) {
-    nextDoc = { ...doc, body: newBody };
+  let nextDoc: DocxDocument = source;
+  if (newBody !== source.body) {
+    nextDoc = { ...source, body: newBody };
   }
-  if (opts.updateToc && doc.body.some(item => item.type === "tableOfContents")) {
-    const headings = collectHeadings(doc, layout);
-    nextDoc = ensureTocStyles(nextDoc, headings);
+  if (plan) {
+    nextDoc = ensureTocStyles(nextDoc, plan, tocInstructions);
   }
   return nextDoc;
 }
@@ -121,70 +163,168 @@ export function updateFields(doc: DocxDocument, options?: FieldUpdateOptions): D
  * 仅更新 TOC（目录）字段。
  * 扫描文档中的标题（Heading1-9 样式或 outline level），
  * 生成目录缓存段落。
+ * 目录页码来自本库的分页布局，见 {@link updateFields}。
+ *
+ * Does not modify `doc`; the result may share unchanged nodes with it — see
+ * `Document.clone`.
  */
 export function updateTableOfContents(
   doc: DocxDocument,
   options?: FieldUpdateOptions
 ): DocxDocument {
+  checkHandle(doc, "document", "doc", "Transform.updateTableOfContents");
+  checkFieldUpdateOptions(options, "Transform.updateTableOfContents");
   // Skip the entire pipeline (including TOC style registration) when the
-  // document has no <toc> block at all — callers rely on `updateTableOfContents`
-  // returning the same reference in that case so they can detect "nothing
-  // changed" with a `===` check.
-  const hasToc = doc.body.some(item => item.type === "tableOfContents");
-  if (!hasToc) {
+  // document has no table of contents at all — callers rely on
+  // `updateTableOfContents` returning the same reference in that case so they
+  // can detect "nothing changed" with a `===` check.
+  const instructions = listTocInstructions(doc);
+  if (instructions.length === 0) {
     return doc;
   }
 
-  const layout = layoutDocument(doc, options?.layoutOptions);
-  const headings = collectHeadings(doc, layout);
-
-  const newBody = doc.body.map(item => {
-    if (item.type === "tableOfContents") {
-      return updateTocContent(item, headings);
-    }
-    return item;
-  });
-
-  const changed = newBody.some((item, i) => item !== doc.body[i]);
-  const stage1: DocxDocument = changed ? { ...doc, body: newBody } : doc;
-  return ensureTocStyles(stage1, headings);
+  const plan = planTableOfContents(doc, instructions);
+  return settleTableOfContents(plan, instructions, options?.layoutOptions).doc;
 }
 
 /**
- * Register TOC1..TOCn paragraph styles for every heading level present in
- * the document. The cached TOC paragraphs reference these styles by id, so
- * if they aren't defined Word logs a "missing referenced style" warning on
- * every TOC entry.
+ * The document of `plan` with its tables of contents regenerated, and the
+ * layout their page numbers come from — the layout *of that document*, entries
+ * included, as Word paginates it: a table of contents that grows by a page
+ * moves every heading after it by a page. Laid out again until the entries
+ * read the same as the layout they were numbered from; a page number changing
+ * width can rewrap an entry, so this can take a second round, rarely a third.
  */
-function ensureTocStyles(doc: DocxDocument, headings: HeadingEntry[]): DocxDocument {
-  if (headings.length === 0) {
-    return doc;
+function settleTableOfContents(
+  plan: TocPlan,
+  instructions: readonly string[],
+  layoutOptions: LayoutOptions | undefined
+): { doc: DocxDocument; layout: LayoutResult } {
+  // The entries are laid out in the styles they will be written with, numbered
+  // first from the quick estimate so the first full layout already holds them.
+  // Each round still numbers the entries of the document as it stands, so a
+  // table of contents that was already right comes back untouched.
+  let doc = ensureTocStyles(plan.doc, plan, instructions);
+  let laidOut = withTocEntries(doc, plan, layoutDocument(doc, layoutOptions));
+  let layout = paginateDocument(laidOut, layoutOptions);
+  for (let round = 0; round <= MAX_TOC_ROUNDS; round++) {
+    const next = withTocEntries(doc, plan, layout);
+    // New numbers that leave every line where it was move nothing after
+    // them: the layout of `laidOut` is the layout of `next`.
+    if (next === laidOut || samePrefixLayout(laidOut, next, layoutOptions)) {
+      return { doc: next, layout };
+    }
+    if (round === MAX_TOC_ROUNDS) {
+      break;
+    }
+    doc = laidOut = next;
+    layout = paginateDocument(doc, layoutOptions);
   }
+  return { doc, layout };
+}
+
+/**
+ * Whether `a` and `b`, which differ only in some body items, lay out the same
+ * up to the last of those — compared on the body cut after it, set in the
+ * section it belongs to. Content after it then lands the same in both.
+ */
+function samePrefixLayout(
+  a: DocxDocument,
+  b: DocxDocument,
+  layoutOptions: LayoutOptions | undefined
+): boolean {
+  if (a.body.length !== b.body.length || a.styles !== b.styles) {
+    return false;
+  }
+  let last = -1;
+  for (let i = 0; i < a.body.length; i++) {
+    if (a.body[i] !== b.body[i]) {
+      last = i;
+    }
+  }
+  const cut = (doc: DocxDocument): DocxDocument => {
+    let sectionProperties = doc.sectionProperties;
+    for (let i = last; i < doc.body.length; i++) {
+      const item = doc.body[i]!;
+      if (item.type === "paragraph" && item.properties?.sectionProperties) {
+        sectionProperties = item.properties.sectionProperties;
+        break;
+      }
+    }
+    return { ...doc, body: doc.body.slice(0, last + 1), sectionProperties };
+  };
+  return layoutFootprint(cut(a), layoutOptions) === layoutFootprint(cut(b), layoutOptions);
+}
+
+/** Rounds of {@link settleTableOfContents} after the first layout. */
+const MAX_TOC_ROUNDS = 4;
+
+/** `doc` with its tables of contents numbered from `layout`, or `doc` when they already are. */
+function withTocEntries(doc: DocxDocument, plan: TocPlan, layout: LayoutResult): DocxDocument {
+  const updated = doc.body.map(item =>
+    item.type === "tableOfContents" ? updateTocContent(item, plan, layout) : item
+  );
+  const changed = updated.some((item, i) => item !== doc.body[i]);
+  const body = updateSplitTocFields(changed ? updated : doc.body, plan, layout);
+  return body !== doc.body ? { ...doc, body } : doc;
+}
+
+/**
+ * The instruction of every table of contents in the body: its
+ * `TableOfContents` blocks, and the `TOC` fields held in pieces among its
+ * paragraphs.
+ */
+function listTocInstructions(doc: DocxDocument): string[] {
+  const out: string[] = [];
+  for (const item of doc.body) {
+    if (item.type === "tableOfContents") {
+      out.push(buildTocInstruction(item));
+    }
+  }
+  for (const field of resolveSplitFields(doc.body)?.fields ?? []) {
+    if (isTocInstruction(field.instruction) && field.end && !field.deleted) {
+      out.push(field.instruction);
+    }
+  }
+  return out;
+}
+
+function isTocInstruction(instruction: string): boolean {
+  return /^\s*TOC\b/i.test(instruction);
+}
+
+/**
+ * Register the paragraph styles the entries use — `TOC1`..`TOCn` for every
+ * heading level listed, `TableofFigures` for captions — so the cached entries
+ * don't reference undefined styles. Word logs a "missing referenced style"
+ * warning on every entry otherwise.
+ */
+function ensureTocStyles(
+  doc: DocxDocument,
+  plan: TocPlan,
+  instructions: readonly string[]
+): DocxDocument {
   const usedTocLevels = new Set<number>();
-  for (const h of headings) {
-    usedTocLevels.add(Math.max(1, Math.min(9, h.level)));
+  let figures = false;
+  for (const instruction of instructions) {
+    const used = plan.styles(instruction);
+    for (const level of used.levels) {
+      usedTocLevels.add(Math.max(1, Math.min(9, level)));
+    }
+    figures ||= used.figures;
   }
   const existingStyles = doc.styles ?? [];
   const definedIds = new Set(existingStyles.map(s => s.styleId));
   const stylesToAdd: StyleDef[] = [];
-  for (const lvl of usedTocLevels) {
+  for (const lvl of [...usedTocLevels].sort((a, b) => a - b)) {
     const id = `TOC${lvl}`;
     if (definedIds.has(id)) {
       continue;
     }
-    stylesToAdd.push({
-      type: "paragraph",
-      styleId: id,
-      name: `toc ${lvl}`,
-      basedOn: "Normal",
-      next: "Normal",
-      uiPriority: 39,
-      unhideWhenUsed: true,
-      paragraphProperties: {
-        spacing: { after: 100 },
-        indent: { left: (lvl - 1) * 220 }
-      }
-    });
+    stylesToAdd.push(tocStyle(lvl));
+  }
+  if (figures && !definedIds.has("TableofFigures")) {
+    stylesToAdd.push(builtInStyle("TableofFigures")!);
   }
   if (stylesToAdd.length === 0) {
     return doc;
@@ -201,19 +341,31 @@ interface BookmarkData {
   readonly page: number;
 }
 
-interface HeadingEntry {
-  readonly text: string;
-  readonly level: number;
-  readonly page: number;
-}
-
 interface IndexEntry {
   readonly term: string;
   readonly page: number;
 }
 
 type BookmarkMap = ReadonlyMap<string, BookmarkData>;
-type SeqMap = ReadonlyMap<number, number>;
+/** A `SEQ` field's number, by the field (whole) or its begin piece (in pieces). */
+type SeqMap = ReadonlyMap<FieldContent, number>;
+
+type ResolvedFieldOptions = Required<Omit<FieldUpdateOptions, "layoutOptions">> & {
+  layoutOptions?: LayoutOptions;
+};
+
+/** What updating one field needs, computed once per update. */
+interface UpdateEnv {
+  readonly doc: DocxDocument;
+  readonly layout: LayoutResult;
+  readonly bookmarkInfo: BookmarkMap;
+  readonly seqValues: SeqMap;
+  readonly styleIndex: Map<string, { index: number; text: string }[]>;
+  readonly indexEntries: IndexEntry[];
+  readonly opts: ResolvedFieldOptions;
+  /** The tables of contents to regenerate, when they are updated. */
+  readonly toc: TocPlan | undefined;
+}
 
 // =============================================================================
 // Field Instruction Parsing
@@ -239,17 +391,6 @@ function parseFieldInstruction(instruction: string): {
     type: trimmed.slice(0, spaceIdx).toUpperCase(),
     args: trimmed.slice(spaceIdx + 1).trim()
   };
-}
-
-/** Parse TOC instruction to extract outline level range. */
-function parseTocLevels(args: string): { min: number; max: number } {
-  // Match \o "1-3" pattern
-  const match = /\\o\s*"(\d+)-(\d+)"/.exec(args);
-  if (match) {
-    return { min: parseInt(match[1], 10), max: parseInt(match[2], 10) };
-  }
-  // Default: all heading levels 1-9
-  return { min: 1, max: 9 };
 }
 
 /** Parse SEQ switches: \h (hidden), \r N (reset to N), \c (repeat). */
@@ -284,181 +425,6 @@ function parseSeqSwitches(args: string): {
   return { identifier, hidden, resetTo, repeat };
 }
 
-/** Parse IF field: IF expr1 op expr2 "trueText" "falseText" */
-function parseIfField(args: string): {
-  left: string;
-  operator: string;
-  right: string;
-  trueText: string;
-  falseText: string;
-} | null {
-  // Hand-rolled parser used in place of the previous chained regex
-  // (`/^"?([^"=<>!]*?)"?\s*(<=|>=|<>|=|<|>)\s*"?([^"]*?)"?\s+"([^"]*)"\s+"([^"]*)"/`).
-  // CodeQL flagged that regex as polynomial-redos. The grammar is also
-  // permissive in ways the regex captured implicitly: real Word IF
-  // fields contain operands such as `MERGEFIELD foo` (with internal
-  // whitespace) and operands wrapped in quotes. The scanner below
-  // mirrors the regex's accepted shape:
-  //
-  //   args := SP* leftOperand SP* op SP* rightOperand SP+ "trueText" SP+ "falseText" …
-  //
-  // where `leftOperand` runs up to the first comparison operator that
-  // is not inside a quoted span, and `rightOperand` runs up to the
-  // first `"` that begins the trueText literal.
-
-  // 1. Find the comparison operator outside any quoted span.
-  const opPos = findIfOperator(args, 0);
-  if (!opPos) {
-    return null;
-  }
-
-  // 2. Left operand: everything before the operator, with surrounding
-  //    whitespace and outer quotes stripped.
-  const left = stripOuterQuotes(args.slice(0, opPos.start).trim());
-
-  // 3. Right operand: text between the operator and the first quoted
-  //    literal, with surrounding whitespace and outer quotes stripped.
-  let cursor = opPos.next;
-  // Scan to the next `"` that is not the immediate value-quoted operand.
-  // We have to be careful: the right operand itself may be quoted, e.g.
-  // `1 = "bar" "y" "n"`. To match the previous regex we adopt: skip
-  // whitespace, optionally consume one quoted span as the right operand,
-  // otherwise consume up to the next whitespace+`"` boundary.
-  cursor = skipSpaces(args, cursor);
-  let right: string;
-  if (args.charCodeAt(cursor) === 0x22 /* '"' */) {
-    const close = args.indexOf('"', cursor + 1);
-    if (close < 0) {
-      return null;
-    }
-    right = args.slice(cursor + 1, close);
-    cursor = close + 1;
-  } else {
-    // Read until the next `"` (which begins the trueText literal).
-    const nextQuote = args.indexOf('"', cursor);
-    if (nextQuote < 0) {
-      return null;
-    }
-    right = args.slice(cursor, nextQuote).trim();
-    cursor = nextQuote;
-  }
-
-  // 4. trueText (required quoted string).
-  cursor = skipSpaces(args, cursor);
-  const trueRead = readQuotedString(args, cursor);
-  if (!trueRead) {
-    return null;
-  }
-  cursor = skipSpaces(args, trueRead.next);
-
-  // 5. falseText (required quoted string).
-  const falseRead = readQuotedString(args, cursor);
-  if (!falseRead) {
-    return null;
-  }
-
-  return {
-    left,
-    operator: opPos.value,
-    right,
-    trueText: trueRead.value,
-    falseText: falseRead.value
-  };
-}
-
-/**
- * Find the first IF-field comparison operator (`<=`, `>=`, `<>`, `=`,
- * `<`, `>`) starting at `from`, skipping over any quoted (`"…"`) spans
- * so that operators inside operand strings are not mistaken for the
- * top-level comparator.
- *
- * Bare `!` is reported as "no operator" rather than absorbed into the
- * preceding operand: the previous regex excluded `!` from the left
- * operand character class, so `1 != 1 …` was rejected outright. We
- * preserve that rejection here to avoid silently parsing `!=` (not a
- * Word IF-field operator) as `=` with `!` glued to the left operand.
- */
-function findIfOperator(
-  s: string,
-  from: number
-): { start: number; next: number; value: string } | null {
-  const n = s.length;
-  let i = from;
-  while (i < n) {
-    const c = s.charCodeAt(i);
-    if (c === 0x22 /* '"' */) {
-      // Skip quoted span.
-      const close = s.indexOf('"', i + 1);
-      if (close < 0) {
-        return null;
-      }
-      i = close + 1;
-      continue;
-    }
-    if (c === 0x21 /* '!' */) {
-      // Reject `!` outside quotes — matches the previous regex behaviour.
-      return null;
-    }
-    if (c === 0x3c /* '<' */) {
-      const next = s.charCodeAt(i + 1);
-      if (next === 0x3d) {
-        return { start: i, next: i + 2, value: "<=" };
-      }
-      if (next === 0x3e) {
-        return { start: i, next: i + 2, value: "<>" };
-      }
-      return { start: i, next: i + 1, value: "<" };
-    }
-    if (c === 0x3e /* '>' */) {
-      if (s.charCodeAt(i + 1) === 0x3d) {
-        return { start: i, next: i + 2, value: ">=" };
-      }
-      return { start: i, next: i + 1, value: ">" };
-    }
-    if (c === 0x3d /* '=' */) {
-      return { start: i, next: i + 1, value: "=" };
-    }
-    i++;
-  }
-  return null;
-}
-
-/**
- * Strip a single matched pair of outer quotes (`"…"`) from a trimmed
- * operand. Mirrors the implicit `"?…"?` shape of the original regex.
- */
-function stripOuterQuotes(s: string): string {
-  if (s.length >= 2 && s.charCodeAt(0) === 0x22 && s.charCodeAt(s.length - 1) === 0x22) {
-    return s.slice(1, -1);
-  }
-  return s;
-}
-
-function skipSpaces(s: string, from: number): number {
-  const n = s.length;
-  let i = from;
-  while (i < n) {
-    const c = s.charCodeAt(i);
-    if (c !== 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) {
-      break;
-    }
-    i++;
-  }
-  return i;
-}
-
-/** Read a quoted (`"…"`) string starting at `from`, or return null. */
-function readQuotedString(s: string, from: number): { value: string; next: number } | null {
-  if (s.charCodeAt(from) !== 0x22 /* '"' */) {
-    return null;
-  }
-  const close = s.indexOf('"', from + 1);
-  if (close < 0) {
-    return null;
-  }
-  return { value: s.slice(from + 1, close), next: close + 1 };
-}
-
 /** Parse STYLEREF field to get the style name. */
 function parseStyleRef(args: string): string {
   // STYLEREF "StyleName" or STYLEREF StyleName
@@ -490,9 +456,24 @@ function collectBookmarkInfo(doc: DocxDocument, layout: LayoutResult): Map<strin
   // contentPages[i] when the bookmark wasn't seen by the layout pass.
   let topLevelIndex = -1;
 
+  // A bookmark that starts between blocks (before a table, between rows…)
+  // takes the text of the paragraph it opens before, as one inside a
+  // paragraph takes that paragraph's text.
+  let inParagraph = 0;
+  let pending: string[] = [];
   walkBlocks(doc.body as BodyContent[], {
+    visitBookmarkStart(bookmark) {
+      if (inParagraph === 0) {
+        pending.push(bookmark.name);
+      }
+    },
     enterParagraph(para) {
+      inParagraph++;
       const text = extractParagraphText(para);
+      for (const name of pending) {
+        map.set(name, { text, page: layout.bookmarkPages.get(name) ?? 1 });
+      }
+      pending = [];
       for (const child of para.children) {
         if (isBookmarkStart(child)) {
           const fallbackPage =
@@ -503,8 +484,19 @@ function collectBookmarkInfo(doc: DocxDocument, layout: LayoutResult): Map<strin
           map.set(child.name, { text, page });
         }
       }
+    },
+    leaveParagraph() {
+      inParagraph--;
     }
   });
+  for (const marker of doc.bodyRangeMarkersAfter ?? []) {
+    if (marker.type === "bookmarkStart") {
+      pending.push(marker.name);
+    }
+  }
+  for (const name of pending) {
+    map.set(name, { text: "", page: layout.bookmarkPages.get(name) ?? 1 });
+  }
 
   // The walker doesn't expose top-level indexing directly, so re-walk only
   // body to keep `topLevelIndex` synchronised. The previous loop's results
@@ -535,169 +527,49 @@ function isBookmarkStart(child: ParagraphChild): child is BookmarkStart {
 }
 
 // =============================================================================
-// Heading Collection
-// =============================================================================
-
-/** Collect headings from the document for TOC generation.
- *
- * Walks the entire document — headings inside tables (very common) or text
- * boxes / SDTs / TOC cached content also feed the TOC. Page numbers for
- * top-level headings come from `layout.contentPages`; nested headings use
- * the outer block's page or fall back to 1.
- */
-function collectHeadings(doc: DocxDocument, layout: LayoutResult): HeadingEntry[] {
-  const headings: HeadingEntry[] = [];
-  const { contentPages } = layout;
-  const styles = indexStyles(doc);
-
-  // Walk body twice to track the enclosing top-level body index. First pass:
-  // record outer index per top-level block, then traverse its subtree.
-  for (let i = 0; i < doc.body.length; i++) {
-    const item = doc.body[i];
-    const fallbackPage = contentPages[i] ?? 1;
-    walkBlocks([item] as BodyContent[], {
-      enterParagraph(para) {
-        const level = getHeadingLevel(doc, para, styles);
-        if (level !== null) {
-          headings.push({
-            text: extractParagraphText(para),
-            level,
-            page: fallbackPage
-          });
-        }
-      }
-    });
-  }
-
-  return headings;
-}
-
-/**
- * A paragraph's TOC level (1-9), or null when it is not an outline entry.
- *
- * The heading rule is `resolveHeadingLevel`, shared with every converter and
- * the page layout, so a TOC lists exactly the paragraphs those render as
- * headings — including a custom style that inherits an outline level through
- * `basedOn`. The one exception is the built-in Title style: converters show it
- * as a heading, but it has no outline level, so Word's `TOC \o` omits it.
- */
-function getHeadingLevel(doc: DocxDocument, para: Paragraph, styles: StyleIndex): number | null {
-  const heading = resolveHeadingLevel(doc, para, styles);
-  return heading && heading.kind === "heading" ? heading.level : null;
-}
-
-// =============================================================================
 // SEQ Value Computation
 // =============================================================================
 
 /** Compute all SEQ field values by traversing the document in order.
  *
- * Walks every paragraph reachable from the body — including ones inside
- * tables / SDTs / text boxes / TOC caches — so SEQ counters in tabular
- * figure / table captions advance correctly. Field index ordering across
- * nested blocks matches the document reading order produced by
- * walkBlocks (depth-first).
+ * Walks every field reachable from the body — whole or in pieces, inside
+ * hyperlinks and tracked insertions, tables, SDTs, text boxes and TOC caches
+ * — in reading order (`forEachField`), so SEQ counters in tabular figure /
+ * table captions advance correctly. A field in a tracked deletion is not
+ * counted. Each value is keyed by the field itself, so the update finds it
+ * wherever it walks.
  */
-function computeSeqValues(doc: DocxDocument): Map<number, number> {
+function computeSeqValues(doc: DocxDocument): Map<FieldContent, number> {
   const counters = new Map<string, number>();
-  const values = new Map<number, number>();
-  const state = { fieldIndex: 0 };
+  const values = new Map<FieldContent, number>();
 
-  walkBlocks(doc.body as BodyContent[], {
-    enterParagraph(para) {
-      state.fieldIndex = processSeqInParagraph(para, counters, values, state.fieldIndex);
+  forEachField(doc.body, field => {
+    if (field.deleted) {
+      return;
+    }
+    const { type, args } = parseFieldInstruction(field.instruction);
+    if (type !== "SEQ") {
+      return;
+    }
+    const { identifier, resetTo, repeat } = parseSeqSwitches(args);
+    if (!identifier) {
+      return;
+    }
+    if (resetTo !== null) {
+      counters.set(identifier, resetTo);
+    }
+    const key = field.kind === "whole" ? field.content : field.field.begin;
+    if (repeat) {
+      // \c: repeat last value without incrementing
+      values.set(key, counters.get(identifier) ?? 0);
+    } else {
+      const current = (counters.get(identifier) ?? 0) + 1;
+      counters.set(identifier, current);
+      values.set(key, current);
     }
   });
 
   return values;
-}
-
-function processSeqInParagraph(
-  para: Paragraph,
-  counters: Map<string, number>,
-  values: Map<number, number>,
-  startIndex: number
-): number {
-  let fieldIndex = startIndex;
-
-  // Walk every visible Run reachable from the paragraph — including ones
-  // nested inside hyperlinks (`<w:hyperlink>`), tracked-insertion
-  // wrappers (`<w:ins>`) and moved-to wrappers (`<w:moveTo>`). The
-  // previous implementation only saw top-level runs, so common cases
-  // like a SEQ field placed inside `Figure 1` (typically wrapped in a
-  // hyperlink for cross-references) silently skipped the SEQ counter
-  // and produced wrong figure numbering throughout the document.
-  forEachVisibleRun(para.children, run => {
-    for (const content of run.content) {
-      if (content.type !== "field") {
-        continue;
-      }
-
-      const { type, args } = parseFieldInstruction(content.instruction);
-      if (type !== "SEQ") {
-        fieldIndex++;
-        continue;
-      }
-
-      const { identifier, hidden: _hidden, resetTo, repeat } = parseSeqSwitches(args);
-      if (!identifier) {
-        fieldIndex++;
-        continue;
-      }
-
-      if (resetTo !== null) {
-        counters.set(identifier, resetTo);
-      }
-
-      if (repeat) {
-        // \c: repeat last value without incrementing
-        const current = counters.get(identifier) ?? 0;
-        values.set(fieldIndex, current);
-      } else {
-        const current = (counters.get(identifier) ?? 0) + 1;
-        counters.set(identifier, current);
-        values.set(fieldIndex, current);
-      }
-
-      fieldIndex++;
-    }
-  });
-
-  return fieldIndex;
-}
-
-/**
- * Walk every "visible" Run reachable from a paragraph child list.
- *
- * Visible runs are:
- *   - bare Run children;
- *   - Run children inside a Hyperlink wrapper;
- *   - the inner `run` of an `insertedRun` or `movedToRun` wrapper.
- *
- * `deletedRun` / `movedFromRun` represent pending removals and so are
- * skipped, matching the convention used by `extractParagraphText` and
- * `replaceText`.
- */
-function forEachVisibleRun(children: readonly ParagraphChild[], cb: (run: Run) => void): void {
-  for (const child of children) {
-    if (isRun(child)) {
-      cb(child);
-      continue;
-    }
-    if ("type" in child) {
-      const t = (child as { type: string }).type;
-      if (t === "hyperlink") {
-        forEachVisibleRun((child as { children: readonly ParagraphChild[] }).children, cb);
-        continue;
-      }
-      if (t === "insertedRun" || t === "movedToRun") {
-        const inner = (child as { run?: Run }).run;
-        if (inner) {
-          cb(inner);
-        }
-      }
-    }
-  }
 }
 
 // =============================================================================
@@ -771,17 +643,15 @@ function collectIndexEntries(doc: DocxDocument, layout: LayoutResult): IndexEntr
 
   for (let i = 0; i < doc.body.length; i++) {
     const page = contentPages[i] ?? 1;
-    walkBlocks([doc.body[i]] as BodyContent[], {
-      visitRunContent(content) {
-        if (content.type !== "field") {
-          return;
-        }
-        const { type, args } = parseFieldInstruction(content.instruction);
-        if (type === "XE") {
-          const term = parseXeTerm(args);
-          if (term) {
-            entries.push({ term, page });
-          }
+    forEachField([doc.body[i]!], field => {
+      if (field.deleted) {
+        return;
+      }
+      const { type, args } = parseFieldInstruction(field.instruction);
+      if (type === "XE") {
+        const term = parseXeTerm(args);
+        if (term) {
+          entries.push({ term, page });
         }
       }
     });
@@ -862,17 +732,15 @@ function buildIndexContent(entries: IndexEntry[], args: string): string {
  * Supports: +, -, *, /, (), numbers, and SUM(ABOVE)/SUM(LEFT).
  */
 function evaluateFormula(
+  instruction: string,
   args: string,
   bodyIndex: number,
   doc: DocxDocument,
   cellCtx: CellContext | undefined
 ): string {
-  // Extract the number format switch \# "format"
-  const formatMatch = /\\#\s*"([^"]+)"/.exec(args);
-  const format = formatMatch ? formatMatch[1] : null;
-
-  // Remove format switch from expression
-  let expr = args.replace(/\\#\s*"[^"]*"/, "").trim();
+  // The expression ends where the first switch begins.
+  const switchAt = args.search(/\\[#*@]/);
+  let expr = (switchAt < 0 ? args : args.slice(0, switchAt)).trim();
 
   // Handle SUM(ABOVE) and SUM(LEFT)
   expr = expr.replace(/SUM\s*\(\s*ABOVE\s*\)/gi, () => {
@@ -888,7 +756,7 @@ function evaluateFormula(
     return "!";
   }
 
-  return format ? formatNumber(result, format) : String(result);
+  return formatFieldResult(String(result), instruction);
 }
 
 /** Evaluate a simple arithmetic expression with +, -, *, /, (). */
@@ -1108,15 +976,8 @@ function findCellInTable(
       for (let c = 0; c < row.cells.length; c++) {
         const cell = row.cells[c];
         let found = false;
-        walkBlocks(cell.content as readonly BodyContent[], {
-          visitRunContent(content) {
-            if (content.type === "field") {
-              const { type } = parseFieldInstruction(content.instruction);
-              if (type === "=") {
-                found = true;
-              }
-            }
-          }
+        forEachField(cell.content, field => {
+          found ||= parseFieldInstruction(field.instruction).type === "=";
         });
         if (found) {
           // Heuristic: return first match since we can't precisely map bodyIndex to cell
@@ -1145,119 +1006,136 @@ function extractCellNumericValue(cell: TableCell): number {
   return isNaN(num) ? 0 : num;
 }
 
-/** Format a number according to a simple format string (e.g. "#,##0", "0.00"). */
-function formatNumber(value: number, format: string): string {
-  // Determine decimal places from format
-  const dotIndex = format.indexOf(".");
-  let decimals = 0;
-  if (dotIndex !== -1) {
-    decimals = format.length - dotIndex - 1;
-  }
-
-  // Check if format uses thousand separators
-  const useThousands = format.includes(",");
-
-  if (useThousands) {
-    const fixed = value.toFixed(decimals);
-    const [intPart, decPart] = fixed.split(".");
-    const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return decPart ? `${withCommas}.${decPart}` : withCommas;
-  }
-
-  return value.toFixed(decimals);
-}
-
 // =============================================================================
 // Body Update
 // =============================================================================
 
-function updateBody(
-  doc: DocxDocument,
-  layout: LayoutResult,
-  bookmarkInfo: BookmarkMap,
-  seqValues: SeqMap,
-  styleIndex: Map<string, { index: number; text: string }[]>,
-  indexEntries: IndexEntry[],
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions }
-): readonly BodyContent[] {
-  const body = doc.body;
+function updateBody(env: UpdateEnv): readonly BodyContent[] {
+  const body = env.doc.body;
   let changed = false;
-  let globalFieldIndex = 0;
   const newBody: BodyContent[] = [];
 
   for (let i = 0; i < body.length; i++) {
     const item = body[i];
 
     if (item.type === "paragraph") {
-      const result = updateParagraphFields(
-        item,
-        i,
-        layout,
-        bookmarkInfo,
-        seqValues,
-        styleIndex,
-        indexEntries,
-        doc,
-        globalFieldIndex,
-        opts,
-        // No cell context at the body level — formulas here can still
-        // call SUM(ABOVE/LEFT) but findCellInTable will be used as a
-        // fallback (likely returning null at the body level).
-        undefined
-      );
-      globalFieldIndex = result.nextFieldIndex;
-      if (result.paragraph !== item) {
+      // No cell context at the body level — formulas here can still call
+      // SUM(ABOVE/LEFT) but findCellInTable will be used as a fallback
+      // (likely returning null at the body level).
+      const updated = updateParagraphFields(item, i, env, undefined);
+      if (updated !== item) {
         changed = true;
       }
-      newBody.push(result.paragraph);
-    } else if (item.type === "tableOfContents" && opts.updateToc) {
-      const headings = collectHeadingsFromLayout(doc, body, layout);
-      const updated = updateTocContent(item, headings);
+      newBody.push(updated);
+    } else if (item.type === "tableOfContents" && env.toc) {
+      const updated = updateTocContent(item, env.toc, env.layout);
       if (updated !== item) {
         changed = true;
       }
       newBody.push(updated);
     } else if (item.type === "table") {
       // Recurse into table cells to update fields within tables
-      const updatedTable = updateTableFields(
-        item,
-        i,
-        layout,
-        bookmarkInfo,
-        seqValues,
-        styleIndex,
-        indexEntries,
-        doc,
-        globalFieldIndex,
-        opts
-      );
-      if (updatedTable.table !== item) {
+      const updated = updateTableFields(item, i, env);
+      if (updated !== item) {
         changed = true;
       }
-      globalFieldIndex = updatedTable.nextFieldIndex;
-      newBody.push(updatedTable.table);
+      newBody.push(updated);
     } else {
       newBody.push(item);
     }
   }
 
-  return changed ? newBody : body;
+  const blocks = changed ? newBody : body;
+  // The fields held in pieces, across the paragraphs they span.
+  return updateSplitFields(blocks, block => block, env, undefined, true);
+}
+
+/**
+ * `blocks` — one list of blocks — with the result of every field it holds in
+ * pieces updated: across the runs, wrappers and paragraphs between its
+ * separate and end characters, which stay. `bodyIndex` maps the index of the
+ * paragraph holding a field's begin to the body block it is in.
+ */
+function updateSplitFields<T extends object>(
+  blocks: readonly T[],
+  bodyIndex: (block: number) => number,
+  env: UpdateEnv,
+  cellCtx: CellContext | undefined,
+  inBody = false
+): readonly T[] {
+  const resolved = resolveSplitFields(blocks);
+  if (!resolved) {
+    return blocks;
+  }
+  // Inner fields first: an `IF` testing a nested field tests what it updates to.
+  const values = evaluateSplitFields(
+    resolved,
+    (field, instruction) => {
+      if (field.deleted || !field.end || isTocInstruction(field.instruction)) {
+        return undefined;
+      }
+      const current: FieldContent = { type: "field", instruction, cachedValue: field.result };
+      return computeFieldValue(current, field.begin, bodyIndex(field.block), env, cellCtx)
+        .cachedValue;
+    },
+    (content, within) =>
+      computeFieldValue(content, content, bodyIndex(within.block), env, cellCtx).cachedValue ?? ""
+  );
+  return rewriteSplitFields(
+    blocks,
+    field => {
+      if (field.deleted || !field.end) {
+        return undefined;
+      }
+      if (isTocInstruction(field.instruction)) {
+        // A table of contents lists the body: one in the body regenerates.
+        if (!env.toc || !inBody) {
+          return undefined;
+        }
+        const paragraphs = env.toc.entries(field.instruction, env.layout, page =>
+          shownPageText(env.layout, env.doc, page)
+        );
+        const old = field.result.replace(/^\n+|\n+$/g, "");
+        if (paragraphs.map(extractParagraphText).join("\n") === old) {
+          return undefined;
+        }
+        return { replace: "result", paragraphs };
+      }
+      const value = values.get(field);
+      return value === undefined || value === field.result
+        ? undefined
+        : { replace: "result", text: value };
+    },
+    resolved
+  );
+}
+
+/**
+ * The `TOC` fields held in pieces among the body's paragraphs, regenerated
+ * (`updateTableOfContents`, which updates no other field).
+ */
+function updateSplitTocFields(
+  body: readonly BodyContent[],
+  plan: TocPlan,
+  layout: LayoutResult
+): readonly BodyContent[] {
+  return rewriteSplitFields(body, field => {
+    if (field.deleted || !field.end || !isTocInstruction(field.instruction)) {
+      return undefined;
+    }
+    const paragraphs = plan.entries(field.instruction, layout, page =>
+      shownPageText(layout, plan.doc, page)
+    );
+    const old = field.result.replace(/^\n+|\n+$/g, "");
+    if (paragraphs.map(extractParagraphText).join("\n") === old) {
+      return undefined;
+    }
+    return { replace: "result", paragraphs };
+  });
 }
 
 /** Recursively update fields inside a table's cells. */
-function updateTableFields(
-  table: Table,
-  bodyIndex: number,
-  layout: LayoutResult,
-  bookmarkInfo: BookmarkMap,
-  seqValues: SeqMap,
-  styleIndex: Map<string, { index: number; text: string }[]>,
-  indexEntries: IndexEntry[],
-  doc: DocxDocument,
-  startFieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions }
-): { table: Table; nextFieldIndex: number } {
-  let fieldIndex = startFieldIndex;
+function updateTableFields(table: Table, bodyIndex: number, env: UpdateEnv): Table {
   let tableChanged = false;
   const newRows = table.rows.map((row, rowIndex) => {
     let rowChanged = false;
@@ -1270,49 +1148,30 @@ function updateTableFields(
       const cellCtx: CellContext = { table, rowIndex, colIndex };
       for (const block of cell.content) {
         if (block.type === "paragraph") {
-          const result = updateParagraphFields(
-            block,
-            bodyIndex,
-            layout,
-            bookmarkInfo,
-            seqValues,
-            styleIndex,
-            indexEntries,
-            doc,
-            fieldIndex,
-            opts,
-            cellCtx
-          );
-          fieldIndex = result.nextFieldIndex;
-          if (result.paragraph !== block) {
+          const updated = updateParagraphFields(block, bodyIndex, env, cellCtx);
+          if (updated !== block) {
             cellChanged = true;
           }
-          newContent.push(result.paragraph);
+          newContent.push(updated);
         } else if (block.type === "table") {
-          const nested = updateTableFields(
-            block,
-            bodyIndex,
-            layout,
-            bookmarkInfo,
-            seqValues,
-            styleIndex,
-            indexEntries,
-            doc,
-            fieldIndex,
-            opts
-          );
-          fieldIndex = nested.nextFieldIndex;
-          if (nested.table !== block) {
+          const nested = updateTableFields(block, bodyIndex, env);
+          if (nested !== block) {
             cellChanged = true;
           }
-          newContent.push(nested.table);
+          newContent.push(nested);
         } else {
           newContent.push(block);
         }
       }
-      if (cellChanged) {
+      const content = updateSplitFields(
+        cellChanged ? newContent : cell.content,
+        () => bodyIndex,
+        env,
+        cellCtx
+      );
+      if (content !== cell.content) {
         rowChanged = true;
-        return { ...cell, content: newContent } as TableCell;
+        return { ...cell, content } as TableCell;
       }
       return cell;
     });
@@ -1323,39 +1182,7 @@ function updateTableFields(
     return row;
   });
 
-  if (tableChanged) {
-    return { table: { ...table, rows: newRows }, nextFieldIndex: fieldIndex };
-  }
-  return { table, nextFieldIndex: fieldIndex };
-}
-
-/** Collect headings directly from body with layout info (avoiding a second layout pass). */
-function collectHeadingsFromLayout(
-  doc: DocxDocument,
-  body: readonly BodyContent[],
-  layout: LayoutResult
-): HeadingEntry[] {
-  const headings: HeadingEntry[] = [];
-  const { contentPages } = layout;
-  const styles = indexStyles(doc);
-
-  for (let i = 0; i < body.length; i++) {
-    const item = body[i];
-    if (item.type !== "paragraph") {
-      continue;
-    }
-
-    const level = getHeadingLevel(doc, item, styles);
-    if (level !== null) {
-      headings.push({
-        text: extractParagraphText(item),
-        level,
-        page: contentPages[i] ?? 1
-      });
-    }
-  }
-
-  return headings;
+  return tableChanged ? { ...table, rows: newRows } : table;
 }
 
 // =============================================================================
@@ -1365,39 +1192,13 @@ function collectHeadingsFromLayout(
 function updateParagraphFields(
   para: Paragraph,
   bodyIndex: number,
-  layout: LayoutResult,
-  bookmarkInfo: BookmarkMap,
-  seqValues: SeqMap,
-  styleIndex: Map<string, { index: number; text: string }[]>,
-  indexEntries: IndexEntry[],
-  doc: DocxDocument,
-  startFieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions },
+  env: UpdateEnv,
   cellCtx: CellContext | undefined
-): { paragraph: Paragraph; nextFieldIndex: number } {
-  let fieldIndex = startFieldIndex;
+): Paragraph {
   let childrenChanged = false;
   const newChildren: ParagraphChild[] = [];
 
-  // Helper that runs `updateRunFields` against a single Run and returns
-  // the (possibly new) Run reference.
-  const updateRun = (r: Run): Run => {
-    const runResult = updateRunFields(
-      r,
-      bodyIndex,
-      layout,
-      bookmarkInfo,
-      seqValues,
-      styleIndex,
-      indexEntries,
-      doc,
-      fieldIndex,
-      opts,
-      cellCtx
-    );
-    fieldIndex = runResult.nextFieldIndex;
-    return runResult.run;
-  };
+  const updateRun = (r: Run): Run => updateRunFields(r, bodyIndex, env, cellCtx);
 
   for (const child of para.children) {
     if (isRun(child)) {
@@ -1447,14 +1248,7 @@ function updateParagraphFields(
     newChildren.push(child);
   }
 
-  if (!childrenChanged) {
-    return { paragraph: para, nextFieldIndex: fieldIndex };
-  }
-
-  return {
-    paragraph: { ...para, children: newChildren },
-    nextFieldIndex: fieldIndex
-  };
+  return childrenChanged ? { ...para, children: newChildren } : para;
 }
 
 // =============================================================================
@@ -1464,55 +1258,28 @@ function updateParagraphFields(
 function updateRunFields(
   run: Run,
   bodyIndex: number,
-  layout: LayoutResult,
-  bookmarkInfo: BookmarkMap,
-  seqValues: SeqMap,
-  styleIndex: Map<string, { index: number; text: string }[]>,
-  indexEntries: IndexEntry[],
-  doc: DocxDocument,
-  startFieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions },
+  env: UpdateEnv,
   cellCtx: CellContext | undefined
-): { run: Run; nextFieldIndex: number } {
-  let fieldIndex = startFieldIndex;
+): Run {
   let contentChanged = false;
   const newContent: RunContent[] = [];
 
   for (const item of run.content) {
-    if (item.type !== "field") {
+    // A field read in pieces is updated across the runs it spans
+    // (`updateSplitFields`); its pieces stay as they are.
+    if (item.type !== "field" || item.fieldChar) {
       newContent.push(item);
       continue;
     }
 
-    const updated = computeFieldValue(
-      item,
-      bodyIndex,
-      layout,
-      bookmarkInfo,
-      seqValues,
-      styleIndex,
-      indexEntries,
-      doc,
-      fieldIndex,
-      opts,
-      cellCtx
-    );
-    fieldIndex++;
-
+    const updated = computeFieldValue(item, item, bodyIndex, env, cellCtx);
     if (updated !== item) {
       contentChanged = true;
     }
     newContent.push(updated);
   }
 
-  if (!contentChanged) {
-    return { run, nextFieldIndex: fieldIndex };
-  }
-
-  return {
-    run: { ...run, content: newContent },
-    nextFieldIndex: fieldIndex
-  };
+  return contentChanged ? { ...run, content: newContent } : run;
 }
 
 // =============================================================================
@@ -1522,8 +1289,8 @@ function updateRunFields(
 /**
  * A page-number field's text for `n`, honouring its `\\*` format switch and,
  * for `PAGE`, the section's `w:pgNumType w:fmt` (shared with the layout's
- * headers and footers). Falls back to the plain number when the instruction
- * carries a switch the shared formatter does not handle.
+ * headers and footers). Any other switch (`\\#`, `\\* Ordinal`…) goes through
+ * the general field switches (`formatFieldResult`).
  */
 function pageFieldText(
   field: FieldContent,
@@ -1531,24 +1298,50 @@ function pageFieldText(
   sectionFormat: PageNumberFormat | undefined
 ): string {
   const parsed = parsePageField(field.instruction);
-  return (parsed && formatPageField(parsed, n, sectionFormat)) ?? String(n);
+  return (
+    (parsed && formatPageField(parsed, n, sectionFormat)) ??
+    formatFieldResult(String(n), field.instruction)
+  );
 }
 
-/** What `PAGE` needs from one estimated layout, computed once per layout. */
-interface EstimatedPageNumbering {
+/** The number `PAGE` shows on physical `page` (1-based) of `layout`. */
+function shownPageNumber(layout: LayoutResult, doc: DocxDocument, page: number): number {
+  return layoutPageNumbering(layout, doc).shown[page - 1] ?? page;
+}
+
+/**
+ * Physical `page` of `layout` as Word refers to it from a `PAGEREF` or a
+ * table of contents: the number `PAGE` shows there, in its section's format
+ * (a front matter numbered i, ii, … lists its pages so, and a section that
+ * restarts at 1 is listed from 1).
+ */
+function shownPageText(layout: LayoutResult, doc: DocxDocument, page: number): string {
+  const numbering = layoutPageNumbering(layout, doc);
+  const n = numbering.shown[page - 1] ?? page;
+  const section = numbering.sections[numbering.pageSections[page - 1] ?? 0];
+  return (
+    formatPageField({ name: "PAGE", format: undefined }, n, section?.pageNumbering?.format) ??
+    String(n)
+  );
+}
+
+/** What `PAGE` needs from one layout, computed once per layout. */
+interface LayoutPageNumbering {
   /** The number `PAGE` shows on each page (index 0 is page 1). */
   readonly shown: readonly number[];
   /** `collectSectionProperties(doc)`, indexed like `layout.contentSections`. */
   readonly sections: readonly (SectionProperties | undefined)[];
+  /** The section each page is in (index 0 is page 1). */
+  readonly pageSections: readonly number[];
 }
 
 /**
- * The number `PAGE` shows on each page of the estimated layout, by the same
+ * The number `PAGE` shows on each page of the layout, by the same
  * rule the page layout applies to headers and footers
  * (`displayedPageNumbers`). A page takes the section of the first body item
  * that lands on it; a page no item starts on continues the previous one's.
  */
-function estimatedPageNumbering(layout: LayoutResult, doc: DocxDocument): EstimatedPageNumbering {
+function layoutPageNumbering(layout: LayoutResult, doc: DocxDocument): LayoutPageNumbering {
   const cached = pageNumberingCache.get(layout);
   if (cached) {
     return cached;
@@ -1571,30 +1364,35 @@ function estimatedPageNumbering(layout: LayoutResult, doc: DocxDocument): Estima
     slots.push({ sectionIndex, pageInSection });
   }
   const sections = collectSectionProperties(doc);
-  const result = { shown: displayedPageNumbers(slots, sections), sections };
+  const result = {
+    shown: displayedPageNumbers(slots, sections),
+    sections,
+    pageSections: slots.map(slot => slot.sectionIndex)
+  };
   pageNumberingCache.set(layout, result);
   return result;
 }
 
 /**
- * Per estimated layout, so a document with many `PAGE` fields computes it
+ * Per layout, so a document with many `PAGE` fields computes it
  * once. A layout is produced from one document snapshot, so it is a safe key.
  */
-const pageNumberingCache = new WeakMap<LayoutResult, EstimatedPageNumbering>();
+const pageNumberingCache = new WeakMap<LayoutResult, LayoutPageNumbering>();
 
+/**
+ * `field` with the result it computes to, or `field` itself when that is its
+ * result already (or it is not one computed here). `key` is the field in the
+ * document — a whole field, or a field in pieces' begin — that `SEQ` values
+ * are kept by.
+ */
 function computeFieldValue(
   field: FieldContent,
+  key: FieldContent,
   bodyIndex: number,
-  layout: LayoutResult,
-  bookmarkInfo: BookmarkMap,
-  seqValues: SeqMap,
-  styleIndex: Map<string, { index: number; text: string }[]>,
-  indexEntries: IndexEntry[],
-  doc: DocxDocument,
-  fieldIndex: number,
-  opts: Required<Omit<FieldUpdateOptions, "layoutOptions">> & { layoutOptions?: LayoutOptions },
+  env: UpdateEnv,
   cellCtx: CellContext | undefined
 ): FieldContent {
+  const { layout, bookmarkInfo, seqValues, styleIndex, indexEntries, doc, opts } = env;
   const { type, args } = parseFieldInstruction(field.instruction);
 
   switch (type) {
@@ -1604,7 +1402,7 @@ function computeFieldValue(
       }
       const page = layout.contentPages[bodyIndex] ?? 1;
       const sectionIdx = layout.contentSections[bodyIndex] ?? 0;
-      const { shown: displayed, sections } = estimatedPageNumbering(layout, doc);
+      const { shown: displayed, sections } = layoutPageNumbering(layout, doc);
       const numbering = sections[sectionIdx]?.pageNumbering;
       const shown = displayed[page - 1] ?? page;
       const value = pageFieldText(field, shown, numbering?.format);
@@ -1656,7 +1454,7 @@ function computeFieldValue(
       }
       const bookmarkName = args.split(/\s+/)[0] ?? "";
       const data = bookmarkInfo.get(bookmarkName);
-      const value = data?.text ?? "";
+      const value = formatFieldResult(data?.text ?? "", field.instruction);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1669,7 +1467,13 @@ function computeFieldValue(
       }
       const bookmarkName = args.split(/\s+/)[0] ?? "";
       const page = layout.bookmarkPages.get(bookmarkName);
-      const value = page != null ? String(page) : "?";
+      // The number the page shows; a `\*` switch formats the plain number instead.
+      const value =
+        page == null
+          ? "?"
+          : /\\\*/.test(args)
+            ? formatFieldResult(String(shownPageNumber(layout, env.doc, page)), field.instruction)
+            : shownPageText(layout, env.doc, page);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1680,11 +1484,11 @@ function computeFieldValue(
       if (!opts.updateSequences) {
         return field;
       }
-      const seqVal = seqValues.get(fieldIndex);
+      const seqVal = seqValues.get(key);
       if (seqVal == null) {
         return field;
       }
-      const value = String(seqVal);
+      const value = formatFieldResult(String(seqVal), field.instruction);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1692,12 +1496,18 @@ function computeFieldValue(
     }
 
     case "IF": {
-      const parsed = parseIfField(args);
-      if (!parsed) {
+      const value = evaluateIfField(field.instruction);
+      if (value === undefined || field.cachedValue === value) {
         return field;
       }
-      const result = evaluateCondition(parsed.left, parsed.operator, parsed.right);
-      const value = result ? parsed.trueText : parsed.falseText;
+      return { ...field, cachedValue: value };
+    }
+
+    case "QUOTE": {
+      const tokens = tokenizeFieldCode(args);
+      const end = tokens.findIndex(t => !t.quoted && t.text.startsWith("\\"));
+      const text = (end < 0 ? tokens : tokens.slice(0, end)).map(t => t.text).join(" ");
+      const value = formatFieldResult(text, field.instruction);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1709,7 +1519,10 @@ function computeFieldValue(
       if (!styleName) {
         return field;
       }
-      const value = findStyleRef(styleIndex, styleName, bodyIndex);
+      const value = formatFieldResult(
+        findStyleRef(styleIndex, styleName, bodyIndex),
+        field.instruction
+      );
       if (field.cachedValue === value) {
         return field;
       }
@@ -1717,6 +1530,7 @@ function computeFieldValue(
     }
 
     case "INDEX": {
+      // An index lists the pages its entries are on.
       const value = buildIndexContent(indexEntries, args);
       if (field.cachedValue === value) {
         return field;
@@ -1725,7 +1539,7 @@ function computeFieldValue(
     }
 
     case "=": {
-      const value = evaluateFormula(args, bodyIndex, doc, cellCtx);
+      const value = evaluateFormula(field.instruction, args, bodyIndex, doc, cellCtx);
       if (field.cachedValue === value) {
         return field;
       }
@@ -1747,82 +1561,50 @@ function computeFieldValue(
   }
 }
 
-/** Evaluate a simple comparison between two string values. */
-function evaluateCondition(left: string, operator: string, right: string): boolean {
-  switch (operator) {
-    case "=":
-      return left === right;
-    case "<>":
-      return left !== right;
-    case "<":
-      return left < right;
-    case ">":
-      return left > right;
-    case "<=":
-      return left <= right;
-    case ">=":
-      return left >= right;
-    default:
-      return false;
-  }
-}
-
 // =============================================================================
 // TOC Update
 // =============================================================================
 
-/** Update a TableOfContents body content with generated cached paragraphs. */
-function updateTocContent(toc: TableOfContents, headings: HeadingEntry[]): TableOfContents {
-  const { min, max } = parseTocLevels(buildTocInstruction(toc));
+/**
+ * A TableOfContents block with its entries regenerated as its instruction
+ * asks (`planTableOfContents`), or the block itself when they read the same.
+ */
+function updateTocContent(
+  toc: TableOfContents,
+  plan: TocPlan,
+  layout: LayoutResult
+): TableOfContents {
+  const cachedParagraphs = plan.entries(
+    buildTocInstruction(toc),
+    layout,
+    page => shownPageText(layout, plan.doc, page),
+    toc.leader
+  );
 
-  // Filter headings by level range
-  const filtered = headings.filter(h => h.level >= min && h.level <= max);
-
-  // Generate cached paragraphs for each heading
-  const cachedParagraphs: Paragraph[] = filtered.map(heading => buildTocEntryParagraph(heading));
-
-  // Check if content actually changed
+  // Check if content actually changed. Entries holding the block's field
+  // (`field: "entries"`) also hold the paragraphs it opens and closes in,
+  // which carry no entry.
+  const old = (toc.cachedParagraphs ?? []).filter(
+    p => toc.field !== "entries" || extractParagraphText(p) !== ""
+  );
   if (
     toc.cachedParagraphs &&
-    toc.cachedParagraphs.length === cachedParagraphs.length &&
-    cachedParagraphs.every(
-      (p, i) => extractParagraphText(p) === extractParagraphText(toc.cachedParagraphs![i])
-    )
+    old.length === cachedParagraphs.length &&
+    cachedParagraphs.every((p, i) => extractParagraphText(p) === extractParagraphText(old[i]!))
   ) {
     return toc;
   }
 
-  return { ...toc, cachedParagraphs };
-}
-
-/** Reconstruct a TOC instruction string from TOC properties. */
-function buildTocInstruction(toc: TableOfContents): string {
-  let instruction = "TOC";
-  if (toc.headingStyleRange) {
-    instruction += ` \\o "${toc.headingStyleRange}"`;
-  }
-  if (toc.hyperlink) {
-    instruction += " \\h";
-  }
-  return instruction;
-}
-
-/** Build a single TOC entry paragraph. */
-function buildTocEntryParagraph(heading: HeadingEntry): Paragraph {
-  // Build: "HeadingText\tPageNumber"
-  const textRun: Run = {
-    content: [
-      { type: "text", text: heading.text },
-      { type: "tab" },
-      { type: "text", text: String(heading.page) }
-    ]
+  // The ranges the old entries opened or closed stay paired around the new ones.
+  const { leading, trailing } = collectRangeMarkers(toc.cachedParagraphs ?? []);
+  const updated: Mutable<TableOfContents> = {
+    ...toc,
+    cachedParagraphs: settleRangeMarkers<Paragraph>([...leading, ...cachedParagraphs, ...trailing])
   };
-
-  return {
-    type: "paragraph",
-    properties: {
-      style: `TOC${heading.level}`
-    },
-    children: [textRun]
-  };
+  // The old entries took the field they held with them: the new ones get the
+  // block's own, with the instruction it had.
+  if (updated.field === "entries") {
+    delete updated.field;
+  }
+  return updated;
 }

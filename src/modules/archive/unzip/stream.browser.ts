@@ -10,7 +10,7 @@ import { hasDeflateRawDecompressionStream } from "@archive/compression/compress.
 import { inflateRaw as fallbackInflateRaw } from "@archive/compression/deflate-fallback";
 import { ByteQueue } from "@archive/core/byte-queue";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
-import { toError } from "@archive/core/errors";
+import { toError, toInflateError } from "@archive/core/errors";
 import type {
   CrxHeader,
   EntryProps,
@@ -28,6 +28,8 @@ import type {
   ZipEntry
 } from "@archive/unzip/stream.base";
 import {
+  failCurrentEntry,
+  fileEndedError,
   runParseLoop,
   DEFAULT_UNZIP_STREAM_HIGH_WATER_MARK,
   streamUntilValidatedDataDescriptor
@@ -155,9 +157,9 @@ class BrowserInflateRaw extends Duplex {
           }
         } else {
           if (callback) {
-            callback(e);
+            callback(toInflateError(e));
           } else {
-            this.emit("error", e);
+            this.emit("error", toInflateError(e));
           }
         }
       });
@@ -220,7 +222,7 @@ class BrowserInflateRaw extends Duplex {
         // This is OK - we've read all decompressed data
       } else {
         // Re-throw other errors
-        this.emit("error", e);
+        this.emit("error", toInflateError(e));
       }
     } finally {
       this._readingDone = true;
@@ -443,7 +445,7 @@ class WorkerInflateRaw extends Duplex {
           return;
         }
 
-        const err = new Error(message);
+        const err = toInflateError(new Error(message));
         // Fail any pending writes.
         this._settlePendingAcks(err);
         this.emit("error", err);
@@ -786,6 +788,23 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
       });
     }
 
+    /**
+     * Torn down while waiting for input — its consumer left, or the input failed: fail the
+     * entry being read, wake whatever is pulling to find the input over, and let go of a
+     * write held back for backpressure so the producer feeding it settles too.
+     */
+    override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+      failCurrentEntry(this._driverState, error);
+      this.finished = true;
+      const held = this._writeCb;
+      this._writeCb = undefined;
+      held?.();
+      this._wakeUp();
+      this.emit("data-available");
+      this.emit("chunk", false);
+      callback(error);
+    }
+
     private _handleWrite(chunk: Uint8Array, callback: (err?: Error | null) => void): void {
       this._buffer.append(chunk);
 
@@ -873,7 +892,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
       while (remaining > 0) {
         while (this._buffer.length === 0) {
           if (this.finished) {
-            throw new Error("FILE_ENDED");
+            throw fileEndedError();
           }
           await this._waitForData();
         }
@@ -939,7 +958,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         scanner.onNoMatch(bufLen);
 
         if (this.finished) {
-          throw new Error("FILE_ENDED");
+          throw fileEndedError();
         }
 
         const safeLen = this._buffer.length - patternLen;
@@ -993,7 +1012,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         } else if (this.finished) {
           done = true;
           this.removeListener("data-available", pull);
-          output.destroy(new Error("FILE_ENDED"));
+          output.destroy(fileEndedError());
         }
       };
 
@@ -1052,7 +1071,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
           if (this.finished) {
             done = true;
             this.removeListener("data-available", pull);
-            output.destroy(new Error("FILE_ENDED"));
+            output.destroy(fileEndedError());
             return;
           }
 
@@ -1097,7 +1116,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
       if (typeof eof === "number") {
         // Node-compatible behavior: if finished and not enough bytes, reject.
         if (this.finished && this._buffer.length < eof) {
-          return Promise.reject(new Error("FILE_ENDED"));
+          return Promise.reject(fileEndedError());
         }
         if (this._buffer.length >= eof) {
           const out = this._buffer.read(eof);
@@ -1109,7 +1128,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
 
       // Pattern mode
       if (this.finished) {
-        return Promise.reject(new Error("FILE_ENDED"));
+        return Promise.reject(fileEndedError());
       }
       return this._pullUntilInternal(eof, includeEof ?? false);
     }

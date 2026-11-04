@@ -299,13 +299,13 @@ describe("Chart Round-Trip Preservation", () => {
       expect(chart.chartNumber).toBe(1);
 
       // This chart has an auto-generated title (no explicit c:tx), so title is undefined
-      expect(Chart.title(chart)).toBeUndefined();
+      expect(Chart.getTitle(chart)).toBeUndefined();
 
       // Verify chart model is accessible
-      expect(Chart.chartModel(chart)).toBeDefined();
-      expect(Chart.chartTypes(chart).length).toBeGreaterThan(0);
-      expect(Chart.chartTypes(chart)[0].type).toBe("bar");
-      expect(Chart.axes(chart).length).toBeGreaterThan(0);
+      expect(Chart.getModel(chart)).toBeDefined();
+      expect(Chart.getChartTypes(chart).length).toBeGreaterThan(0);
+      expect(Chart.getChartTypes(chart)[0].type).toBe("bar");
+      expect(Chart.getAxes(chart).length).toBeGreaterThan(0);
     });
 
     it("should read chart title after setting it programmatically", async () => {
@@ -315,7 +315,7 @@ describe("Chart Round-Trip Preservation", () => {
 
       // Set a title
       Chart.setTitle(chart, "Revenue by Region");
-      expect(Chart.title(chart)).toBe("Revenue by Region");
+      expect(Chart.getTitle(chart)).toBe("Revenue by Region");
 
       // Round-trip and verify
       const outputBuffer = await Workbook.toBuffer(workbook);
@@ -323,7 +323,7 @@ describe("Chart Round-Trip Preservation", () => {
       await Workbook.read(workbook2, outputBuffer);
 
       const chart2 = getCharts(Workbook.getWorksheet(workbook2, "Pivot")!)[0];
-      expect(Chart.title(chart2)).toBe("Revenue by Region");
+      expect(Chart.getTitle(chart2)).toBe("Revenue by Region");
     });
 
     it("should preserve cell data in Data sheet", async () => {

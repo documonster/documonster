@@ -33,10 +33,14 @@ const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Sheet1");
 
 Cell.setValue(ws, "A1", "Hello");
-Cell.setComment(ws, "A1", Note.create({ texts: [{ text: "Comment by Alice" }] }, "Alice"));
+Cell.setComment(
+  ws,
+  "A1",
+  Note.create({ texts: [{ text: "Comment by Alice" }] }, { author: "Alice" })
+);
 
 Cell.setValue(ws, "B2", "World");
-Cell.setComment(ws, "B2", Note.create({ texts: [{ text: "Comment by Bob" }] }, "Bob"));
+Cell.setComment(ws, "B2", Note.create({ texts: [{ text: "Comment by Bob" }] }, { author: "Bob" }));
 
 await writeBothFormats(wb, flatFile);
 console.log(`  Written flat-layout file: ${flatFile}`);
@@ -45,8 +49,7 @@ console.log(`  Written flat-layout file: ${flatFile}`);
 // Step 2: Read back the flat-layout file and verify
 // ---------------------------------------------------------------------------
 console.log("\nStep 2: Reading flat-layout file...");
-const wb2 = Workbook.create();
-await Workbook.readFile(wb2, flatFile);
+const wb2 = await Workbook.readFile(flatFile);
 const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
 
 console.log(
@@ -123,8 +126,7 @@ console.log(`  Written subdirectory-layout file: ${subdirFile}`);
 // Step 4: Read the subdirectory-layout file and verify comments are parsed
 // ---------------------------------------------------------------------------
 console.log("\nStep 4: Reading subdirectory-layout file...");
-const wb3 = Workbook.create();
-await Workbook.readFile(wb3, subdirFile);
+const wb3 = await Workbook.readFile(subdirFile);
 const ws3 = Workbook.getWorksheet(wb3, "Sheet1")!;
 
 console.log(

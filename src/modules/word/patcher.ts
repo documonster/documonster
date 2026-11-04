@@ -17,8 +17,24 @@
  * of which container holds it.
  */
 
+import {
+  checkArray,
+  checkFinite,
+  checkNode,
+  checkNodeArray,
+  checkOneOf,
+  checkRecord,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
+import { assertImageMediaType } from "@word/core/image-media";
 import type { Mutable } from "@word/core/internal-utils";
-import { isHyperlink, isRun } from "@word/core/text-utils";
+import {
+  collectRangeMarkers,
+  replaceParagraphChildren,
+  settleRangeMarkers
+} from "@word/core/range-markers";
+import { isHyperlink, isRangeMarker, isRun } from "@word/core/text-utils";
 import type {
   BodyContent,
   DocxDocument,
@@ -27,6 +43,7 @@ import type {
   ImageDef,
   InlineImageContent,
   Paragraph,
+  RangeMarker,
   ParagraphChild,
   Run,
   StructuredDocumentTag,
@@ -59,6 +76,46 @@ export interface PatchOperation {
   readonly placeholder: string;
   /** Content to replace the placeholder with. */
   readonly content: PatchContent;
+}
+
+const PATCH_CONTENT_TYPES = new Set<string>([
+  "text",
+  "paragraph",
+  "table",
+  "image"
+] satisfies PatchContent["type"][]);
+
+/** The patches' shape, before any is applied — in the name of `where`. */
+export function checkPatches(patches: unknown, where: string): void {
+  checkArray(patches, "patches", where);
+  (patches as readonly unknown[]).forEach((value, i) => {
+    const at = `patches[${i}]`;
+    checkRecord(value, at, where);
+    const patch = value as Record<string, unknown>;
+    checkString(patch.placeholder, `${at}.placeholder`, where);
+    if (patch.placeholder === "") {
+      invalidArgument(where, `${at}.placeholder`, "a non-empty string", patch.placeholder);
+    }
+    checkRecord(patch.content, `${at}.content`, where);
+    const content = patch.content as Record<string, unknown>;
+    checkOneOf(content.type, PATCH_CONTENT_TYPES, `${at}.content.type`, where);
+    switch (content.type) {
+      case "text":
+        checkString(content.text, `${at}.content.text`, where);
+        break;
+      case "paragraph":
+        checkNodeArray(content.children, `${at}.content.children`, where);
+        break;
+      case "table":
+        checkNode(content.table, "table", `${at}.content.table`, where);
+        break;
+      case "image":
+        checkRecord(content.image, `${at}.content.image`, where);
+        checkFinite(content.width, `${at}.content.width`, where, { min: 0 });
+        checkFinite(content.height, `${at}.content.height`, where, { min: 0 });
+        break;
+    }
+  });
 }
 
 // =============================================================================
@@ -112,6 +169,7 @@ export function applyPatchesToDocument(
       return patch;
     }
     const img = patch.content.image;
+    assertImageMediaType(img.mediaType, `Image patch for ${JSON.stringify(patch.placeholder)}`);
     let rId = imageFileNameToRId.get(img.fileName);
     if (!rId) {
       rId = img.rId ?? `rId_img_${img.fileName}`;
@@ -317,7 +375,7 @@ function replaceInParagraph(para: Paragraph, search: string, replacement: string
 function patchParagraph(
   para: Paragraph,
   patchMap: Map<string, PatchOperation>
-): BodyContent | BodyContent[] | null {
+): BodyContent | (BodyContent | RangeMarker)[] | null {
   let text = paragraphText(para);
 
   // First pass: apply all text replacements (can have multiple in same paragraph)
@@ -343,11 +401,16 @@ function patchParagraph(
     }
 
     switch (patch.content.type) {
-      case "paragraph": {
-        return patch.content.children as BodyContent[];
-      }
+      case "paragraph":
       case "table": {
-        return patch.content.table;
+        // The ranges the placeholder paragraph opened or closed stay paired
+        // around what replaces it; the caller settles the markers.
+        const replacement =
+          patch.content.type === "paragraph"
+            ? (patch.content.children as BodyContent[])
+            : [patch.content.table];
+        const { leading, trailing } = collectRangeMarkers([para]);
+        return [...leading, ...replacement, ...trailing];
       }
       case "image": {
         // The patch was normalized in applyPatchesToDocument so image.rId
@@ -365,12 +428,7 @@ function patchParagraph(
           altText: img.fileName,
           name: img.fileName
         };
-        const newPara: Paragraph = {
-          type: "paragraph",
-          properties: para.properties,
-          children: [{ content: [imgContent] } as Run]
-        };
-        return newPara;
+        return replaceParagraphChildren(para, [{ content: [imgContent] } as Run]);
       }
     }
   }
@@ -388,7 +446,7 @@ function patchBlockList(
   blocks: readonly BodyContent[],
   patchMap: Map<string, PatchOperation>
 ): BodyContent[] {
-  const out: BodyContent[] = [];
+  const out: (BodyContent | RangeMarker)[] = [];
   for (const block of blocks) {
     const replaced = patchBlock(block, patchMap);
     if (replaced === null) {
@@ -400,7 +458,7 @@ function patchBlockList(
       out.push(replaced);
     }
   }
-  return out;
+  return settleRangeMarkers(out);
 }
 
 /**
@@ -413,7 +471,7 @@ function patchBlockList(
 function patchBlock(
   block: BodyContent,
   patchMap: Map<string, PatchOperation>
-): BodyContent | BodyContent[] | null {
+): BodyContent | (BodyContent | RangeMarker)[] | null {
   switch (block.type) {
     case "paragraph":
       return patchParagraph(block, patchMap);
@@ -465,7 +523,7 @@ function patchTable(table: Table, patchMap: Map<string, PatchOperation>): void {
  *     ignored for the inline-run case (text patches still apply).
  */
 function patchSdt(sdt: StructuredDocumentTag, patchMap: Map<string, PatchOperation>): void {
-  type SdtChild = Paragraph | Run | Table;
+  type SdtChild = Paragraph | Run | Table | RangeMarker;
   const newChildren: SdtChild[] = [];
 
   // Buffer of consecutive inline runs so a placeholder split across runs
@@ -508,12 +566,11 @@ function patchSdt(sdt: StructuredDocumentTag, patchMap: Map<string, PatchOperati
           continue;
         }
         if (Array.isArray(result)) {
-          // paragraph[] → keep all paragraph items, drop any non-paragraph
-          // (defensive: PatchContent.paragraph carries Paragraph[], so this
-          // branch only ever yields paragraphs in practice).
+          // Replacement blocks with the placeholder's range markers around
+          // them; keep what SDT content can hold (paragraphs, tables).
           for (const item of result) {
-            if (item.type === "paragraph") {
-              newChildren.push(item);
+            if (isRangeMarker(item) || item.type === "paragraph" || item.type === "table") {
+              newChildren.push(item as SdtChild);
             }
           }
         } else if (result.type === "paragraph") {
@@ -548,7 +605,7 @@ function patchSdt(sdt: StructuredDocumentTag, patchMap: Map<string, PatchOperati
   }
   flushRunBuffer();
 
-  (sdt as Mutable<StructuredDocumentTag>).content = newChildren as readonly (
+  (sdt as Mutable<StructuredDocumentTag>).content = settleRangeMarkers(newChildren) as readonly (
     | Paragraph
     | Run
     | Table

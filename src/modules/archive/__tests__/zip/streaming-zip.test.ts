@@ -4,7 +4,7 @@
  * Runs shared streaming ZIP tests in Node.js environment.
  */
 
-import { createDeflateStream } from "@archive";
+import { Compression } from "@archive";
 import type { StreamingZipModuleImports } from "@archive/__tests__/zip/streaming-zip.shared";
 import { runStreamingZipTests } from "@archive/__tests__/zip/streaming-zip.shared";
 import { ZipParser } from "@archive/unzip/zip-parser";
@@ -18,7 +18,7 @@ describe("ZIP Streaming - Node.js", () => {
   const imports = {
     Zip,
     ZipDeflate,
-    createDeflateStream,
+    createDeflateStream: Compression.createDeflateStream,
     ZipParser
   } as StreamingZipModuleImports;
 

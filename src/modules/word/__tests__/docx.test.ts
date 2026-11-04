@@ -188,7 +188,7 @@ describe("DOCX Builder Helpers", () => {
   it("useDefaultStyles should define Hyperlink and FollowedHyperlink styles", () => {
     const d = Document.create();
     Document.useDefaultStyles(d);
-    const built = Document.build(d);
+    const built = d;
     const ids = (built.styles ?? []).map(s => s.styleId);
     expect(ids).toContain("Hyperlink");
     expect(ids).toContain("FollowedHyperlink");
@@ -595,7 +595,7 @@ describe("Document namespace", () => {
   it("should build a basic document", () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello World");
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.body).toHaveLength(1);
     expect(doc.body[0].type).toBe("paragraph");
@@ -606,7 +606,7 @@ describe("Document namespace", () => {
     const h = Document.create();
     Document.addHeading(h, "Title", 1);
     Document.addHeading(h, "Subtitle", 2);
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.body).toHaveLength(2);
     expect((doc.body[0] as Paragraph).properties?.style).toBe("Heading1");
@@ -619,7 +619,7 @@ describe("Document namespace", () => {
       ["A", "B"],
       ["C", "D"]
     ]);
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.body).toHaveLength(1);
     expect(doc.body[0].type).toBe("table");
@@ -629,7 +629,7 @@ describe("Document namespace", () => {
   it("should add bullet lists", () => {
     const h = Document.create();
     Document.addBulletList(h, ["Item 1", "Item 2", "Item 3"]);
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.body).toHaveLength(3);
     expect(doc.abstractNumberings).toHaveLength(1);
@@ -640,7 +640,7 @@ describe("Document namespace", () => {
   it("should add numbered lists", () => {
     const h = Document.create();
     Document.addNumberedList(h, ["First", "Second"]);
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.body).toHaveLength(2);
     expect(doc.abstractNumberings![0].levels[0].format).toBe("decimal");
@@ -650,7 +650,7 @@ describe("Document namespace", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
     Document.addParagraph(h, "Test");
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.styles).toBeDefined();
     expect(doc.styles!.length).toBeGreaterThan(0);
@@ -663,7 +663,7 @@ describe("Document namespace", () => {
       pageSize: { width: 11906, height: 16838 },
       margins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
     });
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.sectionProperties?.pageSize?.width).toBe(11906);
   });
@@ -671,7 +671,7 @@ describe("Document namespace", () => {
   it("should set core properties", () => {
     const h = Document.create();
     Document.setCoreProperties(h, { title: "Test", creator: "Author" });
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.coreProperties?.title).toBe("Test");
     expect(doc.coreProperties?.creator).toBe("Author");
@@ -681,7 +681,7 @@ describe("Document namespace", () => {
     const h = Document.create();
     const id = Document.addFootnote(h, "A footnote");
     Document.addParagraph(h, "Text");
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(id).toBe(1);
     expect(doc.footnotes).toHaveLength(1);
@@ -692,7 +692,7 @@ describe("Document namespace", () => {
     const h = Document.create();
     const id = Document.addEndnote(h, "An endnote");
     Document.addParagraph(h, "Text");
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(id).toBe(1);
     expect(doc.endnotes).toHaveLength(1);
@@ -703,7 +703,7 @@ describe("Document namespace", () => {
     Document.addParagraph(h, "Page 1");
     Document.addPageBreak(h);
     Document.addParagraph(h, "Page 2");
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.body).toHaveLength(3);
   });
@@ -712,7 +712,7 @@ describe("Document namespace", () => {
     const h = Document.create();
     Document.setHeader(h, "default", { children: [Build.textParagraph("Header")] });
     Document.setFooter(h, "default", { children: [Build.textParagraph("Footer")] });
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.headers?.size).toBe(1);
     expect(doc.footers?.size).toBe(1);
@@ -721,7 +721,7 @@ describe("Document namespace", () => {
   it("should set settings", () => {
     const h = Document.create();
     Document.setSettings(h, { zoom: 150, defaultTabStop: 720 });
-    const doc = Document.build(h);
+    const doc = h;
 
     expect(doc.settings?.zoom).toBe(150);
   });
@@ -737,9 +737,9 @@ describe("DOCX Roundtrip", () => {
     Document.useDefaultStyles(h);
     Document.addParagraph(h, "Hello World");
     Document.setCoreProperties(h, { title: "Test Document", creator: "Test" });
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(0);
 
@@ -755,15 +755,15 @@ describe("DOCX Roundtrip", () => {
 
   it("should roundtrip paragraphs with formatting", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([Build.text("Normal "), Build.bold("Bold "), Build.italic("Italic")], {
         alignment: "center"
       })
     );
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     const firstPara = parsed.body[0] as Paragraph;
@@ -780,9 +780,9 @@ describe("DOCX Roundtrip", () => {
       ["Cell 1", "Cell 2"],
       ["Cell 3", "Cell 4"]
     ]);
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     const tbl = parsed.body[0] as Table;
@@ -794,9 +794,9 @@ describe("DOCX Roundtrip", () => {
   it("should roundtrip numbered lists", async () => {
     const h = Document.create();
     Document.addNumberedList(h, ["First", "Second", "Third"]);
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.abstractNumberings).toBeDefined();
@@ -811,9 +811,9 @@ describe("DOCX Roundtrip", () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
     Document.addParagraph(h, "Test");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.styles).toBeDefined();
@@ -825,9 +825,9 @@ describe("DOCX Roundtrip", () => {
     const h = Document.create();
     Document.addFootnote(h, "This is a footnote.");
     Document.addParagraph(h, "Text with footnote");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.footnotes).toBeDefined();
@@ -839,9 +839,9 @@ describe("DOCX Roundtrip", () => {
     const h = Document.create();
     Document.addEndnote(h, "This is an endnote.");
     Document.addParagraph(h, "Text with endnote");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.endnotes).toBeDefined();
@@ -857,9 +857,9 @@ describe("DOCX Roundtrip", () => {
       footers: [{ type: "default", rId: "" }]
     });
     Document.addParagraph(h, "Body text");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.headers).toBeDefined();
@@ -870,9 +870,9 @@ describe("DOCX Roundtrip", () => {
     const h = Document.create();
     Document.setSettings(h, { zoom: 120, defaultTabStop: 720, compatibilityMode: 15 });
     Document.addParagraph(h, "Test");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.settings?.zoom).toBe(120);
@@ -882,9 +882,9 @@ describe("DOCX Roundtrip", () => {
   it("should roundtrip font table", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.fonts).toBeDefined();
@@ -907,9 +907,9 @@ describe("DOCX Roundtrip", () => {
       modified: now
     });
     Document.addParagraph(h, "Test");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.coreProperties?.title).toBe("My Title");
@@ -922,9 +922,9 @@ describe("DOCX Roundtrip", () => {
     const h = Document.create();
     Document.setAppProperties(h, { application: "TestApp", appVersion: "2.0.0", pages: 3 });
     Document.addParagraph(h, "Test");
-    const original = Document.build(h);
+    const original = h;
 
-    const bytes = await Io.package(original);
+    const bytes = await Io.toBuffer(original);
     const parsed = await Io.read(bytes);
 
     expect(parsed.appProperties?.application).toBe("TestApp");
@@ -938,7 +938,7 @@ describe("DOCX Roundtrip", () => {
     Document.addHeading(h, "Chapter 1", 1);
     Document.addParagraph(h, "Introduction paragraph with normal text.");
     Document.addHeading(h, "Section 1.1", 2);
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([
         Build.text("This has "),
@@ -962,8 +962,8 @@ describe("DOCX Roundtrip", () => {
     Document.addFootnote(h, "A test footnote.");
     Document.addEndnote(h, "A test endnote.");
 
-    const doc = Document.build(h);
-    const bytes = await Io.package(doc);
+    const doc = h;
+    const bytes = await Io.toBuffer(doc);
 
     expect(bytes.length).toBeGreaterThan(0);
     expect(bytes[0]).toBe(0x50); // P
@@ -980,13 +980,13 @@ describe("DOCX Roundtrip", () => {
   it("should produce valid DOCX that can be re-packaged", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const doc = Document.build(h);
+    const doc = h;
 
-    const bytes1 = await Io.package(doc);
+    const bytes1 = await Io.toBuffer(doc);
     const parsed = await Io.read(bytes1);
 
     // Re-package the parsed document
-    const bytes2 = await Io.package(parsed);
+    const bytes2 = await Io.toBuffer(parsed);
     expect(bytes2.length).toBeGreaterThan(0);
 
     // Read again
@@ -1003,7 +1003,7 @@ describe("Document.toBuffer()", () => {
   it("should generate DOCX bytes directly", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello");
-    const bytes = await Io.toBuffer(Document.build(h));
+    const bytes = await Io.toBuffer(h);
 
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes[0]).toBe(0x50);
@@ -1014,11 +1014,11 @@ describe("Document.toBuffer()", () => {
     const longText = "A".repeat(10000);
     const h1 = Document.create();
     Document.addParagraph(h1, longText);
-    const bytesLow = await Io.toBuffer(Document.build(h1), { compressionLevel: 1 });
+    const bytesLow = await Io.toBuffer(h1, { compressionLevel: 1 });
 
     const h2 = Document.create();
     Document.addParagraph(h2, longText);
-    const bytesHigh = await Io.toBuffer(Document.build(h2), { compressionLevel: 9 });
+    const bytesHigh = await Io.toBuffer(h2, { compressionLevel: 9 });
 
     // Higher compression should produce smaller output
     expect(bytesHigh.length).toBeLessThanOrEqual(bytesLow.length);
@@ -1081,9 +1081,9 @@ describe("drawingShape()", () => {
       })
     );
     Document.addParagraph(h, "After shape");
-    const doc = Document.build(h);
+    const doc = h;
 
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
 
     const shapes = parsed.body.filter(b => b.type === "drawingShape");
@@ -1099,9 +1099,9 @@ describe("drawingShape()", () => {
 describe("mailMerge()", () => {
   it("should replace MERGEFIELD with data values", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD FirstName ")]));
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD LastName ")]));
-    const doc = Document.build(h);
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD FirstName ")]));
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD LastName ")]));
+    const doc = h;
 
     const count = Query.mailMerge(doc, {
       FirstName: "John",
@@ -1117,8 +1117,8 @@ describe("mailMerge()", () => {
 
   it("should leave unmatched fields by default", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD Unknown ")]));
-    const doc = Document.build(h);
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD Unknown ")]));
+    const doc = h;
 
     const count = Query.mailMerge(doc, { Other: "value" });
     expect(count).toBe(0);
@@ -1129,8 +1129,8 @@ describe("mailMerge()", () => {
 
   it("should remove unmatched fields when removeUnmatched is true", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD Unknown ")]));
-    const doc = Document.build(h);
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD Unknown ")]));
+    const doc = h;
 
     const count = Query.mailMerge(doc, {}, { removeUnmatched: true });
     expect(count).toBe(1);
@@ -1142,8 +1142,8 @@ describe("mailMerge()", () => {
 
   it("should handle quoted field names", () => {
     const h = Document.create();
-    Document.addParagraphElement(h, Build.paragraph([Build.field(' MERGEFIELD "Full Name" ')]));
-    const doc = Document.build(h);
+    Document.addParagraph(h, Build.paragraph([Build.field(' MERGEFIELD "Full Name" ')]));
+    const doc = h;
 
     const count = Query.mailMerge(doc, { "Full Name": "Jane Smith" });
     expect(count).toBe(1);
@@ -1162,7 +1162,7 @@ describe("mailMerge()", () => {
 
     const h = Document.create();
     Document.addContent(h, tbl);
-    const doc = Document.build(h);
+    const doc = h;
     const count = Query.mailMerge(doc, { City: "NYC", State: "NY" });
     expect(count).toBe(2);
   });
@@ -1173,10 +1173,10 @@ describe("mailMerge()", () => {
     // mail merges with attacker-controlled headers could pull function
     // references out of Object.prototype and inject them into the doc.
     const h = Document.create();
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD __proto__ ")]));
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD toString ")]));
-    Document.addParagraphElement(h, Build.paragraph([Build.field(" MERGEFIELD constructor ")]));
-    const doc = Document.build(h);
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD __proto__ ")]));
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD toString ")]));
+    Document.addParagraph(h, Build.paragraph([Build.field(" MERGEFIELD constructor ")]));
+    const doc = h;
 
     const count = Query.mailMerge(doc, {}); // empty data — none of the prototype keys are own
     expect(count).toBe(0);
@@ -1196,7 +1196,7 @@ describe("Opaque parts round-trip", () => {
   it("should preserve opaque parts through packaging", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Test");
-    const doc = Document.build(h);
+    const doc = h;
     (doc as any).opaqueParts = [
       {
         path: "word/charts/chart1.xml",
@@ -1205,7 +1205,7 @@ describe("Opaque parts round-trip", () => {
       }
     ];
 
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
 
     expect(parsed.opaqueParts).toBeDefined();
@@ -1237,7 +1237,7 @@ describe("Round-trip: hyperlink history/tgtFrame", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const link = para.children[0] as any;
@@ -1260,7 +1260,7 @@ describe("Round-trip: bookmark colFirst/colLast", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const bm = para.children[0] as any;
@@ -1283,7 +1283,7 @@ describe("Round-trip: floating image layoutInCell/allowOverlap/simplePos", () =>
       allowOverlap: false
     } as any);
     Document.addParagraph(h, "Doc with floating image");
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     // Find floating image in body
     const fi = parsed.body.find(b => b.type === "floatingImage") as any;
@@ -1322,7 +1322,7 @@ describe("Round-trip: table tl2br/tr2bl diagonal borders + caption/description",
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.caption).toBe("Sales data");
@@ -1352,7 +1352,7 @@ describe("Round-trip: table row gridBefore/gridAfter + cnfStyle", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.rows[0].properties?.gridBefore).toBe(1);
@@ -1379,7 +1379,7 @@ describe("Round-trip: Run fitText and complexScript", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as any;
@@ -1403,7 +1403,7 @@ describe("Round-trip: Section bidi", () => {
         rtlGutter: true
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.bidi).toBe(true);
     expect(parsed.sectionProperties?.rtlGutter).toBe(true);
@@ -1418,7 +1418,7 @@ describe("Round-trip: Settings characterSpacingControl", () => {
         characterSpacingControl: "compressPunctuation"
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.settings?.characterSpacingControl).toBe("compressPunctuation");
   });
@@ -1440,7 +1440,7 @@ describe("Round-trip: Style customStyle/hidden/locked", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const s = parsed.styles?.find(st => st.styleId === "MyCustom");
     expect(s).toBeDefined();
@@ -1455,7 +1455,7 @@ describe("Round-trip: Math mathPreSubSuperScript", () => {
   it("should preserve m:sPre structure", async () => {
     const __wmod = await import("../index");
     const mathRun = __wmod.Build.mathRun;
-    const mathPre = __wmod.Build.mathPreSubSuperScript;
+    const mathPre = __wmod.Build.mathPreSubSuperscript;
     const doc: DocxDocument = {
       body: [
         {
@@ -1464,7 +1464,7 @@ describe("Round-trip: Math mathPreSubSuperScript", () => {
         } as any
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const math = parsed.body[0] as any;
     const content = math.content[0];
@@ -1513,7 +1513,7 @@ describe("Round-trip: Numbering LevelOverride full levelDef", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const inst = parsed.numberingInstances?.[0];
     expect(inst).toBeDefined();
@@ -1543,7 +1543,7 @@ describe("Round-trip: Paragraph-level track changes", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.paragraphInsertion?.author).toBe("User1");
@@ -1572,7 +1572,7 @@ describe("Round-trip: SDT dataBinding + new appearance", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const sdt = parsed.body[0] as any;
     expect(sdt.type).toBe("sdt");
@@ -1598,7 +1598,7 @@ describe("Round-trip: East Asian paragraph properties", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.kinsoku).toBe(true);
@@ -1624,7 +1624,7 @@ describe("Round-trip: Positional tab (ptab)", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as any;
@@ -1648,7 +1648,7 @@ describe("Round-trip: Ruby text", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as any;
@@ -1692,7 +1692,7 @@ describe("Round-trip: Theme color scheme + font scheme", () => {
         }
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.theme?.colorScheme.colors.accent1).toBe("FF0000");
     expect(parsed.theme?.colorScheme.colors.hlink).toBe("AA0000");
@@ -1728,7 +1728,7 @@ describe("Round-trip: numPicBullet picture bullet", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.numPicBullets?.[0]?.id).toBe(0);
     expect(parsed.abstractNumberings?.[0]?.levels[0]?.picBulletId).toBe(0);
@@ -1751,7 +1751,7 @@ describe("Round-trip: Settings compat flags + compatSettings", () => {
         compatFlags: [{ name: "useFELayout" }, { name: "doNotExpandShiftReturn" }]
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.settings?.compatibilityMode).toBe(15);
     const overrideCs = parsed.settings?.compatSettings?.find(
@@ -1777,7 +1777,7 @@ describe("Round-trip: Settings compat flags + compatSettings", () => {
         ]
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/settings.xml")!.data);
     const matches = xml.match(/w:name="compatibilityMode"/g) ?? [];
     expect(matches.length).toBe(1);
@@ -1796,7 +1796,7 @@ describe("Round-trip: trackRevisions setting", () => {
       body: [{ type: "paragraph", children: [{ content: [] } as any] }],
       settings: { trackRevisions: true }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.settings?.trackRevisions).toBe(true);
   });
@@ -1820,7 +1820,7 @@ describe("Round-trip: numbering with only numId (no level)", () => {
       ],
       numberingInstances: [{ numId: 1, abstractNumId: 0 }]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.numbering?.level).toBe(0);
@@ -1846,7 +1846,7 @@ describe("Round-trip: TOC instruction options", () => {
         } as any
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const toc = parsed.body.find(b => b.type === "tableOfContents") as any;
     expect(toc).toBeDefined();
@@ -1871,7 +1871,7 @@ describe("Round-trip: cnfStyle on paragraph", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.cnfStyle).toBe("100000000000");
@@ -1909,7 +1909,7 @@ describe("Round-trip: commentsExtended (done/parentId)", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const c1 = parsed.comments?.find(c => c.id === 1);
     const c2 = parsed.comments?.find(c => c.id === 2);
@@ -1951,7 +1951,7 @@ describe("Round-trip: table propertyChange (tblPrChange/trPrChange/tcPrChange)",
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.propertyChange?.revision.id).toBe(5);
@@ -1996,7 +1996,7 @@ describe("Round-trip: cellIns/cellDel/cellMerge revisions", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.rows[0].cells[0].properties?.inserted?.revision.id).toBe(1);
@@ -2025,7 +2025,7 @@ describe("Round-trip: tblPrEx (row-level table property exception)", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const row = (parsed.body[0] as Table).rows[0];
     expect(row.properties?.tblPrEx?.alignment).toBe("center");
@@ -2052,7 +2052,7 @@ describe("Round-trip: extended Settings (rsids/decimalSymbol/listSeparator)", ()
         }
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.settings?.rsids?.rsidRoot).toBe("00123456");
     expect(parsed.settings?.rsids?.rsid?.length).toBe(2);
@@ -2087,7 +2087,7 @@ describe("Round-trip: altChunk (embedded HTML)", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const alt = parsed.body.find(b => b.type === "altChunk") as any;
     expect(alt).toBeDefined();
@@ -2108,7 +2108,7 @@ describe("Round-trip: WebSettings", () => {
         doNotSaveAsSingleFile: true
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.webSettings?.allowPng).toBe(true);
     expect(parsed.webSettings?.relyOnVml).toBe(true);
@@ -2127,7 +2127,7 @@ describe("Round-trip: Thumbnail", () => {
       body: [{ type: "paragraph", children: [{ content: [] } as any] }],
       thumbnail: { contentType: "image/jpeg", data: jpegData }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.thumbnail).toBeDefined();
     expect(parsed.thumbnail?.contentType).toBe("image/jpeg");
@@ -2147,7 +2147,7 @@ describe("Round-trip: People (w15:people)", () => {
         { author: "Bob Jones" }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.people?.length).toBe(2);
     expect(parsed.people?.[0].author).toBe("Alice Smith");
@@ -2174,7 +2174,7 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
         } as any
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const math = parsed.body[0] as any;
     const [phant, group, border] = math.content;
@@ -2201,7 +2201,7 @@ describe("Round-trip: Math m:phant / m:groupChr / m:borderBox", () => {
         } as any
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     // The XML must carry <m:show m:val="0"/> — omitting it leaves the base
     // visible in Word, which defeats the "occupies space but invisible" intent.
     const { extractAll } = await import("@archive/unzip/extract");
@@ -2230,7 +2230,7 @@ describe("Round-trip: Paragraph paraId/textId", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.paraId).toBe("12345678");
@@ -2254,7 +2254,7 @@ describe("Round-trip: Footnote/endnote type (continuationNotice)", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.footnotes?.length).toBe(2);
     const cn = parsed.footnotes?.find(f => f.type === "continuationNotice");
@@ -2286,7 +2286,7 @@ describe("Regression: pPrChange self-reference does not crash", () => {
       ]
     };
     // Should NOT crash
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.body.length).toBe(1);
   });
@@ -2305,7 +2305,7 @@ describe("Regression: rel.target path normalization", () => {
         headers: [{ type: "default", rId: "rId10" }]
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.headers).toBeDefined();
     expect(parsed.headers!.size).toBeGreaterThan(0);
@@ -2346,7 +2346,7 @@ describe("Regression: smartTag/customXml/dir wrappers flatten children", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     // Text should preserve
@@ -2414,7 +2414,7 @@ describe("Regression: collectImageRids recurses into nested tables/SDTs", () => 
       ]
     } as any);
     Document.addParagraph(h, "body");
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     // Just verify it round-trips without errors
     const parsed = await Io.read(buffer);
     expect(parsed.images?.length ?? 0).toBeGreaterThan(0);
@@ -2441,7 +2441,7 @@ describe("Regression: TableLook explicit false values preserved", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.look?.firstRow).toBe(true);
@@ -2461,7 +2461,7 @@ describe("Regression: pageSize.orientation=portrait preserved", () => {
         pageSize: { width: 12240, height: 15840, orientation: "portrait" }
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.pageSize?.orientation).toBe("portrait");
   });
@@ -2486,7 +2486,7 @@ describe("Regression: TableFloat.overlap round-trip", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.float?.overlap).toBe("never");
@@ -2506,7 +2506,7 @@ describe("Regression: lineRule defaults to 'auto' when line is set", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.spacing?.line).toBe(276);
@@ -2526,7 +2526,7 @@ describe("Regression: opaquePart content type inference", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     // The opaque part should be round-tripped
     const part = parsed.opaqueParts?.find(p => p.path === "word/customXml/item99.xml");
@@ -2550,7 +2550,7 @@ describe("Regression: TableLook val-only bitmask still read correctly", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const tbl = parsed.body[0] as Table;
     expect(tbl.properties?.look?.firstRow).toBe(true);
@@ -2580,7 +2580,7 @@ describe("Error paths: readDocx", () => {
     const { zip } = await import("@archive/create-archive");
     const ar = zip({ level: 0 });
     ar.add("[Content_Types].xml", new TextEncoder().encode('<?xml version="1.0"?><Types/>'));
-    const bytes = await ar.bytes();
+    const bytes = await ar.toBuffer();
     try {
       await Io.read(bytes);
       throw new Error("should have thrown");
@@ -2597,7 +2597,7 @@ describe("Error paths: readDocx", () => {
     // A valid minimal DOCX without numbering part
     const h = Document.create();
     Document.addParagraph(h, "Hello");
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     // Should parse without error
     const parsed = await Io.read(buffer);
     expect(parsed.body.length).toBeGreaterThan(0);
@@ -2624,7 +2624,7 @@ describe("attrInt: NaN safety", () => {
     // Build and parse a doc — non-numeric IDs in bookmarks shouldn't crash
     const h = Document.create();
     Document.addParagraph(h, "hello");
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     expect(parsed.body.length).toBe(1);
   });
@@ -2637,7 +2637,7 @@ describe("attrInt: NaN safety", () => {
 describe("Query API", () => {
   it("getHeadings: extracts outline from style 'Heading1'...'HeadingN'", async () => {
     const __wmod = await import("../index");
-    const getHeadings = __wmod.Query.getHeadings;
+    const getHeadings = __wmod.Query.listHeadings;
     const doc: DocxDocument = {
       body: [
         {
@@ -2670,7 +2670,7 @@ describe("Query API", () => {
 
   it("findBookmark: locates bookmark by name", async () => {
     const __wmod = await import("../index");
-    const findBookmark = __wmod.Query.findBookmark;
+    const findBookmark = __wmod.Query.getBookmark;
     const doc: DocxDocument = {
       body: [
         {
@@ -2691,16 +2691,16 @@ describe("Query API", () => {
 
   it("findBookmark: returns undefined for missing name", async () => {
     const __wmod = await import("../index");
-    const findBookmark = __wmod.Query.findBookmark;
+    const findBookmark = __wmod.Query.getBookmark;
     const doc: DocxDocument = { body: [] };
     expect(findBookmark(doc, "nothing")).toBeUndefined();
   });
 
   it("paragraphCount / countWords / tableCount", async () => {
     const __wmod = await import("../index");
-    const paragraphCount = __wmod.Query.paragraphCount;
-    const countWords = __wmod.Query.countWords;
-    const tableCount = __wmod.Query.tableCount;
+    const paragraphCount = __wmod.Query.getParagraphCount;
+    const countWords = __wmod.Query.getWordCount;
+    const tableCount = __wmod.Query.getTableCount;
     const doc: DocxDocument = {
       body: [
         {
@@ -2737,7 +2737,7 @@ describe("Query API", () => {
 
   it("findComment: locates comment by id", async () => {
     const __wmod = await import("../index");
-    const findComment = __wmod.Query.findComment;
+    const findComment = __wmod.Query.getComment;
     const doc: DocxDocument = {
       body: [],
       comments: [
@@ -2794,8 +2794,8 @@ describe("Packager idempotency", () => {
       ],
       watermark: { type: "text", text: "DRAFT" }
     };
-    const buf1 = await Io.package(doc);
-    const buf2 = await Io.package(doc);
+    const buf1 = await Io.toBuffer(doc);
+    const buf2 = await Io.toBuffer(doc);
     // Both should succeed without modifying doc
     expect(buf1.length).toBeGreaterThan(0);
     expect(buf2.length).toBeGreaterThan(0);
@@ -2998,7 +2998,7 @@ describe("useDefaultStyles: built-in latent styles", () => {
     // inherit unknown vertical metrics).
     const h = Document.create();
     Document.useDefaultStyles(h);
-    const built = Document.build(h);
+    const built = h;
     const ids = (built.styles ?? []).map(s => s.styleId);
     for (const required of [
       "Normal",
@@ -3020,7 +3020,7 @@ describe("useDefaultStyles: built-in latent styles", () => {
   it("should pair Header/HeaderChar and Footer/FooterChar via link (round-trippable)", async () => {
     const h = Document.create();
     Document.useDefaultStyles(h);
-    const built = Document.build(h);
+    const built = h;
     const styles = built.styles ?? [];
     const header = styles.find(s => s.styleId === "Header");
     const headerChar = styles.find(s => s.styleId === "HeaderChar");
@@ -3040,7 +3040,7 @@ describe("useDefaultStyles: built-in latent styles", () => {
     const { extractAll } = await import("@archive/unzip/extract");
     const h = Document.create();
     Document.useDefaultStyles(h);
-    const buffer = await Io.package(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/styles.xml")!.data);
     expect(xml).toContain('w:styleId="Header"');
     expect(xml).toContain('w:styleId="HeaderChar"');
@@ -3054,14 +3054,14 @@ describe("Paragraph bidi (RTL)", () => {
     const { extractAll } = await import("@archive/unzip/extract");
     const h = Document.create();
     Document.useDefaultStyles(h);
-    Document.addParagraphElement(h, Build.paragraph([Build.text("اَلْعَرَبِيَّةُ")], { bidi: true }));
-    Document.addParagraphElement(
+    Document.addParagraph(h, Build.paragraph([Build.text("اَلْعَرَبِيَّةُ")], { bidi: true }));
+    Document.addParagraph(
       h,
       Build.paragraph([Build.text("Heading in RTL")], { style: "Heading1", bidi: true })
     );
-    Document.addParagraphElement(h, Build.paragraph([Build.text("ltr fallback")]));
+    Document.addParagraph(h, Build.paragraph([Build.text("ltr fallback")]));
 
-    const buffer = await Io.package(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const xml = new TextDecoder().decode((await extractAll(buffer)).get("word/document.xml")!.data);
 
     // Both bidi paragraphs must serialize <w:bidi/> inside their pPr; the
@@ -3076,8 +3076,8 @@ describe("Paragraph bidi (RTL)", () => {
 
   it("should round-trip paragraph bidi through readDocx", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, Build.paragraph([Build.text("RTL")], { bidi: true }));
-    const buffer = await Io.package(Document.build(h));
+    Document.addParagraph(h, Build.paragraph([Build.text("RTL")], { bidi: true }));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.bidi).toBe(true);

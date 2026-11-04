@@ -27,13 +27,21 @@ import type {
   WorkerTaskType,
   WorkerRequestMessage,
   WorkerResponseMessage,
+  WorkerPoolStream,
   TaskPriority
 } from "@archive/compression/worker-pool/types";
 import {
   getWorkerBlobUrl,
   releaseWorkerBlobUrl
 } from "@archive/compression/worker-pool/worker-script";
-import { ArchiveError, ArchiveLimitError } from "@archive/core/errors";
+import { ArchiveError, ArchiveLimitError, WorkerStreamStartError } from "@archive/core/errors";
+
+export { WorkerStreamStartError };
+
+/** Whether `error` means a stream never reached its worker (see {@link WorkerStreamStartError}). */
+export function isWorkerStreamStartError(error: unknown): error is WorkerStreamStartError {
+  return error instanceof WorkerStreamStartError;
+}
 
 export type { WorkerPoolOptions, WorkerPoolStats, TaskOptions, TaskResult, WorkerTaskType };
 export { hasWorkerSupport };
@@ -136,11 +144,7 @@ function compactForTransfer(data: Uint8Array): Uint8Array {
   return isStandaloneBuffer(data) ? data : data.slice();
 }
 
-export interface WorkerPoolStream {
-  write(data: Uint8Array): Promise<void>;
-  end(): Promise<void>;
-  abort(reason?: string): void;
-}
+export type { WorkerPoolStream };
 
 /**
  * Browser Worker Pool
@@ -612,6 +616,15 @@ export class WorkerPool {
           if (message.taskId !== session.taskId) {
             return;
           }
+          if (!session.startReady) {
+            // Nothing reached the worker yet; let the caller run the stream elsewhere
+            this._failStreamStart(
+              poolWorker,
+              new WorkerStreamStartError(message.error ?? "Worker failed to start the stream"),
+              false
+            );
+            return;
+          }
           const error = new Error(message.error ?? "Unknown worker error");
           session.ended = true;
           session.inflightChunkCount = 0;
@@ -708,7 +721,18 @@ export class WorkerPool {
     // slot waiter / drain waiter / `onError` are never called and the
     // caller (AsyncStreamCodec.write/end) hangs forever. Wake every
     // promise we own and report the error to the codec.
-    if (session) {
+    if (session && !session.startReady) {
+      // The worker died before the stream reached it; the caller can run it elsewhere
+      session.ended = true;
+      session.rejectStart?.(
+        new WorkerStreamStartError(event.message || "Worker terminated before the stream started")
+      );
+      session.rejectStart = null;
+      session.resolveStart = null;
+      this._resolveSlotWaiter(session);
+      this._resolveDrainWaiter(session);
+      poolWorker.streamSession = null;
+    } else if (session) {
       const error = new Error(event.message || "Worker terminated unexpectedly");
       session.ended = true;
       session.rejectStart?.(error);
@@ -799,6 +823,10 @@ export class WorkerPool {
         };
 
     let sessionWorker: PoolWorker | null = null;
+    // The session this stream was bound to. The worker drops its reference when the
+    // session ends, including when it never started — and then the start error, not
+    // "not active", is what a later write or end must report.
+    let boundSession: StreamSession | null = null;
     let ensureWorkerPromise: Promise<PoolWorker> | null = null;
 
     const ensureWorker = async (): Promise<PoolWorker> => {
@@ -814,6 +842,7 @@ export class WorkerPool {
         if (idleWorker) {
           sessionWorker = idleWorker;
           this._bindStreamSession(sessionWorker, taskId, taskType, options.level, options);
+          boundSession = sessionWorker.streamSession;
           this._startStreamSession(sessionWorker);
           return sessionWorker;
         }
@@ -824,6 +853,7 @@ export class WorkerPool {
         });
 
         this._bindStreamSession(sessionWorker, taskId, taskType, options.level, options);
+        boundSession = sessionWorker.streamSession;
         this._startStreamSession(sessionWorker);
         return sessionWorker;
       })();
@@ -871,7 +901,11 @@ export class WorkerPool {
       }
 
       const worker = sessionWorker ?? (await ensureWorker());
-      const session = worker.streamSession;
+      const session = boundSession;
+      if (session && !session.startReady) {
+        // Rejects with the start failure if the worker never started the stream
+        await session.startPromise;
+      }
       if (!session || session.ended) {
         throw new ArchiveError("Streaming session is not active");
       }
@@ -900,14 +934,13 @@ export class WorkerPool {
 
     const end = async (): Promise<void> => {
       const worker = await ensureWorker();
-      const session = worker.streamSession;
+      const session = boundSession;
+      // If start failed, propagate the rejection.
+      if (session && !session.startReady) {
+        await session.startPromise;
+      }
       if (!session || session.ended) {
         return;
-      }
-
-      // If start failed, propagate the rejection.
-      if (!session.startReady) {
-        await session.startPromise;
       }
 
       // Flush any pending writes before ending.
@@ -924,7 +957,7 @@ export class WorkerPool {
     const abort = (reason?: string): void => {
       void ensureWorker().then(worker => {
         const session = worker.streamSession;
-        if (!session) {
+        if (!session || session !== boundSession) {
           return;
         }
         const message = session.abortMessage;
@@ -958,12 +991,22 @@ export class WorkerPool {
       rejectStart = reject;
     });
 
-    // Safety net: avoid hanging forever if the worker never responds.
-    const START_TIMEOUT_MS = 5000;
+    // A worker that has not started in time is treated as lost: the caller runs the
+    // stream elsewhere rather than waiting on — or failing because of — a busy device.
     const startTimeout = setTimeout(() => {
-      rejectStart?.(new Error("Worker stream start timeout"));
-    }, START_TIMEOUT_MS);
-    startPromise.finally(() => clearTimeout(startTimeout));
+      this._failStreamStart(
+        worker,
+        new WorkerStreamStartError(
+          `Worker stream did not start within ${this._options.streamStartTimeout} ms`
+        ),
+        true
+      );
+    }, this._options.streamStartTimeout);
+    // Observed here so a start nobody waits for cannot become an unhandled rejection
+    startPromise.then(
+      () => clearTimeout(startTimeout),
+      () => clearTimeout(startTimeout)
+    );
 
     worker.streamSession = {
       taskId,
@@ -1006,6 +1049,36 @@ export class WorkerPool {
       onEnd: handlers.onEnd,
       onError: handlers.onError
     };
+  }
+
+  /**
+   * Give up on a session whose worker has not started it: reject the start, so the
+   * caller can run the stream elsewhere, and free the worker — terminated when it is
+   * unresponsive, since a late `started` would otherwise bind it to a stream nobody owns.
+   */
+  private _failStreamStart(
+    poolWorker: PoolWorker,
+    error: WorkerStreamStartError,
+    unresponsive: boolean
+  ): void {
+    const session = poolWorker.streamSession;
+    if (!session || session.startReady || session.ended) {
+      return;
+    }
+    session.ended = true;
+    session.rejectStart?.(error);
+    session.rejectStart = null;
+    session.resolveStart = null;
+    this._resolveSlotWaiter(session);
+    this._resolveDrainWaiter(session);
+    this._failedTasks++;
+    poolWorker.streamSession = null;
+    if (unresponsive) {
+      this._terminateWorker(poolWorker);
+      this._processQueue();
+    } else {
+      this._workerBecameIdle(poolWorker);
+    }
   }
 
   private _startStreamSession(worker: PoolWorker): void {

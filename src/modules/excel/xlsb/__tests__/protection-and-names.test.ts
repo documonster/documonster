@@ -92,7 +92,8 @@ describe("BrtSheetProtection", () => {
     const model = await roundTrip(async workbook => {
       const sheet = Workbook.addWorksheet(workbook, "S");
       Cell.setValue(sheet, "A1", 1);
-      await Worksheet.protect(sheet, "", {
+      await Worksheet.protect(sheet, {
+        password: "",
         formatCells: true,
         insertRows: true,
         selectLockedCells: false
@@ -114,7 +115,7 @@ describe("BrtSheetProtection", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Cell.setValue(sheet, "A1", 1);
-    await Worksheet.protect(sheet, "secret", {} as never);
+    await Worksheet.protect(sheet, { password: "secret" } as never);
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).resolves.toBeDefined();
   });
 });
@@ -190,8 +191,8 @@ describe("the protection password, which the legacy record cannot carry", () => 
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Cell.setValue(sheet, "A1", 1);
-    await Worksheet.protect(sheet, "secret", { formatCells: true });
-    await Workbook.protect(workbook, "bookpass", { lockStructure: true });
+    await Worksheet.protect(sheet, { password: "secret", formatCells: true });
+    await Workbook.protect(workbook, { password: "bookpass", lockStructure: true });
     const sheetBefore = Worksheet.getModel(sheet).sheetProtection as Record<string, unknown>;
     const bookBefore = Workbook.getModel(workbook).protection as
       | Record<string, unknown>
@@ -290,7 +291,7 @@ describe("the protection password, which the legacy record cannot carry", () => 
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Cell.setValue(sheet, "A1", 1);
-    await Worksheet.protect(sheet, undefined as never, { formatCells: true });
+    await Worksheet.protect(sheet, { password: undefined as never, formatCells: true });
     const parts = await extractAll(await Workbook.toBuffer(workbook, { format: "xlsb" }));
     const sheetPath = [...parts.keys()].find(name => /worksheets\/sheet\d+\.bin$/.test(name))!;
     const names = [...iterateInterpretableRecords(parts.get(sheetPath)!.data, "s")]
@@ -303,8 +304,8 @@ describe("the protection password, which the legacy record cannot carry", () => 
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S");
     Cell.setValue(sheet, "A1", 1);
-    await Worksheet.protect(sheet, "secret", {});
-    await Workbook.protect(workbook, "bookpass", { lockStructure: true });
+    await Worksheet.protect(sheet, { password: "secret" });
+    await Workbook.protect(workbook, { password: "bookpass", lockStructure: true });
     await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).resolves.toBeDefined();
   });
 });
@@ -330,7 +331,7 @@ describe("workbook protection record order", () => {
   it("puts the protection pair between BrtWbProp and BrtBeginBookViews", async () => {
     const workbook = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(workbook, "S"), "A1", 1);
-    await Workbook.protect(workbook, "b00kpass", { lockStructure: true });
+    await Workbook.protect(workbook, { password: "b00kpass", lockStructure: true });
     const parts = await extractAll(await Workbook.toBuffer(workbook, { format: "xlsb" }));
     const names = [...iterateInterpretableRecords(parts.get("xl/workbook.bin")!.data, "w")].map(
       entry => recordSpec(entry.id)?.name

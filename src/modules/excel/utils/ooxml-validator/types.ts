@@ -127,7 +127,10 @@ export type StylesKind =
 export type TableKind =
   | "table-filterColumn-redundant-per-column"
   | "table-totalsRowFormula-with-builtin-function"
-  | "table-autoFilter-covers-totalsRow";
+  | "table-autoFilter-covers-totalsRow"
+  | "table-headerless-autoFilter"
+  | "table-duplicate-column-name"
+  | "table-name-is-defined-name";
 
 // -----------------------------------------------------------------------------
 // Chart / drawing / chartsheet / pivot

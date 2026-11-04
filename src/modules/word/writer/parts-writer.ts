@@ -24,6 +24,7 @@ import {
   STD_DOC_ATTRIBUTES
 } from "@word/constants";
 import { DocxRawXmlPolicyError } from "@word/errors";
+import { sidOfHashAlgorithm } from "@word/security/hash-names";
 import type {
   DocumentSettings,
   CoreProperties,
@@ -33,18 +34,30 @@ import type {
   CustomProperty,
   FootnoteProperties,
   EndnoteProperties,
+  FootnoteDef,
+  EndnoteDef,
   DocumentTheme,
   ThemeFont,
   WebSettings,
   PersonInfo
 } from "@word/types";
+import { separatorReferenceIds } from "@word/writer/note-separators";
+import {
+  createPreservedEmitter,
+  preservedElements,
+  schemaOrder,
+  withPreservedNamespaces
+} from "@word/writer/preserved-xml";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
-/** Render footnote/endnote properties in settings. */
+/** Render footnote/endnote properties in settings, with the separator references last (CT_FtnDocProps). */
 function renderSettingsNoteProperties(
   xml: XmlSink,
   tagName: string,
-  props: FootnoteProperties | EndnoteProperties
+  props: FootnoteProperties | EndnoteProperties,
+  refName: string,
+  refIds: readonly number[]
 ): void {
   xml.openNode(tagName);
   if (props.position) {
@@ -54,10 +67,13 @@ function renderSettingsNoteProperties(
     xml.leafNode("w:numFmt", { "w:val": props.numFmt });
   }
   if (props.numStart !== undefined) {
-    xml.leafNode("w:numStart", { "w:val": String(props.numStart) });
+    xml.leafNode("w:numStart", { "w:val": xmlValue(props.numStart, "w:val") });
   }
   if (props.numRestart) {
     xml.leafNode("w:numRestart", { "w:val": props.numRestart });
+  }
+  for (const id of refIds) {
+    xml.leafNode(refName, { "w:id": xmlValue(id, "w:id") });
   }
   xml.closeNode();
 }
@@ -66,131 +82,234 @@ function renderSettingsNoteProperties(
 // Settings
 // =============================================================================
 
-/** Render word/settings.xml. */
+/** CT_Settings, as far as the writer or a preserved element can need it. */
+const SETTINGS_ORDER = schemaOrder([
+  "w:writeProtection",
+  "w:view",
+  "w:zoom",
+  "w:removePersonalInformation",
+  "w:removeDateAndTime",
+  "w:doNotDisplayPageBoundaries",
+  "w:displayBackgroundShape",
+  "w:printPostScriptOverText",
+  "w:printFractionalCharacterWidth",
+  "w:printFormsData",
+  "w:embedTrueTypeFonts",
+  "w:embedSystemFonts",
+  "w:saveSubsetFonts",
+  "w:saveFormsData",
+  "w:mirrorMargins",
+  "w:alignBordersAndEdges",
+  "w:bordersDoNotSurroundHeader",
+  "w:bordersDoNotSurroundFooter",
+  "w:gutterAtTop",
+  "w:hideSpellingErrors",
+  "w:hideGrammaticalErrors",
+  "w:activeWritingStyle",
+  "w:proofState",
+  "w:formsDesign",
+  "w:attachedTemplate",
+  "w:linkStyles",
+  "w:stylePaneFormatFilter",
+  "w:stylePaneSortMethod",
+  "w:documentType",
+  "w:mailMerge",
+  "w:revisionView",
+  "w:trackRevisions",
+  "w:doNotTrackMoves",
+  "w:doNotTrackFormatting",
+  // Not in CT_Settings; kept where earlier versions of this writer put it.
+  "w:doNotDemoteNonCombiningChars",
+  "w:documentProtection",
+  "w:autoFormatOverride",
+  "w:styleLockTheme",
+  "w:styleLockQFSet",
+  "w:defaultTabStop",
+  "w:autoHyphenation",
+  "w:consecutiveHyphenLimit",
+  "w:hyphenationZone",
+  "w:doNotHyphenateCaps",
+  "w:showEnvelope",
+  "w:summaryLength",
+  "w:clickAndTypeStyle",
+  "w:defaultTableStyle",
+  "w:evenAndOddHeaders",
+  "w:bookFoldRevPrinting",
+  "w:bookFoldPrinting",
+  "w:bookFoldPrintingSheets",
+  "w:drawingGridHorizontalSpacing",
+  "w:drawingGridVerticalSpacing",
+  "w:displayHorizontalDrawingGridEvery",
+  "w:displayVerticalDrawingGridEvery",
+  "w:doNotUseMarginsForDrawingGridOrigin",
+  "w:drawingGridHorizontalOrigin",
+  "w:drawingGridVerticalOrigin",
+  "w:doNotShadeFormData",
+  "w:noPunctuationKerning",
+  "w:characterSpacingControl",
+  "w:printTwoOnOne",
+  "w:strictFirstAndLastChars",
+  "w:noLineBreaksAfter",
+  "w:noLineBreaksBefore",
+  "w:savePreviewPicture",
+  "w:doNotValidateAgainstSchema",
+  "w:saveInvalidXml",
+  "w:ignoreMixedContent",
+  "w:alwaysShowPlaceholderText",
+  "w:doNotDemarcateInvalidXml",
+  "w:saveXmlDataOnly",
+  "w:useXSLTWhenSaving",
+  "w:saveThroughXslt",
+  "w:showXMLTags",
+  "w:alwaysMergeEmptyNamespace",
+  "w:updateFields",
+  "w:hdrShapeDefaults",
+  "w:footnotePr",
+  "w:endnotePr",
+  "w:compat",
+  "w:docVars",
+  "w:rsids",
+  "m:mathPr",
+  "w:attachedSchema",
+  "w:themeFontLang",
+  "w:clrSchemeMapping",
+  "w:doNotIncludeSubdocsInStats",
+  "w:doNotAutoCompressPictures",
+  "w:forceUpgrade",
+  "w:captions",
+  "w:readModeInkLockDown",
+  "w:smartTagType",
+  "sl:schemaLibrary",
+  "w:shapeDefaults",
+  "w:doNotEmbedSmartTags",
+  "w:decimalSymbol",
+  "w:listSeparator"
+]);
+
+/**
+ * Render word/settings.xml. Elements are written in CT_Settings order, with
+ * the ones the model does not represent (`settings.preservedXml`) in their
+ * places among them; extension elements (`w14:docId`, …) come last.
+ */
 export function renderSettings(
   xml: XmlSink,
   settings?: DocumentSettings,
-  rawXmlPolicy?: "preserve" | "strip" | "reject"
+  rawXmlPolicy?: "preserve" | "strip" | "reject",
+  notes?: {
+    readonly footnotes?: readonly FootnoteDef[];
+    readonly endnotes?: readonly EndnoteDef[];
+  }
 ): void {
+  const footnoteRefs = separatorReferenceIds(settings?.footnoteSeparators, notes?.footnotes);
+  const endnoteRefs = separatorReferenceIds(settings?.endnoteSeparators, notes?.endnotes);
+  const preserved = createPreservedEmitter(
+    xml,
+    SETTINGS_ORDER,
+    preservedElements(
+      settings?.preservedXml?.elements,
+      rawXmlPolicy,
+      "settings.preservedXml.elements"
+    )
+  );
+  /** Write `name` as a leaf, after the preserved elements that precede it. */
+  const leaf = (name: string, attrs?: Record<string, string>): void => {
+    preserved.upTo(name);
+    xml.leafNode(name, attrs);
+  };
+
   xml.openXml(STD_DOC_ATTRIBUTES);
-  xml.openNode("w:settings", {
-    "xmlns:w": NS_W,
-    "xmlns:m": NS_M,
-    "xmlns:r": NS_R,
-    "xmlns:w14": NS_W14,
-    "xmlns:o": NS_O,
-    "xmlns:v": NS_V
-  });
+  xml.openNode(
+    "w:settings",
+    withPreservedNamespaces(
+      {
+        "xmlns:w": NS_W,
+        "xmlns:m": NS_M,
+        "xmlns:r": NS_R,
+        "xmlns:w14": NS_W14,
+        "xmlns:o": NS_O,
+        "xmlns:v": NS_V
+      },
+      settings?.preservedXml
+    )
+  );
 
-  if (settings?.zoom) {
-    xml.leafNode("w:zoom", { "w:percent": String(settings.zoom) });
+  // Write protection
+  if (settings?.writeProtection) {
+    const wp = settings.writeProtection;
+    const wpAttrs: Record<string, string> = {};
+    if (wp.recommended) {
+      wpAttrs["w:recommended"] = "1";
+    }
+    if (wp.algorithmName) {
+      wpAttrs["w:algorithmName"] = wp.algorithmName;
+    }
+    if (wp.hashValue) {
+      wpAttrs["w:hashValue"] = wp.hashValue;
+    }
+    if (wp.saltValue) {
+      wpAttrs["w:saltValue"] = wp.saltValue;
+    }
+    if (wp.spinCount !== undefined) {
+      wpAttrs["w:spinCount"] = xmlValue(wp.spinCount, "w:spinCount");
+    }
+    leaf("w:writeProtection", wpAttrs);
   }
 
+  if (settings?.zoom || settings?.zoomType) {
+    leaf("w:zoom", {
+      ...(settings.zoomType ? { "w:val": settings.zoomType } : {}),
+      ...(settings.zoom ? { "w:percent": xmlValue(settings.zoom, "w:percent") } : {})
+    });
+  }
+
+  // Display background shape
+  if (settings?.displayBackgroundShape) {
+    leaf("w:displayBackgroundShape");
+  }
+  if (settings?.saveSubsetFonts) {
+    leaf("w:saveSubsetFonts", { "w:val": "1" });
+  }
   if (settings?.mirrorMargins) {
-    xml.leafNode("w:mirrorMargins");
+    leaf("w:mirrorMargins");
+  }
+  if (settings?.bordersDoNotSurroundHeader) {
+    leaf("w:bordersDoNotSurroundHeader");
+  }
+  if (settings?.bordersDoNotSurroundFooter) {
+    leaf("w:bordersDoNotSurroundFooter");
+  }
+  if (settings?.gutterAtTop) {
+    leaf("w:gutterAtTop");
+  }
+  if (settings?.stylePaneFormatFilter) {
+    leaf("w:stylePaneFormatFilter", { "w:val": settings.stylePaneFormatFilter });
+  }
+  if (settings?.stylePaneSortMethod) {
+    leaf("w:stylePaneSortMethod", { "w:val": settings.stylePaneSortMethod });
   }
 
-  if (settings?.gutterAtTop) {
-    xml.leafNode("w:gutterAtTop");
+  // Mail merge (round-trip preservation)
+  if (settings?.mailMergeRawXml) {
+    if (rawXmlPolicy === "reject") {
+      throw new DocxRawXmlPolicyError("settings.mailMergeRawXml");
+    }
+    if (rawXmlPolicy !== "strip") {
+      preserved.upTo("w:mailMerge");
+      xml.writeRaw(settings.mailMergeRawXml);
+    }
   }
 
   if (settings?.trackRevisions) {
-    xml.leafNode("w:trackRevisions");
+    leaf("w:trackRevisions");
   }
-
-  if (settings?.evenAndOddHeaders) {
-    xml.leafNode("w:evenAndOddHeaders");
-  }
-
-  xml.leafNode("w:defaultTabStop", { "w:val": String(settings?.defaultTabStop ?? 720) });
-  xml.leafNode("w:characterSpacingControl", {
-    "w:val": settings?.characterSpacingControl ?? "doNotCompress"
-  });
-
-  // Extended settings flags
   if (settings?.doNotTrackMoves) {
-    xml.leafNode("w:doNotTrackMoves");
+    leaf("w:doNotTrackMoves");
   }
   if (settings?.doNotTrackFormatting) {
-    xml.leafNode("w:doNotTrackFormatting");
+    leaf("w:doNotTrackFormatting");
   }
   if (settings?.doNotDemoteAsianTextFirstLine) {
-    xml.leafNode("w:doNotDemoteNonCombiningChars");
-  }
-  if (settings?.saveSubsetFonts) {
-    xml.leafNode("w:saveSubsetFonts", { "w:val": "1" });
-  }
-  if (settings?.noPunctuationKerning) {
-    xml.leafNode("w:noPunctuationKerning");
-  }
-  if (settings?.bordersDoNotSurroundHeader) {
-    xml.leafNode("w:bordersDoNotSurroundHeader");
-  }
-  if (settings?.bordersDoNotSurroundFooter) {
-    xml.leafNode("w:bordersDoNotSurroundFooter");
-  }
-  if (settings?.clickAndTypeStyle) {
-    xml.leafNode("w:clickAndTypeStyle", { "w:val": settings.clickAndTypeStyle });
-  }
-  if (settings?.stylePaneFormatFilter) {
-    xml.leafNode("w:stylePaneFormatFilter", {
-      "w:val": settings.stylePaneFormatFilter
-    });
-  }
-  if (settings?.stylePaneSortMethod) {
-    xml.leafNode("w:stylePaneSortMethod", { "w:val": settings.stylePaneSortMethod });
-  }
-  if (settings?.themeFontLang) {
-    const attrs: Record<string, string> = {};
-    if (settings.themeFontLang.val) {
-      attrs["w:val"] = settings.themeFontLang.val;
-    }
-    if (settings.themeFontLang.eastAsia) {
-      attrs["w:eastAsia"] = settings.themeFontLang.eastAsia;
-    }
-    if (settings.themeFontLang.bidi) {
-      attrs["w:bidi"] = settings.themeFontLang.bidi;
-    }
-    if (Object.keys(attrs).length > 0) {
-      xml.leafNode("w:themeFontLang", attrs);
-    }
-  }
-  if (settings?.decimalSymbol !== undefined) {
-    xml.leafNode("w:decimalSymbol", { "w:val": settings.decimalSymbol });
-  }
-  if (settings?.listSeparator !== undefined) {
-    xml.leafNode("w:listSeparator", { "w:val": settings.listSeparator });
-  }
-
-  // RSID list (revision save IDs)
-  if (settings?.rsids) {
-    xml.openNode("w:rsids");
-    if (settings.rsids.rsidRoot) {
-      xml.leafNode("w:rsidRoot", { "w:val": settings.rsids.rsidRoot });
-    }
-    if (settings.rsids.rsid) {
-      for (const id of settings.rsids.rsid) {
-        xml.leafNode("w:rsid", { "w:val": id });
-      }
-    }
-    xml.closeNode();
-  }
-
-  // Hyphenation
-  if (settings?.autoHyphenation || settings?.hyphenation?.autoHyphenation) {
-    xml.leafNode("w:autoHyphenation");
-  }
-  if (settings?.hyphenation) {
-    const h = settings.hyphenation;
-    if (h.consecutiveHyphenLimit !== undefined) {
-      xml.leafNode("w:consecutiveHyphenLimit", { "w:val": String(h.consecutiveHyphenLimit) });
-    }
-    if (h.hyphenationZone !== undefined) {
-      xml.leafNode("w:hyphenationZone", { "w:val": String(h.hyphenationZone) });
-    }
-    if (h.doNotHyphenateCaps) {
-      xml.leafNode("w:doNotHyphenateCaps");
-    }
+    leaf("w:doNotDemoteNonCombiningChars");
   }
 
   // Document protection
@@ -221,71 +340,72 @@ export function renderSettings(
       attrs["w:salt"] = dp.saltValue;
     }
     if (dp.spinCount !== undefined) {
-      attrs["w:cryptSpinCount"] = String(dp.spinCount);
+      attrs["w:cryptSpinCount"] = xmlValue(dp.spinCount, "w:cryptSpinCount");
     }
-    xml.leafNode("w:documentProtection", attrs);
+    leaf("w:documentProtection", attrs);
   }
 
-  // Display background shape
-  if (settings?.displayBackgroundShape) {
-    xml.leafNode("w:displayBackgroundShape");
+  leaf("w:defaultTabStop", { "w:val": xmlValue(settings?.defaultTabStop ?? 720, "w:val") });
+
+  // Hyphenation
+  if (settings?.autoHyphenation || settings?.hyphenation?.autoHyphenation) {
+    leaf("w:autoHyphenation");
   }
+  if (settings?.hyphenation) {
+    const h = settings.hyphenation;
+    if (h.consecutiveHyphenLimit !== undefined) {
+      leaf("w:consecutiveHyphenLimit", { "w:val": xmlValue(h.consecutiveHyphenLimit, "w:val") });
+    }
+    if (h.hyphenationZone !== undefined) {
+      leaf("w:hyphenationZone", { "w:val": xmlValue(h.hyphenationZone, "w:val") });
+    }
+    if (h.doNotHyphenateCaps) {
+      leaf("w:doNotHyphenateCaps");
+    }
+  }
+
+  if (settings?.clickAndTypeStyle) {
+    leaf("w:clickAndTypeStyle", { "w:val": settings.clickAndTypeStyle });
+  }
+  if (settings?.evenAndOddHeaders) {
+    leaf("w:evenAndOddHeaders");
+  }
+  if (settings?.noPunctuationKerning) {
+    leaf("w:noPunctuationKerning");
+  }
+  leaf("w:characterSpacingControl", {
+    "w:val": settings?.characterSpacingControl ?? "doNotCompress"
+  });
 
   // Update fields on open
   if (settings?.updateFieldsOnOpen) {
-    xml.leafNode("w:updateFields", { "w:val": "true" });
-  }
-
-  // Document variables
-  if (settings?.docVars && settings.docVars.size > 0) {
-    xml.openNode("w:docVars");
-    for (const [name, val] of settings.docVars) {
-      xml.leafNode("w:docVar", { "w:name": name, "w:val": val });
-    }
-    xml.closeNode();
+    leaf("w:updateFields", { "w:val": "true" });
   }
 
   // Footnote/endnote properties
-  if (settings?.footnoteProperties) {
-    renderSettingsNoteProperties(xml, "w:footnotePr", settings.footnoteProperties);
+  if (settings?.footnoteProperties || footnoteRefs.length > 0) {
+    preserved.upTo("w:footnotePr");
+    renderSettingsNoteProperties(
+      xml,
+      "w:footnotePr",
+      settings?.footnoteProperties ?? {},
+      "w:footnote",
+      footnoteRefs
+    );
   }
-  if (settings?.endnoteProperties) {
-    renderSettingsNoteProperties(xml, "w:endnotePr", settings.endnoteProperties);
-  }
-
-  // Mail merge (round-trip preservation)
-  if (settings?.mailMergeRawXml) {
-    if (rawXmlPolicy === "reject") {
-      throw new DocxRawXmlPolicyError("settings.mailMergeRawXml");
-    }
-    if (rawXmlPolicy !== "strip") {
-      xml.writeRaw(settings.mailMergeRawXml);
-    }
-  }
-
-  // Write protection
-  if (settings?.writeProtection) {
-    const wp = settings.writeProtection;
-    const wpAttrs: Record<string, string> = {};
-    if (wp.recommended) {
-      wpAttrs["w:recommended"] = "1";
-    }
-    if (wp.algorithmName) {
-      wpAttrs["w:algorithmName"] = wp.algorithmName;
-    }
-    if (wp.hashValue) {
-      wpAttrs["w:hashValue"] = wp.hashValue;
-    }
-    if (wp.saltValue) {
-      wpAttrs["w:saltValue"] = wp.saltValue;
-    }
-    if (wp.spinCount !== undefined) {
-      wpAttrs["w:spinCount"] = String(wp.spinCount);
-    }
-    xml.leafNode("w:writeProtection", wpAttrs);
+  if (settings?.endnoteProperties || endnoteRefs.length > 0) {
+    preserved.upTo("w:endnotePr");
+    renderSettingsNoteProperties(
+      xml,
+      "w:endnotePr",
+      settings?.endnoteProperties ?? {},
+      "w:endnote",
+      endnoteRefs
+    );
   }
 
   // Compatibility
+  preserved.upTo("w:compat");
   xml.openNode("w:compat");
 
   // Legacy compat flags (w:useFELayout, etc.) come before compatSettings
@@ -329,6 +449,54 @@ export function renderSettings(
 
   xml.closeNode(); // w:compat
 
+  // Document variables
+  if (settings?.docVars && settings.docVars.size > 0) {
+    preserved.upTo("w:docVars");
+    xml.openNode("w:docVars");
+    for (const [name, val] of settings.docVars) {
+      xml.leafNode("w:docVar", { "w:name": name, "w:val": val });
+    }
+    xml.closeNode();
+  }
+
+  // RSID list (revision save IDs)
+  if (settings?.rsids) {
+    preserved.upTo("w:rsids");
+    xml.openNode("w:rsids");
+    if (settings.rsids.rsidRoot) {
+      xml.leafNode("w:rsidRoot", { "w:val": settings.rsids.rsidRoot });
+    }
+    if (settings.rsids.rsid) {
+      for (const id of settings.rsids.rsid) {
+        xml.leafNode("w:rsid", { "w:val": id });
+      }
+    }
+    xml.closeNode();
+  }
+
+  if (settings?.themeFontLang) {
+    const attrs: Record<string, string> = {};
+    if (settings.themeFontLang.val) {
+      attrs["w:val"] = settings.themeFontLang.val;
+    }
+    if (settings.themeFontLang.eastAsia) {
+      attrs["w:eastAsia"] = settings.themeFontLang.eastAsia;
+    }
+    if (settings.themeFontLang.bidi) {
+      attrs["w:bidi"] = settings.themeFontLang.bidi;
+    }
+    if (Object.keys(attrs).length > 0) {
+      leaf("w:themeFontLang", attrs);
+    }
+  }
+  if (settings?.decimalSymbol !== undefined) {
+    leaf("w:decimalSymbol", { "w:val": settings.decimalSymbol });
+  }
+  if (settings?.listSeparator !== undefined) {
+    leaf("w:listSeparator", { "w:val": settings.listSeparator });
+  }
+
+  preserved.rest();
   xml.closeNode();
 }
 
@@ -336,8 +504,27 @@ export function renderSettings(
 // Font Table
 // =============================================================================
 
+/** CT_Font's children. */
+const FONT_ORDER = schemaOrder([
+  "w:altName",
+  "w:panose1",
+  "w:charset",
+  "w:family",
+  "w:notTrueType",
+  "w:pitch",
+  "w:sig",
+  "w:embedRegular",
+  "w:embedBold",
+  "w:embedItalic",
+  "w:embedBoldItalic"
+]);
+
 /** Render word/fontTable.xml. */
-export function renderFontTable(xml: XmlSink, fonts?: readonly FontDef[]): void {
+export function renderFontTable(
+  xml: XmlSink,
+  fonts?: readonly FontDef[],
+  rawXmlPolicy?: "preserve" | "strip" | "reject"
+): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("w:fonts", { "xmlns:w": NS_W, "xmlns:r": NS_R });
 
@@ -348,17 +535,29 @@ export function renderFontTable(xml: XmlSink, fonts?: readonly FontDef[]): void 
   // statement.
   const allFonts = mergeFontDefs(DEFAULT_FONTS, fonts);
   for (const font of allFonts) {
+    const preserved = createPreservedEmitter(
+      xml,
+      FONT_ORDER,
+      preservedElements(font.preservedXml, rawXmlPolicy, "font.preservedXml")
+    );
     xml.openNode("w:font", { "w:name": font.name });
+    if (font.altName) {
+      xml.leafNode("w:altName", { "w:val": font.altName });
+    }
     if (font.panose1) {
+      preserved.upTo("w:panose1");
       xml.leafNode("w:panose1", { "w:val": font.panose1 });
     }
     if (font.charset) {
+      preserved.upTo("w:charset");
       xml.leafNode("w:charset", { "w:val": font.charset });
     }
     if (font.family) {
+      preserved.upTo("w:family");
       xml.leafNode("w:family", { "w:val": font.family });
     }
     if (font.pitch) {
+      preserved.upTo("w:pitch");
       xml.leafNode("w:pitch", { "w:val": font.pitch });
     }
     // Signature bytes
@@ -383,10 +582,12 @@ export function renderFontTable(xml: XmlSink, fonts?: readonly FontDef[]): void 
         sigAttrs["w:csb1"] = font.sig.csb1;
       }
       if (Object.keys(sigAttrs).length > 0) {
+        preserved.upTo("w:sig");
         xml.leafNode("w:sig", sigAttrs);
       }
     }
     // Embedded font references
+    preserved.upTo("w:embedRegular");
     if (font.embedRegular) {
       const attrs: Record<string, string> = { "r:id": font.embedRegular };
       if (font.embedRegularKey) {
@@ -415,6 +616,7 @@ export function renderFontTable(xml: XmlSink, fonts?: readonly FontDef[]): void 
       }
       xml.leafNode("w:embedBoldItalic", attrs);
     }
+    preserved.rest();
     xml.closeNode();
   }
 
@@ -431,11 +633,8 @@ function mergeFontDefs(
   defaults: readonly FontDef[],
   extra: readonly FontDef[] | undefined
 ): FontDef[] {
-  if (!extra || extra.length === 0) {
-    return [...defaults];
-  }
   const byName = new Map<string, FontDef>();
-  for (const font of [...defaults, ...extra]) {
+  for (const font of [...defaults, ...(extra ?? [])]) {
     byName.set(font.name.toLowerCase(), font);
   }
   return [...byName.values()];
@@ -502,6 +701,7 @@ const DEFAULT_FONTS: readonly FontDef[] = [
   },
   {
     name: "PMingLiU",
+    panose1: "02020500000000000000",
     charset: "88",
     family: "auto",
     pitch: "variable"
@@ -517,13 +717,6 @@ const DEFAULT_FONTS: readonly FontDef[] = [
     name: "DengXian",
     panose1: "02010600030101010101",
     charset: "86",
-    family: "auto",
-    pitch: "variable"
-  },
-  {
-    name: "PMingLiU",
-    panose1: "02020500000000000000",
-    charset: "88",
     family: "auto",
     pitch: "variable"
   }
@@ -590,8 +783,15 @@ export function renderCoreProperties(xml: XmlSink, props?: CoreProperties): void
 // App Properties (docProps/app.xml)
 // =============================================================================
 
-/** Render docProps/app.xml. */
-export function renderAppProperties(xml: XmlSink, props?: AppProperties): void {
+/**
+ * Render docProps/app.xml. CT_Properties is an `xsd:all`, so the elements the
+ * model does not represent (`props.preservedXml`) are simply appended.
+ */
+export function renderAppProperties(
+  xml: XmlSink,
+  props?: AppProperties,
+  rawXmlPolicy?: "preserve" | "strip" | "reject"
+): void {
   xml.openXml(STD_DOC_ATTRIBUTES);
   xml.openNode("Properties", {
     xmlns: NS_EP,
@@ -602,25 +802,32 @@ export function renderAppProperties(xml: XmlSink, props?: AppProperties): void {
   xml.leafNode("AppVersion", undefined, props?.appVersion ?? "1.0.0");
 
   if (props?.pages !== undefined) {
-    xml.leafNode("Pages", undefined, String(props.pages));
+    xml.leafNode("Pages", undefined, props.pages);
   }
   if (props?.words !== undefined) {
-    xml.leafNode("Words", undefined, String(props.words));
+    xml.leafNode("Words", undefined, props.words);
   }
   if (props?.characters !== undefined) {
-    xml.leafNode("Characters", undefined, String(props.characters));
+    xml.leafNode("Characters", undefined, props.characters);
   }
   if (props?.lines !== undefined) {
-    xml.leafNode("Lines", undefined, String(props.lines));
+    xml.leafNode("Lines", undefined, props.lines);
   }
   if (props?.paragraphs !== undefined) {
-    xml.leafNode("Paragraphs", undefined, String(props.paragraphs));
+    xml.leafNode("Paragraphs", undefined, props.paragraphs);
   }
   if (props?.company) {
     xml.leafNode("Company", undefined, props.company);
   }
   if (props?.manager) {
     xml.leafNode("Manager", undefined, props.manager);
+  }
+  for (const element of preservedElements(
+    props?.preservedXml,
+    rawXmlPolicy,
+    "appProperties.preservedXml"
+  )) {
+    xml.writeRaw(element);
   }
 
   xml.closeNode();
@@ -664,7 +871,7 @@ export function renderCustomProperties(xml: XmlSink, properties: readonly Custom
   for (const prop of properties) {
     xml.openNode("property", {
       fmtid: "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}",
-      pid: String(fmtid++),
+      pid: xmlValue(fmtid++, "pid"),
       name: prop.name
     });
 
@@ -674,9 +881,9 @@ export function renderCustomProperties(xml: XmlSink, properties: readonly Custom
         break;
       case "number":
         if (Number.isInteger(prop.value.value)) {
-          xml.leafNode("vt:i4", undefined, String(prop.value.value));
+          xml.leafNode("vt:i4", undefined, prop.value.value);
         } else {
-          xml.leafNode("vt:r8", undefined, String(prop.value.value));
+          xml.leafNode("vt:r8", undefined, prop.value.value);
         }
         break;
       case "boolean":
@@ -737,9 +944,20 @@ export function renderTheme(
   ] as const;
   for (const name of colorOrder) {
     const val = colorScheme?.colors[name] ?? defaultColors[name];
+    const system = colorScheme?.systemColors?.[name];
     xml.openNode(`a:${name}`);
-    // dk1/lt1 use sysClr in standard theme, but srgbClr also valid
-    xml.leafNode("a:srgbClr", { val });
+    // A system colour stays one unless `colors` was edited away from what it resolved to.
+    if (
+      system &&
+      (system.lastClr === undefined || system.lastClr.toUpperCase() === val.toUpperCase())
+    ) {
+      xml.leafNode("a:sysClr", {
+        val: system.val,
+        ...(system.lastClr !== undefined ? { lastClr: system.lastClr } : {})
+      });
+    } else {
+      xml.leafNode("a:srgbClr", { val });
+    }
     xml.closeNode();
   }
   xml.closeNode(); // a:clrScheme
@@ -780,6 +998,15 @@ export function renderTheme(
 
   xml.closeNode(); // a:themeElements
 
+  // objectDefaults, extraClrSchemeLst, custClrLst — between the two by CT_OfficeStyleSheet.
+  for (const element of preservedElements(
+    theme?.preservedXml,
+    rawXmlPolicy,
+    "theme.preservedXml"
+  )) {
+    xml.writeRaw(element);
+  }
+
   // Extension list (round-trip preservation)
   if (theme?.extLstXml) {
     if (rawXmlPolicy === "reject") {
@@ -800,9 +1027,10 @@ function renderThemeFont(
   fallbackLatin: string,
   isGeneratedTheme: boolean
 ): void {
-  xml.leafNode("a:latin", { typeface: font?.latin ?? fallbackLatin });
-  xml.leafNode("a:ea", { typeface: font?.eastAsia ?? "" });
-  xml.leafNode("a:cs", { typeface: font?.complexScript ?? "" });
+  const extra = font?.faceAttributes;
+  xml.leafNode("a:latin", { typeface: font?.latin ?? fallbackLatin, ...extra?.latin });
+  xml.leafNode("a:ea", { typeface: font?.eastAsia ?? "", ...extra?.ea });
+  xml.leafNode("a:cs", { typeface: font?.complexScript ?? "", ...extra?.cs });
   if (font?.supplementalFonts) {
     for (const [script, typeface] of Object.entries(font.supplementalFonts)) {
       xml.leafNode("a:font", { script, typeface });
@@ -855,7 +1083,7 @@ function renderDefaultFormatScheme(xml: XmlSink): void {
   // Line styles
   xml.openNode("a:lnStyleLst");
   for (let i = 0; i < 3; i++) {
-    xml.openNode("a:ln", { w: String(6350 + i * 6350) });
+    xml.openNode("a:ln", { w: xmlValue(6350 + i * 6350, "w") });
     xml.openNode("a:solidFill");
     xml.leafNode("a:schemeClr", { val: "phClr" });
     xml.closeNode();
@@ -904,7 +1132,7 @@ export function renderWebSettings(
       attrs["w:target"] = ws.optimizeForBrowser.target;
     }
     if (ws.optimizeForBrowser.majorVersion !== undefined) {
-      attrs["w:majorVersion"] = String(ws.optimizeForBrowser.majorVersion);
+      attrs["w:majorVersion"] = xmlValue(ws.optimizeForBrowser.majorVersion, "w:majorVersion");
     }
     xml.leafNode("w:optimizeForBrowser", attrs);
   }
@@ -971,16 +1199,7 @@ export function renderPeople(xml: XmlSink, people: readonly PersonInfo[]): void 
 
 /** Convert hash algorithm name to OOXML cryptAlgorithmSid value. */
 function hashAlgorithmToSid(algorithm: string): string {
-  switch (algorithm) {
-    case "SHA-1":
-      return "4";
-    case "SHA-256":
-      return "12";
-    case "SHA-384":
-      return "13";
-    case "SHA-512":
-      return "14";
-    default:
-      return "4"; // Default to SHA-1
-  }
+  // Either spelling of a SHA name, and every name the reader gives, maps back to
+  // its id: `"SHA256"` was written as SHA-1, and a hash read as `MD5` was too.
+  return sidOfHashAlgorithm(algorithm) ?? "4"; // A name with no id: SHA-1, as before.
 }

@@ -28,10 +28,100 @@ export interface ConditionalRuleLike {
   readonly formulae?: readonly unknown[];
 }
 
+/**
+ * Whether a formula is absent: not a string or number, or a string with nothing but whitespace in it.
+ *
+ * Whitespace counts as absent because it is not a formula in either container: the XLSX writer used to write
+ * `<formula> </formula>`, a condition Excel cannot evaluate, while the XLSB writer failed to tokenize the same text
+ * and refused the rule — so one model produced a broken file in one container and a refusal in the other.
+ */
+function isBlankFormula(formula: unknown): boolean {
+  return typeof formula === "string" ? formula.trim() === "" : typeof formula !== "number";
+}
+
 /** The rule's own formula, when it has one. */
 function stated(rule: ConditionalRuleLike): string | undefined {
   const first = rule.formulae?.[0];
-  return typeof first === "string" && first !== "" ? first : undefined;
+  return typeof first === "string" && !isBlankFormula(first) ? first : undefined;
+}
+
+/**
+ * The eight conditions of the text-matching family, by the XLSX `type` that names each.
+ *
+ * The model spells them two ways, and both are accepted everywhere: as the rule's own `type` (`"beginsWith"`, which
+ * is how XLSX names the rule, and how readers return `notContainsText`, `beginsWith` and `endsWith`) or as
+ * `type: "containsText"` with the condition in `operator`, the shape `ContainsTextRuleType` declares.
+ * `"notContains"` — XLSX's spelling of the *operator* attribute for `notContainsText` — is accepted as the same
+ * condition.
+ */
+export type TextRuleKind =
+  | "containsText"
+  | "notContainsText"
+  | "beginsWith"
+  | "endsWith"
+  | "containsBlanks"
+  | "notContainsBlanks"
+  | "containsErrors"
+  | "notContainsErrors";
+
+const TEXT_RULE_KINDS: ReadonlySet<string> = new Set<TextRuleKind>([
+  "containsText",
+  "notContainsText",
+  "beginsWith",
+  "endsWith",
+  "containsBlanks",
+  "notContainsBlanks",
+  "containsErrors",
+  "notContainsErrors"
+]);
+
+/** The text-family condition a rule states, or `undefined` when it is not one of them. */
+export function textRuleKind(rule: ConditionalRuleLike): TextRuleKind | undefined {
+  const asKind = (value: string | undefined): TextRuleKind | undefined =>
+    value === "notContains"
+      ? "notContainsText"
+      : value !== undefined && TEXT_RULE_KINDS.has(value)
+        ? (value as TextRuleKind)
+        : undefined;
+  if (rule.type === "containsText") {
+    // A bare `containsText` with no operator is the plain condition its name says.
+    return asKind(rule.operator) ?? "containsText";
+  }
+  return asKind(rule.type);
+}
+
+/**
+ * The `type` and `operator` a reader returns for a text-family condition — the shape the XLSX reader has always
+ * produced, so the binary reader gives the same model for the same rule.
+ *
+ * Five conditions fold onto `type: "containsText"` with the XLSX type in `operator`; the other three keep the XLSX
+ * spelling of both, `notContainsText`'s operator attribute being `notContains`.
+ */
+export function textRuleReadShape(kind: TextRuleKind): { type: string; operator: string } {
+  switch (kind) {
+    case "notContainsText":
+      return { type: "notContainsText", operator: "notContains" };
+    case "beginsWith":
+    case "endsWith":
+      return { type: kind, operator: kind };
+    default:
+      return { type: "containsText", operator: kind };
+  }
+}
+
+/** Whether a text-family condition carries a search string (`text`), which four of the eight do. */
+export function textRuleHasSearchString(kind: TextRuleKind): boolean {
+  return (
+    kind === "containsText" ||
+    kind === "notContainsText" ||
+    kind === "beginsWith" ||
+    kind === "endsWith"
+  );
+}
+
+/** A string as a formula literal: quoted, with each quote doubled, as Excel escapes one. */
+function stringLiteral(text: string): string {
+  return `"${text.replaceAll('"', '""')}"`;
 }
 
 /**
@@ -44,7 +134,7 @@ function topLeft(rule: ConditionalRuleLike): string | undefined {
   return rule.ref === undefined ? undefined : rangeTl(rangeCreate(rule.ref));
 }
 
-/** The formula for the text-matching family, or `undefined` when the operator has none. */
+/** The formula for the text-matching family, or `undefined` when the rule is not one of them. */
 export function textRuleFormula(rule: ConditionalRuleLike): string | undefined {
   const own = stated(rule);
   if (own !== undefined) {
@@ -54,15 +144,18 @@ export function textRuleFormula(rule: ConditionalRuleLike): string | undefined {
   if (tl === undefined) {
     return undefined;
   }
-  switch (rule.operator) {
+  // **Quotes in the search string are doubled.** Interpolated raw, `q"z` produced `SEARCH("q"z",C5)` — a formula
+  // that does not parse, so the XLSX file carried a broken condition and the XLSB writer refused the rule.
+  const text = stringLiteral(rule.text ?? "");
+  switch (textRuleKind(rule)) {
     case "containsText":
-      return `NOT(ISERROR(SEARCH("${rule.text ?? ""}",${tl})))`;
+      return `NOT(ISERROR(SEARCH(${text},${tl})))`;
     case "notContainsText":
-      return `ISERROR(SEARCH("${rule.text ?? ""}",${tl}))`;
+      return `ISERROR(SEARCH(${text},${tl}))`;
     case "beginsWith":
-      return `LEFT(${tl},LEN("${rule.text ?? ""}"))="${rule.text ?? ""}"`;
+      return `LEFT(${tl},LEN(${text}))=${text}`;
     case "endsWith":
-      return `RIGHT(${tl},LEN("${rule.text ?? ""}"))="${rule.text ?? ""}"`;
+      return `RIGHT(${tl},LEN(${text}))=${text}`;
     case "containsBlanks":
       return `LEN(TRIM(${tl}))=0`;
     case "notContainsBlanks":
@@ -115,30 +208,40 @@ export function timePeriodRuleFormula(rule: ConditionalRuleLike): string | undef
 /**
  * The formula for any rule that derives one, or `undefined`.
  *
- * The `containsText` family arrives with `type` collapsed onto `containsText` and the real kind moved into
- * `operator` — that is what the XML writer's `opType` does — so both spellings are accepted here rather than
- * making each caller normalise first.
+ * The text family is recognised in either spelling — see {@link textRuleKind} — so a caller does not have to
+ * normalise first.
  */
 export function derivedRuleFormula(rule: ConditionalRuleLike): string | undefined {
-  const TEXT_KINDS = new Set([
-    "containsText",
-    "notContainsText",
-    "beginsWith",
-    "endsWith",
-    "containsBlanks",
-    "notContainsBlanks",
-    "containsErrors",
-    "notContainsErrors"
-  ]);
   if (rule.type === "timePeriod") {
     return timePeriodRuleFormula(rule);
   }
-  if (TEXT_KINDS.has(rule.type ?? "") || TEXT_KINDS.has(rule.operator ?? "")) {
-    return textRuleFormula({
-      ...rule,
-      // When the kind is still in `type`, it is also the operator the switch above keys on.
-      operator: TEXT_KINDS.has(rule.operator ?? "") ? rule.operator : rule.type
-    });
+  if (textRuleKind(rule) !== undefined) {
+    return textRuleFormula(rule);
   }
   return stated(rule);
+}
+
+/**
+ * Why a rule cannot be written, when it states its condition only through formulas and does not have them.
+ *
+ * A comparison (`cellIs`) and an `expression` have nothing else to derive a condition from: with no operand the
+ * first compares against nothing and the second has no test, and a container cannot express either as a rule that
+ * means anything. Both writers ask this one question, so they skip and report the same rules — the XLSX writer used to
+ * fail on such a rule with a `TypeError`, and the XLSB writer wrote it with no formula at all.
+ *
+ * @returns `undefined` when the rule has what it needs.
+ */
+export function missingRuleFormula(rule: ConditionalRuleLike): string | undefined {
+  if (rule.type !== "cellIs" && rule.type !== "expression") {
+    return undefined;
+  }
+  const needed =
+    rule.type === "cellIs" && (rule.operator === "between" || rule.operator === "notBetween")
+      ? 2
+      : 1;
+  const present = (rule.formulae ?? []).filter(formula => !isBlankFormula(formula)).length;
+  if (present >= needed) {
+    return undefined;
+  }
+  return `${rule.type} rule needs ${needed} formula(s) and has ${present}`;
 }

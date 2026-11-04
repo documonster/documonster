@@ -20,19 +20,19 @@ describe.each(["rc4-40", "rc4-128", "aes-128", "aes-256-r6"])("%s", name => {
 
   it("opens with the user and the owner password, and refuses a wrong one", async () => {
     for (const password of ["user", "owner"]) {
-      const read = await Pdf.read(original, { password });
+      const read = await Pdf.extract(original, { password });
       expect(read.pages[0].text).toContain("Base text");
     }
-    await expect(Pdf.read(original, { password: "wrong" })).rejects.toThrow();
+    await expect(Pdf.extract(original, { password: "wrong" })).rejects.toThrow();
   });
 
   it("appends an encrypted update that reads back", async () => {
-    const editor = Pdf.Editor.load(original, { password: "user" });
+    const editor = Pdf.Editor.read(original, { password: "user" });
     editor.getPage(0).drawText("Appended (é) text", { x: 72, y: 450, fontSize: 12 });
-    const updated = await editor.saveIncremental();
+    const updated = await editor.toBuffer({ incremental: true });
     expect(updated.subarray(0, original.length)).toEqual(original);
     expect(latin1(updated.subarray(original.length))).not.toContain("Appended");
-    const read = await Pdf.read(updated, { password: "user" });
+    const read = await Pdf.extract(updated, { password: "user" });
     expect(read.pages[0].text).toContain("Base text");
     expect(read.pages[0].text).toContain("Appended (é) text");
   });
@@ -54,10 +54,10 @@ describe("crypt filters", () => {
   const load = (name: string) => new Uint8Array(readFileSync(join(DIR, `${name}.pdf`)));
 
   async function roundTrip(original: Uint8Array): Promise<Uint8Array> {
-    const editor = Pdf.Editor.load(original, { password: "user" });
+    const editor = Pdf.Editor.read(original, { password: "user" });
     editor.getPage(0).drawText("Appended text", { x: 72, y: 450, fontSize: 12 });
-    const updated = await editor.saveIncremental();
-    const read = await Pdf.read(updated, { password: "user" });
+    const updated = await editor.toBuffer({ incremental: true });
+    const read = await Pdf.extract(updated, { password: "user" });
     expect(read.pages[0].text).toContain("Base text");
     expect(read.pages[0].text).toContain("Appended text");
     return updated;
@@ -66,7 +66,7 @@ describe("crypt filters", () => {
   it.each(["aes-128-identity-streams", "aes-128-identity-strings"])(
     "%s: reads strings and streams through their own filter",
     async name => {
-      const read = await Pdf.read(load(name), { password: "user" });
+      const read = await Pdf.extract(load(name), { password: "user" });
       expect(read.pages[0].text).toContain("Base text");
       expect(read.metadata.title).toBe("Secret title");
     }
@@ -89,7 +89,7 @@ describe("crypt filters", () => {
   it("reads a cleartext metadata stream when /EncryptMetadata is false", async () => {
     const original = load("aes-128-cleartext-metadata");
     expect(latin1(original)).toContain("Cleartext XMP");
-    const read = await Pdf.read(original, { password: "user" });
+    const read = await Pdf.extract(original, { password: "user" });
     expect(read.metadata.xmpXml).toContain("Cleartext XMP");
     expect(read.pages[0].text).toContain("Base text");
     await roundTrip(original);
@@ -97,7 +97,7 @@ describe("crypt filters", () => {
 
   it("does not decrypt strings of objects inside an object stream twice", async () => {
     const original = load("aes-128-object-streams");
-    const read = await Pdf.read(original, { password: "user" });
+    const read = await Pdf.extract(original, { password: "user" });
     expect(read.metadata.title).toBe("Secret title");
     await roundTrip(original);
   });

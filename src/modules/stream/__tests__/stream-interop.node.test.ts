@@ -194,13 +194,13 @@ async function typedNodeEntry(): Promise<void> {
   await nativePipeline(RS.Readable.from(["a"]), typed);
   void [asNative, asReadWrite];
   const duplex: nodeEntry.Duplex = nodeEntry.Duplex.from(RS.Readable.from(["a"]));
-  const web: ReadableStream = nodeEntry.readableToWeb(RS.Readable.from(["a"]));
-  const sink: WritableStream = nodeEntry.writableToWeb(theirSink(out));
-  const text: string = await nodeEntry.text(RS.Readable.from([new Uint8Array(1)]));
+  const web: ReadableStream = nodeEntry.Streams.toWebReadable(RS.Readable.from(["a"]));
+  const sink: WritableStream = nodeEntry.Streams.toWebWritable(theirSink(out));
+  const text: string = await nodeEntry.Streams.text(RS.Readable.from([new Uint8Array(1)]));
   const flags: boolean[] = [
     nodeEntry.isReadable(RS.Readable.from(["a"])),
-    nodeEntry.isStream(theirSink(out)),
-    nodeEntry.isTransform(theirUpper())
+    nodeEntry.Streams.isStream(theirSink(out)),
+    nodeEntry.Streams.isTransform(theirUpper())
   ];
   RS.Readable.from(["a"]).pipe(new nodeEntry.PassThrough());
   void [composed, typed, length, duplex, web, sink, text, flags];
@@ -222,13 +222,13 @@ async function typedBrowserEntry(): Promise<void> {
   });
   const length: number | null = typed.read();
   const duplex: browserEntry.Duplex = browserEntry.Duplex.from(RS.Readable.from(["a"]));
-  const web: ReadableStream = browserEntry.readableToWeb(RS.Readable.from(["a"]));
-  const sink: WritableStream = browserEntry.writableToWeb(theirSink(out));
-  const text: string = await browserEntry.text(RS.Readable.from([new Uint8Array(1)]));
+  const web: ReadableStream = browserEntry.Streams.toWebReadable(RS.Readable.from(["a"]));
+  const sink: WritableStream = browserEntry.Streams.toWebWritable(theirSink(out));
+  const text: string = await browserEntry.Streams.text(RS.Readable.from([new Uint8Array(1)]));
   const flags: boolean[] = [
     browserEntry.isReadable(RS.Readable.from(["a"])),
-    browserEntry.isStream(theirSink(out)),
-    browserEntry.isTransform(theirUpper())
+    browserEntry.Streams.isStream(theirSink(out)),
+    browserEntry.Streams.isTransform(theirUpper())
   ];
   RS.Readable.from(["a"]).pipe(new browserEntry.PassThrough());
   void [composed, typed, length, duplex, web, sink, text, flags];

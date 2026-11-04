@@ -18,6 +18,7 @@
  * than the code.
  */
 
+import { Draw } from "@draw/index";
 import { BasicRasterCanvas } from "@draw/raster/canvas";
 import type { RasterFont, RasterFontSource } from "@draw/raster/glyph-outline";
 import {
@@ -147,14 +148,49 @@ describe("raster font fallback", () => {
   });
 
   it("keeps supplied faces ahead of anything discovered", () => {
-    const chain = resolveFontChain("中文", parseInjectedFonts([cjkFont()]), true);
+    const chain = resolveFontChain("中文", parseInjectedFonts([cjkFont()]).fonts, true);
     expect(chain[0].familyName).toBe("Fixture CJK");
   });
 
-  it("skips a font it cannot parse instead of throwing", () => {
-    const fonts = parseInjectedFonts([new Uint8Array([1, 2, 3, 4]), cjkFont()]);
+  it("skips a font it cannot parse instead of throwing, and says which", () => {
+    const { fonts, warnings } = parseInjectedFonts([new Uint8Array([1, 2, 3, 4]), cjkFont()]);
     expect(fonts.map(f => f.familyName)).toEqual(["Fixture CJK"]);
     expect(draw("中", fonts).uncovered).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^fonts\[0\] could not be read \(.+\) and was skipped\.$/);
+  });
+
+  it("reports a dropped supplied font in RasterizedImage.textWarnings (R4P-C3)", () => {
+    const list = {
+      width: 40,
+      height: 20,
+      children: [
+        {
+          kind: "text" as const,
+          x: 2,
+          y: 14,
+          lines: [{ text: "中", dy: 0 }],
+          style: { size: 12, fill: { r: 0, g: 0, b: 0, a: 1 } }
+        }
+      ]
+    };
+    const image = Draw.toRgba(list, {
+      fonts: [new Uint8Array(10), cjkFont()],
+      useSystemFonts: false
+    });
+    expect(image.uncoveredCodePoints).toEqual([]);
+    expect(image.textWarnings).toEqual([
+      expect.stringMatching(/^fonts\[0\] could not be read \(.+\) and was skipped\.$/)
+    ]);
+    // A face named past the end of its collection still draws with face 0, and says so.
+    const past = Draw.toRgba(list, {
+      fonts: [{ data: cjkFont(), collectionIndex: 3 }],
+      useSystemFonts: false
+    });
+    expect(past.uncoveredCodePoints).toEqual([]);
+    expect(past.textWarnings).toEqual([
+      expect.stringMatching(/^fonts\[0\]: collectionIndex 3 is out of range .*; face 0 was used\.$/)
+    ]);
   });
 
   it("degrades a font with no outlines to one that draws nothing", () => {

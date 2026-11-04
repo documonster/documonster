@@ -4,13 +4,15 @@
  * Plain functions over the workbook model, like the XLSB writer beside it. Charts are written by
  * `write/charts`, which is loaded only for a package that has one, and nothing here imports the reader.
  */
+import { missingRuleFormula } from "@excel/core/conditional-formula";
 import {
   imageContentTypeFor,
-  isForeignSheetPart,
+  isForeignContainerPart,
   isRootOrWorkbookSourced
 } from "@excel/core/opaque-part";
 import type { PivotTable } from "@excel/core/pivot-table";
 import { refuseUnsupported } from "@excel/core/unsupported";
+import { namedStyleMap } from "@excel/core/workbook-core";
 import type { Workbook, ExternalLinkModel, NamedStyleEntry } from "@excel/core/workbook.browser";
 import {
   _collectExternalLinksForWrite,
@@ -20,8 +22,15 @@ import {
 import type { XlsxWritable } from "@excel/core/xlsx-io-types";
 import { ImageError, TableError } from "@excel/errors";
 import type { ThreadedCommentPerson } from "@excel/types";
+import {
+  claimArrayRange,
+  overlappingArrayReason,
+  type ArrayRange
+} from "@excel/utils/array-ranges";
 import { filterDrawingAnchors, isExternalImage } from "@excel/utils/drawing-utils";
 import { rewriteExternalRefs } from "@excel/utils/external-link-formula";
+import { formulaNameSet, hasUnnamedThisRow } from "@excel/utils/future-functions";
+import { MediaReferenceTracker } from "@excel/utils/media-references";
 import {
   commentsPath,
   chartsheetPath,
@@ -55,7 +64,16 @@ import {
   worksheetRelsPath,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
+import { isStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
 import { StreamBuf } from "@excel/utils/stream-buf";
+import { tableNameAt } from "@excel/utils/table-at";
+import {
+  writableConditionalFormattings,
+  writableDataValidations,
+  writableDefinedNames,
+  type FormulaCheck
+} from "@excel/utils/unwritable-formulas";
+import { createVmlShapeIdSpace, reserveVmlShapeIds } from "@excel/utils/vml-shape-ids";
 import type {
   OpaquePart,
   OpaqueRelationship,
@@ -92,11 +110,13 @@ import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { FeaturePropertyBagXform } from "@excel/xlsx/xform/core/feature-property-bag-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { writesDynamicArray } from "@excel/xlsx/xform/sheet/cell-xform";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
 import { theme1Xml } from "@excel/xlsx/xml/theme1";
 import { appendToZip, createZipWriterAdapter, renderToZip } from "@excel/xlsx/zip-writer";
+import { excelNameKey } from "@utils/name-key";
 
 /**
  * Add `sheetName` to an ExternalLinkModel's `sheetNames` list if it isn't
@@ -210,6 +230,82 @@ async function runWriteBufferSelfCheck(bytes: Uint8Array): Promise<void> {
   }
 }
 
+/** Whether any sheet has an ordinary formula that was not read from a file — see `stored-formulas.ts`. */
+function hasAuthoredFormula(model: any): boolean {
+  return (model.worksheets ?? []).some((worksheet: any) =>
+    (worksheet.rows ?? []).some((row: any) =>
+      (row.cells ?? []).some(
+        (cell: any) =>
+          typeof cell?.formula === "string" &&
+          cell.shareType === undefined &&
+          !isStoredOrdinaryFormula(cell)
+      )
+    )
+  );
+}
+
+/** Whether any part of the workbook may hold a formula — a cell, a conditional format, a validation, a name. */
+function mayHoldFormula(model: any): boolean {
+  return (
+    (model.definedNames ?? []).length > 0 ||
+    (model.worksheets ?? []).some(
+      (worksheet: any) =>
+        (worksheet.conditionalFormattings ?? []).length > 0 ||
+        Object.keys(worksheet.dataValidations ?? {}).length > 0 ||
+        (worksheet.rows ?? []).some((row: any) =>
+          (row.cells ?? []).some((cell: any) => typeof cell?.formula === "string")
+        )
+    )
+  );
+}
+
+/**
+ * Leave out what holds a formula Excel will not open, and say what it was, as `Sheet!A1: reason`.
+ *
+ * Conditional formats, validations and defined names are replaced on the write model by copies without them. A cell is
+ * written with its cached value by `CellXform.prepare`, which asks the same `check`; a shared formula's dependents go
+ * with their master, as they do for an unnamed this-row reference.
+ */
+function dropUnwritableFormulas(model: any, check: FormulaCheck): string[] {
+  const lost: string[] = [];
+  for (const worksheet of model.worksheets ?? []) {
+    const masters = new Set<string>();
+    for (const row of worksheet.rows ?? []) {
+      for (const cell of row.cells ?? []) {
+        const reason = typeof cell?.formula === "string" ? check(cell.formula) : undefined;
+        if (reason !== undefined) {
+          masters.add(cell.address);
+          lost.push(`${worksheet.name}!${cell.address}: ${reason}`);
+        } else if (typeof cell?.sharedFormula === "string" && masters.has(cell.sharedFormula)) {
+          lost.push(
+            `${worksheet.name}!${cell.address}: formula (its shared master ${cell.sharedFormula} cannot be written)`
+          );
+        }
+      }
+    }
+    if (worksheet.conditionalFormattings !== undefined) {
+      worksheet.conditionalFormattings = writableConditionalFormattings(
+        worksheet.conditionalFormattings,
+        check,
+        `${worksheet.name}!`,
+        lost
+      );
+    }
+    if (worksheet.dataValidations !== undefined) {
+      worksheet.dataValidations = writableDataValidations(
+        worksheet.dataValidations,
+        check,
+        `${worksheet.name}!`,
+        lost
+      );
+    }
+  }
+  if (model.definedNames !== undefined) {
+    model.definedNames = writableDefinedNames(model.definedNames, check, lost);
+  }
+  return lost;
+}
+
 function hasChartParts(model: any): boolean {
   const nonEmpty = (record: Record<string, unknown> | undefined) =>
     !!record && Object.keys(record).length > 0;
@@ -218,6 +314,16 @@ function hasChartParts(model: any): boolean {
     nonEmpty(model.chartExEntries) ||
     nonEmpty(model.chartExStructuredEntries)
   );
+}
+
+/** `test` asked with the workbook's registered functions, when it has any. */
+function withRegisteredFunctions(
+  test: (formula: string, functions?: Workbook["userFunctions"]) => boolean,
+  functions: Workbook["userFunctions"]
+): (formula: string) => boolean {
+  return functions === undefined || functions.size === 0
+    ? test
+    : formula => test(formula, functions);
 }
 
 /**
@@ -230,7 +336,27 @@ async function writeXlsxPackage(
   options?: XlsxWriteOptions
 ): Promise<void> {
   const model = getWorkbookModel(workbook);
-  prepareModel(workbook, model, options);
+  // The test for a formula that has to be written as a dynamic array parses formulas, so it is loaded only when a
+  // sheet has a formula a caller set — see `CellXform.prepare`.
+  // The workbook's registered functions declare whether they return arrays, which decides for a formula calling one.
+  const needsArrayEvaluation = hasAuthoredFormula(model)
+    ? withRegisteredFunctions(
+        (await import("@excel/xlsx/write/array-formulas")).needsArrayEvaluation,
+        workbook.userFunctions
+      )
+    : undefined;
+  // A formula Excel refuses to open — a constant where only a reference is accepted, `RANK(2,{2,2,1})` — is written
+  // nowhere: a cell keeps its cached value, and a conditional format, validation or defined name holding one is left
+  // out. Checked for every formula, read or set: the check parses only those that call such a function.
+  const unwritableFormula = mayHoldFormula(model)
+    ? (await import("@excel/xlsx/write/array-formulas")).unwritableFormulaReason
+    : undefined;
+  const formulaLosses =
+    unwritableFormula === undefined ? [] : dropUnwritableFormulas(model, unwritableFormula);
+  prepareModel(workbook, model, { ...options, needsArrayEvaluation, unwritableFormula });
+  // Media are written last, and only those some written part references — see `media-references.ts`.
+  const mediaReferences = new MediaReferenceTracker();
+  zip = observeParts(zip, mediaReferences);
   // **`unsupported` is honoured here, and used to be inert for this container.**
   //
   // `WorkbookWriteOptions.unsupported` is declared for both formats and was consulted only by the XLSB writer, so
@@ -248,7 +374,13 @@ async function writeXlsxPackage(
   // was passed. Read through the narrower shape rather than widening this function's signature, which every
   // caller shares.
   refuseUnsupported(
-    model.opaqueForeignSheetParts ?? [],
+    [
+      ...(model.opaqueForeignSheetParts ?? []),
+      ...unwritableConditionalRules(model),
+      ...unnamedThisRowCells(model),
+      ...overlappingArrayCells(model),
+      ...formulaLosses
+    ],
     options as { readonly unsupported?: "error" | "ignore" } | undefined,
     "XLSX"
   );
@@ -283,12 +415,64 @@ async function writeXlsxPackage(
   await addStyles(zip, model);
   await addFeaturePropertyBag(zip, model);
   await addMetadata(zip, model);
-  await addMedia(zip, model);
   await addApp(zip, model);
   await addCore(zip, model);
   await addPersons(zip, model);
   await addSlicerAndTimelineParts(zip, model);
   await addOpaqueParts(zip, model);
+  await addMedia(zip, model, mediaReferences, workbook._releasedMedia);
+}
+
+/**
+ * `zip`, reporting every part written through it to `tracker`.
+ *
+ * An explicit decorator over the two write paths `IZipWriter` has — `append` (`appendToZip`) and
+ * `createEntry` (`renderToZip`) — rather than an interception of arbitrary members: every other
+ * member is forwarded by name, so a new write path added to the interface is a compile error here
+ * instead of a part the tracker silently never sees. Base64 parts are media bytes, never references.
+ */
+function observeParts(zip: IZipWriter, tracker: MediaReferenceTracker): IZipWriter {
+  const observed: IZipWriter = {
+    append(data, options) {
+      if (!options.base64) {
+        tracker.observe(options.name, data);
+      }
+      zip.append(data, options);
+    },
+    createEntry(name) {
+      const entry = zip.createEntry(name);
+      if (!tracker.wants(name)) {
+        return entry;
+      }
+      const chunks: Array<string | Uint8Array> = [];
+      return {
+        write(chunk) {
+          chunks.push(chunk);
+          entry.write(chunk);
+        },
+        end() {
+          tracker.observeChunks(name, chunks);
+          entry.end();
+        }
+      };
+    },
+    pipe: stream => zip.pipe(stream),
+    finalize: () => zip.finalize(),
+    waitForDrain: () => zip.waitForDrain(),
+    on(event, listener) {
+      zip.on(event, listener);
+      return observed;
+    },
+    once(event, listener) {
+      zip.once(event, listener);
+      return observed;
+    },
+    off(event, listener) {
+      zip.off(event, listener);
+      return observed;
+    }
+  };
+  return observed;
 }
 
 /**
@@ -408,13 +592,19 @@ export async function writeXlsxBytes(
  * Add media files to ZIP
  * Supports buffer, base64, and filename (Node only — see `write/media-file`)
  */
-async function addMedia(zip: IZipWriter, model: MediaModel): Promise<void> {
+async function addMedia(
+  zip: IZipWriter,
+  model: MediaModel,
+  references: MediaReferenceTracker,
+  /** Media ids an API call stopped using — the only ones a write may leave out. */
+  releasedMedia: ReadonlySet<number> | undefined
+): Promise<void> {
   // Keep filename reads concurrent as before, but append the resolved data in
   // model order. ZIP output itself is strictly sequential, and only a
   // sequential append makes each completion promise mean that entry's bytes
   // have reached the sink before backpressure is inspected.
   const resolved = await Promise.all(
-    (model.media as WorkbookMediaLike[]).map(async medium => {
+    (model.media as WorkbookMediaLike[]).map(async (medium, index) => {
       if (medium.type !== "image") {
         throw new ImageError("Unsupported media");
       }
@@ -428,7 +618,14 @@ async function addMedia(zip: IZipWriter, model: MediaModel): Promise<void> {
 
       // Preserve legacy behavior: `${undefined}` becomes "undefined" in template strings
       const mediaName = medium.name ?? "undefined";
-      const name = mediaPath(`${mediaName}.${medium.extension}`);
+      const fileName = `${mediaName}.${medium.extension}`;
+      // Still registered, no longer used — an API call removed its last use. The model keeps it,
+      // so its id stays valid; only this package goes without the bytes. Media that were never
+      // released (unplaced, or unreferenced in the file that was read) are written as before.
+      const name = mediaPath(fileName);
+      if (releasedMedia?.has(index) && !references.isReferenced(name)) {
+        return null;
+      }
 
       if (medium.filename) {
         return { data: await readMediaFile(medium.filename), options: { name } };
@@ -627,16 +824,20 @@ async function addThemes(zip: IZipWriter, model: any): Promise<void> {
   // The XLSB writer has the same guard for the same reason, in `themeParts`: a fallback exists to stop a package
   // having *no* theme, and a preserved one means it has one. Suppressing it on the *path* rather than on the
   // existence of any preserved theme is what keeps a preserved `theme2.xml` from silencing the default for `theme1`.
+  //
+  // **`theme1` is ensured, not merely defaulted when nothing is modelled.** The workbook relationship and the
+  // content-type override always name `xl/theme/theme1.xml`, so a package without that part dangles both. An XLSX
+  // read of a file that carries no theme models `themes` as `{}` — set, so a `model.themes || default` fallback
+  // never fired and the package declared a part it did not contain.
   const preserved = new Set(
     ((model.opaqueParts ?? []) as readonly OpaquePart[]).map(part => part.path.toLowerCase())
   );
-  const themes = model.themes || { theme1: theme1Xml };
+  const themes: Record<string, string> = { ...model.themes };
+  if (themes.theme1 === undefined && !preserved.has(themePath("theme1").toLowerCase())) {
+    themes.theme1 = theme1Xml;
+  }
   for (const name of Object.keys(themes)) {
-    const path = themePath(name);
-    if (!model.themes && preserved.has(path.toLowerCase())) {
-      continue;
-    }
-    await appendToZip(zip, themes[name], { name: path });
+    await appendToZip(zip, themes[name], { name: themePath(name) });
   }
 }
 
@@ -648,6 +849,92 @@ async function addOfficeRels(zip: IZipWriter, model: any): Promise<void> {
   ];
   appendOpaqueSourceRelationships(relationships, model.opaqueParts, "");
   await renderToZip(zip, OOXML_PATHS.rootRels, new RelationshipsXform(), relationships);
+}
+
+/**
+ * The conditional-formatting rules this write leaves out, as `Sheet!range: reason`.
+ *
+ * A comparison or an expression rule without its formula is skipped by the worksheet writer (see
+ * `missingRuleFormula`) — there is no `<cfRule>` that says "compare against nothing" — and this is how the skip
+ * reaches the caller: through `unsupported`, like every other thing a writer cannot carry.
+ */
+function unwritableConditionalRules(model: any): string[] {
+  const lost: string[] = [];
+  for (const worksheet of model.worksheets ?? []) {
+    for (const block of worksheet.conditionalFormattings ?? []) {
+      for (const rule of block.rules ?? []) {
+        const reason = missingRuleFormula(rule);
+        if (reason !== undefined) {
+          lost.push(`${worksheet.name}!${block.ref}: conditional formatting ${reason}`);
+        }
+      }
+    }
+  }
+  return lost;
+}
+
+/**
+ * Cells whose formula holds an unnamed this-row reference (`[@x]`) and that sit in no table, as `Sheet!A1: reason`.
+ *
+ * A file stores a this-row reference with its table's name, and there is no table to name: Excel reads the unnamed
+ * form as `#REF!`. Such a cell is written with its cached value and no formula (see `CellXform.prepare`), and this is
+ * how that reaches the caller.
+ */
+function unnamedThisRowCells(model: any): string[] {
+  const lost: string[] = [];
+  for (const worksheet of model.worksheets ?? []) {
+    const tableAt = tableNameAt(worksheet.tables);
+    // A shared master lost this way takes its dependents with it — see `CellXform.prepare`.
+    const masters = new Set<string>();
+    for (const row of worksheet.rows ?? []) {
+      for (const cell of row.cells ?? []) {
+        if (
+          typeof cell.formula === "string" &&
+          hasUnnamedThisRow(cell.formula) &&
+          tableAt(cell.address) === undefined
+        ) {
+          masters.add(cell.address);
+          lost.push(
+            `${worksheet.name}!${cell.address}: formula (an unnamed this-row reference outside any table)`
+          );
+        } else if (typeof cell.sharedFormula === "string" && masters.has(cell.sharedFormula)) {
+          lost.push(
+            `${worksheet.name}!${cell.address}: formula (its shared master ${cell.sharedFormula} has an unnamed this-row reference outside any table)`
+          );
+        }
+      }
+    }
+  }
+  return lost;
+}
+
+/**
+ * Array formulas whose master sits inside an earlier array's range, as `Sheet!A1: reason`.
+ *
+ * Excel refuses a cell that is both a member of one array and the master of another. The cell is written with its
+ * cached result (see `CellXform.prepare`, which claims the ranges in the same order through the same rule), and this is
+ * how that reaches the caller.
+ */
+function overlappingArrayCells(model: any): string[] {
+  const lost: string[] = [];
+  for (const worksheet of model.worksheets ?? []) {
+    const ranges: ArrayRange[] = [];
+    for (const row of worksheet.rows ?? []) {
+      for (const cell of row.cells ?? []) {
+        if (
+          cell?.shareType === "array" &&
+          typeof cell.ref === "string" &&
+          typeof cell.formula === "string"
+        ) {
+          const outer = claimArrayRange(ranges, cell.address, cell.ref);
+          if (outer !== undefined) {
+            lost.push(`${worksheet.name}!${cell.address}: ${overlappingArrayReason(outer)}`);
+          }
+        }
+      }
+    }
+  }
+  return lost;
 }
 
 /**
@@ -665,18 +952,20 @@ function resolveOpaqueReachability(model: any): void {
   // containers is what made this reachable in the first place: reading `cal-any_sheets.xlsb` and writing XLSX put
   // `xl/chartsheets/sheet1.bin` — content type `application/vnd.ms-excel.chartsheet` — inside the output. Reported as
   // a drop with its own reason, because "could not cross the container" is a different fact from "nothing points at
-  // it any more". See `isForeignSheetPart`.
-  const foreign = all.filter(part => isForeignSheetPart(part, "xlsx"));
-  const parts = foreign.length === 0 ? all : all.filter(part => !isForeignSheetPart(part, "xlsx"));
+  // it any more". See `isForeignContainerPart`.
+  const foreign = all.filter(part => isForeignContainerPart(part, "xlsx"));
+  const parts =
+    foreign.length === 0 ? all : all.filter(part => !isForeignContainerPart(part, "xlsx"));
   if (foreign.length > 0) {
     model.opaqueParts = parts;
     // Recorded on the model so `writeXlsxPackage` can apply `unsupported` to it — the one loss this writer has, and the
     // reason the option is no longer inert for XLSX. Unlike `opaqueDrops`, this is read back in the same call.
     model.opaqueForeignSheetParts = foreign.map(
-      part => `${part.path}: preserved sheet part from the other container`
+      part => `${part.path}: preserved part from the other container`
     );
   }
   if (parts.length === 0) {
+    pruneSheetRelationships(model, parts);
     return;
   }
 
@@ -705,6 +994,9 @@ function resolveOpaqueReachability(model: any): void {
 
   const resolved = resolveReachableOpaqueParts(parts, emitted);
   if (resolved.drops.length === 0) {
+    if (foreign.length > 0) {
+      pruneSheetRelationships(model, parts);
+    }
     return;
   }
 
@@ -720,8 +1012,16 @@ function resolveOpaqueReachability(model: any): void {
   // `WorkbookReadOptions.blankCells` already documents for the collapsed-blank case. Stating that is better than an
   // assignment implying otherwise.
 
-  // A sheet must not keep pointing at a part that is no longer written.
-  const kept = new Set(resolved.parts.map(part => part.path.toLowerCase()));
+  pruneSheetRelationships(model, resolved.parts);
+}
+
+/**
+ * A sheet must not keep pointing at a part that is no longer written — whether it became unreachable or could not
+ * cross the container (a foreign part's sheet edge would otherwise dangle).
+ */
+function pruneSheetRelationships(model: any, writtenParts: readonly OpaquePart[]): void {
+  const canonicalSheet = worksheetPath(1);
+  const kept = new Set(writtenParts.map(part => part.path.toLowerCase()));
   for (const worksheet of model.worksheets ?? []) {
     if (!worksheet.opaqueRels) {
       continue;
@@ -901,8 +1201,17 @@ async function addStyles(zip: IZipWriter, model: any): Promise<void> {
   }
 }
 
+/**
+ * The workbook's defined names, for the parts that hold formulas: a bare function name passed as an argument is
+ * written `_xleta.SUM` unless the workbook defines that name — see `toFileFormula`. Read at render time, after the
+ * chart writer has added its hidden `_xlchart.` names.
+ */
+function formulaNames(model: any): ReadonlySet<string> {
+  return formulaNameSet(model.definedNames ?? []);
+}
+
 async function addWorkbook(zip: IZipWriter, model: any): Promise<void> {
-  await renderToZip(zip, OOXML_PATHS.xlWorkbook, new WorkbookXform(), model);
+  await renderToZip(zip, OOXML_PATHS.xlWorkbook, new WorkbookXform(), model, formulaNames(model));
 }
 
 async function addWorksheets(zip: IZipWriter, model: any): Promise<void> {
@@ -915,7 +1224,10 @@ async function addWorksheets(zip: IZipWriter, model: any): Promise<void> {
   const needsComments = model.worksheets.some((ws: any) => ws.comments.length > 0);
   const needsVml = model.worksheets.some(
     (ws: any) =>
-      ws.comments.length > 0 || (ws.formControls && ws.formControls.length > 0) || ws.headerImage
+      ws.comments.length > 0 ||
+      (ws.formControls && ws.formControls.length > 0) ||
+      ws.legacyControls?.length > 0 ||
+      ws.headerImage
   );
   const needsCtrlProp = model.worksheets.some(
     (ws: any) => ws.formControls && ws.formControls.length > 0
@@ -936,7 +1248,13 @@ async function addWorksheets(zip: IZipWriter, model: any): Promise<void> {
 
     // Worksheet XML: stream directly to the zip entry (avoids holding the
     // entire XML in memory) and use the shared completion/backpressure path.
-    await renderToZip(zip, worksheetPath(fileIndex), worksheetXform, worksheet);
+    await renderToZip(
+      zip,
+      worksheetPath(fileIndex),
+      worksheetXform,
+      worksheet,
+      formulaNames(model)
+    );
 
     if (worksheet.rels && worksheet.rels.length) {
       await renderToZip(zip, worksheetRelsPath(fileIndex), relationshipsXform, worksheet.rels);
@@ -961,11 +1279,14 @@ async function addWorksheets(zip: IZipWriter, model: any): Promise<void> {
     // Generate unified VML drawing (contains both notes and form controls)
     const hasComments = worksheet.comments.length > 0;
     const hasFormControls = worksheet.formControls && worksheet.formControls.length > 0;
+    const legacyControls = worksheet.legacyControls ?? [];
 
-    if (hasComments || hasFormControls) {
+    if (hasComments || hasFormControls || legacyControls.length > 0) {
       await renderToZip(zip, vmlDrawingPath(fileIndex), vmlDrawingXform!, {
         comments: hasComments ? worksheet.comments : [],
-        formControls: hasFormControls ? worksheet.formControls : []
+        formControls: hasFormControls ? worksheet.formControls : [],
+        legacyControls,
+        shapeIds: worksheet.vmlShapeIds
       });
     }
 
@@ -981,8 +1302,10 @@ async function addWorksheets(zip: IZipWriter, model: any): Promise<void> {
           imageRelId: hdrImage.imageRelId,
           width: hdrImage.headerWidth,
           height: hdrImage.headerHeight,
-          position: hdrImage.position
-        }))
+          position: hdrImage.position,
+          shape: hdrImage.vmlShape
+        })),
+        shapeIds: worksheet.headerImageShapeIds
       });
 
       // Write the VML rels file referencing the image
@@ -1011,6 +1334,12 @@ async function addWorksheets(zip: IZipWriter, model: any): Promise<void> {
     if (hasFormControls) {
       for (const control of worksheet.formControls) {
         await renderToZip(zip, ctrlPropPath(control.ctrlPropId), ctrlPropXform!, control);
+      }
+    }
+    // A preserved control's part, as it was read, under the number this write gave it.
+    for (const control of legacyControls) {
+      if (control.ctrlPropId !== undefined && control.ctrlPropXml !== undefined) {
+        await appendToZip(zip, control.ctrlPropXml, { name: ctrlPropPath(control.ctrlPropId) });
       }
     }
   }
@@ -1087,7 +1416,14 @@ async function addChartsheets(zip: IZipWriter, model: any): Promise<void> {
         if (emittedVmlPaths.has(vmlPath)) {
           continue;
         }
-        const vmlName = /\/(vmlDrawingHF\d+)[.]vml$/.exec(vmlPath)?.[1];
+        // The header/footer VML: the one `legacyDrawingHF` names, whatever it is called
+        // (Excel calls it `vmlDrawingN.vml`, like a comment's).
+        const isHeaderVml =
+          (cs.legacyDrawingHF?.rId !== undefined && rel.Id === cs.legacyDrawingHF.rId) ||
+          /\/vmlDrawingHF\d+[.]vml$/.test(vmlPath);
+        const vmlName = isHeaderVml
+          ? /\/(vmlDrawing(?:HF)?\d+)[.]vml$/.exec(vmlPath)?.[1]
+          : undefined;
         const validHeaderImages = vmlName
           ? (cs.headerImages ?? []).flatMap((image: any) => {
               const medium = model.media?.[image.imageId];
@@ -1101,7 +1437,8 @@ async function addChartsheets(zip: IZipWriter, model: any): Promise<void> {
             imageRelId: `rId${index + 1}`,
             width: image.width,
             height: image.height,
-            position: image.position
+            position: image.position,
+            shape: image.shape
           }));
         const vmlModel =
           model.vmlDrawings?.[vmlPath] ?? (headerImages ? { headerImages } : undefined);
@@ -1111,7 +1448,7 @@ async function addChartsheets(zip: IZipWriter, model: any): Promise<void> {
         emittedVmlPaths.add(vmlPath);
         await renderToZip(zip, vmlPath, vmlDrawingXform, vmlModel);
         const headerImageRels =
-          (vmlName && model.vmlDrawingHFRels?.[vmlName]) ??
+          (vmlName && model.vmlDrawingRels?.[vmlName]) ??
           validHeaderImages.map(({ medium }: any, index: number) => {
             const filename = medium.name?.endsWith(`.${medium.extension}`)
               ? medium.name
@@ -1226,7 +1563,7 @@ async function addTables(zip: IZipWriter, model: any): Promise<void> {
   for (const worksheet of model.worksheets) {
     for (const table of worksheet.tables) {
       tableXform.prepare(table, {});
-      await renderToZip(zip, tablePath(table.target), tableXform, table);
+      await renderToZip(zip, tablePath(table.target), tableXform, table, formulaNames(model));
     }
   }
 }
@@ -1256,23 +1593,47 @@ async function addExternalLinks(zip: IZipWriter, model: any): Promise<void> {
   for (const link of externalLinks) {
     await renderToZip(zip, externalLinkPath(link.index), externalLinkXform, link);
 
-    // Always rId1 — the externalLink part only ever has a single rel.
-    // `TargetMode="External"` is what flags Office to look the file up
-    // at workbook-open time rather than embed it.
-    await renderToZip(zip, externalLinkRelsPath(link.index), relsXform, [
-      {
-        Id: "rId1",
-        Type: RelType.ExternalLinkPath,
-        Target: link.target,
-        TargetMode: link.targetMode ?? "External"
-      }
-    ]);
+    // `TargetMode="External"` is what flags Office to look the file up at workbook-open time rather than embed it.
+    // A link this library authored has one relationship, `rId1`. A link read from a file keeps every relationship
+    // it had, because preserved XML names them; the book's own takes the model's target, which a caller may change.
+    const preserved = link.preserved;
+    const bookRel = {
+      Id: preserved?.bookRelationshipId ?? "rId1",
+      Type: RelType.ExternalLinkPath,
+      Target: link.target,
+      TargetMode: link.targetMode ?? "External"
+    };
+    await renderToZip(
+      zip,
+      externalLinkRelsPath(link.index),
+      relsXform,
+      preserved === undefined
+        ? [bookRel]
+        : preserved.relationships.map(rel =>
+            rel.id === bookRel.Id
+              ? { ...bookRel, Type: rel.type }
+              : {
+                  Id: rel.id,
+                  Type: rel.type,
+                  Target: rel.target,
+                  ...(rel.targetMode === undefined ? {} : { TargetMode: rel.targetMode })
+                }
+          )
+    );
   }
 }
 
 async function addPivotTables(zip: IZipWriter, model: any): Promise<void> {
   if (!model.pivotTables.length) {
     return;
+  }
+  // The cache of a pivot table built here is recomputed from its source as the source is now, so values and rows
+  // the source gained after `Pivot.add` are in it — the records are read from the source at write time anyway, and
+  // a record with a value the shared items lacked was refused.
+  for (const pivotTable of model.pivotTables as PivotTable[]) {
+    if (!pivotTable.isLoaded) {
+      pivotTable.refreshCache?.();
+    }
   }
 
   // Dynamic import: pivot serialisation (~44 KB across the three xforms) is
@@ -1386,8 +1747,9 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
   // Register workbook-level named cell styles so cells referencing them by
   // name resolve to the correct cellStyleXfs index during style building.
   if (model.cellStyles && model.styles.registerNamedStyles) {
-    const namedStyleMap = new Map((model.cellStyles as NamedStyleEntry[]).map(cs => [cs.name, cs]));
-    model.styles.registerNamedStyles(namedStyleMap);
+    // Keyed as Excel compares the names, without regard to case; see `namedStyleMap`.
+    const namedStyles = namedStyleMap(model.cellStyles as NamedStyleEntry[]);
+    model.styles.registerNamedStyles(namedStyles);
   }
   // Before any worksheet is prepared: every `addDxfStyle` must see the source table already in place.
   if (model.dxfs && model.styles.seedDxfs) {
@@ -1413,6 +1775,8 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
   normaliseExternalLinks(workbook, model);
 
   const worksheetOptions: any = {
+    needsArrayEvaluation: options.needsArrayEvaluation,
+    unwritableFormula: options.unwritableFormula,
     sharedStrings: model.sharedStrings,
     styles: model.styles,
     date1904: model.properties?.date1904,
@@ -1426,7 +1790,7 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
   // name, a count starting at 0 would hand out "drawing1" again — a duplicate
   // `/xl/drawings/drawing1.xml` Override (invalid per OPC). Starting the count
   // above the highest existing numeric drawing name avoids the collision
-  // regardless of how the mix arose (e.g. Workbook.importSheet).
+  // regardless of how the mix arose (e.g. Workbook.importWorksheet).
   let maxExistingDrawingNo = 0;
   for (const ws of model.worksheets as any[]) {
     const m = /^drawing(\d+)$/.exec(ws?.drawing?.name ?? "");
@@ -1465,9 +1829,22 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
     p => !p.includes("/_rels/")
   );
   model.hasHeaderWatermark = false;
+  // VML shape ids are numbered across the workbook, so every sheet's parts draw from one space. A
+  // checkbox read from a file keeps its id when it can; reserving its block first stops an earlier
+  // sheet's notes from taking it.
+  worksheetOptions.vmlShapeIds = createVmlShapeIdSpace();
+  for (const worksheet of model.worksheets) {
+    reserveVmlShapeIds(
+      worksheetOptions.vmlShapeIds,
+      worksheet,
+      [...(worksheet.formControls ?? []), ...(worksheet.legacyControls ?? [])].map(
+        (control: { shapeId: number }) => control.shapeId
+      )
+    );
+  }
   let tableCount = 0;
   model.tables = [];
-  const tableNameMap = new Map<string, string>(); // name (lowercase) → worksheet name
+  const tableNameMap = new Map<string, string>(); // name (excelNameKey) → worksheet name
   model.worksheets.forEach((worksheet: any, index: number) => {
     // Assign fileIndex early so that worksheet-xform.prepare() can use it
     // for comment/VML relationship targets and content type names.
@@ -1479,7 +1856,7 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
       // OOXML requires table names to be unique across the entire workbook
       // (case-insensitive). Detect duplicates early to produce a clear error
       // instead of generating a corrupt file that Excel must repair.
-      const nameKey = table.name.toLowerCase();
+      const nameKey = excelNameKey(table.name);
       const existingSheet = tableNameMap.get(nameKey);
       if (existingSheet !== undefined) {
         throw new TableError(
@@ -1512,7 +1889,7 @@ function prepareModel(workbook: Workbook, model: any, options: any): void {
   model.worksheets.forEach((worksheet: any) => {
     (worksheet.rows ?? []).forEach((row: any) => {
       (row.cells ?? []).forEach((cell: any) => {
-        if (cell.isDynamicArray) {
+        if (writesDynamicArray(cell)) {
           dynamicArrayCount++;
         }
       });

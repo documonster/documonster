@@ -12,9 +12,11 @@
  * change a report's usefulness; the deep option trees stay in `documonster_help`.
  */
 
-import { Cell, ExcelNotSupportedError, Workbook, Worksheet } from "documonster/excel";
-import { readCsvFile } from "documonster/excel/csv";
-import { calculateFormulas } from "documonster/excel/formula";
+import { createReadStream } from "node:fs";
+
+import { Cell, Column, ExcelNotSupportedError, Row, Workbook, Worksheet } from "documonster/excel";
+import { ExcelCsv } from "documonster/excel/csv";
+import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -194,7 +196,7 @@ export const sheetWriteTool = defineTool({
     let formulaNote = "formulas not evaluated (recalculate: false)";
     if (recalculate) {
       try {
-        calculateFormulas(wb);
+        ExcelFormula.calculate(wb);
         formulaNote = "formulas evaluated";
       } catch (cause) {
         // A bad formula must not lose the whole document — save it and say so,
@@ -255,16 +257,16 @@ async function buildSheet(
 
   if (spec.fromCsv !== undefined) {
     const source = await resolveInRoot(config, spec.fromCsv, { mustExist: true });
-    // readCsvFile appends a new sheet named after the file, so rename it to the
+    // addWorksheet appends a new sheet with a default name, so rename it to the
     // requested name afterwards rather than creating a second, empty sheet.
-    ws = await readCsvFile(
+    ws = await ExcelCsv.addWorksheet(
       wb,
-      source,
+      createReadStream(source, "utf8"),
       spec.csvDelimiter === undefined ? undefined : { delimiter: spec.csvDelimiter }
     );
     Worksheet.setModel(ws, { ...Worksheet.getModel(ws), name: spec.name });
     report.push(
-      `- sheet ${JSON.stringify(spec.name)}: loaded ${Worksheet.actualRowCount(ws)} row(s) from ${spec.fromCsv} server-side`
+      `- sheet ${JSON.stringify(spec.name)}: loaded ${Row.getActualCount(ws)} row(s) from ${spec.fromCsv} server-side`
     );
   } else {
     ws = Workbook.addWorksheet(wb, spec.name);
@@ -330,7 +332,7 @@ function applyLayout(
   report: string[]
 ): void {
   if (spec.columnWidths !== undefined && spec.columnWidths.length > 0) {
-    Worksheet.setColumns(
+    Column.setDefinitions(
       ws,
       spec.columnWidths.map(width => ({ width }))
     );
@@ -342,7 +344,7 @@ function applyLayout(
     // the literal was not as broken as it looked. What it was, is a reach into a model field
     // that has a public setter, which then has to be kept in step with it by hand: the setter
     // also takes a column count, and writing the literal is what quietly limited this to rows.
-    Worksheet.freeze(ws, 0, spec.freezeRows);
+    Worksheet.freeze(ws, { rows: spec.freezeRows });
   }
 
   for (const range of spec.merges ?? []) {

@@ -1,4 +1,4 @@
-import { XLSB_MAX_COLUMNS, XLSB_MAX_ROWS } from "@excel/xlsb/binary";
+import { XLSB_MAX_COLUMNS, XLSB_MAX_ROWS, XlsbReader } from "@excel/xlsb/binary";
 /**
  * Page breaks: `BrtBrk` inside a `BrtBeginRwBrk` or `BrtBeginColBrk` scope.
  *
@@ -15,7 +15,7 @@ import { XLSB_MAX_COLUMNS, XLSB_MAX_ROWS } from "@excel/xlsb/binary";
  * twenty-three *test fixtures*, not a sample of what people build, and a page break is something a
  * person sets deliberately on a sheet they intend to print.
  */
-import { BinaryReader, BinaryWriter } from "@utils/binary";
+import { BinaryWriter } from "@utils/binary";
 
 /** Which collection a break belongs to, and therefore what its indices mean. */
 export type BreakAxis = "row" | "column";
@@ -58,7 +58,7 @@ export function encodeBreak(entry: SheetBreak, axis: BreakAxis): Uint8Array {
 /** Read a `BrtBrk`, or `undefined` when the payload is short. */
 export function readBreak(payload: Uint8Array, part: string): SheetBreak | undefined {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const id = reader.readUint32();
     const min = reader.readUint32();
     const max = reader.readUint32();

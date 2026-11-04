@@ -3015,11 +3015,13 @@ export function runStreamTests(imports: StreamModuleImports): void {
           expect(result).toBe(mixedEndings);
         });
 
-        it("should handle string with BOM", async () => {
+        it("should strip a leading BOM, as TextDecoder and node:stream/consumers.text do", async () => {
+          // This pinned the BOM being kept; `Streams.text` now decodes as
+          // `node:stream/consumers.text`, `Response.text()` and `Blob.text()` do.
           const bomStr = "\uFEFFcontent with BOM";
           const readable = createReadableFromArray([stringToUint8Array(bomStr)]);
           const result = await streamToString(readable);
-          expect(result).toBe(bomStr);
+          expect(result).toBe("content with BOM");
         });
 
         it("should decode split multibyte UTF-8 across chunk boundaries", async () => {

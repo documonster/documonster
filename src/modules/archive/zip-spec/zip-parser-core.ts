@@ -413,7 +413,9 @@ export function parseCentralDirectoryEntry(
     aesVersion,
     aesKeyStrength,
     originalCompressionMethod,
-    dosTime: lastModTime
+    dosTime: lastModTime,
+    dosDate: lastModDate,
+    flags
   };
 }
 

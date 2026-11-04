@@ -1,4 +1,5 @@
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { parseXsdFloatOrText } from "@excel/xlsx/xform/xsd-values";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 interface PageMarginsModel {
@@ -35,12 +36,12 @@ class PageMarginsXform extends BaseXform {
     switch (node.name) {
       case this.tag:
         this.model = {
-          left: node.attributes.left ? parseFloat(node.attributes.left) : 0.7,
-          right: node.attributes.right ? parseFloat(node.attributes.right) : 0.7,
-          top: node.attributes.top ? parseFloat(node.attributes.top) : 0.75,
-          bottom: node.attributes.bottom ? parseFloat(node.attributes.bottom) : 0.75,
-          header: node.attributes.header ? parseFloat(node.attributes.header) : 0.3,
-          footer: node.attributes.footer ? parseFloat(node.attributes.footer) : 0.3
+          left: parseXsdFloatOrText(node.attributes.left || undefined) ?? 0.7,
+          right: parseXsdFloatOrText(node.attributes.right || undefined) ?? 0.7,
+          top: parseXsdFloatOrText(node.attributes.top || undefined) ?? 0.75,
+          bottom: parseXsdFloatOrText(node.attributes.bottom || undefined) ?? 0.75,
+          header: parseXsdFloatOrText(node.attributes.header || undefined) ?? 0.3,
+          footer: parseXsdFloatOrText(node.attributes.footer || undefined) ?? 0.3
         };
         return true;
       default:

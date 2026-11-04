@@ -36,7 +36,7 @@ describe("sheet password verification", () => {
     it("verifies against a sheet protected with a password", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
-      await Worksheet.protect(ws, "letmein");
+      await Worksheet.protect(ws, { password: "letmein" });
 
       expect(await Worksheet.verifyPassword(ws, "letmein")).toBe(true);
       expect(await Worksheet.verifyPassword(ws, "wrong")).toBe(false);
@@ -52,7 +52,7 @@ describe("sheet password verification", () => {
       // The hash must survive a real read/write round-trip so verifyPassword
       // works on a workbook opened from disk, not just one protected in-memory.
       const wb = Workbook.create();
-      await Worksheet.protect(Workbook.addWorksheet(wb, "Sheet1"), "diskpass");
+      await Worksheet.protect(Workbook.addWorksheet(wb, "Sheet1"), { password: "diskpass" });
       const buffer = await Workbook.toBuffer(wb);
 
       const reopened = Workbook.create();

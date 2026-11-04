@@ -74,7 +74,10 @@ const ALLOWED: Record<ModuleName, ReadonlySet<ModuleName>> = {
   word: new Set(["draw", "formula", "archive", "xml", "csv", "markdown", "stream", "utils"]),
   // pdf may reach excel/word ONLY via the bridge files (see EXCEPTIONS); the
   // base allow-set covers the unconditional dependencies.
-  pdf: new Set(["draw", "archive", "utils"])
+  // xml: XMP metadata is XML, and the editor edits it with the real parser — the regex
+  // editor it replaced wrote unbound prefixes, duplicated properties and edited nested
+  // descriptions. A downward import (Layer 5 → Layer 1).
+  pdf: new Set(["draw", "archive", "xml", "utils"])
 };
 
 /**

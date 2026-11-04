@@ -337,7 +337,8 @@ describe("the loss report is data, not just a sentence", () => {
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "S1");
     for (let row = 1; row <= 12; row++) {
-      Cell.setValue(sheet, `A${row}`, { formula: "A1:A2", isDynamicArray: true } as never);
+      // An unnamed this-row reference outside any table, which has no file form.
+      Cell.setValue(sheet, `A${row}`, { formula: "[@x]" } as never);
     }
     let thrown: unknown;
     try {

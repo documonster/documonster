@@ -25,7 +25,7 @@ import { crc32Finalize } from "@archive/compression/crc32.base";
  * @example
  * ```ts
  * const data = new TextEncoder().encode("Hello, World!");
- * const checksum = crc32(data);
+ * const checksum = Archive.crc32(data);
  * console.log(checksum.toString(16)); // "ec4ac3d0"
  * ```
  */
@@ -48,9 +48,9 @@ export function crc32(data: Uint8Array): number {
  * @example
  * ```ts
  * let crc = 0xffffffff;
- * crc = crc32Update(crc, chunk1);
- * crc = crc32Update(crc, chunk2);
- * const checksum = crc32Finalize(crc);
+ * crc = Archive.crc32Update(crc, chunk1);
+ * crc = Archive.crc32Update(crc, chunk2);
+ * const checksum = Archive.crc32Finalize(crc);
  * ```
  */
 export function crc32Update(crc: number, data: Uint8Array): number {

@@ -18,6 +18,17 @@
  * ```
  */
 
+import {
+  checkArray,
+  checkBoolean,
+  checkFinite,
+  checkHandle,
+  checkOneOf,
+  checkRecord,
+  checkString,
+  invalidArgument
+} from "@word/core/argument-checks";
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -86,6 +97,72 @@ export interface StyleMapOptions {
 // =============================================================================
 // Default Mappings
 // =============================================================================
+
+const SOURCE_TYPES: ReadonlySet<string> = new Set<MappingSourceType>([
+  "p",
+  "r",
+  "table",
+  "image",
+  "b",
+  "i",
+  "u",
+  "strike"
+]);
+const CONDITION_ATTRIBUTES: ReadonlySet<string> = new Set<MappingCondition["attribute"]>([
+  "style-name",
+  "style-id",
+  "outline-level",
+  "numbering-level",
+  "is-bold",
+  "is-italic"
+]);
+
+function checkStyleMap(map: unknown, field: string, where: string): void {
+  checkRecord(map, field, where);
+  checkRules((map as StyleMap).rules, `${field}.rules`, where);
+}
+
+function checkTarget(target: unknown, field: string, where: string): void {
+  checkRecord(target, field, where);
+  const t = target as MappingTarget;
+  if (typeof t.tagName !== "string" || !/^[A-Za-z][A-Za-z0-9-]*$/.test(t.tagName)) {
+    invalidArgument(where, `${field}.tagName`, "an HTML tag name", t.tagName);
+  }
+  checkString(t.className, `${field}.className`, where, { optional: true });
+  checkString(t.separator, `${field}.separator`, where, { optional: true });
+  checkBoolean(t.fresh, `${field}.fresh`, where, { optional: true });
+  if (t.child !== undefined) {
+    checkTarget(t.child, `${field}.child`, where);
+  }
+}
+
+/** Rules as `Styles.create` takes them; a regex condition must compile. */
+function checkRules(rules: unknown, field: string, where: string): void {
+  checkArray(rules, field, where);
+  (rules as unknown[]).forEach((rule, i) => {
+    const at = `${field}[${i}]`;
+    checkRecord(rule, at, where);
+    const r = rule as StyleMappingRule;
+    checkOneOf(r.source, SOURCE_TYPES, `${at}.source`, where);
+    checkArray(r.conditions, `${at}.conditions`, where);
+    r.conditions.forEach((cond, j) => {
+      const c = `${at}.conditions[${j}]`;
+      checkRecord(cond, c, where);
+      checkOneOf(cond.attribute, CONDITION_ATTRIBUTES, `${c}.attribute`, where);
+      checkString(cond.value, `${c}.value`, where);
+      checkBoolean(cond.regex, `${c}.regex`, where, { optional: true });
+      if (cond.regex) {
+        try {
+          new RegExp(cond.value);
+        } catch {
+          invalidArgument(where, `${c}.value`, "a valid regular expression", cond.value);
+        }
+      }
+    });
+    checkTarget(r.target, `${at}.target`, where);
+    checkFinite(r.priority, `${at}.priority`, where, { optional: true });
+  });
+}
 
 /** Default style mappings (standard Word styles → semantic HTML). */
 export const DEFAULT_STYLE_MAP: StyleMap = {
@@ -208,6 +285,13 @@ export const DEFAULT_STYLE_MAP: StyleMap = {
  * ```
  */
 export function parseStyleMap(dsl: string, options?: StyleMapOptions): StyleMap {
+  const where = "Styles.parse";
+  checkString(dsl, "dsl", where);
+  checkRecord(options, "options", where, { optional: true });
+  checkBoolean(options?.includeDefaults, "options.includeDefaults", where, { optional: true });
+  if (options?.base !== undefined) {
+    checkStyleMap(options.base, "options.base", where);
+  }
   // User-defined rules from the DSL.
   const userRules: StyleMappingRule[] = [];
 
@@ -263,6 +347,7 @@ export function parseStyleMap(dsl: string, options?: StyleMapOptions): StyleMap 
  * Create a style map programmatically (without DSL parsing).
  */
 export function createStyleMap(rules: readonly StyleMappingRule[]): StyleMap {
+  checkRules(rules, "rules", "Styles.create");
   const sorted = [...rules].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   return { rules: sorted };
 }
@@ -272,6 +357,7 @@ export function createStyleMap(rules: readonly StyleMappingRule[]): StyleMap {
  * Later maps take precedence (higher priority) over earlier ones.
  */
 export function mergeStyleMaps(...maps: readonly StyleMap[]): StyleMap {
+  maps.forEach((map, i) => checkStyleMap(map, `maps[${i}]`, "Styles.merge"));
   const allRules: StyleMappingRule[] = [];
   for (let i = 0; i < maps.length; i++) {
     // Add base priority offset based on position
@@ -299,6 +385,8 @@ export function matchStyleMap(
   source: MappingSourceType,
   attributes: Readonly<Record<string, string>>
 ): MappingTarget | undefined {
+  checkHandle(map, "styleMap", "map", "Styles.match");
+  checkRecord(attributes, "attributes", "Styles.match");
   for (const rule of map.rules) {
     if (rule.source !== source) {
       continue;

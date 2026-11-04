@@ -7,23 +7,16 @@
  * rewritten by hand every time a margin changes and would say nothing about whether the
  * picture is right.
  */
-import { rasterizeToRgba, toSvg } from "@draw/index";
+import { Draw } from "@draw/index";
 import { renderDrawList } from "@draw/render";
 import type { DrawNode, DrawPaint } from "@draw/types";
-import {
-  centredText,
-  layoutFlowchart,
-  mermaidToDrawList,
-  mermaidToSvg,
-  parseMermaid,
-  resolveTheme
-} from "@mermaid/index";
+import { Mermaid } from "@mermaid/index";
 import type { FlowchartDiagram } from "@mermaid/types";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { createPdfDrawSurface } from "@pdf/render/draw-surface";
 import { describe, expect, it } from "vitest";
 
-const layout = (source: string) => layoutFlowchart(parseMermaid(source) as FlowchartDiagram);
+const layout = (source: string) => Mermaid.layoutGraph(Mermaid.parse(source) as FlowchartDiagram);
 const centre = (box: { x: number; width: number }): number => box.x + box.width / 2;
 const nodeById = (result: ReturnType<typeof layout>, id: string) =>
   result.nodes.find(node => node.id === id)!;
@@ -358,7 +351,7 @@ describe("the display list", () => {
   it("draws an arrowhead as a closed triangle, which every backend already has", () => {
     // A marker is an SVG-only concept; the producer lowers it so nothing had to be added
     // to the IR for this diagram type.
-    const list = mermaidToDrawList("flowchart TD\n A --> B");
+    const list = Mermaid.toDrawList("flowchart TD\n A --> B");
     const triangles = list.children.filter(
       node => node.kind === "polyline" && node.closed === true && node.points.length === 3
     );
@@ -366,7 +359,7 @@ describe("the display list", () => {
   });
 
   it("uses only primitives the engine already had", () => {
-    const list = mermaidToDrawList(`flowchart TD
+    const list = Mermaid.toDrawList(`flowchart TD
       A[(db)] --> B{choice}
       B --> C((circle))`);
     const kinds = new Set(list.children.map(node => node.kind));
@@ -378,9 +371,9 @@ describe("the display list", () => {
   });
 
   it("dashes a dotted link and thickens a thick one", () => {
-    const dotted = mermaidToDrawList("flowchart LR\n A -.-> B");
-    const thick = mermaidToDrawList("flowchart LR\n A ==> B");
-    const strokeOf = (list: ReturnType<typeof mermaidToDrawList>): DrawPaint => {
+    const dotted = Mermaid.toDrawList("flowchart LR\n A -.-> B");
+    const thick = Mermaid.toDrawList("flowchart LR\n A ==> B");
+    const strokeOf = (list: ReturnType<typeof Mermaid.toDrawList>): DrawPaint => {
       const found = list.children.find(
         (node): node is Extract<DrawNode, { kind: "polyline" }> =>
           node.kind === "polyline" && node.paint.stroke !== undefined
@@ -389,12 +382,12 @@ describe("the display list", () => {
     };
     expect(strokeOf(dotted).dash).toBeDefined();
     expect(strokeOf(thick).strokeWidth).toBeGreaterThan(
-      strokeOf(mermaidToDrawList("flowchart LR\n A --> B")).strokeWidth!
+      strokeOf(Mermaid.toDrawList("flowchart LR\n A --> B")).strokeWidth!
     );
   });
 
   it("applies a classDef to the node that carries the class", () => {
-    const list = mermaidToDrawList(`flowchart LR
+    const list = Mermaid.toDrawList(`flowchart LR
       A --> B:::hot
       classDef hot fill:#ff0000`);
     const red = list.children.filter(
@@ -405,7 +398,7 @@ describe("the display list", () => {
 
   it("draws an edge label above the node it would otherwise hide behind", () => {
     // Labels are emitted after the nodes; drawn with their edge they sat underneath.
-    const list = mermaidToDrawList("flowchart TD\n A -->|yes| B");
+    const list = Mermaid.toDrawList("flowchart TD\n A -->|yes| B");
     const lastText = list.children.map(node => node.kind).lastIndexOf("text");
     const lastRect = list.children.map(node => node.kind).lastIndexOf("rect");
     expect(lastText).toBeGreaterThan(lastRect - 2);
@@ -419,13 +412,13 @@ describe("every backend draws the same diagram", () => {
     B -->|no| D((Stop))`;
 
   it("renders to markup, pixels and page operators from one list", () => {
-    const list = mermaidToDrawList(source, { background: "#ffffff" });
+    const list = Mermaid.toDrawList(source, { theme: { background: "#ffffff" } });
 
-    const svg = toSvg(list);
+    const svg = Draw.toSvg(list);
     expect(svg).toContain("<svg");
     expect(svg).toContain("<text");
 
-    const image = rasterizeToRgba(list, { width: list.width, height: list.height });
+    const image = Draw.toRgba(list, { width: list.width, height: list.height });
     expect(image.data).toHaveLength(image.width * image.height * 4);
     expect([...image.data].some(channel => channel > 0)).toBe(true);
 
@@ -440,31 +433,86 @@ describe("every backend draws the same diagram", () => {
   });
 
   it("puts the same number of glyphs in the SVG as the diagram has labels", () => {
-    const svg = mermaidToSvg(source);
+    const svg = Mermaid.toSvg(source);
     const texts = (svg.match(/<text/g) ?? []).length;
     // Four node labels and two edge labels.
     expect(texts).toBe(6);
   });
 
   it("leaves the list transparent unless a background is asked for", () => {
-    expect(mermaidToDrawList(source).children[0].kind).not.toBe("rect");
-    expect(mermaidToDrawList(source, { background: "#fff" }).children[0].kind).toBe("rect");
+    expect(Mermaid.toDrawList(source).children[0].kind).not.toBe("rect");
+    expect(Mermaid.toDrawList(source, { theme: { background: "#fff" } }).children[0].kind).toBe(
+      "rect"
+    );
+  });
+
+  it("paints a named background once, in the same colour on every backend", () => {
+    // `toSvg` used to add its own backdrop under the list's, and the list's read "white" as
+    // black, so `background: "white"` drew a black diagram.
+    const svg = Mermaid.toSvg(source, { theme: { background: "white" } });
+    const backdrops = svg.match(/<rect x="0" y="0"[^>]*>/g) ?? [];
+    expect(backdrops).toEqual([expect.stringContaining('fill="#ffffff"')]);
+    const pixels = Draw.toRgba(Mermaid.toDrawList(source, { theme: { background: "white" } }));
+    expect([...pixels.data.slice(0, 4)]).toEqual([255, 255, 255, 255]);
+  });
+
+  it("honours the top-level background once, in its colour, on every backend", () => {
+    // `background` is published (v0.21.1). `toSvg` drew a second backdrop under the list's,
+    // and the list's read "white" as black.
+    const options = { background: "white" };
+    const svg = Mermaid.toSvg(source, options);
+    expect(svg.match(/<rect x="0" y="0"[^>]*>/g) ?? []).toEqual([
+      expect.stringContaining('fill="#ffffff"')
+    ]);
+    const list = Mermaid.toDrawList(source, options);
+    const backdrops = list.children.filter(
+      node => node.kind === "rect" && node.x === 0 && node.y === 0 && node.width === list.width
+    );
+    expect(backdrops).toHaveLength(1);
+    expect((backdrops[0] as { paint: DrawPaint }).paint.fill).toEqual({ r: 1, g: 1, b: 1, a: 1 });
+    expect([...Draw.toRgba(list).data.slice(0, 4)]).toEqual([255, 255, 255, 255]);
+    const page = new PdfDocumentBuilder().addPage({ width: list.width, height: list.height });
+    renderDrawList(
+      list,
+      createPdfDrawSurface(page, { x: 0, y: 0, width: list.width, height: list.height })
+    );
+    const ops = page.getContentStream().toString();
+    expect(ops.match(/^1 1 1 rg$/m)).not.toBeNull();
+    expect(ops).not.toMatch(/^0 0 0 rg$/m);
+  });
+
+  it("lets the top-level background win over theme.background, and transparent means none", () => {
+    const svg = Mermaid.toSvg(source, { background: "#ff0000", theme: { background: "#00ff00" } });
+    expect(svg.match(/<rect x="0" y="0"[^>]*>/g) ?? []).toEqual([
+      expect.stringContaining('fill="#ff0000"')
+    ]);
+    const none = Mermaid.toDrawList(source, {
+      background: "transparent",
+      theme: { background: "#00ff00" }
+    });
+    expect(none.children[0].kind).not.toBe("rect");
+    expect(() => Mermaid.toSvg(source, { background: 42 as never })).toThrow(/background/);
+  });
+
+  it("draws a named classDef fill in its colour, not black", () => {
+    const svg = Mermaid.toSvg("flowchart TD\nA-->B\nclassDef hot fill:orange\nclass A hot");
+    expect(svg).toContain('fill="#ffa500"');
   });
 });
 
 describe("pie and sequence", () => {
   it("draws one sector per slice", () => {
-    const list = mermaidToDrawList('pie\n "A" : 60\n "B" : 40');
+    const list = Mermaid.toDrawList('pie\n "A" : 60\n "B" : 40');
     expect(list.children.filter(node => node.kind === "sector")).toHaveLength(2);
   });
 
   it("drops a slice with no positive value rather than drawing a zero-width wedge", () => {
-    const list = mermaidToDrawList('pie\n "A" : 60\n "B" : 0\n "C" : -5');
+    const list = Mermaid.toDrawList('pie\n "A" : 60\n "B" : 0\n "C" : -5');
     expect(list.children.filter(node => node.kind === "sector")).toHaveLength(1);
   });
 
   it("repeats a sequence diagram's headers at the foot", () => {
-    const list = mermaidToDrawList("sequenceDiagram\n A->>B: hi");
+    const list = Mermaid.toDrawList("sequenceDiagram\n A->>B: hi");
     const labels = list.children.filter(
       node => node.kind === "text" && (node.lines[0].text === "A" || node.lines[0].text === "B")
     );
@@ -472,7 +520,7 @@ describe("pie and sequence", () => {
   });
 
   it("gives every message a lifeline to travel between", () => {
-    const list = mermaidToDrawList("sequenceDiagram\n A->>B: one\n B-->>A: two");
+    const list = Mermaid.toDrawList("sequenceDiagram\n A->>B: one\n B-->>A: two");
     const dashed = list.children.filter(
       node => node.kind === "polyline" && node.paint.dash !== undefined
     );
@@ -483,8 +531,11 @@ describe("pie and sequence", () => {
 
 describe("edge labels have somewhere to be", () => {
   /** Every pair of labels that share any area. */
-  const collisions = (source: string, options?: Parameters<typeof layoutFlowchart>[1]): number => {
-    const boxes = layoutFlowchart(parseMermaid(source) as FlowchartDiagram, options)
+  const collisions = (
+    source: string,
+    options?: Parameters<typeof Mermaid.layoutGraph>[1]
+  ): number => {
+    const boxes = Mermaid.layoutGraph(Mermaid.parse(source) as FlowchartDiagram, options)
       .edges.map(route => route.label)
       .filter((label): label is NonNullable<typeof label> => label !== undefined);
     let hits = 0;
@@ -653,8 +704,8 @@ describe("an edge may name a subgraph", () => {
   });
 
   it("reserves room for a wrapped label on a subgraph edge", () => {
-    const result = layoutFlowchart(
-      parseMermaid(`flowchart TB
+    const result = Mermaid.layoutGraph(
+      Mermaid.parse(`flowchart TB
         TOP[Top] -->|a very long label that has to wrap over several lines| GROUP
         subgraph GROUP[Inner]
           A[One]
@@ -701,7 +752,7 @@ describe("rendering a public layout yourself", () => {
   // existence; a test cannot usefully add to that.
 
   it("fills a theme out from CSS strings, keeping the defaults for the rest", () => {
-    const theme = resolveTheme({ nodeFill: "#ff0000" });
+    const theme = Mermaid.resolveTheme({ nodeFill: "#ff0000" });
     expect(theme.nodeFill).toEqual({ r: 1, g: 0, b: 0, a: 1 });
     // Every token arrives resolved rather than absent or still a string, which is the whole
     // reason a consumer needs this instead of reading `ThemeOptions` themselves: one missing
@@ -729,7 +780,11 @@ describe("rendering a public layout yourself", () => {
     // A display list positions text by its baseline, so vertical centring is arithmetic the
     // caller would otherwise redo — this is the ninth copy that does not exist.
     const box = { x: 0, y: 100, width: 80, height: 40 };
-    const node = centredText(box, ["one", "two"], 10, "Arial", { r: 0, g: 0, b: 0, a: 1 });
+    const node = Mermaid.createCenteredText(box, ["one", "two"], {
+      size: 10,
+      family: "Arial",
+      fill: { r: 0, g: 0, b: 0, a: 1 }
+    });
     expect(node.kind).toBe("text");
     if (node.kind !== "text") {
       return;
@@ -739,5 +794,53 @@ describe("rendering a public layout yourself", () => {
     // Two lines, 10pt at the module's 1.3 line height: 13 units apart, centred on y=120.
     expect(baselines[1]! - baselines[0]!).toBeCloseTo(13, 5);
     expect((baselines[0]! + baselines[1]!) / 2 - 120).toBeCloseTo(10 * 0.36, 5);
+  });
+
+  it("keeps the rest of the style but always centres horizontally", () => {
+    const node = Mermaid.createCenteredText({ x: 0, y: 0, width: 10, height: 10 }, ["a"], {
+      size: 12,
+      bold: true,
+      anchor: "start"
+    });
+    expect(node.kind === "text" && node.style).toMatchObject({
+      size: 12,
+      bold: true,
+      anchor: "middle"
+    });
+  });
+});
+
+// A group reopened inside itself made itself its own parent, and the frame-padding walk over the group tree recursed
+// until the stack ran out. The nested header re-enters the open group, as a second `subgraph S` beside the first
+// would; it does not create a second group, and its `end` closes nothing.
+describe("a group reopened inside itself", () => {
+  it.each([
+    ["a subgraph", "flowchart TD\n subgraph S\n subgraph S\n A\n end\n B\n end\n C\n"],
+    [
+      "a subgraph through another",
+      "flowchart TD\n subgraph S\n subgraph T\n subgraph S\n A\n end\n end\n B\n end\n"
+    ],
+    ["a composite state", "stateDiagram-v2\n state S {\n state S {\n A --> B\n }\n }\n"]
+  ])("draws %s", (_, source) => {
+    const diagram = Mermaid.parse(source) as FlowchartDiagram & {
+      subgraphs?: FlowchartDiagram["subgraphs"];
+      composites?: FlowchartDiagram["subgraphs"];
+    };
+    const groups = diagram.subgraphs ?? diagram.composites ?? [];
+    expect(groups.filter(group => group.id === "S")).toHaveLength(1);
+    expect(groups.every(group => group.parent !== group.id)).toBe(true);
+    expect(Mermaid.toSvg(source)).toContain("<svg");
+  });
+
+  it("lays out a hand-built diagram whose groups are each other's parent", () => {
+    const diagram = Mermaid.parse("flowchart TD\n A --> B\n") as FlowchartDiagram;
+    const cyclic: FlowchartDiagram = {
+      ...diagram,
+      subgraphs: [
+        { id: "P", text: "P", nodeIds: ["A"], parent: "Q" },
+        { id: "Q", text: "Q", nodeIds: ["B"], parent: "P" }
+      ]
+    };
+    expect(Mermaid.layoutGraph(cyclic).nodes).toHaveLength(2);
   });
 });

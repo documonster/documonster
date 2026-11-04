@@ -128,7 +128,7 @@ describe("collapse changes the model, not the file", () => {
 
   it("keeps every value", async () => {
     const collapsed = await readAs("collapse");
-    const sheet = Workbook.getWorksheets(collapsed.handle)[0];
+    const sheet = Workbook.listWorksheets(collapsed.handle)[0];
     expect(Cell.getValue(sheet, "A1")).toBe(1);
     expect(Cell.getValue(sheet, "H20")).toBe(160);
   });
@@ -145,7 +145,7 @@ describe("the two containers agree", () => {
     const viaXlsb = Workbook.create();
     await Workbook.read(viaXlsb, asXlsb, { blankCells: "collapse" });
     expect(physicalRows(viaXlsb)).toBe(physicalRows(viaXlsx));
-    const sheet = Workbook.getWorksheets(viaXlsb)[0];
+    const sheet = Workbook.listWorksheets(viaXlsb)[0];
     expect(Cell.getValue(sheet, "A1")).toBe(1);
     expect(Cell.getValue(sheet, "H20")).toBe(160);
   });

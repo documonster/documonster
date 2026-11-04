@@ -24,10 +24,10 @@
  * against a new sample, which `INFERRED_VALUES` registers and `spec.test.ts` pins.
  */
 import type { Font } from "@excel/types";
-import { encodeWideString, readWideString } from "@excel/xlsb/binary";
+import { encodeWideString, readWideString, XlsbReader } from "@excel/xlsb/binary";
 import { COLOR_SIZE, encodeColor, readColor } from "@excel/xlsb/color";
 import { INFERRED_VALUES } from "@excel/xlsb/spec/records";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /**
  * Bytes before the name's character count.
@@ -110,7 +110,7 @@ export function readFont(payload: Uint8Array, part: string): Partial<Font> | und
   if (payload.length < FONT_HEADER_SIZE + 4) {
     return undefined;
   }
-  const reader = new BinaryReader(payload, 0, part);
+  const reader = new XlsbReader(payload, 0, part);
   const height = reader.readUint16();
   const grbit = reader.readUint16();
   const weight = reader.readUint16();
@@ -298,7 +298,7 @@ export function unmodelledFlagsOf(payload: Uint8Array): number {
   if (payload.length < FONT_HEADER_SIZE) {
     return 0;
   }
-  const grbit = new BinaryReader(payload, GRBIT_OFFSET).readUint16();
+  const grbit = new XlsbReader(payload, GRBIT_OFFSET).readUint16();
   const modelled =
     INFERRED_FONT_VALUES.italic |
     INFERRED_FONT_VALUES.strike |

@@ -1,11 +1,12 @@
-/**
- * The streaming ZIP adapter every package part is written through, and the two helpers that put a part
- * into it. Shared by the XLSX writer, its chart writer and the XLSB writer.
- */
 import type { ZipTimestampMode } from "@archive/zip-spec/timestamps";
 import { StreamingZip, ZipDeflateFile } from "@archive/zip/stream";
 import type { XlsxWritable } from "@excel/core/xlsx-io-types";
 import { ExcelStreamStateError } from "@excel/errors";
+/**
+ * The streaming ZIP adapter every package part is written through, and the two helpers that put a part
+ * into it. Shared by the XLSX writer, its chart writer and the XLSB writer.
+ */
+import { withFormulaNames } from "@excel/utils/future-functions";
 import type { IZipWriter, StreamListener, ZipWriterOptions } from "@excel/xlsx/types";
 import { base64ToUint8Array } from "@utils/utils";
 import { XmlStreamWriter } from "@xml/stream-writer";
@@ -235,7 +236,12 @@ class StreamingZipWriterAdapter implements IZipWriter {
   private _trackOutput(output: Promise<void>): void {
     const settled = output.then(
       () => {},
-      () => {}
+      (err: unknown) => {
+        // A part that fails to compress never completes, so the archive would wait for it forever: report the
+        // failure on the error channel, which `finalizeZip` turns into a rejected write. Swallowing it here is how
+        // an out-of-range `zip.level` left `Workbook.toBuffer` pending with no rejection at all.
+        this._emit("error", err instanceof Error ? err : new Error(String(err)));
+      }
     );
     this._pendingOutput.add(settled);
     void settled.then(() => {
@@ -380,11 +386,13 @@ export async function renderToZip(
   zip: IZipWriter,
   path: string,
   xform: { render(xmlStream: any, model?: any): void },
-  model?: any
+  model?: any,
+  /** The workbook's defined names, for a part that holds formulas — see `withFormulaNames`. */
+  formulaNames?: ReadonlySet<string>
 ): Promise<void> {
   const entry = zip.createEntry(path);
   const stream = new XmlStreamWriter(entry);
-  xform.render(stream, model);
+  withFormulaNames(formulaNames, () => xform.render(stream, model));
   entry.end();
   // Respect downstream backpressure between entries
   await zip.waitForDrain();

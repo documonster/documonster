@@ -1,5 +1,4 @@
-import { addChart, getCharts } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Chart, Row, Workbook } from "@excel/index";
 import { buildTtfWithCmap } from "@pdf/__tests__/ttf-test-utils";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { chartToPdf, excelToPdf } from "@pdf/excel-bridge";
@@ -124,11 +123,11 @@ describe("chart → PDF", () => {
   const chineseChart = () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["第一季度", 10],
       ["第二季度", 20]
     ]);
-    addChart(
+    Chart.add(
       ws,
       {
         type: "bar",
@@ -137,7 +136,7 @@ describe("chart → PDF", () => {
       },
       "D1:J10"
     );
-    return getCharts(ws)[0];
+    return Chart.list(ws)[0];
   };
 
   it.skipIf(!hasFamily("Kaiti SC") || !hasFamily("Songti SC"))(
@@ -191,7 +190,7 @@ describe("shared font engine", () => {
 
       const doc = new PdfDocumentBuilder({ fontManager: shared });
       doc.addPage().drawText(`中文报表${LATE}`, { x: 40, y: 700, fontSize: 12 });
-      const bytes = await doc.build();
+      const bytes = await doc.toBuffer();
 
       // A face covering the whole repertoire is embedded, and nothing is left to Type3.
       expect(embeddedFace(bytes)).not.toMatch(/Kaiti/i);
@@ -216,7 +215,7 @@ describe("shared font engine", () => {
 
       const doc = new PdfDocumentBuilder({ fontManager: shared });
       doc.addPage().drawText(`中文报表${LATE}`, { x: 40, y: 700, fontSize: 12 });
-      expect(embeddedFace(await doc.build())).toMatch(/Kaiti/i);
+      expect(embeddedFace(await doc.toBuffer())).toMatch(/Kaiti/i);
     }
   );
 
@@ -262,8 +261,8 @@ describe("shared font engine", () => {
 });
 
 describe("auto-embedding a host font is reported by every entry point", () => {
-  // The warning existed at the one discovery site inside `PdfDocumentBuilder.build()`,
-  // so `Pdf.create`, `Pdf.fromExcel` and `Pdf.fromDocx` — which discover in their own
+  // The warning existed at the one discovery site inside `PdfDocumentBuilder.toBuffer()`,
+  // so `Pdf.fromTable`, `Pdf.fromExcel` and `Pdf.fromDocx` — which discover in their own
   // pipelines — embedded a face off the host and said nothing. Those are the entry
   // points most likely to be producing a golden file, and the output stops being
   // reproducible the moment it happens. It is now noted on the `FontManager` and
@@ -275,12 +274,15 @@ describe("auto-embedding a host font is reported by every entry point", () => {
   const cjkWorkbook = (): Workbook.Handle => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [[ZH]]);
+    Row.addMany(ws, [[ZH]]);
     return wb;
   };
 
   it.each([
-    ["Pdf.create", (w: (m: string) => void) => pdf({ name: "s", data: [[ZH]] }, { onWarning: w })],
+    [
+      "Pdf.fromTable",
+      (w: (m: string) => void) => pdf({ name: "s", data: [[ZH]] }, { onWarning: w })
+    ],
     ["Pdf.fromExcel", (w: (m: string) => void) => excelToPdf(cjkWorkbook(), { onWarning: w })],
     [
       "Pdf.fromDocx",
@@ -334,7 +336,7 @@ describe("disableFontAutoDiscovery", () => {
   const cjkWorkbook = (): Workbook.Handle => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [[ZH]]);
+    Row.addMany(ws, [[ZH]]);
     return wb;
   };
 
@@ -346,7 +348,7 @@ describe("disableFontAutoDiscovery", () => {
     (new TextDecoder("latin1").decode(bytes).match(/\/Subtype\s*\/Type3/g) ?? []).length;
 
   it.each([
-    ["Pdf.create", () => pdf({ name: "s", data: [[ZH]] }, { disableFontAutoDiscovery: true })],
+    ["Pdf.fromTable", () => pdf({ name: "s", data: [[ZH]] }, { disableFontAutoDiscovery: true })],
     ["Pdf.fromExcel", () => excelToPdf(cjkWorkbook(), { disableFontAutoDiscovery: true })],
     ["Pdf.fromDocx", () => docxToPdf(docxDoc, { disableFontAutoDiscovery: true })]
   ])("should embed no discovered face through %s", async (_label, run) => {
@@ -361,11 +363,11 @@ describe("disableFontAutoDiscovery", () => {
     // separate pipeline from the workbook exporter and needed the option too.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["第一季度", 10],
       ["第二季度", 20]
     ]);
-    addChart(
+    Chart.add(
       ws,
       {
         type: "bar",
@@ -374,7 +376,7 @@ describe("disableFontAutoDiscovery", () => {
       },
       "D1:J10"
     );
-    const bytes = await chartToPdf(getCharts(ws)[0], { disableFontAutoDiscovery: true });
+    const bytes = await chartToPdf(Chart.list(ws)[0], { disableFontAutoDiscovery: true });
     expect(embeddedFace(bytes)).toBe("(none)");
     expect(type3Count(bytes)).toBeGreaterThan(0);
   });
@@ -384,11 +386,11 @@ describe("disableFontAutoDiscovery", () => {
     // which is how the option came to be honoured unevenly.
     const viaOption = new PdfDocumentBuilder({ disableFontAutoDiscovery: true });
     viaOption.addPage().drawText(ZH, { x: 40, y: 700, fontSize: 12 });
-    expect(embeddedFace(await viaOption.build())).toBe("(none)");
+    expect(embeddedFace(await viaOption.toBuffer())).toBe("(none)");
 
     const viaMethod = new PdfDocumentBuilder().disableFontAutoDiscovery();
     viaMethod.addPage().drawText(ZH, { x: 40, y: 700, fontSize: 12 });
-    expect(embeddedFace(await viaMethod.build())).toBe("(none)");
+    expect(embeddedFace(await viaMethod.toBuffer())).toBe("(none)");
   });
 
   it("should still embed a font the caller supplied explicitly", async () => {
@@ -410,8 +412,16 @@ describe("disableFontAutoDiscovery", () => {
 
   it("should produce identical bytes across runs", async () => {
     // The point of the option: no dependence on what the host has installed.
-    const first = await excelToPdf(cjkWorkbook(), { disableFontAutoDiscovery: true });
-    const second = await excelToPdf(cjkWorkbook(), { disableFontAutoDiscovery: true });
+    // A fixed date: /CreationDate and the header/footer date otherwise follow the clock.
+    const at = new Date("2024-01-01T00:00:00Z");
+    const options = {
+      disableFontAutoDiscovery: true,
+      creationDate: at,
+      modDate: at,
+      headerFooter: { date: at }
+    };
+    const first = await excelToPdf(cjkWorkbook(), options);
+    const second = await excelToPdf(cjkWorkbook(), options);
     expect(Buffer.compare(Buffer.from(first), Buffer.from(second))).toBe(0);
   });
 

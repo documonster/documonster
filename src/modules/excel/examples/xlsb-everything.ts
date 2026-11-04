@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  ConditionalFormatting,
   Image,
   Pivot,
   Watermark,
@@ -94,7 +95,7 @@ Worksheet.setModel(layout, layoutModel);
 // nothing parsed. A rule then fired and displayed nothing, which Excel still lists in its dialog.
 const rules = Workbook.addWorksheet(workbook, "Rules");
 Worksheet.addAoa(rules, [["Score"], [95], [42], [7], ["n/a"]]);
-Worksheet.addConditionalFormatting(rules, {
+ConditionalFormatting.add(rules, {
   ref: "A2:A5",
   rules: [
     {
@@ -180,8 +181,8 @@ Pivot.add(pivotSheet, {
 // has to be reversed.
 const secured = Workbook.addWorksheet(workbook, "Secured");
 Worksheet.addAoa(secured, [["Locked down"], ["and watermarked"]]);
-await Worksheet.protect(secured, "s3cret", { formatCells: true, sort: true });
-await Workbook.protect(workbook, "b00kpass", { lockStructure: true });
+await Worksheet.protect(secured, { password: "s3cret", formatCells: true, sort: true });
+await Workbook.protect(workbook, { password: "b00kpass", lockStructure: true });
 
 // An *overlay* watermark is a picture in the sheet's own drawing. It used to be collected with the header
 // pictures, so it came back as a page-header decoration with its opacity dropped — a different document
@@ -242,8 +243,7 @@ fs.writeFileSync(filename, bytes);
 
 const generations: Record<string, unknown>[] = [];
 for (let generation = 0; generation < 3; generation += 1) {
-  const reopened = Workbook.create();
-  await Workbook.read(reopened, bytes);
+  const reopened = await Workbook.read(bytes);
   generations.push(census(reopened));
   bytes = await Workbook.toBuffer(reopened, { format: "xlsb" });
 }

@@ -994,6 +994,16 @@ describe("renderSectionProperties", () => {
     expect(cols).toBeGreaterThan(pn);
   });
 
+  it("counts the columns it lists, which Word reads from w:num alone", () => {
+    // Word for Mac 16.114 lays out `<w:cols w:equalWidth="0">` with two
+    // `w:col` children but no `w:num` as one column of the first width.
+    const xml = new XmlWriter();
+    renderSectionProperties(xml, {
+      columns: { equalWidth: false, columns: [{ width: 2500, space: 500 }, { width: 6360 }] }
+    });
+    expect(xml.toString()).toContain('<w:cols w:num="2" w:equalWidth="0">');
+  });
+
   it("places footnotePr/endnotePr before type and pgSz", () => {
     const sect: SectionProperties = {
       footnoteProperties: { numFmt: "decimal" },

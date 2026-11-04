@@ -14,14 +14,14 @@
  * @example
  * ```ts
  * // Simple array data with headers
- * formatMarkdown(["Name", "Age"], [["Alice", "30"], ["Bob", "25"]]);
+ * Markdown.format(["Name", "Age"], [["Alice", "30"], ["Bob", "25"]]);
  * // | Name  | Age |
- * // | ----- | --- |
+ * // |:------|:----|
  * // | Alice | 30  |
  * // | Bob   | 25  |
  *
  * // With alignment
- * formatMarkdown(["Left", "Center", "Right"], data, {
+ * Markdown.format(["Left", "Center", "Right"], data, {
  *   alignment: "left",
  *   columns: [
  *     { header: "Left", alignment: "left" },
@@ -32,7 +32,9 @@
  * ```
  */
 
+import { checkFormatArguments, checkStringified } from "@markdown/arguments";
 import { ESCAPE_AND_NEWLINE, NEWLINE_IN_CELL } from "@markdown/constants";
+import { MarkdownArgumentError } from "@markdown/errors";
 import type { MarkdownAlignment, MarkdownFormatOptions } from "@markdown/types";
 import { isFullWidthCodePoint } from "@utils/font-metrics";
 
@@ -106,21 +108,38 @@ function defaultStringify(value: unknown): string {
     return value.toISOString();
   }
   if (typeof value === "object") {
+    // An object or array is written as JSON (`stringify` overrides it). One JSON cannot
+    // write — a circular structure — used to come out as "[object Object]".
+    let json: string | undefined;
     try {
-      return JSON.stringify(value);
-    } catch {
-      return "[object Object]";
+      json = JSON.stringify(value);
+    } catch (cause) {
+      throw new MarkdownArgumentError(
+        "rows",
+        "Markdown.format: a cell holds an object JSON cannot write (a circular structure?); format it with stringify",
+        { cause }
+      );
     }
+    return json ?? "";
+  }
+  if (typeof value === "function" || typeof value === "symbol") {
+    // A function used to be written as its source text and a symbol as "Symbol(x)".
+    throw new MarkdownArgumentError(
+      "rows",
+      `Markdown.format: a cell holds a ${typeof value}, which has no text`
+    );
   }
   return String(value);
 }
 
 /**
  * Escape pipe characters, backslashes, and convert newlines to `<br>` in a single pass.
- * `|` → `\|`, `\` → `\\`, `\r\n`/`\r`/`\n` → `<br>`
+ * `|` → `\|`, `\` → `\\`, the `<` of a literal `<br>` → `\<`, `\r\n`/`\r`/`\n` → `<br>`
  */
 function escapeCell(value: string): string {
-  return value.replace(ESCAPE_AND_NEWLINE, ch => (ch === "|" || ch === "\\" ? "\\" + ch : "<br>"));
+  return value.replace(ESCAPE_AND_NEWLINE, ch =>
+    ch === "|" || ch === "\\" || ch === "<" ? "\\" + ch : "<br>"
+  );
 }
 
 /**
@@ -184,10 +203,10 @@ function padCell(value: string, targetWidth: number, alignment: MarkdownAlignmen
  * Resolve column configuration from options.
  */
 function resolveColumns(
-  headers: string[],
-  options: MarkdownFormatOptions
+  headers: readonly string[],
+  options: MarkdownFormatOptions,
+  columnCount: number
 ): { displayHeaders: string[]; alignments: MarkdownAlignment[]; minWidths: number[] } {
-  const columnCount = headers.length;
   const defaultAlignment: MarkdownAlignment = options.alignment ?? "left";
   const displayHeaders: string[] = new Array(columnCount);
   const alignments: MarkdownAlignment[] = new Array(columnCount);
@@ -235,7 +254,7 @@ function resolveColumns(
  *
  * @example
  * ```ts
- * formatMarkdown(
+ * Markdown.format(
  *   ["Name", "Age", "City"],
  *   [
  *     ["Alice", 30, "New York"],
@@ -245,10 +264,11 @@ function resolveColumns(
  * ```
  */
 export function formatMarkdown(
-  headers: string[],
-  rows: unknown[][],
+  headers: readonly string[],
+  rows: readonly (readonly unknown[])[],
   options: MarkdownFormatOptions = {}
 ): string {
+  checkFormatArguments(headers, rows, options);
   const {
     padding = true,
     trailingNewline = true,
@@ -256,14 +276,22 @@ export function formatMarkdown(
     stringify = defaultStringify
   } = options;
 
-  const columnCount = headers.length;
+  // The table has as many columns as the longest of `headers`, `columns` and the rows: cells
+  // beyond the header count used to be dropped (and a table with no headers dropped entirely).
+  // Extra columns get an empty header cell, which GFM accepts.
+  let columnCount = Math.max(headers.length, options.columns?.length ?? 0);
+  for (const row of rows) {
+    if (row.length > columnCount) {
+      columnCount = row.length;
+    }
+  }
 
   if (columnCount === 0) {
     return "";
   }
 
   // Resolve column configs
-  const { displayHeaders, alignments, minWidths } = resolveColumns(headers, options);
+  const { displayHeaders, alignments, minWidths } = resolveColumns(headers, options, columnCount);
 
   // Single-pass: convert all cell values to strings, apply escaping,
   // and compute column widths simultaneously.
@@ -283,7 +311,7 @@ export function formatMarkdown(
     const row = rows[r];
     const cells: string[] = new Array(columnCount);
     for (let c = 0; c < columnCount; c++) {
-      const raw = c < row.length ? stringify(row[c]) : "";
+      const raw = c < row.length ? checkStringified(stringify(row[c]), r, c) : "";
       const cell = escapeContent ? escapeCell(raw) : convertNewlines(raw);
       cells[c] = cell;
       if (padding) {

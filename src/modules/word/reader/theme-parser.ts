@@ -9,9 +9,12 @@ import { DEFAULT_OFFICE_THEME } from "@utils/theme-colors";
 import type { Mutable } from "@word/core/internal-utils";
 import { findChildNs, serializeElement } from "@word/reader/parse-utils";
 import { parsePartXml } from "@word/reader/part-xml";
+import { unmodelledChildren } from "@word/reader/preserved-xml";
 import type {
   DocumentTheme,
   ThemeColorName,
+  ThemeColorScheme,
+  ThemeSystemColor,
   ThemeFont,
   ThemeFontScheme,
   ThemeFormatScheme
@@ -58,7 +61,12 @@ export function parseThemeXml(xmlStr: string, maxDepth?: number): DocumentTheme 
   // Parse color scheme
   const clrSchemeEl =
     findChild(themeElements, "a:clrScheme") ?? findChildNs(themeElements, "clrScheme");
-  const colorScheme = { ...defaultScheme };
+  const colorScheme: {
+    name: string;
+    colors: Record<ThemeColorName, string>;
+    systemColors?: ThemeColorScheme["systemColors"];
+  } = { ...defaultScheme };
+  const systemColors: Partial<Record<ThemeColorName, ThemeSystemColor>> = {};
   if (clrSchemeEl) {
     colorScheme.name = clrSchemeEl.attributes["name"] ?? "Office";
     for (const colorName of THEME_COLOR_NAMES) {
@@ -79,10 +87,17 @@ export function parseThemeXml(xmlStr: string, maxDepth?: number): DocumentTheme 
             if (lastClr) {
               colorScheme.colors[colorName] = lastClr;
             }
+            const val = sys.attributes["val"];
+            if (val) {
+              systemColors[colorName] = { val, ...(lastClr ? { lastClr } : {}) };
+            }
           }
         }
       }
     }
+  }
+  if (Object.keys(systemColors).length > 0) {
+    colorScheme.systemColors = systemColors;
   }
 
   // Parse font scheme
@@ -139,12 +154,19 @@ export function parseThemeXml(xmlStr: string, maxDepth?: number): DocumentTheme 
     extLstXml = serializeElement(extLstEl);
   }
 
+  // objectDefaults, extraClrSchemeLst, custClrLst: kept verbatim.
+  const preservedXml = unmodelledChildren(root, {}, child => {
+    const local = child.name.slice(child.name.indexOf(":") + 1);
+    return local === "themeElements" || local === "extLst";
+  });
+
   return {
     name: root.attributes["name"],
     colorScheme,
     fontScheme,
     formatScheme,
-    extLstXml
+    extLstXml,
+    ...(preservedXml.length > 0 ? { preservedXml } : {})
   };
 }
 
@@ -162,6 +184,20 @@ function parseThemeFont(el: XmlElement): ThemeFont | undefined {
   const cs = findChild(el, "a:cs") ?? findChildNs(el, "cs");
   if (cs?.attributes["typeface"]) {
     font.complexScript = cs.attributes["typeface"];
+  }
+  const faceAttributes: Partial<Record<"latin" | "ea" | "cs", Record<string, string>>> = {};
+  for (const [key, face] of [
+    ["latin", latin],
+    ["ea", ea],
+    ["cs", cs]
+  ] as const) {
+    const extra = Object.entries(face?.attributes ?? {}).filter(([name]) => name !== "typeface");
+    if (extra.length > 0) {
+      faceAttributes[key] = Object.fromEntries(extra);
+    }
+  }
+  if (Object.keys(faceAttributes).length > 0) {
+    font.faceAttributes = faceAttributes;
   }
   // Supplemental fonts (a:font script="..." typeface="...")
   const supplementalFonts: Record<string, string> = {};

@@ -5,22 +5,16 @@
  * All examples work identically in browser and Node.js.
  */
 
-import {
-  BufferedStream,
-  ChunkedBuilder,
-  TransactionalChunkedBuilder,
-  PullStream,
-  createTransform
-} from "@stream";
+import { Streams } from "@stream";
 import { stringToUint8Array, uint8ArrayToString } from "@utils/binary";
 
 /**
- * Example 1: Using createTransform for custom transformation
+ * Example 1: Using Streams.createTransform for custom transformation
  */
 export async function exampleTransformBasic(): Promise<void> {
-  console.log("\n=== createTransform Example ===");
+  console.log("\n=== Streams.createTransform Example ===");
 
-  const transform = createTransform<string, string>(chunk => chunk.toUpperCase(), {
+  const transform = Streams.createTransform<string, string>(chunk => chunk.toUpperCase(), {
     objectMode: true
   });
 
@@ -41,7 +35,7 @@ export async function exampleTransformBasic(): Promise<void> {
 export function exampleBufferedStream(): void {
   console.log("\n=== BufferedStream Example ===");
 
-  const buffered = new BufferedStream({ batchSize: 1024 });
+  const buffered = Streams.createBufferedStream({ batchSize: 1024 });
 
   // Write some data
   buffered.write("Hello ");
@@ -61,7 +55,7 @@ export function exampleBufferedStream(): void {
 export function exampleChunkedBuilder(): void {
   console.log("\n=== ChunkedBuilder Example ===");
 
-  const builder = new ChunkedBuilder({ chunkSize: 10 });
+  const builder = new Streams.ChunkedBuilder({ chunkSize: 10 });
 
   // Simulate building an XML document
   builder.push('<?xml version="1.0"?>');
@@ -79,7 +73,7 @@ export function exampleChunkedBuilder(): void {
 export function exampleTransactionalBuilder(): void {
   console.log("\n=== TransactionalChunkedBuilder Example ===");
 
-  const builder = new TransactionalChunkedBuilder();
+  const builder = new Streams.TransactionalChunkedBuilder();
 
   builder.push("<record>");
 
@@ -110,7 +104,7 @@ export function exampleTransactionalBuilder(): void {
 export async function examplePullStream(): Promise<void> {
   console.log("\n=== PullStream Example ===");
 
-  const stream = new PullStream();
+  const stream = Streams.createPullStream();
 
   // Write some data
   stream.write(stringToUint8Array("Line1\nLine2\nLine3\n"));
@@ -129,13 +123,13 @@ export async function examplePullStream(): Promise<void> {
 }
 
 /**
- * Example 6: Using createTransform factory
+ * Example 6: Using Streams.createTransform factory
  */
 export async function exampleCreateTransform(): Promise<void> {
-  console.log("\n=== createTransform Example ===");
+  console.log("\n=== Streams.createTransform Example ===");
 
   // Create a transform that doubles numbers
-  const doubler = createTransform<number, number>(n => n * 2, { objectMode: true });
+  const doubler = Streams.createTransform<number, number>(n => n * 2, { objectMode: true });
 
   const results: number[] = [];
   doubler.on("data", n => results.push(n));
@@ -156,8 +150,10 @@ export async function exampleCreateTransform(): Promise<void> {
 export async function examplePipeTransforms(): Promise<void> {
   console.log("\n=== Pipe Transforms Example ===");
 
-  const upper = createTransform<string, string>(chunk => chunk.toUpperCase(), { objectMode: true });
-  const prefixer = createTransform<string, string>(chunk => `[PREFIX] ${chunk}`, {
+  const upper = Streams.createTransform<string, string>(chunk => chunk.toUpperCase(), {
+    objectMode: true
+  });
+  const prefixer = Streams.createTransform<string, string>(chunk => `[PREFIX] ${chunk}`, {
     objectMode: true
   });
 

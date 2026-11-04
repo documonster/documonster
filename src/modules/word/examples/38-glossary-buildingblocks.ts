@@ -61,12 +61,12 @@ const cover = Glossary.createBlock(
 const glossary = Glossary.createDocument([greeting, signoff, disclaimer, cover]);
 
 console.log(
-  `  AutoText:     ${Glossary.autoTextEntries(glossary)
+  `  AutoText:     ${Glossary.listAutoTextEntries(glossary)
     .map(b => b.name)
     .join(", ")}`
 );
 console.log(
-  `  Quick Parts:  ${Glossary.quickParts(glossary)
+  `  Quick Parts:  ${Glossary.listQuickParts(glossary)
     .map(b => b.name)
     .join(", ")}`
 );
@@ -103,7 +103,7 @@ insertBlock(disclaimer);
 // Word then exposes them as Quick Parts / AutoText, not just as inlined body
 // content. The packager registers the glossaryDocument relationship + content
 // type automatically.
-const builtDoc = { ...Document.build(d), glossary };
+const builtDoc = { ...d, glossary };
 const buf = await Io.toBuffer(builtDoc);
 fs.writeFileSync(path.join(outDir, "01-letter-from-blocks.docx"), buf);
 console.log(`  → 01-letter-from-blocks.docx (${buf.length} bytes)`);

@@ -23,6 +23,7 @@
 import { canRenderChartExAsVectorPdf, drawChartExPdf } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf } from "@excel/chart/render/chart-renderer";
 import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
+import type { ChartThemeColors } from "@excel/chart/shared/chart-utils";
 import type { PdfPageBuilder } from "@pdf/builder/document-builder";
 import { wordChartToChartModel } from "@word/bridge/excel-bridge";
 import type { LayoutChart } from "@word/layout/layout-model";
@@ -38,23 +39,11 @@ import type {
 export type { Chart as WordChart } from "@word/types";
 
 /**
- * Create a chart renderer callback for use with `Pdf.fromDocx`.
+ * The classic-chart renderer callback behind the deprecated `Pdf.wordChartRenderer()`.
  *
- * This factory returns a function that converts Word Chart definitions
- * into Excel's internal ChartModel and renders them using the full
- * Excel chart rendering engine (8000+ lines of vector drawing logic).
- *
- * Consumers reach it as `Pdf.wordChartRenderer()`, which loads this
- * bridge lazily and returns the same callback.
- *
- * @example
- * ```typescript
- * import { Pdf } from "documonster/pdf";
- *
- * const pdfBytes = await Pdf.fromDocx(doc, {
- *   chartRenderer: await Pdf.wordChartRenderer()
- * });
- * ```
+ * It draws a Word chart's classic model with the Excel chart engine — exactly what
+ * `Pdf.fromDocx` does by default through {@link createWordLayoutChartPdfRenderer}, which
+ * also covers ChartEx. Kept so the deprecated name returns the callback it always did.
  */
 export function createWordChartPdfRenderer(): (
   chart: WordChart,
@@ -90,18 +79,22 @@ export function createWordChartPdfRenderer(): (
  * keeps "fail soft" behaviour: a chart the engine can't draw still
  * renders *something* rather than a blank slot.
  */
-export function createWordLayoutChartPdfRenderer(): (
+export function createWordLayoutChartPdfRenderer(
+  options: { readonly themeColors?: ChartThemeColors } = {}
+): (
   chart: LayoutChart,
   page: PdfPageBuilder,
   rect: { x: number; y: number; width: number; height: number }
 ) => boolean | void {
+  // The document theme's colours: a Word chart's automatic and scheme colours are its theme's.
+  const theme = options.themeColors === undefined ? {} : { themeColors: options.themeColors };
   return (layoutChart, page, rect) => {
     const source = layoutChart.source as WordChartContent | WordChartExContent | undefined;
 
     if (layoutChart.chartKind === "chart") {
       // Classic chart: prefer the structured source, fall back to nothing.
       if (source && source.type === "chart") {
-        drawChartPdf(page, wordChartToChartModel(source.chart), rect);
+        drawChartPdf(page, wordChartToChartModel(source.chart), { ...rect, ...theme });
         return;
       }
       return false;
@@ -118,7 +111,8 @@ export function createWordLayoutChartPdfRenderer(): (
       }
       if (model && canRenderChartExAsVectorPdf(model)) {
         drawChartExPdf(page, model, rect, {
-          title: layoutChart.title
+          title: layoutChart.title,
+          ...theme
         });
         return;
       }

@@ -449,7 +449,7 @@ describe("RemoteZipReader", () => {
       });
       const reader = await RemoteZipReader.fromReader(createBufferReader(zipData));
 
-      const data = await reader.extract("secret.txt", password);
+      const data = await reader.extract("secret.txt", { password });
       expect(new TextDecoder().decode(data!)).toBe(content);
 
       await reader.close();

@@ -5,20 +5,7 @@
  * Platform-agnostic — imported by both Node.js and browser test runners.
  */
 
-import {
-  createReadableFromArray,
-  collect,
-  text,
-  json,
-  bytes,
-  fromString,
-  fromJSON,
-  fromBytes,
-  transform,
-  filter,
-  isReadableStreamLike,
-  readableStreamToAsyncIterable
-} from "@stream";
+import { Streams } from "@stream";
 import { stringToUint8Array } from "@utils/binary";
 import { describe, it, expect } from "vitest";
 
@@ -60,20 +47,20 @@ export function runStreamUtilsTests(): void {
   // ===========================================================================
   describe("collect", () => {
     it("should collect all chunks from a stream", async () => {
-      const stream = createReadableFromArray([1, 2, 3], { objectMode: true });
-      const result = await collect(stream);
+      const stream = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+      const result = await Streams.collect(stream);
       expect(result).toEqual([1, 2, 3]);
     });
 
     it("should return empty array for empty stream", async () => {
-      const stream = createReadableFromArray([], { objectMode: true });
-      const result = await collect(stream);
+      const stream = Streams.createReadableFromArray([], { objectMode: true });
+      const result = await Streams.collect(stream);
       expect(result).toEqual([]);
     });
 
     it("should collect string chunks", async () => {
-      const stream = createReadableFromArray(["a", "b", "c"], { objectMode: true });
-      const result = await collect(stream);
+      const stream = Streams.createReadableFromArray(["a", "b", "c"], { objectMode: true });
+      const result = await Streams.collect(stream);
       expect(result).toEqual(["a", "b", "c"]);
     });
   });
@@ -84,20 +71,22 @@ export function runStreamUtilsTests(): void {
   describe("text", () => {
     it("should convert binary stream to text", async () => {
       const chunks = [stringToUint8Array("hello"), stringToUint8Array(" world")];
-      const stream = createReadableFromArray(chunks, { objectMode: false });
-      const result = await text(stream);
+      const stream = Streams.createReadableFromArray(chunks, { objectMode: false });
+      const result = await Streams.text(stream);
       expect(result).toBe("hello world");
     });
 
     it("should handle single chunk", async () => {
-      const stream = createReadableFromArray([stringToUint8Array("test")], { objectMode: false });
-      const result = await text(stream);
+      const stream = Streams.createReadableFromArray([stringToUint8Array("test")], {
+        objectMode: false
+      });
+      const result = await Streams.text(stream);
       expect(result).toBe("test");
     });
 
     it("should handle empty stream", async () => {
-      const stream = createReadableFromArray([] as Uint8Array[], { objectMode: false });
-      const result = await text(stream);
+      const stream = Streams.createReadableFromArray([] as Uint8Array[], { objectMode: false });
+      const result = await Streams.text(stream);
       expect(result).toBe("");
     });
   });
@@ -108,19 +97,19 @@ export function runStreamUtilsTests(): void {
   describe("json", () => {
     it("should parse JSON from binary stream", async () => {
       const data = { key: "value", num: 42 };
-      const stream = createReadableFromArray([stringToUint8Array(JSON.stringify(data))], {
+      const stream = Streams.createReadableFromArray([stringToUint8Array(JSON.stringify(data))], {
         objectMode: false
       });
-      const result = await json(stream);
+      const result = await Streams.json(stream);
       expect(result).toEqual(data);
     });
 
     it("should parse JSON array", async () => {
       const data = [1, 2, 3];
-      const stream = createReadableFromArray([stringToUint8Array(JSON.stringify(data))], {
+      const stream = Streams.createReadableFromArray([stringToUint8Array(JSON.stringify(data))], {
         objectMode: false
       });
-      const result = await json(stream);
+      const result = await Streams.json(stream);
       expect(result).toEqual(data);
     });
   });
@@ -132,25 +121,25 @@ export function runStreamUtilsTests(): void {
     it("should collect binary stream into single Uint8Array", async () => {
       const chunk1 = new Uint8Array([1, 2, 3]);
       const chunk2 = new Uint8Array([4, 5, 6]);
-      const stream = createReadableFromArray([chunk1, chunk2], { objectMode: false });
-      const result = await bytes(stream);
+      const stream = Streams.createReadableFromArray([chunk1, chunk2], { objectMode: false });
+      const result = await Streams.bytes(stream);
       expect(result).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6]));
     });
 
     it("should handle single chunk", async () => {
       const chunk = new Uint8Array([10, 20, 30]);
-      const stream = createReadableFromArray([chunk], { objectMode: false });
-      const result = await bytes(stream);
+      const stream = Streams.createReadableFromArray([chunk], { objectMode: false });
+      const result = await Streams.bytes(stream);
       expect(result).toEqual(new Uint8Array([10, 20, 30]));
     });
   });
 
   // ===========================================================================
-  // fromString
+  // Streams.fromString
   // ===========================================================================
   describe("fromString", () => {
     it("should create a readable stream from a string", async () => {
-      const stream = fromString("hello world");
+      const stream = Streams.fromString("hello world");
       const chunks = await toArray(stream);
       expect(chunks.length).toBe(1);
       expect(chunks[0]).toBeInstanceOf(Uint8Array);
@@ -162,13 +151,13 @@ export function runStreamUtilsTests(): void {
       // TextEncoder.encode("") returns a 0-length Uint8Array, which Node's
       // Readable treats as a no-op push (like pushing null), so the stream
       // ends with 0 chunks.
-      const stream = fromString("");
+      const stream = Streams.fromString("");
       const chunks = await toArray(stream);
       expect(chunks.length).toBe(0);
     });
 
     it("should handle unicode string", async () => {
-      const stream = fromString("\u4f60\u597d\u4e16\u754c");
+      const stream = Streams.fromString("\u4f60\u597d\u4e16\u754c");
       const chunks = await toArray(stream);
       const decoded = new TextDecoder().decode(chunks[0] as Uint8Array);
       expect(decoded).toBe("\u4f60\u597d\u4e16\u754c");
@@ -176,12 +165,12 @@ export function runStreamUtilsTests(): void {
   });
 
   // ===========================================================================
-  // fromJSON
+  // Streams.fromJson
   // ===========================================================================
   describe("fromJSON", () => {
     it("should create a readable stream from JSON data", async () => {
       const data = { hello: "world" };
-      const stream = fromJSON(data);
+      const stream = Streams.fromJson(data);
       const chunks = await toArray(stream);
       const decoded = new TextDecoder().decode(chunks[0] as Uint8Array);
       expect(JSON.parse(decoded)).toEqual(data);
@@ -189,14 +178,14 @@ export function runStreamUtilsTests(): void {
 
     it("should handle arrays", async () => {
       const data = [1, 2, 3];
-      const stream = fromJSON(data);
+      const stream = Streams.fromJson(data);
       const chunks = await toArray(stream);
       const decoded = new TextDecoder().decode(chunks[0] as Uint8Array);
       expect(JSON.parse(decoded)).toEqual(data);
     });
 
     it("should handle primitives", async () => {
-      const stream = fromJSON(42);
+      const stream = Streams.fromJson(42);
       const chunks = await toArray(stream);
       const decoded = new TextDecoder().decode(chunks[0] as Uint8Array);
       expect(JSON.parse(decoded)).toBe(42);
@@ -204,12 +193,12 @@ export function runStreamUtilsTests(): void {
   });
 
   // ===========================================================================
-  // fromBytes
+  // Streams.fromBytes
   // ===========================================================================
   describe("fromBytes", () => {
     it("should create a readable stream from Uint8Array", async () => {
       const data = new Uint8Array([1, 2, 3, 4, 5]);
-      const stream = fromBytes(data);
+      const stream = Streams.fromBytes(data);
       const chunks = await toArray(stream);
       expect(chunks.length).toBe(1);
       // In Node.js, chunk may be a Buffer (subclass of Uint8Array)
@@ -220,7 +209,7 @@ export function runStreamUtilsTests(): void {
     it("should handle empty Uint8Array", async () => {
       // A 0-length Uint8Array push is treated as no-op (EOF) by Node Readable
       const data = new Uint8Array(0);
-      const stream = fromBytes(data);
+      const stream = Streams.fromBytes(data);
       const chunks = await toArray(stream);
       expect(chunks.length).toBe(0);
     });
@@ -231,11 +220,11 @@ export function runStreamUtilsTests(): void {
   // ===========================================================================
   describe("transform", () => {
     it("should create a transform stream with sync function", async () => {
-      const source = createReadableFromArray(
+      const source = Streams.createReadableFromArray(
         [stringToUint8Array("hello"), stringToUint8Array(" world")],
         { objectMode: false }
       );
-      const upper = transform<Uint8Array, Uint8Array>(chunk => {
+      const upper = Streams.createTransform<Uint8Array, Uint8Array>(chunk => {
         const str = new TextDecoder().decode(chunk).toUpperCase();
         return stringToUint8Array(str);
       });
@@ -247,11 +236,11 @@ export function runStreamUtilsTests(): void {
     });
 
     it("should create a transform stream with async function", async () => {
-      const source = createReadableFromArray(
+      const source = Streams.createReadableFromArray(
         [stringToUint8Array("abc"), stringToUint8Array("def")],
         { objectMode: false }
       );
-      const upper = transform<Uint8Array, Uint8Array>(async chunk => {
+      const upper = Streams.createTransform<Uint8Array, Uint8Array>(async chunk => {
         const str = new TextDecoder().decode(chunk).toUpperCase();
         return stringToUint8Array(str);
       });
@@ -268,8 +257,8 @@ export function runStreamUtilsTests(): void {
   // ===========================================================================
   describe("filter", () => {
     it("should filter chunks with sync predicate", async () => {
-      const source = createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
-      const evens = filter<number>(n => n % 2 === 0);
+      const source = Streams.createReadableFromArray([1, 2, 3, 4, 5], { objectMode: true });
+      const evens = Streams.filter<number>(n => n % 2 === 0);
 
       source.pipe(evens);
       const result = await toArray(evens);
@@ -277,8 +266,10 @@ export function runStreamUtilsTests(): void {
     });
 
     it("should filter chunks with async predicate", async () => {
-      const source = createReadableFromArray(["hello", "", "world", ""], { objectMode: true });
-      const nonEmpty = filter<string>(async s => s.length > 0);
+      const source = Streams.createReadableFromArray(["hello", "", "world", ""], {
+        objectMode: true
+      });
+      const nonEmpty = Streams.filter<string>(async s => s.length > 0);
 
       source.pipe(nonEmpty);
       const result = await toArray(nonEmpty);
@@ -286,8 +277,8 @@ export function runStreamUtilsTests(): void {
     });
 
     it("should return empty for all-rejected stream", async () => {
-      const source = createReadableFromArray([1, 2, 3], { objectMode: true });
-      const none = filter<number>(() => false);
+      const source = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+      const none = Streams.filter<number>(() => false);
 
       source.pipe(none);
       const result = await toArray(none);
@@ -296,29 +287,29 @@ export function runStreamUtilsTests(): void {
   });
 
   // ===========================================================================
-  // isReadableStreamLike
+  // Streams.isReadableStream
   // ===========================================================================
   describe("isReadableStreamLike", () => {
     it("should return true for a ReadableStream", () => {
       const rs = new ReadableStream();
-      expect(isReadableStreamLike(rs)).toBe(true);
+      expect(Streams.isReadableStream(rs)).toBe(true);
     });
 
     it("should return true for an object with getReader", () => {
-      expect(isReadableStreamLike({ getReader: () => ({}) })).toBe(true);
+      expect(Streams.isReadableStream({ getReader: () => ({}) })).toBe(true);
     });
 
     it("should return false for null", () => {
-      expect(isReadableStreamLike(null)).toBe(false);
+      expect(Streams.isReadableStream(null)).toBe(false);
     });
 
     it("should return false for a plain object", () => {
-      expect(isReadableStreamLike({})).toBe(false);
+      expect(Streams.isReadableStream({})).toBe(false);
     });
   });
 
   // ===========================================================================
-  // readableStreamToAsyncIterable
+  // Streams.readableStreamToAsyncIterable
   // ===========================================================================
   describe("readableStreamToAsyncIterable", () => {
     it("should convert a ReadableStream to an async iterable", async () => {
@@ -332,7 +323,7 @@ export function runStreamUtilsTests(): void {
       });
 
       const result: string[] = [];
-      for await (const chunk of readableStreamToAsyncIterable<string>(rs)) {
+      for await (const chunk of Streams.readableStreamToAsyncIterable<string>(rs)) {
         result.push(chunk);
       }
       expect(result).toEqual(["a", "b", "c"]);
@@ -346,7 +337,7 @@ export function runStreamUtilsTests(): void {
       });
 
       const result: unknown[] = [];
-      for await (const chunk of readableStreamToAsyncIterable(rs)) {
+      for await (const chunk of Streams.readableStreamToAsyncIterable(rs)) {
         result.push(chunk);
       }
       expect(result).toEqual([]);
@@ -362,7 +353,7 @@ export function runStreamUtilsTests(): void {
       });
 
       const result: Uint8Array[] = [];
-      for await (const chunk of readableStreamToAsyncIterable<Uint8Array>(rs)) {
+      for await (const chunk of Streams.readableStreamToAsyncIterable<Uint8Array>(rs)) {
         result.push(chunk);
       }
       expect(result).toEqual([data]);
@@ -379,7 +370,7 @@ export function runStreamUtilsTests(): void {
           }
         });
       const result: unknown[] = [];
-      for await (const chunk of readableStreamToAsyncIterable<unknown>(source())) {
+      for await (const chunk of Streams.readableStreamToAsyncIterable<unknown>(source())) {
         result.push(chunk);
       }
       expect(result).toEqual([1, null, undefined, 2]);
@@ -407,7 +398,7 @@ export function runStreamUtilsTests(): void {
       })();
       const failures = await Promise.all(
         [web, iterable].map(source =>
-          text(source as AsyncIterable<Uint8Array>).then(
+          Streams.text(source as AsyncIterable<Uint8Array>).then(
             () => "accepted",
             (error: Error) => error.name
           )
@@ -425,7 +416,7 @@ export function runStreamUtilsTests(): void {
         }
       });
 
-      for await (const _chunk of readableStreamToAsyncIterable<string>(rs)) {
+      for await (const _chunk of Streams.readableStreamToAsyncIterable<string>(rs)) {
         // consume
       }
 

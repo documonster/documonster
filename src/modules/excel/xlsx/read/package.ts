@@ -9,8 +9,11 @@ import { parseChartEx } from "@excel/chart/serialize/chart-ex-parser";
  * here — `scripts/treeshake-verify.ts` asserts that a write-only bundle holds no reader module.
  */
 import { loadWorkbookModel } from "@excel/core/model-load";
+import { isArrayBufferLike } from "@excel/core/workbook-format";
 import type { Workbook } from "@excel/core/workbook.browser";
 import { ExcelFileError, XlsxParseError } from "@excel/errors";
+import { containerReadError } from "@excel/utils/container-errors";
+import { xlsxPartError } from "@excel/utils/file-content-errors";
 import {
   chartsheetPath,
   getChartsheetNoFromPath,
@@ -40,7 +43,7 @@ import {
   getThemeNameFromPath,
   getVmlDrawingNameFromPath,
   getVmlDrawingHFNameFromPath,
-  getVmlDrawingHFNameFromRelsPath,
+  getVmlDrawingNameFromRelsPath,
   getWorksheetNoFromWorksheetPath,
   getWorksheetNoFromWorksheetRelsPath,
   isBinaryEntryPath,
@@ -68,6 +71,7 @@ import { CoreXform } from "@excel/xlsx/xform/core/core-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { canonicalizeXml } from "@excel/xlsx/xform/namespace-prefixes";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { WorkSheetXform } from "@excel/xlsx/xform/sheet/worksheet-xform";
 import { SharedStringsXform } from "@excel/xlsx/xform/strings/shared-strings-xform";
@@ -165,7 +169,7 @@ export async function readXlsxInto(
   } else if (data instanceof Uint8Array) {
     // Covers Buffer (Node) and any typed-array view whose element size is 1.
     buffer = data;
-  } else if (data instanceof ArrayBuffer) {
+  } else if (isArrayBufferLike(data)) {
     buffer = new Uint8Array(data);
   } else if (ArrayBuffer.isView(data)) {
     // DataView, Int8Array, Float32Array, … — view onto an underlying buffer.
@@ -202,18 +206,36 @@ export async function readXlsxBytesInto(
   buffer: Uint8Array,
   options?: XlsxReadOptions
 ): Promise<Workbook> {
-  const parser = new ZipParser(buffer, {
-    ...options?.zip,
-    maxEntries: options?.zip?.maxEntries ?? XLSX_DEFAULT_MAX_ENTRIES,
-    maxTotalUncompressedSize:
-      options?.zip?.maxTotalUncompressedSize ?? XLSX_DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE
-  });
-  const filesMap = await parser.extractAll();
+  let parser: ZipParser;
+  let filesMap: Awaited<ReturnType<ZipParser["extractAll"]>>;
+  try {
+    parser = new ZipParser(buffer, {
+      ...options?.zip,
+      maxEntries: options?.zip?.maxEntries ?? XLSX_DEFAULT_MAX_ENTRIES,
+      maxTotalUncompressedSize:
+        options?.zip?.maxTotalUncompressedSize ?? XLSX_DEFAULT_MAX_TOTAL_UNCOMPRESSED_SIZE
+    });
+    filesMap = await parser.extractAll();
+  } catch (error) {
+    // Bytes that are not a ZIP package, or a part the package says is damaged, are not a readable workbook: reported
+    // as the Excel error a caller tests for with `isExcelError`, with the archive's diagnosis as the cause.
+    throw containerReadError(error, undefined, undefined, buffer);
+  }
+  // A folder entry is not a part (OPC §9.1.1.1), whether its name ends in "/" or
+  // only its attributes say so.
+  const folders = new Set(
+    parser
+      .getEntries()
+      .filter(e => e.type === "directory")
+      .map(e => e.path)
+  );
 
   // Convert Map to Record for readXlsxFilesInto
   const allFiles: Record<string, Uint8Array> = {};
   for (const [path, content] of filesMap) {
-    allFiles[path] = content;
+    if (!folders.has(path)) {
+      allFiles[path] = content;
+    }
   }
 
   return readXlsxFilesInto(workbook, allFiles, options);
@@ -236,8 +258,9 @@ function createEmptyModel(): any {
     comments: {},
     tables: {},
     vmlDrawings: {},
+    ctrlProps: {},
     vmlDrawingHF: {},
-    vmlDrawingHFRels: {},
+    vmlDrawingRels: {},
     pivotTables: {},
     pivotTableRels: {},
     pivotCacheDefinitions: {},
@@ -449,8 +472,9 @@ function assertNotBinaryWorkbook(sawBinaryWorkbook: boolean, sawXmlWorkbook: boo
     "<input>",
     "read",
     `the package contains xl/workbook.bin and no ${OOXML_PATHS.xlWorkbook}, so it is XLSB and not ` +
-      `XLSX. Reading it here would return an empty workbook rather than fail. Omit the format to ` +
-      `detect it, or pass format: "xlsb".`
+      `XLSX. Reading it here would return an empty workbook rather than fail. Pass format: "xlsb" — ` +
+      `Workbook.read and Workbook.readFile also detect it when no format is given; Workbook.readStream ` +
+      `cannot, since it reads the package as it arrives.`
   );
 }
 
@@ -505,9 +529,33 @@ export async function readXlsxEntriesInto(
   }
 
   assertNotBinaryWorkbook(sawBinaryWorkbook, sawXmlWorkbook);
-  await reconcile(model, options);
-  loadWorkbookModel(workbook, model);
+  await assembleWorkbook(workbook, model, options);
   return workbook;
+}
+
+/**
+ * Reconcile the parts read into `model` and load it into `workbook` — the last step both readers share. A position in
+ * a sheet that the model cannot hold is that sheet's part's `XlsxParseError` (see `utils/file-content-errors`).
+ */
+async function assembleWorkbook(
+  workbook: Workbook,
+  model: any,
+  options?: XlsxOptions
+): Promise<void> {
+  try {
+    await reconcile(model, options);
+  } catch (error) {
+    throw xlsxPartError(error, OOXML_PATHS.xlWorkbook);
+  }
+  loadWorkbookModel(workbook, model, {
+    sheetError: (error, sheet) =>
+      xlsxPartError(
+        error,
+        typeof (sheet as unknown as { sheetNo?: unknown }).sheetNo === "number"
+          ? worksheetPath((sheet as unknown as { sheetNo: number }).sheetNo)
+          : `worksheet "${sheet.name}"`
+      )
+  });
 }
 
 /**
@@ -590,8 +638,8 @@ async function processWorksheetRelsEntry(
 async function processMediaEntry(part: XlsxPart, model: any, filename: string): Promise<void> {
   const lastDot = filename.lastIndexOf(".");
   if (lastDot >= 1) {
-    const extension = filename.substr(lastDot + 1);
-    const name = filename.substr(0, lastDot);
+    const extension = filename.slice(lastDot + 1);
+    const name = filename.slice(0, lastDot);
     const buffer = await part.bytes();
     model.mediaIndex[filename] = model.media.length;
     model.mediaIndex[name] = model.media.length;
@@ -652,6 +700,18 @@ async function processVmlDrawingEntry(part: XlsxPart, model: any, zipPath: strin
   const vmlDrawing = await parseXformStream(xform, part.stream);
   // Key by absolute zip path so reconcile can match any rel target layout.
   model.vmlDrawings[zipPath] = vmlDrawing;
+  // Excel names a header/footer VML `vmlDrawingN.vml` too, so its pictures are recorded here as
+  // well; the sheet's `legacyDrawingHF` decides whether they are used.
+  recordHeaderImages(model, getVmlDrawingNameFromPath(zipPath)!, vmlDrawing);
+}
+
+function recordHeaderImages(model: any, name: string, vmlDrawing: any): void {
+  const headerImages =
+    vmlDrawing?.headerImages ?? (vmlDrawing?.headerImage ? [vmlDrawing.headerImage] : undefined);
+  if (headerImages?.length) {
+    model.vmlDrawingHF ??= {};
+    model.vmlDrawingHF[name] = headerImages;
+  }
 }
 
 async function processVmlDrawingHFEntry(part: XlsxPart, model: any, _name: string): Promise<void> {
@@ -660,21 +720,12 @@ async function processVmlDrawingHFEntry(part: XlsxPart, model: any, _name: strin
   const vmlDrawing = await parseXformStream(xform, part.stream);
   // Store every positioned header/footer image shape (LH/CH/RH/LF/CF/RF)
   // for reconciliation against the VML part's own image relationships.
-  const headerImages =
-    vmlDrawing?.headerImages ?? (vmlDrawing?.headerImage ? [vmlDrawing.headerImage] : undefined);
-  if (headerImages?.length) {
-    model.vmlDrawingHF ??= {};
-    model.vmlDrawingHF[_name] = headerImages;
-  }
+  recordHeaderImages(model, _name, vmlDrawing);
 }
 
-async function processVmlDrawingHFRelsEntry(
-  part: XlsxPart,
-  model: any,
-  name: string
-): Promise<void> {
-  model.vmlDrawingHFRels ??= {};
-  model.vmlDrawingHFRels[name] = await parseRelsPart(part, model, `xl/drawings/${name}.vml`);
+async function processVmlDrawingRelsEntry(part: XlsxPart, model: any, name: string): Promise<void> {
+  model.vmlDrawingRels ??= {};
+  model.vmlDrawingRels[name] = await parseRelsPart(part, model, `xl/drawings/${name}.vml`);
 }
 
 async function processThemeEntry(part: XlsxPart, model: any, name: string): Promise<void> {
@@ -756,11 +807,15 @@ async function processExternalLinkRelsEntry(
 }
 
 async function processChartEntry(part: XlsxPart, model: any, chartNumber: number): Promise<void> {
-  const data = await part.bytes();
+  // The bytes are kept and patched in place on write, by expressions that name Excel's prefixes — so
+  // a part that binds the chart namespace to another prefix is stored in canonical form.
+  const bytes = await part.bytes();
+  const source = bufferToString(bytes);
+  const xmlString = canonicalizeXml(source);
+  const data = xmlString === source ? bytes : new TextEncoder().encode(xmlString);
 
   // Parse into model for high-level API access
   const xform = new ChartSpaceXform();
-  const xmlString = bufferToString(data);
   const chart = await parseXformStream(xform, [xmlString]);
   if (chart) {
     model.chartEntries[chartNumber] = {
@@ -810,8 +865,7 @@ async function readXlsxFilesInto(
     }
   }
 
-  await reconcile(model, options);
-  loadWorkbookModel(workbook, model);
+  await assembleWorkbook(workbook, model, options);
   return workbook;
 }
 
@@ -825,10 +879,15 @@ async function processEntry(
   entryName: string,
   options?: XlsxOptions
 ): Promise<boolean> {
-  return (
-    (await processKnownEntry(part, model, entryName, options)) ||
-    (await processDefaultEntry(part, model, entryName))
-  );
+  // The part boundary: a position the part's content puts outside the grid is the part's `XlsxParseError`.
+  try {
+    return (
+      (await processKnownEntry(part, model, entryName, options)) ||
+      (await processDefaultEntry(part, model, entryName))
+    );
+  } catch (error) {
+    throw xlsxPartError(error, entryName);
+  }
 }
 
 /**
@@ -893,10 +952,30 @@ async function processDefaultEntry(
     return true;
   }
 
-  // The VML part's own rels map each shape's `o:relid` to a media target.
-  const vmlHFRelsName = getVmlDrawingHFNameFromRelsPath(entryName);
-  if (vmlHFRelsName) {
-    await processVmlDrawingHFRelsEntry(part, model, vmlHFRelsName);
+  // Every VML part's own rels, keyed by part name: they map a shape's `o:relid` to a media target.
+  // Only the part a sheet's `legacyDrawingHF` names is read for header pictures (reconcile); a
+  // comment / form-control VML is regenerated from the model on write, so its rels are not needed.
+  const vmlRelsName = getVmlDrawingNameFromRelsPath(entryName);
+  if (vmlRelsName) {
+    await processVmlDrawingRelsEntry(part, model, vmlRelsName);
+    return true;
+  }
+
+  // A form control's properties. A checkbox is modelled — the worksheet reconcile joins it to its VML
+  // shape — and the writer authors the part again. Any other control (a button, a list box) is not
+  // modelled: its part is kept verbatim on the control, and written back with it under a fresh part
+  // number. Kept as an opaque part instead, it survived at its old path with the control itself dropped,
+  // and could collide with the part number a checkbox is written under.
+  if (/^xl\/ctrlProps\/ctrlProp\d+\.xml$/.test(entryName)) {
+    const bytes = await part.bytes();
+    const { CtrlPropXform } = await import("@excel/xlsx/xform/drawing/ctrl-prop-xform");
+    const xform = new CtrlPropXform();
+    await parseXformStream(xform, [bytes]);
+    if (xform.parsed) {
+      model.ctrlProps[entryName] = { ...xform.parsed, xml: new TextDecoder().decode(bytes) };
+    } else {
+      model.opaqueUnknownEntries.set(entryName, bytes);
+    }
     return true;
   }
 
@@ -1007,8 +1086,11 @@ async function processDefaultEntry(
   // ChartEx files (Office 2016+ extended charts) — raw bytes plus best-effort structured model
   const chartExNumber = getChartExNumberFromPath(entryName);
   if (chartExNumber !== undefined) {
-    const data = await part.bytes();
-    const rawXml = bufferToString(data);
+    // Canonical prefixes, for the same reason as a chart's — see `processChartEntry`.
+    const bytes = await part.bytes();
+    const source = bufferToString(bytes);
+    const rawXml = canonicalizeXml(source);
+    const data = rawXml === source ? bytes : new TextEncoder().encode(rawXml);
     model.chartExEntries[chartExNumber] = data;
     try {
       const parsed = parseChartEx(rawXml);

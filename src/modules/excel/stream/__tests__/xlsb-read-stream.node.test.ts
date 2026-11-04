@@ -220,7 +220,7 @@ describe("the row decoder", () => {
     // in `xlsb-worksheet-reader.ts` and excluded here rather than quietly absorbed into a tolerance.
     const handle = Workbook.create();
     await Workbook.read(handle, Uint8Array.from(await readFile(richXlsb)));
-    const reference = Workbook.getWorksheets(handle)[0];
+    const reference = Workbook.listWorksheets(handle)[0];
     const streamed = await streamedCells();
     let compared = 0;
     for (const [address, value] of streamed) {
@@ -245,7 +245,7 @@ describe("the row decoder", () => {
       : [];
     const handle = Workbook.create();
     await Workbook.read(handle, Uint8Array.from(await readFile(richXlsb)));
-    const reference = Workbook.getWorksheets(handle)[0];
+    const reference = Workbook.listWorksheets(handle)[0];
     const scratch = Workbook.create();
     const target = Workbook.addWorksheet(scratch, "S");
     let compared = 0;
@@ -302,7 +302,9 @@ describe("what the streamed row decoder does and does not decode", () => {
     for await (const worksheet of reader) {
       for await (const row of worksheet) {
         seen.push(
-          Stream.rowValues(row).filter(value => value !== undefined && value !== null) as unknown[]
+          Stream.getRowValues(row).filter(
+            value => value !== undefined && value !== null
+          ) as unknown[]
         );
       }
     }
@@ -384,7 +386,7 @@ describe("Stream.WorkbookReader on a binary package", () => {
     const streamed = await streamRead(file);
     const handle = Workbook.create();
     await Workbook.read(handle, Uint8Array.from(await readFile(file)));
-    const reference = Workbook.getWorksheets(handle)[0];
+    const reference = Workbook.listWorksheets(handle)[0];
     let compared = 0;
     for (const [address, value] of streamed.firstRow) {
       const expected = Cell.getValue(reference, address);
@@ -424,7 +426,7 @@ describe("Stream.WorkbookReader on a binary package", () => {
     const { writeFile } = await import("node:fs/promises");
     const directory = await mkdtemp(join(tmpdir(), "documonster-xlsb-defer-"));
     const target = join(directory, "reordered.xlsb");
-    await writeFile(target, await zip.bytes());
+    await writeFile(target, await zip.toBuffer());
 
     const streamed = await streamRead(target);
     expect(streamed.names.length).toBeGreaterThan(0);

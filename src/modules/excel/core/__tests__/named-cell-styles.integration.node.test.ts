@@ -17,12 +17,12 @@ describe("named cell styles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    Workbook.defineCellStyle(wb, "Heading 1", {
+    Workbook.addCellStyle(wb, "Heading 1", {
       font: { name: "Arial", size: 20, bold: true, color: { argb: "FF1F4E79" } }
     });
 
     Cell.setValue(ws, "A1", "My heading");
-    Cell.applyCellStyle(ws, "A1", "Heading 1");
+    Cell.applyStyle(ws, "A1", "Heading 1");
 
     // registry accessors
     expect(Workbook.getCellStyle(wb, "Heading 1")?.font).toMatchObject({
@@ -52,12 +52,12 @@ describe("named cell styles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    const name = Workbook.useBuiltinCellStyle(wb, "Heading1");
+    const name = Workbook.useBuiltInCellStyle(wb, "Heading1");
     expect(name).toBe("Heading 1");
     expect(Workbook.getCellStyle(wb, "Heading 1")?.builtinId).toBe(16);
 
     Cell.setValue(ws, "A1", "Title text");
-    Cell.applyCellStyle(ws, "A1", name);
+    Cell.applyStyle(ws, "A1", name);
 
     const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer);
@@ -70,7 +70,7 @@ describe("named cell styles", () => {
   it("Cell.setStyle accepts styleName directly", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Accent", {
+    Workbook.addCellStyle(wb, "Accent", {
       fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
     });
 
@@ -83,13 +83,13 @@ describe("named cell styles", () => {
 
   it("rejects redefining the reserved Normal style", () => {
     const wb = Workbook.create();
-    expect(() => Workbook.defineCellStyle(wb, "Normal", {})).toThrow();
-    expect(() => Workbook.defineCellStyle(wb, "", {})).toThrow();
+    expect(() => Workbook.addCellStyle(wb, "Normal", {})).toThrow();
+    expect(() => Workbook.addCellStyle(wb, "", {})).toThrow();
   });
 
   it("removeCellStyle deletes a defined style", () => {
     const wb = Workbook.create();
-    Workbook.defineCellStyle(wb, "Temp", { font: { italic: true } });
+    Workbook.addCellStyle(wb, "Temp", { font: { italic: true } });
     expect(Workbook.removeCellStyle(wb, "Temp")).toBe(true);
     expect(Workbook.getCellStyle(wb, "Temp")).toBeUndefined();
     expect(Workbook.removeCellStyle(wb, "Missing")).toBe(false);
@@ -99,7 +99,7 @@ describe("named cell styles", () => {
     const filename = getUniqueTestFilePath(import.meta.url);
 
     const wb = new WorkbookWriter({ filename, useStyles: true });
-    wb.defineCellStyle("Heading 1", {
+    wb.addCellStyle("Heading 1", {
       font: { name: "Arial", size: 20, bold: true }
     });
     const ws = wb.addWorksheet("Sheet1");
@@ -125,7 +125,7 @@ describe("named cell styles", () => {
 
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Heading 2", { font: { size: 13, bold: true } });
+    Workbook.addCellStyle(wb, "Heading 2", { font: { size: 13, bold: true } });
 
     // Apply the named style to an entire row, then add cells to it.
     Row.setStyle(ws, 1, { styleName: "Heading 2" });
@@ -151,7 +151,7 @@ describe("named cell styles", () => {
 
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Accent", {
+    Workbook.addCellStyle(wb, "Accent", {
       fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } }
     });
 
@@ -173,7 +173,7 @@ describe("named cell styles", () => {
 
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Heading 1", {
+    Workbook.addCellStyle(wb, "Heading 1", {
       font: { name: "Arial", size: 20, bold: true }
     });
 
@@ -202,11 +202,11 @@ describe("named cell styles", () => {
   it("applyCellStyle preserves a previously set direct facet", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Heading 1", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "Heading 1", { font: { bold: true } });
 
     Cell.setValue(ws, "A1", "x");
     Cell.setStyle(ws, "A1", { alignment: { horizontal: "right" } });
-    Cell.applyCellStyle(ws, "A1", "Heading 1");
+    Cell.applyStyle(ws, "A1", "Heading 1");
 
     const style = Cell.getStyle(ws, "A1");
     expect(style.styleName).toBe("Heading 1");
@@ -219,7 +219,7 @@ describe("named cell styles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     // The named style owns a font; the cell only adds a local alignment.
-    Workbook.defineCellStyle(wb, "Heading 1", {
+    Workbook.addCellStyle(wb, "Heading 1", {
       font: { name: "Arial", size: 20, bold: true }
     });
     Cell.setValue(ws, "A1", "Mixed");
@@ -256,12 +256,25 @@ describe("named cell styles", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "x");
-    expect(() => Cell.applyCellStyle(ws, "A1", "Nope")).toThrow(/not defined/);
+    expect(() => Cell.applyStyle(ws, "A1", "Nope")).toThrow(/not defined/);
     // Low-level setStyle stays lenient (no workbook lookup / no throw).
     expect(() => Cell.setStyle(ws, "A1", { styleName: "Nope" })).not.toThrow();
   });
 
-  it("streaming defineCellStyle validates name and dedups on redefine", async () => {
+  it("streaming addCellStyle returns the entry; useBuiltInCellStyle and the deprecated forward register", () => {
+    const stream = new Writable({ write: (_c: Uint8Array, _e: string, cb: () => void) => cb() });
+    const wb = new WorkbookWriter({ stream, useStyles: true });
+    expect(wb.addCellStyle("Accent", { font: { bold: true } })).toEqual({
+      name: "Accent",
+      font: { bold: true }
+    });
+    expect(wb.useBuiltInCellStyle("Heading1")).toBe(
+      Workbook.useBuiltInCellStyle(Workbook.create(), "Heading1")
+    );
+    expect(wb.defineCellStyle("Old", { font: { italic: true } })).toBeUndefined();
+  });
+
+  it("streaming addCellStyle validates name and dedups on redefine", async () => {
     const chunks: Uint8Array[] = [];
     const stream = new Writable({
       write(chunk: Uint8Array, _enc: string, cb: () => void) {
@@ -270,12 +283,12 @@ describe("named cell styles", () => {
       }
     });
     const wb = new WorkbookWriter({ stream, useStyles: true });
-    expect(() => wb.defineCellStyle("", { font: { bold: true } })).toThrow();
-    expect(() => wb.defineCellStyle("Normal", { font: { bold: true } })).toThrow();
+    expect(() => wb.addCellStyle("", { font: { bold: true } })).toThrow();
+    expect(() => wb.addCellStyle("Normal", { font: { bold: true } })).toThrow();
 
     // Redefining the same name must not emit a duplicate <cellStyle>.
-    wb.defineCellStyle("Accent", { font: { bold: true } });
-    wb.defineCellStyle("Accent", { font: { italic: true } });
+    wb.addCellStyle("Accent", { font: { bold: true } });
+    wb.addCellStyle("Accent", { font: { italic: true } });
     const ws = wb.addWorksheet("Sheet1");
     const a1 = ws.getCell("A1");
     cellSetValue(a1, "x");
@@ -301,9 +314,9 @@ describe("named cell styles", () => {
     // 1. Author a workbook with a custom named style and emit it.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Custom", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "Custom", { font: { bold: true } });
     Cell.setValue(ws, "A1", "x");
-    Cell.applyCellStyle(ws, "A1", "Custom");
+    Cell.applyStyle(ws, "A1", "Custom");
     const first = new Uint8Array(await Workbook.toBuffer(wb));
 
     // 2. Inject the extra OOXML attributes onto the <cellStyle> and repack.
@@ -341,12 +354,12 @@ describe("named cell styles", () => {
     // cellStyleXf and read back as the same name.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Heading A", { font: { bold: true } });
-    Workbook.defineCellStyle(wb, "Heading B", { font: { bold: true } }); // identical content
+    Workbook.addCellStyle(wb, "Heading A", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "Heading B", { font: { bold: true } }); // identical content
     Cell.setValue(ws, "A1", "a");
-    Cell.applyCellStyle(ws, "A1", "Heading A");
+    Cell.applyStyle(ws, "A1", "Heading A");
     Cell.setValue(ws, "B1", "b");
-    Cell.applyCellStyle(ws, "B1", "Heading B");
+    Cell.applyStyle(ws, "B1", "Heading B");
 
     const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer);
@@ -360,15 +373,15 @@ describe("named cell styles", () => {
   it("supports multiple named styles round-trip with correct name mapping", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "S1", { font: { bold: true } });
-    Workbook.defineCellStyle(wb, "S2", { font: { italic: true } });
-    Workbook.defineCellStyle(wb, "S3", { numFmt: "0.00%" });
+    Workbook.addCellStyle(wb, "S1", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "S2", { font: { italic: true } });
+    Workbook.addCellStyle(wb, "S3", { numFmt: "0.00%" });
     Cell.setValue(ws, "A1", 1);
-    Cell.applyCellStyle(ws, "A1", "S3");
+    Cell.applyStyle(ws, "A1", "S3");
     Cell.setValue(ws, "A2", 2);
-    Cell.applyCellStyle(ws, "A2", "S1");
+    Cell.applyStyle(ws, "A2", "S1");
     Cell.setValue(ws, "A3", 3);
-    Cell.applyCellStyle(ws, "A3", "S2");
+    Cell.applyStyle(ws, "A3", "S2");
 
     const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     await expectValidXlsx(buffer);
@@ -387,25 +400,25 @@ describe("named cell styles", () => {
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "x");
     // "Normal" cannot be defined, so applyCellStyle should reject it clearly.
-    expect(() => Cell.applyCellStyle(ws, "A1", "Normal")).toThrow(/not defined/);
+    expect(() => Cell.applyStyle(ws, "A1", "Normal")).toThrow(/not defined/);
   });
 
   it("applyCellStyle works with the (ws, row, col, name) overload", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "H", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "H", { font: { bold: true } });
     Cell.setValue(ws, 2, 3, "x"); // C2
-    Cell.applyCellStyle(ws, 2, 3, "H");
+    Cell.applyStyle(ws, 2, 3, "H");
     expect(Cell.getStyle(ws, "C2").styleName).toBe("H");
     // Undefined name via the same overload must still throw.
-    expect(() => Cell.applyCellStyle(ws, 2, 3, "Missing")).toThrow(/not defined/);
+    expect(() => Cell.applyStyle(ws, 2, 3, "Missing")).toThrow(/not defined/);
     await expectValidXlsx(new Uint8Array(await Workbook.toBuffer(wb)));
   });
 
   it("setStyle keeps styleName when a later setStyle changes another facet", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "H", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "H", { font: { bold: true } });
     Cell.setValue(ws, "A1", "x");
     Cell.setStyle(ws, "A1", { styleName: "H" });
     Cell.setStyle(ws, "A1", { alignment: { horizontal: "center" } });
@@ -416,9 +429,9 @@ describe("named cell styles", () => {
   it("gracefully degrades a cell whose named style was removed", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "Gone", { font: { bold: true } });
+    Workbook.addCellStyle(wb, "Gone", { font: { bold: true } });
     Cell.setValue(ws, "A1", "x");
-    Cell.applyCellStyle(ws, "A1", "Gone");
+    Cell.applyStyle(ws, "A1", "Gone");
     // Remove the definition but leave the cell's dangling reference.
     Workbook.removeCellStyle(wb, "Gone");
     // Writing must not throw; the cell falls back to a plain style.
@@ -434,9 +447,9 @@ describe("named cell styles", () => {
   it("is stable across repeated toBuffer() calls", async () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Workbook.defineCellStyle(wb, "H", { font: { name: "Arial", bold: true } });
+    Workbook.addCellStyle(wb, "H", { font: { name: "Arial", bold: true } });
     Cell.setValue(ws, "A1", "x");
-    Cell.applyCellStyle(ws, "A1", "H");
+    Cell.applyStyle(ws, "A1", "H");
 
     const b1 = new Uint8Array(await Workbook.toBuffer(wb));
     const b2 = new Uint8Array(await Workbook.toBuffer(wb));

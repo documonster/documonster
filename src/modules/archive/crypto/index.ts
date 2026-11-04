@@ -48,7 +48,7 @@ export {
 } from "@archive/crypto/aes";
 
 // Random bytes — from shared @utils/crypto
-export { randomBytes } from "@utils/crypto";
+export { randomBytes } from "@archive/crypto/random-bytes";
 
 // Types
 export {

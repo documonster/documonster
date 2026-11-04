@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { extractAll } from "@archive/unzip/extract";
-import { Cell, Column, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,7 +30,7 @@ const ws = Workbook.addWorksheet(wb, "Text");
 Column.setWidth(ws, 1, 26);
 Column.setWidth(ws, 2, 44);
 
-Worksheet.addRow(ws, ["What it is", "The text"]);
+Row.add(ws, ["What it is", "The text"]);
 Cell.setStyle(ws, "A1", { font: { bold: true } });
 Cell.setStyle(ws, "B1", { font: { bold: true } });
 
@@ -76,9 +76,8 @@ const entries = await extractAll(fs.readFileSync(filename));
 const sst = entries.get("xl/sharedStrings.bin");
 console.log(`sharedStrings.bin is ${sst?.data.length ?? 0} bytes for 50 repeats plus 15 samples`);
 
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
-const read = Workbook.getWorksheets(reopened)[0]!;
+const reopened = await Workbook.readFile(filename);
+const read = Workbook.listWorksheets(reopened)[0]!;
 let exact = 0;
 samples.forEach(([label, text], index) => {
   const got = Cell.getValue(read, `B${index + 2}`);

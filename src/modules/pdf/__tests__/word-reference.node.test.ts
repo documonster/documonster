@@ -47,7 +47,7 @@ describe("Word → PDF matches Microsoft Word", () => {
   for (const [name, pages] of Object.entries(expected)) {
     it(name, async () => {
       const doc = await Io.read(readFileSync(join(DIR, `${name}.docx`)));
-      const read = await Pdf.read(await Pdf.fromDocx(doc));
+      const read = await Pdf.extract(await Pdf.fromDocx(doc));
       const actual = read.pages.map(page => {
         const bold: Record<string, boolean> = {};
         for (const fragment of page.textFragments) {

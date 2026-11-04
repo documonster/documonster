@@ -12,10 +12,10 @@
  * small filled triangle aimed along the last segment, which every backend draws already.
  */
 
-import { cssColour } from "@draw/colour";
+import { cssColor } from "@draw/colour";
 import type { DrawNode, DrawPaint, DrawPathCommand, DrawPoint } from "@draw/types";
 import type { EdgeRoute, FlowLayout, GroupBox, NodeBox } from "@mermaid/layout/flowchart";
-import { ARROW_LENGTH, arrowHead, centredText, layoutTitleBlock } from "@mermaid/render/shared";
+import { ARROW_LENGTH, arrowHead, centeredText, layoutTitleBlock } from "@mermaid/render/shared";
 import type { Theme } from "@mermaid/theme";
 import type { ClassDef, EdgeEnd, EdgeStroke } from "@mermaid/types";
 
@@ -63,15 +63,15 @@ function boxNodes(
 ): DrawNode[] {
   const def = box.classes.map(name => classes.get(name)).find(entry => entry !== undefined);
   const paint: DrawPaint = {
-    fill: def?.fill ? cssColour(def.fill) : theme.nodeFill,
-    stroke: def?.stroke ? cssColour(def.stroke) : theme.nodeStroke,
+    fill: def?.fill ? cssColor(def.fill) : theme.nodeFill,
+    stroke: def?.stroke ? cssColor(def.stroke) : theme.nodeStroke,
     strokeWidth: def?.strokeWidth ?? 1.5,
     ...(def?.strokeDasharray ? { dash: [...def.strokeDasharray] } : {})
   };
 
   const out: DrawNode[] = [...outline(box, paint)];
-  const textFill = def?.color ? cssColour(def.color) : theme.nodeText;
-  out.push(centredText(box, box.lines, fontSize, fontFamily, textFill));
+  const textFill = def?.color ? cssColor(def.color) : theme.nodeText;
+  out.push(centeredText(box, box.lines, fontSize, fontFamily, textFill));
   return out;
 }
 
@@ -320,7 +320,7 @@ export function edgeLabelNodes(
       rx: 3,
       paint: { fill: theme.edgeLabelBackground }
     },
-    centredText(
+    centeredText(
       { x: route.label.x, y: route.label.y, width: route.label.width, height: route.label.height },
       route.label.lines,
       fontSize - 2,

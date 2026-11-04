@@ -6,7 +6,7 @@
  * journey's is a score and a cast — so they share a shape and not a grammar.
  */
 
-import { decodeLabel, splitStatements } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, splitStatementsAt } from "@mermaid/parse/lex";
 import type { JourneyDiagram, JourneyTask, TimelineDiagram, TimelinePeriod } from "@mermaid/types";
 
 /** Parse a timeline. */
@@ -16,7 +16,9 @@ export function parseTimeline(source: string): TimelineDiagram {
   let title: string | undefined;
   let section = "";
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^timeline\b/i.test(text)) {
       continue;
     }
@@ -48,6 +50,8 @@ export function parseTimeline(source: string): TimelineDiagram {
           ...previous,
           events: [...previous.events, ...parts.slice(1).filter(part => part !== "")]
         };
+      } else {
+        skipped.add(statement);
       }
       continue;
     }
@@ -62,7 +66,8 @@ export function parseTimeline(source: string): TimelineDiagram {
     kind: "timeline",
     ...(title === undefined ? {} : { title }),
     sections,
-    periods
+    periods,
+    ...skipped.report()
   };
 }
 
@@ -73,7 +78,9 @@ export function parseJourney(source: string): JourneyDiagram {
   let title: string | undefined;
   let section = "";
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^journey\b/i.test(text)) {
       continue;
     }
@@ -97,10 +104,12 @@ export function parseJourney(source: string): JourneyDiagram {
     // `Make tea: 5: Me, Cat`
     const parts = text.split(":");
     if (parts.length < 2) {
+      skipped.add(statement);
       continue;
     }
     const score = Number.parseInt(parts[1].trim(), 10);
     if (!Number.isFinite(score)) {
+      skipped.add(statement);
       continue;
     }
     tasks.push({
@@ -119,6 +128,7 @@ export function parseJourney(source: string): JourneyDiagram {
     kind: "journey",
     ...(title === undefined ? {} : { title }),
     sections,
-    tasks
+    tasks,
+    ...skipped.report()
   };
 }

@@ -31,6 +31,11 @@ Image.place(ws, imageId, {
 });
 Image.place(ws, imageId, "B7:E12");
 
+// A placement can be taken off again; the image stays registered, so its id is reusable.
+Image.place(ws, imageId, "G2:H4");
+const [, , draft] = Image.list(ws);
+Image.remove(ws, draft);
+
 Image.setBackground(ws, backgroundId);
 
 const stopwatch = new HrStopwatch();

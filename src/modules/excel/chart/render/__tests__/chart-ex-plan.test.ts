@@ -10,7 +10,7 @@
  * The geometry itself is pinned by `chart-ex-baseline.test.ts`; what is checked here is
  * *agreement*, which a hash of one backend's output cannot see.
  */
-import { buildChartExModel, drawChartExPdf, renderChartExSvg } from "@excel/chart";
+import { ChartEx, drawChartExPdf } from "@excel/chart";
 import { recordChartPdf } from "@test/pdf-draw-record";
 import { extractSvgGeometry } from "@test/svg-geometry";
 import { describe, expect, it } from "vitest";
@@ -25,7 +25,7 @@ interface Cfg {
 }
 
 function modelOf(type: string, cfg: Cfg = {}) {
-  return buildChartExModel({
+  return ChartEx.createModel({
     type,
     categories: "Sheet1!$A$1:$A$4",
     series: [
@@ -39,7 +39,7 @@ function modelOf(type: string, cfg: Cfg = {}) {
     showLegend: cfg.showLegend ?? true,
     legendPosition: cfg.legendPosition ?? "r",
     ...(cfg.title === undefined ? {} : { title: cfg.title })
-  } as Parameters<typeof buildChartExModel>[0]);
+  } as Parameters<typeof ChartEx.createModel>[0]);
 }
 
 /** The PDF calls for one model, drawn into a box at `origin`. */
@@ -60,7 +60,7 @@ function pdfCalls(type: string, cfg: Cfg = {}, origin = { x: 0, y: 0 }): string[
  * have to be read out of the children rather than out of the element's own content.
  */
 function svgText(type: string, cfg: Cfg = {}): string[] {
-  const svg = renderChartExSvg(modelOf(type, cfg), { width: WIDTH, height: HEIGHT });
+  const svg = ChartEx.toSvg(modelOf(type, cfg), { width: WIDTH, height: HEIGHT });
   const out: string[] = [];
   for (const element of svg.matchAll(/<text[^>]*font-size="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g)) {
     const size = element[1];
@@ -125,7 +125,7 @@ describe("every backend draws from one plan", () => {
     // Both paths call `getPlotRect` through the plan, so the gridlines they draw sit at
     // the same Y once the PDF flip is undone. Reading it off the marks is what catches a
     // second derivation; comparing the two renderers' own numbers would not.
-    const svg = renderChartExSvg(modelOf("waterfall", { title: "T" }), {
+    const svg = ChartEx.toSvg(modelOf("waterfall", { title: "T" }), {
       width: WIDTH,
       height: HEIGHT
     });
@@ -153,7 +153,7 @@ describe("every backend draws from one plan", () => {
 
   it("a region map reports its mode in SVG and draws the same marks in PDF", () => {
     // The mode is an SVG-only annotation attached at serialisation; the nodes are shared.
-    const svg = renderChartExSvg(modelOf("regionMap"), { width: WIDTH, height: HEIGHT });
+    const svg = ChartEx.toSvg(modelOf("regionMap"), { width: WIDTH, height: HEIGHT });
     expect(svg).toMatch(/data-region-map-mode="[a-z-]+"/);
     expect(pdfCalls("regionMap").length).toBeGreaterThan(1);
   });

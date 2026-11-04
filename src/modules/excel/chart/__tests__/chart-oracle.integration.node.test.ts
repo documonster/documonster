@@ -13,14 +13,14 @@ import {
   runOfficeOpenValidation
 } from "@excel/__tests__/helpers/external-oracle";
 import { addChart, addChartEx, addComboChart } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Row, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
 describe("optional chart oracle and enterprise corpus harness", () => {
   it("optionally exports chart workbooks through LibreOffice as a visual oracle hook", async () => {
     const workbook = Workbook.create();
     const ws = Workbook.addWorksheet(workbook, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -53,7 +53,7 @@ describe("optional chart oracle and enterprise corpus harness", () => {
   it("optionally open-validates generated chart workbooks with Office-compatible binaries", async () => {
     const workbook = Workbook.create();
     const ws = Workbook.addWorksheet(workbook, "Data");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 1],
       ["B", 20, 2],
       ["C", 30, 3]

@@ -5,27 +5,21 @@
  * - StreamError / StreamStateError / StreamTypeError /
  *   UnsupportedStreamTypeError — the stream error hierarchy
  * - isStreamError()  — narrow an unknown caught value to a StreamError
- * - isStream / isReadable / isWritable / isTransform / isDuplex —
+ * - Streams.isStream / isReadable / isWritable / Streams.isTransform / Streams.isDuplex —
  *   runtime type guards for stream shapes
  *
  * Usage: pnpm example --filter 07-errors-guards
  */
 
 import {
-  createDuplex,
-  createReadableFromArray,
-  createTransform,
-  createWritable,
-  isDuplex,
   isReadable,
-  isStream,
   isStreamError,
-  isTransform,
   isWritable,
   StreamError,
   StreamStateError,
   StreamTypeError,
-  UnsupportedStreamTypeError
+  UnsupportedStreamTypeError,
+  Streams
 } from "@stream";
 
 /** The error classes form a hierarchy rooted at StreamError. */
@@ -62,38 +56,42 @@ export async function exampleCatchStreamError(): Promise<void> {
 
 /** Runtime type guards distinguish the different stream shapes. */
 export function exampleTypeGuards(): void {
-  const readable = createReadableFromArray([1, 2, 3], { objectMode: true });
-  const writable = createWritable<number>({
+  const readable = Streams.createReadableFromArray([1, 2, 3], { objectMode: true });
+  const writable = Streams.createWritable<number>({
     objectMode: true,
     write: (_chunk, _encoding, callback) => callback()
   });
-  const transformStream = createTransform<number, number>(n => n, { objectMode: true });
-  const duplex = createDuplex<number, number>({ objectMode: true });
+  const transformStream = Streams.createTransform<number, number>(n => n, { objectMode: true });
+  const duplex = Streams.createDuplex<number, number>({ objectMode: true });
 
   console.log(
-    "readable: isStream=%s isReadable=%s isWritable=%s",
-    isStream(readable),
+    "readable: Streams.isStream=%s isReadable=%s isWritable=%s",
+    Streams.isStream(readable),
     isReadable(readable),
     isWritable(readable)
   );
 
   console.log(
-    "writable: isStream=%s isReadable=%s isWritable=%s",
-    isStream(writable),
+    "writable: Streams.isStream=%s isReadable=%s isWritable=%s",
+    Streams.isStream(writable),
     isReadable(writable),
     isWritable(writable)
   );
 
   console.log(
-    "transform: isTransform=%s isDuplex=%s",
-    isTransform(transformStream),
-    isDuplex(transformStream)
+    "transform: Streams.isTransform=%s Streams.isDuplex=%s",
+    Streams.isTransform(transformStream),
+    Streams.isDuplex(transformStream)
   );
 
-  console.log("duplex: isDuplex=%s isTransform=%s", isDuplex(duplex), isTransform(duplex));
+  console.log(
+    "duplex: Streams.isDuplex=%s Streams.isTransform=%s",
+    Streams.isDuplex(duplex),
+    Streams.isTransform(duplex)
+  );
 
   // Non-stream values are rejected.
-  console.log("plain object isStream:", isStream({ foo: "bar" }));
+  console.log("plain object isStream:", Streams.isStream({ foo: "bar" }));
 }
 
 export async function exampleErrorsGuards(): Promise<void> {

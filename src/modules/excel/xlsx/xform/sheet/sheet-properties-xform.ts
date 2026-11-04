@@ -14,6 +14,8 @@ interface SheetPropertiesModel {
 class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
   declare public map: Record<string, BaseXform>;
   declare public parser?: BaseXform;
+  /** The `<tabColor>` attributes as read, for the numbers the colour parser could not read. */
+  declare private tabColorAttributes?: Record<string, string>;
 
   constructor() {
     super();
@@ -61,6 +63,9 @@ class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
       return true;
     }
     if (this.map[node.name]) {
+      if (node.name === "tabColor") {
+        this.tabColorAttributes = node.attributes;
+      }
       this.parser = this.map[node.name];
       this.parser.parseOpen(node);
       return true;
@@ -86,7 +91,19 @@ class SheetPropertiesXform extends BaseXform<SheetPropertiesModel> {
     if (this.map.tabColor.model || this.map.pageSetUpPr.model || this.map.outlinePr.model) {
       this.model = {};
       if (this.map.tabColor.model) {
-        this.model.tabColor = this.map.tabColor.model;
+        // A number that is not one keeps its text, for the reader to set aside (`sheet-settings-checks`), rather
+        // than reaching the model as `NaN`.
+        const tabColor: Record<string, unknown> = { ...this.map.tabColor.model };
+        for (const [field, attribute] of [
+          ["theme", "theme"],
+          ["tint", "tint"],
+          ["indexed", "indexed"]
+        ]) {
+          if (Number.isNaN(tabColor[field])) {
+            tabColor[field] = this.tabColorAttributes?.[attribute];
+          }
+        }
+        this.model.tabColor = tabColor as Partial<Color>;
       }
       if (this.map.pageSetUpPr.model) {
         this.model.pageSetup = this.map.pageSetUpPr.model;

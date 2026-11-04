@@ -18,7 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Sparkline, Workbook, Worksheet } from "@excel/index";
+import { Row, Sparkline, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,10 +30,10 @@ const filename = process.argv[2] ?? path.join(outDir, "sparkline-api.xlsx");
 const wb = Workbook.create();
 const ws = Workbook.addWorksheet(wb, "Trends");
 
-Worksheet.addRow(ws, ["Region", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6"]);
-Worksheet.addRow(ws, ["North", 540, 620, 610, 710, 805, 880]);
-Worksheet.addRow(ws, ["South", 320, 300, 360, 410, 390, 460]);
-Worksheet.addRow(ws, ["East", 210, 260, 250, 300, 340, 380]);
+Row.add(ws, ["Region", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6"]);
+Row.add(ws, ["North", 540, 620, 610, 710, 805, 880]);
+Row.add(ws, ["South", 320, 300, 360, 410, 390, 460]);
+Row.add(ws, ["East", 210, 260, 250, 300, 340, 380]);
 
 // 1. add — three sparkline groups
 const line = Sparkline.add(ws, {

@@ -18,7 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Workbook } from "@excel/index";
 
 /** The path for `format`, derived from a path that names another. */
@@ -76,7 +76,7 @@ export async function writeBothFormats(
 ): Promise<{ readonly xlsx: string; readonly xlsb: string }> {
   // **Recalculate before writing, or every formula ships with no cached value.**
   //
-  // A formula this library creates carries an expression and nothing else until `calculateFormulas` runs — the engine
+  // A formula this library creates carries an expression and nothing else until `ExcelFormula.calculate` runs — the engine
   // is a separate subpath precisely so a CDN consumer does not pay ~200 KB for it, which means an example has to ask.
   // None of them did, and the cost is not the missing number; it is what the missing number makes a *reader* do.
   //
@@ -88,7 +88,7 @@ export async function writeBothFormats(
   //
   // It belongs here rather than in each example for the same reason the write does: an example should be about the
   // feature it demonstrates, and a file that takes eight minutes to open is not a demonstration of anything.
-  calculateFormulas(workbook);
+  ExcelFormula.calculate(workbook);
 
   const written: Record<"xlsx" | "xlsb", string> = { xlsx: "", xlsb: "" };
   for (const format of ["xlsx", "xlsb"] as const) {

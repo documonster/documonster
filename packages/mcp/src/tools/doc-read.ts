@@ -15,7 +15,7 @@ import { readFile } from "node:fs/promises";
 
 import { Pdf } from "documonster/pdf";
 import { Io, Query } from "documonster/word";
-import { renderToMarkdown } from "documonster/word/markdown";
+import { WordMarkdown } from "documonster/word/markdown";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -105,11 +105,11 @@ async function readWord(resolved: string, args: DocReadArgs): Promise<string> {
     );
   });
 
-  const headings = Query.getHeadings(doc);
+  const headings = Query.listHeadings(doc);
   const stats = [
-    `- paragraphs: ${Query.paragraphCount(doc)}`,
-    `- words: ${Query.countWords(doc)}`,
-    `- tables: ${Query.tableCount(doc)}`,
+    `- paragraphs: ${Query.getParagraphCount(doc)}`,
+    `- words: ${Query.getWordCount(doc)}`,
+    `- tables: ${Query.getTableCount(doc)}`,
     `- images: ${Query.listImages(doc).length}`
   ];
 
@@ -129,7 +129,7 @@ async function readWord(resolved: string, args: DocReadArgs): Promise<string> {
     return lines.join("\n");
   }
 
-  const markdown = renderToMarkdown(doc);
+  const markdown = WordMarkdown.fromDocx(doc);
   const window = takeLines(markdown, args.startLine ?? 1, args.maxLines ?? DEFAULT_MAX_LINES);
 
   return [
@@ -150,7 +150,7 @@ async function readPdf(resolved: string, args: DocReadArgs): Promise<string> {
   const bytes = await readFile(resolved);
   const wanted = parsePages(args.pages);
 
-  const result = await Pdf.read(new Uint8Array(bytes), {
+  const result = await Pdf.extract(new Uint8Array(bytes), {
     extractText: true,
     extractImages: false,
     extractTables: false,

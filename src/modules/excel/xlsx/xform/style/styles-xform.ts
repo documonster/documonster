@@ -3,26 +3,26 @@ import type { NamedStyleEntry } from "@excel/core/workbook-core";
 import { ExcelNotSupportedError } from "@excel/errors";
 import type { Alignment, Borders, Fill, Font, Protection, Style } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { ListXform } from "@excel/xlsx/xform/list-xform";
 import { StaticXform } from "@excel/xlsx/xform/static-xform";
 import { BorderXform } from "@excel/xlsx/xform/style/border-xform";
 import type { CellStyleModel } from "@excel/xlsx/xform/style/cell-style-xform";
 import { CellStyleXform } from "@excel/xlsx/xform/style/cell-style-xform";
-import {
-  dxfExtensionsOf,
-  setDxfExtensions,
-  withInheritedNamespaces
-} from "@excel/xlsx/xform/style/dxf-extensions";
 import { DxfEntryXform } from "@excel/xlsx/xform/style/dxf-xform";
 import { FillXform } from "@excel/xlsx/xform/style/fill-xform";
 import { FontXform } from "@excel/xlsx/xform/style/font-xform";
 import { NumFmtXform } from "@excel/xlsx/xform/style/numfmt-xform";
 import { StyleXform } from "@excel/xlsx/xform/style/style-xform";
+import { excelNameKey } from "@utils/name-key";
 import type { SaxTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
 
 // custom numfmt ids start here
 const NUMFMT_BASE = 164;
+
+/** The built-in "Normal" style's name as cell style names are compared — without regard to case, as Excel does. */
+const NORMAL_STYLE_KEY = excelNameKey("Normal");
 
 /**
  * The style-manager model. Each collection is dual-mode: in the write/manager
@@ -229,6 +229,14 @@ function styleModelKey(model: Partial<Style>, type: number): string | undefined 
 // StylesXform is used to generate and parse the styles.xml file
 // it manages the collections of fonts, number formats, alignments, etc
 class StylesXform extends BaseXform {
+  /**
+   * A preserved `<dxf>` `<extLst>` is written under this writer's `<styleSheet>`, not the source's, so it
+   * declares any prefix it borrowed from the source's root itself — see `fragment-namespaces.ts`.
+   */
+  get writerNamespaces(): WriterNamespaces {
+    return STYLES_WRITER_NAMESPACES;
+  }
+
   declare public map: Record<string, BaseXform>;
   declare public model: StylesModel;
   declare private index?: StyleIndex;
@@ -266,8 +274,6 @@ class StylesXform extends BaseXform {
    * original index back instead of appending a duplicate. See {@link seedDxfs}.
    */
   declare private dxfIds?: Map<DxfStyle, number>;
-  /** Namespace declarations on the source's `<styleSheet>`, by prefix; see `withInheritedNamespaces`. */
-  declare private rootNamespaces?: Record<string, string>;
   declare private _hasCheckboxes?: boolean;
   declare public defaultFont?: Partial<Font>;
   declare public parser?: BaseXform;
@@ -375,7 +381,7 @@ class StylesXform extends BaseXform {
     this._namedStyleIds = new Map();
     this._addCellStyleXf({ numFmtId: 0, fontId: 0, fillId: 0, borderId: 0 });
     this.model.cellStyles!.push({ name: "Normal", xfId: 0, builtinId: 0 });
-    this._namedStyleIds.set("Normal", 0);
+    this._namedStyleIds.set(excelNameKey("Normal"), 0);
 
     this.styleMemo = new Map();
     this._hasCheckboxes = false;
@@ -394,7 +400,10 @@ class StylesXform extends BaseXform {
    * collections. Must be called (in the manager role) before cells are added so
    * that {@link addStyleModel} can resolve `styleName` → xfId. The built-in
    * "Normal" style is already seeded by {@link init}; entries named "Normal"
-   * are ignored.
+   * (in any case) are ignored.
+   *
+   * Names are compared as Excel compares them, without regard to case: an entry whose name matches a registered one
+   * replaces it and keeps the registered spelling, so the package never carries two `<cellStyle>`s Excel would merge.
    */
   registerNamedStyles(namedStyles: Map<string, NamedStyleEntry>): void {
     // Only the manager role (init()) maintains the named-style collections.
@@ -408,10 +417,15 @@ class StylesXform extends BaseXform {
     // themselves omit a font (so they correctly inherit fontId 0).
     this._ensureDefaultFont();
 
-    for (const [name, style] of namedStyles) {
-      if (name === "Normal") {
+    for (const style of namedStyles.values()) {
+      const key = excelNameKey(style.name);
+      if (key === NORMAL_STYLE_KEY) {
         continue;
       }
+      const existingIndex = this._namedStyleIds.has(key)
+        ? this.model.cellStyles!.findIndex(cs => excelNameKey(cs.name) === key)
+        : -1;
+      const name = existingIndex >= 0 ? this.model.cellStyles![existingIndex].name : style.name;
       const ref = this._buildStyleRef(style);
       const xfId = this._addCellStyleXf(ref);
       const cellStyle: CellStyleModel = {
@@ -424,15 +438,12 @@ class StylesXform extends BaseXform {
       };
       // Replace an existing entry of the same name (e.g. a streaming writer
       // redefining a style) rather than emitting a duplicate <cellStyle>.
-      const existingIndex = this._namedStyleIds.has(name)
-        ? this.model.cellStyles!.findIndex(cs => cs.name === name)
-        : -1;
       if (existingIndex >= 0) {
         this.model.cellStyles![existingIndex] = cellStyle;
       } else {
         this.model.cellStyles!.push(cellStyle);
       }
-      this._namedStyleIds.set(name, xfId);
+      this._namedStyleIds.set(key, xfId);
     }
     // A memoised styleId embeds the xfId its `styleName` resolved to. Redefining
     // a name allocates a fresh cellStyleXf, so a surviving memo entry would hand
@@ -602,12 +613,6 @@ class StylesXform extends BaseXform {
     switch (node.name) {
       case "styleSheet":
         this.initIndex();
-        // The namespaces the source declared at the root, for a preserved `<dxf>` extension that relies on them.
-        this.rootNamespaces = Object.fromEntries(
-          Object.entries(node.attributes)
-            .filter(([name]) => name.startsWith("xmlns:"))
-            .map(([name, uri]) => [name.slice("xmlns:".length), uri])
-        );
         return true;
       default:
         this.parser = this.map[node.name];
@@ -646,14 +651,6 @@ class StylesXform extends BaseXform {
         add("borders", this.map.borders);
         add("styles", this.map.cellXfs);
         add("dxfs", this.map.dxfs);
-        // A preserved `<extLst>` is written under this writer's `<styleSheet>`, not the source's: any prefix it
-        // borrowed from the source's root is declared on it now, while the source's declarations are known.
-        for (const dxf of (this.model.dxfs ?? []) as object[]) {
-          const extensions = dxfExtensionsOf(dxf);
-          if (extensions !== undefined) {
-            setDxfExtensions(dxf, withInheritedNamespaces(extensions, this.rootNamespaces ?? {}));
-          }
-        }
         add("cellStyleXfs", this.map.cellStyleXfs);
         add("cellStyles", this.map.cellStyles);
 
@@ -757,8 +754,11 @@ class StylesXform extends BaseXform {
     // Named cell style reference: point this xf at the named style's base xf.
     // Facets the cell sets explicitly (above) override; unset facets stay at
     // index 0 and are inherited from the referenced cellStyleXf by Excel.
-    if (model.styleName && this._namedStyleIds && this._namedStyleIds.has(model.styleName)) {
-      style.xfId = this._namedStyleIds.get(model.styleName);
+    if (model.styleName && this._namedStyleIds) {
+      const xfId = this._namedStyleIds.get(excelNameKey(model.styleName));
+      if (xfId !== undefined) {
+        style.xfId = xfId;
+      }
     }
 
     if (type === Enums.ValueType.Checkbox) {
@@ -783,7 +783,8 @@ class StylesXform extends BaseXform {
   getStyleModel(id: number): Style | null {
     // In the parse/read role the `styles` collection holds StyleRef objects
     // (not the rendered strings of the write role).
-    const style = this.model.styles![id] as StyleRef | undefined;
+    // `?.`: a styles part with no `<cellXfs>` — malformed, but readable — has no list to index.
+    const style = this.model.styles?.[id] as StyleRef | undefined;
     if (!style) {
       return null;
     }
@@ -852,7 +853,10 @@ class StylesXform extends BaseXform {
       if (cellStyles) {
         const named = cellStyles.find(cs => cs.xfId === style.xfId);
         if (named) {
-          model.styleName = named.name;
+          // A file can carry two styles whose names differ only in case; Excel keeps the first and points the cells
+          // of the other at it, and so does this (see `getNamedStyles`).
+          const key = excelNameKey(named.name);
+          model.styleName = cellStyles.find(cs => excelNameKey(cs.name) === key)!.name;
         }
       }
     }
@@ -872,10 +876,15 @@ class StylesXform extends BaseXform {
       return [];
     }
     const result: NamedStyleEntry[] = [];
+    // Names compare without regard to case, as Excel compares them: of two that differ only in case the first is
+    // kept — what Excel does on opening such a file — and cells styled with the other are re-pointed at it.
+    const seen = new Set<string>([NORMAL_STYLE_KEY]);
     for (const cs of cellStyles) {
-      if (cs.builtinId === 0 || cs.name === "Normal") {
+      const key = excelNameKey(cs.name);
+      if (cs.builtinId === 0 || seen.has(key)) {
         continue;
       }
+      seen.add(key);
       const ref = cellStyleXfs[cs.xfId];
       const entry: NamedStyleEntry = { name: cs.name };
       if (cs.builtinId !== undefined) {
@@ -1203,5 +1212,8 @@ class StylesXformMock extends StylesXform {
 
 // Assign Mock after class declaration to avoid "used before declaration" error
 StylesXform.Mock = StylesXformMock;
+
+/** The styles writer declares its fixed set, whatever the source's root declared. */
+const STYLES_WRITER_NAMESPACES: WriterNamespaces = { fixed: StylesXform.STYLESHEET_ATTRIBUTES };
 
 export { StylesXform };

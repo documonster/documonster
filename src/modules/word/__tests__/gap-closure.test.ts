@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 
 import { htmlToDocxBody } from "../convert/html/html-import";
 import { renderToMarkdown } from "../convert/markdown/markdown-renderer";
-import { Document, Build, Diff, Io, Query, Template } from "../index";
+import { Build, Diff, Document, Io, Package, Query, Template, Transform } from "../index";
 import { readCfb } from "../security/cfb-reader";
 import { isEncryptedDocx } from "../security/encryption";
 import type { DocxDocument, Paragraph, Table, Run, BodyContent } from "../types";
@@ -43,7 +43,7 @@ describe("extractText: table cells", () => {
         Build.textParagraph("After table")
       ]
     };
-    const result = Query.extractText(doc);
+    const result = Query.getText(doc);
     expect(result).toContain("Before table");
     expect(result).toContain("Cell A1");
     expect(result).toContain("Cell B1");
@@ -81,7 +81,7 @@ describe("extractText: table cells", () => {
         }
       ]
     };
-    const result = Query.extractText(doc);
+    const result = Query.getText(doc);
     expect(result).toContain("Outer");
     expect(result).toContain("Inner");
   });
@@ -110,7 +110,7 @@ describe("replaceText: enhanced features", () => {
     };
     const count = Query.replaceText(doc, "Hello", "Goodbye");
     expect(count).toBe(1);
-    const text = Query.extractText(doc);
+    const text = Query.getText(doc);
     expect(text).toContain("Goodbye World");
   });
 
@@ -127,7 +127,7 @@ describe("replaceText: enhanced features", () => {
     const count = Query.replaceText(doc, "Hello", "Hi");
     expect(count).toBe(1);
     // The replacement should distribute text across runs (format preservation)
-    const fullText = Query.extractText(doc);
+    const fullText = Query.getText(doc);
     expect(fullText).toContain("Hi");
     expect(fullText).toContain("World");
   });
@@ -205,7 +205,7 @@ describe("Chart reader", () => {
       })
     );
     Document.addParagraph(h, "After chart");
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
 
     // Should find a chart content item
@@ -236,7 +236,7 @@ describe("Chart reader", () => {
         ]
       })
     );
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     const charts = parsed.body.filter(b => b.type === "chart");
     expect(charts.length).toBe(1);
@@ -251,7 +251,7 @@ describe("Chart reader", () => {
 describe("Form field builders", () => {
   it("should create text form field with properties", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([
         Build.formTextField({
@@ -262,7 +262,7 @@ describe("Form field builders", () => {
         })
       ])
     );
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     // Find the field in the run content
@@ -286,11 +286,11 @@ describe("Form field builders", () => {
 
   it("should create checkbox form field", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([Build.formCheckboxField({ name: "Agree", checked: true })])
     );
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     let foundField = false;
@@ -312,7 +312,7 @@ describe("Form field builders", () => {
 
   it("should create dropdown form field", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.paragraph([
         Build.formDropdownField({
@@ -322,7 +322,7 @@ describe("Form field builders", () => {
         })
       ])
     );
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     let foundField = false;
@@ -357,8 +357,8 @@ describe("mergeDocuments", () => {
       body: [Build.textParagraph("Doc 2 content")],
       styles: [{ type: "paragraph", styleId: "Heading2", name: "heading 2" }]
     };
-    const merged = Io.merge([doc1, doc2]);
-    const text = Query.extractText(merged);
+    const merged = Transform.merge([doc1, doc2]);
+    const text = Query.getText(merged);
     expect(text).toContain("Doc 1 content");
     expect(text).toContain("Doc 2 content");
     expect(merged.styles!.length).toBe(2);
@@ -366,19 +366,19 @@ describe("mergeDocuments", () => {
 
   it("should handle single document", () => {
     const doc: DocxDocument = { body: [Build.textParagraph("Only one")] };
-    const result = Io.merge([doc]);
+    const result = Transform.merge([doc]);
     expect(result).toBe(doc); // Should return same reference
   });
 
   it("should handle empty array", () => {
-    const result = Io.merge([]);
+    const result = Transform.merge([]);
     expect(result.body).toEqual([]);
   });
 
   it("should mark section breaks on the preceding paragraph (no stray empty paragraph)", () => {
     const doc1: DocxDocument = { body: [Build.textParagraph("A")] };
     const doc2: DocxDocument = { body: [Build.textParagraph("B")] };
-    const merged = Io.merge([doc1, doc2], { sectionBreak: "continuous" });
+    const merged = Transform.merge([doc1, doc2], { sectionBreak: "continuous" });
     // A section's properties are carried by the sectPr of its LAST paragraph —
     // not by an extra empty paragraph (which would render as a stray blank
     // line / blank page in Word). So the body stays at 2 paragraphs: "A"
@@ -430,7 +430,7 @@ describe("resolveStyle", () => {
       }
     };
     const para = doc.body[0] as Paragraph;
-    const resolved = Query.resolveStyle(doc, para);
+    const resolved = Query.getParagraphStyle(doc, para);
 
     expect(resolved.chain).toEqual(["Heading1", "Normal"]);
     // Heading1 overrides Normal's alignment
@@ -449,7 +449,7 @@ describe("resolveStyle", () => {
       }
     };
     const para = doc.body[0] as Paragraph;
-    const resolved = Query.resolveStyle(doc, para);
+    const resolved = Query.getParagraphStyle(doc, para);
     expect(resolved.chain).toEqual([]);
     expect((resolved.runProperties as any).size).toBe(24);
   });
@@ -495,17 +495,17 @@ describe("compileTemplate / patchTemplate", () => {
     const h = Document.create();
     Document.addParagraph(h, "Hello {{name}}!");
     Document.addParagraph(h, "Your role is {{role}}.");
-    const templateBuf = await Io.toBuffer(Document.build(h));
+    const templateBuf = await Io.toBuffer(h);
 
     // Compile once
-    const compiled = await Io.compileTemplate(templateBuf);
+    const compiled = await Package.compileTemplate(templateBuf);
 
     // Patch multiple times
-    const result1 = await Io.patchTemplate(compiled, [
+    const result1 = await Package.patchTemplate(compiled, [
       { placeholder: "{{name}}", content: { type: "text", text: "Alice" } },
       { placeholder: "{{role}}", content: { type: "text", text: "Engineer" } }
     ]);
-    const result2 = await Io.patchTemplate(compiled, [
+    const result2 = await Package.patchTemplate(compiled, [
       { placeholder: "{{name}}", content: { type: "text", text: "Bob" } },
       { placeholder: "{{role}}", content: { type: "text", text: "Designer" } }
     ]);
@@ -513,10 +513,10 @@ describe("compileTemplate / patchTemplate", () => {
     // Verify both results
     const parsed1 = await Io.read(result1);
     const parsed2 = await Io.read(result2);
-    expect(Query.extractText(parsed1)).toContain("Alice");
-    expect(Query.extractText(parsed1)).toContain("Engineer");
-    expect(Query.extractText(parsed2)).toContain("Bob");
-    expect(Query.extractText(parsed2)).toContain("Designer");
+    expect(Query.getText(parsed1)).toContain("Alice");
+    expect(Query.getText(parsed1)).toContain("Engineer");
+    expect(Query.getText(parsed2)).toContain("Bob");
+    expect(Query.getText(parsed2)).toContain("Designer");
   });
 });
 
@@ -586,7 +586,7 @@ describe("htmlToDocxBody", () => {
   it("should decode HTML entities", () => {
     const blocks = htmlToDocxBody("<p>&lt;html&gt; &amp; &quot;quotes&quot;</p>");
     expect(blocks.length).toBe(1);
-    const text = Query.extractText({ body: blocks });
+    const text = Query.getText({ body: blocks });
     expect(text).toContain('<html> & "quotes"');
   });
 });
@@ -696,7 +696,7 @@ describe("diffDocuments", () => {
     const doc2: DocxDocument = {
       body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
     };
-    const result = Diff.documents(doc1, doc2);
+    const result = Diff.compare(doc1, doc2);
     expect(result.summary.unchanged).toBe(2);
     expect(result.summary.added).toBe(0);
     expect(result.summary.deleted).toBe(0);
@@ -707,7 +707,7 @@ describe("diffDocuments", () => {
     const doc2: DocxDocument = {
       body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
     };
-    const result = Diff.documents(doc1, doc2);
+    const result = Diff.compare(doc1, doc2);
     expect(result.summary.added).toBe(1);
     expect(result.entries.some(e => e.type === "added" && e.newText === "World")).toBe(true);
   });
@@ -717,7 +717,7 @@ describe("diffDocuments", () => {
       body: [Build.textParagraph("Hello"), Build.textParagraph("World")]
     };
     const doc2: DocxDocument = { body: [Build.textParagraph("Hello")] };
-    const result = Diff.documents(doc1, doc2);
+    const result = Diff.compare(doc1, doc2);
     expect(result.summary.deleted).toBe(1);
     expect(result.entries.some(e => e.type === "deleted" && e.oldText === "World")).toBe(true);
   });
@@ -725,7 +725,7 @@ describe("diffDocuments", () => {
   it("should detect modifications", () => {
     const doc1: DocxDocument = { body: [Build.textParagraph("Hello World")] };
     const doc2: DocxDocument = { body: [Build.textParagraph("Hello Earth")] };
-    const result = Diff.documents(doc1, doc2);
+    const result = Diff.compare(doc1, doc2);
     // Lightly-edited single paragraph → one modification, not delete+add.
     expect(result.summary.modified).toBe(1);
     expect(result.summary.added).toBe(0);
@@ -753,7 +753,7 @@ describe("diffDocuments", () => {
         Build.textParagraph("Step 4: Cool before slicing.")
       ]
     };
-    const result = Diff.documents(doc1, doc2);
+    const result = Diff.compare(doc1, doc2);
 
     expect(result.summary.modified).toBe(3);
     expect(result.summary.deleted).toBe(1);
@@ -780,7 +780,7 @@ describe("diffDocuments", () => {
   it("should not pair completely unrelated paragraphs as modified", () => {
     const doc1: DocxDocument = { body: [Build.textParagraph("The quick brown fox")] };
     const doc2: DocxDocument = { body: [Build.textParagraph("Lorem ipsum dolor amet")] };
-    const result = Diff.documents(doc1, doc2);
+    const result = Diff.compare(doc1, doc2);
     // No shared words → not a modification, but a delete + an add.
     expect(result.summary.modified).toBe(0);
     expect(result.summary.deleted).toBe(1);
@@ -821,9 +821,9 @@ describe("Full round-trip: new features", () => {
       ["C", "D"]
     ]);
     Document.addHeading(h, "Heading 1", 1);
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
-    const text = Query.extractText(parsed);
+    const text = Query.getText(parsed);
     expect(text).toContain("Top-level paragraph");
     expect(text).toContain("A");
     expect(text).toContain("B");
@@ -833,7 +833,7 @@ describe("Full round-trip: new features", () => {
   it("should round-trip search/replace in table", async () => {
     const h = Document.create();
     Document.addTable(h, [["Hello World", "Foo"]]);
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
 
     const searchResults = Query.searchText(parsed, "Hello");
@@ -841,24 +841,24 @@ describe("Full round-trip: new features", () => {
 
     const count = Query.replaceText(parsed, "Hello", "Goodbye");
     expect(count).toBe(1);
-    expect(Query.extractText(parsed)).toContain("Goodbye World");
+    expect(Query.getText(parsed)).toContain("Goodbye World");
   });
 
   it("should merge and repackage successfully", async () => {
     const h1 = Document.create();
     Document.addParagraph(h1, "Document One");
-    const buf1 = await Io.toBuffer(Document.build(h1));
+    const buf1 = await Io.toBuffer(h1);
     const doc1 = await Io.read(buf1);
 
     const h2 = Document.create();
     Document.addParagraph(h2, "Document Two");
-    const buf2 = await Io.toBuffer(Document.build(h2));
+    const buf2 = await Io.toBuffer(h2);
     const doc2 = await Io.read(buf2);
 
-    const merged = Io.merge([doc1, doc2]);
-    const mergedBuf = await Io.package(merged);
+    const merged = Transform.merge([doc1, doc2]);
+    const mergedBuf = await Io.toBuffer(merged);
     const reParsed = await Io.read(mergedBuf);
-    const text = Query.extractText(reParsed);
+    const text = Query.getText(reParsed);
     expect(text).toContain("Document One");
     expect(text).toContain("Document Two");
   });
@@ -893,7 +893,7 @@ describe("Track Changes: accept/reject", () => {
     };
     const count = Query.acceptAllRevisions(doc);
     expect(count).toBeGreaterThanOrEqual(2);
-    const result = Query.extractText(doc);
+    const result = Query.getText(doc);
     expect(result).toContain("Hello ");
     expect(result).toContain("beautiful ");
     expect(result).not.toContain("ugly ");
@@ -924,7 +924,7 @@ describe("Track Changes: accept/reject", () => {
     };
     const count = Query.rejectAllRevisions(doc);
     expect(count).toBeGreaterThanOrEqual(2);
-    const result = Query.extractText(doc);
+    const result = Query.getText(doc);
     expect(result).toContain("Hello ");
     expect(result).not.toContain("beautiful ");
     expect(result).toContain("ugly ");
@@ -939,15 +939,15 @@ describe("Track Changes: accept/reject", () => {
 describe("heading builder: mixed formatting", () => {
   it("should accept array of runs for mixed formatting", async () => {
     const h = Document.create();
-    Document.addParagraphElement(
+    Document.addParagraph(
       h,
       Build.heading([Build.text("Normal "), Build.text("Bold", { bold: true })], 1)
     );
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.style).toBe("Heading1");
-    const fullText = Query.extractText(parsed);
+    const fullText = Query.getText(parsed);
     expect(fullText).toContain("Normal ");
     expect(fullText).toContain("Bold");
   });
@@ -962,13 +962,13 @@ describe("patchDocument: header/footer full support", () => {
     const h = Document.create();
     Document.addParagraph(h, "Body with {{name}}");
     Document.setHeader(h, "default", { children: [Build.textParagraph("Header: {{name}}")] });
-    const templateBuf = await Io.toBuffer(Document.build(h));
+    const templateBuf = await Io.toBuffer(h);
 
-    const result = await Io.patchDocument(templateBuf, [
+    const result = await Package.patch(templateBuf, [
       { placeholder: "{{name}}", content: { type: "text", text: "Acme Inc" } }
     ]);
     const parsed = await Io.read(result);
-    const bodyText = Query.extractText(parsed);
+    const bodyText = Query.getText(parsed);
     expect(bodyText).toContain("Acme Inc");
   });
 });
@@ -989,7 +989,7 @@ describe("replaceText: surrogate pair safety", () => {
     };
     const doc: DocxDocument = { body: [para] };
     Query.replaceText(doc, "Hello 🌍 World", "Goodbye 🌎 Earth");
-    const result = Query.extractText(doc);
+    const result = Query.getText(doc);
     expect(result).toContain("Goodbye");
     expect(result).toContain("Earth");
     // Should not have broken the emoji
@@ -1005,7 +1005,7 @@ describe("docType and VBA round-trip", () => {
   it("should round-trip docType for macroEnabledDocument", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Macro doc");
-    const doc = Document.build(h);
+    const doc = h;
     const macroDoc: DocxDocument = {
       ...doc,
       docType: "macroEnabledDocument",
@@ -1022,7 +1022,7 @@ describe("docType and VBA round-trip", () => {
   it("should round-trip docType for template", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Template doc");
-    const doc = Document.build(h);
+    const doc = h;
     const templateDoc: DocxDocument = { ...doc, docType: "template" };
     const buffer = await Io.toBuffer(templateDoc);
     const parsed = await Io.read(buffer);
@@ -1032,7 +1032,7 @@ describe("docType and VBA round-trip", () => {
   it("should not set docType for standard document", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Normal doc");
-    const buffer = await Io.toBuffer(Document.build(h));
+    const buffer = await Io.toBuffer(h);
     const parsed = await Io.read(buffer);
     expect(parsed.docType).toBeUndefined();
   });
@@ -1046,7 +1046,7 @@ describe("Opaque XML preservation", () => {
   it("should preserve unknown run content through round-trip", async () => {
     const h = Document.create();
     Document.addParagraph(h, "Normal text");
-    const doc = Document.build(h);
+    const doc = h;
     // Manually inject an opaque run content
     const paraWithOpaque: Paragraph = {
       type: "paragraph",
@@ -1076,7 +1076,7 @@ describe("Opaque XML preservation", () => {
 
   it("should preserve unknown paragraph children through round-trip", async () => {
     const h = Document.create();
-    const doc = Document.build(h);
+    const doc = h;
     const paraWithOpaque: Paragraph = {
       type: "paragraph",
       children: [
@@ -1119,7 +1119,7 @@ describe("Template engine: listTemplateTags", () => {
         Build.textParagraph("{{>extra}}")
       ]
     };
-    const tags = Template.listTemplateTags(doc);
+    const tags = Template.listTags(doc);
     expect(tags.length).toBe(9);
     expect(tags[0].type).toBe("variable");
     expect(tags[0].expression).toBe("name");
@@ -1141,13 +1141,17 @@ describe("Template engine: fillTemplateEnhanced", () => {
       body: [Build.textParagraph("{{%logo}}")]
     };
     const imgData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header stub
-    const result = Template.fillTemplateEnhanced(doc, {
-      logo: {
-        image: { data: imgData, fileName: "logo.png", mediaType: "png" },
-        width: 914400,
-        height: 457200
-      }
-    }) as DocxDocument;
+    const result = Template.fill(
+      doc,
+      {
+        logo: {
+          image: { data: imgData, fileName: "logo.png", mediaType: "png" },
+          width: 914400,
+          height: 457200
+        }
+      },
+      { richPlaceholders: true }
+    ) as DocxDocument;
 
     expect(result.images).toBeDefined();
     expect(result.images!.length).toBe(1);
@@ -1165,7 +1169,11 @@ describe("Template engine: fillTemplateEnhanced", () => {
       { properties: { bold: true }, content: [{ type: "text", text: "Bold" }] },
       { content: [{ type: "text", text: " and normal" }] }
     ];
-    const result = Template.fillTemplateEnhanced(doc, { formatted: richRuns }) as DocxDocument;
+    const result = Template.fill(
+      doc,
+      { formatted: richRuns },
+      { richPlaceholders: true }
+    ) as DocxDocument;
     const para = result.body[0] as Paragraph;
     expect(para.children.length).toBe(2);
     expect(((para.children[0] as Run).properties as any)?.bold).toBe(true);
@@ -1183,9 +1191,13 @@ describe("Template engine: fillTemplateEnhanced", () => {
       Build.textParagraph("Sub paragraph 1"),
       Build.textParagraph("Sub paragraph 2")
     ];
-    const result = Template.fillTemplateEnhanced(doc, { extra: subContent }) as DocxDocument;
+    const result = Template.fill(
+      doc,
+      { extra: subContent },
+      { richPlaceholders: true }
+    ) as DocxDocument;
     expect(result.body.length).toBe(4); // Before + 2 sub + After
-    expect(Query.extractText(result)).toContain("Sub paragraph 1");
-    expect(Query.extractText(result)).toContain("Sub paragraph 2");
+    expect(Query.getText(result)).toContain("Sub paragraph 1");
+    expect(Query.getText(result)).toContain("Sub paragraph 2");
   });
 });

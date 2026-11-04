@@ -276,7 +276,7 @@ describe.each(implementations)("stream parity (%s)", (_name, S: Impl) => {
 
 describe("BufferedStream", () => {
   it("keeps write order when reads and writes interleave", () => {
-    const s = new nodeEntry.BufferedStream();
+    const s = new nodeEntry.Streams.BufferedStream();
     s.write(new Uint8Array([1, 2, 3, 4]));
     expect(Array.from(s.read(1)!)).toEqual([1]);
     s.write(new Uint8Array([5]));
@@ -286,7 +286,7 @@ describe("BufferedStream", () => {
 
 describe("PullStream", () => {
   it("keeps its buffer proportional to the data held, not to the data passed through", async () => {
-    const s = new nodeEntry.PullStream();
+    const s = new nodeEntry.Streams.PullStream();
     const chunk = new Uint8Array(1000);
     for (let i = 0; i < 20_000; i++) {
       s.write(chunk);

@@ -1,7 +1,7 @@
 /**
  * Example: PDF Reader — Annotation / Table / Bookmark Extraction
  *
- * Demonstrates the read-side extraction features driven by `Pdf.read`
+ * Demonstrates the read-side extraction features driven by `Pdf.extract`
  * options:
  *   - extractAnnotations → result.pages[].annotations  (PdfAnnotation[])
  *   - extractTables      → result.pages[].tables        (PdfTable[])
@@ -94,7 +94,7 @@ doc.addBookmark("Overview", 0); // points to page 1 (0-based)
 doc.addBookmark("Appendix", 1); // top-level → page 2
 doc.addBookmark("Appendix Details", 1, 1); // nested under "Appendix" (parent index 1)
 
-const bytes = await doc.build();
+const bytes = await doc.toBuffer();
 const srcPath = path.join(outDir, "extraction-source.pdf");
 fs.writeFileSync(srcPath, bytes);
 console.log("=== PDF Extraction Examples ===\n");
@@ -104,7 +104,7 @@ console.log(`Built source PDF: ${srcPath} (${bytes.length} bytes)\n`);
 // 2. Read it back with extraction enabled
 // =============================================================================
 
-const result = await Pdf.read(bytes, {
+const result = await Pdf.extract(bytes, {
   extractAnnotations: true,
   extractTables: true,
   extractBookmarks: true

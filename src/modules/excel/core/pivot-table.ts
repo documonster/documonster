@@ -1,6 +1,6 @@
 import type { PivotChartOptions } from "@excel/chart/model/types";
 import type { CellData } from "@excel/core/cell";
-import { cellNumFmt } from "@excel/core/cell";
+import { cellGetValue, cellNumFmt } from "@excel/core/cell";
 import type { ColumnData } from "@excel/core/column";
 import type {
   CacheField,
@@ -27,14 +27,7 @@ import { rowDimensions, rowValues } from "@excel/core/row";
 import type { TableData } from "@excel/core/table";
 import { tableModel } from "@excel/core/table";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import {
-  columnValues,
-  findCell,
-  getColumn,
-  getRow,
-  getSheetName,
-  getSheetValues
-} from "@excel/core/worksheet-core";
+import { columnValues, findCell, getSheetName } from "@excel/core/worksheet-core";
 import { PivotTableError } from "@excel/errors";
 import { colCache } from "@excel/utils/col-cache";
 import { isDateFmt, range } from "@utils/utils";
@@ -87,6 +80,11 @@ export interface PivotTableSource {
    * makes `45306` a date rather than a quantity. A source without it can still mark a column of `Date` values.
    */
   getNumberFormat?(rowNumber: number, columnNumber: number): string | undefined;
+  /**
+   * @internal The A1 range a worksheet source reads (`"A1:C9"`), header row first. Row and column numbers above are
+   * relative to it, and structural edits of the sheet move and resize it as they do any other reference.
+   */
+  ref?: string;
 }
 
 /** A cell's number format as a code, whichever of its two shapes it is stored in. */
@@ -153,7 +151,7 @@ export interface PivotTableModel {
    */
   sourceTable?: TableData;
   /** Column names to use as row fields in the pivot table */
-  rows: string[];
+  rows: readonly string[];
   /**
    * Column names to use as column fields in the pivot table.
    * If omitted or empty, Excel will use "Values" as the column field.
@@ -161,7 +159,7 @@ export interface PivotTableModel {
    * "∑Values" pseudo-field is appended to the column axis automatically.
    * @default []
    */
-  columns?: string[];
+  columns?: readonly string[];
   /**
    * Column names (or value field specifications) to aggregate in the pivot table.
    * Each entry can be a plain string (column name) or a {@link PivotTableValue}
@@ -183,13 +181,13 @@ export interface PivotTableModel {
    * values: ["Sales", { name: "Quantity", metric: "count" }]
    * ```
    */
-  values: (string | PivotTableValue)[];
+  values: readonly (string | PivotTableValue)[];
   /**
    * Column names to use as page fields (report filters) in the pivot table.
    * Page fields appear as dropdown filters above the pivot table.
    * @default []
    */
-  pages?: string[];
+  pages?: readonly string[];
   /**
    * Default aggregation metric for all value fields.
    * Individual value fields can override this via {@link PivotTableValue.metric}.
@@ -268,6 +266,11 @@ export interface PivotTable {
   tableNumber: number;
   /** Workbook relationship ID, assigned during write by addWorkbookRels() */
   rId?: string;
+  /**
+   * @internal Recompute `cacheFields` from the source as it is now. The writers call it, so the cache describes the
+   * source the file is written with — not the one the pivot was added over.
+   */
+  refreshCache?: () => void;
   /** Flag indicating this pivot table was loaded from file (not newly created) */
   isLoaded?: boolean;
   /** Data fields for loaded pivot tables */
@@ -316,27 +319,21 @@ const DATA_START_INDEX = 2;
  * This allows Tables to be used as pivot table data sources with the same interface as Worksheets.
  */
 function createTableSourceAdapter(table: TableData): PivotTableSource {
-  const tblModel = tableModel(table);
-
-  // Validate that table has headerRow enabled (required for pivot table column names)
-  if (tblModel.headerRow === false) {
+  // Checked once, when the pivot table is added: a pivot needs a header row to name its fields and a row to read.
+  const initial = tableModel(table);
+  if (initial.headerRow === false) {
     throw new PivotTableError(
       "Cannot create pivot table from a table without headers. Set headerRow: true on the table."
     );
   }
-
-  // Validate table has data rows
-  if (!tblModel.rows || tblModel.rows.length === 0) {
+  if (!initial.rows || initial.rows.length === 0) {
     throw new PivotTableError(
       "Cannot create pivot table from an empty table. Add data rows to the table."
     );
   }
-
-  const columnNames = tblModel.columns.map(col => col.name);
-
-  // Check for duplicate column names
+  const names = initial.columns.map(col => col.name);
   const nameSet = new Set<string>();
-  for (const name of columnNames) {
+  for (const name of names) {
     if (nameSet.has(name)) {
       throw new PivotTableError(
         `Duplicate column name "${name}" found in table. Pivot tables require unique column names.`
@@ -345,68 +342,167 @@ function createTableSourceAdapter(table: TableData): PivotTableSource {
     nameSet.add(name);
   }
 
-  // Build the full data array: headers + rows
-  const headerRow = [undefined, ...columnNames]; // sparse array starting at index 1
-  const dataRows = tblModel.rows.map(row => [undefined, ...row]); // sparse array starting at index 1
-
-  // Calculate the range reference for the table
-  const tl = tblModel.tl;
-  if (!tl) {
-    throw new PivotTableError(`Table "${tblModel.name}" is missing top-left cell address (tl)`);
-  }
-  const startRow = tl.row;
-  const startCol = tl.col;
-  const endRow = startRow + tblModel.rows.length; // header row + data rows
-  const endCol = startCol + columnNames.length - 1;
-
-  // Use the worksheet name (not table name) for pivotCacheDefinition's worksheetSource
-  // The sheet attribute in worksheetSource must reference the actual worksheet name
-  const worksheetName = getSheetName(table.worksheet);
-  const tableName = tblModel.name;
+  // **Read from the table each time, not copied when the pivot is added.** The cache is recomputed when the workbook
+  // is written (see `refreshCache`), so a row added to the table, or a value changed in it, is in the cache the file
+  // carries — as Excel's own cache would be after a refresh.
+  const current = () => {
+    const model = tableModel(table);
+    const tl = model.tl;
+    if (!tl) {
+      throw new PivotTableError(`Table "${model.name}" is missing top-left cell address (tl)`);
+    }
+    return {
+      model,
+      columnNames: model.columns.map(col => col.name),
+      startRow: tl.row,
+      startCol: tl.col
+    };
+  };
 
   return {
-    name: worksheetName,
-    tableName,
+    // The worksheet's name for `worksheetSource`; the table's name is what the cache references.
+    get name(): string {
+      return getSheetName(table.worksheet);
+    },
+    set name(_: string) {
+      // Follows the table's sheet by itself; a rename's rewrite of `source.name` has nothing to change.
+    },
+    get tableName(): string {
+      return table.table.name;
+    },
     getRow(rowNumber: number): { values: unknown[] } {
+      const { model, columnNames } = current();
       if (rowNumber === 1) {
-        return { values: headerRow };
+        return { values: [undefined, ...columnNames] };
       }
       const dataIndex = rowNumber - DATA_START_INDEX; // rowNumber 2 maps to index 0
-      if (dataIndex >= 0 && dataIndex < dataRows.length) {
-        return { values: dataRows[dataIndex] };
+      if (dataIndex >= 0 && dataIndex < model.rows.length) {
+        return { values: [undefined, ...model.rows[dataIndex]] };
       }
       return { values: [] };
     },
     getColumn(columnNumber: number): { values: unknown[] } {
-      // Validate column number is within bounds
+      const { model, columnNames } = current();
       if (columnNumber < 1 || columnNumber > columnNames.length) {
         return { values: [] };
       }
-      // Values should be sparse array with header at index 1, data starting at index 2
+      // Sparse: header at index 1, data from index 2.
       const values: unknown[] = [];
       values[1] = columnNames[columnNumber - 1];
-      for (let i = 0; i < tblModel.rows.length; i++) {
-        values[i + 2] = tblModel.rows[i][columnNumber - 1];
+      for (let i = 0; i < model.rows.length; i++) {
+        values[i + 2] = model.rows[i][columnNumber - 1];
       }
       return { values };
     },
     getNumberFormat(rowNumber: number, columnNumber: number): string | undefined {
       // The table's rows are a copy of its values; the formats stay on the worksheet's cells.
+      const { startRow, startCol } = current();
       return formatCodeOf(
         findCell(table.worksheet, startRow + rowNumber - 1, startCol + columnNumber - 1)
       );
     },
     getSheetValues(): unknown[][] {
-      // Return sparse array where index 1 is header row, and subsequent indices are data rows
+      const { model, columnNames } = current();
       const result: unknown[][] = [];
-      result[1] = headerRow;
-      for (let i = 0; i < dataRows.length; i++) {
-        result[i + 2] = dataRows[i];
+      result[1] = [undefined, ...columnNames];
+      for (let i = 0; i < model.rows.length; i++) {
+        result[i + 2] = [undefined, ...model.rows[i]];
       }
       return result;
     },
-    dimensions: rangeCreate(startRow, startCol, endRow, endCol)
+    get dimensions(): RangeData {
+      const { model, columnNames, startRow, startCol } = current();
+      return rangeCreate(
+        startRow,
+        startCol,
+        startRow + model.rows.length,
+        startCol + columnNames.length - 1
+      );
+    }
   };
+}
+
+/**
+ * A worksheet source: the range of the sheet's populated cells when the pivot table is added, header row first.
+ *
+ * **The range is kept, and its cells are read each time.** It used to be the whole sheet, read relative to `A1` with
+ * the cache computed once: a row inserted above the data made the inserted row the header, a value added to the
+ * source was missing from the cache's shared items — and the writer refused the workbook. Now structural edits move
+ * and resize `ref` as they do every other reference, and the cache is recomputed from these cells when the workbook is
+ * written.
+ */
+function createSheetSourceAdapter(ws: WorksheetData): PivotTableSource {
+  const dims = computeSourceDimensions(ws);
+  const source: PivotTableSource & { ref: string } = {
+    name: getSheetName(ws),
+    ref:
+      dims.top !== undefined && dims.left !== undefined
+        ? colCache.encode(dims.top, dims.left, dims.bottom!, dims.right!)
+        : "A1:A1",
+    getRow(rowNumber: number): { values: unknown[] } {
+      const b = bounds();
+      const values: unknown[] = [];
+      for (let c = 1; c <= b.width; c++) {
+        const value = valueAt(b.top + rowNumber - 1, b.left + c - 1);
+        if (value !== undefined) {
+          values[c] = value;
+        }
+      }
+      return { values };
+    },
+    getColumn(columnNumber: number): { values: unknown[] } {
+      const b = bounds();
+      const values: unknown[] = [];
+      if (columnNumber < 1 || columnNumber > b.width) {
+        return { values };
+      }
+      for (let r = 1; r <= b.height; r++) {
+        const value = valueAt(b.top + r - 1, b.left + columnNumber - 1);
+        if (value !== undefined) {
+          values[r] = value;
+        }
+      }
+      return { values };
+    },
+    getSheetValues(): unknown[][] {
+      const b = bounds();
+      const result: unknown[][] = [];
+      for (let r = 1; r <= b.height; r++) {
+        const row = rowValuesOf(source.getRow(r));
+        // A row with nothing in the range is no record, as an empty row of the sheet never was.
+        if (row.some(value => value !== undefined)) {
+          result[r] = row;
+        }
+      }
+      return result;
+    },
+    getNumberFormat(rowNumber: number, columnNumber: number): string | undefined {
+      const b = bounds();
+      return formatCodeOf(findCell(ws, b.top + rowNumber - 1, b.left + columnNumber - 1));
+    },
+    get dimensions(): RangeData {
+      const b = bounds();
+      return rangeCreate(b.top, b.left, b.top + b.height - 1, b.left + b.width - 1);
+    }
+  };
+  function bounds(): { top: number; left: number; height: number; width: number } {
+    const decoded = colCache.decode(source.ref);
+    if ("top" in decoded) {
+      return {
+        top: decoded.top,
+        left: decoded.left,
+        height: decoded.bottom - decoded.top + 1,
+        width: decoded.right - decoded.left + 1
+      };
+    }
+    return { top: decoded.row, left: decoded.col, height: 1, width: 1 };
+  }
+  function valueAt(row: number, col: number): unknown {
+    const cell = findCell(ws, row, col);
+    const value = cell === undefined ? undefined : cellGetValue(cell);
+    return value === null ? undefined : value;
+  }
+  return source;
 }
 
 /** Base cache ID starts at 10 (Excel convention), each subsequent table increments */
@@ -430,18 +526,7 @@ function resolveSource(model: PivotTableModel): PivotTableSource {
   // by its `_rows` field; a pre-built PivotTableSource adapter has none.
   const sourceSheet = model.sourceSheet;
   if ("_rows" in sourceSheet) {
-    const ws = sourceSheet;
-    return {
-      name: getSheetName(ws),
-      getRow: (rowNumber: number) => getRow(ws, rowNumber),
-      getColumn: (columnNumber: number) => getColumn(ws, columnNumber),
-      getSheetValues: () => getSheetValues(ws) as unknown[][],
-      getNumberFormat: (rowNumber: number, columnNumber: number) =>
-        formatCodeOf(findCell(ws, rowNumber, columnNumber)),
-      get dimensions(): RangeData {
-        return computeSourceDimensions(ws);
-      }
-    };
+    return createSheetSourceAdapter(sourceSheet);
   }
   return sourceSheet;
 }
@@ -486,7 +571,13 @@ function makePivotTable(
   const defaultMetric: PivotTableSubtotal = model.metric ?? "sum";
   const valueMetrics = model.values.map(v => resolveValueMetric(v) ?? defaultMetric);
 
-  const cacheFields = makeCacheFields(source, [...rows, ...columns, ...pages], valueNames);
+  const sharedNames = new Set<string>([...rows, ...columns, ...pages]);
+  const valueNameSet = new Set(valueNames);
+  const cacheFields = makeCacheFields(
+    source,
+    (_, name) => sharedNames.has(name),
+    (_, name) => valueNameSet.has(name)
+  );
 
   const nameToIndex: Record<string, number> = {};
   for (let i = 0; i < cacheFields.length; i++) {
@@ -532,7 +623,7 @@ function makePivotTable(
   const ref = normalisePivotRef(model.ref);
 
   // form pivot table object
-  return {
+  const pivot: PivotTable = {
     name: `PivotTable${tableNumber}`,
     worksheetName: worksheet.name,
     source,
@@ -552,6 +643,18 @@ function makePivotTable(
     // Table number for file naming (pivotTable1.xml, pivotTable2.xml, etc.)
     tableNumber
   };
+  // From the fields' positions, not their names: a renamed header renames the field, and a column edit of the source
+  // sheet renumbers the positions (`structural-edit.ts`).
+  pivot.refreshCache = () => {
+    const shared = new Set([...pivot.rows, ...pivot.columns, ...(pivot.pages ?? [])]);
+    const values = new Set(pivot.values);
+    pivot.cacheFields = makeCacheFields(
+      source,
+      index => shared.has(index),
+      index => values.has(index)
+    );
+  };
+  return pivot;
 }
 
 /**
@@ -757,10 +860,14 @@ function unwrapCellValue(v: unknown): string | number | boolean | Date | PivotEr
   return String(v);
 }
 
+/**
+ * The cache fields of `source`, one per column. `withSharedItems` names (by 0-based position or header) the fields
+ * used on an axis, which list their distinct values; `asValue` those only aggregated, which carry their range.
+ */
 function makeCacheFields(
   source: PivotTableSource,
-  fieldNamesWithSharedItems: string[],
-  valueFieldNames: string[]
+  withSharedItems: (index: number, name: string) => boolean,
+  asValue: (index: number, name: string) => boolean
 ): CacheField[] {
   // Cache fields are used in pivot tables to reference source data.
   // Fields in fieldNamesWithSharedItems get their unique values extracted as sharedItems.
@@ -768,9 +875,6 @@ function makeCacheFields(
   // Other fields are unused and get null sharedItems.
 
   const names = rowValuesOf(source.getRow(1));
-  // Use Set for O(1) lookup instead of object
-  const sharedItemsFields = new Set(fieldNamesWithSharedItems);
-  const valueFields = new Set(valueFieldNames);
 
   const aggregate = (columnIndex: number): SharedItemValue[] => {
     const columnValues = columnValuesOf(source.getColumn(columnIndex));
@@ -889,14 +993,14 @@ function makeCacheFields(
   for (const columnIndex of range(1, names.length)) {
     const rawName = names[columnIndex];
     const name = String(rawName);
-    if (sharedItemsFields.has(name)) {
+    if (withSharedItems(columnIndex - 1, name)) {
       // Field used for rows/columns - extract unique values as sharedItems
       result.push({
         name,
         sharedItems: aggregate(columnIndex),
         ...withNumberFormat(columnIndex)
       });
-    } else if (valueFields.has(name)) {
+    } else if (asValue(columnIndex - 1, name)) {
       // Field used only for values (aggregation) - calculate min/max
       const minMax = getMinMax(columnIndex);
       result.push({

@@ -14,7 +14,7 @@
  *   6. = <> < > <= >=  (comparison)
  */
 
-import { FormulaParseError } from "@formula/errors";
+import { FormulaArgumentError, FormulaParseError } from "@formula/errors";
 import type {
   AstNode,
   CellRefNode,
@@ -23,8 +23,11 @@ import type {
   ArrayNode
 } from "@formula/syntax/ast";
 import { NodeType } from "@formula/syntax/ast";
+import { layoutOf, type FormulaLayout } from "@formula/syntax/layout";
 import type { Token, CellRefToken, RangeToken, FunctionToken } from "@formula/syntax/token-types";
-import { TokenType } from "@formula/syntax/token-types";
+import { isSpillOperator, SPILL_OPERATOR, TokenType } from "@formula/syntax/token-types";
+import { tokenize, tokenizeWithSpans } from "@formula/syntax/tokenizer";
+import { describeValue } from "@utils/describe-value";
 
 // ============================================================================
 // Operator Precedence
@@ -42,11 +45,22 @@ function prefixBindingPower(op: string): number {
       //   =-2^3  →  (-2)^3  →  -8
       // Previously we used 55 which routed via `^` (60/61) and produced
       // `-(2^3)` — matching most languages but not Excel.
-      return 70;
+      //
+      // Above `%` (75) too, which the same table ranks third: `-A1%` is `(-A1)%`. Excel's own token stream for it
+      // is `A1, PtgUminus, PtgPercent`, and at 70 this parsed it as `-(A1%)` — the same number, a different tree,
+      // and one that printed back as `(-A1)%` from Excel's tokens.
+      return PREFIX_BINDING_POWER;
     default:
       return 0;
   }
 }
+
+/** Unary `+`/`-`: Excel's precedence table ranks negation above `%` and `^`. */
+const PREFIX_BINDING_POWER = 77;
+/** Postfix `%`. */
+const PERCENT_BINDING_POWER = 75;
+/** Postfix `#` (spill range): above the range operator `:` (100), so `A1#` is one operand wherever it stands. */
+const SPILL_BINDING_POWER = 110;
 
 function infixBindingPower(op: string): [number, number] {
   // Returns [left bp, right bp]. Higher = tighter binding.
@@ -104,11 +118,30 @@ class Parser {
    */
   private depth: number;
   private readonly MAX_DEPTH = 256;
+  /** Whitespace before each token, when a layout was asked for — see `parseWithLayout`. */
+  private readonly gaps: readonly string[] | undefined;
+  /** Where the layout is collected; present exactly when `gaps` is. */
+  readonly layout: FormulaLayout | undefined;
 
-  constructor(tokens: Token[]) {
+  constructor(tokens: Token[], gaps?: readonly string[]) {
     this.tokens = tokens;
     this.pos = 0;
     this.depth = 0;
+    this.gaps = gaps;
+    this.layout = gaps === undefined ? undefined : new Map();
+  }
+
+  /** The whitespace before the token at `index`, or `""` when no layout is being kept. */
+  private gapAt(index: number): string {
+    return this.gaps?.[index] ?? "";
+  }
+
+  /** Record a layout field, skipping empty whitespace so a plain formula produces an empty layout. */
+  private note(node: AstNode, field: "lead" | "op" | "close", text: string): void {
+    if (this.layout !== undefined && text !== "") {
+      const entry = layoutOf(this.layout, node);
+      entry[field] = text + (field === "lead" ? (entry.lead ?? "") : "");
+    }
   }
 
   private enter(): void {
@@ -132,7 +165,10 @@ class Parser {
   expect(type: TokenType): Token {
     const t = this.next();
     if (!t || t.type !== type) {
-      throw new FormulaParseError(`Expected token type ${type}, got ${t?.type ?? "EOF"}`, this.pos);
+      throw new FormulaParseError(
+        `Expected ${TokenType[type]}, got ${t ? TokenType[t.type] : "the end of the formula"}`,
+        this.pos
+      );
     }
     return t;
   }
@@ -145,7 +181,7 @@ class Parser {
     // produce an AST that drops the trailing tokens.
     if (this.pos !== this.tokens.length) {
       const t = this.tokens[this.pos];
-      throw new FormulaParseError(`Unexpected trailing token (type ${t.type})`, this.pos);
+      throw new FormulaParseError(`Unexpected trailing ${TokenType[t.type]}`, this.pos);
     }
     return node;
   }
@@ -168,10 +204,27 @@ class Parser {
         break;
       }
 
-      // Postfix: %
+      // Postfix `#`, Excel's spill-range operator: `A1#` is the range `A1`'s dynamic array spills into. The
+      // tokenizer emits it only straight after a cell reference, and it binds tighter than everything else.
+      if (isSpillOperator(t)) {
+        if (SPILL_BINDING_POWER < minBp) {
+          break;
+        }
+        this.next();
+        left = { type: NodeType.UnaryOp, op: SPILL_OPERATOR, operand: left };
+        continue;
+      }
+
+      // Postfix: %. Binds tighter than every arithmetic operator and looser than negation and the reference
+      // operators, so it ends an operand being parsed at a higher power — `-A1%` is `(-A1)%`, `A1 B1%` is `(A1 B1)%`.
       if (t.type === TokenType.Percent) {
+        if (PERCENT_BINDING_POWER < minBp) {
+          break;
+        }
+        const gap = this.gapAt(this.pos);
         this.next();
         left = { type: NodeType.Percent, operand: left };
+        this.note(left, "op", gap);
         continue;
       }
 
@@ -181,9 +234,11 @@ class Parser {
         if (lbp === 0 || lbp < minBp) {
           break;
         }
+        const gap = this.gapAt(this.pos);
         this.next();
         const right = this.parseExpr(rbp);
         left = { type: NodeType.BinaryOp, op: t.value, left, right };
+        this.note(left, "op", gap);
         continue;
       }
 
@@ -195,9 +250,14 @@ class Parser {
         if (lbp < minBp) {
           break;
         }
+        // The operator *is* the whitespace, so only a run longer than one character says anything.
+        const gap = this.gapAt(this.pos);
         this.next();
         const right = this.parseExpr(rbp);
         left = { type: NodeType.BinaryOp, op: " ", left, right };
+        if (gap !== " ") {
+          this.note(left, "op", gap);
+        }
         continue;
       }
 
@@ -215,9 +275,11 @@ class Parser {
         if (lbp < minBp) {
           break;
         }
+        const gap = this.gapAt(this.pos);
         this.next();
         const right = this.parseExpr(rbp);
         left = { type: NodeType.BinaryOp, op: ":", left, right };
+        this.note(left, "op", gap);
         continue;
       }
 
@@ -251,6 +313,52 @@ class Parser {
   }
 
   private parsePrefixInner(): AstNode {
+    // Whitespace before the prefix's first token belongs to the node it starts — except for a parenthesis, whose
+    // whitespace is the parenthesis's own and is recorded with it.
+    const gap = this.gapAt(this.pos);
+    if (this.peek()?.type === TokenType.OpenParen) {
+      return this.parseParenthesised(gap);
+    }
+    const node = this.parsePrefixCore();
+    this.note(node, "lead", gap);
+    return node;
+  }
+
+  /**
+   * A parenthesised expression — also the syntactic entry point for reference unions: `(A1:B2, D4:E5)` is a
+   * multi-area reference that `INDEX(..., area_num)` can index into. A single expression inside parens is just an
+   * expression group (no UnionRef wrapper), and when a layout is being kept the group is recorded on the node it
+   * encloses.
+   */
+  private parseParenthesised(openGap: string): AstNode {
+    this.next();
+    const first = this.parseExpr(0);
+    if (this.peek()?.type === TokenType.Comma) {
+      const areas: AstNode[] = [first];
+      while (this.peek()?.type === TokenType.Comma) {
+        this.next(); // consume ','
+        areas.push(this.parseExpr(0));
+      }
+      const closeGap = this.gapAt(this.pos);
+      this.expect(TokenType.CloseParen);
+      const union: AstNode = { type: NodeType.UnionRef, areas };
+      this.note(union, "lead", openGap);
+      this.note(union, "close", closeGap);
+      return union;
+    }
+    const closeGap = this.gapAt(this.pos);
+    this.expect(TokenType.CloseParen);
+    if (this.layout !== undefined) {
+      const entry = layoutOf(this.layout, first);
+      (entry.parens ??= []).push({
+        ...(openGap === "" ? {} : { open: openGap }),
+        ...(closeGap === "" ? {} : { close: closeGap })
+      });
+    }
+    return first;
+  }
+
+  private parsePrefixCore(): AstNode {
     const t = this.peek();
     if (!t) {
       throw new FormulaParseError("Unexpected end of formula", this.pos);
@@ -306,31 +414,18 @@ class Parser {
       return { type: NodeType.Boolean, value: t.value === "TRUE" };
     }
 
-    // Error literal
+    // Error literal. `Sheet2!#REF!` is what a reference becomes once the cells it named are deleted; the error is
+    // the value, and the qualifying sheet is kept so the text survives.
     if (t.type === TokenType.Error) {
       this.next();
-      return { type: NodeType.Error, value: t.value };
+      if (t.externalReference !== undefined) {
+        return { type: NodeType.Error, value: t.value, externalReference: t.externalReference };
+      }
+      const sheet = this.takeSheetFor(t.value === "#REF!");
+      return { type: NodeType.Error, value: t.value, ...(sheet === undefined ? {} : { sheet }) };
     }
 
-    // Parenthesized expression — also the syntactic entry point for
-    // reference unions: `(A1:B2, D4:E5)` is a multi-area reference
-    // that `INDEX(..., area_num)` can index into. A single expression
-    // inside parens is just an expression group (no UnionRef wrapper).
-    if (t.type === TokenType.OpenParen) {
-      this.next();
-      const first = this.parseExpr(0);
-      if (this.peek()?.type === TokenType.Comma) {
-        const areas: AstNode[] = [first];
-        while (this.peek()?.type === TokenType.Comma) {
-          this.next(); // consume ','
-          areas.push(this.parseExpr(0));
-        }
-        this.expect(TokenType.CloseParen);
-        return { type: NodeType.UnionRef, areas };
-      }
-      this.expect(TokenType.CloseParen);
-      return first;
-    }
+    // Parenthesised expressions are handled by `parseParenthesised`, before this is reached.
 
     // Array constant: {1,2;3,4}
     if (t.type === TokenType.OpenBrace) {
@@ -365,10 +460,11 @@ class Parser {
       return this.parseRangeFromToken(t, sheet, endSheet);
     }
 
-    // Named range / defined name
+    // Named range / defined name. `Sheet2!Total` names the one scoped to that sheet.
     if (t.type === TokenType.Name) {
       this.next();
-      return { type: NodeType.Name, name: t.value };
+      const sheet = this.takeSheetFor(true);
+      return { type: NodeType.Name, name: t.value, ...(sheet === undefined ? {} : { sheet }) };
     }
 
     // Whole-column range (e.g. A:B, $C:$D)
@@ -381,7 +477,14 @@ class Parser {
       const parts = t.value.split(":");
       const startCol = parts[0].replace(/\$/g, "").toUpperCase();
       const endCol = parts[1].replace(/\$/g, "").toUpperCase();
-      return { type: NodeType.ColRangeRef, startCol, endCol, sheet, endSheet };
+      return {
+        type: NodeType.ColRangeRef,
+        startCol,
+        endCol,
+        ...absoluteMarkers(parts),
+        sheet,
+        endSheet
+      };
     }
 
     // Whole-row range (e.g. 1:5, $3:$7)
@@ -394,7 +497,14 @@ class Parser {
       const parts = t.value.split(":");
       const startRow = parseInt(parts[0].replace(/\$/g, ""), 10);
       const endRow = parseInt(parts[1].replace(/\$/g, ""), 10);
-      return { type: NodeType.RowRangeRef, startRow, endRow, sheet, endSheet };
+      return {
+        type: NodeType.RowRangeRef,
+        startRow,
+        endRow,
+        ...absoluteMarkers(parts),
+        sheet,
+        endSheet
+      };
     }
 
     // Structured reference (e.g. Table1[Column], [@Column])
@@ -408,7 +518,23 @@ class Parser {
       };
     }
 
-    throw new FormulaParseError(`Unexpected token: ${t.type}`, this.pos);
+    throw new FormulaParseError(
+      `Unexpected ${TokenType[t.type] ?? `token type ${String(t.type)}`}`,
+      this.pos
+    );
+  }
+
+  /**
+   * Consume a pending single-sheet qualifier for a node that can carry one. Left pending otherwise, so
+   * `parsePrefix` reports the qualifier as dangling.
+   */
+  private takeSheetFor(allowed: boolean): string | undefined {
+    if (!allowed || this.pendingSheet === undefined || this.pendingEndSheet !== undefined) {
+      return undefined;
+    }
+    const sheet = this.pendingSheet;
+    this.pendingSheet = undefined;
+    return sheet;
   }
 
   private parseCellRefFromToken(t: CellRefToken): CellRefNode {
@@ -438,8 +564,29 @@ class Parser {
 
   private parseFunctionCall(): FunctionCallNode {
     const nameToken = this.next() as FunctionToken; // function name
-    this.expect(TokenType.OpenParen);
+    const first = this.parseArgumentList();
+    const call: FunctionCallNode = {
+      type: NodeType.FunctionCall,
+      name: nameToken.name,
+      args: first.args
+    };
+    this.note(call, "close", first.closeGap);
+    // An argument list straight after the `)` applies the call's result — `LAMBDA(n,n*2)(3)`, `f(1)(2)`. Only an
+    // adjacent `(`: with whitespace between, the tokenizer has already made it an intersection.
+    while (this.peek()?.type === TokenType.OpenParen) {
+      const applied = this.parseArgumentList();
+      (call.invocations ??= []).push(applied.args);
+      if (this.layout !== undefined && applied.closeGap !== "") {
+        const entry = layoutOf(this.layout, call);
+        (entry.invocationClose ??= [])[call.invocations.length - 1] = applied.closeGap;
+      }
+    }
+    return call;
+  }
 
+  /** `(arg, arg, …)`, with a missing argument wherever a comma or the `)` leaves one empty. */
+  private parseArgumentList(): { args: AstNode[]; closeGap: string } {
+    this.expect(TokenType.OpenParen);
     const args: AstNode[] = [];
     if (this.peek()?.type !== TokenType.CloseParen) {
       // First argument: might be missing if comma is next
@@ -458,13 +605,9 @@ class Parser {
         }
       }
     }
+    const closeGap = this.gapAt(this.pos);
     this.expect(TokenType.CloseParen);
-
-    return {
-      type: NodeType.FunctionCall,
-      name: nameToken.name,
-      args
-    };
+    return { args, closeGap };
   }
 
   private parseArrayConstant(): ArrayNode {
@@ -498,6 +641,17 @@ class Parser {
 }
 
 // Helper to parse a cell reference string like "$A$1" or "B2"
+/** The `$` markers on the two halves of a whole-row or whole-column range, only where present. */
+function absoluteMarkers(parts: readonly string[]): {
+  startAbsolute?: boolean;
+  endAbsolute?: boolean;
+} {
+  return {
+    ...(parts[0]?.startsWith("$") ? { startAbsolute: true } : {}),
+    ...(parts[1]?.startsWith("$") ? { endAbsolute: true } : {})
+  };
+}
+
 function parseCellRefStr(s: string): CellRefNode {
   let i = 0;
   let colAbsolute = false;
@@ -535,4 +689,75 @@ function parseCellRefStr(s: string): CellRefNode {
 export function parse(tokens: Token[]): AstNode {
   const parser = new Parser(tokens);
   return parser.parse();
+}
+
+/**
+ * Parse, and also collect the formula's layout — the whitespace and redundant parentheses its text carries.
+ *
+ * `gaps` is what `tokenizeWithGaps` returns beside the tokens. The tree is the one `parse` builds; the layout is
+ * keyed by its nodes. See `syntax/layout.ts`.
+ */
+export function parseWithLayout(
+  tokens: Token[],
+  gaps: readonly string[]
+): { ast: AstNode; layout: FormulaLayout } {
+  const parser = new Parser(tokens, gaps);
+  const ast = parser.parse();
+  return { ast, layout: parser.layout! };
+}
+
+/**
+ * Parse a formula into an AST, from its source text (`"=SUM(A1:B2)"`, the
+ * leading `=` optional) or from tokens `Formula.tokenize` already produced.
+ *
+ * @example
+ * ```ts
+ * import { Formula } from "documonster/formula";
+ * const ast = Formula.parse("=A1+1");
+ *
+ * // Tokens you already have (e.g. after inspecting or filtering them) skip re-tokenizing
+ * const tokens = Formula.tokenize("SUM(A1:B2)");
+ * const same = Formula.parse(tokens);
+ * ```
+ *
+ * The result is the same either way; `Formula.format(ast)` turns it back into text.
+ */
+export function parseFormula(source: string | readonly Token[]): AstNode {
+  if (typeof source === "string") {
+    const tokens = tokenize(source);
+    try {
+      return parse(tokens);
+    } catch (error) {
+      // The parser counts tokens; a caller holding the text wants to know where in it.
+      throw relocate(error, source);
+    }
+  }
+  if (!Array.isArray(source)) {
+    throw new FormulaArgumentError(
+      "source",
+      `Formula.parse: source must be formula text or the tokens Formula.tokenize returned, got ${describeValue(source)}`
+    );
+  }
+  try {
+    return parse(source as Token[]);
+  } catch (error) {
+    if (error instanceof FormulaParseError && error.position !== undefined) {
+      // No text to point into: name the token instead of passing its index off as an offset.
+      throw new FormulaParseError(`${error.detail} (at token ${error.position})`, undefined, {
+        cause: error
+      });
+    }
+    throw error;
+  }
+}
+
+/** A parser error re-expressed with the character offset of the token it names. */
+function relocate(error: unknown, source: string): unknown {
+  if (!(error instanceof FormulaParseError) || error.position === undefined) {
+    return error;
+  }
+  const { spans } = tokenizeWithSpans(source);
+  const index = error.position;
+  const offset = index < spans.length ? spans[index][0] : source.length;
+  return new FormulaParseError(error.detail, offset, { cause: error });
 }

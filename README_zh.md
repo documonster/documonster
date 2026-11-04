@@ -22,7 +22,7 @@ Documonster 由九个独立模块组成,每个模块都有自己的文档和可�
 
 ### Excel — XLSX/JSON 工作簿管理器
 
-创建、读取和修改 Excel 电子表格,完整支持样式、公式、图片和流式处理。
+创建、读取和修改 Excel 电子表格,完整支持样式、公式、图片和流式处理。日期被视为日历值而非时间点:`Cell.setDateParts` / `Cell.getDateParts` 在所有运行时上都使用与时区无关的字段;在宿主提供 Temporal 时,`Cell.setValue` / `Cell.getTemporal` 接受并返回 `Temporal.PlainDate`、`PlainTime` 和 `PlainDateTime`——这也找回了 `Date` 无法表达的日期 / 时间 / 日期时间之分。参见[日期:日历值,而非时间点](src/modules/excel/README_zh.md#日期日历值而非时间点)。
 
 - [文档](src/modules/excel/README.md) | [中文](src/modules/excel/README_zh.md)
 - [示例](src/modules/excel/examples/)
@@ -36,7 +36,7 @@ Documonster 由九个独立模块组成,每个模块都有自己的文档和可�
 
 ### Formula — Excel 兼容公式引擎
 
-448 函数计算引擎,包含 tokenizer、parser、依赖图、动态数组 spill,支持 `LAMBDA`/`LET`/`MAP`/`REDUCE`。用 `documonster/excel/formula` 的 `calculateFormulas()` 重算 workbook;用 `documonster/formula` 的 `Formula` 检查语法。无需任何安装步骤,且引擎不会进入只读写 XLSX 的 bundle。
+467 函数计算引擎,包含 tokenizer、parser、依赖图、动态数组 spill,支持 `LAMBDA`/`LET`/`MAP`/`REDUCE`。用 `documonster/excel/formula` 的 `ExcelFormula.calculate()` 重算 workbook;用 `documonster/formula` 的 `Formula` 检查语法。无需任何安装步骤,且引擎不会进入只读写 XLSX 的 bundle。
 
 - [文档](src/modules/formula/README.md) | [中文](src/modules/formula/README_zh.md)
 - [示例](src/modules/formula/examples/)
@@ -118,32 +118,44 @@ bun add documonster
 ## 快速开始
 
 ```typescript
-import { Workbook, Worksheet, Row } from "documonster/excel";
+import { Workbook, Row } from "documonster/excel";
 
 // 创建
 const workbook = Workbook.create();
 const sheet = Workbook.addWorksheet(workbook, "Sheet1");
-Worksheet.addRow(sheet, ["姓名", "年龄"]);
-Worksheet.addRow(sheet, ["Alice", 30]);
+Row.add(sheet, ["姓名", "年龄"]);
+Row.add(sheet, ["Alice", 30]);
 await Workbook.writeFile(workbook, "output.xlsx");
 
 // 读取
-const wb = Workbook.create();
-await Workbook.readFile(wb, "output.xlsx");
+const wb = await Workbook.readFile("output.xlsx");
 const readSheet = Workbook.getWorksheet(wb, 1);
-Worksheet.eachRow(readSheet, (_row, n) => console.log(n, Row.getValues(readSheet, n)));
+Row.each(readSheet, n => console.log(n, Row.getValues(readSheet, n)));
 
 // PDF — 直接从数据生成，无需 Workbook
 import { Pdf } from "documonster/pdf";
-const pdfBytes = await Pdf.create([
+const pdfBytes = await Pdf.fromTable([
   ["产品", "收入"],
   ["小工具", 1000]
 ]);
 
 // PDF — 读取任意 PDF 的文本、图片和元数据
-const result = await Pdf.read(pdfBytes);
+const result = await Pdf.extract(pdfBytes);
 console.log(result.text); // 提取的文本
 console.log(result.metadata); // 标题、作者等
+
+// PDF — 构建自由排版的 PDF：文本、图形、SVG 路径
+const doc = new Pdf.Builder();
+const page = doc.addPage();
+page.drawText("Hello!", { x: 72, y: 770, fontSize: 24 });
+page.drawSvgPath("M10 10 L90 10 L50 80 Z", { fill: { r: 1, g: 0, b: 0 } });
+page.addAnnotation({ type: "Highlight", rect: [72, 765, 150, 785] });
+
+// PDF — 编辑已有 PDF（叠加、合并、填写表单）
+const editor = Pdf.Editor.read(existingPdf);
+editor.getPage(0).drawText("Stamp", { x: 200, y: 400, fontSize: 36 });
+editor.setFormField("name", "Jane");
+editor.copyPagesFrom(otherPdf);
 
 // CSV — 解析和格式化
 import { Csv } from "documonster/csv";
@@ -156,7 +168,7 @@ const titles = Xml.queryAll(Xml.parse(xmlString).root, "book/title");
 
 // ZIP — 创建和解压
 import { Archive } from "documonster/archive";
-const archive = await Archive.zip().add("hello.txt", "Hello!").bytes();
+const archive = await Archive.createZip().add("hello.txt", "Hello!").toBuffer();
 
 // Markdown — 解析和格式化表格
 import { Markdown } from "documonster/markdown";
@@ -167,19 +179,19 @@ import { Document, Io } from "documonster/word";
 const wdoc = Document.create();
 Document.addHeading(wdoc, "报告", 1);
 Document.addParagraph(wdoc, "由 Documonster 生成。");
-const docxBytes = await Io.toBuffer(Document.build(wdoc));
+const docxBytes = await Io.toBuffer(wdoc);
 const parsedDocx = await Io.read(docxBytes); // 往返读取
 
 // Formula — 可选的公式引擎(默认不打进主 bundle)
 // 重算 excel workbook：走 excel/formula subpath。
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 import { Cell } from "documonster/excel";
 Cell.setValue(sheet, "A4", { formula: "SUM(A1:A3)" });
-calculateFormulas(workbook); // 现在能填充单元格计算结果了
+ExcelFormula.calculate(workbook); // 现在能填充单元格计算结果了
 
 // 语法检查单独可用
 import { Formula } from "documonster/formula";
-const ast = Formula.parse(Formula.tokenize("SUM(A1:A3)"));
+const ast = Formula.parse("SUM(A1:A3)");
 ```
 
 ## 浏览器支持

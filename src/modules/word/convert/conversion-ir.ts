@@ -30,8 +30,10 @@ export interface ConversionAsset {
   readonly mimeType: string;
   readonly data: Uint8Array;
   readonly altText?: string;
-  readonly width?: number; // in points
-  readonly height?: number; // in points
+  /** Width in points. */
+  readonly width?: number;
+  /** Height in points. */
+  readonly height?: number;
 }
 
 /** Resolved inline formatting (no style inheritance — everything is explicit). */
@@ -43,7 +45,8 @@ export interface ResolvedFormatting {
   readonly superscript?: boolean;
   readonly subscript?: boolean;
   readonly fontFamily?: string;
-  readonly fontSize?: number; // in points
+  /** Font size in points (a Word run size is half-points). */
+  readonly fontSize?: number;
   readonly color?: string; // hex RGB
   readonly backgroundColor?: string;
   readonly code?: boolean; // monospace/code style
@@ -57,7 +60,9 @@ export type SemanticInline =
       readonly type: "image";
       readonly assetId: string;
       readonly alt?: string;
+      /** Width in inches (a Word drawing size is EMU). */
       readonly width?: number;
+      /** Height in inches. */
       readonly height?: number;
     }
   | { readonly type: "link"; readonly href: string; readonly children: readonly SemanticInline[] }
@@ -97,7 +102,9 @@ export type SemanticBlock =
       readonly type: "image";
       readonly assetId: string;
       readonly alt?: string;
+      /** Width in inches (a Word drawing size is EMU). */
       readonly width?: number;
+      /** Height in inches. */
       readonly height?: number;
       readonly caption?: string;
     }
@@ -157,9 +164,13 @@ export type SemanticBlock =
 /** Paragraph style properties (resolved, not inherited). */
 export interface SemanticParagraphStyle {
   readonly alignment?: "left" | "center" | "right" | "justify";
-  readonly indentLeft?: number; // in points
+  /** Left indent in points (a Word indent is twips). */
+  readonly indentLeft?: number;
+  /** Right indent in points. */
   readonly indentRight?: number;
+  /** Space before in points. */
   readonly spaceBefore?: number;
+  /** Space after in points. */
   readonly spaceAfter?: number;
 }
 

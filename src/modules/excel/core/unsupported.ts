@@ -26,7 +26,7 @@ export function refuseUnsupported(
    * Which writer is refusing, for the error's `operation`.
    *
    * Named rather than fixed at `"Write XLSB"`, because the XLSX writer refuses through this too now — it has exactly one
-   * loss of its own (a preserved sheet part from the other container) and the option governing it used to be inert.
+   * loss of its own (a preserved part from the other container) and the option governing it used to be inert.
    */
   container: "XLSB" | "XLSX" = "XLSB"
 ): void {

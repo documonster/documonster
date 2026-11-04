@@ -9,7 +9,7 @@ import type { ParseConfig } from "@csv/parse/config";
 import { processHeaders, validateAndAdjustColumns, convertRowToObject } from "@csv/parse/helpers";
 import type { ParseState } from "@csv/parse/state";
 import type { CsvRecordError, HeaderArray, RecordInfo } from "@csv/types";
-import { applyDynamicTypingToRow } from "@csv/utils/dynamic-typing";
+import { typeRecord } from "@csv/utils/dynamic-typing";
 import { isEmptyRow, hasAllEmptyValues } from "@csv/utils/row";
 
 // =============================================================================
@@ -156,7 +156,10 @@ export function buildRecordInfo(
 export function rowToRecord(
   row: string[],
   state: ParseState,
-  config: Pick<ParseConfig, "groupColumnsByName" | "dynamicTyping" | "castDate">
+  config: Pick<
+    ParseConfig,
+    "groupColumnsByName" | "dynamicTyping" | "castDate" | "decimalSeparator"
+  >
 ): Record<string, unknown> {
   if (state.headerRow) {
     let record: Record<string, unknown> = convertRowToObject(
@@ -166,10 +169,11 @@ export function rowToRecord(
       config.groupColumnsByName
     );
     if (config.dynamicTyping || config.castDate) {
-      record = applyDynamicTypingToRow(
+      record = typeRecord(
         record as Record<string, string>,
         config.dynamicTyping || false,
-        config.castDate
+        config.castDate,
+        config.decimalSeparator
       );
     }
     return record;
@@ -218,26 +222,42 @@ export function shouldSkipRow(
 /**
  * Process a completed row through headers, validation, etc.
  * This is the core row processing logic shared between sync and streaming parsers.
+ *
+ * `recordError` is a problem the scanner found in the record itself (text after a closing
+ * quote). Such a record is left out like a column mismatch: reported in `errors`, returned as
+ * invalid, and handed to `onSkip`. A header row is still used as the header; its error is
+ * reported.
  */
 export function processCompletedRow(
   row: string[],
   state: ParseState,
   config: ParseConfig,
   errors: CsvRecordError[],
-  lineNumber: number
+  lineNumber: number,
+  recordError?: CsvRecordError
 ): RowProcessResult {
   // Header handling
   if (state.useHeaders && !state.headerRowProcessed) {
+    if (recordError) {
+      errors.push(recordError);
+    }
     const shouldSkip = processHeaderRow(row, state, config);
     if (shouldSkip) {
       return { stop: false, skipped: true };
     }
+    recordError = undefined;
   }
 
   // Skip data rows
   if (state.skippedDataRows < config.skipRows) {
     state.skippedDataRows++;
     return { stop: false, skipped: true };
+  }
+
+  if (recordError) {
+    errors.push(recordError);
+    config.invokeOnSkip?.(recordError, row);
+    return { stop: false, skipped: true, row, error: recordError, reason: recordError.message };
   }
 
   // Column validation
@@ -253,28 +273,16 @@ export function processCompletedRow(
     errors.push(errorObj);
 
     if (!validationError.isValid) {
-      if (config.skipRecordsWithError) {
-        config.invokeOnSkip?.(
-          {
-            code: validationError.errorCode,
-            message: validationError.reason || "Column mismatch",
-            line: lineNumber
-          },
-          row
-        );
-        return {
-          stop: false,
-          skipped: true,
-          row,
-          error: {
-            code: validationError.errorCode,
-            message: validationError.reason || "Column mismatch",
-            line: lineNumber
-          },
-          reason: validationError.reason || "Column mismatch"
-        };
-      }
-      // Column mismatch with error strategy - return as invalid
+      // Every record left out because of an error reaches `onSkip`; it is the only way a
+      // streaming consumer (`Csv.parseRows`) learns a record was not returned.
+      config.invokeOnSkip?.(
+        {
+          code: validationError.errorCode,
+          message: validationError.reason || "Column mismatch",
+          line: lineNumber
+        },
+        row
+      );
       return {
         stop: false,
         skipped: true,

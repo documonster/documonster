@@ -3,7 +3,7 @@ import { Writable, PassThrough } from "node:stream";
 import { createCsvReadStream, writeCsv } from "@excel/bridge/csv-bridge";
 import { cellSetValue } from "@excel/core/cell";
 import { rowCommit, rowGetCell } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Cell, Row, Workbook } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 /**
  * Backpressure regression tests for streaming xlsx writers.
@@ -120,7 +120,7 @@ describe("streaming write backpressure", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Data");
     for (let i = 1; i <= 10_000; i++) {
-      Worksheet.addRow(ws, [`row-${i}`, i, i * 3.14]);
+      Row.add(ws, [`row-${i}`, i, i * 3.14]);
     }
 
     const slowSink = createSlowAsyncSink({ highWaterMark: 1024 });
@@ -188,7 +188,7 @@ describe("streaming write backpressure", () => {
     // Build enough rows that without backpressure the formatter would buffer
     // megabytes before the slow sink could drain.
     for (let i = 1; i <= 20_000; i++) {
-      Worksheet.addRow(ws, [`row-${i}`, i, "x".repeat(200)]);
+      Row.add(ws, [`row-${i}`, i, "x".repeat(200)]);
     }
 
     const slowSink = createSlowAsyncSink({ highWaterMark: 1024 });
@@ -218,9 +218,9 @@ describe("streaming write backpressure", () => {
     // right number of lines.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sparse");
-    cellSetValue(rowGetCell(Worksheet.getRow(ws, 1), 1), "row-1");
-    cellSetValue(rowGetCell(Worksheet.getRow(ws, 3), 1), "row-3");
-    cellSetValue(rowGetCell(Worksheet.getRow(ws, 5), 1), "row-5");
+    Cell.setValue(ws, 1, 1, "row-1");
+    Cell.setValue(ws, 3, 1, "row-3");
+    Cell.setValue(ws, 5, 1, "row-5");
 
     // Path 1: writeCsv(stream) → exercises _writeCsvStream
     const collector1: string[] = [];

@@ -14,8 +14,17 @@ import type { ImageWatermark, TextWatermark, Watermark } from "@word/types";
 import { findChild } from "@xml/dom";
 import type { XmlElement } from "@xml/types";
 
-/** Detect a watermark shape inside a header XML root, if present. */
-export function detectWatermarkFromRoot(root: XmlElement): Watermark | undefined {
+/** A watermark found in a header, and the markup drawing it. */
+export interface FoundWatermark {
+  readonly watermark: Watermark;
+  /** The header paragraph holding the watermark. */
+  readonly paragraph: XmlElement;
+  /** The child of `paragraph` — a `w:r`, or a bare `w:pict` — that draws it. */
+  readonly carrier: XmlElement;
+}
+
+/** Find a watermark shape inside a header XML root, if present. */
+export function findWatermark(root: XmlElement): FoundWatermark | undefined {
   // Look for VML shape with id containing "WaterMark"
   for (const pEl of root.children) {
     if (pEl.type !== "element") {
@@ -48,14 +57,19 @@ export function detectWatermarkFromRoot(root: XmlElement): Watermark | undefined
           }
           // Found watermark shape
           const shapeType = shapeEl.attributes["type"] ?? "";
+          let watermark: Watermark | undefined;
           if (shapeType.includes("136")) {
             // WordArt text watermark (shapetype 136)
-            return parseTextWatermark(shapeEl);
+            watermark = parseTextWatermark(shapeEl);
+          } else {
+            // Check for image watermark (has v:imagedata)
+            const imgData = findChild(shapeEl, "v:imagedata");
+            if (imgData) {
+              watermark = parseImageWatermark(shapeEl, imgData);
+            }
           }
-          // Check for image watermark (has v:imagedata)
-          const imgData = findChild(shapeEl, "v:imagedata");
-          if (imgData) {
-            return parseImageWatermark(shapeEl, imgData);
+          if (watermark) {
+            return { watermark, paragraph: pEl, carrier: rEl };
           }
         }
       }
@@ -64,17 +78,34 @@ export function detectWatermarkFromRoot(root: XmlElement): Watermark | undefined
   return undefined;
 }
 
-function parseTextWatermark(shapeEl: XmlElement): TextWatermark {
-  const fillColor = shapeEl.attributes["fillcolor"] ?? "#C0C0C0";
-  const color = fillColor.replace(/^#/, "");
+/** `root` without the markup drawing `found`; the input is not modified. */
+export function withoutWatermark(root: XmlElement, found: FoundWatermark): XmlElement {
+  return {
+    ...root,
+    children: root.children.map(child =>
+      child === found.paragraph
+        ? {
+            ...found.paragraph,
+            children: found.paragraph.children.filter(c => c !== found.carrier)
+          }
+        : child
+    )
+  };
+}
 
-  // Parse rotation from style
+function parseTextWatermark(shapeEl: XmlElement): TextWatermark {
+  const color = vmlColorToHex(shapeEl.attributes["fillcolor"] ?? "#C0C0C0");
+
+  // Parse rotation from style. A shape without one is horizontal: Word's own
+  // horizontal watermarks carry no rotation at all.
   const style = shapeEl.attributes["style"] ?? "";
-  let rotation = -45;
-  const rotMatch = style.match(/rotation:\s*(-?\d+)/);
+  let rotation = 0;
+  const rotMatch = style.match(/rotation:\s*(-?\d+(?:\.\d+)?)/);
   if (rotMatch) {
-    rotation = parseInt(rotMatch[1], 10);
+    rotation = parseFloat(rotMatch[1]);
   }
+  const widthPt = styleLengthPt(style, "width");
+  const heightPt = styleLengthPt(style, "height");
 
   // Get opacity from v:fill
   const fillEl = findChild(shapeEl, "v:fill");
@@ -92,7 +123,9 @@ function parseTextWatermark(shapeEl: XmlElement): TextWatermark {
     font = fontMatch[1].replace(/&quot;/g, "");
   }
   const sizeMatch = tpStyle.match(/font-size:\s*(\d+(?:\.\d+)?)\s*pt/);
-  if (sizeMatch) {
+  // 1pt is Word's "auto": the text is stretched over the shape (fitshape), so
+  // the box is the size and the text path carries none.
+  if (sizeMatch && parseFloat(sizeMatch[1]) !== 1) {
     fontSize = Math.round(parseFloat(sizeMatch[1]) * 2); // convert pt to half-points
   }
 
@@ -103,18 +136,72 @@ function parseTextWatermark(shapeEl: XmlElement): TextWatermark {
     fontSize,
     color,
     semiTransparent,
-    rotation
+    rotation,
+    ...(widthPt !== undefined ? { widthPt } : {}),
+    ...(heightPt !== undefined ? { heightPt } : {})
   };
+}
+
+/**
+ * The sixteen HTML 4 colour names, which VML colour attributes accept, as
+ * `RRGGBB`. Word writes `fillcolor="silver"` for its own watermarks;
+ * `TextWatermark.color` is hex.
+ */
+const VML_COLOR_NAMES: Readonly<Record<string, string>> = {
+  black: "000000",
+  silver: "C0C0C0",
+  gray: "808080",
+  white: "FFFFFF",
+  maroon: "800000",
+  red: "FF0000",
+  purple: "800080",
+  fuchsia: "FF00FF",
+  green: "008000",
+  lime: "00FF00",
+  olive: "808000",
+  yellow: "FFFF00",
+  navy: "000080",
+  blue: "0000FF",
+  teal: "008080",
+  aqua: "00FFFF"
+};
+
+/** A VML colour (`#RRGGBB`, `#RGB`, a name, optionally followed by ` [index]`) as `RRGGBB`. */
+function vmlColorToHex(value: string): string {
+  const color = value.trim().split(/\s+/)[0] ?? "";
+  const named = VML_COLOR_NAMES[color.toLowerCase()];
+  if (named) {
+    return named;
+  }
+  const hex = color.replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    return [...hex]
+      .map(c => c + c)
+      .join("")
+      .toUpperCase();
+  }
+  return hex;
 }
 
 function parseImageWatermark(shapeEl: XmlElement, imgDataEl: XmlElement): ImageWatermark {
   const rId = imgDataEl.attributes["r:id"] ?? "";
   const gain = imgDataEl.attributes["gain"] ?? "";
   const washout = gain.startsWith("19661") || gain === "";
+  const style = shapeEl.attributes["style"] ?? "";
+  const widthPt = styleLengthPt(style, "width");
+  const heightPt = styleLengthPt(style, "height");
 
   return {
     type: "image",
     rId,
-    washout
+    washout,
+    ...(widthPt !== undefined ? { widthPt } : {}),
+    ...(heightPt !== undefined ? { heightPt } : {})
   };
+}
+
+/** A length in points from a VML `style` declaration, when it is given in `pt`. */
+function styleLengthPt(style: string, property: string): number | undefined {
+  const match = style.match(new RegExp(`(?:^|;)\\s*${property}:\\s*(\\d+(?:\\.\\d+)?)pt`));
+  return match ? parseFloat(match[1]) : undefined;
 }

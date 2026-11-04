@@ -2,7 +2,7 @@
  * Word Example 28 — DOCX → PDF
  *
  * Covers:
- *   - Basic conversion using Document.build() → docxToPdf
+ *   - Basic conversion using Document.create() → Pdf.fromDocx
  *   - Custom page size, margins, default font
  *   - Reading an existing .docx and converting it to PDF
  *   - Using a custom chart renderer (the built-in renderer is intentionally
@@ -32,7 +32,7 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addHeading(d, "DOCX → PDF", 1);
   Document.addParagraph(d, "Plain paragraph rendered through the PDF flow renderer.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     d,
     Build.paragraph([
       Build.text("Mixed run: "),
@@ -66,7 +66,7 @@ fs.mkdirSync(outDir, { recursive: true });
   ]);
   Document.addImage(d, tinyPng, "png", Units.cmToEmu(1.5), Units.cmToEmu(1.5), { altText: "logo" });
 
-  const pdfBytes = await Pdf.fromDocx(Document.build(d));
+  const pdfBytes = await Pdf.fromDocx(d);
   fs.writeFileSync(path.join(outDir, "01-basic.pdf"), pdfBytes);
   console.log(`  → 01-basic.pdf (${pdfBytes.length} bytes)`);
 }
@@ -81,15 +81,12 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.addParagraph(d, "This PDF is rendered onto an A5 page (148 × 210 mm).");
   Document.addParagraph(d, "Lorem ipsum… ".repeat(80));
 
-  const pdfBytes = await Pdf.fromDocx(Document.build(d), {
+  const pdfBytes = await Pdf.fromDocx(d, {
     // A5 portrait: 148mm × 210mm = 419.5 × 595.3 points
     pageWidth: 419.5,
     pageHeight: 595.3,
-    marginTop: 36,
-    marginBottom: 36,
-    marginLeft: 36,
-    marginRight: 36,
-    defaultFont: "Helvetica",
+    margins: { top: 36, right: 36, bottom: 36, left: 36 },
+    defaultFontFamily: "Helvetica",
     defaultFontSize: 10
   });
   fs.writeFileSync(path.join(outDir, "02-a5.pdf"), pdfBytes);
@@ -104,7 +101,7 @@ fs.mkdirSync(outDir, { recursive: true });
   Document.useDefaultStyles(d);
   Document.addHeading(d, "From file", 1);
   Document.addParagraph(d, "This document was first written to disk and then re-read.");
-  const buf = await Io.toBuffer(Document.build(d));
+  const buf = await Io.toBuffer(d);
   fs.writeFileSync(path.join(outDir, "03-source.docx"), buf);
 
   const reread = await Io.read(buf);
@@ -141,7 +138,7 @@ fs.mkdirSync(outDir, { recursive: true });
     }
   });
 
-  const pdfBytes = await Pdf.fromDocx(Document.build(d), {
+  const pdfBytes = await Pdf.fromDocx(d, {
     chartRenderer: (chart, page, rect) => {
       // Draw a coloured filled rectangle then a label so the output is
       // visibly different from the default chart renderer.

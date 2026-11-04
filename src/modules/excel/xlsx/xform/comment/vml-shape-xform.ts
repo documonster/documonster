@@ -40,8 +40,9 @@ class VmlShapeXform extends BaseXform {
     return "v:shape";
   }
 
-  render(xmlStream: XmlSink, model: ShapeModel, index?: number): void {
-    xmlStream.openNode("v:shape", VmlShapeXform.V_SHAPE_ATTRIBUTES(model, index ?? 0));
+  /** `shapeId` is the shape's VML id — the part allocates it, see `@excel/utils/vml-shape-ids`. */
+  render(xmlStream: XmlSink, model: ShapeModel, shapeId: number = noteShapeId(0)): void {
+    xmlStream.openNode("v:shape", VmlShapeXform.V_SHAPE_ATTRIBUTES(model, shapeId));
 
     xmlStream.leafNode("v:fill", { color2: "infoBackground [80]" });
     xmlStream.leafNode("v:shadow", { color: "none [81]", obscured: "t" });
@@ -138,11 +139,11 @@ class VmlShapeXform extends BaseXform {
     return Number.isFinite(value) ? value : undefined;
   }
 
-  static V_SHAPE_ATTRIBUTES(model: ShapeModel, index: number): XmlAttributes {
+  static V_SHAPE_ATTRIBUTES(model: ShapeModel, shapeId: number): XmlAttributes {
     const width = model.note?.width ?? DEFAULT_NOTE_WIDTH_PT;
     const height = model.note?.height ?? DEFAULT_NOTE_HEIGHT_PT;
     return {
-      id: `_x0000_s${1025 + index}`,
+      id: `_x0000_s${shapeId}`,
       type: "#_x0000_t202",
       style: `position:absolute; margin-left:105.3pt;margin-top:10.5pt;width:${width}pt;height:${height}pt;z-index:1;visibility:hidden`,
       fillcolor: "infoBackground [80]",
@@ -153,3 +154,11 @@ class VmlShapeXform extends BaseXform {
 }
 
 export { VmlShapeXform };
+
+/**
+ * The VML shape id of the note at `index` of a part that has block 1 to itself. A workbook write
+ * allocates ids across every part instead — see `@excel/utils/vml-shape-ids`.
+ */
+export function noteShapeId(index: number): number {
+  return 1025 + index;
+}

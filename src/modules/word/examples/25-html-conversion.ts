@@ -2,7 +2,8 @@
  * Word Example 25 — HTML ↔ DOCX conversion
  *
  * Covers:
- *   - htmlToDocxBody — parses an HTML string into BodyContent[]
+ *   - WordHtml.toDocxBody — parses an HTML string into body content plus the
+ *     styles, list numbering and images it refers to
  *     · headings, paragraphs, divs
  *     · ordered & unordered lists (incl. task lists)
  *     · tables with colspan/rowspan, borders, alignment, header rows
@@ -13,7 +14,8 @@
  *     · pre/code blocks
  *     · base64 inline images (data: URL)
  *     · page-break div
- *   - renderToHtml — DOCX → HTML, with inline styles, images as data URLs,
+ *   - WordHtml.toDocx — HTML → a complete document in one call
+ *   - WordHtml.fromDocx — DOCX → HTML, with inline styles, images as data URLs,
  *     comments rendered, footnotes, custom style map
  *   - Edge cases: malformed tags, mixed-script content, very long tables.
  *
@@ -26,7 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderToHtml, htmlToDocx } from "../html";
+import { WordHtml } from "../html";
 import { Document, Io } from "../index";
 
 const outDir = path.resolve(
@@ -103,74 +105,32 @@ const inputHtml = /* html */ `
   </body>
 </html>`;
 
-const { body, images: htmlImages } = htmlToDocx(inputHtml, {
+const fragment = WordHtml.toDocxBody(inputHtml, {
   defaultFont: "Calibri",
   defaultFontSize: 22,
   classStyles: {
     quote: "border-left: 3px solid #1F4E79; padding-left: 12px;"
   }
 });
-console.log(`  htmlToDocx → ${body.length} body content blocks, ${htmlImages.length} images`);
+const { body, images: htmlImages } = fragment;
+console.log(
+  `  WordHtml.toDocxBody → ${body.length} body content blocks, ${htmlImages.length} images`
+);
 
-// Wrap into a full document. htmlToDocxBody emits paragraphs that reference
-// numId=1 (bullets) and numId=2 (ordered), but it does NOT define those
-// abstractNumberings — the caller owns numbering. Inject the matching
-// definitions so the bullets/numbers render.
+// Splice into a document of our own. The body refers to heading styles, the
+// bullet / numbered list instances and its pictures by id; the fragment
+// carries every one of those definitions, so merge them in beside the body.
 const doc = Document.create();
-Document.useDefaultStyles(doc);
 for (const item of body) {
   Document.addContent(doc, item);
 }
-const built = Document.build(doc);
 const finalDoc = {
-  ...built,
-  images: [...(built.images ?? []), ...htmlImages],
-  abstractNumberings: [
-    ...(built.abstractNumberings ?? []),
-    {
-      abstractNumId: 1,
-      multiLevelType: "hybridMultilevel" as const,
-      levels: [
-        {
-          level: 0,
-          start: 1,
-          format: "bullet" as const,
-          text: "\u2022",
-          justification: "left" as const,
-          paragraphProperties: { indent: { left: 720, hanging: 360 } },
-          runProperties: { font: { ascii: "Symbol", hAnsi: "Symbol" } }
-        },
-        {
-          level: 1,
-          start: 1,
-          format: "bullet" as const,
-          text: "\u25E6",
-          justification: "left" as const,
-          paragraphProperties: { indent: { left: 1440, hanging: 360 } },
-          runProperties: { font: { ascii: "Courier New", hAnsi: "Courier New" } }
-        }
-      ]
-    },
-    {
-      abstractNumId: 2,
-      multiLevelType: "hybridMultilevel" as const,
-      levels: [
-        {
-          level: 0,
-          start: 1,
-          format: "decimal" as const,
-          text: "%1.",
-          justification: "left" as const,
-          paragraphProperties: { indent: { left: 720, hanging: 360 } }
-        }
-      ]
-    }
-  ],
-  numberingInstances: [
-    ...(built.numberingInstances ?? []),
-    { numId: 1, abstractNumId: 1 },
-    { numId: 2, abstractNumId: 2 }
-  ]
+  ...doc,
+  docDefaults: fragment.docDefaults,
+  styles: fragment.styles,
+  images: [...(doc.images ?? []), ...htmlImages],
+  abstractNumberings: [...(doc.abstractNumberings ?? []), ...fragment.abstractNumberings],
+  numberingInstances: [...(doc.numberingInstances ?? []), ...fragment.numberingInstances]
 };
 const docxBytes = await Io.toBuffer(finalDoc);
 fs.writeFileSync(path.join(outDir, "25-html-imported.docx"), docxBytes);
@@ -180,7 +140,7 @@ console.log(`  → 25-html-imported.docx (${docxBytes.length} bytes)`);
 // 2. DOCX → HTML (round-trip)
 // ---------------------------------------------------------------------------
 const reread = await Io.read(docxBytes);
-const htmlOut = renderToHtml(reread, {
+const htmlOut = WordHtml.fromDocx(reread, {
   fullDocument: true,
   includeStyles: true,
   imageMode: "dataUrl",
@@ -193,7 +153,7 @@ const htmlOut = renderToHtml(reread, {
   }
 });
 console.log(
-  `  renderToHtml → ${htmlOut.html.length} chars, ${htmlOut.images.size} images, ${htmlOut.warnings.length} warnings`
+  `  WordHtml.fromDocx → ${htmlOut.html.length} chars, ${htmlOut.images.size} images, ${htmlOut.warnings.length} warnings`
 );
 fs.writeFileSync(path.join(outDir, "25-html-roundtrip.html"), htmlOut.html);
 console.log("  → 25-html-roundtrip.html");
@@ -201,7 +161,7 @@ console.log("  → 25-html-roundtrip.html");
 // ---------------------------------------------------------------------------
 // 3. Fragment mode — produce only the body fragment (useful for emails)
 // ---------------------------------------------------------------------------
-const frag = renderToHtml(reread, {
+const frag = WordHtml.fromDocx(reread, {
   fullDocument: false,
   includeStyles: false,
   imageMode: "filename"
@@ -219,4 +179,16 @@ for (const img of reread.images ?? []) {
     fs.writeFileSync(path.join(outDir, img.fileName), img.data);
     console.log(`  → ${img.fileName} (${img.data.length} bytes)`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 4. WordHtml.toDocx — the one-call form of section 1: a complete
+//    document that already defines the heading styles and the bullet /
+//    numbered list instances the converted content refers to.
+// ---------------------------------------------------------------------------
+{
+  const wholeDoc = WordHtml.toDocx(inputHtml, { defaultFont: "Calibri" });
+  const bytes = await Io.toBuffer(wholeDoc);
+  fs.writeFileSync(path.join(outDir, "25-html-to-document.docx"), bytes);
+  console.log(`  WordHtml.toDocx → 25-html-to-document.docx (${bytes.length} bytes)`);
 }

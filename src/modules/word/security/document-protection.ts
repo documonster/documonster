@@ -14,12 +14,42 @@
  */
 
 import {
+  checkBoolean,
+  checkHandle,
+  checkInteger,
+  checkOneOf,
+  checkRecord,
+  checkString
+} from "@word/core/argument-checks";
+import {
   bytesToBase64,
   base64ToBytes,
   stringToUtf16LE,
   randomBytes
 } from "@word/core/internal-utils";
+import { HASH_ALGORITHM_NAMES, canonicalHashAlgorithm } from "@word/security/hash-names";
+import type { CompactHashAlgorithm } from "@word/security/hash-names";
 import type { DocxDocument, DocumentSettings } from "@word/types";
+
+const EDIT_TYPES: ReadonlySet<string> = new Set<ProtectionEditType>([
+  "none",
+  "readOnly",
+  "comments",
+  "trackedChanges",
+  "forms"
+]);
+
+function checkProtectionOptions(options: DocumentProtectionOptions, where: string): void {
+  checkRecord(options, "options", where);
+  checkOneOf(options.edit, EDIT_TYPES, "options.edit", where);
+  checkString(options.password, "options.password", where, { optional: true });
+  checkOneOf(options.hashAlgorithm, HASH_ALGORITHM_NAMES, "options.hashAlgorithm", where, {
+    optional: true
+  });
+  checkInteger(options.spinCount, "options.spinCount", where, { optional: true, min: 0 });
+  checkBoolean(options.enforcement, "options.enforcement", where, { optional: true });
+  checkBoolean(options.formatting, "options.formatting", where, { optional: true });
+}
 
 // =============================================================================
 // Types
@@ -37,8 +67,11 @@ export interface DocumentProtectionOptions {
   readonly edit: ProtectionEditType;
   /** Password to protect the document (will be hashed). */
   readonly password?: string;
-  /** Hash algorithm. Default: "SHA-256". */
-  readonly hashAlgorithm?: ProtectionHashAlgorithm;
+  /**
+   * Hash algorithm. Default: `"SHA-256"`. The encryption format's spelling (`"SHA256"`, as
+   * `WordCrypto.encrypt` takes it) is accepted too and stored as the canonical `"SHA-256"`.
+   */
+  readonly hashAlgorithm?: ProtectionHashAlgorithm | CompactHashAlgorithm;
   /** Number of hash iterations (spin count). Default: 100000. */
   readonly spinCount?: number;
   /** Whether protection is enforced. Default: true. */
@@ -73,13 +106,18 @@ export interface ProtectionState {
  * Set document protection on a DocxDocument.
  * Returns a new document with protection settings applied.
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it — see
+ * `Document.clone`.
+ *
  * @param doc - The document to protect.
  * @param options - Protection options.
  * @returns A new document with protection settings.
  *
  * @example
  * ```ts
- * const protected = await protectDocument(doc, {
+ * import { Security } from "documonster/word";
+ *
+ * const locked = await Security.protect(doc, {
  *   edit: "readOnly",
  *   password: "secret123",
  *   hashAlgorithm: "SHA-256"
@@ -90,6 +128,8 @@ export async function protectDocument(
   doc: DocxDocument,
   options: DocumentProtectionOptions
 ): Promise<DocxDocument> {
+  checkHandle(doc, "document", "doc", "Security.protect");
+  checkProtectionOptions(options, "Security.protect");
   const protection = await buildProtectionSettings(options);
 
   const existingSettings = doc.settings ?? {};
@@ -107,10 +147,14 @@ export async function protectDocument(
 /**
  * Remove document protection.
  *
+ * Does not modify `doc`; the result may share unchanged nodes with it — see
+ * `Document.clone`.
+ *
  * @param doc - The protected document.
  * @returns A new document without protection.
  */
 export function unprotectDocument(doc: DocxDocument): DocxDocument {
+  checkHandle(doc, "document", "doc", "Security.unprotect");
   if (!doc.settings?.documentProtection) {
     return doc;
   }
@@ -126,6 +170,7 @@ export function unprotectDocument(doc: DocxDocument): DocxDocument {
  * Check if a document is protected.
  */
 export function isDocumentProtected(doc: DocxDocument): boolean {
+  checkHandle(doc, "document", "doc", "Security.isProtected");
   const dp = doc.settings?.documentProtection;
   return dp !== undefined && dp.enforcement === true;
 }
@@ -134,6 +179,7 @@ export function isDocumentProtected(doc: DocxDocument): boolean {
  * Get the protection state of a document.
  */
 export function getProtectionState(doc: DocxDocument): ProtectionState | undefined {
+  checkHandle(doc, "document", "doc", "Security.getState");
   const dp = doc.settings?.documentProtection;
   if (!dp) {
     return undefined;
@@ -142,7 +188,9 @@ export function getProtectionState(doc: DocxDocument): ProtectionState | undefin
   return {
     edit: (dp.edit as ProtectionEditType) ?? "none",
     enforcement: dp.enforcement === true,
-    hashAlgorithm: dp.hashAlgorithm,
+    // Reported in the canonical spelling whichever one the model holds; a name
+    // the file gave that is neither (`MD5`, an unknown SID) as it is.
+    hashAlgorithm: canonicalHashAlgorithm(dp.hashAlgorithm) ?? dp.hashAlgorithm,
     hashValue: dp.hashValue,
     saltValue: dp.saltValue,
     spinCount: dp.spinCount,
@@ -151,8 +199,10 @@ export function getProtectionState(doc: DocxDocument): ProtectionState | undefin
 }
 
 /**
- * Verify a password against the document's protection hash.
- * Returns true if the password matches, false otherwise.
+ * Verify a password against the document's protection hash — the editing
+ * restriction's password, not a file-encryption password (that is
+ * `WordCrypto.verifyPassword`). Returns true if the password matches, false
+ * otherwise, including when the document has no password hash.
  *
  * @param doc - The protected document.
  * @param password - The password to verify.
@@ -162,8 +212,13 @@ export async function verifyProtectionPassword(
   doc: DocxDocument,
   password: string
 ): Promise<boolean> {
+  const where = "Security.verifyPassword";
+  checkHandle(doc, "document", "doc", where);
+  checkString(password, "password", where);
   const dp = doc.settings?.documentProtection;
-  if (!dp || !dp.hashValue || !dp.saltValue || !dp.hashAlgorithm) {
+  // Either spelling names the algorithm (a hand-built model may hold `"SHA256"`).
+  const algorithm = canonicalHashAlgorithm(dp?.hashAlgorithm);
+  if (!dp || !dp.hashValue || !dp.saltValue || algorithm === undefined) {
     return false;
   }
 
@@ -177,12 +232,7 @@ export async function verifyProtectionPassword(
     return false;
   }
   const spinCount = rawSpin;
-  const computedHash = await computePasswordHash(
-    password,
-    dp.saltValue,
-    dp.hashAlgorithm as ProtectionHashAlgorithm,
-    spinCount
-  );
+  const computedHash = await computePasswordHash(password, dp.saltValue, algorithm, spinCount);
 
   // Constant-time string comparison so an attacker cannot recover
   // hashValue byte-by-byte from timing differences. A short-circuit
@@ -228,7 +278,7 @@ async function buildProtectionSettings(
   }
 
   if (options.password) {
-    const algorithm = options.hashAlgorithm ?? "SHA-256";
+    const algorithm = canonicalHashAlgorithm(options.hashAlgorithm ?? "SHA-256")!;
     const spinCount = options.spinCount ?? 100000;
     const salt = generateSalt();
     const hash = await computePasswordHash(options.password, salt, algorithm, spinCount);
@@ -248,7 +298,8 @@ async function computePasswordHash(
   algorithm: ProtectionHashAlgorithm,
   spinCount: number
 ): Promise<string> {
-  const algName = algorithmToSubtle(algorithm);
+  // The canonical spelling is WebCrypto's.
+  const algName = algorithm;
   const saltBytes = base64ToBytes(saltBase64);
   // ECMA-376 §14.2.1: password must be encoded as UTF-16LE
   const passwordBytes = encodeUtf16LE(password);
@@ -286,19 +337,6 @@ async function computePasswordHash(
 
 /** Alias for UTF-16LE encoding (uses unified implementation). */
 const encodeUtf16LE = stringToUtf16LE;
-
-function algorithmToSubtle(alg: ProtectionHashAlgorithm): string {
-  switch (alg) {
-    case "SHA-1":
-      return "SHA-1";
-    case "SHA-256":
-      return "SHA-256";
-    case "SHA-384":
-      return "SHA-384";
-    case "SHA-512":
-      return "SHA-512";
-  }
-}
 
 function generateSalt(): string {
   return bytesToBase64(randomBytes(16));

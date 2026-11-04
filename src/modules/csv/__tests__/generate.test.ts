@@ -870,3 +870,23 @@ describe("createCsvGenerator enhanced API", () => {
     expect(rows).toHaveLength(4); // 1 header + 3 data rows
   });
 });
+
+describe("Csv.generate — argument checks", () => {
+  it("refuses an unknown column type instead of generating strings for it", async () => {
+    const { Csv, CsvError } = await import("@csv/index");
+    expect(() => Csv.generate({ rows: 1, columns: ["bogus" as never] })).toThrow(CsvError);
+    expect(() => Csv.generate({ rows: 1, columns: [{ type: "bogus" as never }] })).toThrow(
+      CsvError
+    );
+  });
+
+  it("refuses options that are not an object", async () => {
+    const { Csv, CsvError } = await import("@csv/index");
+    expect(() => Csv.generate(42 as never)).toThrow(CsvError);
+  });
+
+  it("names the public functions in its messages", async () => {
+    const { Csv } = await import("@csv/index");
+    expect(() => Csv.generate({ rows: -1 })).toThrow(/Csv\.generateRows\(\)/);
+  });
+});

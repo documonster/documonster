@@ -9,10 +9,11 @@ import { createFinishedAll } from "@stream/core/finished-all";
 import type { FinishedOptions, PipelineCallback, PipelineOptions } from "@stream/core/options";
 import { createPipeline } from "@stream/core/pipeline-api";
 import { isWebOnlyPipeline, pipeWebStreams } from "@stream/core/web-pipeline";
+import { UnsupportedStreamTypeError } from "@stream/errors";
 import { kernel } from "@stream/kernel/classes";
 import { eos } from "@stream/kernel/end-of-stream";
 import { pipelineImpl } from "@stream/kernel/pipeline-impl";
-import { isNodeStream } from "@stream/kernel/stream-utils";
+import { isNodeStream, isWebStream } from "@stream/kernel/stream-utils";
 import type { PipelineStageLike, PipelineStreamLike } from "@stream/types";
 
 export type { PipelineOptions, FinishedOptions } from "@stream/core/options";
@@ -34,22 +35,44 @@ const runPipeline = createPipeline((stages, options) =>
       })
 );
 
+/**
+ * Pipe `streams` together. With a trailing callback it is called once every stage is done
+ * (or with the first error) and the last stage is returned, as `node:stream`'s `pipeline`
+ * does; without one, a promise settles instead.
+ */
+export function pipeline<D extends PipelineStageLike>(
+  ...args:
+    | [...PipelineStageLike[], D, PipelineCallback]
+    | [...PipelineStageLike[], D, PipelineOptions, PipelineCallback]
+): D;
+export function pipeline(
+  ...args: [...PipelineStageLike[], PipelineOptions] | PipelineStageLike[]
+): Promise<void>;
 export function pipeline(
   ...args: [...PipelineStageLike[], PipelineOptions | PipelineCallback] | PipelineStageLike[]
-): Promise<void> {
+): Promise<void> | PipelineStageLike {
   return runPipeline(...args);
 }
 
 /**
- * Settle when `stream` has finished, errored or closed early.
+ * Settle when `stream` has finished, errored or closed early. With a callback it is called
+ * then and a function that removes the listeners is returned, as `node:stream`'s `finished`
+ * does; without one, a promise settles instead.
  *
  * Web streams are adapted first; that takes their lock, as reading them does.
  */
+export function finished(stream: PipelineStreamLike, callback: PipelineCallback): () => void;
+export function finished(
+  stream: PipelineStreamLike,
+  options: FinishedOptions | undefined,
+  callback: PipelineCallback
+): () => void;
+export function finished(stream: PipelineStreamLike, options?: FinishedOptions): Promise<void>;
 export function finished(
   stream: PipelineStreamLike,
   optionsOrCallback?: FinishedOptions | PipelineCallback,
   callback?: PipelineCallback
-): Promise<void> {
+): Promise<void> | (() => void) {
   let options: FinishedOptions | undefined;
   let cb: PipelineCallback | undefined;
   if (typeof optionsOrCallback === "function") {
@@ -59,20 +82,39 @@ export function finished(
     cb = callback;
   }
 
-  const promise = isNodeStream(stream)
+  if (!isNodeStream(stream) && !isWebStream(stream)) {
+    const error = new UnsupportedStreamTypeError(
+      "finished",
+      stream === null ? "null" : typeof stream,
+      { field: "stream" }
+    );
+    if (cb) {
+      throw error;
+    }
+    return Promise.reject(error);
+  }
+
+  // With a callback, the cleanup function `node:stream` returns: it removes the listeners.
+  if (cb) {
+    const done = cb;
+    if (isNodeStream(stream)) {
+      return eos(stream, options ?? null, err => (err ? done(err) : done()));
+    }
+    let cancelled = false;
+    webFinished().catch((err: Error) => {
+      if (!cancelled) {
+        done(err);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }
+  return isNodeStream(stream)
     ? new Promise<void>((resolve, reject) => {
         eos(stream, options ?? null, err => (err ? reject(err) : resolve()));
       })
     : webFinished();
-
-  if (cb) {
-    const done = cb;
-    promise.then(
-      () => done(),
-      err => done(err)
-    );
-  }
-  return promise;
 }
 
 /**

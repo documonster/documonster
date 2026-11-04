@@ -111,7 +111,7 @@ describe("the round trip still holds", () => {
     const handle = Workbook.create();
     await Workbook.read(handle, bytes);
     const { Cell } = await import("@excel");
-    const sheets = Workbook.getWorksheets(handle);
+    const sheets = Workbook.listWorksheets(handle);
     expect(Cell.getFormula(sheets[0], "H2")).toBe("H1+1");
   });
 });

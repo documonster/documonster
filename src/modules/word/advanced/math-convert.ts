@@ -10,6 +10,7 @@
  * (sum/integral/product), delimiters (parentheses/brackets), and matrices.
  */
 
+import { checkNodeArray, checkString } from "@word/core/argument-checks";
 import type {
   MathContent,
   MathDelimiter,
@@ -37,6 +38,7 @@ import { xmlDecode, xmlEncode } from "@xml/encode";
  * @stability experimental
  */
 export function ommlToMathML(content: readonly MathContent[]): string {
+  checkNodeArray(content, "content", "Convert.ommlToMathMl");
   const inner = content.map(node => convertNodeToMathML(node)).join("");
   return `<math xmlns="http://www.w3.org/1998/Math/MathML">${inner}</math>`;
 }
@@ -292,6 +294,7 @@ function childrenToMathML(nodes: readonly MathContent[]): string {
  * @stability experimental
  */
 export function mathMLToOmml(mathml: string): MathContent[] {
+  checkString(mathml, "mathml", "Convert.mathMlToOmml");
   // Simple XML parser for MathML → OMML conversion
   const nodes = parseMathMLNodes(mathml);
   return nodes;

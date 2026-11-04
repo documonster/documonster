@@ -6,7 +6,7 @@ A high-performance, RFC 4180 compliant CSV parser and formatter with zero depend
 
 ```typescript
 import { Csv } from "documonster/csv";
-// Csv.parse, Csv.format, Csv.ParserStream, …
+// Csv.parse, Csv.format, Csv.createParserStream, …
 ```
 
 ## Features
@@ -15,7 +15,7 @@ import { Csv } from "documonster/csv";
 - **Zero Dependencies** - Pure TypeScript, no external packages
 - **Cross-Platform** - Same API in Node.js and browsers
 - **High Performance** - indexOf-based scanner, fast-mode detection, batch processing
-- **Streaming** - `CsvParserStream` / `CsvFormatterStream` for large files
+- **Streaming** - `Csv.createParserStream` / `Csv.createFormatterStream` for large files
 - **Type-Safe** - Full TypeScript generics with overloaded signatures
 - **Auto-Detection** - Delimiter, linebreak, and BOM detection
 - **Dynamic Typing** - Automatic type coercion (numbers, booleans, dates)
@@ -94,32 +94,32 @@ Csv.parse(csvString, { headers: true }): CsvParseResult;
 Csv.parse(csvString, { headers: true, dynamicTyping: true }): CsvParseResult;
 
 // info: true -> rows include metadata (line number, raw input, etc.)
-Csv.parse(csvString, { headers: true, info: true }): CsvParseResult<RecordWithInfo>;
+Csv.parse(csvString, { headers: true, info: true }): CsvParseResult<CsvRecordWithInfo>;
 ```
 
 **Parse Options (`CsvParseOptions`):**
 
-| Option           | Type                                             | Default       | Description                                             |
-| ---------------- | ------------------------------------------------ | ------------- | ------------------------------------------------------- |
-| `delimiter`      | `string`                                         | auto-detect   | Field delimiter (`,`, `;`, `\t`, `\|`)                  |
-| `headers`        | `boolean \| string[] \| HeaderTransformFunction` | `false`       | Use first row as headers, or provide custom             |
-| `quote`          | `string \| false`                                | `"`           | Quote character (`false` to disable)                    |
-| `escape`         | `string \| false`                                | same as quote | Escape character inside quoted fields                   |
-| `comment`        | `string`                                         | -             | Comment line prefix (e.g. `"#"`)                        |
-| `skipEmptyLines` | `boolean \| "greedy"`                            | `false`       | Skip empty lines; `"greedy"` also skips whitespace-only |
-| `skipLines`      | `number`                                         | `0`           | Number of lines to skip before parsing                  |
-| `maxRows`        | `number`                                         | -             | Maximum rows to parse                                   |
-| `dynamicTyping`  | `boolean \| DynamicTypingConfig`                 | `false`       | Auto-convert to numbers/booleans/dates                  |
-| `castDate`       | `boolean \| CastDateConfig`                      | `false`       | Parse date strings to Date objects                      |
-| `transform`      | `RowTransformFunction`                           | -             | Transform each row before output                        |
-| `validate`       | `RowValidateFunction`                            | -             | Validate rows; invalid rows go to `errors`              |
-| `columns`        | `ColumnConfig[]`                                 | -             | Per-column type/transform configuration                 |
-| `objname`        | `string`                                         | -             | Key rows by a specific column value                     |
-| `encoding`       | `string`                                         | `"utf-8"`     | Input encoding                                          |
-| `info`           | `boolean`                                        | `false`       | Include line/record metadata per row                    |
-| `fastMode`       | `boolean`                                        | auto          | Force fast-mode parsing (no quote handling)             |
-| `renameHeaders`  | `boolean`                                        | `false`       | Auto-rename duplicate headers                           |
-| `columnMismatch` | `ColumnMismatchConfig`                           | -             | Handle rows with more/fewer columns than headers        |
+| Option             | Type                                                | Default       | Description                                               |
+| ------------------ | --------------------------------------------------- | ------------- | --------------------------------------------------------- |
+| `delimiter`        | `string`                                            | `,`           | Field delimiter; `""` auto-detects (`,`, `;`, `\t`, `\|`) |
+| `headers`          | `boolean \| string[] \| CsvHeaderTransformFunction` | `false`       | Use first row as headers, or provide custom               |
+| `quote`            | `string \| false`                                   | `"`           | Quote character (`false` to disable)                      |
+| `escape`           | `string \| false`                                   | same as quote | Escape character inside quoted fields                     |
+| `comment`          | `string`                                            | -             | Comment line prefix (e.g. `"#"`)                          |
+| `skipEmptyLines`   | `boolean \| "greedy"`                               | `false`       | Skip empty lines; `"greedy"` also skips whitespace-only   |
+| `skipLines`        | `number`                                            | `0`           | Number of lines to skip before parsing                    |
+| `maxRows`          | `number`                                            | -             | Maximum rows to parse                                     |
+| `dynamicTyping`    | `boolean \| CsvDynamicTypingConfig`                 | `false`       | Auto-convert to numbers/booleans/dates                    |
+| `decimalSeparator` | `"." \| ","`                                        | `"."`         | Decimal separator `dynamicTyping` reads numbers with      |
+| `castDate`         | `boolean \| CsvCastDateConfig`                      | `false`       | Parse ISO dates; a date-only value is UTC midnight        |
+| `rowTransform`     | `(row) => row \| null`                              | -             | Transform each row before output                          |
+| `validate`         | `(row) => boolean \| { isValid, reason }`           | -             | Validate rows; rejected rows go to `invalidRows`          |
+| `objname`          | `string`                                            | -             | Key rows by a header column (needs `headers`)             |
+| `onSkip`           | `CsvOnSkipCallback`                                 | -             | Called for every record left out because of an error      |
+| `encoding`         | `string`                                            | `"utf-8"`     | Input encoding                                            |
+| `info`             | `boolean`                                           | `false`       | Include line/record metadata per row                      |
+| `fastMode`         | `boolean`                                           | `false`       | Fast-mode parsing (no quote handling)                     |
+| `columnMismatch`   | `CsvColumnMismatchConfig`                           | -             | Handle rows with more/fewer columns than headers          |
 
 **Result (`CsvParseResult<T>`):**
 
@@ -135,7 +135,9 @@ interface CsvParseResult<T> {
 
 ### `Csv.parseAsync(input, options?)`
 
-Async parser supporting strings, `AsyncIterable<string | Uint8Array>`, and `ReadableStream`.
+Async parser supporting strings, bytes (`Uint8Array` or any `ArrayBufferView`, `ArrayBuffer`),
+a `Blob` / `File`, `AsyncIterable<string | Uint8Array>`, and `ReadableStream`. Bytes are decoded as
+the same bytes streamed would be (`encoding`, BOM). `Csv.parseRows` takes the same inputs.
 
 ```typescript
 import { Csv } from "documonster/csv";
@@ -149,6 +151,9 @@ const result = await Csv.parseAsync(response.body, { headers: true });
 
 // From async iterable
 const result = await Csv.parseAsync(asyncChunks, { headers: true });
+
+// From bytes or a File (an <input type="file">)
+const result = await Csv.parseAsync(fileInput.files[0], { headers: true });
 ```
 
 ### `Csv.parseRows(input, options?)`
@@ -163,20 +168,19 @@ for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
 }
 ```
 
-### `Csv.parseWithProgress(input, options?, onProgress?)`
+### `Csv.parseAsync(input, { onProgress })`
 
 Async parser with progress callback for large files.
 
 ```typescript
 import { Csv } from "documonster/csv";
 
-const result = await Csv.parseWithProgress(
-  largeCsvString,
-  { headers: true },
-  ({ rowsProcessed, bytesProcessed }) => {
+const result = await Csv.parseAsync(largeCsvString, {
+  headers: true,
+  onProgress: ({ rowsProcessed, bytesProcessed }) => {
     console.log(`Parsed ${rowsProcessed} rows (${bytesProcessed} bytes)`);
   }
-);
+});
 ```
 
 ---
@@ -210,24 +214,25 @@ Csv.format([
 
 **Format Options (`CsvFormatOptions`):**
 
-| Option            | Type                                              | Default       | Description                                        |
-| ----------------- | ------------------------------------------------- | ------------- | -------------------------------------------------- |
-| `delimiter`       | `string`                                          | `,`           | Field delimiter                                    |
-| `headers`         | `boolean \| string[]`                             | auto          | Include headers; auto-derived from objects         |
-| `quote`           | `string \| false`                                 | `"`           | Quote character                                    |
-| `escape`          | `string`                                          | same as quote | Escape character                                   |
-| `quoteColumns`    | `boolean \| boolean[] \| Record<string, boolean>` | auto          | Force quoting per column                           |
-| `escapeFormulae`  | `boolean`                                         | `false`       | Prefix formula chars (`=`, `+`, `-`, `@`) with `'` |
-| `bom`             | `boolean`                                         | `false`       | Prepend UTF-8 BOM                                  |
-| `columns`         | `ColumnConfig[]`                                  | -             | Per-column formatting configuration                |
-| `transform`       | `RowTransformFunction`                            | -             | Transform rows before formatting                   |
-| `trailingNewline` | `boolean`                                         | `false`       | Add trailing newline                               |
+| Option             | Type                                              | Default       | Description                                        |
+| ------------------ | ------------------------------------------------- | ------------- | -------------------------------------------------- |
+| `delimiter`        | `string`                                          | `,`           | Field delimiter                                    |
+| `headers`          | `boolean \| string[]`                             | auto          | Header row; object rows default to their keys      |
+| `quote`            | `string \| false`                                 | `"`           | Quote character                                    |
+| `escape`           | `string`                                          | same as quote | Escape character                                   |
+| `quoteColumns`     | `boolean \| boolean[] \| Record<string, boolean>` | auto          | Force quoting per column                           |
+| `escapeFormulae`   | `boolean`                                         | `false`       | Prefix formula chars (`=`, `+`, `-`, `@`) with `'` |
+| `bom`              | `boolean`                                         | `false`       | Prepend UTF-8 BOM                                  |
+| `columns`          | `(string \| CsvColumnConfig)[]`                   | -             | Keys to read, with optional header text            |
+| `typeTransform`    | `CsvTypeTransformMap`                             | -             | Per-type value formatting, and a `row` transform   |
+| `decimalSeparator` | `"." \| ","`                                      | `"."`         | Decimal separator for numbers                      |
+| `trailingNewline`  | `boolean`                                         | `false`       | Add trailing newline                               |
 
 ---
 
 ## Streaming API
 
-### `Csv.ParserStream`
+### `Csv.createParserStream(options?)`
 
 Transform stream that parses CSV data chunk-by-chunk. Cross-platform (Node.js + browser).
 
@@ -237,9 +242,6 @@ import { pipeline } from "documonster/stream";
 
 // Using factory function
 const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
-
-// Using class constructor
-const parser = new Csv.ParserStream({ headers: true });
 
 // With transform and validation
 parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
@@ -254,7 +256,7 @@ parser.on("end", () => console.log("Done"));
 await pipeline(readableStream, parser, writable);
 ```
 
-### `Csv.FormatterStream`
+### `Csv.createFormatterStream(options?)`
 
 Transform stream that formats rows to CSV text. Cross-platform (Node.js + browser).
 
@@ -286,6 +288,7 @@ import { Csv } from "documonster/csv";
 Csv.detectDelimiter("a,b,c\n1,2,3"); // ","
 Csv.detectDelimiter("a;b;c\n1;2;3"); // ";"
 Csv.detectDelimiter("a\tb\tc\n1\t2\t3"); // "\t"
+Csv.detectDelimiter("a:b\n1:2", { delimitersToGuess: [":"] }); // ":"
 
 // Detect line terminator (quote-aware)
 Csv.detectLinebreak("a,b\r\nc,d"); // "\r\n"
@@ -322,6 +325,7 @@ Csv.applyDynamicTyping("42"); // 42 (number)
 Csv.applyDynamicTyping("3.14"); // 3.14 (number)
 Csv.applyDynamicTyping("true"); // true (boolean)
 Csv.applyDynamicTyping("hello"); // "hello" (string, unchanged)
+Csv.applyDynamicTyping("007", value => Number(value)); // 7 (your own converter)
 ```
 
 ---
@@ -376,7 +380,7 @@ for (const row of Csv.generateRows({ columns: 3, duration: 5000 })) {
 }
 
 // Async generator with delay between rows
-for await (const row of Csv.generateAsync({ columns: 5, rows: 100, delay: 10 })) {
+for await (const row of Csv.generateRowsAsync({ columns: 5, rows: 100, delay: 10 })) {
   console.log(row);
 }
 
@@ -424,41 +428,39 @@ try {
 
 ### Core Functions
 
-| Function                                              | Description                                      |
-| ----------------------------------------------------- | ------------------------------------------------ |
-| `Csv.parse(input, options?)`                          | Synchronous CSV parser                           |
-| `Csv.parseAsync(input, options?)`                     | Async parser (strings, streams, async iterables) |
-| `Csv.parseRows(input, options?)`                      | Async generator yielding rows one at a time      |
-| `Csv.parseWithProgress(input, options?, onProgress?)` | Parser with progress reporting                   |
-| `Csv.format(data, options?)`                          | Batch CSV formatter                              |
+| Function                                | Description                                                    |
+| --------------------------------------- | -------------------------------------------------------------- |
+| `Csv.parse(input, options?)`            | Synchronous CSV parser                                         |
+| `Csv.parseAsync(input, options?)`       | Async parser (strings, bytes, Blobs, streams, async iterables) |
+| `Csv.parseRows(input, options?)`        | Async generator yielding rows one at a time                    |
+| `Csv.parseAsync(input, { onProgress })` | Parser with progress reporting                                 |
+| `Csv.format(data, options?)`            | Batch CSV formatter                                            |
 
 ### Stream Classes
 
 | Class                                 | Description                                |
 | ------------------------------------- | ------------------------------------------ |
-| `Csv.ParserStream`                    | Transform stream: CSV bytes -> parsed rows |
-| `Csv.FormatterStream`                 | Transform stream: rows -> CSV text         |
-| `Csv.createParserStream(options?)`    | Factory for `Csv.ParserStream`             |
-| `Csv.createFormatterStream(options?)` | Factory for `Csv.FormatterStream`          |
+| `Csv.createParserStream(options?)`    | Transform stream: CSV bytes -> parsed rows |
+| `Csv.createFormatterStream(options?)` | Transform stream: rows -> CSV text         |
 
 ### Utilities
 
-| Function                          | Description                   |
-| --------------------------------- | ----------------------------- |
-| `Csv.detectDelimiter(input)`      | Auto-detect CSV delimiter     |
-| `Csv.detectLinebreak(input)`      | Auto-detect line terminator   |
-| `Csv.stripBom(input)`             | Strip UTF-8 BOM               |
-| `Csv.applyDynamicTyping(value)`   | Convert string to native type |
-| `Csv.formatNumber(value, sep)`    | Format number for locale      |
-| `Csv.parseNumber(value, sep)`     | Parse locale-formatted number |
-| `Csv.deduplicateHeaders(headers)` | Rename duplicate headers      |
+| Function                                       | Description                   |
+| ---------------------------------------------- | ----------------------------- |
+| `Csv.detectDelimiter(input)`                   | Auto-detect CSV delimiter     |
+| `Csv.detectLinebreak(input)`                   | Auto-detect line terminator   |
+| `Csv.stripBom(input)`                          | Strip UTF-8 BOM               |
+| `Csv.applyDynamicTyping(value, columnConfig?)` | Convert string to native type |
+| `Csv.formatNumber(value, sep)`                 | Format number for locale      |
+| `Csv.parseNumber(value, sep)`                  | Parse locale-formatted number |
+| `Csv.deduplicateHeaders(headers)`              | Rename duplicate headers      |
 
 ### Generator Functions
 
-| Function                        | Description                         |
-| ------------------------------- | ----------------------------------- |
-| `Csv.generate(options?)`        | Generate CSV string + data          |
-| `Csv.generateRows(options?)`    | Sync generator yielding CSV rows    |
-| `Csv.generateAsync(options?)`   | Async generator with delay support  |
-| `Csv.generateData(options?)`    | Generate raw data (not CSV strings) |
-| `Csv.createGenerator(options?)` | Reusable generator factory          |
+| Function                          | Description                         |
+| --------------------------------- | ----------------------------------- |
+| `Csv.generate(options?)`          | Generate CSV string + data          |
+| `Csv.generateRows(options?)`      | Sync generator yielding CSV rows    |
+| `Csv.generateRowsAsync(options?)` | Async generator with delay support  |
+| `Csv.generateData(options?)`      | Generate raw data (not CSV strings) |
+| `Csv.createGenerator(options?)`   | Reusable generator factory          |

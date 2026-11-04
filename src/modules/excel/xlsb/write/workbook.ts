@@ -12,6 +12,7 @@
  * nothing — and a round trip could not see it, because it read back the *cached result* rather than the
  * expression.
  */
+import { isLambdaParameter } from "@excel/utils/future-functions";
 import {
   SHEET_STATE,
   encodeBiffRecords,
@@ -30,17 +31,19 @@ import {
   type WorkbookViewLike
 } from "@excel/xlsb/defaults";
 import {
+  CALC_EXP_FUTURE_FUNCTIONS,
+  ETA_NAME_FLAGS,
   FUTURE_FUNCTION_FLAGS,
   FUTURE_FUNCTION_STUB_RGCE,
-  encodePtg,
+  LAMBDA_PARAMETER_FLAGS,
+  NAME_FLAG_CALC_EXP,
+  encodeFormula,
   externSheetWasUsed,
   type PtgContext
 } from "@excel/xlsb/formula/ptg";
 import { pivotCacheIdRecords } from "@excel/xlsb/pivot-cache";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
 import { type SheetEntry } from "@excel/xlsb/write/types";
-import { parse } from "@formula/syntax/parser";
-import { tokenize } from "@formula/syntax/tokenizer";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** A workbook part, and what the names in it could not carry. */
@@ -193,8 +196,9 @@ export function writeWorkbookPart(
     table.forEach(entry => {
       externSheets
         .writeUint32(0) // iSupBook: this workbook
-        .writeUint32(entry.first) // itabFirst
-        .writeUint32(entry.last); // itabLast
+        // Signed: -2 is the workbook-level entry a `PtgNameX` to another sheet's local name goes through.
+        .writeInt32(entry.first) // itabFirst
+        .writeInt32(entry.last); // itabLast
     });
     records.push(record("BrtExternSheet", externSheets.toUint8Array()));
     records.push(record("BrtEndExternals"));
@@ -218,6 +222,24 @@ export function writeWorkbookPart(
   return { bytes: encodeBiffRecords(records), unsupported };
 }
 
+/**
+ * `table`, with a single-sheet `BrtExternSheet` entry appended for each of the first `sheetCount` sheets it lacks.
+ *
+ * Appended rather than rebuilt, so an `ixti` a formula has already been encoded with keeps its meaning. For an empty
+ * table this is the identity mapping — `ixti = sheet position`.
+ */
+export function withSheetExternSheets(
+  table: { first: number; last: number }[],
+  sheetCount: number
+): { first: number; last: number }[] {
+  for (let index = 0; index < sheetCount; index++) {
+    if (!table.some(entry => entry.first === index && entry.last === index)) {
+      table.push({ first: index, last: index });
+    }
+  }
+  return table;
+}
+
 /** The subset of `DefinedNameModel` this writer reads. */
 interface DefinedNameLike {
   readonly name: string;
@@ -230,6 +252,8 @@ interface DefinedNameLike {
   readonly rawText?: string;
   readonly kind?: "reference" | "formula" | "opaque";
   readonly hidden?: boolean;
+  /** For a `_xlpm.` parameter, whether its record sets `fCalcExp` (default yes). */
+  readonly calcExp?: boolean;
 }
 
 /**
@@ -258,8 +282,20 @@ function encodeName(
   // A stub for a function the `Ftab` cannot name. Its body is `PtgErr(#NAME?)` and its flags are fixed by the
   // specification — neither is a property of the *model*, so both are decided from the name itself rather than
   // asked of the caller. `package.ts` creates these; nothing else may be called `_xlfn.*`.
-  const isFutureFunctionStub = name.name.startsWith("_xlfn.");
+  // A `LET`/`LAMBDA` parameter's name has the same record shape as a stub, with its own flags — see
+  // `LAMBDA_PARAMETER_FLAGS`. `calcExp` is decided by the package writer from the formulas that declare it.
+  // A function passed by name, `_xleta.SUM`, is a third such record, with flags of its own — `ETA_NAME_FLAGS`.
+  const isParameter = isLambdaParameter(name.name);
+  const isEta = name.name.startsWith("_xleta.");
+  const isFutureFunctionStub = name.name.startsWith("_xlfn.") || isParameter || isEta;
+  const stubFlags = isParameter
+    ? LAMBDA_PARAMETER_FLAGS | (name.calcExp === false ? 0 : NAME_FLAG_CALC_EXP)
+    : isEta
+      ? ETA_NAME_FLAGS
+      : FUTURE_FUNCTION_FLAGS |
+        (CALC_EXP_FUTURE_FUNCTIONS.has(name.name.toUpperCase()) ? NAME_FLAG_CALC_EXP : 0);
   let tokens: Uint8Array = isFutureFunctionStub ? FUTURE_FUNCTION_STUB_RGCE : new Uint8Array(0);
+  let extra: Uint8Array = new Uint8Array(0);
   // A reference name's definition is its first range. A *formula* name holds an expression instead and
   // an *opaque* one holds the raw XML it was read from — both arrive with `ranges` empty, so reading
   // only `ranges[0]` wrote them as a name defined as nothing and reported that as a success. Neither is
@@ -273,22 +309,35 @@ function encodeName(
   // only separates function arguments there — so this library's parser rejects it with "unexpected
   // trailing token". `(A1:B2,C3:D4)` is the union form, and joining without them made every multi-range
   // name fail to encode and be reported as an unwritable definition.
+  //
+  // A name read from a file arrives as its text (`rawText`) with nothing else — a constant (`0.2`), an array
+  // (`{1,2,3}`), `Other!#REF!` — and that text is the definition, exactly as `<definedName>` holds it in XLSX.
   const definition =
     name.ranges !== undefined && name.ranges.length > 0
       ? name.ranges.length === 1
         ? name.ranges[0]
         : `(${name.ranges.join(",")})`
-      : name.formulaExpression;
+      : (name.formulaExpression ?? name.rawText);
   if (isFutureFunctionStub) {
     // Nothing to encode: the body is the constant above. Writing the model's `#NAME?` text through the
     // formula encoder would work, and would put a second spelling of the same two bytes in the file.
   } else if (definition !== undefined) {
     try {
-      tokens = encodePtg(parse(tokenize(definition)), context, `name ${name.name}`);
+      const encoded = encodeFormula(
+        definition,
+        {
+          ...context,
+          role: "name",
+          ...(name.localSheetId === undefined ? {} : { sheetIndex: name.localSheetId })
+        },
+        `name ${name.name}`
+      );
+      tokens = encoded.rgce;
+      extra = encoded.extra;
     } catch {
       lost.push("defined name definition");
     }
-  } else if (name.rawText !== undefined || name.kind === "opaque") {
+  } else if (name.kind === "opaque") {
     lost.push("opaque defined name definition");
   }
   // `localSheetId` is the model's field, and this check used to read `sheetName` — which
@@ -304,9 +353,7 @@ function encodeName(
       // A future function's stub is the one name with more than that: MS-XLSB 2.4.674 makes
       // `fHidden | fFunc | fProc | fFutureFunction` mandatory together, and Excel's own stubs carry exactly
       // that value. See `FUTURE_FUNCTION_FLAGS`.
-      .writeUint32(
-        isFutureFunctionStub ? FUTURE_FUNCTION_FLAGS : name.hidden === true ? NAME_FLAG_HIDDEN : 0
-      )
+      .writeUint32(isFutureFunctionStub ? stubFlags : name.hidden === true ? NAME_FLAG_HIDDEN : 0)
       .writeUint8(0) // keyboard shortcut
       // The sheet index, or `0xFFFFFFFF` for workbook scope. Both values are read off Excel's own
       // output, so a sheet-local name is expressible — this writer used to force every name to the
@@ -316,8 +363,10 @@ function encodeName(
     encodeWideString(name.name),
     new BinaryWriter().writeUint32(tokens.length).toUint8Array(),
     tokens,
+    // `cb` and the `RgbExtra` — an array constant's values, `{1,2,3}`.
+    new BinaryWriter().writeUint32(extra.length).toUint8Array(),
+    extra,
     new BinaryWriter()
-      .writeUint32(0) // cb: no extra token data
       .writeUint32(0xffffffff) // comment: absent
       .toUint8Array(),
     // **`fProc` brings four more strings with it, and omitting them truncates the record.**

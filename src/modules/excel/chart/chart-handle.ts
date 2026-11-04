@@ -16,7 +16,7 @@ import {
   buildChartModel,
   buildChartSeriesForType
 } from "@excel/chart/build/chart-builder";
-import type { ChartExModel } from "@excel/chart/model/chart-ex-types";
+import type { ChartExEntry, ChartExModel } from "@excel/chart/model/chart-ex-types";
 import type {
   AddChartOptions,
   AddChartRange,
@@ -39,6 +39,7 @@ import { buildChartColors, buildChartStyle } from "@excel/chart/serialize/chart-
 import { parseTxPr } from "@excel/chart/shared/shape-properties";
 import type { AnchorData, AnchorModel } from "@excel/core/anchor";
 import { anchorCreate, anchorModel } from "@excel/core/anchor";
+import { checkChart } from "@excel/core/feature-handles";
 import {
   addChartEntry,
   addChartExStructuredEntry,
@@ -52,8 +53,9 @@ import {
   setChartStyle
 } from "@excel/core/workbook-core";
 import type { ChartAnchorRange, ChartHandle, WorksheetData } from "@excel/core/worksheet-core";
-import { getSheetWorkbook } from "@excel/core/worksheet-core";
-import { ChartOptionsError } from "@excel/errors";
+import { checkWorksheetAttached, getSheetWorkbook } from "@excel/core/worksheet-core";
+import { ChartOptionsError, ExcelArgumentError } from "@excel/errors";
+import { argumentChecks } from "@excel/utils/arguments";
 import { colCache } from "@excel/utils/col-cache";
 import { RelType } from "@excel/xlsx/rel-type";
 
@@ -102,8 +104,28 @@ const RAW_TX_CV_RE = /<c:v(?:\s[^>]*)?>([\s\S]*?)<\/c:v>/g;
  *   `updateSeries`, `addSeriesFromOptions`, `getSeriesCount`, `mutate`,
  *   `setStyle`) are classic-only — ChartEx has its own topology that
  *   doesn't map cleanly onto the classic group/series abstraction;
- *   use {@link Chart.mutateChartEx} for ChartEx mutations.
+ *   use {@link Chart.mutateEx} for ChartEx mutations.
  */
+/**
+ * Refuse an edit through a handle whose chart is gone — removed with `Chart.remove`, or with its sheet. The edit would
+ * change nothing that is written, and used to be accepted in silence, or reported as the wrong kind of chart.
+ */
+function checkChartPresent(c: ChartHandle, where: string): void {
+  checkWorksheetAttached(c.worksheet);
+  const wb = getSheetWorkbook(c.worksheet);
+  const present =
+    c.chartNumber > 0
+      ? getChartEntry(wb, c.chartNumber) !== undefined
+      : getChartExStructuredEntry(wb, c.chartExNumber) !== undefined ||
+        wb._chartExEntries?.[c.chartExNumber] !== undefined;
+  if (!present) {
+    throw new ExcelArgumentError(
+      "chart",
+      `${where}: the chart was removed from its sheet; it can no longer be edited.`
+    );
+  }
+}
+
 // ============================================================================
 // Chart — de-classed domain model (data record + flat helpers)
 // ============================================================================
@@ -142,6 +164,7 @@ export function registerChart(
   range: AddChartRange,
   options?: Pick<AddChartOptions, "chartStyle" | "chartColors">
 ): number {
+  checkWorksheetAttached(ws);
   const chartNumber = nextChartNumber(ws._workbook);
   // Auto-populate caches so headless consumers see non-empty charts.
   // Excel itself will recompute on open; this is a best-effort enrichment.
@@ -175,6 +198,7 @@ export function registerChartEx(
   model: ChartExModel,
   range: AddChartRange
 ): number {
+  checkWorksheetAttached(ws);
   const chartExNumber = nextChartExNumber(ws._workbook);
   try {
     fillChartExCaches(model, ws._workbook, ws);
@@ -214,6 +238,7 @@ export function applyChartSidecars(
 
 /** Whether this is an Office 2016+ extended chart (cx:chart) */
 export function chartIsChartEx(c: ChartHandle): boolean {
+  checkChart(c);
   return c.chartExNumber > 0;
 }
 
@@ -222,6 +247,9 @@ function chartParseRange(
   range: AddChartRange | ChartAnchorModel["range"]
 ): ChartAnchorRange {
   if (typeof range === "string") {
+    // Read as Excel reads a reference: `d5:h10` is `D5:H10`. The decoder takes upper-case letters only, and the
+    // boundary check takes both, so a lower-case range became an anchor of `NaN`s and failed only at write time.
+    range = range.toUpperCase();
     const decoded = colCache.decode(range);
     if ("top" in decoded) {
       return {
@@ -261,6 +289,7 @@ function chartParseRange(
   if ("pos" in range && range.pos !== undefined) {
     if (!range.ext) {
       throw new ChartOptionsError(
+        "range.ext",
         "Chart range with `pos` requires `ext` (absolute anchor needs an explicit EMU extent)."
       );
     }
@@ -306,7 +335,9 @@ function chartParseRange(
   };
 }
 
+/** Where the chart sits on its sheet, and which chart part it is — a new object each call. */
 export function chartAnchorModel(c: ChartHandle): ChartAnchorModel {
+  checkChart(c);
   const base: ChartAnchorModel = {
     chartNumber: c.chartNumber,
     chartExNumber: c.chartExNumber,
@@ -325,16 +356,21 @@ export function chartAnchorModel(c: ChartHandle): ChartAnchorModel {
 // Chart data access
 // ===========================================================================
 
-/** Get the full ChartModel from the workbook's chart entries (classic charts only) */
+/**
+ * The chart's model (classic charts only) — the live object the workbook writes, not a copy. Change it through
+ * `Chart.mutate`, which keeps what the loaded file carried that the model does not describe.
+ */
 export function chartChartModel(c: ChartHandle): ChartModel | undefined {
+  checkChart(c);
   if (c.chartNumber <= 0) {
     return undefined;
   }
   return getChartEntry(getSheetWorkbook(c.worksheet), c.chartNumber)?.model;
 }
 
-/** Get the structured ChartEx model, when this chart is an Office 2016+ chartEx. */
+/** The chart's ChartEx model, when it is an Office 2016+ chartEx — the live object; change it through `Chart.mutateEx`. */
 export function chartChartExModel(c: ChartHandle): ChartExModel | undefined {
+  checkChart(c);
   if (c.chartExNumber <= 0) {
     return undefined;
   }
@@ -366,6 +402,7 @@ export function chartChartExModel(c: ChartHandle): ChartExModel | undefined {
 export function chartUnknownElements(
   c: ChartHandle
 ): Array<{ name: string; path: string }> | undefined {
+  checkChart(c);
   const classic = chartChartModel(c)?.unknownElements;
   if (classic && classic.length > 0) {
     return classic.slice();
@@ -395,6 +432,7 @@ export function chartUnknownElements(
  * have their own extension mechanism and do not use `c:userShapes`).
  */
 export function chartUserShapesXml(c: ChartHandle): Uint8Array | undefined {
+  checkChart(c);
   if (c.chartNumber <= 0) {
     return undefined;
   }
@@ -421,12 +459,17 @@ export function chartUserShapesXml(c: ChartHandle): Uint8Array | undefined {
  * Classic charts only. Throws on chartEx charts.
  */
 export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string | undefined): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setUserShapesXml");
+  if (xml !== undefined && typeof xml !== "string" && !ArrayBuffer.isView(xml)) {
+    argumentChecks("Chart.setUserShapesXml").fail("xml", "XML text, its bytes, or undefined", xml);
+  }
   if (c.chartNumber <= 0) {
-    throw new ChartOptionsError("Chart.setUserShapesXml is only supported on classic charts.");
+    throw new ChartOptionsError("c", "Chart.setUserShapesXml is only supported on classic charts.");
   }
   const entry = getChartEntry(getSheetWorkbook(c.worksheet), c.chartNumber);
   if (!entry) {
-    throw new ChartOptionsError(`Chart ${c.chartNumber} has no registered chart entry.`);
+    throw new ChartOptionsError("c", `Chart ${c.chartNumber} has no registered chart entry.`);
   }
   if (xml === undefined) {
     chartRemoveUserShapes(c);
@@ -443,6 +486,7 @@ export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string |
   const peek = new TextDecoder().decode(bytes.slice(0, 512));
   if (!peek.includes("userShapes")) {
     throw new ChartOptionsError(
+      "xml",
       "Chart.setUserShapesXml expects a DrawingML document whose root is c:userShapes."
     );
   }
@@ -508,6 +552,8 @@ export function chartSetUserShapesXml(c: ChartHandle, xml: Uint8Array | string |
  * Classic charts only. No-op when the chart has no user shapes.
  */
 export function chartRemoveUserShapes(c: ChartHandle): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.removeUserShapes");
   if (c.chartNumber <= 0) {
     return;
   }
@@ -561,6 +607,7 @@ export function chartRemoveUserShapes(c: ChartHandle): void {
 
 /** Get the chart title text. Returns undefined if no title. */
 export function chartTitle(c: ChartHandle): string | undefined {
+  checkChart(c);
   const titleObj =
     chartChartModel(c)?.chart?.title ?? chartChartExModel(c)?.chartSpace?.chart?.title;
   if (!titleObj) {
@@ -601,6 +648,8 @@ export function chartSetTitle(
   c: ChartHandle,
   value: string | ChartRichText | { formula: string } | undefined
 ): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setTitle");
   const chart = chartChartModel(c)?.chart ?? chartChartExModel(c)?.chartSpace?.chart;
   if (!chart) {
     return;
@@ -656,8 +705,9 @@ export function chartSetTitle(
     // we silently returned, which quietly swallowed malformed input; throw
     // instead so callers see the bug at the assignment site.
     throw new ChartOptionsError(
-      "Chart.title accepts string | ChartRichText | { formula: string } | undefined. " +
-        `Got: ${JSON.stringify(value)}`
+      "value",
+      "Chart.setTitle: value must be a string, rich text, { formula } or undefined, " +
+        `got ${JSON.stringify(value)}.`
     );
   }
   _chartMarkDirty(c, true);
@@ -684,6 +734,8 @@ export function chartSetTitle(
  * Convenience method equivalent to `chart.title = richText`.
  */
 export function chartSetTitleRichText(c: ChartHandle, richText: ChartRichText): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setTitleRichText");
   chartSetTitle(c, richText);
 }
 
@@ -692,6 +744,7 @@ export function chartSetTitleRichText(c: ChartHandle, richText: ChartRichText): 
  * Returns undefined if the title is unset, formula-only, or captured as rawTx.
  */
 export function chartTitleRichText(c: ChartHandle): ChartRichText | undefined {
+  checkChart(c);
   return (
     chartChartModel(c)?.chart?.title?.text ?? chartChartExModel(c)?.chartSpace?.chart?.title?.text
   );
@@ -699,21 +752,26 @@ export function chartTitleRichText(c: ChartHandle): ChartRichText | undefined {
 
 /** Get the chart type groups in the plot area */
 export function chartChartTypes(c: ChartHandle): ChartTypeGroup[] {
+  checkChart(c);
   return chartChartModel(c)?.chart?.plotArea?.chartTypes ?? [];
 }
 
 /** Get the chart axes */
 export function chartAxes(c: ChartHandle): ChartAxis[] {
+  checkChart(c);
   return chartChartModel(c)?.chart?.plotArea?.axes ?? [];
 }
 
 /** Get the chart legend */
 export function chartLegend(c: ChartHandle): ChartLegend | undefined {
+  checkChart(c);
   return chartChartModel(c)?.chart?.legend ?? chartChartExModel(c)?.chartSpace?.chart?.legend;
 }
 
 /** Set the chart legend */
 export function chartSetLegend(c: ChartHandle, value: ChartLegend | undefined): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setLegend");
   const chart = chartChartModel(c)?.chart ?? chartChartExModel(c)?.chartSpace?.chart;
   if (chart) {
     _chartMarkDirty(c, true);
@@ -727,6 +785,7 @@ export function chartSetLegend(c: ChartHandle, value: ChartLegend | undefined): 
  * Chart2014 schema puts `spPr` on `chartSpace`, not on `chart`).
  */
 export function chartSpPr(c: ChartHandle): ShapeProperties | undefined {
+  checkChart(c);
   const model = chartChartModel(c);
   if (model) {
     return model.spPr;
@@ -747,6 +806,8 @@ export function chartSpPr(c: ChartHandle): ShapeProperties | undefined {
  * styling belongs to `CT_ChartSpace/spPr`).
  */
 export function chartSetSpPr(c: ChartHandle, value: ShapeProperties | undefined): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setSpPr");
   const cm = chartChartModel(c);
   if (cm) {
     _chartMarkDirty(c);
@@ -764,6 +825,7 @@ export function chartSetSpPr(c: ChartHandle, value: ShapeProperties | undefined)
  * Get an axis by its ID.
  */
 export function chartGetAxis(c: ChartHandle, axId: number): ChartAxis | undefined {
+  checkChart(c);
   return chartAxes(c).find(ax => ax.axId === axId);
 }
 
@@ -771,6 +833,7 @@ export function chartGetAxis(c: ChartHandle, axId: number): ChartAxis | undefine
  * Get the category (X) axis, if any.
  */
 export function chartCategoryAxis(c: ChartHandle): ChartAxis | undefined {
+  checkChart(c);
   return chartAxes(c).find(ax => ax.axisType === "cat" || ax.axisType === "date");
 }
 
@@ -778,22 +841,42 @@ export function chartCategoryAxis(c: ChartHandle): ChartAxis | undefined {
  * Get the value (Y) axis, if any.
  */
 export function chartValueAxis(c: ChartHandle): ChartAxis | undefined {
+  checkChart(c);
   return chartAxes(c).find(ax => ax.axisType === "val");
 }
 
 /** Get the plot area for direct manipulation */
 export function chartPlotArea(c: ChartHandle): PlotArea | undefined {
+  checkChart(c);
   return chartChartModel(c)?.chart?.plotArea;
 }
 
+/**
+ * Edit a classic chart's model through `mutator`, which receives a copy: the chart takes the result only when the
+ * mutator returns, so one that throws leaves the chart as it was. Returns the handle.
+ *
+ * The edit is not checked as the setters check theirs — it is the way to reach what they do not cover.
+ *
+ * Options, for a chart read from a file:
+ * - `preferRawPatch` — write the change by patching the part's original XML where it can, keeping what the model
+ *   does not describe; otherwise the part is rendered from the model.
+ * - `requireRawPatch` — the same, but `Workbook.toBuffer` throws a `ChartOptionsError` when the change cannot be
+ *   written as a patch, rather than rendering the part from the model.
+ *
+ * @throws {ChartOptionsError} when the chart is an Office 2016 chart (use {@link chartMutateChartEx}).
+ * @throws {ExcelArgumentError} when the chart was removed from its sheet.
+ */
 export function chartMutate(
   c: ChartHandle,
   mutator: (model: ChartModel) => void,
   options: { preferRawPatch?: boolean; requireRawPatch?: boolean } = {}
 ): ChartHandle {
+  checkChart(c);
+  checkChartPresent(c, "Chart.mutate");
   const model = chartChartModel(c);
   if (!model) {
     throw new ChartOptionsError(
+      "c",
       "Cannot mutate a classic chart model because this chart is ChartEx or missing."
     );
   }
@@ -805,14 +888,25 @@ export function chartMutate(
   return c;
 }
 
+/**
+ * Edit an Office 2016 chart's model through `mutator`, as {@link chartMutate} edits a classic one: the mutator gets a
+ * copy, the chart takes it only if the mutator returns and the result still has `chartSpace.chart` and
+ * `chartSpace.chartData`. `preferRawPatch` / `requireRawPatch` as for {@link chartMutate}.
+ *
+ * @throws {ChartOptionsError} when the chart is a classic chart, or the result is not a chart.
+ * @throws {ExcelArgumentError} when the chart was removed from its sheet.
+ */
 export function chartMutateChartEx(
   c: ChartHandle,
   mutator: (model: ChartExModel) => void,
   options: { preferRawPatch?: boolean; requireRawPatch?: boolean } = {}
 ): ChartHandle {
+  checkChart(c);
+  checkChartPresent(c, "Chart.mutateEx");
   const model = chartChartExModel(c);
   if (!model) {
     throw new ChartOptionsError(
+      "c",
       "Cannot mutate a ChartEx model because this chart is classic or missing."
     );
   }
@@ -820,7 +914,8 @@ export function chartMutateChartEx(
   mutator(draft);
   if (!draft.chartSpace?.chart || !draft.chartSpace.chartData) {
     throw new ChartOptionsError(
-      "Chart.mutateChartEx produced an invalid model: chartSpace.chart and chartSpace.chartData are required."
+      "mutator",
+      "Chart.mutateEx produced an invalid model: chartSpace.chart and chartSpace.chartData are required."
     );
   }
   // Invalidate the model-level rawXml cache so subsequent calls to
@@ -902,14 +997,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  *         chart is a ChartEx.
  */
 export function chartSetStyle(c: ChartHandle, style: number): ChartHandle {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setStyle");
   if (!Number.isInteger(style) || style < 1 || style > 48) {
     throw new ChartOptionsError(
+      "style",
       `Chart.setStyle: built-in style must be an integer in 1..48, received ${style}`
     );
   }
   const model = chartChartModel(c);
   if (!model) {
     throw new ChartOptionsError(
+      "c",
       "Chart.setStyle is only valid on classic charts; ChartEx does not honour `c:style`"
     );
   }
@@ -924,6 +1023,7 @@ export function chartSetStyle(c: ChartHandle, style: number): ChartHandle {
  * every way — both write the same `<c:style val>` attribute.
  */
 export function chartSetBuiltInStyle(c: ChartHandle, style: number): ChartHandle {
+  checkChart(c);
   return chartSetStyle(c, style);
 }
 
@@ -942,6 +1042,12 @@ export function chartSetBuiltInStyle(c: ChartHandle, style: number): ChartHandle
  * @param groupIndex - 0-based index of the chart type group (for combo charts). Defaults to 0.
  */
 export function chartAddSeries(c: ChartHandle, series: SeriesBase, groupIndex = 0): void {
+  checkChart(c);
+  checkChartPresent(c, "Chart.addSeries");
+  const check = argumentChecks("Chart.addSeries");
+  check.required("series", series);
+  check.record("series", series);
+  check.number("groupIndex", groupIndex, { min: 0, integer: true });
   const ctg = chartChartTypes(c)[groupIndex];
   if (ctg) {
     _chartMarkDirty(c);
@@ -972,13 +1078,16 @@ export function chartAddSeries(c: ChartHandle, series: SeriesBase, groupIndex = 
  *
  * @param index - 0-based index of the series within the group.
  * @param groupIndex - 0-based index of the chart type group (for combo charts). Defaults to 0.
- * @returns The removed series, or undefined if out of range.
+ * @returns The removed series, or undefined if out of range. This predates the `remove(…) → boolean`
+ *   convention and is kept: the series is more useful than a flag, and its truthiness answers the same question.
  */
 export function chartRemoveSeries(
   c: ChartHandle,
   index: number,
   groupIndex = 0
 ): SeriesBase | undefined {
+  checkChart(c);
+  checkChartPresent(c, "Chart.removeSeries");
   const ctg = chartChartTypes(c)[groupIndex];
   if (!ctg || index < 0 || index >= ctg.series.length) {
     return undefined;
@@ -998,6 +1107,7 @@ export function chartGetSeries(
   index: number,
   groupIndex = 0
 ): SeriesBase | undefined {
+  checkChart(c);
   const ctg = chartChartTypes(c)[groupIndex];
   if (!ctg) {
     return undefined;
@@ -1012,6 +1122,8 @@ export function chartUpdateSeries(
   options: Partial<AddChartSeriesOptions>,
   groupIndex = 0
 ): boolean {
+  checkChart(c);
+  checkChartPresent(c, "Chart.updateSeries");
   const series = chartGetSeries(c, index, groupIndex);
   if (!series) {
     return false;
@@ -1059,6 +1171,8 @@ export function chartAddSeriesFromOptions(
   options: AddChartSeriesOptions,
   groupIndex = 0
 ): boolean {
+  checkChart(c);
+  checkChartPresent(c, "Chart.addSeriesFromOptions");
   const ctg = chartChartTypes(c)[groupIndex];
   if (!ctg) {
     return false;
@@ -1095,6 +1209,8 @@ export function chartSetSeriesValues(
   values: string,
   groupIndex = 0
 ): boolean {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setSeriesValues");
   return chartUpdateSeries(c, index, { values }, groupIndex);
 }
 
@@ -1105,6 +1221,8 @@ export function chartSetSeriesCategories(
   categories: string,
   groupIndex = 0
 ): boolean {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setSeriesCategories");
   return chartUpdateSeries(c, index, { categories }, groupIndex);
 }
 
@@ -1115,11 +1233,14 @@ export function chartSetSeriesName(
   name: NonNullable<AddChartSeriesOptions["name"]>,
   groupIndex = 0
 ): boolean {
+  checkChart(c);
+  checkChartPresent(c, "Chart.setSeriesName");
   return chartUpdateSeries(c, index, { name }, groupIndex);
 }
 
 /** Get the total number of series across all chart type groups. */
 export function chartTotalSeriesCount(c: ChartHandle): number {
+  checkChart(c);
   return chartChartTypes(c).reduce((sum, ctg) => sum + (ctg.series?.length ?? 0), 0);
 }
 
@@ -1129,6 +1250,7 @@ export function chartTotalSeriesCount(c: ChartHandle): number {
  * @param groupIndex - 0-based index of the chart type group (defaults to 0).
  */
 export function chartGetSeriesCount(c: ChartHandle, groupIndex = 0): number {
+  checkChart(c);
   const ctg = chartChartTypes(c)[groupIndex];
   return ctg?.series?.length ?? 0;
 }
@@ -1141,7 +1263,7 @@ export function chartGetSeriesCount(c: ChartHandle, groupIndex = 0): number {
  * Create a deep copy of this chart and add it to a target worksheet.
  * The new chart receives a fresh chartNumber; the original is untouched.
  *
- * @param targetWs - Worksheet to receive the clone. Defaults to this chart's worksheet.
+ * @param targetWs - Worksheet to receive the copy; {@link chartClone} copies onto the chart's own sheet.
  * @param range - Anchor range for the clone. Defaults to the original range.
  * @returns The new chartNumber in the target workbook.
  */
@@ -1150,10 +1272,19 @@ export function chartCopyTo(
   targetWs: WorksheetData,
   range?: AddChartRange
 ): number {
+  checkChart(c);
+  if (typeof targetWs !== "object" || targetWs === null) {
+    throw new ExcelArgumentError(
+      "targetWs",
+      "Chart.copyTo: targetWs must be the worksheet to copy the chart to; Chart.clone copies it onto its own sheet."
+    );
+  }
+  // A removed chart has no model to copy; say so as every other edit through its handle does.
+  checkChartPresent(c, "Chart.copyTo");
   const sourceModel = chartChartModel(c);
   const sourceChartExModel = chartChartExModel(c);
   if (!sourceModel && !sourceChartExModel) {
-    throw new ChartOptionsError("Cannot copy chart because no chart model is available.");
+    throw new ChartOptionsError("c", "Cannot copy chart because no chart model is available.");
   }
   const targetRange = range ?? _chartCloneRange(c);
   if (sourceChartExModel) {
@@ -1221,6 +1352,8 @@ export function chartCopyTo(
  * @param range - Anchor for the clone (defaults to shifting right of original).
  */
 export function chartClone(c: ChartHandle, range?: AddChartRange): number {
+  checkChart(c);
+  checkChartPresent(c, "Chart.clone");
   return chartCopyTo(c, c.worksheet, range ?? _chartCloneRange(c));
 }
 
@@ -1310,45 +1443,49 @@ function _chartMarkDirty(c: ChartHandle, preferRawPatch = false, requireRawPatch
   if (c.chartNumber > 0) {
     const entry = getChartEntry(getSheetWorkbook(c.worksheet), c.chartNumber);
     if (entry) {
-      entry.dirty = true;
-      // Once any mutation drops `preferRawPatch`, a full rebuild is
-      // required — a subsequent minor mutation must not re-enable
-      // patching. Conversely, if the entry was already marked for
-      // full rebuild, a minor mutation should not downgrade it back
-      // to patch mode.
-      if (!preferRawPatch) {
-        entry.preferRawPatch = false;
-      } else if (entry.preferRawPatch === undefined) {
-        entry.preferRawPatch = true;
-      }
-      if (requireRawPatch) {
-        entry.requireRawPatch = true;
-      }
+      markChartEntryDirty(entry, preferRawPatch, requireRawPatch);
     }
   }
   if (c.chartExNumber > 0) {
     const entry = getChartExStructuredEntry(getSheetWorkbook(c.worksheet), c.chartExNumber);
     if (entry) {
-      entry.dirty = true;
-      if (!preferRawPatch) {
-        entry.preferRawPatch = false;
-      } else if (entry.preferRawPatch === undefined) {
-        entry.preferRawPatch = true;
-      }
-      if (requireRawPatch) {
-        entry.requireRawPatch = true;
-      }
-      // Invalidate the ChartExModel.rawXml cache on every structural
-      // mutation (title / legend / spPr setters, addSeries etc.) —
-      // direct consumers of `renderChartEx(model)` (standalone
-      // preview, tests) short-circuit to `model.rawXml` when present
-      // and would otherwise silently drop the mutation. The
-      // `preferRawPatch` opt-in keeps the bytes so the xlsx writer
-      // can still do surgical byte patching on them.
-      if (!preferRawPatch && !requireRawPatch && entry.model) {
-        entry.model.rawXml = undefined;
-      }
+      markChartEntryDirty(entry, preferRawPatch, requireRawPatch);
     }
+  }
+}
+
+/**
+ * Record that a chart's model was changed after it was built or read, so the writer re-renders it — or, with
+ * `preferRawPatch`, patches the bytes it was read from.
+ */
+export function markChartEntryDirty(
+  entry: ChartEntry | ChartExEntry,
+  preferRawPatch = false,
+  requireRawPatch = false
+): void {
+  entry.dirty = true;
+  // Once any mutation drops `preferRawPatch`, a full rebuild is
+  // required — a subsequent minor mutation must not re-enable
+  // patching. Conversely, if the entry was already marked for
+  // full rebuild, a minor mutation should not downgrade it back
+  // to patch mode.
+  if (!preferRawPatch) {
+    entry.preferRawPatch = false;
+  } else if (entry.preferRawPatch === undefined) {
+    entry.preferRawPatch = true;
+  }
+  if (requireRawPatch) {
+    entry.requireRawPatch = true;
+  }
+  // Invalidate the ChartExModel.rawXml cache on every structural
+  // mutation (title / legend / spPr setters, addSeries etc.) —
+  // direct consumers of `renderChartEx(model)` (standalone
+  // preview, tests) short-circuit to `model.rawXml` when present
+  // and would otherwise silently drop the mutation. The
+  // `preferRawPatch` opt-in keeps the bytes so the xlsx writer
+  // can still do surgical byte patching on them.
+  if (!preferRawPatch && !requireRawPatch && "chartExNumber" in entry && entry.model) {
+    entry.model.rawXml = undefined;
   }
 }
 
@@ -1427,6 +1564,7 @@ function _chartRefreshCaches(c: ChartHandle): void {
  * fill, then restore it so the writer behaviour is unaffected.
  */
 export function _chartRefreshChartExCaches(c: ChartHandle): void {
+  checkChart(c);
   const model = chartChartExModel(c);
   if (!model) {
     return;

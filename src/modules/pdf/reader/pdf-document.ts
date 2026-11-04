@@ -11,6 +11,7 @@
  * @see PDF Reference 1.7, §3.4 - File Structure
  */
 
+import { isSignatureDict } from "@pdf/core/signature-dict";
 import { PdfLimitExceededError, PdfStructureError } from "@pdf/errors";
 import {
   parseObject,
@@ -35,6 +36,20 @@ import { assertLimitOption } from "@utils/limits";
 
 /** Cached TextEncoder instance to avoid repeated allocation in hot paths */
 const _encoder = new TextEncoder();
+
+/** One classic cross-reference entry: offset, generation, and the in-use keyword. */
+const XREF_ENTRY = /^\s*(\d+)\s+(\d+)\s+(\S+)/;
+
+/**
+ * Whether a line that is not an entry ends the subsection rather than being a damaged entry:
+ * the end of the data, a keyword (`trailer`, `startxref`, `xref`), a dictionary, or the next
+ * subsection's `first count` header — whose first number, unlike an entry's ten-digit offset,
+ * is short.
+ */
+function endsXrefSubsection(line: string): boolean {
+  const text = line.trim();
+  return text === "" || /^[A-Za-z<]/.test(text) || /^\d{1,9}\s+\d+$/.test(text);
+}
 
 // =============================================================================
 // Types
@@ -90,12 +105,33 @@ interface ObjStmMember {
 export class PdfDocument {
   private tokenizer: PdfTokenizer;
   private xref: Map<number, XrefEntry> = new Map();
-  private cache: Map<string, PdfObject> = new Map();
+  /**
+   * Whether a classic table had lines that were not entries. The objects they listed are
+   * then looked for by their headers (see {@link resolve}).
+   */
+  private xrefDamaged = false;
+  /** See {@link scanObjectHeaders}. */
+  private scannedHeaders: ReadonlyMap<number, XrefEntry> | null = null;
+  /**
+   * Resolved objects, including the ones that failed to parse (as `null`). A failure is as
+   * deterministic as a success, and re-parsing it is not cheap: an entry pointing into the
+   * middle of the file parses until the parse breaks, which can be the end of the file, and
+   * a page-tree walk resolves the same entries once per page.
+   */
+  private cache: Map<string, PdfObject | null> = new Map();
+  /**
+   * False while the cross-reference data is still being read. A failure then may only mean
+   * an entry it depends on is not known yet, so it is not remembered until this is true.
+   */
+  private structureRead = false;
   // Parsed object streams (keyed by the object-stream's object number). Kept
   // separate from `cache` because the value is a Map, not a `PdfObject`.
   // Each entry is the stream's members in index order; a member that failed
   // to parse keeps its slot (as `null`) so later indices stay aligned.
-  private objStmCache: Map<number, ObjStmMember[]> = new Map();
+  private objStmCache: Map<number, ObjStmMember[] | null> = new Map();
+  /** The page tree, flattened in page order; see {@link getPagesWithObjInfo}. */
+  private pagesCache: ReadonlyArray<{ dict: PdfDictValue; objNum: number; gen: number }> | null =
+    null;
   declare readonly trailer: PdfDictValue;
 
   /**
@@ -134,11 +170,16 @@ export class PdfDocument {
   limitError: PdfLimitExceededError | null = null;
 
   /**
-   * `true` when the cross-reference data could not be read from the
-   * `startxref` chain and was rebuilt by scanning the file for `N G obj`
-   * headers. The object map is then a best guess and the file's own
-   * `startxref` names a broken section, so nothing may be chained onto it
-   * with `/Prev` — an incremental update must become a full rewrite.
+   * `true` when the cross-reference data could not be read from the `startxref` chain —
+   * it did not parse, or led to no catalog — and was rebuilt by scanning the file for
+   * `N G obj` headers. The object map is then a best guess and the file's own `startxref`
+   * names a broken section, so nothing may be chained onto it with `/Prev` — an
+   * incremental update must become a full rewrite.
+   *
+   * A chain that parses but has a wrong or unreadable entry is not this: the object is read
+   * where its header is (see `parseObjectAt`), and an update chained onto the chain lists
+   * every object it writes correctly, so it is no more damaged than the file was. Falling
+   * back to a rewrite there would refuse to update a signed document that could be.
    */
   xrefRecovered = false;
 
@@ -159,6 +200,7 @@ export class PdfDocument {
       // A limit hit swallowed during recovery outranks the error it led to.
       throw this.limitError ?? err;
     }
+    this.structureRead = true;
     this.throwIfLimitExceeded();
   }
 
@@ -221,18 +263,93 @@ export class PdfDocument {
   // ===========================================================================
 
   private parseFileStructure(): PdfDictValue {
+    let chained: {
+      trailer: PdfDictValue;
+      xref: Map<number, XrefEntry>;
+      startxrefOffset: number;
+    } | null = null;
     try {
       const startxrefOffset = this.findStartxref();
       const trailer = this.parseXrefChain(startxrefOffset);
-      this.startxrefOffset = startxrefOffset;
-      return trailer;
+      if (this.leadsToCatalog(trailer)) {
+        this.startxrefOffset = startxrefOffset;
+        return trailer;
+      }
+      // The chain parsed, but its trailer names no catalog, or its entry for the catalog
+      // points somewhere else — a table damaged in a way that still parses. Scanning the
+      // file is then the better guess, as it is for a chain that does not parse at all.
+      chained = { trailer, xref: new Map(this.xref), startxrefOffset };
     } catch {
       this.throwIfLimitExceeded();
-      // If normal xref parsing fails, attempt full-file reconstruction
-      this.xrefRecovered = true;
-      this.startxrefOffset = null;
-      return this.reconstructXref();
     }
+    // If normal xref parsing fails, attempt full-file reconstruction
+    this.xrefRecovered = true;
+    this.startxrefOffset = null;
+    try {
+      return this.reconstructXref();
+    } catch (err) {
+      this.throwIfLimitExceeded();
+      if (!chained) {
+        throw err;
+      }
+      // Nothing better was found: keep what the chain said.
+      this.xref = chained.xref;
+      this.xrefRecovered = false;
+      this.startxrefOffset = chained.startxrefOffset;
+      return chained.trailer;
+    }
+  }
+
+  /**
+   * Whether `trailer`'s `/Root` has a cross-reference entry that points at that object. An
+   * entry inside an object stream cannot be checked before decryption is set up and is
+   * trusted. Nothing is cached here: decryption is not set up yet.
+   */
+  private leadsToCatalog(trailer: PdfDictValue): boolean {
+    const root = dictGetRef(trailer, "Root");
+    const entry = root && this.xref.get(root.objNum);
+    if (!entry) {
+      return false;
+    }
+    if (entry.type !== 1) {
+      return true;
+    }
+    const header = this.objectHeaderAt(entry.offset);
+    if (header === root.objNum) {
+      return true;
+    }
+    if (this.scanObjectHeaders().has(root.objNum)) {
+      // The catalog is defined somewhere else in the file: this entry is wrong.
+      return false;
+    }
+    // Nothing else in the file claims the number — a damaged header, or an entry pointing
+    // straight at the dictionary — so the entry is the best information there is.
+    this.tokenizer.pos = entry.offset;
+    try {
+      return isPdfDict(this.parse(this.tokenizer));
+    } catch {
+      this.throwIfLimitExceeded();
+      return false;
+    }
+  }
+
+  /**
+   * The object number of the `N G obj` header at `offset`, or `undefined` when there is no
+   * header there. Leaves the tokenizer at an unspecified position.
+   */
+  private objectHeaderAt(offset: number): number | undefined {
+    if (!(offset >= 0 && offset < this.tokenizer.bytes.length)) {
+      return undefined;
+    }
+    this.tokenizer.pos = offset;
+    const num = this.tokenizer.next();
+    if (num.type !== TokenType.Number || this.tokenizer.next().type !== TokenType.Number) {
+      return undefined;
+    }
+    const keyword = this.tokenizer.next();
+    return keyword.type === TokenType.Keyword && keyword.strValue === "obj"
+      ? num.numValue
+      : undefined;
   }
 
   /**
@@ -370,21 +487,32 @@ export class PdfDocument {
       }
       const count = countToken.numValue!;
 
-      // Parse entries
+      // Parse entries. `count` comes from the file, so it bounds nothing: each entry must be
+      // an actual `offset gen n|f` line, and the first line that is not one ends the
+      // subsection there. An overstated count otherwise ran billions of iterations past the
+      // end of the data, and consumed the `trailer` keyword as if it were entries.
       for (let i = 0; i < count; i++) {
         const objNum = startObj + i;
         this.tokenizer.skipWhitespaceAndComments();
 
         // Each entry is exactly "OOOOOOOOOO GGGGG n \n" or "OOOOOOOOOO GGGGG f \n"
+        const lineStart = this.tokenizer.pos;
         const line = this.tokenizer.readLine();
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 3) {
+        const entry = XREF_ENTRY.exec(line);
+        if (!entry) {
+          if (endsXrefSubsection(line)) {
+            this.tokenizer.pos = lineStart;
+            break;
+          }
+          // A damaged entry: it still holds its object number's place, as a reader that
+          // splits the line into fields and finds too few of them always took it.
+          this.xrefDamaged = true;
           continue;
         }
 
-        const entryOffset = parseInt(parts[0], 10);
-        const gen = parseInt(parts[1], 10);
-        const inUse = parts[2] === "n";
+        const entryOffset = parseInt(entry[1], 10);
+        const gen = parseInt(entry[2], 10);
+        const inUse = entry[3] === "n";
 
         if (inUse && !this.xref.has(objNum)) {
           this.xref.set(objNum, { offset: entryOffset, gen, type: 1 });
@@ -430,6 +558,12 @@ export class PdfDocument {
     const w0 = wArray[0] as number;
     const w1 = wArray[1] as number;
     const w2 = wArray[2] as number;
+    // Each entry consumes `entrySize` bytes, and that is the only thing bounding the loop
+    // below — `/Index` counts come from the file. With all three widths 0 nothing was ever
+    // consumed and a count of a billion ran a billion times; a negative width read backwards.
+    if (![w0, w1, w2].every(width => Number.isInteger(width) && width >= 0) || w0 + w1 + w2 === 0) {
+      throw new PdfStructureError(`Invalid /W array in xref stream: [${wArray.join(" ")}]`);
+    }
     const entrySize = w0 + w1 + w2;
 
     // Parse Index array (default: [0 Size])
@@ -476,14 +610,16 @@ export class PdfDocument {
   }
 
   /**
-   * Reconstruct the xref table by scanning the entire file for `N N obj` patterns.
-   * This is a fallback for corrupted or broken PDFs where the normal xref parsing fails.
-   *
-   * @returns A synthetic trailer dictionary
+   * Every `N G obj` header in the file, by object number; the last definition of a number
+   * wins. Scanned once, on first need: by {@link reconstructXref}, or by a lookup whose
+   * cross-reference entry does not point at the object it names.
    */
-  private reconstructXref(): PdfDictValue {
+  private scanObjectHeaders(): ReadonlyMap<number, XrefEntry> {
+    if (this.scannedHeaders) {
+      return this.scannedHeaders;
+    }
     const data = this.tokenizer.bytes;
-    this.xref.clear();
+    const found = new Map<number, XrefEntry>();
 
     // Regex-style scan: look for patterns like "123 0 obj" in the raw bytes
     // We scan byte-by-byte looking for digit sequences followed by spaces and "obj"
@@ -551,12 +687,25 @@ export class PdfDocument {
 
           // Last definition wins: an incremental update appends a newer
           // version of an object after the one it replaces.
-          this.xref.set(objNum, { offset: savedPos, gen, type: 1 });
+          found.set(objNum, { offset: savedPos, gen, type: 1 });
         }
       }
 
       pos = savedPos + 1;
     }
+
+    this.scannedHeaders = found;
+    return found;
+  }
+
+  /**
+   * Reconstruct the xref table by scanning the entire file for `N N obj` patterns.
+   * This is a fallback for corrupted or broken PDFs where the normal xref parsing fails.
+   *
+   * @returns A synthetic trailer dictionary
+   */
+  private reconstructXref(): PdfDictValue {
+    this.xref = new Map(this.scanObjectHeaders());
 
     if (this.xref.size === 0) {
       throw new PdfStructureError("Could not reconstruct xref: no objects found");
@@ -710,7 +859,11 @@ export class PdfDocument {
       return this.cache.get(cacheKey)!;
     }
 
-    const entry = this.xref.get(objNum);
+    let entry = this.xref.get(objNum);
+    if (!entry && this.xrefDamaged) {
+      // The table lost entries to damaged lines; the object may be one of them.
+      entry = this.scanObjectHeaders().get(objNum);
+    }
     if (!entry) {
       return null;
     }
@@ -732,7 +885,7 @@ export class PdfDocument {
       obj = this.decryptObjectStrings(obj, objNum, entry.gen);
     }
 
-    if (obj !== null) {
+    if (obj !== null || this.structureRead) {
       this.cache.set(cacheKey, obj);
     }
     return obj;
@@ -846,6 +999,20 @@ export class PdfDocument {
   }
 
   /**
+   * A stream's bytes decrypted but **not** decoded — still in its `/Filter`s. For copying a
+   * stream into another file as it is: decoding and re-encoding loses whatever the decoder
+   * passes through (a JPEG's `DCTDecode`) or cannot read (a deflate stream that does not
+   * inflate is returned as it was, and was then written without its filter).
+   */
+  getEncodedStreamData(stream: PdfStream, objNum = 0, gen = 0): Uint8Array {
+    this.throwIfLimitExceeded();
+    if (this.decryptFn && this.isStreamEncrypted(stream.dict)) {
+      return this.decryptFn(stream.data, objNum, gen, "stream");
+    }
+    return stream.data;
+  }
+
+  /**
    * Decrypt a string value (bytes) if encryption is active.
    */
   decryptString(bytes: Uint8Array, objNum: number, gen: number): Uint8Array {
@@ -901,9 +1068,17 @@ export class PdfDocument {
 
     // Recurse into dictionaries
     if (isPdfDict(obj)) {
+      // A signature dictionary's /Contents is written in the clear even in an encrypted
+      // file (ISO 32000-1 §7.6.1): it is computed over the file's final bytes, after
+      // encryption. "Decrypting" it turned the signature into noise.
+      // The writer applies the same rule when it encrypts (`@pdf/core/signature-dict`).
+      const isSignature = isSignatureDict(obj);
       const decrypted: PdfDictValue = new Map();
       for (const [key, value] of obj) {
-        decrypted.set(key, this.decryptObjectStrings(value, objNum, gen));
+        decrypted.set(
+          key,
+          isSignature && key === "Contents" ? value : this.decryptObjectStrings(value, objNum, gen)
+        );
       }
       return decrypted;
     }
@@ -950,6 +1125,15 @@ export class PdfDocument {
    * inline streams within page objects).
    */
   getPagesWithObjInfo(): Array<{ dict: PdfDictValue; objNum: number; gen: number }> {
+    this.throwIfLimitExceeded();
+    // The page tree cannot change once the file is read, and walking it costs a lookup per
+    // node; callers ask for it once per page (a split writes every page on its own), which
+    // made that walk quadratic in the page count. The copy keeps the cached list intact.
+    this.pagesCache ??= this.collectAllPages();
+    return this.pagesCache.slice();
+  }
+
+  private collectAllPages(): Array<{ dict: PdfDictValue; objNum: number; gen: number }> {
     const catalog = this.getCatalog();
     const pagesRef = catalog.get("Pages");
     const pagesDict = this.derefDict(pagesRef);
@@ -1026,6 +1210,15 @@ export class PdfDocument {
    * Parse an object definition at the given byte offset.
    */
   private parseObjectAt(offset: number, objNum: number, _gen: number): PdfObject | null {
+    // An entry that does not point at the header of the object it names is damage — an
+    // offset shifted by an edit, or a table whose lines slipped by one. The object is then
+    // read where its header actually is, as a reconstruction would have found it.
+    if (this.objectHeaderAt(offset) !== objNum) {
+      const found = this.scanObjectHeaders().get(objNum);
+      if (found && found.offset !== offset) {
+        offset = found.offset;
+      }
+    }
     this.tokenizer.pos = offset;
     try {
       const obj = this.parse(this.tokenizer);
@@ -1047,12 +1240,12 @@ export class PdfDocument {
 
   /** The members of object stream `objStmNum`, parsed once and cached. */
   private getObjectStreamMembers(objStmNum: number): ObjStmMember[] | null {
-    let members = this.objStmCache.get(objStmNum);
-    if (!members) {
-      members = this.parseObjectStream(objStmNum) ?? undefined;
-      if (!members) {
-        return null;
-      }
+    const cached = this.objStmCache.get(objStmNum);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const members = this.parseObjectStream(objStmNum);
+    if (members || this.structureRead) {
       this.objStmCache.set(objStmNum, members);
     }
     return members;

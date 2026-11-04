@@ -1,4 +1,5 @@
-import { ArchiveError } from "@archive/core/errors";
+import { checkArchiveSource, checkString, checkZipEntryOptions } from "@archive/core/entry-checks";
+import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import type { ArchiveSource } from "@archive/io/archive-source";
 import { resolveArchiveSourceToBuffer } from "@archive/io/archive-source";
 import type { ZipEntryOptions } from "@archive/zip";
@@ -80,15 +81,23 @@ export interface SerializedZipEditPlan {
 export class ZipEditPlan {
   private readonly _ops: ZipEditOp[];
 
-  constructor(ops: ZipEditOp[] = []) {
-    this._ops = ops;
+  constructor(ops: readonly ZipEditOp[] = []) {
+    this._ops = [...ops];
   }
 
+  /** The operations, in order: a frozen copy, so changing it changes nothing here. */
   getOperations(): readonly ZipEditOp[] {
-    return this._ops;
+    return Object.freeze(this._ops.map(op => Object.freeze({ ...op })));
   }
 
+  /**
+   * Add or replace an entry. The source and options are checked now; the name is checked
+   * when the plan is applied, against the editor's naming rules.
+   */
   set(name: string, source: ArchiveSource, options?: ZipEntryOptions): this {
+    checkString("Archive.ZipEditPlan#set", "name", name);
+    checkArchiveSource("Archive.ZipEditPlan#set", "source", source);
+    checkZipEntryOptions("Archive.ZipEditPlan#set", options);
     this._ops.push({ type: "set", name, source, options });
     return this;
   }
@@ -114,6 +123,7 @@ export class ZipEditPlan {
   }
 
   setComment(comment?: string): this {
+    checkString("Archive.ZipEditPlan#setComment", "comment", comment, true);
     this._ops.push({ type: "comment", comment });
     return this;
   }
@@ -128,6 +138,19 @@ export class ZipEditPlan {
     rename(from: string, to: string): unknown;
     setComment(comment?: string): unknown;
   }): void {
+    const t = target as Record<string, unknown> | null;
+    if (
+      typeof t !== "object" ||
+      t === null ||
+      ["set", "delete", "deleteDirectory", "rename", "setComment"].some(
+        method => typeof t[method] !== "function"
+      )
+    ) {
+      throw new ArchiveArgumentError(
+        "target",
+        "Archive.ZipEditPlan#applyTo: target must have set, delete, deleteDirectory, rename and setComment methods"
+      );
+    }
     for (const op of this._ops) {
       switch (op.type) {
         case "set":
@@ -157,6 +180,12 @@ export class ZipEditPlan {
    * Return a new plan which runs this plan, then `other`.
    */
   concat(other: ZipEditPlan): ZipEditPlan {
+    if (!(other instanceof ZipEditPlan)) {
+      throw new ArchiveArgumentError(
+        "other",
+        "Archive.ZipEditPlan#concat: other must be a ZipEditPlan"
+      );
+    }
     return new ZipEditPlan([...this._ops, ...other._ops]);
   }
 
@@ -198,9 +227,18 @@ export class ZipEditPlan {
    * @param signal - Optional abort signal for cancellation
    * @returns JSON string representation of the plan
    */
-  async toJSON(signal?: AbortSignal): Promise<string> {
+  async toJson(signal?: AbortSignal): Promise<string> {
     const serialized = await this.serialize(signal);
     return JSON.stringify(serialized);
+  }
+
+  /**
+   * @deprecated Use {@link toJson}. Being named `toJSON`, this is also what
+   * `JSON.stringify(plan)` calls — and since it returns a Promise, that call serialises
+   * `{}`. Removed in 1.0.
+   */
+  async toJSON(signal?: AbortSignal): Promise<string> {
+    return this.toJson(signal);
   }
 
   /**
@@ -210,10 +248,24 @@ export class ZipEditPlan {
    * @returns Restored ZipEditPlan
    */
   static deserialize(data: SerializedZipEditPlan): ZipEditPlan {
+    if (typeof data !== "object" || data === null) {
+      throw new ArchiveArgumentError(
+        "data",
+        `Archive.ZipEditPlan.deserialize: data must be a serialized plan object, got ${
+          data === null ? "null" : typeof data
+        }`
+      );
+    }
     if (data.version !== 1) {
       throw new ArchiveError(`Unsupported ZipEditPlan version: ${data.version}`);
     }
 
+    if (!Array.isArray(data.ops)) {
+      throw new ArchiveArgumentError(
+        "data.ops",
+        "Archive.ZipEditPlan.deserialize: data.ops must be an array"
+      );
+    }
     const ops: ZipEditOp[] = data.ops.map(op => {
       if (op.type === "set") {
         // Decode base64 back to Uint8Array
@@ -237,9 +289,28 @@ export class ZipEditPlan {
    * @param json - JSON string representation of a serialized plan
    * @returns Restored ZipEditPlan
    */
-  static fromJSON(json: string): ZipEditPlan {
-    const data = JSON.parse(json) as SerializedZipEditPlan;
+  static fromJson(json: string): ZipEditPlan {
+    checkString("Archive.ZipEditPlan.fromJson", "json", json);
+    let data: SerializedZipEditPlan;
+    try {
+      data = JSON.parse(json) as SerializedZipEditPlan;
+    } catch (cause) {
+      throw new ArchiveArgumentError(
+        "json",
+        "Archive.ZipEditPlan.fromJson: json is not valid JSON",
+        {
+          cause
+        }
+      );
+    }
     return ZipEditPlan.deserialize(data);
+  }
+
+  /**
+   * @deprecated Use {@link ZipEditPlan.fromJson}. Removed in 1.0.
+   */
+  static fromJSON(json: string): ZipEditPlan {
+    return ZipEditPlan.fromJson(json);
   }
 }
 

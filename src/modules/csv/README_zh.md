@@ -6,7 +6,7 @@
 
 ```typescript
 import { Csv } from "documonster/csv";
-// Csv.parse, Csv.format, Csv.ParserStream, …
+// Csv.parse, Csv.format, Csv.createParserStream, …
 ```
 
 ## 功能特性
@@ -15,7 +15,7 @@ import { Csv } from "documonster/csv";
 - **零依赖** — 纯 TypeScript，无外部包
 - **跨平台** — Node.js 和浏览器使用相同 API
 - **高性能** — 基于 indexOf 的扫描器、快速模式检测、批处理
-- **流式处理** — `Csv.ParserStream` / `Csv.FormatterStream` 处理大文件
+- **流式处理** — `Csv.createParserStream` / `Csv.createFormatterStream` 处理大文件
 - **类型安全** — 完整的 TypeScript 泛型和重载签名
 - **自动检测** — 分隔符、换行符和 BOM 检测
 - **动态类型** — 自动类型转换（数字、布尔值、日期）
@@ -94,32 +94,32 @@ Csv.parse(csvString, { headers: true }): CsvParseResult;
 Csv.parse(csvString, { headers: true, dynamicTyping: true }): CsvParseResult;
 
 // info: true -> 行包含元数据（行号、原始输入等）
-Csv.parse(csvString, { headers: true, info: true }): CsvParseResult<RecordWithInfo>;
+Csv.parse(csvString, { headers: true, info: true }): CsvParseResult<CsvRecordWithInfo>;
 ```
 
 **解析选项（`CsvParseOptions`）：**
 
-| 选项             | 类型                                             | 默认值        | 描述                                    |
-| ---------------- | ------------------------------------------------ | ------------- | --------------------------------------- |
-| `delimiter`      | `string`                                         | 自动检测      | 字段分隔符（`,`、`;`、`\t`、`\|`）      |
-| `headers`        | `boolean \| string[] \| HeaderTransformFunction` | `false`       | 使用第一行作为表头，或提供自定义表头    |
-| `quote`          | `string \| false`                                | `"`           | 引号字符（`false` 禁用）                |
-| `escape`         | `string \| false`                                | 与 quote 相同 | 引号字段内的转义字符                    |
-| `comment`        | `string`                                         | -             | 注释行前缀（如 `"#"`）                  |
-| `skipEmptyLines` | `boolean \| "greedy"`                            | `false`       | 跳过空行；`"greedy"` 也跳过仅含空白的行 |
-| `skipLines`      | `number`                                         | `0`           | 解析前跳过的行数                        |
-| `maxRows`        | `number`                                         | -             | 最大解析行数                            |
-| `dynamicTyping`  | `boolean \| DynamicTypingConfig`                 | `false`       | 自动转换为数字/布尔值/日期              |
-| `castDate`       | `boolean \| CastDateConfig`                      | `false`       | 将日期字符串解析为 Date 对象            |
-| `transform`      | `RowTransformFunction`                           | -             | 输出前转换每一行                        |
-| `validate`       | `RowValidateFunction`                            | -             | 验证行；无效行进入 `errors`             |
-| `columns`        | `ColumnConfig[]`                                 | -             | 按列的类型/转换配置                     |
-| `objname`        | `string`                                         | -             | 按特定列值作为行的键                    |
-| `encoding`       | `string`                                         | `"utf-8"`     | 输入编码                                |
-| `info`           | `boolean`                                        | `false`       | 每行包含行/记录元数据                   |
-| `fastMode`       | `boolean`                                        | 自动          | 强制快速模式解析（不处理引号）          |
-| `renameHeaders`  | `boolean`                                        | `false`       | 自动重命名重复表头                      |
-| `columnMismatch` | `ColumnMismatchConfig`                           | -             | 处理列数与表头不匹配的行                |
+| 选项               | 类型                                                | 默认值        | 描述                                                |
+| ------------------ | --------------------------------------------------- | ------------- | --------------------------------------------------- |
+| `delimiter`        | `string`                                            | `,`           | 字段分隔符；`""` 为自动检测（`,`、`;`、`\t`、`\|`） |
+| `headers`          | `boolean \| string[] \| CsvHeaderTransformFunction` | `false`       | 使用第一行作为表头，或提供自定义表头                |
+| `quote`            | `string \| false`                                   | `"`           | 引号字符（`false` 禁用）                            |
+| `escape`           | `string \| false`                                   | 与 quote 相同 | 引号字段内的转义字符                                |
+| `comment`          | `string`                                            | -             | 注释行前缀（如 `"#"`）                              |
+| `skipEmptyLines`   | `boolean \| "greedy"`                               | `false`       | 跳过空行；`"greedy"` 也跳过仅含空白的行             |
+| `skipLines`        | `number`                                            | `0`           | 解析前跳过的行数                                    |
+| `maxRows`          | `number`                                            | -             | 最大解析行数                                        |
+| `dynamicTyping`    | `boolean \| CsvDynamicTypingConfig`                 | `false`       | 自动转换为数字/布尔值/日期                          |
+| `decimalSeparator` | `"." \| ","`                                        | `"."`         | `dynamicTyping` 读取数字时使用的小数点              |
+| `castDate`         | `boolean \| CsvCastDateConfig`                      | `false`       | 解析 ISO 日期；只有日期的值为 UTC 零点              |
+| `rowTransform`     | `(row) => row \| null`                              | -             | 输出前转换每一行                                    |
+| `validate`         | `(row) => boolean \| { isValid, reason }`           | -             | 验证行；被拒绝的行进入 `invalidRows`                |
+| `objname`          | `string`                                            | -             | 按某个表头列的值作为行的键（需 `headers`）          |
+| `onSkip`           | `CsvOnSkipCallback`                                 | -             | 每条因错误被跳过的记录都会调用                      |
+| `encoding`         | `string`                                            | `"utf-8"`     | 输入编码                                            |
+| `info`             | `boolean`                                           | `false`       | 每行包含行/记录元数据                               |
+| `fastMode`         | `boolean`                                           | `false`       | 快速模式解析（不处理引号）                          |
+| `columnMismatch`   | `CsvColumnMismatchConfig`                           | -             | 处理列数与表头不匹配的行                            |
 
 **结果（`CsvParseResult<T>`）：**
 
@@ -135,7 +135,9 @@ interface CsvParseResult<T> {
 
 ### `Csv.parseAsync(input, options?)`
 
-异步解析器，支持字符串、`AsyncIterable<string | Uint8Array>` 和 `ReadableStream`。
+异步解析器，支持字符串、字节（`Uint8Array` 或任意 `ArrayBufferView`、`ArrayBuffer`）、`Blob` / `File`、
+`AsyncIterable<string | Uint8Array>` 和 `ReadableStream`。字节按同样的字节以流形式输入时的方式解码（`encoding`、BOM）。
+`Csv.parseRows` 接受同样的输入。
 
 ```typescript
 import { Csv } from "documonster/csv";
@@ -149,6 +151,9 @@ const result = await Csv.parseAsync(response.body, { headers: true });
 
 // 从异步可迭代对象
 const result = await Csv.parseAsync(asyncChunks, { headers: true });
+
+// 从字节或 File（<input type="file">）
+const result = await Csv.parseAsync(fileInput.files[0], { headers: true });
 ```
 
 ### `Csv.parseRows(input, options?)`
@@ -163,20 +168,19 @@ for await (const row of Csv.parseRows(hugeFile, { headers: true })) {
 }
 ```
 
-### `Csv.parseWithProgress(input, options?, onProgress?)`
+### `Csv.parseAsync(input, { onProgress })`
 
 带进度回调的异步解析器，适合大文件。
 
 ```typescript
 import { Csv } from "documonster/csv";
 
-const result = await Csv.parseWithProgress(
-  largeCsvString,
-  { headers: true },
-  ({ rowsProcessed, bytesProcessed }) => {
+const result = await Csv.parseAsync(largeCsvString, {
+  headers: true,
+  onProgress: ({ rowsProcessed, bytesProcessed }) => {
     console.log(`已解析 ${rowsProcessed} 行（${bytesProcessed} 字节）`);
   }
-);
+});
 ```
 
 ---
@@ -210,24 +214,25 @@ Csv.format([
 
 **格式化选项（`CsvFormatOptions`）：**
 
-| 选项              | 类型                                              | 默认值        | 描述                                        |
-| ----------------- | ------------------------------------------------- | ------------- | ------------------------------------------- |
-| `delimiter`       | `string`                                          | `,`           | 字段分隔符                                  |
-| `headers`         | `boolean \| string[]`                             | 自动          | 包含表头；从对象自动推导                    |
-| `quote`           | `string \| false`                                 | `"`           | 引号字符                                    |
-| `escape`          | `string`                                          | 与 quote 相同 | 转义字符                                    |
-| `quoteColumns`    | `boolean \| boolean[] \| Record<string, boolean>` | 自动          | 按列强制引用                                |
-| `escapeFormulae`  | `boolean`                                         | `false`       | 公式字符（`=`、`+`、`-`、`@`）前加 `'` 前缀 |
-| `bom`             | `boolean`                                         | `false`       | 前置 UTF-8 BOM                              |
-| `columns`         | `ColumnConfig[]`                                  | -             | 按列的格式化配置                            |
-| `transform`       | `RowTransformFunction`                            | -             | 格式化前转换行                              |
-| `trailingNewline` | `boolean`                                         | `false`       | 添加尾部换行符                              |
+| 选项               | 类型                                              | 默认值        | 描述                                        |
+| ------------------ | ------------------------------------------------- | ------------- | ------------------------------------------- |
+| `delimiter`        | `string`                                          | `,`           | 字段分隔符                                  |
+| `headers`          | `boolean \| string[]`                             | 自动          | 表头行；对象行默认使用其键                  |
+| `quote`            | `string \| false`                                 | `"`           | 引号字符                                    |
+| `escape`           | `string`                                          | 与 quote 相同 | 转义字符                                    |
+| `quoteColumns`     | `boolean \| boolean[] \| Record<string, boolean>` | 自动          | 按列强制引用                                |
+| `escapeFormulae`   | `boolean`                                         | `false`       | 公式字符（`=`、`+`、`-`、`@`）前加 `'` 前缀 |
+| `bom`              | `boolean`                                         | `false`       | 前置 UTF-8 BOM                              |
+| `columns`          | `(string \| CsvColumnConfig)[]`                   | -             | 要读取的键，可附表头文字                    |
+| `typeTransform`    | `CsvTypeTransformMap`                             | -             | 按类型格式化值，以及 `row` 行转换           |
+| `decimalSeparator` | `"." \| ","`                                      | `"."`         | 数字的小数点                                |
+| `trailingNewline`  | `boolean`                                         | `false`       | 添加尾部换行符                              |
 
 ---
 
 ## 流式 API
 
-### `Csv.ParserStream`
+### `Csv.createParserStream(options?)`
 
 转换流，逐块解析 CSV 数据。跨平台（Node.js + 浏览器）。
 
@@ -237,9 +242,6 @@ import { pipeline } from "documonster/stream";
 
 // 使用工厂函数
 const parser = Csv.createParserStream({ headers: true, dynamicTyping: true });
-
-// 使用类构造函数
-const parser = new Csv.ParserStream({ headers: true });
 
 // 使用转换和验证
 parser.transform(row => ({ ...row, age: Number(row.age) })).validate(row => row.age > 0);
@@ -254,7 +256,7 @@ parser.on("end", () => console.log("完成"));
 await pipeline(readableStream, parser, writable);
 ```
 
-### `Csv.FormatterStream`
+### `Csv.createFormatterStream(options?)`
 
 转换流，将行格式化为 CSV 文本。跨平台（Node.js + 浏览器）。
 
@@ -286,6 +288,7 @@ import { Csv } from "documonster/csv";
 Csv.detectDelimiter("a,b,c\n1,2,3"); // ","
 Csv.detectDelimiter("a;b;c\n1;2;3"); // ";"
 Csv.detectDelimiter("a\tb\tc\n1\t2\t3"); // "\t"
+Csv.detectDelimiter("a:b\n1:2", { delimitersToGuess: [":"] }); // ":"
 
 // 检测行终止符（引号感知）
 Csv.detectLinebreak("a,b\r\nc,d"); // "\r\n"
@@ -322,6 +325,7 @@ Csv.applyDynamicTyping("42"); // 42（number）
 Csv.applyDynamicTyping("3.14"); // 3.14（number）
 Csv.applyDynamicTyping("true"); // true（boolean）
 Csv.applyDynamicTyping("hello"); // "hello"（string，不变）
+Csv.applyDynamicTyping("007", value => Number(value)); // 7（自定义转换函数）
 ```
 
 ---
@@ -376,7 +380,7 @@ for (const row of Csv.generateRows({ columns: 3, duration: 5000 })) {
 }
 
 // 异步生成器，行间有延迟
-for await (const row of Csv.generateAsync({ columns: 5, rows: 100, delay: 10 })) {
+for await (const row of Csv.generateRowsAsync({ columns: 5, rows: 100, delay: 10 })) {
   console.log(row);
 }
 
@@ -424,41 +428,39 @@ try {
 
 ### 核心函数
 
-| 函数                                                  | 描述                                     |
-| ----------------------------------------------------- | ---------------------------------------- |
-| `Csv.parse(input, options?)`                          | 同步 CSV 解析器                          |
-| `Csv.parseAsync(input, options?)`                     | 异步解析器（字符串、流、异步可迭代对象） |
-| `Csv.parseRows(input, options?)`                      | 异步生成器，逐行产出                     |
-| `Csv.parseWithProgress(input, options?, onProgress?)` | 带进度报告的解析器                       |
-| `Csv.format(data, options?)`                          | 批量 CSV 格式化器                        |
+| 函数                                    | 描述                                                 |
+| --------------------------------------- | ---------------------------------------------------- |
+| `Csv.parse(input, options?)`            | 同步 CSV 解析器                                      |
+| `Csv.parseAsync(input, options?)`       | 异步解析器（字符串、字节、Blob、流、异步可迭代对象） |
+| `Csv.parseRows(input, options?)`        | 异步生成器，逐行产出                                 |
+| `Csv.parseAsync(input, { onProgress })` | 带进度报告的解析器                                   |
+| `Csv.format(data, options?)`            | 批量 CSV 格式化器                                    |
 
 ### 流类
 
 | 类                                    | 描述                           |
 | ------------------------------------- | ------------------------------ |
-| `Csv.ParserStream`                    | 转换流：CSV 字节 -> 已解析的行 |
-| `Csv.FormatterStream`                 | 转换流：行 -> CSV 文本         |
-| `Csv.createParserStream(options?)`    | `Csv.ParserStream` 工厂函数    |
-| `Csv.createFormatterStream(options?)` | `Csv.FormatterStream` 工厂函数 |
+| `Csv.createParserStream(options?)`    | 转换流：CSV 字节 -> 已解析的行 |
+| `Csv.createFormatterStream(options?)` | 转换流：行 -> CSV 文本         |
 
 ### 工具函数
 
-| 函数                              | 描述                   |
-| --------------------------------- | ---------------------- |
-| `Csv.detectDelimiter(input)`      | 自动检测 CSV 分隔符    |
-| `Csv.detectLinebreak(input)`      | 自动检测行终止符       |
-| `Csv.stripBom(input)`             | 去除 UTF-8 BOM         |
-| `Csv.applyDynamicTyping(value)`   | 将字符串转换为原生类型 |
-| `Csv.formatNumber(value, sep)`    | 按区域格式化数字       |
-| `Csv.parseNumber(value, sep)`     | 解析区域格式化的数字   |
-| `Csv.deduplicateHeaders(headers)` | 重命名重复表头         |
+| 函数                                           | 描述                   |
+| ---------------------------------------------- | ---------------------- |
+| `Csv.detectDelimiter(input)`                   | 自动检测 CSV 分隔符    |
+| `Csv.detectLinebreak(input)`                   | 自动检测行终止符       |
+| `Csv.stripBom(input)`                          | 去除 UTF-8 BOM         |
+| `Csv.applyDynamicTyping(value, columnConfig?)` | 将字符串转换为原生类型 |
+| `Csv.formatNumber(value, sep)`                 | 按区域格式化数字       |
+| `Csv.parseNumber(value, sep)`                  | 解析区域格式化的数字   |
+| `Csv.deduplicateHeaders(headers)`              | 重命名重复表头         |
 
 ### 生成器函数
 
-| 函数                            | 描述                          |
-| ------------------------------- | ----------------------------- |
-| `Csv.generate(options?)`        | 生成 CSV 字符串 + 数据        |
-| `Csv.generateRows(options?)`    | 同步生成器，逐行产出 CSV 行   |
-| `Csv.generateAsync(options?)`   | 异步生成器，支持延迟          |
-| `Csv.generateData(options?)`    | 生成原始数据（非 CSV 字符串） |
-| `Csv.createGenerator(options?)` | 可复用的生成器工厂            |
+| 函数                              | 描述                          |
+| --------------------------------- | ----------------------------- |
+| `Csv.generate(options?)`          | 生成 CSV 字符串 + 数据        |
+| `Csv.generateRows(options?)`      | 同步生成器，逐行产出 CSV 行   |
+| `Csv.generateRowsAsync(options?)` | 异步生成器，支持延迟          |
+| `Csv.generateData(options?)`      | 生成原始数据（非 CSV 字符串） |
+| `Csv.createGenerator(options?)`   | 可复用的生成器工厂            |

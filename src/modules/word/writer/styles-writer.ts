@@ -6,9 +6,23 @@
  */
 
 import { NS_W, NS_R, STD_DOC_ATTRIBUTES } from "@word/constants";
-import type { DocDefaults, StyleDef, TableStyleConditionalFormat, TableBorders } from "@word/types";
+import { within } from "@word/core/node-path";
+import type {
+  DocDefaults,
+  PreservedXml,
+  StyleDef,
+  TableStyleConditionalFormat,
+  TableBorders
+} from "@word/types";
 import { renderParagraphProperties } from "@word/writer/paragraph-writer";
+import {
+  createPreservedEmitter,
+  preservedElements,
+  schemaOrder,
+  withPreservedNamespaces
+} from "@word/writer/preserved-xml";
 import { renderRunProperties, renderShading } from "@word/writer/run-writer";
+import { xmlValue } from "@xml/encode";
 import type { XmlSink } from "@xml/types";
 
 /** Render document defaults. */
@@ -17,13 +31,15 @@ function renderDocDefaults(xml: XmlSink, defaults: DocDefaults): void {
 
   if (defaults.runProperties) {
     xml.openNode("w:rPrDefault");
-    renderRunProperties(xml, defaults.runProperties);
+    const run = defaults.runProperties;
+    within("docDefaults.runProperties", () => renderRunProperties(xml, run));
     xml.closeNode();
   }
 
   if (defaults.paragraphProperties) {
     xml.openNode("w:pPrDefault");
-    renderParagraphProperties(xml, defaults.paragraphProperties);
+    const paragraph = defaults.paragraphProperties;
+    within("docDefaults.paragraphProperties", () => renderParagraphProperties(xml, paragraph));
     xml.closeNode();
   }
 
@@ -52,10 +68,12 @@ function renderTableStyleCondition(xml: XmlSink, condition: TableStyleConditiona
   xml.openNode("w:tblStylePr", { "w:type": typeVal });
 
   if (condition.paragraphProperties) {
-    renderParagraphProperties(xml, condition.paragraphProperties);
+    const paragraph = condition.paragraphProperties;
+    within("paragraphProperties", () => renderParagraphProperties(xml, paragraph));
   }
   if (condition.runProperties) {
-    renderRunProperties(xml, condition.runProperties);
+    const run = condition.runProperties;
+    within("runProperties", () => renderRunProperties(xml, run));
   }
   if (condition.tableProperties) {
     xml.openNode("w:tblPr");
@@ -68,7 +86,8 @@ function renderTableStyleCondition(xml: XmlSink, condition: TableStyleConditiona
   if (condition.cellProperties) {
     xml.openNode("w:tcPr");
     if (condition.cellProperties.shading) {
-      renderShading(xml, condition.cellProperties.shading);
+      const shading = condition.cellProperties.shading;
+      within("cellProperties.shading", () => renderShading(xml, shading));
     }
     if (condition.cellProperties.borders) {
       renderCellBordersInStyle(xml, condition.cellProperties.borders);
@@ -102,8 +121,8 @@ function renderCellBordersInStyle(xml: XmlSink, borders: TableBorders): void {
     if (b) {
       xml.leafNode(`w:${side}`, {
         "w:val": b.style,
-        "w:sz": String(b.size ?? 4),
-        "w:space": String(Math.max(0, Math.round(b.space ?? 0))),
+        "w:sz": xmlValue(b.size ?? 4, "w:sz"),
+        "w:space": xmlValue(Math.max(0, Math.round(b.space ?? 0)), "w:space"),
         "w:color": b.color ?? "auto"
       });
     }
@@ -119,8 +138,8 @@ function renderTableBordersInStyle(xml: XmlSink, borders: TableBorders): void {
     if (b) {
       xml.leafNode(`w:${side}`, {
         "w:val": b.style,
-        "w:sz": String(b.size ?? 4),
-        "w:space": String(Math.max(0, Math.round(b.space ?? 0))),
+        "w:sz": xmlValue(b.size ?? 4, "w:sz"),
+        "w:space": xmlValue(Math.max(0, Math.round(b.space ?? 0)), "w:space"),
         "w:color": b.color ?? "auto"
       });
     }
@@ -128,8 +147,44 @@ function renderTableBordersInStyle(xml: XmlSink, borders: TableBorders): void {
   xml.closeNode();
 }
 
+/** CT_Style's children. */
+const STYLE_ORDER = schemaOrder([
+  "w:name",
+  "w:aliases",
+  "w:basedOn",
+  "w:next",
+  "w:link",
+  "w:autoRedefine",
+  "w:hidden",
+  "w:uiPriority",
+  "w:semiHidden",
+  "w:unhideWhenUsed",
+  "w:qFormat",
+  "w:locked",
+  "w:personal",
+  "w:personalCompose",
+  "w:personalReply",
+  "w:rsid",
+  "w:pPr",
+  "w:rPr",
+  "w:tblPr",
+  "w:trPr",
+  "w:tcPr",
+  "w:tblStylePr"
+]);
+
+/** CT_Styles' children. */
+const STYLES_ORDER = schemaOrder(["w:docDefaults", "w:latentStyles", "w:style"]);
+
+type RawXmlPolicy = "preserve" | "strip" | "reject" | undefined;
+
 /** Render a single style definition. */
-function renderStyle(xml: XmlSink, style: StyleDef): void {
+function renderStyle(xml: XmlSink, style: StyleDef, rawXmlPolicy: RawXmlPolicy): void {
+  const preserved = createPreservedEmitter(
+    xml,
+    STYLE_ORDER,
+    preservedElements(style.preservedXml, rawXmlPolicy, "style.preservedXml")
+  );
   const attrs: Record<string, string> = {
     "w:type": style.type,
     "w:styleId": style.styleId
@@ -145,65 +200,81 @@ function renderStyle(xml: XmlSink, style: StyleDef): void {
   xml.leafNode("w:name", { "w:val": style.name });
 
   if (style.basedOn) {
+    preserved.upTo("w:basedOn");
     xml.leafNode("w:basedOn", { "w:val": style.basedOn });
   }
   if (style.next) {
+    preserved.upTo("w:next");
     xml.leafNode("w:next", { "w:val": style.next });
   }
   if (style.link) {
+    preserved.upTo("w:link");
     xml.leafNode("w:link", { "w:val": style.link });
   }
   if (style.autoRedefine) {
+    preserved.upTo("w:autoRedefine");
     xml.leafNode("w:autoRedefine");
   }
   if (style.hidden) {
+    preserved.upTo("w:hidden");
     xml.leafNode("w:hidden");
   }
   if (style.uiPriority !== undefined) {
-    xml.leafNode("w:uiPriority", { "w:val": String(style.uiPriority) });
+    preserved.upTo("w:uiPriority");
+    xml.leafNode("w:uiPriority", { "w:val": xmlValue(style.uiPriority, "w:val") });
   }
   if (style.semiHidden) {
+    preserved.upTo("w:semiHidden");
     xml.leafNode("w:semiHidden");
   }
   if (style.unhideWhenUsed) {
+    preserved.upTo("w:unhideWhenUsed");
     xml.leafNode("w:unhideWhenUsed");
   }
   if (style.qFormat) {
+    preserved.upTo("w:qFormat");
     xml.leafNode("w:qFormat");
   }
   if (style.locked) {
+    preserved.upTo("w:locked");
     xml.leafNode("w:locked");
   }
 
-  if (style.outlineLevel !== undefined) {
-    xml.leafNode("w:outlineLvl", { "w:val": String(style.outlineLevel) });
-  }
-
-  if (style.paragraphProperties) {
-    renderParagraphProperties(xml, style.paragraphProperties);
+  // `outlineLevel` is a paragraph property: `w:outlineLvl` belongs in the
+  // style's `w:pPr` (CT_PPrBase), never directly under `w:style`.
+  const paragraphProperties =
+    style.outlineLevel !== undefined && style.paragraphProperties?.outlineLevel === undefined
+      ? { ...style.paragraphProperties, outlineLevel: style.outlineLevel }
+      : style.paragraphProperties;
+  if (paragraphProperties) {
+    preserved.upTo("w:pPr");
+    within("paragraphProperties", () => renderParagraphProperties(xml, paragraphProperties));
   }
 
   if (style.runProperties) {
-    renderRunProperties(xml, style.runProperties);
+    preserved.upTo("w:rPr");
+    const run = style.runProperties;
+    within("runProperties", () => renderRunProperties(xml, run));
   }
 
   // For table styles
   if (style.tableProperties) {
+    preserved.upTo("w:tblPr");
     xml.openNode("w:tblPr");
     // Per CT_TblPrBase order, band sizes precede w:tblW.
     if (style.tableProperties.rowBandSize !== undefined) {
       xml.leafNode("w:tblStyleRowBandSize", {
-        "w:val": String(style.tableProperties.rowBandSize)
+        "w:val": xmlValue(style.tableProperties.rowBandSize, "w:val")
       });
     }
     if (style.tableProperties.colBandSize !== undefined) {
       xml.leafNode("w:tblStyleColBandSize", {
-        "w:val": String(style.tableProperties.colBandSize)
+        "w:val": xmlValue(style.tableProperties.colBandSize, "w:val")
       });
     }
     if (style.tableProperties.width) {
       xml.leafNode("w:tblW", {
-        "w:w": String(style.tableProperties.width.value),
+        "w:w": xmlValue(style.tableProperties.width.value, "w:w"),
         "w:type": style.tableProperties.width.type
       });
     }
@@ -212,7 +283,7 @@ function renderStyle(xml: XmlSink, style: StyleDef): void {
     }
     if (style.tableProperties.indent !== undefined) {
       xml.leafNode("w:tblInd", {
-        "w:w": String(style.tableProperties.indent),
+        "w:w": xmlValue(style.tableProperties.indent, "w:w"),
         "w:type": "dxa"
       });
     }
@@ -227,14 +298,14 @@ function renderStyle(xml: XmlSink, style: StyleDef): void {
       for (const side of ["top", "left", "bottom", "right"] as const) {
         const m = style.tableProperties.cellMargins[side];
         if (m) {
-          xml.leafNode(`w:${side}`, { "w:w": String(m.value), "w:type": m.type });
+          xml.leafNode(`w:${side}`, { "w:w": xmlValue(m.value, "w:w"), "w:type": m.type });
         }
       }
       xml.closeNode();
     }
     if (style.tableProperties.cellSpacing) {
       xml.leafNode("w:tblCellSpacing", {
-        "w:w": String(style.tableProperties.cellSpacing.value),
+        "w:w": xmlValue(style.tableProperties.cellSpacing.value, "w:w"),
         "w:type": style.tableProperties.cellSpacing.type
       });
     }
@@ -280,35 +351,50 @@ function renderStyle(xml: XmlSink, style: StyleDef): void {
 
   // Table style conditional formats
   if (style.tableStyleConditions) {
-    for (const cond of style.tableStyleConditions) {
-      renderTableStyleCondition(xml, cond);
-    }
+    preserved.upTo("w:tblStylePr");
+    style.tableStyleConditions.forEach((cond, i) =>
+      within(`tableStyleConditions[${i}]`, () => renderTableStyleCondition(xml, cond))
+    );
   }
 
+  preserved.rest();
   xml.closeNode();
 }
 
-/** Render word/styles.xml. */
+/**
+ * Render word/styles.xml. `preservedXml` is what the model does not represent
+ * (`w:latentStyles`, …), written at its schema position.
+ */
 export function renderStyles(
   xml: XmlSink,
   docDefaults?: DocDefaults,
-  styles?: readonly StyleDef[]
+  styles?: readonly StyleDef[],
+  preservedXml?: PreservedXml,
+  rawXmlPolicy?: RawXmlPolicy
 ): void {
+  const preserved = createPreservedEmitter(
+    xml,
+    STYLES_ORDER,
+    preservedElements(preservedXml?.elements, rawXmlPolicy, "stylesPreservedXml.elements")
+  );
   xml.openXml(STD_DOC_ATTRIBUTES);
-  xml.openNode("w:styles", {
-    "xmlns:w": NS_W,
-    "xmlns:r": NS_R
-  });
+  xml.openNode(
+    "w:styles",
+    withPreservedNamespaces({ "xmlns:w": NS_W, "xmlns:r": NS_R }, preservedXml)
+  );
 
   if (docDefaults) {
+    preserved.upTo("w:docDefaults");
     renderDocDefaults(xml, docDefaults);
   }
 
+  preserved.upTo("w:style");
   if (styles) {
-    for (const style of styles) {
-      renderStyle(xml, style);
-    }
+    styles.forEach((style, i) =>
+      within(`styles[${i}]`, () => renderStyle(xml, style, rawXmlPolicy))
+    );
   }
 
+  preserved.rest();
   xml.closeNode();
 }

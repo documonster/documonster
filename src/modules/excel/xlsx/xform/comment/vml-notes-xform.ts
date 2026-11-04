@@ -1,5 +1,6 @@
+import { vmlIdMap } from "@excel/utils/vml-shape-ids";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
-import { VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
+import { noteShapeId, VmlShapeXform } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import type { ShapeModel } from "@excel/xlsx/xform/comment/vml-shape-xform";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { StdDocAttributes } from "@xml/writer";
@@ -32,7 +33,10 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
     xmlStream.openNode(this.tag, VmlNotesXform.DRAWING_ATTRIBUTES);
 
     xmlStream.openNode("o:shapelayout", { "v:ext": "edit" });
-    xmlStream.leafNode("o:idmap", { "v:ext": "edit", data: 1 });
+    xmlStream.leafNode("o:idmap", {
+      "v:ext": "edit",
+      data: vmlIdMap(renderModel!.comments.map((_comment, index) => noteShapeId(index)))
+    });
     xmlStream.closeNode();
 
     xmlStream.openNode("v:shapetype", {
@@ -46,7 +50,7 @@ class VmlNotesXform extends BaseXform<VmlNotesModel> {
     xmlStream.closeNode();
 
     renderModel!.comments.forEach((item, index) => {
-      (this.map["v:shape"] as VmlShapeXform).render(xmlStream, item, index);
+      (this.map["v:shape"] as VmlShapeXform).render(xmlStream, item, noteShapeId(index));
     });
 
     xmlStream.closeNode();

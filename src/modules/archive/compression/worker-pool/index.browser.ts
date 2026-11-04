@@ -15,6 +15,7 @@ export {
   hasWorkerSupport,
   type WorkerPoolOptions,
   type WorkerPoolStats,
+  type WorkerPoolStream,
   type TaskOptions,
   type TaskResult,
   type WorkerTaskType

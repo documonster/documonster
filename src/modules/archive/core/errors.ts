@@ -32,6 +32,44 @@ export class ArchiveError extends BaseError {
   }
 }
 
+/**
+ * A wrong argument or option given to an archive function: the caller's mistake, not damage
+ * in archive data (which stays an {@link ArchiveError}). It is an `ArchiveError`, so existing
+ * `catch` blocks and `isArchiveError` still see it.
+ */
+export class ArchiveArgumentError extends ArchiveError {
+  override name = "ArchiveArgumentError";
+  /** The argument or option at fault, e.g. `level`, `source` or `entries[0]`. */
+  readonly field: string;
+
+  constructor(field: string, message: string, options?: BaseErrorOptions) {
+    super(message, options);
+    this.field = field;
+  }
+}
+
+/**
+ * The error a reader raises when it is asked to read a one-shot source (a `ReadableStream`,
+ * a Node stream, an async iterable) a second time. Such a source is empty once read; reading it
+ * again used to answer "no entries" for TAR and "not a ZIP file" for ZIP.
+ */
+export function oneShotSourceReadError(where: string): ArchiveError {
+  return new ArchiveError(
+    `${where}: the archive's source is a stream that an earlier read already consumed, and a ` +
+      "stream cannot be read twice; open the archive again, or give the reader bytes or a Blob"
+  );
+}
+
+/**
+ * Check if an error is an ArchiveError.
+ *
+ * An {@link AbortError} is not one: cancellation is reported by the shared
+ * `AbortError` every module throws, not by the archive module.
+ */
+export function isArchiveError(err: unknown): err is ArchiveError {
+  return err instanceof ArchiveError;
+}
+
 // -----------------------------------------------------------------------------
 // ZIP Parsing Errors
 // -----------------------------------------------------------------------------
@@ -66,6 +104,29 @@ export class EocdNotFoundError extends ZipParseError {
   constructor(options?: BaseErrorOptions) {
     super("Invalid ZIP file: End of Central Directory not found", options);
   }
+}
+
+/**
+ * A native inflater's failure — one of Node's zlib `Z_*` errors, or a `DecompressionStream`'s — as the archive's own
+ * error, with the original as its `cause`.
+ *
+ * Corrupt DEFLATE data is malformed input like any other, and the pure-JS inflater already reports it as an
+ * `ArchiveError`; without this, the same damage surfaced as a bare `Error` or `TypeError` on the platforms that use a
+ * native one. An error this library already typed (a limit, an abort, the pure-JS inflater's) passes through.
+ */
+export function toInflateError(error: unknown, path?: string): Error {
+  if (error instanceof BaseError) {
+    return error;
+  }
+  const cause = error instanceof Error ? error : new Error(String(error));
+  const where = path === undefined ? "" : ` in "${path}"`;
+  return new ArchiveError(`Invalid DEFLATE data${where}: ${cause.message}`, { cause });
+}
+
+/** Whether `error` came from Node's zlib binding, whose errors carry a `Z_*` code. */
+export function isZlibError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && code.startsWith("Z_");
 }
 
 // -----------------------------------------------------------------------------
@@ -161,7 +222,10 @@ export class EntrySizeMismatchError extends ArchiveError {
 export type ArchiveLimit = "maxOutputLength" | "maxTotalUncompressedSize" | "maxEntries";
 
 /**
- * Error thrown when decompressing or extracting would exceed a configured limit.
+ * Error thrown when decompressing or extracting would exceed a configured limit. `limit` names
+ * the option that set the bound and `allowed` is its value, so a caller can tell which limit was
+ * hit without reading the message. The per-entry size (`maxEntrySize`) is reported by
+ * {@link FileTooLargeError}, which carries the same `limit` / `allowed` fields.
  */
 export class ArchiveLimitError extends ArchiveError {
   override name = "ArchiveLimitError";
@@ -248,14 +312,41 @@ export class HttpRangeError extends ArchiveError {
 // ZIP64 / Size Errors
 // -----------------------------------------------------------------------------
 
+/** Options for {@link FileTooLargeError}. */
+export interface FileTooLargeErrorOptions extends BaseErrorOptions {
+  /** The bound the entry exceeds, in bytes; becomes {@link FileTooLargeError.allowed}. */
+  allowed?: number;
+}
+
 /**
- * Error thrown when a file is too large for in-memory extraction.
+ * Error thrown when an entry is too large to read into memory: the `maxEntrySize` limit. It
+ * carries the same `limit` / `allowed` fields as {@link ArchiveLimitError}, read the same way,
+ * plus the entry's `path`; it is not an `ArchiveLimitError`, so catch both to see every limit.
  */
 export class FileTooLargeError extends ArchiveError {
   override name = "FileTooLargeError";
 
-  constructor(path: string, reason: string, options?: BaseErrorOptions) {
-    super(`File "${path}" is too large to extract into memory (${reason})`, options);
+  /** The limit that was hit: always `"maxEntrySize"`. */
+  readonly limit = "maxEntrySize" as const;
+
+  /**
+   * The bound the entry exceeds, in bytes: the configured `maxEntrySize`, or
+   * `Number.MAX_SAFE_INTEGER` for a ZIP64 size or offset JavaScript cannot hold; `NaN` when the
+   * code that threw did not say.
+   */
+  readonly allowed: number;
+
+  /** The entry that is too large. */
+  readonly path: string;
+
+  constructor(path: string, reason: string, options?: FileTooLargeErrorOptions) {
+    const { allowed = Number.NaN, ...errorOptions } = options ?? {};
+    super(
+      `File "${path}" is too large to extract into memory (${reason})`,
+      options && errorOptions
+    );
+    this.allowed = allowed;
+    this.path = path;
   }
 }
 
@@ -272,4 +363,18 @@ export class UnsupportedCompressionError extends ArchiveError {
   constructor(method: number, options?: BaseErrorOptions) {
     super(`Unsupported compression method: ${method}`, options);
   }
+}
+
+// -----------------------------------------------------------------------------
+// Worker Errors
+// -----------------------------------------------------------------------------
+
+/**
+ * A worker streaming session (`Compression.Workers.WorkerPool#openStream`) whose worker did
+ * not start — it timed out, failed or died first. Nothing was sent to it, so the caller can
+ * run the same stream elsewhere. The library's own streams fall back on their own and never
+ * report it; a caller of `openStream` can tell it apart with `instanceof`.
+ */
+export class WorkerStreamStartError extends ArchiveError {
+  override name = "WorkerStreamStartError";
 }

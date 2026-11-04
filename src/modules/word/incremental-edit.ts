@@ -14,10 +14,14 @@
  * This API is a thin wrapper around ZIP entry mutation. It deliberately
  * does not understand DOCX semantics:
  *
- * - `[Content_Types].xml` is **not** updated when you add a new part with
- *   a previously-unseen content type. If your replacement part introduces
- *   a new MIME type, callers must also patch `[Content_Types].xml` (or
- *   round-trip through `readDocx` + `packageDocx` instead).
+ * - `[Content_Types].xml` is **not** given the real type of a new part
+ *   with a previously-unseen content type. If your replacement part
+ *   introduces a new MIME type, callers must also patch `[Content_Types].xml` (or
+ *   round-trip through `readDocx` + `packageDocx` instead). A new part the
+ *   final `[Content_Types].xml` does not type is given the generic
+ *   `application/octet-stream` (a `Default` for its extension), except a
+ *   media part (`word/media/…`), which is rejected with a `DocxWriteError`
+ *   because a picture typed generically would not render.
  * - Relationship files (`*.rels`) are **not** rebuilt. Adding or deleting
  *   a part with relationships will leave the corresponding `_rels/*.rels`
  *   stale.
@@ -28,6 +32,11 @@
  *   altChunks, opaque drawings carrying rIds) — use `patchDocument` /
  *   `packageDocx` for those cases. Existing references that survive
  *   unchanged are fine because their `.rels` entries already exist.
+ * - A comment that a `replaceBody`, `replaceHeader` or `replaceFooter` takes
+ *   the last anchor of — it was anchored in the replaced part and is anchored
+ *   nowhere afterwards — is removed from `comments.xml`, together with its
+ *   `commentsExtended` / `commentsIds` / `commentsExtensible` entries. A
+ *   comment that had no anchor before the edit is left as it is.
  *
  * For DOCX-aware edits (changes that may add/remove relationships or
  * content types) use `patchDocument` or `compileTemplate`, or round-trip
@@ -39,14 +48,49 @@
 
 import { zip } from "@archive/create-archive";
 import { unzip } from "@archive/read-archive";
+import { xmlEncodeAttr } from "@utils/xml-encode";
 import { PartPath } from "@word/constants";
+import { isFlatOpc } from "@word/convert/flat-opc";
+import {
+  checkArray,
+  checkBytes,
+  checkNodeArray,
+  checkOneOf,
+  checkPackageOptions,
+  checkRecord,
+  checkString
+} from "@word/core/argument-checks";
 import { utf8Decoder, utf8Encoder } from "@word/core/internal-utils";
 import { walkBlocks } from "@word/core/walker";
-import { DocxUnsupportedFeatureError } from "@word/errors";
+import {
+  DocxError,
+  DocxParseError,
+  DocxUnsupportedFeatureError,
+  DocxWriteError
+} from "@word/errors";
+import { checkReadOptions } from "@word/reader/docx-reader";
+import type { ReadDocxOptions } from "@word/reader/docx-reader";
+import { checkPackageSize, createPartBudget, flatOpcEntries } from "@word/reader/package-limits";
+import { decryptIfEncrypted } from "@word/security/package-encryption";
+import { resolveSecurityPolicy } from "@word/security/policy";
 import type { BodyContent, DocxDocument, Paragraph, Table } from "@word/types";
+import { assertValidPartName } from "@word/writer/content-types";
 import { renderBodyContent, renderDocument } from "@word/writer/document-writer";
 import { renderHeader, renderFooter } from "@word/writer/header-footer-writer";
-import { createRenderContext } from "@word/writer/render-context";
+import type { IdGenerators } from "@word/writer/render-context";
+import {
+  closeStoryPart,
+  collectBookmarkStartIds,
+  collectDocPrIds,
+  collectRangeStartIds,
+  collectRevisionIds,
+  createIdGenerators,
+  createRenderContext,
+  enterRevisionIds,
+  exitRevisionIds,
+  renderHelpersFor
+} from "@word/writer/render-context";
+import { parseXml } from "@xml/dom";
 import { XmlWriter } from "@xml/writer";
 
 // =============================================================================
@@ -60,8 +104,10 @@ export type IncrementalEdit =
        * Replace a specific part by raw bytes.
        *
        * Caveat: does not update `[Content_Types].xml` or any `.rels` file.
-       * Adding a part with a new content type or new relationships will
-       * produce a malformed package. See the file header for details.
+       * Adding a part with new relationships produces a malformed package. A
+       * new part `[Content_Types].xml` does not type gets
+       * `application/octet-stream`, and a new media part is rejected. See the
+       * file header for details.
        */
       readonly type: "replacePart";
       readonly path: string;
@@ -103,10 +149,16 @@ export type IncrementalEdit =
       readonly children: readonly (Paragraph | Table)[];
     };
 
-/** Options for incremental editing. */
-export interface IncrementalEditOptions {
+/**
+ * Options for `Package.edit`: how the file is read, as `Io.read` reads it
+ * (`password`, `securityPolicy`, `checkCrc32`), and how the result is written.
+ * The result of an encrypted file is not encrypted: `WordCrypto.encrypt` it again.
+ */
+export interface IncrementalEditOptions extends ReadDocxOptions {
   /** Compression level for replaced entries (0-9). Default: 6. */
   readonly compressionLevel?: number;
+  /** Timestamp for every entry of the written package, as in `Io.toBuffer`. Default: now. */
+  readonly modTime?: Date;
 }
 
 /**
@@ -124,32 +176,51 @@ export interface IncrementalEditOptions {
  * @example
  * ```ts
  * const original = await fs.readFile("template.docx");
- * const edited = await editDocxIncremental(original, [
+ * const edited = await Package.edit(original, [
  *   { type: "replaceBody", body: [...newParagraphs] }
  * ]);
  * ```
  */
 export async function editDocxIncremental(
-  buffer: Uint8Array,
+  buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
   edits: readonly IncrementalEdit[],
   options?: IncrementalEditOptions
 ): Promise<Uint8Array> {
+  const where = "Package.edit";
+  const bytes = checkPackageBytes(buffer, where);
+  checkIncrementalEdits(edits, where);
+  checkPackageOptions(options, "options", where);
+  checkReadOptions(options, where);
   // Read all entries from the original ZIP. Some third-party ZIP writers emit
   // entry paths with a leading "/" — strip it so lookups by canonical path
   // (e.g. "word/document.xml") match consistently with the rest of the
   // codebase (see readDocxPart below).
-  const reader = unzip(buffer);
   const parts = new Map<string, Uint8Array>();
-  for await (const entry of reader.entries()) {
-    const normalizedPath = entry.path.replace(/^\/+/, "");
-    parts.set(normalizedPath, await entry.bytes());
-  }
+  await readPackageEntries(bytes, options, async (path, entry) => {
+    parts.set(path, await entry.bytes());
+    return false;
+  });
+  const originalPaths = new Set(parts.keys());
 
-  // Apply edits
+  // Apply edits. The comments the replaced story parts anchored are noted
+  // first: those this edit leaves without an anchor are removed below.
+  const replacedAnchors = new Set<string>();
   for (const edit of edits) {
+    if (
+      edit.type === "replaceBody" ||
+      edit.type === "replaceHeader" ||
+      edit.type === "replaceFooter"
+    ) {
+      const replaced = parts.get(
+        edit.type === "replaceBody" ? PartPath.Document : edit.path.replace(/^\/+/, "")
+      );
+      if (replaced) {
+        collectCommentAnchors(utf8Decoder.decode(replaced), replacedAnchors);
+      }
+    }
     switch (edit.type) {
       case "replacePart":
-        parts.set(edit.path.replace(/^\/+/, ""), edit.data);
+        parts.set(edit.path.replace(/^\/+/, ""), checkBytes(edit.data, "data", where));
         break;
       case "replacePartText":
         parts.set(edit.path.replace(/^\/+/, ""), utf8Encoder.encode(edit.text));
@@ -164,78 +235,485 @@ export async function editDocxIncremental(
         // replaceHeader/Footer: this editor doesn't rewrite document.xml.rels.
         assertNoExternalReferences(edit.body, "body");
         const original = parts.get(PartPath.Document);
+        const reserved = reservedBookmarkIds(parts, PartPath.Document);
         parts.set(
           PartPath.Document,
           original
-            ? replaceBodyChildrenInDocumentXml(original, edit.body)
-            : renderBodyOnly(edit.body)
+            ? replaceBodyChildrenInDocumentXml(original, edit.body, reserved)
+            : renderBodyOnly(edit.body, reserved)
         );
         break;
       }
       case "replaceHeader":
-        parts.set(edit.path.replace(/^\/+/, ""), renderHeaderFooter("header", edit.children));
+      case "replaceFooter": {
+        const path = edit.path.replace(/^\/+/, "");
+        const kind = edit.type === "replaceHeader" ? "header" : "footer";
+        parts.set(path, renderHeaderFooter(kind, edit.children, reservedBookmarkIds(parts, path)));
         break;
-      case "replaceFooter":
-        parts.set(edit.path.replace(/^\/+/, ""), renderHeaderFooter("footer", edit.children));
-        break;
+      }
     }
   }
 
+  if (replacedAnchors.size > 0) {
+    dropOrphanedComments(parts, replacedAnchors);
+  }
+
+  typeNewParts(parts, originalPaths);
+
   // Write back to a new ZIP
-  const archive = zip({ level: options?.compressionLevel ?? 6 });
+  const archive = zip({ level: options?.compressionLevel ?? 6, modTime: options?.modTime });
   for (const [path, data] of parts) {
     archive.add(path, data);
   }
-  return archive.bytes();
+  return archive.toBuffer();
 }
 
 /**
  * List all part paths in a DOCX file without parsing the model.
  *
- * @param buffer - The DOCX file as a Uint8Array.
+ * @param buffer - The DOCX file (ZIP or Flat OPC).
+ * @param options - How to read it, as `Io.read` takes them (`password`, `securityPolicy`, `checkCrc32`).
  * @returns Array of part paths.
  */
-export async function listDocxParts(buffer: Uint8Array): Promise<string[]> {
-  const reader = unzip(buffer);
+export async function listDocxParts(
+  buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
+  options?: ReadDocxOptions
+): Promise<string[]> {
+  const where = "Package.listParts";
+  const bytes = checkPackageBytes(buffer, where);
+  checkReadOptions(options, where);
   const paths: string[] = [];
-  for await (const entry of reader.entries()) {
-    paths.push(entry.path);
-  }
+  await readPackageEntries(bytes, options, path => {
+    paths.push(path);
+    return false;
+  });
   return paths;
 }
 
 /**
  * Read a single part's raw bytes from a DOCX file.
  *
- * @param buffer - The DOCX file as a Uint8Array.
+ * @param buffer - The DOCX file (ZIP or Flat OPC).
  * @param path - The part path (e.g. `"word/document.xml"`).
+ * @param options - How to read it, as `Io.read` takes them (`password`, `securityPolicy`, `checkCrc32`).
  * @returns The part's raw bytes, or undefined if the part doesn't exist.
  */
 export async function readDocxPart(
-  buffer: Uint8Array,
-  path: string
+  buffer: Uint8Array | ArrayBuffer | ArrayBufferView,
+  path: string,
+  options?: ReadDocxOptions
 ): Promise<Uint8Array | undefined> {
-  const reader = unzip(buffer);
-  for await (const entry of reader.entries()) {
-    const normalizedPath = entry.path.replace(/^\//, "");
-    if (normalizedPath === path) {
-      return entry.bytes();
+  const where = "Package.readPart";
+  const bytes = checkPackageBytes(buffer, where);
+  checkString(path, "path", where);
+  checkReadOptions(options, where);
+  // A part name is written with a leading "/" in `[Content_Types].xml` and
+  // without one as a ZIP entry; either names the same part.
+  const wanted = path.replace(/^\/+/, "");
+  let found: Uint8Array | undefined;
+  await readPackageEntries(bytes, options, async (entryPath, entry) => {
+    if (entryPath !== wanted) {
+      return false;
     }
+    found = await entry.bytes();
+    return true;
+  });
+  return found;
+}
+
+function checkPackageBytes(buffer: unknown, where: string): Uint8Array {
+  return checkBytes(buffer, "buffer", where);
+}
+
+/**
+ * Visit every part of the package — folder entries skipped, a leading "/"
+ * some ZIP writers emit stripped — until `visit` returns `true`, reading it as
+ * `Io.read` does: under the options' security policy, an encrypted file
+ * decrypted with `password` (a `DocxEncryptedError` without one), a Flat OPC
+ * file as the package it holds. Bytes that are not a package are a
+ * `DocxParseError`, as `Io.read` reports them.
+ *
+ * A part's size counts against the policy when its bytes are read, so
+ * `listParts` decompresses nothing and `readPart` only the part it returns.
+ */
+async function readPackageEntries(
+  input: Uint8Array,
+  options: ReadDocxOptions | undefined,
+  visit: (path: string, entry: { bytes(): Promise<Uint8Array> }) => boolean | Promise<boolean>
+): Promise<void> {
+  const policy = resolveSecurityPolicy(options?.securityPolicy);
+  checkPackageSize(input, policy);
+  const buffer = await decryptIfEncrypted(input, options?.password, policy.maxPackageSize);
+  try {
+    if (isFlatOpc(buffer)) {
+      for (const [path, data] of flatOpcEntries(buffer, policy)) {
+        if (await visit(path.replace(/^\/+/, ""), { bytes: async () => data })) {
+          return;
+        }
+      }
+      return;
+    }
+    const budget = createPartBudget(policy);
+    for await (const entry of unzip(buffer, { checkCrc32: options?.checkCrc32 }).entries()) {
+      // Folder entries are not parts (OPC §9.1.1.1) and are not written back.
+      if (isDirectoryEntry(entry)) {
+        continue;
+      }
+      budget.count();
+      const path = entry.path.replace(/^\/+/, "");
+      const charged = {
+        async bytes(): Promise<Uint8Array> {
+          const data = await entry.bytes();
+          budget.charge(path, data.length);
+          return data;
+        }
+      };
+      if (await visit(path, charged)) {
+        return;
+      }
+    }
+  } catch (e) {
+    if (e instanceof DocxError) {
+      throw e;
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new DocxParseError(`Failed to read DOCX: ${msg}`, { cause: e });
   }
-  return undefined;
+}
+
+const EDIT_TYPES = new Set<string>([
+  "replacePart",
+  "replacePartText",
+  "deletePart",
+  "replaceBody",
+  "replaceHeader",
+  "replaceFooter"
+] satisfies IncrementalEdit["type"][]);
+
+/** Every edit's shape, before any is applied. */
+function checkIncrementalEdits(edits: unknown, where: string): void {
+  checkArray(edits, "edits", where);
+  (edits as readonly unknown[]).forEach((value, i) => {
+    const at = `edits[${i}]`;
+    checkRecord(value, at, where);
+    const edit = value as Record<string, unknown>;
+    checkOneOf(edit.type, EDIT_TYPES, `${at}.type`, where);
+    if (edit.type !== "replaceBody") {
+      checkString(edit.path, `${at}.path`, where);
+    }
+    switch (edit.type) {
+      case "replacePart":
+        checkBytes(edit.data, `${at}.data`, where);
+        break;
+      case "replacePartText":
+        checkString(edit.text, `${at}.text`, where);
+        break;
+      case "replaceBody":
+        checkNodeArray(edit.body, `${at}.body`, where);
+        break;
+      case "replaceHeader":
+      case "replaceFooter":
+        checkNodeArray(edit.children, `${at}.children`, where);
+        break;
+    }
+  });
 }
 
 // =============================================================================
 // Internal helpers
 // =============================================================================
 
-function renderBodyOnly(body: readonly BodyContent[]): Uint8Array {
+/** Whether a ZIP entry is a folder rather than a part. */
+function isDirectoryEntry(entry: { readonly type: string; readonly path: string }): boolean {
+  return entry.type === "directory" || /[/\\]$/.test(entry.path);
+}
+
+/**
+ * Give every part this edit added a content type, as OPC requires of every
+ * part (ECMA-376 Part 2 §10.1.2.4). One the final `[Content_Types].xml`
+ * already types — by `Override`, or by its extension's `Default` — is left
+ * alone. A media part (`…/media/…`) without one is refused: a picture typed
+ * generically would not render. Any other gets the generic
+ * `application/octet-stream`, by a `Default` for its extension or, without
+ * one, an `Override`. Parts the original already had are not judged: they
+ * are the input's, not this edit's.
+ */
+function typeNewParts(parts: Map<string, Uint8Array>, originalPaths: ReadonlySet<string>): void {
+  const added = [...parts.keys()].filter(
+    path => !originalPaths.has(path) && path !== CONTENT_TYPES_PART && !path.endsWith(".rels")
+  );
+  for (const path of added) {
+    assertValidPartName(path, "Package.edit");
+  }
+  if (added.length === 0) {
+    return;
+  }
+  const defaults = new Set<string>();
+  const overrides = new Set<string>();
+  const ctXml = parts.get(CONTENT_TYPES_PART);
+  if (!ctXml) {
+    return;
+  }
+  for (const el of parseXml(utf8Decoder.decode(ctXml)).root.children) {
+    if (el.type !== "element") {
+      continue;
+    }
+    const local = el.name.slice(el.name.indexOf(":") + 1);
+    if (local === "Default" && el.attributes["Extension"]) {
+      defaults.add(el.attributes["Extension"].toLowerCase());
+    } else if (local === "Override" && el.attributes["PartName"]) {
+      overrides.add(el.attributes["PartName"].replace(/^\/+/, "").toLowerCase());
+    }
+  }
+  const declarations: string[] = [];
+  for (const path of added) {
+    const leaf = path.slice(path.lastIndexOf("/") + 1);
+    const dot = leaf.lastIndexOf(".");
+    const ext = dot > 0 ? leaf.slice(dot + 1).toLowerCase() : "";
+    if (overrides.has(path.toLowerCase()) || (ext && defaults.has(ext))) {
+      continue;
+    }
+    if (MEDIA_PART.test(path)) {
+      throw new DocxWriteError(
+        `Package.edit: new media part "${path}" has no content type — add a Default for its extension or an Override for it to [Content_Types].xml in the same edit`
+      );
+    }
+    if (ext) {
+      defaults.add(ext);
+      declarations.push(
+        `<Default Extension="${xmlEncodeAttr(ext)}" ContentType="${GENERIC_CONTENT_TYPE}"/>`
+      );
+    } else {
+      overrides.add(path.toLowerCase());
+      declarations.push(
+        `<Override PartName="/${xmlEncodeAttr(path)}" ContentType="${GENERIC_CONTENT_TYPE}"/>`
+      );
+    }
+  }
+  if (declarations.length > 0) {
+    const xml = utf8Decoder.decode(ctXml);
+    const close = xml.lastIndexOf("</");
+    parts.set(
+      CONTENT_TYPES_PART,
+      utf8Encoder.encode(xml.slice(0, close) + declarations.join("") + xml.slice(close))
+    );
+  }
+}
+
+const GENERIC_CONTENT_TYPE = "application/octet-stream";
+const CONTENT_TYPES_PART = "[Content_Types].xml";
+const MEDIA_PART = /(?:^|\/)media\/[^/]+$/;
+
+/** The parts whose content can carry bookmarks (story parts). */
+const STORY_PART = /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$/;
+
+/** Bookmark, range-permission, revision and drawing ids new content must not take. */
+interface ReservedRangeIds {
+  readonly reservedBookmarkIds: Set<number>;
+  readonly reservedPermIds: Set<number>;
+  readonly reservedRevisionIds: Set<number>;
+  /** Id generators whose drawing ids (`wp:docPr`) avoid the ids already used. */
+  readonly ids: IdGenerators;
+}
+
+/**
+ * Bookmark, range-permission, revision and drawing ids new content written into `path`
+ * must not take: those of every other story part, which this editor passes
+ * through untouched. Each kind of id is unique across the whole document, not
+ * per part. (The new content's own markers and drawings, raw or modelled, are
+ * numbered as it is written.)
+ */
+function reservedBookmarkIds(
+  parts: ReadonlyMap<string, Uint8Array>,
+  path: string
+): ReservedRangeIds {
+  const reservedBookmarkIds = new Set<number>();
+  const reservedPermIds = new Set<number>();
+  const reservedRevisionIds = new Set<number>();
+  const docPrs = new Set<number>();
+  for (const [name, data] of parts) {
+    if (name !== path && STORY_PART.test(name)) {
+      const xml = utf8Decoder.decode(data);
+      collectBookmarkStartIds(xml, reservedBookmarkIds);
+      collectRangeStartIds(xml, reservedPermIds, "permStart");
+      collectRevisionIds(xml, reservedRevisionIds);
+      collectDocPrIds(xml, docPrs);
+    }
+  }
+  return {
+    reservedBookmarkIds,
+    reservedPermIds,
+    reservedRevisionIds,
+    ids: createIdGenerators({ reservedDocPrIds: docPrs })
+  };
+}
+
+/** The parts a comment can be anchored in. */
+const ANCHOR_PART = /^word\/(?:document|header\d*|footer\d*|footnotes|endnotes)\.xml$/;
+
+/** Relationship type suffixes of the comment parts, and their usual names. */
+const COMMENT_PARTS = {
+  comments: "word/comments.xml",
+  commentsExtended: "word/commentsExtended.xml",
+  commentsIds: "word/commentsIds.xml",
+  commentsExtensible: "word/commentsExtensible.xml"
+} as const;
+
+/**
+ * Remove the comments this edit orphaned: those a replaced body, header or
+ * footer anchored (`replacedAnchors`) — by a range or reference mark — and no
+ * story part anchors after it. Word reports a comment whose anchor an edit
+ * took away as a damaged document. A comment that had no anchor before the
+ * edit is not this edit's to remove, and stays. A removed comment's entries in
+ * `commentsExtended.xml` (`w15:commentEx`, keyed by the paraId of its
+ * paragraphs), `commentsIds.xml` and, through the durable ids found there,
+ * `commentsExtensible.xml` go with it; a reply whose parent is removed keeps
+ * its own entry without the parent link. `people.xml` is left as it is: an
+ * author without comments is still a valid entry.
+ */
+function dropOrphanedComments(
+  parts: Map<string, Uint8Array>,
+  replacedAnchors: ReadonlySet<string>
+): void {
+  const paths = commentPartPaths(parts);
+  const commentsData = parts.get(paths.comments);
+  if (!commentsData) {
+    return;
+  }
+  const anchored = new Set<string>();
+  for (const [name, data] of parts) {
+    if (ANCHOR_PART.test(name)) {
+      collectCommentAnchors(utf8Decoder.decode(data), anchored);
+    }
+  }
+  let removed = false;
+  const droppedParaIds = new Set<string>();
+  const comments = utf8Decoder
+    .decode(commentsData)
+    .replace(/<w:comment\b[^>]*?(?:\/>|>[\s\S]*?<\/w:comment>)/g, element => {
+      const id = /\bw:id="([^"]*)"/.exec(element)?.[1];
+      if (id === undefined || !replacedAnchors.has(id) || anchored.has(id)) {
+        return element;
+      }
+      for (const m of element.matchAll(/\bw14:paraId="([^"]*)"/g)) {
+        droppedParaIds.add(m[1]);
+      }
+      removed = true;
+      return "";
+    });
+  if (!removed) {
+    return;
+  }
+  parts.set(paths.comments, utf8Encoder.encode(comments));
+  if (droppedParaIds.size === 0) {
+    return;
+  }
+  editPart(parts, paths.commentsExtended, xml =>
+    withoutCommentsExtendedEntries(xml, droppedParaIds)
+  );
+  const droppedDurableIds = new Set<string>();
+  editPart(parts, paths.commentsIds, xml =>
+    withoutCommentIdEntries(xml, droppedParaIds, droppedDurableIds)
+  );
+  if (droppedDurableIds.size > 0) {
+    editPart(parts, paths.commentsExtensible, xml =>
+      withoutCommentExtensibleEntries(xml, droppedDurableIds)
+    );
+  }
+}
+
+/** Add the id of every comment anchor (range start or end, reference mark) in `xml` to `out`. */
+function collectCommentAnchors(xml: string, out: Set<string>): void {
+  for (const m of xml.matchAll(
+    /<w:comment(?:Reference|RangeStart|RangeEnd)\b[^>]*?\bw:id="([^"]*)"/g
+  )) {
+    out.add(m[1]);
+  }
+}
+
+/** `commentsExtended.xml` without the entries of `paraIds`, and without reply links to them. */
+function withoutCommentsExtendedEntries(xml: string, paraIds: ReadonlySet<string>): string {
+  return xml
+    .replace(/<w15:commentEx\b[^>]*\/>/g, element => {
+      const paraId = /\bw15:paraId="([^"]*)"/.exec(element)?.[1];
+      return paraId !== undefined && paraIds.has(paraId) ? "" : element;
+    })
+    .replace(/\s+w15:paraIdParent="([^"]*)"/g, (attr, parent: string) =>
+      paraIds.has(parent) ? "" : attr
+    );
+}
+
+/**
+ * `commentsIds.xml` without the entries of `paraIds`; the durable ids of the
+ * entries removed are added to `durableIds`.
+ */
+function withoutCommentIdEntries(
+  xml: string,
+  paraIds: ReadonlySet<string>,
+  durableIds: Set<string>
+): string {
+  return xml.replace(/<w16cid:commentId\b[^>]*\/>/g, element => {
+    const paraId = /\bw16cid:paraId="([^"]*)"/.exec(element)?.[1];
+    if (paraId === undefined || !paraIds.has(paraId)) {
+      return element;
+    }
+    const durableId = /\bw16cid:durableId="([^"]*)"/.exec(element)?.[1];
+    if (durableId !== undefined) {
+      durableIds.add(durableId);
+    }
+    return "";
+  });
+}
+
+/** `commentsExtensible.xml` without the entries of `durableIds`. */
+function withoutCommentExtensibleEntries(xml: string, durableIds: ReadonlySet<string>): string {
+  return xml.replace(
+    /<w16cex:commentExtensible\b[^>]*?(?:\/>|>[\s\S]*?<\/w16cex:commentExtensible>)/g,
+    element => {
+      const durableId = /\bw16cex:durableId="([^"]*)"/.exec(element)?.[1];
+      return durableId !== undefined && durableIds.has(durableId) ? "" : element;
+    }
+  );
+}
+
+/** Where the comment parts are, by the document's relationships, else by their usual names. */
+function commentPartPaths(
+  parts: ReadonlyMap<string, Uint8Array>
+): Record<keyof typeof COMMENT_PARTS, string> {
+  const paths: Record<keyof typeof COMMENT_PARTS, string> = { ...COMMENT_PARTS };
+  const rels = parts.get("word/_rels/document.xml.rels");
+  if (rels) {
+    for (const m of utf8Decoder.decode(rels).matchAll(/<Relationship\b[^>]*>/g)) {
+      const type = /\bType="[^"]*\/([^"/]+)"/.exec(m[0])?.[1];
+      const target = /\bTarget="([^"]*)"/.exec(m[0])?.[1];
+      if (type && target && type in paths && !/^[a-z]+:/i.test(target)) {
+        paths[type as keyof typeof COMMENT_PARTS] = target.startsWith("/")
+          ? target.slice(1)
+          : `word/${target}`;
+      }
+    }
+  }
+  return paths;
+}
+
+function editPart(
+  parts: Map<string, Uint8Array>,
+  path: string,
+  edit: (xml: string) => string
+): void {
+  const data = parts.get(path);
+  if (data) {
+    parts.set(path, utf8Encoder.encode(edit(utf8Decoder.decode(data))));
+  }
+}
+
+function renderBodyOnly(body: readonly BodyContent[], reserved: ReservedRangeIds): Uint8Array {
   const minimalDoc: DocxDocument = { body } as DocxDocument;
-  const ctx = createRenderContext();
+  const ctx = createRenderContext(reserved);
 
   const xml = new XmlWriter();
   renderDocument(xml, minimalDoc, ctx);
-  return utf8Encoder.encode(xml.toString());
+  return utf8Encoder.encode(closeStoryPart(xml.toString(), ctx));
 }
 
 /**
@@ -250,7 +728,8 @@ function renderBodyOnly(body: readonly BodyContent[]): Uint8Array {
  */
 function replaceBodyChildrenInDocumentXml(
   original: Uint8Array,
-  body: readonly BodyContent[]
+  body: readonly BodyContent[],
+  reserved: ReservedRangeIds
 ): Uint8Array {
   const text = utf8Decoder.decode(original);
 
@@ -261,7 +740,7 @@ function replaceBodyChildrenInDocumentXml(
   // scan.
   const range = findBodyTagRange(text);
   if (!range) {
-    return renderBodyOnly(body);
+    return renderBodyOnly(body, reserved);
   }
   const { bodyStart, bodyCloseIdx } = range;
 
@@ -279,12 +758,12 @@ function replaceBodyChildrenInDocumentXml(
 
   // Render new body children (no document/body wrappers, no sectPr — we add
   // back the preserved one ourselves).
-  const ctx = createRenderContext();
+  const ctx = createRenderContext(reserved);
   const xml = new XmlWriter();
   for (const block of body) {
     renderBodyContent(xml, block, ctx);
   }
-  const newInner = xml.toString() + trailingSectPr;
+  const newInner = closeStoryPart(xml.toString(), ctx) + trailingSectPr;
 
   const updated = text.slice(0, bodyStart) + newInner + text.slice(bodyCloseIdx);
   return utf8Encoder.encode(updated);
@@ -385,7 +864,8 @@ function findBodyTagRange(
 
 function renderHeaderFooter(
   kind: "header" | "footer",
-  children: readonly (Paragraph | Table)[]
+  children: readonly (Paragraph | Table)[],
+  reserved: ReservedRangeIds
 ): Uint8Array {
   // Reject content that requires fresh part-level relationships (images,
   // external hyperlinks, charts, alt-chunks, embedded fonts, etc.). The
@@ -396,13 +876,20 @@ function renderHeaderFooter(
   // flow instead.
   assertNoExternalReferences(children, kind);
 
+  const ctx = createRenderContext(reserved);
+  const helpers = renderHelpersFor(ctx);
   const xml = new XmlWriter();
-  if (kind === "header") {
-    renderHeader(xml, { children });
-  } else {
-    renderFooter(xml, { children });
+  const previous = enterRevisionIds(ctx.revisionIds);
+  try {
+    if (kind === "header") {
+      renderHeader(xml, { children }, helpers);
+    } else {
+      renderFooter(xml, { children }, helpers);
+    }
+  } finally {
+    exitRevisionIds(previous);
   }
-  return utf8Encoder.encode(xml.toString());
+  return utf8Encoder.encode(closeStoryPart(xml.toString(), helpers));
 }
 
 /**

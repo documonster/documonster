@@ -13,7 +13,7 @@ import { extractAll } from "@archive/unzip/extract";
  * bottom is, by asserting that a valid stream produces nothing.
  */
 import { ZipArchive } from "@archive/zip";
-import { Cell, Workbook, Worksheet } from "@excel";
+import { Cell, ConditionalFormatting, Workbook } from "@excel";
 import { validateXlsbBuffer, validateXlsbPart } from "@excel/utils/xlsb-validator";
 import type { XlsbProblemKind } from "@excel/utils/xlsb-validator/types";
 import { encodeBiffRecord, encodeRange, iterateBiffRecords } from "@excel/xlsb/binary";
@@ -547,7 +547,7 @@ describe("records every Excel-authored workbook contains", () => {
       ])
     );
 
-    const result = await validateXlsbBuffer(await archive.bytes(), { includeWarnings: true });
+    const result = await validateXlsbBuffer(await archive.toBuffer(), { includeWarnings: true });
     const missing = result.problems
       .filter(problem => problem.kind === "record-missing-required")
       .map(problem => problem.message);
@@ -603,7 +603,7 @@ describe("records every Excel-authored workbook contains", () => {
         ["BrtEndSheet"]
       ])
     );
-    const bytes = await archive.bytes();
+    const bytes = await archive.toBuffer();
     expect((await validateXlsbBuffer(bytes)).ok).toBe(true);
     expect((await validateXlsbBuffer(bytes, { includeWarnings: true })).ok).toBe(true);
   });
@@ -712,7 +712,7 @@ describe("payload lengths Excel never varies", () => {
       const workbook = Workbook.create();
       const sheet = Workbook.addWorksheet(workbook, "S");
       Cell.setValue(sheet, "A1", 1);
-      Worksheet.addConditionalFormatting(sheet, {
+      ConditionalFormatting.add(sheet, {
         ref: "A1",
         rules: [
           { type: "expression", priority: 1, formulae: ["TRUE"], style: { font: { bold: true } } }
@@ -738,7 +738,7 @@ describe("payload lengths Excel never varies", () => {
       for (const [name, entry] of parts) {
         archive.add(name, name === "xl/styles.bin" ? patched : entry.data);
       }
-      const report = await validateXlsbBuffer(await archive.bytes());
+      const report = await validateXlsbBuffer(await archive.toBuffer());
       expect(report.problems.map(problem => problem.kind)).toContain("index-dxf-out-of-range");
     });
   });

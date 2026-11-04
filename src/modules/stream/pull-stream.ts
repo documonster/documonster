@@ -5,11 +5,20 @@
  * Works identically in both browser and Node.js environments.
  */
 
-import type { IPullStream, PullStreamOptions } from "@stream/types";
+import { StreamTypeError } from "@stream/errors";
+import type { IPullStream, PullStreamOptions, PullUntilOptions } from "@stream/types";
 import { uint8ArrayIndexOf } from "@utils/binary";
 import { EventEmitter } from "@utils/event-emitter";
+import { isRecordArgument } from "@utils/object";
 
 export type { PullStreamOptions } from "@stream/types";
+
+/** A byte array, recognised structurally so one from another realm is accepted too. */
+function isByteArray(value: unknown): value is Uint8Array {
+  return (
+    ArrayBuffer.isView(value) && (value as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT === 1
+  );
+}
 
 const EMPTY_U8 = new Uint8Array(0);
 
@@ -37,6 +46,13 @@ export class PullStream extends EventEmitter implements IPullStream {
 
   constructor(options: PullStreamOptions = {}) {
     super();
+    const hwm = options.highWaterMark;
+    if (hwm !== undefined && (typeof hwm !== "number" || Number.isNaN(hwm) || hwm < 0)) {
+      throw new StreamTypeError("a non-negative highWaterMark", String(hwm), {
+        field: "options.highWaterMark",
+        where: "Streams.PullStream"
+      });
+    }
     if (
       options.highWaterMark !== undefined &&
       options.highWaterMark > 0 &&
@@ -81,6 +97,12 @@ export class PullStream extends EventEmitter implements IPullStream {
    * `'drain'` event.
    */
   write(chunk: Uint8Array): boolean {
+    if (!isByteArray(chunk)) {
+      throw new StreamTypeError("a Uint8Array chunk", chunk === null ? "null" : typeof chunk, {
+        field: "chunk",
+        where: "Streams.PullStream#write"
+      });
+    }
     if (this._destroyed) {
       this.emit("error", new Error("Cannot write to destroyed stream"));
       return false;
@@ -198,22 +220,30 @@ export class PullStream extends EventEmitter implements IPullStream {
   }
 
   /**
-   * Pull exactly N bytes from buffer, or pull until pattern is found
+   * Pull exactly `size` bytes from the buffer.
    */
   pull(size: number): Promise<Uint8Array>;
+  /** @deprecated Use {@link pullUntil}, which takes `{ includePattern }`. Removed in 1.0. */
   pull(pattern: Uint8Array, includePattern?: boolean): Promise<Uint8Array>;
   pull(sizeOrPattern: number | Uint8Array, includePattern?: boolean): Promise<Uint8Array> {
     if (typeof sizeOrPattern === "number") {
       return this._pullSize(sizeOrPattern);
     }
-    return this._pullPattern(sizeOrPattern, includePattern ?? false);
+    return this._pullPattern(sizeOrPattern, includePattern ?? false, "Streams.PullStream#pull");
   }
 
   /**
-   * Pull until pattern is found (alias for pull(pattern, includePattern))
+   * Pull the bytes up to the first occurrence of `pattern`, which is consumed too; it is
+   * included in the result when `options.includePattern` is `true` (default `false`).
    */
-  pullUntil(pattern: Uint8Array, includePattern?: boolean): Promise<Uint8Array> {
-    return this._pullPattern(pattern, includePattern ?? false);
+  pullUntil(pattern: Uint8Array, options?: PullUntilOptions): Promise<Uint8Array>;
+  /** @deprecated Pass `{ includePattern }`. Removed in 1.0. */
+  pullUntil(pattern: Uint8Array, includePattern: boolean): Promise<Uint8Array>;
+  pullUntil(pattern: Uint8Array, options?: PullUntilOptions | boolean): Promise<Uint8Array> {
+    const includePattern = isRecordArgument(options)
+      ? (options as PullUntilOptions).includePattern
+      : (options as boolean | undefined);
+    return this._pullPattern(pattern, includePattern ?? false, "Streams.PullStream#pullUntil");
   }
 
   private _pullSize(size: number): Promise<Uint8Array> {
@@ -269,7 +299,20 @@ export class PullStream extends EventEmitter implements IPullStream {
     });
   }
 
-  private _pullPattern(pattern: Uint8Array, includePattern: boolean): Promise<Uint8Array> {
+  private _pullPattern(
+    pattern: Uint8Array,
+    includePattern: boolean,
+    where: string
+  ): Promise<Uint8Array> {
+    if (!isByteArray(pattern) || pattern.length === 0) {
+      return Promise.reject(
+        new StreamTypeError(
+          "a non-empty Uint8Array pattern",
+          pattern === null ? "null" : isByteArray(pattern) ? "an empty array" : typeof pattern,
+          { field: "pattern", where }
+        )
+      );
+    }
     return new Promise((resolve, reject) => {
       const patternLen = pattern.length;
       // Bytes past the read position already scanned without a match, so a

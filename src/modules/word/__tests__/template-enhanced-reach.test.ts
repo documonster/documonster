@@ -49,9 +49,13 @@ describe("fillTemplateEnhanced image reach", () => {
   it("substitutes an image in a top-level body paragraph", () => {
     const handle = Document.create();
     Document.addParagraph(handle, "{{%logo}}");
-    const filled = Template.fillTemplateEnhanced(Document.build(handle), {
-      logo: templateImage("logo.png")
-    });
+    const filled = Template.fill(
+      handle,
+      {
+        logo: templateImage("logo.png")
+      },
+      { richPlaceholders: true }
+    );
     expect(imageRuns(filled.body as readonly (Paragraph | Table)[])).toHaveLength(1);
     expect(filled.images).toHaveLength(1);
   });
@@ -59,9 +63,13 @@ describe("fillTemplateEnhanced image reach", () => {
   it("descends into a table cell", () => {
     const handle = Document.create();
     Document.addTable(handle, [["{{%logo}}", "Acme Ltd"]]);
-    const filled = Template.fillTemplateEnhanced(Document.build(handle), {
-      logo: templateImage("logo.png")
-    });
+    const filled = Template.fill(
+      handle,
+      {
+        logo: templateImage("logo.png")
+      },
+      { richPlaceholders: true }
+    );
     expect(imageRuns(filled.body as readonly (Paragraph | Table)[])).toHaveLength(1);
     expect(filled.images).toHaveLength(1);
     // The neighbouring cell is untouched.
@@ -74,13 +82,17 @@ describe("fillTemplateEnhanced image reach", () => {
       type: "table",
       rows: [{ cells: [{ content: [Build.textParagraph("{{%logo}}")] }] }]
     };
-    Document.addTableElement(handle, {
+    Document.addTable(handle, {
       type: "table",
       rows: [{ cells: [{ content: [inner] }] }]
     });
-    const filled = Template.fillTemplateEnhanced(Document.build(handle), {
-      logo: templateImage("logo.png")
-    });
+    const filled = Template.fill(
+      handle,
+      {
+        logo: templateImage("logo.png")
+      },
+      { richPlaceholders: true }
+    );
     expect(imageRuns(filled.body as readonly (Paragraph | Table)[])).toHaveLength(1);
   });
 
@@ -90,9 +102,13 @@ describe("fillTemplateEnhanced image reach", () => {
     Document.setHeader(handle, "default", { children: [Build.textParagraph("{{%mark}}")] });
     Document.setFooter(handle, "default", { children: [Build.textParagraph("{{%mark}}")] });
 
-    const filled = Template.fillTemplateEnhanced(Document.build(handle), {
-      mark: templateImage("mark.png")
-    });
+    const filled = Template.fill(
+      handle,
+      {
+        mark: templateImage("mark.png")
+      },
+      { richPlaceholders: true }
+    );
 
     const header = [...(filled.headers?.values() ?? [])][0];
     const footer = [...(filled.footers?.values() ?? [])][0];
@@ -109,9 +125,13 @@ describe("fillTemplateEnhanced image reach", () => {
     const handle = Document.create();
     Document.addParagraph(handle, "Body");
     Document.setHeader(handle, "default", { children: [Build.textParagraph("{{%logo}}")] });
-    const filled = Template.fillTemplateEnhanced(Document.build(handle), {
-      logo: templateImage("logo.png")
-    });
+    const filled = Template.fill(
+      handle,
+      {
+        logo: templateImage("logo.png")
+      },
+      { richPlaceholders: true }
+    );
     expect(imageRuns(filled.body as readonly (Paragraph | Table)[])).toHaveLength(0);
     expect(filled.images, "the header's picture was not registered").toHaveLength(1);
   });
@@ -120,12 +140,12 @@ describe("fillTemplateEnhanced image reach", () => {
     const handle = Document.create();
     Document.addParagraph(handle, "{{%logo}}");
     Document.setHeader(handle, "default", { children: [Build.textParagraph("{{%logo}}")] });
-    const original = Document.build(handle);
+    const original = handle;
     const snapshot = JSON.stringify(original, (key, value) =>
       key === "data" ? "<bytes>" : (value as unknown)
     );
 
-    Template.fillTemplateEnhanced(original, { logo: templateImage("logo.png") });
+    Template.fill(original, { logo: templateImage("logo.png") }, { richPlaceholders: true });
 
     expect(
       JSON.stringify(original, (key, value) => (key === "data" ? "<bytes>" : (value as unknown))),
@@ -141,10 +161,14 @@ describe("fillTemplateEnhanced image reach", () => {
     Document.addParagraph(handle, "{{%.photo}}");
     Document.addParagraph(handle, "{{/each}}");
     expect(() =>
-      Template.fillTemplateEnhanced(Document.build(handle), {
-        items: [{}],
-        ".photo": templateImage("p.png")
-      })
+      Template.fill(
+        handle,
+        {
+          items: [{}],
+          ".photo": templateImage("p.png")
+        },
+        { richPlaceholders: true }
+      )
     ).toThrow(/Unresolved/);
   });
 });

@@ -33,15 +33,42 @@ export function parseDate(text: string): number | undefined {
   if (!match) {
     return undefined;
   }
-  const value = Date.UTC(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3]),
-    Number(match[4] ?? 0),
-    Number(match[5] ?? 0),
-    Number(match[6] ?? 0)
-  );
-  return Number.isFinite(value) ? value : undefined;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(part => Number(part ?? 0));
+  return utcDate(year, month, day, hour, minute, second);
+}
+
+/**
+ * The UTC time of a calendar date, or `undefined` when no such date exists.
+ *
+ * `Date.UTC` rolls an out-of-range field over into the next one — month 13 is January of
+ * the following year, day 45 is a fortnight into the next month — so a date that does not
+ * exist used to be drawn, confidently, somewhere else. It is a date only if every field
+ * reads back as written. `setUTCFullYear` rather than `Date.UTC`, which reads a year below
+ * 100 as 19xx.
+ */
+function utcDate(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number
+): number | undefined {
+  const date = new Date(0);
+  date.setUTCFullYear(year, month - 1, day);
+  date.setUTCHours(hour, minute, second, 0);
+  const value = date.getTime();
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+  const exists =
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute &&
+    date.getUTCSeconds() === second;
+  return exists ? value : undefined;
 }
 
 /**
@@ -128,15 +155,7 @@ export function parseWithFormat(text: string, format: string): number | undefine
   if (field.YYYY === undefined || field.MM === undefined || field.DD === undefined) {
     return undefined;
   }
-  const value = Date.UTC(
-    field.YYYY,
-    field.MM - 1,
-    field.DD,
-    field.HH ?? 0,
-    field.mm ?? 0,
-    field.ss ?? 0
-  );
-  return Number.isFinite(value) ? value : undefined;
+  return utcDate(field.YYYY, field.MM, field.DD, field.HH ?? 0, field.mm ?? 0, field.ss ?? 0);
 }
 
 /**

@@ -12,7 +12,7 @@ import { stat, writeFile } from "node:fs/promises";
 
 import { Pdf } from "documonster/pdf";
 import { Io } from "documonster/word";
-import { markdownToDocx } from "documonster/word/markdown";
+import { WordMarkdown } from "documonster/word/markdown";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -112,7 +112,7 @@ export const docWriteTool = defineTool({
 
     // markdownToDocx is async — verified; treating it as synchronous yields an
     // empty object that fails much later inside the packager.
-    const doc = await markdownToDocx(prepared.markdown, {
+    const doc = await WordMarkdown.toDocx(prepared.markdown, {
       ...("resolveImage" in prepared && prepared.resolveImage !== undefined
         ? { resolveImage: prepared.resolveImage }
         : {})

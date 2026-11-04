@@ -239,8 +239,8 @@
           const ws = Workbook.addWorksheet(wb, "Sample Data");
 
           // Headers, keys and widths in one declaration. `key` is what
-          // `Worksheet.addRow` matches object properties against.
-          Worksheet.setColumns(ws, [
+          // `Row.add` matches object properties against.
+          Column.setDefinitions(ws, [
             { header: "ID", key: "id", width: 10 },
             { header: "Name", key: "name", width: 20 },
             { header: "Email", key: "email", width: 30 },
@@ -293,7 +293,7 @@
               date: new Date("2024-05-01")
             }
           ];
-          for (const row of data) Worksheet.addRow(ws, row);
+          for (const row of data) Row.add(ws, row);
 
           // Number formats, addressed by column key
           Column.setNumFmt(ws, "amount", "$#,##0.00");
@@ -326,14 +326,13 @@
           log(`Reading file: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
 
           const arrayBuffer = await file.arrayBuffer();
-          const { Workbook, Worksheet, Row, Cell } = Documonster.Excel;
-          const wb = Workbook.create();
-          await Workbook.read(wb, arrayBuffer);
+          const { Workbook, Worksheet, Row, Column, Cell } = Documonster.Excel;
+          const wb = await Workbook.read(arrayBuffer);
 
           let html = "<h4>Worksheets:</h4>";
-          for (const ws of Workbook.getWorksheets(wb)) {
-            const rows = Worksheet.rowCount(ws);
-            const cols = Worksheet.columnCount(ws);
+          for (const ws of Workbook.listWorksheets(wb)) {
+            const rows = Row.getCount(ws);
+            const cols = Column.getCount(ws);
             const name = Worksheet.getName(ws);
             html += `<strong>${name}</strong> (${rows} rows, ${cols} cols)<br>`;
             log(`Sheet "${name}": ${rows} rows, ${cols} cols`);
@@ -341,10 +340,10 @@
             // Show first 6 rows
             html += '<table style="border-collapse:collapse;margin:10px 0;font-size:12px;">';
             let shown = 0;
-            Worksheet.eachRow(ws, (_row, rowNumber) => {
+            Row.each(ws, rowNumber => {
               if (shown++ >= 6) return;
               html += "<tr>";
-              Row.eachCell(ws, rowNumber, (_cell, colNumber) => {
+              Row.eachAddress(ws, rowNumber, (_address, _row, colNumber) => {
                 const style = rowNumber === 1 ? "background:#e5e7eb;font-weight:bold;" : "";
                 const text = Cell.getText(ws, rowNumber, colNumber);
                 html += `<td style="border:1px solid #d1d5db;padding:4px 8px;${style}">${text}</td>`;
@@ -376,7 +375,7 @@
 
           log("Applying password protection (SHA-512)...");
           const began = performance.now();
-          await Worksheet.protect(ws, "test123", { sheet: true, formatCells: false });
+          await Worksheet.protect(ws, { password: "test123", sheet: true, formatCells: false });
           const protectTime = (performance.now() - began).toFixed(0);
           log(`Protection applied in ${protectTime}ms`);
 
@@ -413,8 +412,7 @@
 
           // Read back
           log("Reading from buffer...");
-          const wb2 = Workbook.create();
-          await Workbook.read(wb2, buffer);
+          const wb2 = await Workbook.read(buffer);
           const ws2 = Workbook.getWorksheet(wb2, "Test");
 
           // Verify

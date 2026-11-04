@@ -25,6 +25,7 @@ describe("Documonster.Mermaid IIFE bundle", () => {
     };
     mermaidToDrawList: (text: string) => { width: number; height: number; children: unknown[] };
     mermaidToSvg: (text: string) => string;
+    MermaidParseError: new (...args: never[]) => Error;
     MermaidSyntaxError: new (...args: never[]) => Error;
   };
 
@@ -39,7 +40,8 @@ describe("Documonster.Mermaid IIFE bundle", () => {
     expect(typeof Mermaid.layoutFlowchart).toBe("function");
     expect(typeof Mermaid.mermaidToDrawList).toBe("function");
     expect(typeof Mermaid.mermaidToSvg).toBe("function");
-    expect(typeof Mermaid.MermaidSyntaxError).toBe("function");
+    expect(typeof Mermaid.MermaidParseError).toBe("function");
+    expect(Mermaid.MermaidSyntaxError).toBe(Mermaid.MermaidParseError);
   });
 
   it("parses text into a syntax tree that says nothing about geometry", () => {
@@ -72,6 +74,6 @@ describe("Documonster.Mermaid IIFE bundle", () => {
   });
 
   it("reports a syntax error rather than drawing nonsense", () => {
-    expect(() => Mermaid.parseMermaid("not a diagram at all")).toThrow(Mermaid.MermaidSyntaxError);
+    expect(() => Mermaid.parseMermaid("not a diagram at all")).toThrow(Mermaid.MermaidParseError);
   });
 });

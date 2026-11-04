@@ -1,5 +1,4 @@
-import { createWorkbook, addWorksheet } from "@excel/core/workbook";
-import { Cell } from "@excel/index";
+import { Cell, Workbook } from "@excel/index";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
 import { PdfEditor } from "@pdf/builder/pdf-editor";
 import { PdfFontError } from "@pdf/errors";
@@ -409,8 +408,8 @@ describe("Horizontal Metrics", () => {
     // damage survived: it never shows up in line lengths, only in glyphs
     // drifting inside their own advance.
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Bearings");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Bearings");
     Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, { font: buildBearingTtf() });
@@ -427,8 +426,8 @@ describe("Horizontal Metrics", () => {
 
   it("keeps the bearings of a source font that stores them in a tail", async () => {
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Bearings");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Bearings");
     Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, { font: buildBearingTtf({ numHMetrics: 3 }) });
@@ -447,8 +446,8 @@ describe("Horizontal Metrics", () => {
     // they still agree afterwards is what proves the ink lands at `pen + lsb`
     // rather than under some other glyph's bearing.
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Bearings");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Bearings");
     Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, {
@@ -469,8 +468,8 @@ describe("Horizontal Metrics", () => {
     // Every outline in the fixture is 100 units wide, so the extremes follow
     // from the three glyphs that survive: [.notdef, A, B].
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Bearings");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Bearings");
     Cell.setValue(ws, "A1", "AB");
 
     const source = buildTtfWithCmap(SPARSE_SEGMENTS, 10, {
@@ -501,8 +500,8 @@ describe("Horizontal Metrics", () => {
     // for it and has to be measured. The three bearing-derived fields are not
     // defined without contours, and keep whatever the source font said.
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Empty");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Empty");
     Cell.setValue(ws, "A1", "AB");
 
     // No outlineXMins, so every glyph is empty.
@@ -526,8 +525,8 @@ describe("Horizontal Metrics", () => {
     // may carry a description and still have none — only instructions on its
     // phantom points — and its bounding box says nothing about ink.
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Zero");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Zero");
     Cell.setValue(ws, "A1", "AB");
 
     const source = buildTtfWithCmap(SPARSE_SEGMENTS, 10, {
@@ -549,8 +548,8 @@ describe("Horizontal Metrics", () => {
     // loca pointing past glyf, that range would be the table that follows it —
     // so the clamp in the parser is what keeps foreign bytes out of the PDF.
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Broken");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Broken");
     Cell.setValue(ws, "A1", "AB");
 
     const source = buildTtfWithCmap([{ start: 0x41, end: 0x42, delta: -0x40 }], 3, {
@@ -580,8 +579,8 @@ describe("Font Integration with excelToPdf", () => {
 
     const ttfData = buildMinimalTtf();
 
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Test");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Test");
     Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, { font: ttfData });
@@ -610,8 +609,8 @@ describe("Font Integration with excelToPdf", () => {
 
     const ttfData = buildSparseGidTtf();
 
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Test");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Test");
     Cell.setValue(ws, "A1", "AB");
 
     const pdf = await excelToPdf(wb, { font: ttfData });
@@ -626,8 +625,8 @@ describe("Font Integration with excelToPdf", () => {
 
   it("writes a valid whole-font checksum for the embedded subset", async () => {
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Test");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Test");
     Cell.setValue(ws, "A1", "AB");
     const pdf = await excelToPdf(wb, { font: buildMinimalTtf() });
 
@@ -642,8 +641,8 @@ describe("Font Integration with excelToPdf", () => {
 
   it("should keep aliased Unicode code points as distinct CIDs", async () => {
     const { excelToPdf } = await import("@pdf/excel-bridge");
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Test");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Test");
     Cell.setValue(ws, "A1", "AΑ");
 
     const pdf = await excelToPdf(wb, { font: buildAliasedGidTtf() });
@@ -686,8 +685,8 @@ describe("Font Integration with excelToPdf", () => {
       { advanceWidths: [500, 600, 600, 600] }
     );
     const text = "A\ufe0f❤\u200d☀";
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Sequences");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Sequences");
     Cell.setValue(ws, "A1", text);
 
     const pdf = await excelToPdf(wb, { font });
@@ -712,8 +711,8 @@ describe("Font Integration with excelToPdf", () => {
       { advanceWidths: [500, 600, 550, 0] }
     );
     const text = "AA\ufe0féée\u0301";
-    const wb = createWorkbook();
-    const ws = addWorksheet(wb, "Aliases");
+    const wb = Workbook.create();
+    const ws = Workbook.addWorksheet(wb, "Aliases");
     Cell.setValue(ws, "A1", text);
 
     const pdf = await excelToPdf(wb, { font });
@@ -740,7 +739,7 @@ describe("Font Integration with excelToPdf", () => {
     const doc = new Pdf.Builder({ fonts: { default: { regular: font } } });
     doc.addPage().drawText(text, { x: 72, y: 720 });
 
-    const roundtrip = await Pdf.read(await doc.build());
+    const roundtrip = await Pdf.extract(await doc.toBuffer());
     expect(roundtrip.text).toContain(text);
   });
 });
@@ -901,7 +900,7 @@ describe("auto-discovered fallback fonts", () => {
     page.drawText("italic", { x: 72, y: 700, italic: true });
     page.drawText("mono", { x: 72, y: 680, fontFamily: "Courier New" });
     page.drawText("arrow \u2192", { x: 72, y: 660 });
-    const bytes = await doc.build();
+    const bytes = await doc.toBuffer();
     const text = Buffer.from(bytes).toString("latin1");
 
     // All three standard faces must survive alongside whatever draws the arrow.
@@ -941,7 +940,7 @@ describe("fallback fonts and grapheme clusters", () => {
     const { Pdf } = await import("@pdf/index");
     const doc = new Pdf.Builder();
     doc.addPage().drawText("A\uFE0F\u2764\uFE0F ok", { x: 72, y: 700, fontSize: 12 });
-    const roundtrip = await Pdf.read(await doc.build());
+    const roundtrip = await Pdf.extract(await doc.toBuffer());
     // The heart survives; it used to encode as `.notdef` and extract as U+FFFD.
     expect(roundtrip.text).toContain("\u2764");
     expect(roundtrip.text).not.toContain("\uFFFD");
@@ -1073,8 +1072,8 @@ describe("embedFont selects a face inside a collection", () => {
     const font = singleFace();
     const source = new PdfDocumentBuilder();
     source.addPage({ width: 200, height: 200 });
-    const blank = await source.build();
-    expect(() => PdfEditor.load(blank).embedFont(font)).not.toThrow();
-    expect(() => PdfEditor.load(blank).embedFont(font, 3)).toThrow(/collection index/i);
+    const blank = await source.toBuffer();
+    expect(() => PdfEditor.read(blank).embedFont(font)).not.toThrow();
+    expect(() => PdfEditor.read(blank).embedFont(font, 3)).toThrow(/collection index/i);
   });
 });

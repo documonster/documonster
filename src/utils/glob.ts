@@ -221,7 +221,7 @@ export function matchGlob(filePath: string, pattern: string, options?: { dot?: b
  */
 export function matchGlobAny(
   filePath: string,
-  patterns: string[],
+  patterns: readonly string[],
   options?: { dot?: boolean }
 ): boolean {
   if (patterns.length === 0) {

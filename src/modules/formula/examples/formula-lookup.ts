@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -65,7 +65,7 @@ Cell.setValue(ws, "G3", { formula: "ADDRESS(G1, G2)" }); // "$E$1"
 Cell.setValue(ws, "G4", { formula: "ROWS(A2:C4)" }); // 3
 Cell.setValue(ws, "G5", { formula: "COLUMNS(A2:C4)" }); // 3
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "G1", "G2", "G3", "G4", "G5"]) {
   console.log(

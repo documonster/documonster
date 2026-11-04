@@ -331,7 +331,7 @@ describe("TAR byte-for-byte consistency", () => {
       }
       return archive;
     };
-    const bytesOutput = await createArchive().bytes();
+    const bytesOutput = await createArchive().toBuffer();
     const streamOutput = await collectStream(createArchive().stream());
     expect(streamOutput).toEqual(bytesOutput);
   });
@@ -360,7 +360,7 @@ describe("Edge Cases", () => {
       for (const path of specialPaths) {
         archive.add(path, textEncoder.encode(`content of ${path}`));
       }
-      const extracted = await zipAdapter.extract(await archive.bytes());
+      const extracted = await zipAdapter.extract(await archive.toBuffer());
       expect(extracted.size).toBe(specialPaths.length);
       for (const path of specialPaths) {
         expect(extracted.has(path), `Missing: ${path}`).toBe(true);
@@ -372,7 +372,7 @@ describe("Edge Cases", () => {
       for (const path of specialPaths) {
         archive.add(path, `content of ${path}`);
       }
-      const extracted = await tarAdapter.extract(await archive.bytes());
+      const extracted = await tarAdapter.extract(await archive.toBuffer());
       expect(extracted.size).toBe(specialPaths.length);
       for (const path of specialPaths) {
         expect(extracted.has(path), `Missing: ${path}`).toBe(true);
@@ -386,7 +386,7 @@ describe("Edge Cases", () => {
     it("ZIP should handle deeply nested paths (20 levels)", async () => {
       const archive = zip();
       archive.add(deepPath, textEncoder.encode("deep"));
-      const entry = await unzip(await archive.bytes()).get(deepPath);
+      const entry = await unzip(await archive.toBuffer()).get(deepPath);
       expect(entry).not.toBeNull();
       expect(new TextDecoder().decode(await entry!.bytes())).toBe("deep");
     });
@@ -394,7 +394,7 @@ describe("Edge Cases", () => {
     it("TAR should handle deeply nested paths (20 levels)", async () => {
       const archive = new TarArchive();
       archive.add(deepPath, "deep");
-      const parsed = parseTar(await archive.bytes());
+      const parsed = parseTar(await archive.toBuffer());
       expect(parsed[0].info.path).toBe(deepPath);
       expect(await parsed[0].text()).toBe("deep");
     });
@@ -405,7 +405,7 @@ describe("Edge Cases", () => {
       const path = "dir/".repeat(25) + "file.txt"; // ~104 chars
       const archive = new TarArchive();
       archive.add(path, "content");
-      const parsed = parseTar(await archive.bytes());
+      const parsed = parseTar(await archive.toBuffer());
       expect(parsed[0].info.path).toBe(path);
     });
 
@@ -413,7 +413,7 @@ describe("Edge Cases", () => {
       const path = "a".repeat(200) + ".txt";
       const archive = new TarArchive();
       archive.add(path, "content");
-      const parsed = parseTar(await archive.bytes());
+      const parsed = parseTar(await archive.toBuffer());
       expect(parsed[0].info.path).toBe(path);
     });
 
@@ -422,7 +422,7 @@ describe("Edge Cases", () => {
       expect(path.length).toBeGreaterThan(500);
       const archive = new TarArchive();
       archive.add(path, "content");
-      const parsed = parseTar(await archive.bytes());
+      const parsed = parseTar(await archive.toBuffer());
       expect(parsed[0].info.path).toBe(path);
     });
   });
@@ -450,14 +450,14 @@ describe("Edge Cases", () => {
       it(`ZIP should handle: ${name}`, async () => {
         const archive = zip();
         archive.add("test.bin", content);
-        const extracted = await zipAdapter.extract(await archive.bytes());
+        const extracted = await zipAdapter.extract(await archive.toBuffer());
         expect(extracted.get("test.bin")).toEqual(content);
       });
 
       it(`TAR should handle: ${name}`, async () => {
         const archive = new TarArchive();
         archive.add("test.bin", content);
-        const extracted = await tarAdapter.extract(await archive.bytes());
+        const extracted = await tarAdapter.extract(await archive.toBuffer());
         expect(extracted.get("test.bin")).toEqual(content);
       });
     }
@@ -469,14 +469,14 @@ describe("Edge Cases", () => {
     it("ZIP should preserve whitespace-only content", async () => {
       const archive = zip();
       archive.add("ws.txt", textEncoder.encode(whitespaceContent));
-      const entry = await unzip(await archive.bytes()).get("ws.txt");
+      const entry = await unzip(await archive.toBuffer()).get("ws.txt");
       expect(new TextDecoder().decode(await entry!.bytes())).toBe(whitespaceContent);
     });
 
     it("TAR should preserve whitespace-only content", async () => {
       const archive = new TarArchive();
       archive.add("ws.txt", whitespaceContent);
-      const parsed = parseTar(await archive.bytes());
+      const parsed = parseTar(await archive.toBuffer());
       expect(await parsed[0].text()).toBe(whitespaceContent);
     });
   });
@@ -490,7 +490,7 @@ describe("Edge Cases", () => {
       zipArchive.add("a.txt", content);
       zipArchive.add("b.txt", content);
       zipArchive.add("c.txt", content);
-      const zipExtracted = await zipAdapter.extract(await zipArchive.bytes());
+      const zipExtracted = await zipAdapter.extract(await zipArchive.toBuffer());
       expect(zipExtracted.size).toBe(3);
       expect(zipExtracted.get("a.txt")).toEqual(content);
       expect(zipExtracted.get("b.txt")).toEqual(content);
@@ -501,7 +501,7 @@ describe("Edge Cases", () => {
       tarArchive.add("a.txt", content);
       tarArchive.add("b.txt", content);
       tarArchive.add("c.txt", content);
-      const tarExtracted = await tarAdapter.extract(await tarArchive.bytes());
+      const tarExtracted = await tarAdapter.extract(await tarArchive.toBuffer());
       expect(tarExtracted.size).toBe(3);
       expect(tarExtracted.get("a.txt")).toEqual(content);
       expect(tarExtracted.get("b.txt")).toEqual(content);
@@ -545,7 +545,7 @@ describe("Performance Tests", () => {
     const content = generateRandomBytes(1024 * 1024);
     const archive = zip();
     archive.add("large.bin", content);
-    const extracted = await zipAdapter.extract(await archive.bytes());
+    const extracted = await zipAdapter.extract(await archive.toBuffer());
     expect(extracted.get("large.bin")).toEqual(content);
   });
 
@@ -553,7 +553,7 @@ describe("Performance Tests", () => {
     const content = generateRandomBytes(1024 * 1024);
     const archive = new TarArchive();
     archive.add("large.bin", content);
-    const extracted = await tarAdapter.extract(await archive.bytes());
+    const extracted = await tarAdapter.extract(await archive.toBuffer());
     expect(extracted.get("large.bin")).toEqual(content);
   });
 
@@ -562,7 +562,7 @@ describe("Performance Tests", () => {
     const content = new Uint8Array(100 * 1024).fill(0x41); // 100KB of 'A'
     const archive = zip();
     archive.add("compressible.txt", content);
-    const archiveBytes = await archive.bytes();
+    const archiveBytes = await archive.toBuffer();
 
     // Verify compression actually happened
     expect(archiveBytes.length).toBeLessThan(content.length / 10);
@@ -582,7 +582,7 @@ describe("ZIP Compression Levels", () => {
   it("level 0 (store) should not compress", async () => {
     const archive = zip({ level: 0 });
     archive.add("test.txt", content);
-    const bytes = await archive.bytes();
+    const bytes = await archive.toBuffer();
     // Store mode: archive should be larger than content (headers + content)
     expect(bytes.length).toBeGreaterThan(content.length);
   });
@@ -590,11 +590,11 @@ describe("ZIP Compression Levels", () => {
   it("level 9 (max) should produce smaller output than level 1", async () => {
     const archive1 = zip({ level: 1 });
     archive1.add("test.txt", content);
-    const bytes1 = await archive1.bytes();
+    const bytes1 = await archive1.toBuffer();
 
     const archive9 = zip({ level: 9 });
     archive9.add("test.txt", content);
-    const bytes9 = await archive9.bytes();
+    const bytes9 = await archive9.toBuffer();
 
     expect(bytes9.length).toBeLessThanOrEqual(bytes1.length);
 

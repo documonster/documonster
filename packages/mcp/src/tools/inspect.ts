@@ -14,7 +14,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 import { Csv } from "documonster/csv";
 import { Image, Workbook } from "documonster/excel";
 import { Pdf } from "documonster/pdf";
@@ -267,9 +267,9 @@ async function describeWorkbook(resolved: string, config: ServerConfig): Promise
     ];
   }
 
-  const wb = Workbook.create();
+  let wb: Workbook.Handle;
   try {
-    await Workbook.readFile(wb, resolved);
+    wb = await Workbook.readFile(resolved);
   } catch (cause) {
     return [
       `This looks like an Excel workbook but could not be parsed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -277,7 +277,7 @@ async function describeWorkbook(resolved: string, config: ServerConfig): Promise
     ];
   }
 
-  const sheets = Workbook.getWorksheets(wb);
+  const sheets = Workbook.listWorksheets(wb);
   if (sheets.length === 0) {
     // A valid .xlsx always has at least one sheet, and a ZIP that merely looks
     // like one parses without error into an empty workbook — so report the
@@ -341,17 +341,17 @@ async function describeWordDocument(resolved: string, config: ServerConfig): Pro
     ];
   }
 
-  const headings = Query.getHeadings(doc);
-  const templateTags = Template.listTemplateTags(doc);
-  const formFields = Query.extractFormFields(doc);
+  const headings = Query.listHeadings(doc);
+  const templateTags = Template.listTags(doc);
+  const formFields = Query.listFormFields(doc);
   const revisions = Query.listRevisions(doc);
 
   const lines = [
     "## Word document",
     "",
-    `- pages: ${Layout.document(doc).pageCount} (computed, no Word needed)`,
-    `- paragraphs: ${Query.paragraphCount(doc)} · words: ${Query.countWords(doc)}`,
-    `- tables: ${Query.tableCount(doc)} · images: ${Query.listImages(doc).length}`,
+    `- pages: ${Layout.getPageMap(doc).pageCount} (computed, no Word needed)`,
+    `- paragraphs: ${Query.getParagraphCount(doc)} · words: ${Query.getWordCount(doc)}`,
+    `- tables: ${Query.getTableCount(doc)} · images: ${Query.listImages(doc).length}`,
     `- headings: ${headings.length}`
   ];
 
@@ -421,9 +421,9 @@ async function describePdf(resolved: string, config: ServerConfig): Promise<stri
     await handle.close();
   }
 
-  let result: Awaited<ReturnType<typeof Pdf.read>>;
+  let result: Awaited<ReturnType<typeof Pdf.extract>>;
   try {
-    result = await Pdf.read(new Uint8Array(bytes), {
+    result = await Pdf.extract(new Uint8Array(bytes), {
       extractText: true,
       extractImages: false,
       extractTables: false,
@@ -615,7 +615,7 @@ async function detectKind(filePath: string, head: Uint8Array): Promise<FileKind>
 /** Identify OOXML by the parts in the ZIP, never by the filename. */
 async function zipContentKind(filePath: string): Promise<FileKind> {
   try {
-    const archive = await ArchiveFile.fromFile(filePath);
+    const archive = await Archive.ArchiveFile.fromFile(filePath);
     const names = new Set((await archive.getEntries()).map(entry => entry.path));
     // **Either workbook part.** An XLSB stores its workbook in `xl/workbook.bin`; the XML name is the only one this
     // looked for, so a binary workbook was reported as a plain `zip` — and the surrounding comment's own rule ("never

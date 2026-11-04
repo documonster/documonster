@@ -11,7 +11,7 @@ import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { Chart, Workbook, Worksheet } from "documonster/excel";
+import { Chart, Row, Workbook, Worksheet } from "documonster/excel";
 import { Build, Convert, Document, Io, Query } from "documonster/word";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
@@ -86,7 +86,7 @@ describe("sheet_write — charts", () => {
     expect(ws).toBeDefined();
     // Chart.get lists a sheet's charts; a non-empty list proves the drawing
     // part was written and survived the round trip.
-    expect(Chart.get(ws!)).toHaveLength(1);
+    expect(Chart.list(ws!)).toHaveLength(1);
   });
 
   it("supports multiple series with names", async () => {
@@ -112,9 +112,9 @@ describe("sheet_write — charts", () => {
     });
 
     expect(report).toContain("2 series");
-    expect(Chart.get(Workbook.getWorksheet(await reopen(fx, "multi.xlsx"), "Sales")!)).toHaveLength(
-      1
-    );
+    expect(
+      Chart.list(Workbook.getWorksheet(await reopen(fx, "multi.xlsx"), "Sales")!)
+    ).toHaveLength(1);
   });
 
   it("accepts every offered chart type", async () => {
@@ -127,7 +127,7 @@ describe("sheet_write — charts", () => {
         ]
       });
       expect(
-        Chart.get(Workbook.getWorksheet(await reopen(fx, `${type}.xlsx`), "S")!),
+        Chart.list(Workbook.getWorksheet(await reopen(fx, `${type}.xlsx`), "S")!),
         type
       ).toHaveLength(1);
     }
@@ -148,7 +148,7 @@ describe("sheet_write — charts", () => {
       ]
     });
     expect(
-      Chart.get(Workbook.getWorksheet(await reopen(fx, "quoted.xlsx"), "My Sheet")!)
+      Chart.list(Workbook.getWorksheet(await reopen(fx, "quoted.xlsx"), "My Sheet")!)
     ).toHaveLength(1);
   });
 
@@ -230,7 +230,7 @@ describe("sheet_edit — add_chart", () => {
     });
 
     expect(report).toContain("added a pie chart");
-    expect(Chart.get(Workbook.getWorksheet(await reopen(fx, "book.xlsx"), "S")!)).toHaveLength(1);
+    expect(Chart.list(Workbook.getWorksheet(await reopen(fx, "book.xlsx"), "S")!)).toHaveLength(1);
   });
 
   it("reports a chart addition in dryRun without writing", async () => {
@@ -275,7 +275,7 @@ describe("sheet_write — generate", () => {
     const ws = Workbook.getWorksheet(await reopen(fx, "gen.xlsx"), "Test")!;
     const rows = Worksheet.toAoa(ws);
     expect(rows[0]).toEqual(["id", "email", "qty", "region"]);
-    expect(Worksheet.actualRowCount(ws)).toBe(51);
+    expect(Row.getActualCount(ws)).toBe(51);
     // Constraints must actually be honoured.
     for (const row of rows.slice(1)) {
       expect(Number(row[2])).toBeGreaterThanOrEqual(1);
@@ -308,7 +308,7 @@ describe("doc_convert — ODT", () => {
     const doc = Document.create();
     Document.addHeading(doc, "Policy", 1);
     Document.addParagraph(doc, "Body text here.");
-    await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+    await Io.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -322,8 +322,8 @@ describe("doc_convert — ODT", () => {
     // ODT is a ZIP package.
     expect([bytes[0], bytes[1]]).toEqual([0x50, 0x4b]);
     // And it reads back with its text.
-    const back = await Convert.readOdt(new Uint8Array(bytes));
-    expect(Query.extractText(back)).toContain("Policy");
+    const back = await Convert.fromOdt(new Uint8Array(bytes));
+    expect(Query.getText(back)).toContain("Policy");
   });
 
   it("converts odt back to docx and to md", async () => {
@@ -332,9 +332,7 @@ describe("doc_convert — ODT", () => {
     await run(docConvertTool, fx, { from: source, to: "round.odt" });
 
     await run(docConvertTool, fx, { from: "round.odt", to: "back.docx" });
-    expect(Query.extractText(await Io.readFile(path.join(fx.root, "back.docx")))).toContain(
-      "Policy"
-    );
+    expect(Query.getText(await Io.readFile(path.join(fx.root, "back.docx")))).toContain("Policy");
 
     await run(docConvertTool, fx, { from: "round.odt", to: "back.md" });
     expect(await readFile(path.join(fx.root, "back.md"), "utf8")).toContain("# Policy");
@@ -363,7 +361,7 @@ describe("doc_review — comparing two versions", () => {
     for (const paragraph of paragraphs) {
       Document.addParagraph(doc, paragraph);
     }
-    await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+    await Io.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -433,7 +431,7 @@ describe("doc_review — tracked changes", () => {
         Build.text(" days.")
       ]
     });
-    await Io.writeFile(Document.build(doc), path.join(fx.root, name));
+    await Io.writeFile(doc, path.join(fx.root, name));
     return name;
   }
 
@@ -465,7 +463,7 @@ describe("doc_review — tracked changes", () => {
 
     expect(report).toContain("Accepted");
     const doc = await Io.readFile(path.join(fx.root, file));
-    expect(Query.extractText(doc)).toContain("Payment due in 14 days.");
+    expect(Query.getText(doc)).toContain("Payment due in 14 days.");
     expect(Query.listRevisions(doc)).toEqual([]);
     await expect(stat(path.join(fx.root, `${file}.bak`))).resolves.toBeDefined();
   });
@@ -476,7 +474,7 @@ describe("doc_review — tracked changes", () => {
     await run(docReviewTool, fx, { path: file, apply: "reject-all", out: "out/rejected.docx" });
 
     const doc = await Io.readFile(path.join(fx.root, "out/rejected.docx"));
-    expect(Query.extractText(doc)).toContain("Payment due in 30 days.");
+    expect(Query.getText(doc)).toContain("Payment due in 30 days.");
     // The original was untouched, so no backup was taken.
     await expect(stat(path.join(fx.root, `${file}.bak`))).rejects.toThrow();
   });
@@ -485,7 +483,7 @@ describe("doc_review — tracked changes", () => {
     const fx = await fixture();
     const doc = Document.create();
     Document.addParagraph(doc, "Clean document.");
-    await Io.writeFile(Document.build(doc), path.join(fx.root, "clean.docx"));
+    await Io.writeFile(doc, path.join(fx.root, "clean.docx"));
 
     const text = await run(docReviewTool, fx, { path: "clean.docx" });
     expect(text).toContain("no tracked changes");

@@ -2,12 +2,14 @@
  * Word Example 23 — Font embedding & subsetting
  *
  * Covers:
- *   - embedFont with ODTTF obfuscation (default — required by Word for OEM fonts)
- *   - embedFont without obfuscation
- *   - embedFontFamily with regular + bold + italic variants in one call
- *   - addEmbeddedFonts: merging into the document model
- *   - subsetFont: shrink the embedded glyph set to characters actually used
- *   - addFont: register a font name without embedding the binary
+ *   - Font.embed with ODTTF obfuscation (default — required by Word for OEM fonts)
+ *   - Font.embed without obfuscation
+ *   - Font.embedFamily with regular + bold + italic variants in one call
+ *   - Font.addEmbedded: merging into the document model
+ *   - Font.subset: shrink the embedded glyph set to characters actually used
+ *   - Document.addFont: register a font name without embedding the binary
+ *   - Font.obfuscate / deobfuscate / generateObfuscationKey: the ODTTF
+ *     obfuscation primitives behind Font.embed
  *
  * Note: Real-world usage requires a valid TTF/OTF binary. This example uses
  * a deterministic fake TTF stub (starts with the TTF magic bytes 00 01 00 00)
@@ -23,7 +25,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { obfuscateFont, deobfuscateFont, generateFontKey } from "../crypto";
 import { Document, Build, Font, Io } from "../index";
 import type { FontDef } from "../index";
 
@@ -54,11 +55,11 @@ function fakeTtf(size = 200): Uint8Array {
   Document.useDefaultStyles(doc);
   Document.addHeading(doc, "Font embedding demo", 1);
   Document.addParagraph(doc, "The text below uses fonts embedded inside the .docx.");
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([Build.text("Hello in Custom font.", { font: "MyCustom" })])
   );
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([
       Build.text("Regular ", { font: "FamilyA" }),
@@ -87,8 +88,7 @@ function fakeTtf(size = 200): Uint8Array {
   });
 
   // Merge into the model
-  const built = Document.build(doc);
-  const withFonts = Font.addEmbedded(built, [single, ...family]);
+  const withFonts = Font.addEmbedded(doc, [single, ...family]);
   const buf = await Io.toBuffer(withFonts);
   fs.writeFileSync(path.join(outDir, "23-fonts-embedded.docx"), buf);
   console.log(`  → 23-fonts-embedded.docx (${buf.length} bytes)`);
@@ -102,10 +102,7 @@ function fakeTtf(size = 200): Uint8Array {
   Document.useDefaultStyles(doc);
   Document.addHeading(doc, "Subset demo", 1);
   const visibleText = "Hello, world!";
-  Document.addParagraphElement(
-    doc,
-    Build.paragraph([Build.text(visibleText, { font: "Subsetted" })])
-  );
+  Document.addParagraph(doc, Build.paragraph([Build.text(visibleText, { font: "Subsetted" })]));
 
   const fullData = fakeTtf(400);
   const trimmed = Font.subset(fullData, visibleText);
@@ -118,8 +115,7 @@ function fakeTtf(size = 200): Uint8Array {
     usedCharacters: visibleText
   });
 
-  const built = Document.build(doc);
-  const withFonts = Font.addEmbedded(built, [single]);
+  const withFonts = Font.addEmbedded(doc, [single]);
   const buf = await Io.toBuffer(withFonts);
   fs.writeFileSync(path.join(outDir, "23-fonts-subset.docx"), buf);
   console.log(`  → 23-fonts-subset.docx (${buf.length} bytes)`);
@@ -143,27 +139,27 @@ function fakeTtf(size = 200): Uint8Array {
     panose1: "020B0609000000000000"
   };
   Document.addFont(doc, fontDef);
-  Document.addParagraphElement(
+  Document.addParagraph(
     doc,
     Build.paragraph([Build.text("Sample monospace text.", { font: "CustomMono" })])
   );
 
-  const buf = await Io.toBuffer(Document.build(doc));
+  const buf = await Io.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "23-fonts-reference-only.docx"), buf);
   console.log(`  → 23-fonts-reference-only.docx (${buf.length} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
-// 4. Low-level ODTTF obfuscation primitives (used internally by embedFont
-//    when `obfuscate: true`). Useful for round-tripping fonts that were
-//    written by another tool, or for verifying our own output.
+// 4. Low-level ODTTF obfuscation primitives (applied by Font.embed when
+//    `obfuscate: true`). Useful for round-tripping fonts that were written by
+//    another tool, or for verifying our own output.
 // ---------------------------------------------------------------------------
 {
   const original = fakeTtf(64);
-  const key = generateFontKey();
-  console.log(`\n  generateFontKey() → ${key}`);
+  const key = Font.generateObfuscationKey();
+  console.log(`\n  Font.generateObfuscationKey() → ${key}`);
 
-  const obf = obfuscateFont(original, key);
+  const obf = Font.obfuscate(original, key);
   // The first 32 bytes must differ; the rest must be unchanged.
   const firstHalfChanged = obf.slice(0, 32).some((b, i) => b !== original[i]);
   const secondHalfSame = obf.slice(32).every((b, i) => b === original[i + 32]);
@@ -171,14 +167,14 @@ function fakeTtf(size = 200): Uint8Array {
     `  obfuscateFont: first 32 bytes changed=${firstHalfChanged}, tail unchanged=${secondHalfSame}`
   );
 
-  const round = deobfuscateFont(obf, key);
+  const round = Font.deobfuscate(obf, key);
   const isRoundTrip = round.every((b, i) => b === original[i]);
   console.log(`  deobfuscateFont round-trip identical: ${isRoundTrip}`);
 
   // Edge case: applying the wrong key produces garbled output (still 64 bytes
   // but with corrupt header).
-  const wrongKey = generateFontKey();
-  const wrong = deobfuscateFont(obf, wrongKey);
+  const wrongKey = Font.generateObfuscationKey();
+  const wrong = Font.deobfuscate(obf, wrongKey);
   const headerMatches = [0x00, 0x01, 0x00, 0x00].every((b, i) => wrong[i] === b);
   console.log(`  deobfuscate with wrong key produces valid TTF magic: ${headerMatches}`);
 }

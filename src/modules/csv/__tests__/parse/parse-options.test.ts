@@ -14,7 +14,7 @@
  * - transform/validate callbacks
  */
 
-import type { CsvParseResult, RecordWithInfo } from "@csv/index";
+import type { CsvParseResult, CsvRecordWithInfo as RecordWithInfo } from "@csv/index";
 import { Csv } from "@csv/index";
 import { CsvParserStream } from "@csv/stream";
 import { describe, it, expect } from "vitest";
@@ -265,9 +265,9 @@ describe("castDate Option", () => {
 
     expect(result.rows[0].date).toBeInstanceOf(Date);
     const date = result.rows[0].date as Date;
-    expect(date.getFullYear()).toBe(2024);
-    expect(date.getMonth()).toBe(0); // January is 0
-    expect(date.getDate()).toBe(15);
+    expect(date.getUTCFullYear()).toBe(2024);
+    expect(date.getUTCMonth()).toBe(0); // January; a date-only value is UTC midnight is 0; a date-only value is UTC midnight
+    expect(date.getUTCDate()).toBe(15);
     expect(result.rows[0].value).toBe("100"); // Not a date, stays string
   });
 

@@ -131,7 +131,7 @@ describe("BrtCalcProp", () => {
 describe("named cell styles", () => {
   it("round-trips a style's name and every facet", async () => {
     const workbook = Workbook.create();
-    Workbook.defineCellStyle(workbook, "Warning", {
+    Workbook.addCellStyle(workbook, "Warning", {
       font: { bold: true, color: { argb: "FFFF0000" } },
       numFmt: "0.00%",
       border: { top: { style: "thin" } }
@@ -153,8 +153,8 @@ describe("named cell styles", () => {
 
   it("keeps two styles distinct and carries the hidden flag", async () => {
     const workbook = Workbook.create();
-    Workbook.defineCellStyle(workbook, "Warning", { font: { bold: true } } as never);
-    Workbook.defineCellStyle(workbook, "Muted", { font: { italic: true }, hidden: true } as never);
+    Workbook.addCellStyle(workbook, "Warning", { font: { bold: true } } as never);
+    Workbook.addCellStyle(workbook, "Muted", { font: { italic: true }, hidden: true } as never);
     Cell.setValue(Workbook.addWorksheet(workbook, "S"), "A1", 1);
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(workbook, { format: "xlsb" }));

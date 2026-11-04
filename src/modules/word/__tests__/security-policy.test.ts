@@ -18,7 +18,7 @@ import type { Hyperlink, Paragraph, Run } from "../types";
 describe("WordSecurityPolicy: allowExternalTargets", () => {
   it("default policy keeps external hyperlink URLs", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, {
+    Document.addParagraph(h, {
       type: "paragraph",
       children: [
         {
@@ -28,7 +28,7 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
         }
       ]
     } as Paragraph);
-    const bytes = await Io.package(Document.build(h));
+    const bytes = await Io.toBuffer(h);
 
     const parsed = await Io.read(bytes);
     const link = (parsed.body[0] as Paragraph).children.find(
@@ -39,7 +39,7 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
 
   it("strict policy strips external hyperlink URLs but keeps inner text", async () => {
     const h = Document.create();
-    Document.addParagraphElement(h, {
+    Document.addParagraph(h, {
       type: "paragraph",
       children: [
         {
@@ -49,7 +49,7 @@ describe("WordSecurityPolicy: allowExternalTargets", () => {
         }
       ]
     } as Paragraph);
-    const bytes = await Io.package(Document.build(h));
+    const bytes = await Io.toBuffer(h);
 
     const parsed = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
     const link = (parsed.body[0] as Paragraph).children.find(
@@ -70,13 +70,13 @@ describe("WordSecurityPolicy: preserveVbaProject", () => {
     // attached. The packager wires up the rels + content type for us.
     const h = Document.create();
     Document.addParagraph(h, "Body");
-    const doc = Document.build(h);
+    const doc = h;
     const docm = {
       ...doc,
       docType: "macroEnabledDocument" as const,
       vbaProject: new Uint8Array([0x01, 0x02, 0x03])
     };
-    const bytes = await Io.package(docm);
+    const bytes = await Io.toBuffer(docm);
 
     const strict = await Io.read(bytes, { securityPolicy: Security.STRICT_SECURITY_POLICY });
     expect(strict.vbaProject).toBeUndefined();
@@ -91,7 +91,7 @@ describe("WordSecurityPolicy: maxXmlDepth", () => {
   async function withPart(part: string, xml: string): Promise<Uint8Array> {
     const h = Document.create();
     Document.addParagraph(h, "hello");
-    const files = await extractAll(await Io.package(Document.build(h)));
+    const files = await extractAll(await Io.toBuffer(h));
     const entries = [...files].map(([name, entry]) => ({ name, data: entry.data }));
     const data = new TextEncoder().encode(xml);
     const existing = entries.find(e => e.name === part);

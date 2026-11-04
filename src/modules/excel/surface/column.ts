@@ -4,36 +4,314 @@
  *
  * `import { Column } from "documonster/excel"` → `Column.setWidth(ws, "A", 20)`,
  * `Column.setHeader(ws, 1, "Name")`, `Column.setStyle(ws, "B", { numFmt })`,
- * `Column.values(ws, "total")`.
+ * `Column.getValues(ws, "total")`, `Column.autoFit(ws, "B")`.
  *
  * The `col` parameter is a column key, an `"A"` letter, or a 1-based column
  * number — hence the `string | number` unions in the signatures below.
+ *
+ * Every reader creates nothing — no column record, no row, no cell — except
+ * {@link getStyle}, which hands out the column's live style object for editing.
  */
+import { cellType, checkCellValue } from "@excel/core/cell";
 import type { ColumnDefn, ColumnHeaderValue } from "@excel/core/column";
 import {
   columnAddPageBreak,
   columnDefn,
   columnHidden,
-  columnLetter,
+  columnIsDefault,
   columnOutlineLevel,
   columnSetHidden,
   columnSetOutlineLevel
 } from "@excel/core/column";
+import { ValueType } from "@excel/core/enums";
 import { invalidateSharedCellStyle } from "@excel/core/style-sharing";
 import {
+  autoFitColumn,
+  autoFitColumns,
+  getActualColumnCount,
+  getColumnCount,
+  getColumnDefinitions,
+  setColumns,
+  spliceColumns
+} from "@excel/core/worksheet";
+import type { AutoFitColumnOptions } from "@excel/core/worksheet";
+import {
+  columnSetAlignment,
+  columnSetBorder,
+  columnSetFill,
+  columnSetFont,
   columnSetHeader,
   columnSetKey,
   columnSetNumFmt,
+  columnSetProtection,
   columnSetStyle,
+  columnCreate,
   columnSetValuesAt,
   columnValuesAt,
+  checkWorksheetAttached,
+  findColumn,
   findColumnNumber,
-  getColumn
+  getColumn,
+  getColumnKey
 } from "@excel/core/worksheet-core";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import type { CellValue, CellValueInput, Style } from "@excel/types";
+import type {
+  Alignment,
+  Borders,
+  CellValue,
+  CellValueInput,
+  Fill,
+  Font,
+  NumFmt,
+  Protection,
+  Style
+} from "@excel/types";
+import { argumentChecks, checkNumber } from "@excel/utils/arguments";
+import { colCache } from "@excel/utils/col-cache";
+import { copyPlain } from "@excel/utils/copy-plain";
+import { copyStyle, copyStyleFacet } from "@excel/utils/copy-style";
+import { numberedValues } from "@excel/utils/numbered-values";
+import type { ValuesBase, ValuesOptions } from "@excel/utils/numbered-values";
+import { checkStyle, checkStyleFacet } from "@excel/utils/style-checks";
 
+/** @deprecated Use `Worksheet.Handle`. Removed in 1.0. */
 export type Sheet = WorksheetData;
+
+/** Options for {@link each} and {@link eachAddress}. */
+export interface EachOptions {
+  /** Also visit columns (or cells) that hold no value. */
+  includeEmpty?: boolean;
+}
+
+/** How a values array is indexed — the one type `Row`, `Column`, `Worksheet` and `Stream` share. */
+export type { ValuesBase, ValuesOptions };
+
+/** Options for {@link autoFit}. */
+export interface AutoFitOptions extends AutoFitColumnOptions {
+  /** First column of the range form. Defaults to the left of the used range. */
+  start?: number | string;
+  /** Last column of the range form. Defaults to the right of the used range. */
+  end?: number | string;
+}
+
+// --- definitions / counting ---
+
+/**
+ * Every declared column's definition as plain data — the shape
+ * {@link setDefinitions} takes. It is a copy, style included: editing it changes nothing.
+ */
+export function getDefinitions(ws: WorksheetData): ColumnDefn[] {
+  return copyPlain(getColumnDefinitions(ws));
+}
+
+/**
+ * Declare the sheet's columns — header, key, width, style — from column 1
+ * onward. Headers are written into the first rows.
+ *
+ * Every definition is checked before any column changes, as the single-field setters check the same fields: a
+ * width from 0 to 255, an outline level from 0 to 7, a boolean `hidden`, keys that are distinct non-empty strings,
+ * headers a cell can hold and a valid style.
+ */
+export function setDefinitions(ws: WorksheetData, definitions: readonly ColumnDefn[]): void {
+  const where = "Column.setDefinitions";
+  const check = argumentChecks(where);
+  check.required("definitions", definitions);
+  check.array("definitions", definitions);
+  const keys = new Set<string>();
+  definitions.forEach((definition, i) => {
+    const at = `definitions[${i}]`;
+    check.required(at, definition);
+    check.record(at, definition);
+    check.number(`${at}.width`, definition.width, { min: 0, max: MAX_WIDTH });
+    check.number(`${at}.outlineLevel`, definition.outlineLevel, { min: 0, max: 7, integer: true });
+    check.boolean(`${at}.hidden`, definition.hidden);
+    if (definition.key !== undefined) {
+      check.string(`${at}.key`, definition.key, { nonEmpty: true });
+      if (keys.has(definition.key)) {
+        check.fail(`${at}.key`, "a key no other column has", definition.key);
+      }
+      keys.add(definition.key);
+    }
+    checkHeader(definition.header, where, `${at}.header`);
+    if (definition.style !== undefined) {
+      checkStyle(where, definition.style, `${at}.style`);
+    }
+  });
+  setColumns(ws, definitions);
+}
+
+/** Excel's widest column, in characters ("Excel specifications and limits"). */
+const MAX_WIDTH = 255;
+
+/** A header is written into the column's first cells, so each of its values is checked as `Cell.setValue` checks one. */
+function checkHeader(header: ColumnHeaderValue | undefined, where: string, argument: string): void {
+  if (Array.isArray(header)) {
+    header.forEach((value, i) => checkCellValue(value, { where, field: `${argument}[${i}]` }));
+  } else if (header !== undefined) {
+    checkCellValue(header, { where, field: argument });
+  }
+}
+
+/** A values `base` is `0` or `1`; anything else re-indexed the array to nowhere — a write cleared the row. */
+function checkBase(where: string, options: ValuesOptions | undefined): void {
+  const check = argumentChecks(where);
+  if (check.record("options", options)) {
+    if (options.base !== 0 && options.base !== 1) {
+      check.fail("options.base", "0 or 1", options.base);
+    }
+  }
+}
+
+/**
+ * The number of the last column that exists — some row has a cell in it, or it has a setting of its own (see
+ * {@link has}) — the sheet's column count, and the mirror of `Row.getCount`.
+ */
+export function getCount(ws: WorksheetData): number {
+  return lastColumn(ws);
+}
+
+/** The last column {@link has} answers `true` for, or `0`. */
+function lastColumn(ws: WorksheetData): number {
+  let last = getColumnCount(ws);
+  for (let n = ws._columns.length; n > last; n--) {
+    const column = ws._columns[n - 1];
+    if (column !== undefined && !columnIsDefault(column)) {
+      last = n;
+      break;
+    }
+  }
+  return last;
+}
+
+/** How many columns hold a value in at least one row. */
+export function getActualCount(ws: WorksheetData): number {
+  return getActualColumnCount(ws);
+}
+
+/**
+ * Whether column `col` exists — some row has a cell in it, or it has a setting of its own (a width, a style, hidden, an
+ * outline level) — the mirror of `Row.has`. Creates nothing.
+ */
+export function has(ws: WorksheetData, col: string | number): boolean {
+  const n = findColumnNumber(ws, col);
+  const own = ws._columns[n - 1];
+  if (own !== undefined && !columnIsDefault(own)) {
+    return true;
+  }
+  return ws._rows.some(row => row !== undefined && row.cells[n - 1] !== undefined);
+}
+
+/**
+ * The number of the last column that exists — {@link getCount}, the mirror of `Row.getLast` — or `undefined` when
+ * none does. A column exists when some row has a cell in it, even one holding no value (a styled empty cell, say), or
+ * when it has a setting of its own (a width, a style, hidden, an outline level); use {@link getActualCount} to count
+ * only columns holding a value.
+ */
+export function getLast(ws: WorksheetData): number | undefined {
+  const n = lastColumn(ws);
+  return n > 0 ? n : undefined;
+}
+
+/**
+ * Remove `count` columns starting at `start` and insert the given columns of
+ * values in their place, as `Array.prototype.splice` does. *
+ * Everything that refers to cells follows them, on every sheet, as it does in Excel: formulas, defined names,
+ * tables, conditional formats, data validations, charts, sparklines, pivot sources, the auto filter, print areas
+ * and drawings. A reference to cells the edit deletes becomes `#REF!`.
+ */
+export function splice(
+  ws: WorksheetData,
+  start: number,
+  count: number,
+  ...inserts: (readonly CellValueInput[])[]
+): void {
+  spliceColumns(ws, start, count, ...(inserts as CellValue[][]));
+}
+
+/**
+ * Visit each column that holds a value in at least one row, in order, with its
+ * number — the mirror of `Row.each`. With `{ includeEmpty: true }` every column
+ * from 1 to {@link getLast} is visited, a column with only a width included. Creates nothing.
+ */
+export function each(
+  ws: WorksheetData,
+  callback: (colNumber: number) => void,
+  options?: EachOptions
+): void {
+  if (typeof callback !== "function") {
+    argumentChecks("Column.each").fail("callback", "a function", callback);
+  }
+  const n = lastColumn(ws);
+  const used: boolean[] = [];
+  if (!options?.includeEmpty) {
+    for (const row of ws._rows) {
+      row?.cells.forEach((cell, index) => {
+        if (cell && cellType(cell) !== ValueType.Null) {
+          used[index + 1] = true;
+        }
+      });
+    }
+  }
+  for (let c = 1; c <= n; c++) {
+    if (options?.includeEmpty || used[c]) {
+      callback(c);
+    }
+  }
+}
+
+/**
+ * Visit each cell of column `col` that holds a value, in row order, as
+ * `(address, row, col)` — the shape `Range.eachAddress` and `Row.eachAddress`
+ * hand over. With `{ includeEmpty: true }` every row up to the column's last
+ * cell is visited — the mirror of `Row.eachAddress`, which stops at the row's
+ * last cell. Creates nothing.
+ */
+export function eachAddress(
+  ws: WorksheetData,
+  col: string | number,
+  callback: (address: string, row: number, col: number) => void,
+  options?: EachOptions
+): void {
+  if (typeof callback !== "function") {
+    argumentChecks("Column.eachAddress").fail("callback", "a function", callback);
+  }
+  const colNumber = findColumnNumber(ws, col);
+  const letter = colCache.n2l(colNumber);
+  const rows = ws._rows;
+  let last = rows.length;
+  while (last > 0 && !rows[last - 1]?.cells[colNumber - 1]) {
+    last--;
+  }
+  for (let r = 1; r <= last; r++) {
+    const cell = rows[r - 1]?.cells[colNumber - 1];
+    if (options?.includeEmpty || (cell && cellType(cell) !== ValueType.Null)) {
+      callback(letter + r, r, colNumber);
+    }
+  }
+}
+
+/**
+ * Fit column widths to their content, as Excel's AutoFit does: one column, or a
+ * span (`{ start, end }`, defaulting to the used range) when given only options.
+ */
+export function autoFit(
+  ws: WorksheetData,
+  col: string | number,
+  options?: AutoFitColumnOptions
+): void;
+export function autoFit(ws: WorksheetData, options?: AutoFitOptions): void;
+export function autoFit(
+  ws: WorksheetData,
+  colOrOptions?: string | number | AutoFitOptions,
+  options?: AutoFitColumnOptions
+): void {
+  if (typeof colOrOptions === "string" || typeof colOrOptions === "number") {
+    autoFitColumn(ws, findColumnNumber(ws, colOrOptions), options);
+    return;
+  }
+  const { start, end, ...rest } = colOrOptions ?? {};
+  autoFitColumns(ws, start, end, rest);
+}
 
 // --- identity ---
 
@@ -43,51 +321,107 @@ export type Sheet = WorksheetData;
  * This is the bridge from a column *key* to the `(row, col)` form the `Cell`
  * namespace takes: `Cell.setValue(ws, row, Column.getNumber(ws, "total"), v)`.
  */
-export function getNumber(ws: Sheet, col: string | number): number {
-  return getColumn(ws, col).number;
+export function getNumber(ws: WorksheetData, col: string | number): number {
+  return findColumnNumber(ws, col);
 }
 
 /** The column letter (`"A"`, `"AB"`) for a key, letter or number. */
-export function getLetter(ws: Sheet, col: string | number): string {
-  return columnLetter(getColumn(ws, col));
+export function getLetter(ws: WorksheetData, col: string | number): string {
+  return colCache.n2l(findColumnNumber(ws, col));
 }
 
 // --- width ---
 
-export function getWidth(ws: Sheet, col: string | number): number | undefined {
-  return getColumn(ws, col).width;
+/** The column's width in characters, or `undefined` when it has none of its own. Creates nothing. */
+export function getWidth(ws: WorksheetData, col: string | number): number | undefined {
+  return findColumn(ws, col)?.width;
 }
-export function setWidth(ws: Sheet, col: string | number, width: number): void {
-  getColumn(ws, col).width = width;
+/**
+ * Set the column's width in characters — from 0 to 255, Excel's widest column. `undefined` clears it, so the column
+ * takes the sheet's default width again, as {@link getWidth} reports a column with none.
+ *
+ * @throws {ExcelArgumentError} when `width` is not a number in that range.
+ */
+export function setWidth(ws: WorksheetData, col: string | number, width: number | undefined): void {
+  if (width === undefined) {
+    const existing = findColumn(ws, col);
+    checkWorksheetAttached(ws);
+    if (existing) {
+      existing.width = undefined;
+      existing.customWidth = undefined;
+    }
+    return;
+  }
+  checkNumber("Column.setWidth", "width", width, { min: 0, max: MAX_WIDTH });
+  const column = getColumn(ws, col);
+  column.width = width;
+  // The caller's width now, whatever the file said about the one before.
+  column.customWidth = undefined;
 }
 
 // --- header / key ---
 
-export function getHeader(ws: Sheet, col: string | number): ColumnHeaderValue | undefined {
-  return getColumn(ws, col).header;
+/** The column's header, as {@link setHeader} or a definition set it, or `undefined`. Creates nothing. */
+export function getHeader(ws: WorksheetData, col: string | number): ColumnHeaderValue | undefined {
+  return findColumn(ws, col)?.header;
 }
-export function setHeader(ws: Sheet, col: string | number, header: ColumnHeaderValue): void {
+/** Set the column's header and write it into the column's first cell(s) — one per value of an array header. */
+export function setHeader(
+  ws: WorksheetData,
+  col: string | number,
+  header: ColumnHeaderValue
+): void {
+  checkHeader(header, "Column.setHeader", "header");
   columnSetHeader(getColumn(ws, col), header);
 }
-export function getKey(ws: Sheet, col: string | number): string | undefined {
-  return getColumn(ws, col).key;
+/** The column's key, or `undefined`. Creates nothing. */
+export function getKey(ws: WorksheetData, col: string | number): string | undefined {
+  return findColumn(ws, col)?.key;
 }
-export function setKey(ws: Sheet, col: string | number, key: string): void {
+/**
+ * Give the column a key, which then names it wherever a column reference is taken — `Column.setWidth(ws, "total", 12)`.
+ *
+ * **A key wins over a column letter of the same text**: after `setKey(ws, 1, "F")`, `"F"` names column A for every
+ * `Column`, `Cell`-by-key and `Row`-by-key call. Choose keys that do not read as column letters to keep both usable.
+ *
+ * @throws {ExcelArgumentError} when `key` is not a non-empty string, or another column already has it.
+ */
+export function setKey(ws: WorksheetData, col: string | number, key: string): void {
+  const check = argumentChecks("Column.setKey");
+  check.required("key", key);
+  check.string("key", key, { nonEmpty: true });
+  const holder = getColumnKey(ws, key);
+  if (holder !== undefined && holder.number !== findColumnNumber(ws, col)) {
+    check.fail(
+      "key",
+      `a key no other column has (column ${colCache.n2l(holder.number)} has it)`,
+      key
+    );
+  }
   columnSetKey(getColumn(ws, col), key);
 }
 
 // --- visibility / outline ---
 
-export function getHidden(ws: Sheet, col: string | number): boolean {
-  return columnHidden(getColumn(ws, col));
+/** Whether the column is hidden. Creates nothing. */
+export function isHidden(ws: WorksheetData, col: string | number): boolean {
+  const c = findColumn(ws, col);
+  return c !== undefined && columnHidden(c);
 }
-export function setHidden(ws: Sheet, col: string | number, hidden: boolean): void {
+/** Hide or show the column. */
+export function setHidden(ws: WorksheetData, col: string | number, hidden: boolean): void {
+  argumentChecks("Column.setHidden").required("hidden", hidden);
+  argumentChecks("Column.setHidden").boolean("hidden", hidden);
   columnSetHidden(getColumn(ws, col), hidden);
 }
-export function getOutlineLevel(ws: Sheet, col: string | number): number {
-  return columnOutlineLevel(getColumn(ws, col));
+/** The column's outline (grouping) level, `0` when it has none. Creates nothing. */
+export function getOutlineLevel(ws: WorksheetData, col: string | number): number {
+  const c = findColumn(ws, col);
+  return c ? columnOutlineLevel(c) : 0;
 }
-export function setOutlineLevel(ws: Sheet, col: string | number, level: number): void {
+/** Set the column's outline (grouping) level, a whole number from 0 to 7. */
+export function setOutlineLevel(ws: WorksheetData, col: string | number, level: number): void {
+  checkNumber("Column.setOutlineLevel", "level", level, { min: 0, max: 7, integer: true });
   columnSetOutlineLevel(getColumn(ws, col), level);
 }
 
@@ -95,19 +429,34 @@ export function setOutlineLevel(ws: Sheet, col: string | number, level: number):
 
 /**
  * The column's own style object, live — mutating it is how a caller changes the column.
+ * Because it is handed out for editing, this is the one reader here that creates the
+ * column record when it does not exist yet. To *read* the style, use {@link findStyle};
+ * to read one facet, {@link getFont}, {@link getFill}, … — they create nothing.
  *
  * Cells the column has already styled point at a *snapshot* of these facets, so that
  * mutation does not reach them (as it does not today). The snapshot is dropped here
  * because the caller may mutate in place, and a cell created afterwards must copy
  * what the column says then — see `core/style-sharing.ts`.
  */
-export function getStyle(ws: Sheet, col: string | number): Partial<Style> {
+export function getStyle(ws: WorksheetData, col: string | number): Partial<Style> {
   const { style } = getColumn(ws, col);
   invalidateSharedCellStyle(style);
   return style;
 }
-export function setStyle(ws: Sheet, col: string | number, style: Partial<Style>): void {
+/** Merge `style` into the column's style and the style of the cells it applies to; see {@link setNumFmt}. */
+export function setStyle(ws: WorksheetData, col: string | number, style: Partial<Style>): void {
+  checkStyle("Column.setStyle", style);
   columnSetStyle(getColumn(ws, col), style);
+}
+
+/**
+ * A copy of the column's own style, or `undefined` when the sheet has no record for the
+ * column — the read-only counterpart of {@link getStyle}: it creates nothing, and editing
+ * what it returns changes nothing.
+ */
+export function findStyle(ws: WorksheetData, col: string | number): Partial<Style> | undefined {
+  const column = findColumn(ws, col);
+  return column ? (copyStyle(column.style) as Partial<Style>) : undefined;
 }
 
 // --- number format ---
@@ -116,10 +465,8 @@ export function setStyle(ws: Sheet, col: string | number, style: Partial<Style>)
  * Set the column's number format.
  *
  * The mirror of `Cell.setNumFmt` / `Row.setNumFmt`, so a format can be set at
- * whichever level owns it. It is the one facet with its own setter here because
- * it is the one consumers reach for by column; every other facet goes through
- * {@link setStyle} (`setStyle(ws, col, { font })`), which also walks the column a
- * single time when several facets are set together.
+ * whichever level owns it. Each facet setter walks the column once, so
+ * {@link setStyle} is the better call when setting several facets together.
  *
  * The format lands on the column *and* on the cells of every row that holds a
  * value, which is not quite "every existing cell": a row with values elsewhere
@@ -129,8 +476,7 @@ export function setStyle(ws: Sheet, col: string | number, style: Partial<Style>)
  *
  * Passing `undefined` clears the format.
  *
- * There is no matching *getter*: a column's style is one record and
- * {@link getStyle} hands it over whole, so `getStyle(ws, col).numFmt` is the read.
+ * {@link getNumFmt} reads it back.
  *
  * @example
  * ```typescript
@@ -141,66 +487,130 @@ export function setStyle(ws: Sheet, col: string | number, style: Partial<Style>)
  * Column.setNumFmt(ws, "C", "#,##0.00");
  * ```
  */
-export function setNumFmt(ws: Sheet, col: string | number, value: string | undefined): void {
+export function setNumFmt(
+  ws: WorksheetData,
+  col: string | number,
+  value: string | NumFmt | undefined
+): void {
+  checkStyleFacet("Column.setNumFmt", "numFmt", value, "value");
   columnSetNumFmt(getColumn(ws, col), value);
+}
+
+/** Set the font of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
+export function setFont(
+  ws: WorksheetData,
+  col: string | number,
+  value: Partial<Font> | undefined
+): void {
+  checkStyleFacet("Column.setFont", "font", value, "value");
+  columnSetFont(getColumn(ws, col), value);
+}
+/** Set the alignment of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
+export function setAlignment(
+  ws: WorksheetData,
+  col: string | number,
+  value: Partial<Alignment> | undefined
+): void {
+  checkStyleFacet("Column.setAlignment", "alignment", value, "value");
+  columnSetAlignment(getColumn(ws, col), value);
+}
+/** Set the borders of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
+export function setBorder(
+  ws: WorksheetData,
+  col: string | number,
+  value: Partial<Borders> | undefined
+): void {
+  checkStyleFacet("Column.setBorder", "border", value, "value");
+  columnSetBorder(getColumn(ws, col), value);
+}
+/** Set the fill of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
+export function setFill(ws: WorksheetData, col: string | number, value: Fill | undefined): void {
+  checkStyleFacet("Column.setFill", "fill", value, "value");
+  columnSetFill(getColumn(ws, col), value);
+}
+/** Set the protection of the column and of the cells it applies to; `undefined` clears it. See {@link setNumFmt}. */
+export function setProtection(
+  ws: WorksheetData,
+  col: string | number,
+  value: Partial<Protection> | undefined
+): void {
+  checkStyleFacet("Column.setProtection", "protection", value, "value");
+  columnSetProtection(getColumn(ws, col), value);
+}
+
+/** A copy of one facet of column `col`'s own style. Creates nothing and shares nothing. */
+function facet<K extends keyof Style>(
+  ws: WorksheetData,
+  col: string | number,
+  key: K
+): Style[K] | undefined {
+  const value = findColumn(ws, col)?.style[key];
+  return value === undefined ? undefined : copyStyleFacet(key, value);
+}
+
+/**
+ * The per-facet readers answer what the column's own style says — `getFont(ws, col)`
+ * equals `getStyle(ws, col).font` — but as a **read**: they never create the column
+ * record, and what they return is a copy, so editing it changes nothing. Change a
+ * facet with its setter ({@link setFont}, …).
+ */
+export function getNumFmt(ws: WorksheetData, col: string | number): Style["numFmt"] | undefined {
+  return facet(ws, col, "numFmt");
+}
+/** A copy of the column's own font, or `undefined`. Creates nothing; see {@link getNumFmt}. */
+export function getFont(ws: WorksheetData, col: string | number): Partial<Font> | undefined {
+  return facet(ws, col, "font");
+}
+/** A copy of the column's own alignment, or `undefined`. Creates nothing. */
+export function getAlignment(
+  ws: WorksheetData,
+  col: string | number
+): Partial<Alignment> | undefined {
+  return facet(ws, col, "alignment");
+}
+/** A copy of the column's own borders, or `undefined`. Creates nothing. */
+export function getBorder(ws: WorksheetData, col: string | number): Partial<Borders> | undefined {
+  return facet(ws, col, "border");
+}
+/** A copy of the column's own fill, or `undefined`. Creates nothing. */
+export function getFill(ws: WorksheetData, col: string | number): Fill | undefined {
+  return facet(ws, col, "fill");
+}
+/** A copy of the column's own protection, or `undefined`. Creates nothing. */
+export function getProtection(
+  ws: WorksheetData,
+  col: string | number
+): Partial<Protection> | undefined {
+  return facet(ws, col, "protection");
 }
 
 // --- definition ---
 
 /**
- * The column's definition as plain data — the shape `Worksheet.setColumns`
+ * The column's definition as plain data — an element of what {@link setDefinitions}
  * takes, with `hidden` / `outlineLevel` normalised the way the library
  * normalises them internally.
  *
- * Use this (or `Worksheet.columnDefinitions` for every column) instead of copying
+ * It is a copy, style included: editing it changes nothing.
+ *
+ * Use this (or {@link getDefinitions} for every column) instead of copying
  * fields off a column handle by hand: hand-copying re-implements the
  * normalisation and silently drifts the moment a field or a fallback changes.
  */
-export function getDefinition(ws: Sheet, col: string | number): ColumnDefn {
-  return columnDefn(getColumn(ws, col));
+export function getDefinition(ws: WorksheetData, col: string | number): ColumnDefn {
+  return copyPlain(columnDefn(findColumn(ws, col) ?? columnCreate(ws, findColumnNumber(ws, col))));
 }
 
 // --- values ---
 
 /**
- * Read the values down a column as a **0-based sparse** array: the value in row
- * 1 is at index `0`, row 2 at index `1`, and so on, and an empty cell is a hole
- * rather than a `null`.
- *
- * Contrast with {@link values}, which is indexed by row *number* and therefore
- * composes directly with the `Cell` namespace. That is also the one to pass back
- * to {@link setValues} — see the ambiguity noted there.
+ * Read the values down a column as a **sparse** array — an empty cell is a hole
+ * rather than a `null` — indexed **0-based** (row 1 at index `0`) unless
+ * `{ base: 1 }` asks for the index to be the row number.
  *
  * The read is non-destructive: it walks the rows that exist rather than asking
  * each one for a cell, so it neither materialises cells down the column nor
- * declares the column itself. The metadata and style accessors in this namespace
- * resolve their reference through a column *record*, which pads
- * `Worksheet.columns` up to the column asked for.
- *
- * @example
- * ```typescript
- * import { Column, Workbook, Worksheet } from "documonster/excel";
- *
- * const wb = Workbook.create();
- * const ws = Workbook.addWorksheet(wb, "Sales");
- * Worksheet.setColumns(ws, [{ key: "total", header: "Total" }]);
- * Column.setValues(ws, "total", [10, 20, 30]);
- * const [first] = Column.getValues(ws, "total"); // 10 — row 1
- * ```
- */
-export function getValues(ws: Sheet, col: string | number): CellValue[] {
-  return columnValuesAt(ws, findColumnNumber(ws, col), 0);
-}
-
-/**
- * Read the values down a column as a **sparse** array indexed by **row number**:
- * index `0` is always an empty leading slot, the value in row 1 is at index `1`,
- * and so on. This mirrors Excel's 1-based row numbering, so the index can be
- * handed straight to the `Cell` namespace, and it is the form {@link setValues}
- * reads back unambiguously.
- *
- * Use {@link getValues} when the values are wanted as a plain 0-based array. Like
- * it, this read materialises nothing.
+ * declares the column itself.
  *
  * @example
  * ```typescript
@@ -209,46 +619,69 @@ export function getValues(ws: Sheet, col: string | number): CellValue[] {
  * const wb = Workbook.create();
  * const ws = Workbook.addWorksheet(wb, "Sales");
  * Column.setValues(ws, "C", [120, -40, 75]);
+ * const [first] = Column.getValues(ws, "C"); // 120 — row 1
  *
- * // Colour the losses red. The index *is* the row number, and `Column.getNumber`
- * // turns the reference into the column number `Cell` takes.
+ * // Colour the losses red. With `base: 1` the index *is* the row number, and
+ * // `Column.getNumber` turns the reference into the column number `Cell` takes.
  * const colNumber = Column.getNumber(ws, "C");
- * Column.values(ws, "C").forEach((value, rowNumber) => {
+ * Column.getValues(ws, "C", { base: 1 }).forEach((value, rowNumber) => {
  *   if (typeof value === "number" && value < 0) {
  *     Cell.setFont(ws, rowNumber, colNumber, { color: { argb: "FFC00000" } });
  *   }
  * });
  * ```
  */
-export function values(ws: Sheet, col: string | number): CellValue[] {
-  return columnValuesAt(ws, findColumnNumber(ws, col));
+export function getValues(
+  ws: WorksheetData,
+  col: string | number,
+  options?: ValuesOptions
+): CellValue[] {
+  checkBase("Column.getValues", options);
+  return columnValuesAt(ws, findColumnNumber(ws, col), options?.base === 1 ? 1 : 0);
 }
 
 /**
  * Write values down a column. Takes anything `Cell.setValue` takes — a number, a
  * string, a formula, rich text, a hyperlink, a `Date` or a civil `Temporal`.
  *
- * The array is read as **1-based by row number** when index 0 is a hole — the
- * shape {@link values} hands back, so that read round-trips — and as **0-based**
- * when index 0 is present, so a plain array starts at row 1:
+ * With `{ base }` the array is read exactly as {@link getValues} with the same
+ * `base` returns it. Without it the array is read as **1-based by row number** when
+ * index 0 is a hole and as **0-based** when index 0 is present, so a plain array
+ * starts at row 1:
  *
  * ```typescript
  * Column.setValues(ws, "A", [1, 2, 3]); // rows 1, 2, 3
  * Column.setValues(ws, "A", [, 1, 2, 3]); // rows 1, 2, 3 — the same thing
+ * Column.setValues(ws, "A", [, 1, 2], { base: 0 }); // rows 2, 3
  * ```
  *
- * The two are indistinguishable when a 0-based array's own first slot is a hole,
- * so pass {@link values} rather than {@link getValues} when writing a read back —
- * a `getValues` array whose row 1 was empty lands a row high. `Row.setValues` has
- * the same ambiguity.
+ * The two unbased readings are indistinguishable when a 0-based array's own first
+ * slot is a hole — pass `base` whenever the shape is known.
  *
  * **This writes, it does not replace.** Only the indices the array carries are
  * touched — unlike `Row.setValues`, which resets the row — so a shorter array
  * does not truncate the column and a value already in a row the array skips
  * survives. Clear a cell by passing `null` at its index.
  */
-export function setValues(ws: Sheet, col: string | number, v: readonly CellValueInput[]): void {
-  columnSetValuesAt(ws, findColumnNumber(ws, col), v);
+export function setValues(
+  ws: WorksheetData,
+  col: string | number,
+  values: readonly CellValueInput[],
+  options?: ValuesOptions
+): void {
+  const check = argumentChecks("Column.setValues");
+  check.required("values", values);
+  check.array("values", values);
+  checkBase("Column.setValues", options);
+  // Every value before any cell is written, as `Row.setValues` does: a refusal used to leave the earlier ones written.
+  values.forEach((value, i) =>
+    checkCellValue(value, { where: "Column.setValues", field: `values[${i}]` })
+  );
+  columnSetValuesAt(
+    ws,
+    findColumnNumber(ws, col),
+    options ? numberedValues(values, options.base) : values
+  );
 }
 
 // --- printing ---
@@ -270,6 +703,17 @@ export function setValues(ws: Sheet, col: string | number, v: readonly CellValue
  * Column.addPageBreak(ws, "F"); // the next page starts at column G
  * ```
  */
-export function addPageBreak(ws: Sheet, col: string | number): void {
+export function addPageBreak(ws: WorksheetData, col: string | number): void {
   columnAddPageBreak(getColumn(ws, col));
+}
+
+// --- deprecated names ---
+
+/** @deprecated Use {@link isHidden}. Removed in 1.0. */
+export const getHidden = isHidden;
+/**
+ * @deprecated Use {@link getValues} with `{ base: 1 }`. Removed in 1.0.
+ */
+export function values(ws: WorksheetData, col: string | number): CellValue[] {
+  return getValues(ws, col, { base: 1 });
 }

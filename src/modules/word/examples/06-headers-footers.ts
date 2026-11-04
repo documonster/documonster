@@ -32,11 +32,11 @@ Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Headers & Footers demo", 1);
 Document.addParagraph(doc, "First page body. ");
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "Page 2", 2);
 Document.addParagraph(doc, "Even page; check the even-page header.");
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "Page 3", 2);
 Document.addParagraph(doc, "Odd page; default odd-page header should appear.");
 Document.addParagraph(doc, "Lorem ipsum… ".repeat(50));
@@ -52,7 +52,7 @@ Document.setHeader(doc, "default", {
         Build.tab(),
         Build.tab(),
         Build.text("Date: "),
-        Build.dateField("MMMM d, yyyy")
+        Build.dateField({ format: "MMMM d, yyyy" })
       ],
       {
         tabs: [{ position: 9072, type: "right" }],
@@ -102,10 +102,10 @@ const footerTable = Build.table(
       Build.cell([Build.textParagraph("© 2026 Example Co.")], {
         width: { value: 33, type: "pct" },
         borders: {
-          top: Build.border("nil"),
-          bottom: Build.border("nil"),
-          left: Build.border("nil"),
-          right: Build.border("nil")
+          top: Build.border({ style: "nil" }),
+          bottom: Build.border({ style: "nil" }),
+          left: Build.border({ style: "nil" }),
+          right: Build.border({ style: "nil" })
         }
       }),
       Build.cell(
@@ -125,20 +125,20 @@ const footerTable = Build.table(
         {
           width: { value: 34, type: "pct" },
           borders: {
-            top: Build.border("nil"),
-            bottom: Build.border("nil"),
-            left: Build.border("nil"),
-            right: Build.border("nil")
+            top: Build.border({ style: "nil" }),
+            bottom: Build.border({ style: "nil" }),
+            left: Build.border({ style: "nil" }),
+            right: Build.border({ style: "nil" })
           }
         }
       ),
       Build.cell([Build.paragraph([Build.text("Confidential")], { alignment: "right" })], {
         width: { value: 33, type: "pct" },
         borders: {
-          top: Build.border("nil"),
-          bottom: Build.border("nil"),
-          left: Build.border("nil"),
-          right: Build.border("nil")
+          top: Build.border({ style: "nil" }),
+          bottom: Build.border({ style: "nil" }),
+          left: Build.border({ style: "nil" }),
+          right: Build.border({ style: "nil" })
         }
       })
     ])
@@ -146,12 +146,12 @@ const footerTable = Build.table(
   {
     width: { value: 5000, type: "pct" },
     borders: {
-      top: Build.border("nil"),
-      bottom: Build.border("nil"),
-      left: Build.border("nil"),
-      right: Build.border("nil"),
-      insideH: Build.border("nil"),
-      insideV: Build.border("nil")
+      top: Build.border({ style: "nil" }),
+      bottom: Build.border({ style: "nil" }),
+      left: Build.border({ style: "nil" }),
+      right: Build.border({ style: "nil" }),
+      insideH: Build.border({ style: "nil" }),
+      insideV: Build.border({ style: "nil" })
     }
   }
 );
@@ -191,6 +191,6 @@ Document.setSectionProperties(doc, {
 // Tell the document settings to enable evenAndOddHeaders globally.
 Document.setSettings(doc, { evenAndOddHeaders: true });
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "06-headers-footers.docx"), buf);
 console.log(`  → 06-headers-footers.docx (${buf.length} bytes)`);

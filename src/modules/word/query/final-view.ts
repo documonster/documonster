@@ -4,7 +4,7 @@
  * not), and hidden text (`w:vanish`) omitted.
  */
 
-import { isHyperlink, isRun } from "@word/core/text-utils";
+import { hyperlinkContent, isHyperlink, isRun } from "@word/core/text-utils";
 import type { ParagraphChild, Run, RunProperties } from "@word/types";
 
 /**
@@ -47,7 +47,7 @@ export function* finalViewRuns(children: readonly ParagraphChild[]): Generator<R
     if (run) {
       yield run;
     } else if (isHyperlink(child)) {
-      yield* finalViewRuns(child.children as readonly ParagraphChild[]);
+      yield* finalViewRuns(hyperlinkContent(child));
     }
   }
 }

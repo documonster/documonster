@@ -73,7 +73,8 @@ class MetadataXform extends BaseXform {
       "xmlns:xda": NS_DYNAMIC_ARRAY
     });
 
-    // metadataTypes: declare XLDAPR
+    // metadataTypes: declare XLDAPR, with the flags Excel writes for it and no others. In particular
+    // not `adjust`: Excel refuses a workbook whose XLDAPR declaration carries adjust="1".
     xmlStream.openNode("metadataTypes", { count: "1" });
     xmlStream.leafNode("metadataType", {
       name: "XLDAPR",
@@ -88,7 +89,6 @@ class MetadataXform extends BaseXform {
       clearComments: "1",
       assign: "1",
       coerce: "1",
-      adjust: "1",
       cellMeta: "1"
     });
     xmlStream.closeNode(); // </metadataTypes>

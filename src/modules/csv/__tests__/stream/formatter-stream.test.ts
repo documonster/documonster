@@ -332,7 +332,9 @@ describe("CsvFormatterStream - RowHashArray Support", () => {
 
     await new Promise(resolve => formatter.on("finish", resolve));
 
-    expect(chunks.join("")).toBe("Alice,30\nBob,25");
+    // Keyed rows write their keys as the header row by default (this test pinned the old
+    // header-less output, which also read every row in its own key order).
+    expect(chunks.join("")).toBe("name,age\nAlice,30\nBob,25");
   });
 
   it("should auto-detect headers from RowHashArray when headers: true", async () => {
@@ -413,7 +415,7 @@ describe("CsvFormatterStream - RowHashArray Support", () => {
 
     await new Promise(resolve => formatter.on("finish", resolve));
 
-    expect(chunks.join("")).toBe('"Hello, World","He said ""hi"""');
+    expect(chunks.join("")).toBe('greeting,quote\n"Hello, World","He said ""hi"""');
   });
 });
 

@@ -9,7 +9,7 @@
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -96,8 +96,8 @@ export const archiveWriteTool = defineTool({
 
     await assertWithinBudget(resolvedEntries, config);
 
-    // Branch rather than holding a union: ArchiveFile is generic in its format,
-    // and `ArchiveFile<"zip"> | ArchiveFile<"tar">` collapses to `never` on any
+    // Branch rather than holding a union: Archive.ArchiveFile is generic in its format,
+    // and `Archive.ArchiveFile<"zip"> | Archive.ArchiveFile<"tar">` collapses to `never` on any
     // shared method because the `format` field conflicts.
     try {
       // "overwrite" is safe here only because the archive is built into a
@@ -106,13 +106,13 @@ export const archiveWriteTool = defineTool({
       // rather than a truncate-then-fill.
       await writeWithPolicy(target, args.overwrite === true, async temporary => {
         if (format === "tar") {
-          const archive = new ArchiveFile({ format: "tar" });
+          const archive = new Archive.ArchiveFile({ format: "tar" });
           addAll(archive, resolvedEntries);
-          await archive.writeToFile(temporary, { overwrite: "overwrite" });
+          await archive.writeFile(temporary, { overwrite: "overwrite" });
         } else {
-          const archive = new ArchiveFile();
+          const archive = new Archive.ArchiveFile();
           addAll(archive, resolvedEntries);
-          await archive.writeToFile(temporary, { overwrite: "overwrite" });
+          await archive.writeFile(temporary, { overwrite: "overwrite" });
         }
       });
     } catch (cause) {
@@ -127,8 +127,8 @@ export const archiveWriteTool = defineTool({
     // about whether the archive contains what was intended.
     const entries =
       format === "tar"
-        ? await (await ArchiveFile.fromFile(target, { format: "tar" })).getEntries()
-        : await (await ArchiveFile.fromFile(target)).getEntries();
+        ? await (await Archive.ArchiveFile.fromFile(target, { format: "tar" })).getEntries()
+        : await (await Archive.ArchiveFile.fromFile(target)).getEntries();
     const files = entries.filter(entry => !entry.isDirectory);
     const size = (await stat(target)).size;
 
@@ -204,14 +204,14 @@ interface ResolvedEntry {
 
 /** Add every entry to an archive of either format. */
 function addAll(
-  archive: ArchiveFile<"zip"> | ArchiveFile<"tar">,
+  archive: Archive.ArchiveFile<"zip"> | Archive.ArchiveFile<"tar">,
   entries: readonly ResolvedEntry[]
 ): void {
   for (const entry of entries) {
     if (entry.isDirectory) {
-      (archive as ArchiveFile<"zip">).addDirectory(entry.resolved, { prefix: entry.name });
+      (archive as Archive.ArchiveFile<"zip">).addDirectory(entry.resolved, { prefix: entry.name });
     } else {
-      (archive as ArchiveFile<"zip">).addFile(entry.resolved, { name: entry.name });
+      (archive as Archive.ArchiveFile<"zip">).addFile(entry.resolved, { name: entry.name });
     }
   }
 }

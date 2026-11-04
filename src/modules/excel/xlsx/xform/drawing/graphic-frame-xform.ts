@@ -22,7 +22,9 @@
  */
 
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { uuidV4 } from "@utils/uuid";
+import { xmlEncode, xmlEncodeAttr } from "@xml/encode";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 const CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart";
@@ -48,6 +50,15 @@ export interface GraphicFrameModel {
   isChartEx?: boolean;
 }
 
+/** `<name attr="…"…`, unterminated, with the attribute values escaped. */
+function startTag(node: ParseOpenTag): string {
+  let s = `<${node.name}`;
+  for (const key in node.attributes) {
+    s += ` ${key}="${xmlEncodeAttr(node.attributes[key])}"`;
+  }
+  return s;
+}
+
 class GraphicFrameXform extends BaseXform {
   declare public model: GraphicFrameModel;
   declare public parser?: BaseXform;
@@ -56,7 +67,13 @@ class GraphicFrameXform extends BaseXform {
   private _inNvPr = false;
   private _inGraphicData = false;
   /** Raw XML capture for a:extLst inside xdr:cNvPr */
-  private _extLstCapture: { depth: number; parts: string[]; skipNextClose: boolean } | null = null;
+  private _extLstCapture: {
+    depth: number;
+    parts: string[];
+    skipNextClose: boolean;
+    /** Text views and the declarations the fragment needs — see `fragment-namespaces.ts`. */
+    namespaces: FragmentNamespaces;
+  } | null = null;
 
   get tag(): string {
     return "xdr:graphicFrame";
@@ -155,14 +172,12 @@ class GraphicFrameXform extends BaseXform {
   parseOpen(node: ParseOpenTag): boolean {
     // Raw XML capture mode for extLst
     if (this._extLstCapture) {
-      const attrs = Object.entries(node.attributes || {})
-        .map(([k, v]) => ` ${k}="${v}"`)
-        .join("");
+      const tag = startTag(this._extLstCapture.namespaces.open(node));
       if (node.isSelfClosing) {
-        this._extLstCapture.parts.push(`<${node.name}${attrs}/>`);
+        this._extLstCapture.parts.push(`${tag}/>`);
         this._extLstCapture.skipNextClose = true;
       } else {
-        this._extLstCapture.parts.push(`<${node.name}${attrs}>`);
+        this._extLstCapture.parts.push(`${tag}>`);
         this._extLstCapture.depth++;
       }
       return true;
@@ -182,13 +197,12 @@ class GraphicFrameXform extends BaseXform {
       case "a:extLst":
         if (this._inNvPr) {
           // Start capturing raw XML
-          const attrs = Object.entries(node.attributes || {})
-            .map(([k, v]) => ` ${k}="${v}"`)
-            .join("");
+          const namespaces = new FragmentNamespaces();
           this._extLstCapture = {
             depth: 1,
-            parts: [`<a:extLst${attrs}>`],
-            skipNextClose: false
+            parts: [`${startTag(namespaces.open(node))}>`],
+            skipNextClose: false,
+            namespaces
           };
           return true;
         }
@@ -216,20 +230,22 @@ class GraphicFrameXform extends BaseXform {
 
   parseText(text: string): void {
     if (this._extLstCapture && text) {
-      this._extLstCapture.parts.push(text);
+      this._extLstCapture.parts.push(xmlEncode(text));
     }
   }
 
   parseClose(name: string): boolean {
     if (this._extLstCapture) {
+      const namespaces = this._extLstCapture.namespaces;
       if (this._extLstCapture.skipNextClose) {
         this._extLstCapture.skipNextClose = false;
+        namespaces.close(name);
         return true;
       }
-      this._extLstCapture.parts.push(`</${name}>`);
+      this._extLstCapture.parts.push(`</${namespaces.close(name)}>`);
       this._extLstCapture.depth--;
       if (this._extLstCapture.depth === 0) {
-        this.model.cNvPrExtLst = this._extLstCapture.parts.join("");
+        this.model.cNvPrExtLst = namespaces.finish(this._extLstCapture.parts.join(""));
         this._extLstCapture = null;
       }
       return true;

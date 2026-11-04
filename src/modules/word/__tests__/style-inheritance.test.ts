@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { Query } from "../index";
+import { Build, Document, Query } from "../index";
 import type {
   AbstractNumbering,
   DocxDocument,
@@ -39,7 +39,7 @@ describe("resolveRunStyle", () => {
       properties: { bold: true },
       content: []
     };
-    const resolved = Query.resolveRunStyle(doc, run);
+    const resolved = Query.getRunStyle(doc, run);
     expect(resolved.runProperties.bold).toBe(true);
     expect(resolved.chain).toEqual([]);
   });
@@ -65,7 +65,7 @@ describe("resolveRunStyle", () => {
       properties: { style: "Strong" },
       content: []
     };
-    const resolved = Query.resolveRunStyle(doc, run);
+    const resolved = Query.getRunStyle(doc, run);
     expect(resolved.chain).toEqual(["Strong", "Default"]);
     expect(resolved.runProperties.bold).toBe(true);
     expect(resolved.runProperties.font).toBe("Arial");
@@ -86,7 +86,9 @@ describe("resolveRunStyle", () => {
       content: []
     };
 
-    const resolved = Query.resolveRunStyle(doc, run, { font: "Calibri", size: 22 });
+    const resolved = Query.getRunStyle(doc, run, {
+      paragraphRunProperties: { font: "Calibri", size: 22 }
+    });
     // Inherited from paragraph
     expect(resolved.runProperties.font).toBe("Calibri");
     expect(resolved.runProperties.size).toBe(22);
@@ -108,7 +110,7 @@ describe("resolveRunStyle", () => {
       properties: { style: "Red", color: "00FF00" },
       content: []
     };
-    const resolved = Query.resolveRunStyle(doc, run);
+    const resolved = Query.getRunStyle(doc, run);
     // Run's own color overrides style
     expect(resolved.runProperties.color).toBe("00FF00");
   });
@@ -120,7 +122,7 @@ describe("resolveRunStyle", () => {
       }
     });
     const run: Run = { content: [] };
-    const resolved = Query.resolveRunStyle(doc, run);
+    const resolved = Query.getRunStyle(doc, run);
     expect(resolved.runProperties.font).toBe("Times");
   });
 
@@ -144,7 +146,7 @@ describe("resolveRunStyle", () => {
     const doc = createDoc({ styles });
     const run: Run = { properties: { style: "A" }, content: [] };
     // Should not infinite loop
-    const resolved = Query.resolveRunStyle(doc, run);
+    const resolved = Query.getRunStyle(doc, run);
     expect(resolved.chain.length).toBe(2);
   });
 });
@@ -153,7 +155,7 @@ describe("resolveNumberingLevel", () => {
   it("returns undefined for paragraph without numbering", () => {
     const doc = createDoc({});
     const para: Paragraph = { type: "paragraph", children: [] };
-    expect(Query.resolveNumberingLevel(doc, para)).toBeUndefined();
+    expect(Query.getNumberingLevel(doc, para)).toBeUndefined();
   });
 
   it("resolves a simple numbering level", () => {
@@ -179,7 +181,7 @@ describe("resolveNumberingLevel", () => {
       children: []
     };
 
-    const resolved = Query.resolveNumberingLevel(doc, para);
+    const resolved = Query.getNumberingLevel(doc, para);
     expect(resolved).toBeDefined();
     expect(resolved!.format).toBe("decimal");
     expect(resolved!.text).toBe("%1.");
@@ -193,7 +195,7 @@ describe("resolveNumberingLevel", () => {
       properties: { numbering: { level: 0, numId: 999 } },
       children: []
     };
-    expect(Query.resolveNumberingLevel(doc, para)).toBeUndefined();
+    expect(Query.getNumberingLevel(doc, para)).toBeUndefined();
   });
 
   it("applies level override", () => {
@@ -227,7 +229,7 @@ describe("resolveNumberingLevel", () => {
       children: []
     };
 
-    const resolved = Query.resolveNumberingLevel(doc, para);
+    const resolved = Query.getNumberingLevel(doc, para);
     expect(resolved!.format).toBe("bullet");
     expect(resolved!.text).toBe("•");
   });
@@ -251,7 +253,7 @@ describe("resolveTableStyle", () => {
       }
     ];
     const doc = createDoc({ styles });
-    const resolved = Query.resolveTableStyle(doc, "MyTable");
+    const resolved = Query.getTableStyle(doc, "MyTable");
 
     expect(resolved.chain).toEqual(["MyTable", "BaseTable"]);
     expect(resolved.runProperties.bold).toBe(true);
@@ -260,8 +262,10 @@ describe("resolveTableStyle", () => {
 
   it("returns minimal result for unknown style", () => {
     const doc = createDoc({});
-    const resolved = Query.resolveTableStyle(doc, "Unknown");
-    expect(resolved.chain).toEqual(["Unknown"]);
+    const resolved = Query.getTableStyle(doc, "Unknown");
+    // The chain used to list the unknown id as if it were a style; like a
+    // paragraph's, it holds only styles the document defines.
+    expect(resolved.chain).toEqual([]);
   });
 
   it("merges with doc defaults", () => {
@@ -278,7 +282,7 @@ describe("resolveTableStyle", () => {
         }
       ]
     });
-    const resolved = Query.resolveTableStyle(doc, "T");
+    const resolved = Query.getTableStyle(doc, "T");
     expect(resolved.runProperties.font).toBe("Calibri");
     expect(resolved.runProperties.bold).toBe(true);
   });
@@ -318,12 +322,14 @@ describe("combined style resolution", () => {
     };
 
     // Step 1: resolve paragraph style
-    const paraStyle = Query.resolveStyle(doc, para);
+    const paraStyle = Query.getParagraphStyle(doc, para);
     expect(paraStyle.runProperties.font).toBe("Calibri");
     expect(paraStyle.runProperties.size).toBe(22);
 
     // Step 2: resolve run with paragraph context
-    const runStyle = Query.resolveRunStyle(doc, run, paraStyle.runProperties);
+    const runStyle = Query.getRunStyle(doc, run, {
+      paragraphRunProperties: paraStyle.runProperties
+    });
 
     // Inherited from paragraph
     expect(runStyle.runProperties.font).toBe("Calibri");
@@ -362,7 +368,7 @@ describe("attribute-level inheritance of property bags", () => {
       children: []
     };
 
-    const { spacing } = Query.resolveStyle(doc, para).paragraphProperties;
+    const { spacing } = Query.getParagraphStyle(doc, para).paragraphProperties;
     expect(spacing).toEqual({ after: 154, line: 314, lineRule: "auto" });
   });
 
@@ -398,7 +404,7 @@ describe("attribute-level inheritance of property bags", () => {
     });
     const para: Paragraph = { type: "paragraph", properties: { style: "Derived" }, children: [] };
 
-    const props = Query.resolveStyle(doc, para).paragraphProperties;
+    const props = Query.getParagraphStyle(doc, para).paragraphProperties;
     expect(props.indent).toEqual({ left: 1440, firstLine: 360, right: 240 });
     // The container merges per side; a side is still replaced whole, because a
     // `Border` requires `style` and so can never arrive half-declared.
@@ -428,7 +434,7 @@ describe("attribute-level inheritance of property bags", () => {
       ]
     });
 
-    const merged = Query.resolveRunStyle(doc, { properties: { style: "Latin" }, content: [] });
+    const merged = Query.getRunStyle(doc, { properties: { style: "Latin" }, content: [] });
     expect(merged.runProperties.font).toEqual({
       ascii: "Arial",
       hAnsi: "Arial",
@@ -436,7 +442,7 @@ describe("attribute-level inheritance of property bags", () => {
     });
 
     // A `FontSpec` and a family name are different shapes, so the name wins whole.
-    const named = Query.resolveRunStyle(doc, { properties: { style: "Named" }, content: [] });
+    const named = Query.getRunStyle(doc, { properties: { style: "Named" }, content: [] });
     expect(named.runProperties.font).toBe("Courier New");
   });
 
@@ -455,7 +461,7 @@ describe("attribute-level inheritance of property bags", () => {
         }
       ]
     });
-    const resolved = Query.resolveRunStyle(doc, { properties: { style: "Tight" }, content: [] });
+    const resolved = Query.getRunStyle(doc, { properties: { style: "Tight" }, content: [] });
     expect(resolved.runProperties.spacing).toBe(-10);
   });
 
@@ -473,9 +479,72 @@ describe("attribute-level inheritance of property bags", () => {
       ]
     });
     const para: Paragraph = { type: "paragraph", properties: { style: "Explicit" }, children: [] };
-    expect(Query.resolveStyle(doc, para).paragraphProperties.spacing).toEqual({
+    expect(Query.getParagraphStyle(doc, para).paragraphProperties.spacing).toEqual({
       before: 100,
       after: 0
     });
+  });
+});
+
+describe("default styles", () => {
+  const styles: StyleDef[] = [
+    { type: "paragraph", styleId: "Normal", name: "Normal", isDefault: true },
+    {
+      type: "paragraph",
+      styleId: "Body",
+      name: "Body",
+      isDefault: true,
+      paragraphProperties: { spacing: { after: 300 } },
+      runProperties: { size: 30 }
+    },
+    {
+      type: "character",
+      styleId: "Plain",
+      name: "Plain",
+      isDefault: true,
+      runProperties: { color: { val: "FF0000" } }
+    }
+  ];
+
+  it("gives a paragraph naming no style the last default paragraph style, as Word does", () => {
+    const para: Paragraph = { type: "paragraph", children: [] };
+    const resolved = Query.getParagraphStyle(createDoc({ styles }), para);
+    expect(resolved.chain).toEqual(["Body"]);
+    expect(resolved.paragraphProperties.spacing).toEqual({ after: 300 });
+    expect(resolved.runProperties.size).toBe(30);
+  });
+
+  it("gives a paragraph naming an undefined style the default paragraph style", () => {
+    const para: Paragraph = { type: "paragraph", properties: { style: "Missing" }, children: [] };
+    expect(Query.getParagraphStyle(createDoc({ styles }), para).chain).toEqual(["Body"]);
+  });
+
+  it("gives a run naming no character style the default character style", () => {
+    const run: Run = { content: [] };
+    const resolved = Query.getRunStyle(createDoc({ styles }), run);
+    expect(resolved.chain).toEqual(["Plain"]);
+    expect(resolved.runProperties.color).toEqual({ val: "FF0000" });
+  });
+});
+
+describe("a style id the document does not define", () => {
+  it("is not reported in a style chain", () => {
+    const doc = Document.create();
+    Document.addStyle(doc, {
+      styleId: "Child",
+      type: "paragraph",
+      name: "Child",
+      basedOn: "Missing"
+    });
+    Document.addStyle(doc, {
+      styleId: "TChild",
+      type: "table",
+      name: "TChild",
+      basedOn: "Missing"
+    });
+    expect(Query.getTableStyle(doc, "Nope").chain).toEqual([]);
+    expect(Query.getTableStyle(doc, "TChild").chain).toEqual(["TChild"]);
+    const para = Build.textParagraph("x", { style: "Child" });
+    expect(Query.getParagraphStyle(doc, para).chain).toEqual(["Child"]);
   });
 });

@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Document, Build, Io, Query } from "../index";
+import { Document, Build, Io, Transform } from "../index";
 import type { CustomXmlPart } from "../index";
 
 const outDir = path.resolve(
@@ -122,11 +122,11 @@ fs.mkdirSync(outDir, { recursive: true });
   // very simple, non-bound check states such as inline lists. Defaults to
   // ☒/☐ glyphs from MS Gothic; pass custom glyphs via {checkedState,
   // uncheckedState} for ✓/✗ or any other character.
-  Document.addContent(doc, Build.checkBox({ checked: true }));
-  Document.addContent(doc, Build.checkBox({ checked: false }));
+  Document.addContent(doc, Build.checkbox({ checked: true }));
+  Document.addContent(doc, Build.checkbox({ checked: false }));
   Document.addContent(
     doc,
-    Build.checkBox({
+    Build.checkbox({
       checked: true,
       checkedState: { value: "✓", font: "Arial" },
       uncheckedState: { value: "✗", font: "Arial" }
@@ -165,8 +165,7 @@ fs.mkdirSync(outDir, { recursive: true });
     )
   );
 
-  const built = Document.build(doc);
-  const buf = await Io.toBuffer(built);
+  const buf = await Io.toBuffer(doc);
   fs.writeFileSync(path.join(outDir, "17-sdt.docx"), buf);
   console.log(`  → 17-sdt.docx (${buf.length} bytes)`);
 }
@@ -207,11 +206,9 @@ fs.mkdirSync(outDir, { recursive: true });
     xmlContent: "<invoice><customer>John Smith</customer><total>$1,234.56</total></invoice>"
   };
 
-  // We can't use the public Document API to push customXmlParts; the
-  // build() result includes a customXmlParts slot only when the handle has
-  // already been seeded. Instead we attach the part to the built model.
-  const built = Document.build(doc);
-  const final = { ...built, customXmlParts: [customXml] };
+  // No `Document.*` helper adds custom XML parts, so attach one to a copy of
+  // the document tree.
+  const final = { ...doc, customXmlParts: [customXml] };
 
   // First save: bindings present but unresolved (Word resolves them on open)
   const buf1 = await Io.toBuffer(final);
@@ -220,7 +217,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
   // Resolve bindings ahead of time and save again — useful for tools
   // that don't know how to update bindings on open.
-  const resolved = Query.resolveDataBindings(final);
+  const resolved = Transform.resolveDataBindings(final);
   const buf2 = await Io.toBuffer(resolved);
   fs.writeFileSync(path.join(outDir, "17-sdt-resolved.docx"), buf2);
   console.log(`  → 17-sdt-resolved.docx (${buf2.length} bytes)`);

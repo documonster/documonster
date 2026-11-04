@@ -1,6 +1,7 @@
 import type { DefinedNameModel, DefinedNamesData } from "@excel/core/defined-names";
 import { definedNamesSetModel } from "@excel/core/defined-names";
 import type { WorkbookData } from "@excel/core/workbook-core";
+import { namedStyleMap } from "@excel/core/workbook-core";
 import type { WorkbookModel } from "@excel/core/workbook-model";
 /**
  * Applying a model whose defined names may arrive as raw text — the one place the default
@@ -40,8 +41,21 @@ export function defaultFormulaSyntaxProbe(text: string): boolean {
 }
 
 /** `definedNamesSetModel` with the built-in probe as the fallback — `DefinedNames.setModel`. */
-export function loadDefinedNamesModel(dn: DefinedNamesData, value: DefinedNameModel[]): void {
+export function loadDefinedNamesModel(
+  dn: DefinedNamesData,
+  value: readonly DefinedNameModel[]
+): void {
   definedNamesSetModel(dn, value, defaultFormulaSyntaxProbe);
+}
+
+/** How a reader hears of a failure loading one sheet's model — see {@link loadWorkbookModel}. */
+export interface LoadWorkbookModelOptions {
+  /**
+   * The error to raise for `error`, thrown loading the sheet `sheet`. A reader passes it to report a position in the
+   * file as its own parse error (`utils/file-content-errors`); `Workbook.setModel` passes nothing, because there the
+   * model is the caller's argument.
+   */
+  readonly sheetError?: (error: unknown, sheet: WorkbookModel["worksheets"][number]) => unknown;
 }
 
 /**
@@ -50,7 +64,11 @@ export function loadDefinedNamesModel(dn: DefinedNamesData, value: DefinedNameMo
  * Defined names are classified with the workbook's own probe when it was created with one, and with
  * {@link defaultFormulaSyntaxProbe} otherwise.
  */
-export function loadWorkbookModel(wb: WorkbookData, value: WorkbookModel): void {
+export function loadWorkbookModel(
+  wb: WorkbookData,
+  value: WorkbookModel,
+  options?: LoadWorkbookModelOptions
+): void {
   wb.creator = value.creator;
   wb.lastModifiedBy = value.lastModifiedBy;
   wb.lastPrinted = value.lastPrinted;
@@ -68,9 +86,10 @@ export function loadWorkbookModel(wb: WorkbookData, value: WorkbookModel): void 
   wb.contentStatus = value.contentStatus;
   wb.workbookContentType = value.workbookContentType;
 
-  wb.properties = value.properties;
+  // A package without `xl/workbook.xml` reads with neither; the handle declares both as always present.
+  wb.properties = value.properties ?? {};
   wb.protection = value.protection;
-  wb.calcProperties = value.calcProperties;
+  wb.calcProperties = value.calcProperties ?? {};
   wb._worksheets = [];
   wb._tableNames.clear();
   value.worksheets.forEach(worksheetModel => {
@@ -93,7 +112,11 @@ export function loadWorkbookModel(wb: WorkbookData, value: WorkbookModel): void 
       state,
       workbook: wb
     }));
-    setSheetModel(worksheet, worksheetModel);
+    try {
+      setSheetModel(worksheet, worksheetModel);
+    } catch (error) {
+      throw options?.sheetError === undefined ? error : options.sheetError(error, worksheetModel);
+    }
   });
 
   definedNamesSetModel(wb._definedNames, value.definedNames, defaultFormulaSyntaxProbe);
@@ -108,9 +131,9 @@ export function loadWorkbookModel(wb: WorkbookData, value: WorkbookModel): void 
   // Preserve default font for round-trip fidelity
   wb._defaultFont = value.defaultFont;
   // Restore named cell styles for round-trip fidelity
-  wb._cellStyles = value.cellStyles
-    ? new Map(value.cellStyles.map(cs => [cs.name, cs]))
-    : undefined;
+  // Keyed as Excel compares the names, without regard to case; of two that differ only in case the first is kept, as
+  // Excel keeps it.
+  wb._cellStyles = value.cellStyles ? namedStyleMap(value.cellStyles) : undefined;
   wb._dxfs = value.dxfs;
   // Restore chart entries
   wb._chartEntries = value.chartEntries || {};

@@ -382,19 +382,29 @@ function applyScalar(wb: WorkbookData, operation: ScalarWrite): void {
   cellSetResult(cell, snapshotToResult(operation.value));
 }
 
+/**
+ * Every cell of a legacy array formula's range gets its element. The master holds the formula and takes the result;
+ * every other cell of the range is a plain cached value, which is how Excel stores one (`<c r="B2"><v>0</v></c>`) and
+ * what both writers write and both readers read back. Writing only cells that already held a formula left the rest of
+ * a range set with `{ shareType: "array", ref }`, or read from a file, without its values.
+ */
 function applyCSE(wb: WorkbookData, operation: CSEWrite): void {
   const ws = requireWorksheetByName(wb, operation.sheetName);
   for (let r = operation.top; r <= operation.bottom; r++) {
     for (let c = operation.left; c <= operation.right; c++) {
-      const cell = findCell(ws, r, c);
-      if (!cell || cellType(cell) !== Enums.ValueType.Formula) {
-        continue;
-      }
       const value =
         operation.scalarFill !== undefined
           ? operation.scalarFill
           : (operation.results[r - operation.top]?.[c - operation.left] ?? null);
-      cellSetResult(cell, snapshotToResult(value));
+      const cell = findCell(ws, r, c);
+      if (cell && cellType(cell) === Enums.ValueType.Formula) {
+        cellSetResult(cell, snapshotToResult(value));
+        continue;
+      }
+      const target = cell ?? getCell(ws, r, c);
+      if (cellType(target) !== Enums.ValueType.Merge) {
+        cellSetValue(target, snapshotToCellValue(value));
+      }
     }
   }
 }

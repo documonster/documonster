@@ -11,6 +11,11 @@
  * - Practical interoperability constraints from Word/LibreOffice
  */
 
+import { findUnrecognizedValues } from "@utils/unrecognized-values";
+import { checkHandle, checkRecord } from "@word/core/argument-checks";
+import { indexImagesByKey } from "@word/core/image-keys";
+import { EXTENSION_MEDIA_TYPE_MAP, KNOWN_IMAGE_MEDIA_TYPES } from "@word/core/image-media";
+import { isRangeMarker } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import type {
   DocxDocument,
@@ -96,6 +101,8 @@ export function validateDocument(
   doc: DocxDocument,
   options: ValidationOptions = {}
 ): ValidationResult {
+  checkHandle(doc, "document", "doc", "Validation.validate");
+  checkRecord(options, "options", "Validation.validate");
   const issues: ValidationIssue[] = [];
   const maxErrors = options.maxErrors ?? Infinity;
 
@@ -146,6 +153,7 @@ export function validateDocument(
   validateTableCellContent(doc.body, addIssue);
   validateCustomXmlPartItemIds(doc.customXmlParts, addIssue);
   validateImageExtensionMediaType(doc.images, addIssue);
+  validateUnrecognizedValues(doc, addIssue);
 
   const errors = issues.filter(i => i.severity === "error").length;
   const warnings = issues.filter(i => i.severity === "warning").length;
@@ -161,6 +169,50 @@ export function validateDocument(
 // =============================================================================
 // Body Validation
 // =============================================================================
+
+// Exhaustive over the model unions: adding a member to `BodyContent` or
+// `ParagraphChild` fails to compile until it is listed here.
+const BODY_CONTENT_TYPES: Record<BodyContent["type"], true> = {
+  paragraph: true,
+  table: true,
+  floatingImage: true,
+  tableOfContents: true,
+  math: true,
+  textBox: true,
+  checkBox: true,
+  drawingShape: true,
+  opaqueDrawing: true,
+  chart: true,
+  chartEx: true,
+  altChunk: true,
+  sdt: true
+};
+
+const PARAGRAPH_CHILD_TYPES: Record<Extract<ParagraphChild, { type: string }>["type"], true> = {
+  hyperlink: true,
+  bookmarkStart: true,
+  bookmarkEnd: true,
+  commentRangeStart: true,
+  commentRangeEnd: true,
+  commentReference: true,
+  insertedRun: true,
+  deletedRun: true,
+  movedFromRun: true,
+  movedToRun: true,
+  moveFromRangeStart: true,
+  moveFromRangeEnd: true,
+  moveToRangeStart: true,
+  moveToRangeEnd: true,
+  customXmlInsRangeStart: true,
+  customXmlInsRangeEnd: true,
+  customXmlDelRangeStart: true,
+  customXmlDelRangeEnd: true,
+  customXmlMoveFromRangeStart: true,
+  customXmlMoveFromRangeEnd: true,
+  customXmlMoveToRangeStart: true,
+  customXmlMoveToRangeEnd: true,
+  opaqueParagraphChild: true
+};
 
 function validateBody(
   body: readonly BodyContent[],
@@ -195,18 +247,10 @@ function validateBody(
       case "floatingImage":
         validateFloatingImage(element as FloatingImage, path, addIssue);
         break;
-      case "tableOfContents":
-      case "math":
-      case "textBox":
-      case "checkBox":
-      case "drawingShape":
-      case "opaqueDrawing":
-      case "chart":
-      case "altChunk":
-      case "sdt":
-        // These are valid body content types
-        break;
       default:
+        if (Object.hasOwn(BODY_CONTENT_TYPES, element.type)) {
+          break;
+        }
         addIssue(
           "error",
           `Unknown body content type: "${(element as { type: string }).type}"`,
@@ -232,26 +276,10 @@ function validateParagraph(
     const childPath = `${path}.children[${i}]`;
 
     if ("type" in child) {
-      // Typed children: hyperlink, bookmarkStart, bookmarkEnd, commentRangeStart, etc.
-      const validTypes = [
-        "hyperlink",
-        "bookmarkStart",
-        "bookmarkEnd",
-        "commentRangeStart",
-        "commentRangeEnd",
-        "commentReference",
-        "insertedRun",
-        "deletedRun",
-        "movedFromRun",
-        "movedToRun",
-        "moveFromRangeStart",
-        "moveFromRangeEnd",
-        "moveToRangeStart",
-        "moveToRangeEnd",
-        "formField"
-      ];
-      if (!validTypes.includes((child as { type: string }).type)) {
-        // Could be an unknown type — just warn
+      if (
+        !Object.hasOwn(PARAGRAPH_CHILD_TYPES, (child as { type: string }).type) &&
+        !isRangeMarker(child)
+      ) {
         addIssue(
           "info",
           `Paragraph child has unusual type: "${(child as { type: string }).type}"`,
@@ -315,8 +343,7 @@ function validateTable(
     return;
   }
 
-  // Check consistent column count
-  let expectedCols: number | undefined;
+  const gridCols = gridColumnCount(t as Table);
 
   for (let ri = 0; ri < t.rows.length; ri++) {
     const row = t.rows[ri]!;
@@ -327,18 +354,12 @@ function validateTable(
       continue;
     }
 
-    // Count effective columns (accounting for gridSpan)
-    let colCount = 0;
-    for (const cell of row.cells) {
-      colCount += cell.properties?.gridSpan ?? 1;
-    }
+    const colCount = rowGridColumns(row);
 
-    if (expectedCols === undefined) {
-      expectedCols = colCount;
-    } else if (colCount !== expectedCols && !hasVerticalMerge(row)) {
+    if (gridCols !== undefined && colCount > gridCols) {
       addIssue(
         "warning",
-        `Row ${ri} has ${colCount} effective columns, expected ${expectedCols}`,
+        `Row ${ri} occupies ${colCount} grid columns, expected ${gridCols}`,
         rowPath,
         "table-col-mismatch"
       );
@@ -363,8 +384,28 @@ function validateTable(
   }
 }
 
-function hasVerticalMerge(row: TableRow): boolean {
-  return row.cells.some(c => c.properties?.verticalMerge !== undefined);
+/**
+ * Grid columns a row occupies (ECMA-376 §17.4.14/§17.4.15/§17.4.17):
+ * gridBefore + Σ gridSpan + gridAfter. A vMerge continuation cell is still a
+ * `w:tc`, so it is counted like any other cell.
+ */
+function rowGridColumns(row: TableRow): number {
+  let count = (row.properties?.gridBefore ?? 0) + (row.properties?.gridAfter ?? 0);
+  for (const cell of row.cells) {
+    count += cell.properties?.gridSpan ?? 1;
+  }
+  return count;
+}
+
+/**
+ * Column count declared by `w:tblGrid`, or `undefined` when the table has none.
+ * Only a row that needs more columns than the grid is a mismatch: a row may
+ * end short of the grid with its trailing cells omitted (ECMA-376 §17.4.14,
+ * §17.4.15 — `w:gridAfter` is optional), and Word opens such a row unchanged.
+ */
+function gridColumnCount(table: Table): number | undefined {
+  const n = table.columnWidths?.length;
+  return n ? n : undefined;
 }
 
 function validateFloatingImage(
@@ -402,9 +443,23 @@ function validateStyles(
   }
 
   const styleIds = new Set<string>();
+  const defaultTypes = new Set<string>();
   for (let i = 0; i < styles.length; i++) {
     const style = styles[i]!;
     const path = `styles[${i}]`;
+
+    if (style.isDefault) {
+      // Word applies the last one; the others are dead and the file is ambiguous.
+      if (defaultTypes.has(style.type)) {
+        addIssue(
+          "warning",
+          `More than one default ${style.type} style; "${style.styleId}" is the one Word uses`,
+          path,
+          "style-dup-default"
+        );
+      }
+      defaultTypes.add(style.type);
+    }
 
     if (!style.styleId) {
       addIssue("error", "Style missing 'styleId'", path, "style-no-id");
@@ -770,15 +825,8 @@ function validateRelationshipConsistency(
   doc: DocxDocument,
   addIssue: (s: ValidationSeverity, m: string, p: string, r: string) => void
 ): void {
-  // Collect all valid image rIds
-  const validImageRIds = new Set<string>();
-  if (doc.images) {
-    for (const img of doc.images) {
-      if (img.rId) {
-        validImageRIds.add(img.rId);
-      }
-    }
-  }
+  // Every key an image answers to — its rId and aliasRIds — resolved as the writer resolves them
+  const validImageRIds = new Set<string>(indexImagesByKey(doc.images).keys());
 
   // Validate body image references (InlineImageContent and FloatingImage)
   for (let i = 0; i < doc.body.length; i++) {
@@ -946,21 +994,6 @@ function validateHeaderFooterContentImageRefs(
 // Content Type Consistency Validation
 // =============================================================================
 
-/** Valid image media types per OOXML spec. */
-const VALID_IMAGE_MEDIA_TYPES: readonly string[] = [
-  "png",
-  "jpeg",
-  "jpg",
-  "gif",
-  "bmp",
-  "tiff",
-  "tif",
-  "svg",
-  "webp",
-  "emf",
-  "wmf"
-];
-
 function validateContentTypeConsistency(
   doc: DocxDocument,
   addIssue: (s: ValidationSeverity, m: string, p: string, r: string) => void
@@ -969,10 +1002,10 @@ function validateContentTypeConsistency(
   if (doc.images) {
     for (let i = 0; i < doc.images.length; i++) {
       const img = doc.images[i]!;
-      if (img.mediaType && !VALID_IMAGE_MEDIA_TYPES.includes(img.mediaType)) {
+      if (img.mediaType && !img.contentType && !KNOWN_IMAGE_MEDIA_TYPES.includes(img.mediaType)) {
         addIssue(
           "error",
-          `Image has invalid mediaType "${img.mediaType}". Valid types: ${VALID_IMAGE_MEDIA_TYPES.join(", ")}`,
+          `Image has invalid mediaType "${img.mediaType}". Valid types: ${KNOWN_IMAGE_MEDIA_TYPES.join(", ")}`,
           `images[${i}]`,
           "content-type-invalid-media"
         );
@@ -1103,7 +1136,10 @@ function validateTableColumnConsistency(
     return;
   }
 
-  let expectedCols: number | undefined;
+  const gridCols = gridColumnCount(table);
+  if (gridCols === undefined) {
+    return;
+  }
 
   for (let ri = 0; ri < table.rows.length; ri++) {
     const row = table.rows[ri]!;
@@ -1111,18 +1147,12 @@ function validateTableColumnConsistency(
       continue;
     }
 
-    // Count effective columns (accounting for gridSpan)
-    let colCount = 0;
-    for (const cell of row.cells) {
-      colCount += cell.properties?.gridSpan ?? 1;
-    }
+    const colCount = rowGridColumns(row);
 
-    if (expectedCols === undefined) {
-      expectedCols = colCount;
-    } else if (colCount !== expectedCols && !hasVerticalMerge(row)) {
+    if (colCount > gridCols) {
       addIssue(
         "error",
-        `Table row ${ri} has ${colCount} effective columns (gridSpan-weighted), expected ${expectedCols}`,
+        `Table row ${ri} occupies ${colCount} grid columns, expected ${gridCols}`,
         `${path}.rows[${ri}]`,
         "struct-table-col-mismatch"
       );
@@ -1452,8 +1482,29 @@ function validateNoteAndCommentReferences(
   // CommentReference / commentRangeStart / commentRangeEnd live as
   // ParagraphChild siblings (alongside runs) — scan paragraph children
   // directly. We use the existing walker to keep dispatch consistent.
+  // Comment ranges between blocks (not inside a paragraph) are checked the same way.
+  let inParagraph = 0;
+  const checkBlockCommentRange = (
+    marker: { type: "commentRangeStart" | "commentRangeEnd"; id: number },
+    path: { index: number }
+  ): void => {
+    if (inParagraph === 0 && commentIds.size > 0 && !commentIds.has(marker.id)) {
+      addIssue(
+        "error",
+        `${marker.type} points at id=${marker.id} which is not defined in doc.comments`,
+        `body[${path.index}]`,
+        "ref-comment-range-missing"
+      );
+    }
+  };
   walkBlocks(doc.body, {
+    visitCommentRangeStart: checkBlockCommentRange,
+    visitCommentRangeEnd: checkBlockCommentRange,
+    leaveParagraph() {
+      inParagraph--;
+    },
     enterParagraph(para, path) {
+      inParagraph++;
       const basePath = `body[${path.index}]`;
       for (let i = 0; i < para.children.length; i++) {
         const child = para.children[i]!;
@@ -1497,6 +1548,11 @@ function validateNoteAndCommentReferences(
       }
     }
   });
+  for (const marker of doc.bodyRangeMarkersAfter ?? []) {
+    if (marker.type === "commentRangeStart" || marker.type === "commentRangeEnd") {
+      checkBlockCommentRange(marker, { index: doc.body.length });
+    }
+  }
 }
 
 // =============================================================================
@@ -1624,20 +1680,25 @@ function validateCustomXmlPartItemIds(
 // Image File Extension / MediaType Consistency
 // =============================================================================
 
-/** Mapping from file extensions to expected media types. */
-const EXTENSION_MEDIA_TYPE_MAP: ReadonlyMap<string, readonly string[]> = new Map([
-  ["png", ["png"]],
-  ["jpg", ["jpeg"]],
-  ["jpeg", ["jpeg"]],
-  ["gif", ["gif"]],
-  ["bmp", ["bmp"]],
-  ["tiff", ["tiff"]],
-  ["tif", ["tiff"]],
-  ["svg", ["svg"]],
-  ["webp", ["webp"]],
-  ["emf", ["emf"]],
-  ["wmf", ["wmf"]]
-]);
+/**
+ * Values the reader kept as read because they are outside the vocabulary of
+ * their field — see `readToken`. They are written back unchanged, so the
+ * document is no worse than its source; but Word may repair them, and one that
+ * the schema does allow means a vocabulary here is too narrow.
+ */
+function validateUnrecognizedValues(
+  doc: DocxDocument,
+  addIssue: (s: ValidationSeverity, m: string, p: string, r: string) => void
+): void {
+  for (const { path, value } of findUnrecognizedValues(doc)) {
+    addIssue(
+      "warning",
+      `${JSON.stringify(value)} is not a value this field takes; it was kept as read and is written back unchanged`,
+      path,
+      "unrecognized-value"
+    );
+  }
+}
 
 function validateImageExtensionMediaType(
   images: readonly ImageDef[] | undefined,
@@ -1649,7 +1710,8 @@ function validateImageExtensionMediaType(
 
   for (let i = 0; i < images.length; i++) {
     const img = images[i]!;
-    if (!img.fileName || !img.mediaType) {
+    // A picture typed by its source package is written with that type.
+    if (!img.fileName || !img.mediaType || img.contentType) {
       continue;
     }
 

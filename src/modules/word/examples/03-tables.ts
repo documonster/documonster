@@ -85,60 +85,57 @@ for (const [i, r] of [
     )
   );
 }
-Document.addTableElement(
+Document.addTable(
   doc,
-  Build.table(
-    stripedRows,
-    {
-      width: { value: 5000, type: "pct" },
-      borders: Build.gridBorders(4, "BFBFBF"),
-      cellMargins: {
-        top: { value: 80, type: "dxa" },
-        bottom: { value: 80, type: "dxa" },
-        left: { value: 100, type: "dxa" },
-        right: { value: 100, type: "dxa" }
-      }
+  Build.table(stripedRows, {
+    width: { value: 5000, type: "pct" },
+    borders: Build.gridBorders({ size: 4, color: "BFBFBF" }),
+    cellMargins: {
+      top: { value: 80, type: "dxa" },
+      bottom: { value: 80, type: "dxa" },
+      left: { value: 100, type: "dxa" },
+      right: { value: 100, type: "dxa" }
     },
-    [
+    columnWidths: [
       Units.cmToTwips(4),
       Units.cmToTwips(2.5),
       Units.cmToTwips(2.5),
       Units.cmToTwips(2.5),
       Units.cmToTwips(2.5)
     ]
-  )
+  })
 );
 
 // ---------------------------------------------------------------------------
 // 3. Mixed borders & "no borders" table
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "3. Mixed borders / borderless", 2);
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
       Build.row([
         Build.cell("thick top", {
           borders: {
-            top: Build.border("single", 24, "C00000"),
-            bottom: Build.border("single", 4, "auto")
+            top: Build.border({ style: "single", size: 24, color: "C00000" }),
+            bottom: Build.border({ style: "single", size: 4, color: "auto" })
           }
         }),
         Build.cell("dashed", {
           borders: {
-            top: Build.border("dashed", 8, "0070C0"),
-            bottom: Build.border("dashed", 8, "0070C0")
+            top: Build.border({ style: "dashed", size: 8, color: "0070C0" }),
+            bottom: Build.border({ style: "dashed", size: 8, color: "0070C0" })
           }
         }),
         Build.cell("double", {
           borders: {
-            top: Build.border("double", 6, "70AD47"),
-            bottom: Build.border("double", 6, "70AD47")
+            top: Build.border({ style: "double", size: 6, color: "70AD47" }),
+            bottom: Build.border({ style: "double", size: 6, color: "70AD47" })
           }
         })
       ]),
       Build.row([
-        Build.cell("none", { borders: { top: Build.border("nil") } }),
+        Build.cell("none", { borders: { top: Build.border({ style: "nil" }) } }),
         Build.cell("none"),
         Build.cell("none")
       ])
@@ -146,10 +143,10 @@ Document.addTableElement(
     {
       width: { value: 5000, type: "pct" },
       borders: {
-        top: Build.border("nil"),
-        bottom: Build.border("nil"),
-        left: Build.border("nil"),
-        right: Build.border("nil")
+        top: Build.border({ style: "nil" }),
+        bottom: Build.border({ style: "nil" }),
+        left: Build.border({ style: "nil" }),
+        right: Build.border({ style: "nil" })
       }
     }
   )
@@ -159,7 +156,7 @@ Document.addTableElement(
 // 4. Horizontal merge (gridSpan)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "4. Horizontal merge (gridSpan)", 2);
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -175,7 +172,7 @@ Document.addTableElement(
 // 5. Vertical merge (vMerge restart / continue)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "5. Vertical merge (vMerge)", 2);
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -218,9 +215,9 @@ const nested = Build.table(
     Build.row([Build.cell("inner-1A"), Build.cell("inner-1B")]),
     Build.row([Build.cell("inner-2A"), Build.cell("inner-2B")])
   ],
-  { width: { value: 5000, type: "pct" }, borders: Build.gridBorders(2, "808080") }
+  { width: { value: 5000, type: "pct" }, borders: Build.gridBorders({ size: 2, color: "808080" }) }
 );
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -245,7 +242,7 @@ Document.addTableElement(
 // 7. Vertical alignment & text direction
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "7. Vertical alignment & text direction", 2);
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -279,7 +276,7 @@ for (let i = 1; i <= 30; i++) {
     })
   );
 }
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(repeatRows, { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() })
 );
@@ -294,7 +291,7 @@ Document.addParagraph(
     4
   )
 );
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -324,7 +321,7 @@ Document.addTableElement(
 Document.addHeading(doc, "Edge cases", 2);
 
 // Empty cell — must still contain at least one (empty) paragraph
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table([Build.row([Build.cell("non-empty"), Build.cell([Build.textParagraph("")])])], {
     width: { value: 2000, type: "dxa" },
@@ -333,7 +330,7 @@ Document.addTableElement(
 );
 
 // Single-cell single-row table
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table([Build.row([Build.cell("only cell")])], {
     width: { value: 5000, type: "pct" },
@@ -357,7 +354,7 @@ Document.addTable(
 // tblGrid column count). To produce a *visually* ragged row we use
 // gridBefore / gridAfter to leave grid units empty rather than dropping
 // cells entirely.
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -387,8 +384,8 @@ const standaloneTable = Build.simpleTable(
   ],
   { headerRow: true, borders: true, columnWidths: [Units.cmToTwips(3), Units.cmToTwips(3)] }
 );
-Document.addTableElement(doc, standaloneTable);
+Document.addTable(doc, standaloneTable);
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "03-tables.docx"), buf);
 console.log(`  → 03-tables.docx (${buf.length} bytes)`);

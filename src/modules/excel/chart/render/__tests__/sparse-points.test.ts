@@ -8,7 +8,7 @@
  * `densifySparsePoints`, so the two cannot disagree again.
  */
 import type { ChartExModel } from "@excel/chart";
-import { renderChartExSvg } from "@excel/chart";
+import { ChartEx } from "@excel/chart";
 import { densifySparsePoints } from "@excel/chart/shared/chart-utils";
 import { describe, expect, it } from "vitest";
 
@@ -34,11 +34,11 @@ function sparseModel(index: number, value: number): ChartExModel {
   } as unknown as ChartExModel;
 }
 
-/** Data rects, i.e. everything but the full-bleed background. */
+/** Data rects, i.e. everything but the chart area (the one with Office's automatic border). */
 function dataRects(svg: string): string[] {
   return [...svg.matchAll(/<rect [^>]*>/g)]
     .map(match => match[0])
-    .filter(rect => !rect.includes('width="100%"'));
+    .filter(rect => !/stroke="#d9d9d9"/i.test(rect));
 }
 
 describe("densifySparsePoints", () => {
@@ -61,14 +61,14 @@ describe("densifySparsePoints", () => {
 describe("a ChartEx series whose points are sparse", () => {
   it("keeps a value addressed past the declared count", () => {
     // Before sharing the densifier this rendered the background and nothing else.
-    expect(
-      dataRects(renderChartExSvg(sparseModel(3, 42), { width: 300, height: 200 }))
-    ).toHaveLength(1);
+    expect(dataRects(ChartEx.toSvg(sparseModel(3, 42), { width: 300, height: 200 }))).toHaveLength(
+      1
+    );
   });
 
   it("still renders a dense series", () => {
-    expect(
-      dataRects(renderChartExSvg(sparseModel(0, 42), { width: 300, height: 200 }))
-    ).toHaveLength(1);
+    expect(dataRects(ChartEx.toSvg(sparseModel(0, 42), { width: 300, height: 200 }))).toHaveLength(
+      1
+    );
   });
 });

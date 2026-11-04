@@ -8,10 +8,11 @@
  * a glyph for it. A word split across two faces therefore loses the join at the seam.
  */
 
+import { isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
 // The canonical WinAnsi predicate. A local copy here excluded the control
 // characters (`0x00–0x1f`, `0x7f`) that the real one accepts, so a tab or a
 // newline was reported as a code point the face has no glyph for.
-import { isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
+import { PdfFontError } from "@pdf/errors";
 import type {
   CompiledPdfFontConfig,
   CompiledPdfFontFace,
@@ -145,7 +146,7 @@ export function buildFontPlan(
   return {
     collect(intent) {
       if (finalized) {
-        throw new Error("Cannot collect text after the font plan is finalized");
+        throw new PdfFontError("Cannot collect text after the font plan is finalized");
       }
       intents.push(Object.freeze({ ...intent }));
     },
@@ -392,7 +393,7 @@ function genericConfig(input: FontPlanConfig): InternalConfig {
   const fallbackFamilies = (input.fallbackFamilies ?? []).map(name => {
     const family = lookup.get(normalizeName(name));
     if (!family) {
-      throw new Error(`Fallback font family '${name}' is not configured`);
+      throw new PdfFontError(`Fallback font family '${name}' is not configured`);
     }
     return family;
   });

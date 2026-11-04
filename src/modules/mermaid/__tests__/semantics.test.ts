@@ -7,7 +7,7 @@
  * being misinformed, so each is pinned rather than left to a visual check.
  */
 import type { DrawNode } from "@draw/types";
-import { layoutFlowchart, mermaidToDrawList, parseMermaid } from "@mermaid/index";
+import { Mermaid } from "@mermaid/index";
 import {
   addWorkingTime,
   parseCalendarDuration,
@@ -28,16 +28,16 @@ import type {
 import { describe, expect, it } from "vitest";
 
 const centre = (source: string, id: string): { x: number; y: number } => {
-  const result = layoutFlowchart(parseMermaid(source) as FlowchartDiagram);
+  const result = Mermaid.layoutGraph(Mermaid.parse(source) as FlowchartDiagram);
   const box = result.nodes.find(node => node.id === id)!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 };
 const rects = (source: string): Array<Extract<DrawNode, { kind: "rect" }>> =>
-  mermaidToDrawList(source).children.filter(
+  Mermaid.toDrawList(source).children.filter(
     (node): node is Extract<DrawNode, { kind: "rect" }> => node.kind === "rect"
   );
 const texts = (source: string): string[] =>
-  mermaidToDrawList(source)
+  Mermaid.toDrawList(source)
     .children.filter((node): node is Extract<DrawNode, { kind: "text" }> => node.kind === "text")
     .flatMap(node => node.lines.map(line => line.text));
 
@@ -74,7 +74,7 @@ describe("a nested group contains what was nested inside it", () => {
   it("records a node against every group it sits in", () => {
     // Recording only the innermost left the outer frame with no members, and a frame with no
     // members is not drawn at all — the group simply vanished.
-    const diagram = parseMermaid(nested) as FlowchartDiagram;
+    const diagram = Mermaid.parse(nested) as FlowchartDiagram;
     expect(diagram.subgraphs.map(group => `${group.id}:${group.nodeIds.join()}`).sort()).toEqual([
       "inner:A,B",
       "outer:A,B"
@@ -85,7 +85,7 @@ describe("a nested group contains what was nested inside it", () => {
     // Two groups holding the same nodes are indistinguishable by membership, so the frames
     // came out the same size and the containment was invisible. The declared parent tells
     // them apart.
-    const result = layoutFlowchart(parseMermaid(nested) as FlowchartDiagram);
+    const result = Mermaid.layoutGraph(Mermaid.parse(nested) as FlowchartDiagram);
     const outer = result.groups.find(group => group.id === "outer")!;
     const inner = result.groups.find(group => group.id === "inner")!;
     expect(outer.x).toBeLessThan(inner.x);
@@ -94,7 +94,7 @@ describe("a nested group contains what was nested inside it", () => {
   });
 
   it("does the same for a nested composite state", () => {
-    const diagram = parseMermaid(
+    const diagram = Mermaid.parse(
       "stateDiagram-v2\n state Outer {\n state Inner {\n A --> B\n }\n }"
     ) as StateDiagram;
     const outer = diagram.composites.find(group => group.id === "Outer")!;
@@ -113,7 +113,7 @@ describe("YAML frontmatter", () => {
       ["---\ntitle: T\n---\nmindmap\n root\n  A", "mindmap"],
       ["---\ntitle: T\n---\nsankey-beta\nA,B,10", "sankey"]
     ] as Array<[string, string]>) {
-      expect(parseMermaid(source).kind).toBe(kind);
+      expect(Mermaid.parse(source).kind).toBe(kind);
     }
   });
 });
@@ -122,7 +122,7 @@ describe("sequence activation", () => {
   it("reads `+` and `-` as part of the arrow, not of the name", () => {
     // Read as a name they produced participants called `+B` and `-A`, so an ordinary exchange
     // came out as four participants who never spoke to each other.
-    const diagram = parseMermaid(
+    const diagram = Mermaid.parse(
       "sequenceDiagram\n A->>+B: req\n B-->>-A: reply"
     ) as SequenceDiagram;
     expect(diagram.participants.map(entry => entry.id)).toEqual(["A", "B"]);
@@ -138,16 +138,16 @@ describe("sequence activation", () => {
 
   it("gives a wrapped message the height its label needs", () => {
     // A fixed row height let a long label grow upwards over whatever was above it.
-    const short = mermaidToDrawList("sequenceDiagram\n A->>B: hi\n A->>B: next");
-    const long = mermaidToDrawList(
+    const short = Mermaid.toDrawList("sequenceDiagram\n A->>B: hi\n A->>B: next");
+    const long = Mermaid.toDrawList(
       "sequenceDiagram\n A->>B: a message long enough that it has to be wrapped onto several lines\n A->>B: next"
     );
     expect(long.height).toBeGreaterThan(short.height);
   });
 
   it("draws an actor as a figure rather than a box", () => {
-    const withActor = mermaidToDrawList("sequenceDiagram\n actor U\n participant P\n U->>P: x");
-    const withParticipant = mermaidToDrawList(
+    const withActor = Mermaid.toDrawList("sequenceDiagram\n actor U\n participant P\n U->>P: x");
+    const withParticipant = Mermaid.toDrawList(
       "sequenceDiagram\n participant U\n participant P\n U->>P: x"
     );
     // Two head circles, one per repeated header.
@@ -159,7 +159,7 @@ describe("sequence activation", () => {
 
 describe("Gantt calendar arithmetic", () => {
   const tasks = (body: string): GanttDiagram["tasks"] =>
-    (parseMermaid(`gantt\n${body}`) as GanttDiagram).tasks;
+    (Mermaid.parse(`gantt\n${body}`) as GanttDiagram).tasks;
   const day = (time: number): string => new Date(time).toISOString().slice(0, 10);
 
   it("reads a date in the format the source declared", () => {
@@ -226,8 +226,8 @@ describe("XY charts", () => {
   });
 
   it("honours `horizontal`", () => {
-    const vertical = mermaidToDrawList("xychart-beta\n x-axis [a, b]\n bar [10, 20]");
-    const horizontal = mermaidToDrawList("xychart-beta horizontal\n x-axis [a, b]\n bar [10, 20]");
+    const vertical = Mermaid.toDrawList("xychart-beta\n x-axis [a, b]\n bar [10, 20]");
+    const horizontal = Mermaid.toDrawList("xychart-beta horizontal\n x-axis [a, b]\n bar [10, 20]");
     expect(horizontal.width).toBe(vertical.height);
     expect(horizontal.height).toBe(vertical.width);
     // Bars now run along x, so the longer value is the wider bar.
@@ -244,8 +244,8 @@ describe("Sankey", () => {
     // far past the column count the canvas was sized from — so the nodes went outside it.
     // Two nodes in a cycle occupy two columns; comparing against the canvas is not enough,
     // because a runaway depth widens the canvas too.
-    const cycle = mermaidToDrawList("sankey-beta\n A,B,10\n B,A,10");
-    const chain = mermaidToDrawList("sankey-beta\n A,B,10");
+    const cycle = Mermaid.toDrawList("sankey-beta\n A,B,10\n B,A,10");
+    const chain = Mermaid.toDrawList("sankey-beta\n A,B,10");
     const columns = (list: typeof cycle): number =>
       new Set(
         list.children
@@ -258,7 +258,7 @@ describe("Sankey", () => {
 
   it("fits a tall column inside the plot", () => {
     // The scale reserved room for four gaps whatever the column held.
-    const list = mermaidToDrawList(
+    const list = Mermaid.toDrawList(
       `sankey-beta\n${Array.from({ length: 8 }, (_, i) => `A${i},Z,1`).join("\n")}`
     );
     for (const node of list.children) {
@@ -273,13 +273,13 @@ describe("block cells", () => {
   it("keeps a label containing spaces in one cell", () => {
     // Split on whitespace, `A["Long label"]` became two unrelated boxes and the label was
     // lost with them.
-    const diagram = parseMermaid('block-beta\n columns 1\n A["Long label"]') as BlockDiagram;
+    const diagram = Mermaid.parse('block-beta\n columns 1\n A["Long label"]') as BlockDiagram;
     expect(diagram.cells).toHaveLength(1);
     expect(diagram.cells[0].label).toBe("Long label");
   });
 
   it("still reads several cells on one row", () => {
-    const diagram = parseMermaid('block-beta\n columns 3\n a["One two"] b c') as BlockDiagram;
+    const diagram = Mermaid.parse('block-beta\n columns 3\n a["One two"] b c') as BlockDiagram;
     expect(diagram.cells.map(cell => cell.id)).toEqual(["a", "b", "c"]);
   });
 });
@@ -288,7 +288,7 @@ describe("marks that carry the meaning", () => {
   it("keeps two relationships between the same classes apart", () => {
     // Keyed on `from\\0to`, the second overwrote the first, so an inheritance could be drawn
     // with a composition's diamond — and the two marks are the whole difference.
-    const list = mermaidToDrawList("classDiagram\n B --|> A\n B *-- A");
+    const list = Mermaid.toDrawList("classDiagram\n B --|> A\n B *-- A");
     const closed = (points: number): number =>
       list.children.filter(
         node => node.kind === "polyline" && node.closed === true && node.points.length === points
@@ -299,8 +299,8 @@ describe("marks that carry the meaning", () => {
 
   it("draws two bars for an ER `exactly one`", () => {
     // One bar alone reads as "one or more".
-    const exact = mermaidToDrawList("erDiagram\n A ||--|| B : owns");
-    const many = mermaidToDrawList("erDiagram\n A ||--o{ B : owns");
+    const exact = Mermaid.toDrawList("erDiagram\n A ||--|| B : owns");
+    const many = Mermaid.toDrawList("erDiagram\n A ||--o{ B : owns");
     const strokes = (list: typeof exact): number =>
       list.children.filter(node => node.kind === "polyline" && node.points.length === 2).length;
     expect(strokes(exact)).toBeGreaterThan(2);
@@ -320,7 +320,7 @@ describe("marks that carry the meaning", () => {
   it("starts a branch lane where the branch starts", () => {
     // Running every lane the full width made a branch look as though it had existed since the
     // first commit.
-    const list = mermaidToDrawList("gitGraph\n commit\n commit\n branch dev\n commit");
+    const list = Mermaid.toDrawList("gitGraph\n commit\n commit\n branch dev\n commit");
     const lanes = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "polyline" }> =>
         node.kind === "polyline" && node.points.length === 2 && node.paint.stroke !== undefined
@@ -334,8 +334,8 @@ describe("marks that carry the meaning", () => {
     // no longer meant what the source said it meant. The test compares the over-range series
     // against a value *at* the maximum — they must reach the same ring, which is what
     // "clamped" means and what a rescale would not produce.
-    const clamped = mermaidToDrawList("radar-beta\n axis A, B, C\n max 5\n curve X{20, 5, 5}");
-    const atMax = mermaidToDrawList("radar-beta\n axis A, B, C\n max 5\n curve X{5, 5, 5}");
+    const clamped = Mermaid.toDrawList("radar-beta\n axis A, B, C\n max 5\n curve X{20, 5, 5}");
+    const atMax = Mermaid.toDrawList("radar-beta\n axis A, B, C\n max 5\n curve X{5, 5, 5}");
     const reach = (list: typeof clamped): number => {
       const cx = list.width / 2;
       const cy = list.height / 2;
@@ -356,7 +356,7 @@ describe("marks that carry the meaning", () => {
 describe("a frame encloses its members and nobody else", () => {
   /** Ids whose box overlaps a group's frame. */
   const enclosed = (source: string, groupId: string): string[] => {
-    const result = layoutFlowchart(parseMermaid(source) as FlowchartDiagram);
+    const result = Mermaid.layoutGraph(Mermaid.parse(source) as FlowchartDiagram);
     const frame = result.groups.find(group => group.id === groupId)!;
     return result.nodes
       .filter(
@@ -401,7 +401,7 @@ describe("C4 arguments are positional", () => {
   it("keeps an empty argument in its slot", () => {
     // Dropping empties shifted everything after one down a place, so the description was read
     // as the technology and the description itself was lost.
-    const diagram = parseMermaid(
+    const diagram = Mermaid.parse(
       'C4Container\n Container(a, "API", "", "Handles requests")'
     ) as C4Diagram;
     expect(diagram.elements[0].technology).toBe("");
@@ -410,9 +410,11 @@ describe("C4 arguments are positional", () => {
 
   it("still reads the forms that give no technology", () => {
     // A trailing run of empties carries nothing, so `Person(a, "Customer")` is two arguments.
-    const bare = parseMermaid('C4Context\n Person(a, "Customer")') as C4Diagram;
+    const bare = Mermaid.parse('C4Context\n Person(a, "Customer")') as C4Diagram;
     expect([bare.elements[0].label, bare.elements[0].description]).toEqual(["Customer", undefined]);
-    const described = parseMermaid('C4Context\n Person(a, "Customer", "Buys things")') as C4Diagram;
+    const described = Mermaid.parse(
+      'C4Context\n Person(a, "Customer", "Buys things")'
+    ) as C4Diagram;
     expect(described.elements[0].description).toBe("Buys things");
   });
 });
@@ -421,7 +423,7 @@ describe("an inline requirement field", () => {
   it("keeps a quoted value that contains a colon", () => {
     // Reading only the unquoted form truncated at the first colon, so the field matched nothing
     // and vanished from the diagram.
-    const diagram = parseMermaid(
+    const diagram = Mermaid.parse(
       'requirementDiagram\n requirement r { text: "a: b" risk: high }'
     ) as RequirementDiagram;
     expect(diagram.requirements[0].text).toBe("a: b");
@@ -429,7 +431,7 @@ describe("an inline requirement field", () => {
   });
 
   it("still reads an unquoted value", () => {
-    const diagram = parseMermaid(
+    const diagram = Mermaid.parse(
       "requirementDiagram\n requirement r { text: plain risk: low }"
     ) as RequirementDiagram;
     expect(diagram.requirements[0].text).toBe("plain");
@@ -441,14 +443,14 @@ describe("comments follow one rule for every grammar", () => {
   it("keeps a quoted percent sign in the grammars whose syntax is whitespace", () => {
     // These three each had their own `replace(/%%.*$/, "")`, which is not quote-aware. The
     // shared rule is; an *unquoted* `%%` is a comment here exactly as it is in a flowchart.
-    const quoted = parseMermaid('mindmap\n root\n  ["100%% coverage"]') as MindmapDiagram;
+    const quoted = Mermaid.parse('mindmap\n root\n  ["100%% coverage"]') as MindmapDiagram;
     expect(quoted.root?.children.map(child => child.text)).toEqual(["100%% coverage"]);
-    const commented = parseMermaid("mindmap\n root\n  Child %% a note") as MindmapDiagram;
+    const commented = Mermaid.parse("mindmap\n root\n  Child %% a note") as MindmapDiagram;
     expect(commented.root?.children.map(child => child.text)).toEqual(["Child"]);
   });
 
   it("drops a trailing comment from a Sankey row", () => {
-    const diagram = parseMermaid("sankey-beta\nA,B,10 %% note") as SankeyDiagram;
+    const diagram = Mermaid.parse("sankey-beta\nA,B,10 %% note") as SankeyDiagram;
     expect(diagram.links).toEqual([{ from: "A", to: "B", value: 10 }]);
   });
 });

@@ -45,51 +45,51 @@ Output is written to `tmp/word-examples/`.
 
 ### 15–24 Editing, querying & document features
 
-| File                          | Topic                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------------- |
-| `15-track-changes.ts`         | Insertion / deletion / move + accept/reject helpers                                       |
-| `16-templates.ts`             | `fillTemplate` + JSON / XML / CSV data sources, custom delim                              |
-| `17-forms-sdt.ts`             | Legacy form fields + SDT (content controls) + data binding                                |
-| `18-read-modify.ts`           | `Io.read`, `Query.extractText`, `Query.searchText`, `Query.replaceText` (in 9 containers) |
-| `19-merge-split-diff.ts`      | `Io.merge` / `Io.split` / `Diff.documents`                                                |
-| `20-protection-encryption.ts` | `protectDocument` + `encryptDocx`                                                         |
-| `21-validation.ts`            | `validateDocument` (clean / malformed / strict / compat)                                  |
-| `22-streaming.ts`             | `createDocxStream` for huge documents                                                     |
-| `23-fonts.ts`                 | `embedFont` (with subsetting & ODTTF obfuscation)                                         |
-| `24-watermark-bg.ts`          | Text & image watermark, page background, custom theme                                     |
+| File                          | Topic                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `15-track-changes.ts`         | Insertion / deletion / move + accept/reject helpers                                      |
+| `16-templates.ts`             | `Template.fill` + JSON / XML / CSV data sources, custom delim, `Template.isChart`        |
+| `17-forms-sdt.ts`             | Legacy form fields + SDT (content controls) + data binding                               |
+| `18-read-modify.ts`           | `Io.read`, `Query.getText`, `Query.searchText`, `Document.replaceText` (in 9 containers) |
+| `19-merge-split-diff.ts`      | `Transform.merge` / `Transform.split` / `Diff.compare`                                   |
+| `20-protection-encryption.ts` | `Security.protect` + `WordCrypto.encrypt`                                                |
+| `21-validation.ts`            | `Validation.validate` (clean / malformed / strict / compat)                              |
+| `22-streaming.ts`             | `Streaming.createWriter` for huge documents                                              |
+| `23-fonts.ts`                 | `Font.embed` (subsetting & ODTTF obfuscation) + `Font.obfuscate`                         |
+| `24-watermark-bg.ts`          | Text & image watermark, page background, custom theme                                    |
 
 ### 25–30 Conversions & edge cases
 
 | File                        | Topic                                                                                   |
 | --------------------------- | --------------------------------------------------------------------------------------- |
-| `25-html-conversion.ts`     | `htmlToDocxBody` / `renderToHtml`                                                       |
-| `26-markdown-conversion.ts` | `markdownToDocx` / `renderToMarkdown`                                                   |
-| `27-excel-conversion.ts`    | `excelToDocx` / `extractTablesToExcel`                                                  |
+| `25-html-conversion.ts`     | `WordHtml.toDocxBody` / `WordHtml.toDocx` / `WordHtml.fromDocx`                         |
+| `26-markdown-conversion.ts` | `Markdown.toDocx` / `Markdown.fromDocx`                                                 |
+| `27-excel-conversion.ts`    | `WordExcel.toDocx` / `WordExcel.extractTables` / chart bridge (`toChartSvg`, …)         |
 | `28-pdf-conversion.ts`      | `Pdf.fromDocx` (custom page size, custom chart renderer)                                |
-| `29-flat-opc-odt.ts`        | `toFlatOpcFromDoc` / `parseFlatOpc` / `readOdt` / `writeOdt`                            |
+| `29-flat-opc-odt.ts`        | `Io.toFlatOpc` / `Convert.flatOpcToParts` / `Convert.fromOdt` / `Convert.toOdt`         |
 | `30-edge-cases.ts`          | Encryption rejection, empty / large / nested-table docs, corrupted ZIP, 1 000 bookmarks |
 
 ### 31–47 Advanced internals & low-level surface
 
-| File                             | Topic                                                                                                                         |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `31-walker-mapper.ts`            | `walkDocument` / `walkBlocks` / `mapDocument` / collectors                                                                    |
-| `32-style-resolve-themes.ts`     | `resolveStyle` / `resolveRunStyle` / `resolveTableStyle` / `resolveThemeColor` / `parseStyleMap`                              |
-| `33-incremental-edit.ts`         | `editDocxIncremental` / `listDocxParts` / `readDocxPart`                                                                      |
-| `34-decrypt-roundtrip.ts`        | `isEncryptedDocx` / `decryptDocx` / `Io.read` with password                                                                   |
-| `35-mathml-conversion.ts`        | `ommlToMathML` / `mathMLToOmml` + `ruby` + `mathPhantom`                                                                      |
-| `36-text-shaping-hyphenation.ts` | `shapeText` / `detectScript` / `detectDirection` / `hyphenateText`                                                            |
-| `37-svg-render.ts`               | `layoutDocument` / `layoutDocumentFull` / `renderPageToSvg` / `renderDocumentToSvg`                                           |
-| `38-glossary-buildingblocks.ts`  | `createBuildingBlock` / `createGlossaryDocument` / `getQuickParts`                                                            |
-| `39-ole-vba.ts`                  | `extractOleObjects` / `createOleEmbedding` / `addVbaProject` (.docm round-trip)                                               |
-| `40-templates-advanced.ts`       | `compileTemplate` / `patchTemplate` / `bindChartData` / `createCompositeDataSource`                                           |
-| `41-fields-engine.ts`            | `updateFields` / `updateTableOfContents` / `tcField` / `indexEntryField` / `indexField` / `noteRefField`                      |
-| `42-conversion-ir.ts`            | `docxToSemantic` / `createConversionContext`                                                                                  |
-| `43-compat-modes.ts`             | `getCompatibilityMode` / `setCompatibilityMode` for Word 2003-2013+                                                           |
-| `44-queries-deep.ts`             | `Query.findBookmark` / `Query.findComment` / `Query.searchByFormat` / `Query.getUsedFormats`                                  |
-| `45-digital-signatures.ts`       | `extractSignatures` / `parseSignatureXml` / `isWellFormedSignature` / `hasDigitalSignatures`                                  |
-| `46-security-policy.ts`          | `DEFAULT_SECURITY_POLICY` / `STRICT_SECURITY_POLICY` / `resolveSecurityPolicy` / `createRenderContext` / `createIdGenerators` |
-| `47-low-level-crypto.ts`         | `readCfb` / `writeCfb` / `parseEncryptionInfoXml` / `verifyPassword` / `AGILE_BLOCK_KEYS`                                     |
+| File                             | Topic                                                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `31-walker-mapper.ts`            | `Query.each` / `Query.eachBlock` / `Transform.map` / `Query.list*`                                                           |
+| `32-style-resolve-themes.ts`     | `Query.getParagraphStyle` / `Query.getRunStyle` / `Query.getTableStyle` / `Theme.resolveColor` / `Styles.parse`              |
+| `33-incremental-edit.ts`         | `Package.edit` / `Package.listParts` / `Package.readPart`                                                                    |
+| `34-decrypt-roundtrip.ts`        | `WordCrypto.isEncrypted` / `WordCrypto.decrypt` / `Io.read` with password                                                    |
+| `35-mathml-conversion.ts`        | `Convert.ommlToMathMl` / `Convert.mathMlToOmml` + `ruby` + `mathPhantom`                                                     |
+| `36-text-shaping-hyphenation.ts` | `Font.shapeText` / `Font.detectScript` / `Font.detectDirection` / `Font.hyphenateText`                                       |
+| `37-svg-render.ts`               | `Layout.getPageMap` / `Layout.compute` / `Layout.pageToSvg` / `Layout.computedPageToSvg` / `Layout.toSvg`                    |
+| `38-glossary-buildingblocks.ts`  | `Glossary.createBlock` / `Glossary.createDocument` / `Glossary.listQuickParts`                                               |
+| `39-ole-vba.ts`                  | `Ole.extract` / `Ole.createEmbedding` / `Vba.add` (.docm round-trip)                                                         |
+| `40-templates-advanced.ts`       | `Package.compileTemplate` / `Package.patchTemplate` / `Template.bindChartData` / `Template.createCompositeDataSource`        |
+| `41-fields-engine.ts`            | `Transform.updateFields` / `Transform.updateTableOfContents` / `tcField` / `indexEntryField` / `indexField` / `noteRefField` |
+| `42-conversion-ir.ts`            | `Convert.toSemantic` / `Convert.createConversionContext`                                                                     |
+| `43-compat-modes.ts`             | `getCompatibilityMode` / `setCompatibilityMode` for Word 2003-2013+                                                          |
+| `44-queries-deep.ts`             | `Query.getBookmark` / `Query.getComment` / `Query.searchByFormat` / `Query.listUsedFormats`                                  |
+| `45-digital-signatures.ts`       | `WordCrypto.listSignatures` / `parseSignature` / `isWellFormedSignature` / `hasSignatures`                                   |
+| `46-security-policy.ts`          | `Security.DEFAULT_SECURITY_POLICY` / `Security.resolvePolicy` / `RenderContext.create` / `RenderContext.createIds`           |
+| `47-low-level-crypto.ts`         | `WordCrypto.verifyPassword` / `readCfb` / `writeCfb` / `parseEncryptionInfo` / `deriveKey` / `decryptPackage`                |
 
 ## Conventions
 

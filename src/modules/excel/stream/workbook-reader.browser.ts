@@ -12,7 +12,7 @@
 import { FileTooLargeError } from "@archive/core/errors";
 import { createParse } from "@archive/unzip/stream";
 import type { ZipEntry } from "@archive/unzip/stream";
-import { ExcelFileError, ExcelStreamStateError } from "@excel/errors";
+import { ExcelArgumentError, ExcelFileError, ExcelStreamStateError } from "@excel/errors";
 import type { Hyperlink } from "@excel/stream/hyperlink-reader";
 import { HyperlinkReader } from "@excel/stream/hyperlink-reader";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
@@ -25,7 +25,9 @@ import type {
   RichText,
   CellRichTextValue
 } from "@excel/types";
-import { iterateStream } from "@excel/utils/iterate-stream";
+import { compoundFileChecked, withContainerErrors } from "@excel/utils/container-errors";
+import { xlsxPartError } from "@excel/utils/file-content-errors";
+import { iterateStream as iterateRawStream } from "@excel/utils/iterate-stream";
 import type { IterableStreamLike } from "@excel/utils/iterate-stream";
 import {
   getWorksheetNoFromWorksheetPath,
@@ -34,6 +36,16 @@ import {
   OOXML_PATHS,
   worksheetRelTarget
 } from "@excel/utils/ooxml-paths";
+import { createPartDecoder } from "@excel/utils/part-decoder";
+
+/**
+ * A part's (or the package's) chunks, with a damaged package — a part whose bytes do not match its CRC-32, input that
+ * is not a ZIP package — reported as the buffered readers report it: an `ExcelFileError` with the archive's error as
+ * the cause.
+ */
+function iterateStream<T = Uint8Array | string>(stream: IterableStreamLike<T>): AsyncGenerator<T> {
+  return withContainerErrors(iterateRawStream(stream));
+}
 
 /** The binary package's fixed part paths — the `.bin` counterparts of `OOXML_PATHS`. */
 /** A ZIP entry's bytes, joined. Used only for the three small binary parts every sheet depends on. */
@@ -94,9 +106,10 @@ import type { SharedStringValue } from "@excel/utils/shared-strings";
 import { WorkbookXform } from "@excel/xlsx/xform/book/workbook-xform";
 import { MetadataXform } from "@excel/xlsx/xform/core/metadata-xform";
 import { RelationshipsXform } from "@excel/xlsx/xform/core/relationships-xform";
+import { createPrefixNormalizer, scanningChunks } from "@excel/xlsx/xform/namespace-prefixes";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { StylesXform } from "@excel/xlsx/xform/style/styles-xform";
-import { Readable, Transform, isReadableStream, readableFromWeb } from "@stream";
+import { Readable, Transform, Streams } from "@stream";
 import { EventEmitter } from "@utils/event-emitter";
 import { assertLimitOption } from "@utils/limits";
 import { decodeOoxmlEscape } from "@utils/utils";
@@ -111,7 +124,12 @@ export interface InternalWorksheetOptions {
   worksheets?: "emit" | "ignore" | "prep";
   sharedStrings?: "cache" | "emit" | "ignore";
   hyperlinks?: "cache" | "emit" | "ignore";
+  /**
+   * `"cache"` reads the style table, which is what tells a date from a number: with `"ignore"` (the default) a date
+   * cell reads as its serial number (`43845`), and cells carry no number format.
+   */
   styles?: "cache" | "ignore";
+  /** `"emit"` raises an `entry` event for each part of the package as it is reached; `"ignore"` (the default) does not. */
   entries?: "emit" | "ignore";
 }
 
@@ -184,7 +202,12 @@ export interface WaitingWorksheetEntry {
 export type WorkbookReaderInput = Uint8Array | ArrayBuffer | Readable | ReadableStream<Uint8Array>;
 
 export interface WorkbookReaderOptions {
+  /** `"emit"` (the default) yields a reader for each worksheet; `"ignore"` skips every sheet. */
   worksheets?: "emit" | "ignore";
+  /**
+   * What to do with the shared-string table. `"cache"` (the default) keeps it, so cells read as their text; `"emit"`
+   * raises a `shared-strings` event per string instead of keeping them; `"ignore"` skips the table.
+   */
   sharedStrings?: "cache" | "emit" | "ignore";
   /**
    * What to do with each worksheet's hyperlink relationships.
@@ -195,7 +218,12 @@ export interface WorkbookReaderOptions {
    * before asking for the next event, as with a worksheet.
    */
   hyperlinks?: "cache" | "emit" | "ignore";
+  /**
+   * `"cache"` reads the style table, which is what tells a date from a number: with `"ignore"` (the default) a date
+   * cell reads as its serial number (`43845`), and cells carry no number format.
+   */
   styles?: "cache" | "ignore";
+  /** `"emit"` raises an `entry` event for each part of the package as it is reached; `"ignore"` (the default) does not. */
   entries?: "emit" | "ignore";
   /**
    * Maximum total bytes to buffer for worksheets that arrive before
@@ -215,6 +243,19 @@ export interface WorkbookReaderOptions {
    * @default 512 MiB (536870912)
    */
   maxEntrySize?: number;
+  /**
+   * Whether each part is checked against the CRC-32 the package records for it, failing
+   * the read on a mismatch with an `ExcelFileError` whose `cause` is the archive's
+   * `Crc32MismatchError`. Set `false` to read a damaged package as far as it goes.
+   * @default true
+   */
+  checkCrc32?: boolean;
+  /**
+   * The password of an encrypted workbook, as `Workbook.read` takes it. An encrypted workbook cannot be streamed —
+   * its package is one encrypted stream — so it is read whole, decrypted (up to 2 GiB), and its package then read part
+   * by part. Without a password it is an `ExcelEncryptedError`; with a wrong one an `ExcelDecryptionError`.
+   */
+  password?: string;
 }
 
 /**
@@ -232,15 +273,46 @@ function boundedPart(entry: ZipEntry, limit: number): Transform {
       seen += chunk.length;
       if (seen > limit) {
         callback(
-          new FileTooLargeError(entry.path, `holds more than ${limit} bytes (maxEntrySize)`)
+          new FileTooLargeError(entry.path, `holds more than ${limit} bytes (maxEntrySize)`, {
+            allowed: limit
+          })
         );
         return;
       }
       callback(null, chunk);
     }
   });
+  // The reader of `bounded` hears a failure through its own listener while it reads, and through `errored` if it starts
+  // after the failure; once it has stopped reading, nobody is left to tell, and a forwarded error with no listener
+  // would crash the process.
+  bounded.on("error", ignoreErrorAfterReaderLeft);
   entry.on("error", (err: Error) => bounded.destroy(err));
   return entry.pipe(bounded);
+}
+
+function ignoreErrorAfterReaderLeft(): void {
+  // See `boundedPart`
+}
+
+/**
+ * Release a package the reader stopped walking — on an error, or because the caller left early.
+ *
+ * The archive cannot move past a part nobody reads, so leaving the part open would park the parser on it for good, and
+ * with it the input: a file handle for a path, or the caller's own stream, paused behind a destination that will never
+ * drain. A late failure of the part (its CRC-32 is checked only once all its bytes are through) is the parser's to
+ * report, and it has been told the read is over.
+ */
+function abandonPackage(
+  input: Readable,
+  zip: ReturnType<typeof createParse>,
+  entry: ZipEntry | undefined
+): void {
+  if (entry && !entry.destroyed) {
+    entry.destroy();
+  }
+  input.unpipe(zip);
+  input.destroy();
+  zip.destroy();
 }
 
 /**
@@ -333,6 +405,59 @@ export interface ReaderConstructor<TReader, TWorkbook> {
 // Base Class
 // ============================================================================
 
+const READER_CHOICES = {
+  worksheets: ["emit", "ignore"],
+  sharedStrings: ["cache", "emit", "ignore"],
+  hyperlinks: ["cache", "emit", "ignore"],
+  styles: ["cache", "ignore"],
+  entries: ["emit", "ignore"]
+} as const;
+
+/**
+ * The reader's options with their defaults — `worksheets: "emit"`, `sharedStrings: "cache"`, and `"ignore"` for
+ * `hyperlinks`, `styles` and `entries` — each checked against its choices. A misspelt choice was read as "ignore",
+ * so `{ worksheets: "emitt" }` read no sheet and said nothing.
+ */
+function resolveReaderOptions(options: WorkbookReaderOptions): {
+  password?: string;
+  worksheets: "emit" | "ignore";
+  sharedStrings: "cache" | "emit" | "ignore";
+  hyperlinks: "cache" | "emit" | "ignore";
+  styles: "cache" | "ignore";
+  entries: "emit" | "ignore";
+} {
+  if (options === null || typeof options !== "object") {
+    throw new ExcelArgumentError(
+      "options",
+      `WorkbookReader: options must be an object, got ${String(options)}.`
+    );
+  }
+  const password = (options as Record<string, unknown>).password;
+  if (password !== undefined && typeof password !== "string") {
+    throw new ExcelArgumentError(
+      "password",
+      `WorkbookReader: password must be a string, got ${JSON.stringify(password) ?? String(password)}.`
+    );
+  }
+  for (const [key, choices] of Object.entries(READER_CHOICES)) {
+    const value = (options as Record<string, unknown>)[key];
+    if (value !== undefined && !(choices as readonly unknown[]).includes(value)) {
+      throw new ExcelArgumentError(
+        key,
+        `WorkbookReader: ${key} must be one of ${choices.map(choice => JSON.stringify(choice)).join(", ")}, got ${JSON.stringify(value)}.`
+      );
+    }
+  }
+  return {
+    ...options,
+    worksheets: options.worksheets ?? "emit",
+    sharedStrings: options.sharedStrings ?? "cache",
+    hyperlinks: options.hyperlinks ?? "ignore",
+    styles: options.styles ?? "ignore",
+    entries: options.entries ?? "ignore"
+  };
+}
+
 export abstract class WorkbookReaderBase<
   TInput,
   TWorksheetReader extends EventEmitter & {
@@ -349,6 +474,7 @@ export abstract class WorkbookReaderBase<
 > extends EventEmitter {
   input: TInput;
   options: {
+    password?: string;
     worksheets: "emit" | "ignore";
     sharedStrings: "cache" | "emit" | "ignore";
     hyperlinks: "cache" | "emit" | "ignore";
@@ -370,6 +496,7 @@ export abstract class WorkbookReaderBase<
   /** Maximum bytes to buffer for worksheets waiting on prerequisites. Default: 256 MB. */
   protected _maxBufferedBytes: number;
   protected _maxEntrySize: number;
+  protected _checkCrc32: boolean | undefined;
   /** Running total of bytes buffered for waiting worksheets. */
   protected _totalBufferedBytes = 0;
 
@@ -416,15 +543,9 @@ export abstract class WorkbookReaderBase<
     this._maxBufferedBytes = options.maxBufferedWorksheetBytes ?? 256 * 1024 * 1024;
     assertLimitOption("maxEntrySize", options.maxEntrySize);
     this._maxEntrySize = options.maxEntrySize ?? 512 * 1024 * 1024;
+    this._checkCrc32 = options.checkCrc32;
 
-    this.options = {
-      worksheets: "emit",
-      sharedStrings: "cache",
-      hyperlinks: "ignore",
-      styles: "ignore",
-      entries: "ignore",
-      ...options
-    };
+    this.options = resolveReaderOptions(options);
 
     this.styles = new StylesXform();
     this.styles.init();
@@ -440,8 +561,8 @@ export abstract class WorkbookReaderBase<
     // adapter, not the class's `fromWeb`: it hands the lock back once the
     // workbook has been read or the reader is abandoned, where Node's keeps
     // it for good. It returns an instance of this entry's Readable.
-    if (isReadableStream(input)) {
-      return readableFromWeb(input as ReadableStream<Uint8Array>) as unknown as Readable;
+    if (Streams.isReadableStream(input)) {
+      return Streams.fromWebReadable(input as ReadableStream<Uint8Array>) as unknown as Readable;
     }
 
     let data: unknown = input;
@@ -538,7 +659,9 @@ export abstract class WorkbookReaderBase<
     options?: WorkbookReaderOptions
   ): AsyncIterableIterator<ParseEvent<TWorksheetReader, THyperlinkReader>> {
     if (options) {
-      this.options = options as typeof this.options;
+      // The defaults apply to what the call leaves out, as they do for the constructor's options: replacing them
+      // wholesale left `worksheets` unset, and an unset `worksheets` reads no sheet.
+      this.options = resolveReaderOptions(options);
     }
     const stream = (this.stream = this._getStream(input || this.input));
     const waitingWorksheets: TWaitingWorksheet[] = [];
@@ -617,8 +740,11 @@ export abstract class WorkbookReaderBase<
     if (this.options.sharedStrings === "cache") {
       const sharedStrings = this.sharedStrings!;
       const parser = new SaxParser({ position: false, invalidCharHandling: "skip" });
+      // Prefixes normalised to the ones matched below — see `namespace-prefixes.ts`.
+      const parserPrefixes = createPrefixNormalizer({ lazy: true });
 
-      parser.on("opentag", (node: SaxTag) => {
+      parser.on("opentag", (rawNode: SaxTag) => {
+        const node = parserPrefixes.open(rawNode);
         switch (node.name) {
           case "b":
             font = font || {};
@@ -692,7 +818,9 @@ export abstract class WorkbookReaderBase<
         text = text ? text + value : value;
       });
 
-      parser.on("closetag", (tag: SaxTag) => {
+      parser.on("closetag", (rawTag: SaxTag) => {
+        const closed = parserPrefixes.close(rawTag.name);
+        const tag = closed === rawTag.name ? rawTag : { name: closed };
         switch (tag.name) {
           case "t":
             if (text != null && text.includes("_x")) {
@@ -716,16 +844,19 @@ export abstract class WorkbookReaderBase<
         }
       });
 
-      await saxStream(parser, iterateStream(entry));
+      await saxStream(parser, scanningChunks(iterateStream(entry), parserPrefixes));
       return;
     }
 
     // "emit" mode — must yield, so use direct SAX with per-chunk yield
     const emitParser = new SaxParser({ invalidCharHandling: "skip" });
-    const emitDecoder = new TextDecoder("utf-8", { fatal: true });
+    // Prefixes normalised to the ones matched below — see `namespace-prefixes.ts`.
+    const emitParserPrefixes = createPrefixNormalizer({ lazy: true });
+    const emitDecoder = createPartDecoder();
     let pendingEmits: Array<{ index: number; text: SharedStringValue }> = [];
 
-    emitParser.on("opentag", (node: SaxTag) => {
+    emitParser.on("opentag", (rawNode: SaxTag) => {
+      const node = emitParserPrefixes.open(rawNode);
       switch (node.name) {
         case "b":
           font = font || {};
@@ -799,7 +930,9 @@ export abstract class WorkbookReaderBase<
       text = text ? text + value : value;
     });
 
-    emitParser.on("closetag", (tag: SaxTag) => {
+    emitParser.on("closetag", (rawTag: SaxTag) => {
+      const closed = emitParserPrefixes.close(rawTag.name);
+      const tag = closed === rawTag.name ? rawTag : { name: closed };
       switch (tag.name) {
         case "t":
           if (text != null && text.includes("_x")) {
@@ -831,6 +964,7 @@ export abstract class WorkbookReaderBase<
         typeof chunk === "string"
           ? chunk
           : emitDecoder.decode(chunk as Uint8Array, { stream: true });
+      emitParserPrefixes.scan(chunkStr);
       emitParser.write(chunkStr);
       if (pendingEmits.length > 0) {
         for (const item of pendingEmits) {
@@ -843,6 +977,7 @@ export abstract class WorkbookReaderBase<
     // Flush trailing bytes (catches truncated UTF-8)
     const emitTrailing = emitDecoder.decode();
     if (emitTrailing) {
+      emitParserPrefixes.scan(emitTrailing);
       emitParser.write(emitTrailing);
     }
 
@@ -1022,9 +1157,18 @@ export abstract class WorkbookReaderBase<
   }
 
   protected async *_parseEntries(
-    stream: Readable
+    source: Readable
   ): AsyncIterableIterator<ParseEvent<TWorksheetReader, THyperlinkReader> | WaitingWorksheetEntry> {
-    const zip = createParse({ forceStream: true });
+    // An OLE compound file — an encrypted workbook, a legacy .xls — never reaches the ZIP parser: it is reported as
+    // what it is (`ExcelEncryptedError`) rather than as a ZIP without a central directory.
+    // An encrypted workbook is collected, decrypted with `options.password`, and its package parsed.
+    const stream = Readable.from(
+      compoundFileChecked(source as unknown as AsyncIterable<Uint8Array>, {
+        password: this.options.password,
+        format: "workbook"
+      })
+    ) as unknown as Readable;
+    const zip = createParse({ forceStream: true, checkCrc32: this._checkCrc32 });
     // Bidirectional error propagation, guarded against re-entry: each side
     // marks itself "settled" before forwarding so the partner's destroy/emit
     // doesn't bounce the error back into an infinite loop.
@@ -1052,111 +1196,124 @@ export abstract class WorkbookReaderBase<
     stream.pipe(zip);
 
     const emitWorksheets = this.options.worksheets === "emit";
-    for await (const entry of iterateStream(zip)) {
-      let sheetNo;
-      const normalizedPath = normalizeZipPath(entry.path);
+    let current: ZipEntry | undefined;
+    let completed = false;
+    try {
+      for await (const entry of iterateStream(zip)) {
+        current = entry;
+        let sheetNo;
+        const normalizedPath = normalizeZipPath(entry.path);
 
-      switch (normalizedPath) {
-        case OOXML_PATHS.rootRels:
-          break;
-        case OOXML_PATHS.xlWorkbookRels:
-          await this._parseRels(boundedPart(entry, this._maxEntrySize));
-          break;
-        case OOXML_PATHS.xlWorkbook:
-          await this._parseWorkbook(boundedPart(entry, this._maxEntrySize));
-          break;
-        case OOXML_PATHS.xlSharedStrings:
-          for await (const item of this._parseSharedStrings(
-            boundedPart(entry, this._maxEntrySize)
-          )) {
-            yield { eventType: "shared-strings", value: item };
-          }
-          break;
-        case OOXML_PATHS.xlStyles:
-          await this._parseStyles(boundedPart(entry, this._maxEntrySize));
-          break;
-        case OOXML_PATHS.xlMetadata:
-          await this._parseMetadata(boundedPart(entry, this._maxEntrySize));
-          break;
-        // **The binary package's three prerequisite parts.**
-        //
-        // Handled beside their XML counterparts rather than in a separate reader, because the thing that differs is
-        // how a part is decoded and not how the package is walked: the ZIP iteration, the relationship resolution and
-        // the `waiting-worksheet` spooling that copes with shared strings arriving *after* a sheet are all the same
-        // problem in both containers, and were already solved here for one of them.
-        default:
-          if (normalizedPath.toLowerCase() === "xl/_rels/workbook.bin.rels") {
+        switch (normalizedPath) {
+          case OOXML_PATHS.rootRels:
+            break;
+          case OOXML_PATHS.xlWorkbookRels:
             await this._parseRels(boundedPart(entry, this._maxEntrySize));
-            continue;
-          }
-
-          switch (xlsbPartKind(normalizedPath)) {
-            case "workbook":
-              await this._parseXlsbWorkbook(boundedPart(entry, this._maxEntrySize));
-              continue;
-            case "sharedStrings":
-              await this._parseXlsbSharedStrings(boundedPart(entry, this._maxEntrySize));
-              continue;
-            case "styles":
-              await this._parseXlsbStyles(boundedPart(entry, this._maxEntrySize));
-              continue;
-            default:
-              break;
-          }
-
-          // A part the caller has not asked for is not opened at all: it falls through to `autodrain`. One that is handed
-          // out is drained once the caller moves past it — see `handOut`.
-          sheetNo = emitWorksheets ? getXlsbWorksheetNo(normalizedPath)?.toString() : undefined;
-          if (sheetNo) {
-            // The same prerequisite test the XML branch makes, for the same reason: a cell record holds an index into
-            // the shared-string table rather than a string, so a sheet that arrives first has to be spooled and come
-            // back later. `_storeWaitingWorksheet` is shared.
-            if (this._xlsbSharedStrings !== undefined && !!this._xlsbWorkbook) {
-              const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
-              yield* this._parseXlsbWorksheet(part.chunks, sheetNo);
-              await releasePart(entry, part, false);
+            break;
+          case OOXML_PATHS.xlWorkbook:
+            await this._parseWorkbook(boundedPart(entry, this._maxEntrySize));
+            break;
+          case OOXML_PATHS.xlSharedStrings:
+            for await (const item of this._parseSharedStrings(
+              boundedPart(entry, this._maxEntrySize)
+            )) {
+              yield { eventType: "shared-strings", value: item };
+            }
+            break;
+          case OOXML_PATHS.xlStyles:
+            await this._parseStyles(boundedPart(entry, this._maxEntrySize));
+            break;
+          case OOXML_PATHS.xlMetadata:
+            await this._parseMetadata(boundedPart(entry, this._maxEntrySize));
+            break;
+          // **The binary package's three prerequisite parts.**
+          //
+          // Handled beside their XML counterparts rather than in a separate reader, because the thing that differs is
+          // how a part is decoded and not how the package is walked: the ZIP iteration, the relationship resolution and
+          // the `waiting-worksheet` spooling that copes with shared strings arriving *after* a sheet are all the same
+          // problem in both containers, and were already solved here for one of them.
+          default:
+            if (normalizedPath.toLowerCase() === "xl/_rels/workbook.bin.rels") {
+              await this._parseRels(boundedPart(entry, this._maxEntrySize));
               continue;
             }
-            yield { eventType: "waiting-worksheet", sheetNo, entry };
-            continue;
-          }
 
-          sheetNo = emitWorksheets
-            ? getWorksheetNoFromWorksheetPath(normalizedPath)?.toString()
-            : undefined;
-          if (sheetNo) {
-            // Performance: only wait for sharedStrings when they are actually needed.
-            // Also require workbook.xml to be parsed so worksheet name, id, and state
-            // can be resolved from workbook metadata before the worksheet event fires.
-            const hasPrerequisites =
-              !!this.workbookRels &&
-              !!this.model &&
-              (this.options.sharedStrings !== "cache" || !!this.sharedStrings);
-            if (hasPrerequisites) {
-              const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
-              yield* this._parseWorksheet(part.chunks, sheetNo);
-              await releasePart(entry, part, false);
-              continue;
-            } else {
+            switch (xlsbPartKind(normalizedPath)) {
+              case "workbook":
+                await this._parseXlsbWorkbook(boundedPart(entry, this._maxEntrySize));
+                continue;
+              case "sharedStrings":
+                await this._parseXlsbSharedStrings(boundedPart(entry, this._maxEntrySize));
+                continue;
+              case "styles":
+                await this._parseXlsbStyles(boundedPart(entry, this._maxEntrySize));
+                continue;
+              default:
+                break;
+            }
+
+            // A part the caller has not asked for is not opened at all: it falls through to `autodrain`. One that is handed
+            // out is drained once the caller moves past it — see `handOut`.
+            sheetNo = emitWorksheets ? getXlsbWorksheetNo(normalizedPath)?.toString() : undefined;
+            if (sheetNo) {
+              // The same prerequisite test the XML branch makes, for the same reason: a cell record holds an index into
+              // the shared-string table rather than a string, so a sheet that arrives first has to be spooled and come
+              // back later. `_storeWaitingWorksheet` is shared.
+              if (this._xlsbSharedStrings !== undefined && !!this._xlsbWorkbook) {
+                const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
+                yield* this._parseXlsbWorksheet(part.chunks, sheetNo);
+                await releasePart(entry, part, false);
+                continue;
+              }
               yield { eventType: "waiting-worksheet", sheetNo, entry };
               continue;
             }
-          }
 
-          sheetNo = getWorksheetNoFromWorksheetRelsPath(normalizedPath)?.toString();
-          if (
-            sheetNo &&
-            (this.options.hyperlinks === "cache" || this.options.hyperlinks === "emit")
-          ) {
-            const source = boundedPart(entry, this._maxEntrySize);
-            const part = handOut(iterateStream(source), `the hyperlinks of sheet ${sheetNo}`);
-            yield* this._parseHyperlinks(part.chunks, sheetNo);
-            await releasePart(entry, part, true);
-            continue;
-          }
-          break;
+            sheetNo = emitWorksheets
+              ? getWorksheetNoFromWorksheetPath(normalizedPath)?.toString()
+              : undefined;
+            if (sheetNo) {
+              // Performance: only wait for sharedStrings when they are actually needed.
+              // Also require workbook.xml to be parsed so worksheet name, id, and state
+              // can be resolved from workbook metadata before the worksheet event fires.
+              const hasPrerequisites =
+                !!this.workbookRels &&
+                !!this.model &&
+                (this.options.sharedStrings !== "cache" || !!this.sharedStrings);
+              if (hasPrerequisites) {
+                const part = handOut(iterateStream(entry), `worksheet ${sheetNo}`);
+                yield* this._parseWorksheet(part.chunks, sheetNo);
+                await releasePart(entry, part, false);
+                continue;
+              } else {
+                yield { eventType: "waiting-worksheet", sheetNo, entry };
+                continue;
+              }
+            }
+
+            sheetNo = getWorksheetNoFromWorksheetRelsPath(normalizedPath)?.toString();
+            if (
+              sheetNo &&
+              (this.options.hyperlinks === "cache" || this.options.hyperlinks === "emit")
+            ) {
+              const source = boundedPart(entry, this._maxEntrySize);
+              const part = handOut(iterateStream(source), `the hyperlinks of sheet ${sheetNo}`);
+              yield* this._parseHyperlinks(part.chunks, sheetNo);
+              await releasePart(entry, part, true);
+              continue;
+            }
+            break;
+        }
+        entry.autodrain();
       }
-      entry.autodrain();
+      completed = true;
+    } catch (error) {
+      // The part boundary: a position the part's content puts outside the grid is the part's `XlsxParseError`.
+      throw current === undefined ? error : xlsxPartError(error, normalizeZipPath(current.path));
+    } finally {
+      if (!completed) {
+        abandonPackage(stream, zip, current);
+      }
     }
   }
 }
@@ -1187,6 +1344,10 @@ interface WaitingWorksheet {
   isXlsb: boolean;
 }
 
+/**
+ * Read a workbook — a stream, bytes or a Web stream — one part at a time: `parse()` yields an event per worksheet
+ * (and, by the options, shared strings and hyperlinks), each worksheet a reader whose rows are read as they arrive.
+ */
 class WorkbookReader extends WorkbookReaderBase<
   WorkbookReaderInput,
   WorksheetReader,

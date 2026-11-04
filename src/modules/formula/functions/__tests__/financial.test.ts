@@ -616,8 +616,8 @@ describe("IRR comprehensive", () => {
     );
   });
 
-  it("non-array arg → #VALUE!", () => {
-    expect(fnIRR([rvNumber(100)])).toEqual(ERRORS.VALUE);
+  it("a single value has no sign change → #NUM!", () => {
+    expect(fnIRR([rvNumber(100)])).toEqual(ERRORS.NUM);
   });
 
   it("accepts custom guess", () => {
@@ -673,9 +673,9 @@ describe("XIRR comprehensive", () => {
     expect(fnXIRR([vals, bad])).toEqual(ERRORS.NUM);
   });
 
-  it("non-array args → #VALUE!", () => {
-    expect(fnXIRR([rvNumber(1), dts])).toEqual(ERRORS.VALUE);
-    expect(fnXIRR([vals, rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("single values: lengths differ → #NUM!", () => {
+    expect(fnXIRR([rvNumber(1), dts])).toEqual(ERRORS.NUM);
+    expect(fnXIRR([vals, rvNumber(1)])).toEqual(ERRORS.NUM);
   });
 
   it("all-positive flows → #NUM!", () => {
@@ -717,9 +717,9 @@ describe("XNPV comprehensive", () => {
     expect(fnXNPV([rvNumber(-2), vals, dts])).toEqual(ERRORS.NUM);
   });
 
-  it("non-array vals or dts → #VALUE!", () => {
-    expect(fnXNPV([rvNumber(0.09), rvNumber(1), dts])).toEqual(ERRORS.VALUE);
-    expect(fnXNPV([rvNumber(0.09), vals, rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("single values: lengths differ → #NUM!", () => {
+    expect(fnXNPV([rvNumber(0.09), rvNumber(1), dts])).toEqual(ERRORS.NUM);
+    expect(fnXNPV([rvNumber(0.09), vals, rvNumber(1)])).toEqual(ERRORS.NUM);
   });
 
   it("mismatched array lengths → #NUM!", () => {
@@ -748,8 +748,10 @@ describe("MIRR comprehensive", () => {
     expect(fnMIRR([cf, rvNumber(0.1), rvNumber(-1)])).toEqual(ERRORS.DIV0);
   });
 
-  it("fewer than 2 values → #NUM!", () => {
-    expect(fnMIRR([rvArray([[rvNumber(-100)]]), rvNumber(0.1), rvNumber(0.1)])).toEqual(ERRORS.NUM);
+  it("a single value has no sign change → #DIV/0!", () => {
+    expect(fnMIRR([rvArray([[rvNumber(-100)]]), rvNumber(0.1), rvNumber(0.1)])).toEqual(
+      ERRORS.DIV0
+    );
   });
 
   it("all positive (no negative flow) → #DIV/0! (npvNeg === 0)", () => {
@@ -757,8 +759,8 @@ describe("MIRR comprehensive", () => {
     expect(fnMIRR([cf, rvNumber(0.1), rvNumber(0.1)])).toEqual(ERRORS.DIV0);
   });
 
-  it("non-array → #VALUE!", () => {
-    expect(fnMIRR([rvNumber(1), rvNumber(0.1), rvNumber(0.1)])).toEqual(ERRORS.VALUE);
+  it("a single value has no sign change → #DIV/0!", () => {
+    expect(fnMIRR([rvNumber(1), rvNumber(0.1), rvNumber(0.1)])).toEqual(ERRORS.DIV0);
   });
 
   it("propagates error in finance/reinvest rate args", () => {
@@ -2770,8 +2772,8 @@ describe("IRR saturation", () => {
   it("IRR single-element array → #NUM!", () => {
     expect(fnIRR([rvArray([[rvNumber(100)]])])).toEqual(ERRORS.NUM);
   });
-  it("IRR non-array → #VALUE!", () => {
-    expect(fnIRR([rvNumber(100)])).toEqual(ERRORS.VALUE);
+  it("IRR single value → #NUM!", () => {
+    expect(fnIRR([rvNumber(100)])).toEqual(ERRORS.NUM);
   });
   it("IRR with custom guess converges to same root", () => {
     const arr = rvArray([[rvNumber(-1000), rvNumber(500), rvNumber(600)]]);
@@ -2799,9 +2801,9 @@ describe("XNPV saturation", () => {
     expect(fnXNPV([rvNumber(-1), values, dates])).toEqual(ERRORS.NUM);
     expect(fnXNPV([rvNumber(-2), values, dates])).toEqual(ERRORS.NUM);
   });
-  it("XNPV non-array values → #VALUE!", () => {
+  it("XNPV single value and date → that value", () => {
     expect(fnXNPV([rvNumber(0.05), rvNumber(100), rvArray([[rvNumber(43830)]])])).toEqual(
-      ERRORS.VALUE
+      rvNumber(100)
     );
   });
   it("XNPV mismatched lengths → #NUM!", () => {
@@ -2840,8 +2842,8 @@ describe("XIRR saturation", () => {
   it("XIRR single flow → #NUM!", () => {
     expect(fnXIRR([rvArray([[rvNumber(100)]]), rvArray([[rvNumber(43830)]])])).toEqual(ERRORS.NUM);
   });
-  it("XIRR non-array → #VALUE!", () => {
-    expect(fnXIRR([rvNumber(100), rvArray([[rvNumber(43830)]])])).toEqual(ERRORS.VALUE);
+  it("XIRR single value → #NUM!", () => {
+    expect(fnXIRR([rvNumber(100), rvArray([[rvNumber(43830)]])])).toEqual(ERRORS.NUM);
   });
   it("XIRR with custom guess", () => {
     const values = rvArray([[rvNumber(-1000), rvNumber(500), rvNumber(700)]]);
@@ -2861,13 +2863,13 @@ describe("MIRR saturation", () => {
     const r = asNumber(fnMIRR([flows, rvNumber(0.1), rvNumber(0.12)]));
     expect(r).toBeCloseTo(0.126094, 3);
   });
-  it("MIRR single flow → #NUM!", () => {
+  it("MIRR single flow → #DIV/0!", () => {
     expect(fnMIRR([rvArray([[rvNumber(-1000)]]), rvNumber(0.1), rvNumber(0.12)])).toEqual(
-      ERRORS.NUM
+      ERRORS.DIV0
     );
   });
-  it("MIRR non-array → #VALUE!", () => {
-    expect(fnMIRR([rvNumber(100), rvNumber(0.1), rvNumber(0.12)])).toEqual(ERRORS.VALUE);
+  it("MIRR single value → #DIV/0!", () => {
+    expect(fnMIRR([rvNumber(100), rvNumber(0.1), rvNumber(0.12)])).toEqual(ERRORS.DIV0);
   });
   it("MIRR financeRate = -1 → #DIV/0!", () => {
     expect(

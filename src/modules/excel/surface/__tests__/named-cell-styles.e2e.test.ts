@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
  *
  * Runs under BOTH the Node and the browser (chromium) test runners — it uses
  * only in-memory `toBuffer` / `read`, no Node `fs`. This is the runtime the
- * feature was actually broken in (#185 follow-up: `Workbook.defineCellStyle`
+ * feature was actually broken in (#185 follow-up: `Workbook.addCellStyle`
  * was `undefined` in browser/bundler builds), so exercising the real call here
  * guards the browser code path directly.
  */
@@ -15,11 +15,11 @@ describe("named cell styles (cross-platform e2e)", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    Workbook.defineCellStyle(wb, "Heading 1", {
+    Workbook.addCellStyle(wb, "Heading 1", {
       font: { name: "Arial", size: 20, bold: true }
     });
     Cell.setValue(ws, "A1", "Title");
-    Cell.applyCellStyle(ws, "A1", "Heading 1");
+    Cell.applyStyle(ws, "A1", "Heading 1");
 
     const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     const wb2 = Workbook.create();
@@ -38,10 +38,10 @@ describe("named cell styles (cross-platform e2e)", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
 
-    const name = Workbook.useBuiltinCellStyle(wb, "Heading1");
+    const name = Workbook.useBuiltInCellStyle(wb, "Heading1");
     expect(name).toBe("Heading 1");
     Cell.setValue(ws, "A1", "Title");
-    Cell.applyCellStyle(ws, "A1", name);
+    Cell.applyStyle(ws, "A1", name);
 
     const buffer = new Uint8Array(await Workbook.toBuffer(wb));
     const wb2 = Workbook.create();

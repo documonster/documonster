@@ -8,7 +8,7 @@
  * picture survived.
  */
 
-import { mermaidToDrawList } from "documonster/mermaid";
+import { Mermaid } from "documonster/mermaid";
 import { describe, expect, it } from "vitest";
 
 import { planSlices } from "../tools/diagram-slice.js";
@@ -20,7 +20,7 @@ const chain = (n: number): string =>
     (_, i) => `  S${i}["Step ${i + 1}"] --> S${i + 1}["Step ${i + 2}"]`
   ).join("\n")}`;
 
-const listOf = (source: string) => mermaidToDrawList(source, {});
+const listOf = (source: string) => Mermaid.toDrawList(source, {});
 
 describe("planSlices", () => {
   it("leaves a diagram that fits in one piece", () => {
@@ -99,9 +99,9 @@ describe("planSlices", () => {
     // still *looked* reasonable, this was invisible except in the notes. Both readings must
     // agree, which is the only way to state it: the backdrop changes no geometry.
     const source = chain(16);
-    const plain = planSlices(mermaidToDrawList(source, {}), 1, 600);
+    const plain = planSlices(Mermaid.toDrawList(source, {}), 1, 600);
     const themed = planSlices(
-      mermaidToDrawList(source, { theme: { background: "#ffffff" } }),
+      Mermaid.toDrawList(source, { theme: { background: "#ffffff" } }),
       1,
       600
     );

@@ -6,6 +6,8 @@
  * - Callback-to-promise conversion (promisify)
  */
 
+import { StreamTypeError } from "@stream/errors";
+
 // =============================================================================
 // State Inspection
 // =============================================================================
@@ -34,6 +36,14 @@ export function isErrored(stream: { errored?: unknown } | null | undefined): boo
 export function promisify<T>(
   fn: (callback: (error?: Error | null, result?: T) => void) => void
 ): Promise<T> {
+  if (typeof fn !== "function") {
+    return Promise.reject(
+      new StreamTypeError("a function", fn === null ? "null" : typeof fn, {
+        field: "fn",
+        where: "Streams.LowLevel.fromCallback"
+      })
+    );
+  }
   return new Promise((resolve, reject) => {
     fn((error, result) => {
       if (error) {

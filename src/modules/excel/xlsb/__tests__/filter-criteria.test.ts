@@ -263,7 +263,7 @@ describe("end to end, from a real XLSX read", () => {
           `<autoFilter ref="A1:C9">${criteria}</autoFilter></worksheet>`
       )
     );
-    return archive.bytes();
+    return archive.toBuffer();
   }
 
   /** The filter record names in the written sheet part, in order. */

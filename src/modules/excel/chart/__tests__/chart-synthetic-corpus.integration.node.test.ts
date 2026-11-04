@@ -25,9 +25,9 @@ import {
   CHART_EX_TYPES
 } from "@excel/__tests__/helpers/synthetic-fixtures";
 import { entryText } from "@excel/__tests__/helpers/zip-text";
-import { applyChartPreset, EXCEL_CHART_PRESETS } from "@excel/chart";
+import { ChartClassic, EXCEL_CHART_PRESETS } from "@excel/chart";
 import { addChart, addChartEx, getCharts } from "@excel/core/worksheet";
-import { Chart, Workbook, Worksheet } from "@excel/index";
+import { Chart, Row, Workbook } from "@excel/index";
 import { beforeAll, describe, expect, it } from "vitest";
 
 // Top-level fixture cache. Built once per file via `beforeAll` so the
@@ -130,8 +130,8 @@ describe("Synthetic chart corpus", () => {
     it("retains primary chart-type for every preset after one round trip", async () => {
       const fixtures = classicFixtures;
       for (const fixture of fixtures) {
-        const expectedType = applyChartPreset(
-          fixture.id.replace(/^classic-/, "") as Parameters<typeof applyChartPreset>[0],
+        const expectedType = ChartClassic.applyPreset(
+          fixture.id.replace(/^classic-/, "") as Parameters<typeof ChartClassic.applyPreset>[0],
           { series: [] }
         ).type;
         const wb = Workbook.create();
@@ -140,7 +140,7 @@ describe("Synthetic chart corpus", () => {
         expect(sheet, fixture.id).toBeDefined();
         const charts = getCharts(sheet!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
-        const loadedType = Chart.chartModel(charts[0])?.chart.plotArea.chartTypes[0].type;
+        const loadedType = Chart.getModel(charts[0])?.chart.plotArea.chartTypes[0].type;
         expect(loadedType, `${fixture.id} expected ${expectedType}`).toBe(expectedType);
       }
     });
@@ -155,7 +155,7 @@ describe("Synthetic chart corpus", () => {
         await Workbook.read(wb, fixture.bytes);
         const charts = getCharts(Workbook.getWorksheet(wb, "Data")!);
         expect(charts.length, fixture.id).toBeGreaterThanOrEqual(1);
-        const plotArea = Chart.chartExModel(charts[0])?.chartSpace.chart.plotArea;
+        const plotArea = Chart.getExModel(charts[0])?.chartSpace.chart.plotArea;
         const firstSeries = plotArea?.plotAreaRegion?.series?.[0] ?? plotArea?.series?.[0];
         expect(firstSeries, fixture.id).toBeDefined();
         // Histogram and Pareto normalise to clusteredColumn internally.
@@ -216,7 +216,7 @@ describe("Synthetic chart corpus", () => {
     it("validates rels and content types when classic + ChartEx + chartsheet all coexist", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Data");
-      Worksheet.addRows(ws, [
+      Row.addMany(ws, [
         ["A", 10],
         ["B", 20]
       ]);
@@ -262,7 +262,7 @@ describe("Synthetic chart corpus", () => {
     it("reports missing cx:data id, cx:axis id, and externalData rel references", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Data");
-      Worksheet.addRows(ws, [
+      Row.addMany(ws, [
         ["A", 10],
         ["B", 20]
       ]);
@@ -303,7 +303,7 @@ describe("Synthetic chart corpus", () => {
           zip.add(p, entry.data);
         }
       }
-      const mutatedZip = zip.bytesSync();
+      const mutatedZip = zip.toBufferSync();
 
       const { validateXlsxBuffer } = await import("@excel/utils/ooxml-validator");
       const report = await validateXlsxBuffer(mutatedZip, { maxProblems: 50 });

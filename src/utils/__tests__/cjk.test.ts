@@ -209,6 +209,20 @@ describe("hasCjk", () => {
     expect(hasCjk("plain ASCII text 123")).toBe(false);
     expect(hasCjk("")).toBe(false);
   });
+
+  it("answers exactly as isCjkBreakable does for every code point", () => {
+    const disagree: number[] = [];
+    for (let cp = 0; cp <= 0x40000; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) {
+        continue;
+      }
+      const char = String.fromCodePoint(cp);
+      if (hasCjk(`a${char}b`) !== isCjkBreakable(cp)) {
+        disagree.push(cp);
+      }
+    }
+    expect(disagree).toEqual([]);
+  });
 });
 
 describe("detectCjkLanguage", () => {

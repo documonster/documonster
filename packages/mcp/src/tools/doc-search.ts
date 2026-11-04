@@ -16,7 +16,7 @@
  * each surviving run's properties.
  */
 
-import { Io, Query } from "documonster/word";
+import { Document, Io, Query } from "documonster/word";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -90,7 +90,7 @@ export const docSearchTool = defineTool({
     const doc = await readWord(resolved, args.path);
 
     if (args.listFormats === true) {
-      const formats = Query.getUsedFormats(doc);
+      const formats = Query.listUsedFormats(doc);
       if (formats.length === 0) {
         return textResult(
           config,
@@ -283,7 +283,7 @@ export const docEditTool = defineTool({
       );
     }
 
-    const replaced = Query.replaceText(doc, query, args.replace);
+    const replaced = Document.replaceText(doc, query, args.replace);
 
     await assertUnchanged(resolved, inputVersion);
     const writeTarget = await resolveEditTarget(config, args.path, args.out);

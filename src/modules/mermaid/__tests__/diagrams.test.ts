@@ -8,7 +8,7 @@
  * a picture that drew the wrong one would be worse than one that drew nothing.
  */
 import type { DrawNode } from "@draw/types";
-import { mermaidToDrawList, parseMermaid } from "@mermaid/index";
+import { Mermaid } from "@mermaid/index";
 import type {
   ClassDiagram,
   ErDiagram,
@@ -20,7 +20,7 @@ import type {
 import { describe, expect, it } from "vitest";
 
 describe("sequenceDiagram blocks and notes", () => {
-  const parse = (source: string): SequenceDiagram => parseMermaid(source) as SequenceDiagram;
+  const parse = (source: string): SequenceDiagram => Mermaid.parse(source) as SequenceDiagram;
 
   it("keeps a block's branches in one frame", () => {
     // `alt`/`else` is one decision with two outcomes, not two independent frames.
@@ -83,7 +83,7 @@ describe("sequenceDiagram blocks and notes", () => {
   });
 
   it("numbers messages when asked", () => {
-    const list = mermaidToDrawList("sequenceDiagram\n autonumber\n A->>B: one\n B->>A: two");
+    const list = Mermaid.toDrawList("sequenceDiagram\n autonumber\n A->>B: one\n B->>A: two");
     const labels = list.children
       .filter(node => node.kind === "text")
       .flatMap(node => node.lines.map(line => line.text));
@@ -92,8 +92,8 @@ describe("sequenceDiagram blocks and notes", () => {
   });
 
   it("draws a frame for each block", () => {
-    const plain = mermaidToDrawList("sequenceDiagram\n A->>B: one");
-    const framed = mermaidToDrawList("sequenceDiagram\n loop x\n  A->>B: one\n end");
+    const plain = Mermaid.toDrawList("sequenceDiagram\n A->>B: one");
+    const framed = Mermaid.toDrawList("sequenceDiagram\n loop x\n  A->>B: one\n end");
     const rects = (list: typeof plain): number =>
       list.children.filter(node => node.kind === "rect").length;
     expect(rects(framed)).toBeGreaterThan(rects(plain));
@@ -101,7 +101,7 @@ describe("sequenceDiagram blocks and notes", () => {
 });
 
 describe("stateDiagram", () => {
-  const parse = (source: string): StateDiagram => parseMermaid(source) as StateDiagram;
+  const parse = (source: string): StateDiagram => Mermaid.parse(source) as StateDiagram;
 
   it("gives each [*] its own node", () => {
     // Sharing one would wire every ending to every beginning, drawing transitions the
@@ -134,7 +134,7 @@ describe("stateDiagram", () => {
   });
 
   it("draws a marker as a disc with no text", () => {
-    const list = mermaidToDrawList("stateDiagram-v2\n [*] --> A");
+    const list = Mermaid.toDrawList("stateDiagram-v2\n [*] --> A");
     const discs = list.children.filter(node => node.kind === "ellipse");
     expect(discs.length).toBeGreaterThanOrEqual(1);
     const labels = list.children
@@ -145,7 +145,7 @@ describe("stateDiagram", () => {
 });
 
 describe("classDiagram", () => {
-  const parse = (source: string): ClassDiagram => parseMermaid(source) as ClassDiagram;
+  const parse = (source: string): ClassDiagram => Mermaid.parse(source) as ClassDiagram;
 
   it("normalises an arrow so the mark is always at `to`", () => {
     // `A <|-- B` and `B --|> A` say the same thing from opposite ends.
@@ -204,8 +204,8 @@ describe("classDiagram", () => {
   });
 
   it("draws a hollow triangle for inheritance and a filled diamond for composition", () => {
-    const inherit = mermaidToDrawList("classDiagram\n A <|-- B");
-    const compose = mermaidToDrawList("classDiagram\n A *-- B");
+    const inherit = Mermaid.toDrawList("classDiagram\n A <|-- B");
+    const compose = Mermaid.toDrawList("classDiagram\n A *-- B");
     const closed = (
       list: typeof inherit,
       points: number
@@ -221,7 +221,7 @@ describe("classDiagram", () => {
   });
 
   it("separates fields from methods with a rule", () => {
-    const list = mermaidToDrawList("classDiagram\n class A {\n +f\n +m()\n }");
+    const list = Mermaid.toDrawList("classDiagram\n class A {\n +f\n +m()\n }");
     const rules = list.children.filter(
       node => node.kind === "polyline" && node.points.length === 2 && node.paint.fill === undefined
     );
@@ -230,7 +230,7 @@ describe("classDiagram", () => {
 });
 
 describe("erDiagram", () => {
-  const parse = (source: string): ErDiagram => parseMermaid(source) as ErDiagram;
+  const parse = (source: string): ErDiagram => Mermaid.parse(source) as ErDiagram;
 
   it("reads each side's cardinality against its own spelling", () => {
     // `|o` and `o|` are the same cardinality written from opposite ends.
@@ -257,16 +257,16 @@ describe("erDiagram", () => {
   });
 
   it("draws more marks for a crow's foot than for a bar", () => {
-    const many = mermaidToDrawList("erDiagram\n A ||--o{ B : has");
-    const one = mermaidToDrawList("erDiagram\n A ||--|| B : has");
+    const many = Mermaid.toDrawList("erDiagram\n A ||--o{ B : has");
+    const one = Mermaid.toDrawList("erDiagram\n A ||--|| B : has");
     const strokes = (list: typeof many): number =>
       list.children.filter(node => node.kind === "polyline" && node.points.length === 2).length;
     expect(strokes(many)).toBeGreaterThan(strokes(one));
   });
 
   it("draws a circle for an optional end and none for a mandatory one", () => {
-    const optional = mermaidToDrawList("erDiagram\n A ||--o| B : has");
-    const mandatory = mermaidToDrawList("erDiagram\n A ||--|| B : has");
+    const optional = Mermaid.toDrawList("erDiagram\n A ||--o| B : has");
+    const mandatory = Mermaid.toDrawList("erDiagram\n A ||--|| B : has");
     const circles = (list: typeof optional): number =>
       list.children.filter(node => node.kind === "ellipse").length;
     expect(circles(optional)).toBe(1);
@@ -279,7 +279,7 @@ describe("edges arriving at one node", () => {
     // Bending at the midpoint of the flow axis sent every incoming edge to the centre of
     // its target's leading edge, so three parents put three arrowheads on one pixel — and
     // in a class diagram the marks that tell the relationships apart landed on each other.
-    const list = mermaidToDrawList("flowchart TD\n A --> D\n B --> D\n C --> D");
+    const list = Mermaid.toDrawList("flowchart TD\n A --> D\n B --> D\n C --> D");
     const heads = list.children.filter(
       (node): node is Extract<DrawNode, { kind: "polyline" }> =>
         node.kind === "polyline" && node.closed === true && node.points.length === 3

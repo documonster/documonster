@@ -46,6 +46,7 @@ type NonClassKeys<T> = Exclude<keyof T, ClassKeys<T>>;
 // Node-only exports (file system convenience layer + gzip support)
 type NodeOnlyClassExports = "ArchiveFile" | "TarGzArchive";
 type NodeOnlyNonClassExports =
+  | "Fs"
   | "toNodeReadable"
   | "traverseDirectory"
   | "traverseDirectorySync"
@@ -169,16 +170,62 @@ type _NonClass_hasDeflateRaw = Assert<
   IsEqualStrict<NodeRuntimeNonClass["hasDeflateRaw"], BrowserRuntimeNonClass["hasDeflateRaw"]>
 >;
 
-type _NonClass_zip = Assert<
-  IsEqualStrict<NodeRuntime["Archive"]["zip"], BrowserRuntime["Archive"]["zip"]>
+type _NonClass_createZip = Assert<
+  IsEqualStrict<NodeRuntime["Archive"]["createZip"], BrowserRuntime["Archive"]["createZip"]>
 >;
 
-type _NonClass_unzip = Assert<
-  IsEqualStrict<NodeRuntime["Archive"]["unzip"], BrowserRuntime["Archive"]["unzip"]>
+type _NonClass_openZip = Assert<
+  IsEqualStrict<NodeRuntime["Archive"]["openZip"], BrowserRuntime["Archive"]["openZip"]>
 >;
 
-// `Archive` domain namespace parity (the high-level API now lives here)
-type _Namespace_Archive = Assert<IsEqual<NodeRuntime["Archive"], BrowserRuntime["Archive"]>>;
+// `Archive` domain namespace parity — the Node entry adds only the on-disk
+// `ArchiveFile` and the Node-stream adapter `toNodeReadable`.
+type NodeOnlyArchiveMembers = "ArchiveFile" | "toNodeReadable";
+type _Namespace_Archive = Assert<
+  IsEqual<Omit<NodeRuntime["Archive"], NodeOnlyArchiveMembers>, BrowserRuntime["Archive"]>
+>;
+// `Compression` — same member names; the codec types are compared member by member
+// for the ones whose declarations are shared (the gzip/zlib stream interfaces are
+// declared per platform).
+type _Namespace_Compression_Names = Assert<
+  IsEqual<keyof NodeRuntime["Compression"], keyof BrowserRuntime["Compression"]>
+>;
+type _Compression_deflate = Assert<
+  IsEqualStrict<NodeRuntime["Compression"]["deflate"], BrowserRuntime["Compression"]["deflate"]>
+>;
+type _Compression_deflateSync = Assert<
+  IsEqualStrict<
+    NodeRuntime["Compression"]["deflateSync"],
+    BrowserRuntime["Compression"]["deflateSync"]
+  >
+>;
+type _Compression_inflate = Assert<
+  IsEqualStrict<NodeRuntime["Compression"]["inflate"], BrowserRuntime["Compression"]["inflate"]>
+>;
+type _Compression_inflateSync = Assert<
+  IsEqualStrict<
+    NodeRuntime["Compression"]["inflateSync"],
+    BrowserRuntime["Compression"]["inflateSync"]
+  >
+>;
+type _Compression_createDeflateStream = Assert<
+  IsEqualStrict<
+    NodeRuntime["Compression"]["createDeflateStream"],
+    BrowserRuntime["Compression"]["createDeflateStream"]
+  >
+>;
+type _Compression_createInflateStream = Assert<
+  IsEqualStrict<
+    NodeRuntime["Compression"]["createInflateStream"],
+    BrowserRuntime["Compression"]["createInflateStream"]
+  >
+>;
+type _Compression_hasDeflateRaw = Assert<
+  IsEqualStrict<
+    NodeRuntime["Compression"]["hasDeflateRaw"],
+    BrowserRuntime["Compression"]["hasDeflateRaw"]
+  >
+>;
 
 // Exported type parity
 

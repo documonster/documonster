@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { ArchiveFile } from "documonster/archive";
+import { Archive } from "documonster/archive";
 
 import { resolveConfig, type ServerConfig } from "../config.js";
 import { McpToolError } from "../errors.js";
@@ -48,8 +48,8 @@ async function create(fx: Fixture, args: Record<string, unknown>): Promise<strin
 /** List the entries of a produced archive. */
 async function entriesOf(fx: Fixture, name: string, tar = false): Promise<string[]> {
   const archive = tar
-    ? await ArchiveFile.fromFile(path.join(fx.root, name), { format: "tar" })
-    : await ArchiveFile.fromFile(path.join(fx.root, name));
+    ? await Archive.ArchiveFile.fromFile(path.join(fx.root, name), { format: "tar" })
+    : await Archive.ArchiveFile.fromFile(path.join(fx.root, name));
   return (await archive.getEntries()).map(entry => entry.path).toSorted();
 }
 

@@ -14,7 +14,7 @@
  * make.
  */
 
-import { Diff, Io, Query } from "documonster/word";
+import { Diff, Document, Io, Query } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -109,7 +109,7 @@ async function compare(config: ServerConfig, aPath: string, bPath: string): Prom
     assertReadableSize(config, bResolved, bPath)
   ]);
   const [a, b] = await Promise.all([readWord(aResolved, aPath), readWord(bResolved, bPath)]);
-  const diff = Diff.documents(a, b);
+  const diff = Diff.compare(a, b);
 
   if (diff.summary.added === 0 && diff.summary.deleted === 0 && diff.summary.modified === 0) {
     return [
@@ -237,7 +237,9 @@ async function reviewRevisions(
   // number handled, so the listing's instance must not be reused.
   const fresh = await readWord(resolved, args.path);
   const handled =
-    args.apply === "accept-all" ? Query.acceptAllRevisions(fresh) : Query.rejectAllRevisions(fresh);
+    args.apply === "accept-all"
+      ? Document.acceptAllRevisions(fresh)
+      : Document.rejectAllRevisions(fresh);
 
   const writeTarget = await resolveEditTarget(config, args.path, args.out);
   const inPlace = isSameFile(writeTarget.path, resolved);
@@ -295,7 +297,7 @@ function collectRevisionText(doc: Awaited<ReturnType<typeof Io.readFile>>): Map<
     (run.content ?? []).map(item => item.text ?? "").join("");
 
   try {
-    Query.walkDocument(doc, {
+    Query.each(doc, {
       visitInsertedRun(node: { revision?: { id?: number }; run?: unknown }) {
         const id = node.revision?.id;
         if (id !== undefined) {

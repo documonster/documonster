@@ -59,14 +59,14 @@ Document.addTableOfContents(doc, {
     Build.textParagraph("4. Computed fields\t4")
   ]
 });
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 1b. tocField() run-helper — same TOC field, but as a Run inside a paragraph
 //     instead of a top-level helper. Useful when embedding a TOC field
 //     mid-paragraph (e.g. inside a SDT) or composing custom TOC layouts.
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bold("Inline TOC field: "),
@@ -78,14 +78,14 @@ Document.addParagraphElement(
     })
   ])
 );
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 2. Heading content so the TOC has something to point at
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "1. Introduction", 1);
 Document.addParagraph(doc, "This document exercises every field helper.");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bold("Page count: "),
@@ -99,13 +99,13 @@ Document.addParagraphElement(
     Build.text(")")
   ])
 );
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 3. Property fields
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "2. Property fields", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Author: "),
@@ -116,7 +116,7 @@ Document.addParagraphElement(
     Build.subjectField()
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Keywords: "),
@@ -127,22 +127,22 @@ Document.addParagraphElement(
     Build.fileSizeField()
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Generated on: "),
-    Build.dateField("yyyy-MM-dd"),
+    Build.dateField({ format: "yyyy-MM-dd" }),
     Build.text("  at "),
-    Build.timeField("HH:mm")
+    Build.timeField({ format: "HH:mm" })
   ])
 );
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 4. Sequence captions (Figure 1, Figure 2, …)
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "3. Sequence captions", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bold("Figure "),
@@ -151,7 +151,7 @@ Document.addParagraphElement(
   ])
 );
 Document.addParagraph(doc, "[figure 1 placeholder]");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bold("Figure "),
@@ -161,7 +161,7 @@ Document.addParagraphElement(
 );
 Document.addParagraph(doc, "[figure 2 placeholder]");
 
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bold("Table "),
@@ -169,7 +169,7 @@ Document.addParagraphElement(
     Build.text(" — first table")
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.bold("Table "),
@@ -177,13 +177,13 @@ Document.addParagraphElement(
     Build.text(" — second table")
   ])
 );
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 
 // ---------------------------------------------------------------------------
 // 5. Computed fields — IF, QUOTE, STYLEREF
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "4. Computed fields", 1);
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("IF field — branches on a condition: "),
@@ -192,17 +192,19 @@ Document.addParagraphElement(
     // demonstrate a simple literal comparison here so the cached value the
     // writer emits is always meaningful when opened in Word for the first
     // time.
-    Build.ifField('"a" = "a"', "(true branch shown)", "(false branch shown)", "(true branch shown)")
+    Build.ifField('"a" = "a"', "(true branch shown)", "(false branch shown)", {
+      cachedValue: "(true branch shown)"
+    })
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("QUOTE field — literal text: "),
-    Build.quoteField("hello world", "hello world")
+    Build.quoteField("hello world", { cachedValue: "hello world" })
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("STYLEREF — most recent Heading 1 above this run: "),
@@ -214,21 +216,21 @@ Document.addParagraphElement(
 // 6. INCLUDE fields — placeholders only (Word fetches the contents on
 //    update; we ship a sensible cached value so the document opens cleanly).
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Included text from another file: "),
     Build.includeTextField("./fragments/intro.docx", { cachedValue: "(cached: included intro)" })
   ])
 );
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Linked picture: "),
-    Build.includePictureField("./images/logo.png", "(cached: external logo)")
+    Build.includePictureField("./images/logo.png", { cachedValue: "(cached: external logo)" })
   ])
 );
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "10-toc-fields.docx"), buf);
 console.log(`  → 10-toc-fields.docx (${buf.length} bytes)`);

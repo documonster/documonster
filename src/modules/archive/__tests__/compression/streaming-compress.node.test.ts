@@ -22,4 +22,13 @@ describe("streaming-compress (Node)", () => {
 
     expect(decompressed.toString()).toBe(originalData.toString());
   });
+
+  it("destroying a compressor releases its zlib stream", async () => {
+    const deflate = createDeflateStream({ level: 6 });
+    deflate.write(Buffer.from("partial"));
+    deflate.destroy();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const inner = (deflate as unknown as { zstream: { destroyed: boolean } }).zstream;
+    expect(inner.destroyed).toBe(true);
+  });
 });

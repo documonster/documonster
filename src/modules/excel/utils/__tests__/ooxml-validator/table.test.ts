@@ -181,4 +181,50 @@ describe("ooxml-validator / table — autoFilter ref vs totalsRow", () => {
     );
     expect(report.problems.some(p => p.kind === "table-autoFilter-covers-totalsRow")).toBe(false);
   });
+
+  it("flags an autoFilter on a table without a header row", async () => {
+    const report = await validateXlsxBuffer(
+      buildTablePackage(`<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T1" displayName="T1" ref="A1:B2" headerRowCount="0">
+  <autoFilter ref="A1:B2"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="A"/>
+    <tableColumn id="2" name="B"/>
+  </tableColumns>
+</table>`)
+    );
+    expect(report.problems.some(p => p.kind === "table-headerless-autoFilter")).toBe(true);
+  });
+
+  it("flags column names that repeat without case", async () => {
+    const report = await validateXlsxBuffer(
+      buildTablePackage(`<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T1" displayName="T1" ref="A1:B2">
+  <autoFilter ref="A1:B2"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="a"/>
+    <tableColumn id="2" name="A"/>
+  </tableColumns>
+</table>`)
+    );
+    expect(report.problems.some(p => p.kind === "table-duplicate-column-name")).toBe(true);
+  });
+
+  it.each([
+    ["ß", "SS", true],
+    ["ａ", "A", true],
+    ["ı", "I", false]
+  ])("compares column names %s and %s as Excel does", async (a, b, repeats) => {
+    const report = await validateXlsxBuffer(
+      buildTablePackage(`<?xml version="1.0" encoding="UTF-8"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T1" displayName="T1" ref="A1:B2">
+  <autoFilter ref="A1:B2"/>
+  <tableColumns count="2">
+    <tableColumn id="1" name="${a}"/>
+    <tableColumn id="2" name="${b}"/>
+  </tableColumns>
+</table>`)
+    );
+    expect(report.problems.some(p => p.kind === "table-duplicate-column-name")).toBe(repeats);
+  });
 });

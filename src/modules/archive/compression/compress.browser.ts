@@ -226,9 +226,9 @@ export async function compress(
 ): Promise<Uint8Array> {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
 
-  // Level 0 means no compression
+  // Level 0 is DEFLATE's stored blocks: still a DEFLATE stream.
   if (level === 0) {
-    return data;
+    return deflateRawStore(data);
   }
 
   const processOptions = options.level === undefined ? { ...options, level } : options;
@@ -241,7 +241,7 @@ export async function compress(
 export function compressSync(data: Uint8Array, options: CompressOptions = {}): Uint8Array {
   const level = options.level ?? DEFAULT_COMPRESS_LEVEL;
   if (level === 0) {
-    return data;
+    return deflateRawStore(data);
   }
   return deflateRawCompressed(data, level);
 }
@@ -536,7 +536,7 @@ export function unzlibSync(data: Uint8Array, options: CompressOptions = {}): Uin
  * @example
  * ```ts
  * // Works with any format
- * const data = await decompressAuto(compressed);
+ * const data = await Compression.decompressAuto(compressed);
  * ```
  */
 export async function decompressAuto(

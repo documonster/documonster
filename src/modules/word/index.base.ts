@@ -78,6 +78,7 @@ export type {
   FootnoteRefContent,
   EndnoteRefContent,
   FieldContent,
+  FieldRangeMarker,
   InlineImageContent,
   CarriageReturnContent,
   NoBreakHyphenContent,
@@ -95,7 +96,17 @@ export type {
   MovedFromRun,
   MovedToRun,
   MoveRangeMarker,
+  RangeMarker,
+  PermStart,
+  PermEnd,
+  BlockRangeMarkers,
+  ParagraphChildRangeMarkers,
   CustomXmlTrackingMarker,
+  BidiStart,
+  BidiEnd,
+  SmartTagStart,
+  SmartTagEnd,
+  SmartTagAttribute,
   ParagraphPropertyChange,
   RunPropertyChange,
   SectionPropertyChange,
@@ -126,6 +137,7 @@ export type {
   ParagraphProperties,
   Paragraph,
   Hyperlink,
+  HyperlinkNestedChild,
   BookmarkStart,
   BookmarkEnd,
   ParagraphChild,
@@ -187,6 +199,7 @@ export type {
 
   // Notes type enum
   NoteType,
+  NoteSeparatorType,
   FootnoteProperties,
   EndnoteProperties,
   NoteNumberFormat,
@@ -240,6 +253,8 @@ export type {
   SdtDataBinding,
   SdtCheckboxProperties,
   SdtRepeatingSectionProperties,
+  SdtDocPart,
+  BlockContentControl,
   StructuredDocumentTag,
   CustomXmlPart,
 
@@ -299,6 +314,8 @@ export type {
   ProtectionType,
   HyphenationSettings,
   DocumentSettings,
+  PreservedXml,
+  PreservedLink,
   CompatSetting,
   CompatFlag,
 
@@ -308,6 +325,7 @@ export type {
   ThemeColorScheme,
   ThemeFontScheme,
   ThemeFont,
+  ThemeSystemColor,
   ThemeFormatScheme,
   ThemeColorName,
 
@@ -321,7 +339,9 @@ export type {
 
   // Document
   DocxDocument,
-  DocxOptions
+  DocxOptions,
+  DiscardUnrecognizedValuesOptions,
+  UnrecognizedValue
 } from "@word/types";
 
 // --- Preserve-only API (round-trip preservation, no full editing support) ---
@@ -341,22 +361,30 @@ export {
   DocxError,
   DocxParseError,
   DocxWriteError,
+  DocxDuplicateIdError,
+  DocxInvalidImageError,
+  DocxArgumentError,
+  DocxInvalidDrawingError,
   DocxMissingPartError,
   DocxInvalidStructureError,
   DocxUnsupportedFeatureError,
   DocxEncryptedError,
   DocxDecryptionError,
   DocxLimitExceededError,
+  DocxRawXmlPolicyError,
+  TemplateError,
   isDocxError
 } from "@word/errors";
+export type { DocxIdCollection } from "@word/errors";
 
 // --- Stable API ---
 
 // --- Stable API ---
 /** @stability stable */
 export * as Document from "@word/builder/document-handle";
-/** @stability stable */
-export type { DocumentHandle } from "@word/builder/document-handle";
+import type { DocxDocument } from "@word/types";
+/** @deprecated Use {@link DocxDocument}. Removed in 1.0. */
+export type DocumentHandle = DocxDocument;
 
 // =============================================================================
 // Domain namespaces — public value API (tree-shaken via `export * as`).
@@ -368,6 +396,8 @@ export * as Units from "@word/surface/units";
 export * as Theme from "@word/surface/theme";
 export * as Query from "@word/surface/query";
 export * as Io from "@word/surface/io";
+export * as Package from "@word/surface/package";
+export * as Transform from "@word/surface/transform";
 export * as Template from "@word/surface/template";
 export * as Convert from "@word/surface/convert";
 export * as Font from "@word/surface/font";
@@ -383,7 +413,13 @@ export * as Streaming from "@word/surface/streaming";
 export * as RenderContext from "@word/surface/render-context";
 
 /** @stability stable */
-export type { SearchResult, DocumentHeading, DocumentSection } from "@word/query/search";
+export type {
+  SearchResult,
+  DocumentHeading,
+  DocumentSection,
+  BookmarkLocation,
+  ListTablesOptions
+} from "@word/query/search";
 
 /** @stability stable */
 export type { MergeOptions } from "@word/query/merge";
@@ -399,6 +435,7 @@ export type {
   StyleResolveContext,
   ResolvedParagraphStyle,
   ResolvedRunStyle,
+  ResolvedTableStyle,
   ResolvedNumberingLevel,
   StyleIndex
 } from "@word/query/style-resolve";
@@ -409,12 +446,16 @@ export type { CompatibilityMode } from "@word/query/compat";
 /** @stability stable */
 export type { FormFieldEntry } from "@word/query/form-fields";
 
+/** @stability experimental */
+export type { FieldEntry } from "@word/query/fields";
+
 /** @stability stable */
 export type {
   PatchContent,
   PatchOperation,
   PatchOptions,
-  CompiledTemplate
+  CompiledTemplate,
+  ToFlatOpcOptions
 } from "@word/document-io";
 
 // Incremental edit API (low-level efficient editing)
@@ -424,6 +465,8 @@ export type { IncrementalEdit, IncrementalEditOptions } from "@word/incremental-
 
 /** @stability stable */
 export type { ReadDocxOptions } from "@word/reader/docx-reader";
+/** @stability stable */
+export type { DocxWriteOptions } from "@word/writer/docx-packager";
 
 // --- Experimental API ---
 /** @stability experimental */
@@ -437,8 +480,11 @@ export type {
   TemplateSubDocument,
   TemplateChart,
   TemplateHtmlChunk,
-  TemplateTag
+  TemplateTag,
+  LegacyTemplateOptions
 } from "@word/template/template-engine";
+/** @stability experimental */
+export type { FillFromSourceOptions } from "@word/template/template-datasource";
 
 // --- Stable API ---
 /** @stability stable */
@@ -550,7 +596,7 @@ export type { HyphenationOptions, HyphenationPatterns } from "@word/font/hyphena
 
 export type { FormatCriteria, FormatSearchResult } from "@word/query/format-search";
 
-export type { RenderOptions } from "@word/layout/render-page";
+export type { RenderChartContext, RenderOptions } from "@word/layout/render-page";
 
 export type { DataSource } from "@word/template/template-datasource";
 
@@ -560,11 +606,12 @@ export type {
   ChartTemplateData
 } from "@word/template/template-chart";
 
-// NOTE: renderToMarkdown, renderToHtml, htmlToDocx, excelToDocx, markdownToDocx are NOT exported
+// NOTE: the HTML, Markdown, Excel and encryption converters are NOT exported
 // from the main entry — they live in dedicated subpaths to ensure tree-shaking:
-//   import { renderToMarkdown, markdownToDocx } from "documonster/word/markdown"
-//   import { renderToHtml }     from "documonster/word/html"
-//   import { excelToDocx }      from "documonster/word/excel"
+//   import { WordMarkdown } from "documonster/word/markdown"
+//   import { WordHtml }     from "documonster/word/html"
+//   import { WordExcel }    from "documonster/word/excel"
+//   import { WordCrypto }   from "documonster/word/crypto"
 // DOCX → PDF lives in the PDF module's lazy converter namespace:
 //   import { Pdf } from "documonster/pdf"   // await Pdf.fromDocx(doc)
 
@@ -577,7 +624,11 @@ export type { WordSecurityPolicy } from "@word/security/policy";
 
 // --- Render Context (experimental) ---
 /** @stability experimental */
-export type { WordRenderContext, IdGenerators } from "@word/writer/render-context";
+export type {
+  WordRenderContext,
+  IdGenerators,
+  PreservedLinkRId
+} from "@word/writer/render-context";
 
 // --- Document Transformer (experimental) ---
 /** @stability experimental */
@@ -632,3 +683,6 @@ export type { DocxToSemanticOptions } from "@word/convert/docx-to-semantic";
 // --- Model helpers ---
 /** @stability experimental */
 export type { AssetRef, MediaAsset } from "@word/types";
+
+// The options every error constructor of this entry takes (`{ cause }`), named so a subclass can pass them on.
+export type { BaseErrorOptions } from "@utils/errors";

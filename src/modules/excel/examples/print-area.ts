@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Workbook, Worksheet } from "@excel/index";
+import { Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -31,7 +31,7 @@ for (let row = 1; row <= 10; row++) {
       }
     }
   }
-  Worksheet.addRow(ws, values);
+  Row.add(ws, values);
 }
 
 ws.pageSetup.printTitlesColumn = "A:A";

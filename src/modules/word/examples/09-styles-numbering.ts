@@ -96,7 +96,7 @@ const tableStyle: StyleDef = {
   basedOn: "TableNormal",
   uiPriority: 39,
   tableProperties: {
-    borders: Build.gridBorders(4, "BFBFBF"),
+    borders: Build.gridBorders({ size: 4, color: "BFBFBF" }),
     // One row per banding stripe so band1Horz/band2Horz alternate every row.
     rowBandSize: 1,
     cellMargins: {
@@ -154,7 +154,7 @@ Document.addStyle(doc, {
 // ---------------------------------------------------------------------------
 Document.addHeading(doc, "Word — Custom Styles & Numbering", 1);
 
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     [
@@ -167,7 +167,7 @@ Document.addParagraphElement(
 );
 
 // MyQuote
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph(
     [
@@ -180,7 +180,7 @@ Document.addParagraphElement(
 );
 
 // Inline character style
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([
     Build.text("Run formatting via "),
@@ -191,7 +191,7 @@ Document.addParagraphElement(
 
 // Custom table style
 Document.addHeading(doc, "Custom table style with banding", 2);
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -245,13 +245,12 @@ const fancyBullets: AbstractNumbering = {
 };
 const fancyInstance: NumberingInstance = { numId: 501, abstractNumId: 501 };
 
-const built = Document.build(doc);
 const final = {
-  ...built,
-  abstractNumberings: [...(built.abstractNumberings ?? []), asianNumbering, fancyBullets],
-  numberingInstances: [...(built.numberingInstances ?? []), asianInstance, fancyInstance],
+  ...doc,
+  abstractNumberings: [...(doc.abstractNumberings ?? []), asianNumbering, fancyBullets],
+  numberingInstances: [...(doc.numberingInstances ?? []), asianInstance, fancyInstance],
   body: [
-    ...built.body,
+    ...doc.body,
     Build.textParagraph("Asian-numeral list:", { style: "Heading2" }),
     Build.textParagraph("第一项内容", { numbering: { numId: 500, level: 0 } }),
     Build.textParagraph("第二项内容", { numbering: { numId: 500, level: 0 } }),

@@ -1,6 +1,12 @@
 import util from "util";
 
-import { deepEqual, isForbiddenKey, isSafeDynamicKey, MAX_DYNAMIC_KEY_LENGTH } from "@utils/object";
+import {
+  deepEqual,
+  isForbiddenKey,
+  isRecordArgument,
+  isSafeDynamicKey,
+  MAX_DYNAMIC_KEY_LENGTH
+} from "@utils/object";
 import { describe, it, expect } from "vitest";
 
 describe("@utils/object", () => {
@@ -144,6 +150,42 @@ describe("@utils/object", () => {
     it("rejects over-length keys but accepts at-limit keys", () => {
       expect(isSafeDynamicKey("x".repeat(MAX_DYNAMIC_KEY_LENGTH))).toBe(true);
       expect(isSafeDynamicKey("x".repeat(MAX_DYNAMIC_KEY_LENGTH + 1))).toBe(false);
+    });
+  });
+
+  describe("isRecordArgument", () => {
+    it("accepts option objects, with or without a prototype", () => {
+      expect(isRecordArgument({})).toBe(true);
+      expect(isRecordArgument({ columns: 1 })).toBe(true);
+      expect(isRecordArgument(Object.create(null))).toBe(true);
+      class Options {
+        columns = 1;
+      }
+      expect(isRecordArgument(new Options())).toBe(true);
+    });
+
+    it("rejects every positional placeholder", () => {
+      for (const value of [null, undefined, 0, 1, "", "x", true, false, 1n, Symbol("s")]) {
+        expect(isRecordArgument(value), String(value)).toBe(false);
+      }
+    });
+
+    it("rejects sequences, binary data and dates", () => {
+      for (const value of [
+        [],
+        [0],
+        new Set([0]),
+        new Map(),
+        new Int32Array(1),
+        new Uint8Array(1),
+        new DataView(new ArrayBuffer(1)),
+        new ArrayBuffer(1),
+        new Date(0),
+        // A boxed string is iterable, so it is a sequence too.
+        Object("x")
+      ]) {
+        expect(isRecordArgument(value), Object.prototype.toString.call(value)).toBe(false);
+      }
     });
   });
 });

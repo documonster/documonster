@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Row, Stream, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import type { Alignment } from "@excel/types";
 
 import { Pdf } from "../index";
@@ -77,15 +77,14 @@ function addSection(
 
   Row.setHeight(ws, dataRow, rowHeight);
   for (let c = 0; c < 6; c++) {
-    const cell = Row.getCell(ws, dataRow, c + 1);
-    Stream.setCellValue(cell, typeof cellValue === "function" ? cellValue(c) : cellValue);
-    Stream.setCellAlignment(cell, {
+    Cell.setValue(ws, dataRow, c + 1, typeof cellValue === "function" ? cellValue(c) : cellValue);
+    Cell.setAlignment(ws, dataRow, c + 1, {
       horizontal: combos[c].h,
       vertical: combos[c].v,
       textRotation: rotation,
       wrapText: wrap
     });
-    Stream.setCellBorder(cell, thinBorder);
+    Cell.setBorder(ws, dataRow, c + 1, thinBorder);
   }
 }
 

@@ -14,7 +14,8 @@
  * Works in both Node.js and browsers using the Web Crypto API.
  */
 
-import { ArchiveError } from "@archive/core/errors";
+import { checkUint } from "@archive/core/entry-checks";
+import { ArchiveArgumentError, ArchiveError } from "@archive/core/errors";
 import { toArrayBuffer } from "@archive/core/text";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 import { randomBytes } from "@utils/crypto";
@@ -23,6 +24,16 @@ import { randomBytes } from "@utils/crypto";
  * AES key strength options.
  */
 export type AesKeyStrength = 128 | 192 | 256;
+
+/** Refuse a key strength the AES extra field cannot name, before any table lookup. */
+function checkKeyStrength(where: string, keyStrength: unknown): void {
+  if (keyStrength !== 128 && keyStrength !== 192 && keyStrength !== 256) {
+    throw new ArchiveArgumentError(
+      "keyStrength",
+      `${where}: keyStrength must be 128, 192 or 256, got ${String(keyStrength)}`
+    );
+  }
+}
 
 /**
  * AES vendor ID for WinZip format.
@@ -327,6 +338,14 @@ export function buildAesExtraField(
   keyStrength: AesKeyStrength,
   compressionMethod: number
 ): Uint8Array {
+  if (version !== 1 && version !== 2) {
+    throw new ArchiveArgumentError(
+      "version",
+      `Archive.Crypto.createAesExtraField: version must be 1 or 2, got ${String(version)}`
+    );
+  }
+  checkKeyStrength("Archive.Crypto.createAesExtraField", keyStrength);
+  checkUint("Archive.Crypto.createAesExtraField", "compressionMethod", compressionMethod, 0xffff);
   const data = new Uint8Array(11); // 4 bytes header + 7 bytes data
   const view = new DataView(data.buffer);
 
@@ -410,6 +429,7 @@ export async function aesDecrypt(
   password: string | Uint8Array,
   keyStrength: AesKeyStrength
 ): Promise<Uint8Array> {
+  checkKeyStrength("Archive.Crypto.decryptAes", keyStrength);
   const components = extractAesComponents(encryptedData, keyStrength);
   if (!components) {
     throw new ArchiveError("Encrypted data too short");
@@ -448,6 +468,7 @@ export async function aesEncrypt(
   password: string | Uint8Array,
   keyStrength: AesKeyStrength
 ): Promise<Uint8Array> {
+  checkKeyStrength("Archive.Crypto.encryptAes", keyStrength);
   const saltLen = AES_SALT_LENGTH[keyStrength];
 
   // Generate random salt
@@ -486,6 +507,13 @@ export async function aesEncrypt(
  * Calculate the total encrypted size for a given plaintext size.
  */
 export function aesEncryptedSize(plaintextSize: number, keyStrength: AesKeyStrength): number {
+  checkUint(
+    "Archive.Crypto.getAesEncryptedSize",
+    "plaintextSize",
+    plaintextSize,
+    Number.MAX_SAFE_INTEGER
+  );
+  checkKeyStrength("Archive.Crypto.getAesEncryptedSize", keyStrength);
   const saltLen = AES_SALT_LENGTH[keyStrength];
   return saltLen + AES_PASSWORD_VERIFY_LENGTH + plaintextSize + AES_AUTH_CODE_LENGTH;
 }

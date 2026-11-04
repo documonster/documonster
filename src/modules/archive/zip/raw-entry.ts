@@ -53,6 +53,13 @@ export interface ZipRawEntry {
   /** Optional file modification time */
   modTime?: Date;
 
+  /**
+   * Raw DOS time and date to write instead of ones computed from `modTime` — for an entry
+   * copied unchanged, whose ZipCrypto check byte may depend on the time.
+   */
+  dosTime?: number;
+  dosDate?: number;
+
   /** Optional file comment */
   comment?: string;
 

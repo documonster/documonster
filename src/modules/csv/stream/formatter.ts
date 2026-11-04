@@ -6,8 +6,9 @@
  */
 
 import type { FormatConfig, FormatRowOptions } from "@csv/format";
-import { createFormatConfig, formatRowWithLookup } from "@csv/format";
+import { createFormatConfig, formatRowWithLookup, headerNames } from "@csv/format";
 import type { CsvFormatOptions, Row } from "@csv/types";
+import { checkFormatRow } from "@csv/utils/check-options";
 import {
   extractRowValues,
   detectRowKeys,
@@ -15,6 +16,9 @@ import {
   deduplicateHeaders
 } from "@csv/utils/row";
 import { Transform } from "@stream";
+
+/** One row the formatter stream takes: the shapes `Csv.format` accepts for each row. */
+type FormatterRow = Row | readonly unknown[] | Readonly<Record<string, unknown>>;
 
 /**
  * Transform stream that formats rows to CSV
@@ -33,6 +37,10 @@ export class CsvFormatterStream extends Transform {
   /** Unified format configuration (shared with batch formatter) */
   private formatConfig: FormatConfig;
   private headerWritten: boolean = false;
+  /** The first row was written as the header row (`firstRowIsHeader`). */
+  private headerRowWritten = false;
+  /** That row's texts, which name the columns. */
+  private firstRowNames: string[] | undefined;
   /** Keys to access data from source objects */
   private keys: string[] | null = null;
   /** Headers to write to output (may differ from keys) */
@@ -52,9 +60,9 @@ export class CsvFormatterStream extends Transform {
   // dropped the byte arm was not assignable to the latter.
   declare push: (chunk: string | Uint8Array | null, encoding?: string) => boolean;
   declare write: {
-    (chunk: Row | Uint8Array, callback?: (error?: Error | null) => void): boolean;
+    (chunk: FormatterRow | Uint8Array, callback?: (error?: Error | null) => void): boolean;
     (
-      chunk: Row | Uint8Array,
+      chunk: FormatterRow | Uint8Array,
       encoding?: string,
       callback?: (error?: Error | null) => void
     ): boolean;
@@ -73,7 +81,7 @@ export class CsvFormatterStream extends Transform {
     this.options = options;
 
     // Use shared config factory (same as batch formatter)
-    this.formatConfig = createFormatConfig(options);
+    this.formatConfig = createFormatConfig(options, "Csv.createFormatterStream");
 
     // Pre-allocate row options object (mutated per-row to avoid GC pressure)
     const cfg = this.formatConfig;
@@ -86,7 +94,8 @@ export class CsvFormatterStream extends Transform {
       quoteAll: cfg.quoteAll,
       escapeFormulae: cfg.escapeFormulae,
       decimalSeparator: cfg.decimalSeparator,
-      transform: cfg.typeTransform
+      transform: cfg.typeTransform,
+      where: cfg.where
     };
 
     // Process columns config (takes precedence over headers)
@@ -130,6 +139,7 @@ export class CsvFormatterStream extends Transform {
     // note on `push` above).
     const chunk = chunkOrBytes as Row;
     try {
+      checkFormatRow(chunk, this.sourceRowIndex, undefined, this.formatConfig.where);
       // Write BOM if first chunk
       if (!this.headerWritten && this.formatConfig.bom) {
         this.push("\uFEFF");
@@ -137,14 +147,28 @@ export class CsvFormatterStream extends Transform {
 
       // Handle header writing on first row
       if (!this.headerWritten) {
-        // Auto-detect headers from first row if needed
-        if (this.options.headers === true && !this.keys) {
+        // Keyed rows (objects, RowHashArrays) are mapped by the first row's keys unless
+        // `headers`/`columns` name them; those keys are the header row unless `headers: false`.
+        if (!this.keys) {
           this.detectHeadersFromRow(chunk);
+          if (this.options.headers === false) {
+            this.displayHeaders = null;
+          }
         }
 
         // Write headers if we should and have them
         if (this.formatConfig.writeHeaders && this.displayHeaders) {
           this.push(this.formatRow(this.displayHeaders, true));
+        } else if (this.options.firstRowIsHeader === true && !this.displayHeaders) {
+          // The rows carry their own header row: this one, written as a header row (`firstRowIsHeader`).
+          const values = extractRowValues(chunk, this.keys);
+          this.headerWritten = true;
+          this.sourceRowIndex++;
+          this.firstRowNames = headerNames(values, this.formatConfig);
+          this.push(this.formatRow(values, true));
+          this.headerRowWritten = true;
+          callback();
+          return;
         }
         this.headerWritten = true;
       }
@@ -158,6 +182,7 @@ export class CsvFormatterStream extends Transform {
           callback();
           return;
         }
+        checkFormatRow(processedChunk, sourceIndex, "typeTransform.row", this.formatConfig.where);
       }
 
       this.formatAndPush(processedChunk);
@@ -187,7 +212,9 @@ export class CsvFormatterStream extends Transform {
     // Add trailing newline if trailingNewline is true
     // hasOutput = wrote header OR wrote any data row
     const hasOutput =
-      (this.formatConfig.writeHeaders && this.displayHeaders) || this.outputRowIndex > 0;
+      (this.formatConfig.writeHeaders && this.displayHeaders) ||
+      this.headerRowWritten ||
+      this.outputRowIndex > 0;
     if (this.formatConfig.trailingNewline && hasOutput) {
       this.push(this.formatConfig.lineEnding);
     }
@@ -205,7 +232,7 @@ export class CsvFormatterStream extends Transform {
     // Mutate pre-allocated options to avoid per-row object allocation
     const opts = this.rowOptions;
     opts.quoteLookup = isHeader ? cfg.shouldQuoteHeader : cfg.shouldQuoteColumn;
-    opts.headers = this.displayHeaders ?? undefined;
+    opts.headers = this.firstRowNames ?? this.displayHeaders ?? undefined;
     opts.isHeader = isHeader;
     opts.outputRowIndex = this.outputRowIndex;
 
@@ -214,7 +241,10 @@ export class CsvFormatterStream extends Transform {
     // Use row delimiter as prefix (except for first output)
     // First output = header row OR (no header AND first data row)
     const isFirstLine =
-      isHeader || (!(cfg.writeHeaders && this.displayHeaders) && this.outputRowIndex === 0);
+      isHeader ||
+      (!(cfg.writeHeaders && this.displayHeaders) &&
+        !this.headerRowWritten &&
+        this.outputRowIndex === 0);
     return isFirstLine ? formattedRow : cfg.lineEnding + formattedRow;
   }
 }

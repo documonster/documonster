@@ -28,12 +28,12 @@
  * writer unchanged.
  */
 import type { Margins } from "@excel/types";
-import { encodeBiffRecords, encodeNullableWideString } from "@excel/xlsb/binary";
+import { encodeBiffRecords, encodeNullableWideString, XlsbReader } from "@excel/xlsb/binary";
 import { encodeColor } from "@excel/xlsb/color";
 import { encodeDrawing, readDrawing } from "@excel/xlsb/drawing";
 import { encodeMargins } from "@excel/xlsb/page-setup";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** A chartsheet, in the shape the model holds it. */
 export interface SheetChartsheet {
@@ -143,7 +143,7 @@ export function readChartsheetPart(
     const name = nameOf(entry.id);
     if (name === "BrtBeginCsView") {
       try {
-        const reader = new BinaryReader(entry.payload, 0, part);
+        const reader = new XlsbReader(entry.payload, 0, part);
         const flags = reader.readUint16();
         const zoom = reader.readUint32();
         if (zoom !== 0 && zoom !== 100) {

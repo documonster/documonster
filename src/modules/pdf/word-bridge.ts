@@ -18,7 +18,7 @@
  * Every flow decision (line wrapping, page breaks, table sizing,
  * float positioning) lives in `@word/layout`. This file only handles
  * option mapping, optional chart-renderer auto-detection, and the
- * final `builder.build()` serialization.
+ * final `builder.toBuffer()` serialization.
  *
  * Like `excel-bridge.ts`, this is the ONLY file in the PDF module that
  * imports from `@word`.
@@ -36,13 +36,15 @@
 import type { PdfPageBuilder } from "@pdf/builder/document-builder";
 import { isWinAnsiCodePoint } from "@pdf/core/pdf-stream";
 import { compilePdfFontConfig } from "@pdf/font/font-config";
-import type { PdfFontConfig } from "@pdf/font/font-config";
 import { FontManager } from "@pdf/font/font-manager";
 import { findSystemFontForCodePoints } from "@pdf/font/system-fonts";
+import type { PdfDocumentOptions, PdfMargins } from "@pdf/types";
 import type { RenderLayoutOptions } from "@pdf/word-layout-to-pdf";
 import { renderLayoutDocumentToPdf } from "@pdf/word-layout-to-pdf";
 import { addCjkLanguageEvidence, concludeCjkLanguage, createCjkLanguageEvidence } from "@utils/cjk";
 import type { CjkLanguage, CjkLanguageEvidence } from "@utils/cjk";
+import { measureTextWidth, styledFontVariant } from "@utils/font-metrics";
+import { finalizeDocument } from "@word/builder/document-finalize";
 import { symbolText } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type { FullLayoutOptions, PageGeometryOverride } from "@word/layout/layout-full";
@@ -55,58 +57,48 @@ import type { Chart, ChartContent, ChartExContent, DocxDocument } from "@word/ty
 // from `@word` directly — only bridge files may cross into `@word`.
 export type { DocxDocument } from "@word/types";
 
-/** Options for DOCX → PDF conversion. */
-export interface DocxToPdfOptions {
-  /** Page width in points (default: from document sectPr or 612 US Letter). */
+/**
+ * Options for DOCX → PDF conversion: the {@link PdfDocumentOptions} every converter takes —
+ * metadata (each field defaulting to the document's core properties), fixed dates,
+ * encryption, fonts — and the page geometry and layout settings of a Word document.
+ */
+export interface DocxToPdfOptions extends PdfDocumentOptions {
+  /**
+   * Page width in **points** (1/72 inch) — default: the section's own size, or 612 (US
+   * Letter). Word stores page sizes in twentieths of a point (twips); this option does not.
+   */
   readonly pageWidth?: number;
-  /** Page height in points (default: from document sectPr or 792 US Letter). */
+  /** Page height in **points** — default: the section's own size, or 792 (US Letter). */
   readonly pageHeight?: number;
-  /** Top margin in points (default: from sectPr or 72). */
+  /**
+   * Page margins in **points** (1/72 inch), as one object — the same `margins` `Pdf.fromExcel`
+   * takes. A side left out takes the section's own margin, or 72 (1 inch).
+   */
+  readonly margins?: Partial<PdfMargins>;
+  /** @deprecated Use `margins: { top }`. Removed in 1.0. `margins.top` wins when both are given. */
   readonly marginTop?: number;
-  /** Bottom margin in points (default: from sectPr or 72). */
+  /** @deprecated Use `margins: { bottom }`. Removed in 1.0. */
   readonly marginBottom?: number;
-  /** Left margin in points (default: from sectPr or 72). */
+  /** @deprecated Use `margins: { left }`. Removed in 1.0. */
   readonly marginLeft?: number;
-  /** Right margin in points (default: from sectPr or 72). */
+  /** @deprecated Use `margins: { right }`. Removed in 1.0. */
   readonly marginRight?: number;
-  /** Default font family (default: "Helvetica"). */
+  /**
+   * Font family for text whose style names none — the same name `Pdf.fromExcel` uses.
+   * Default: `"Helvetica"`.
+   */
+  readonly defaultFontFamily?: string;
+  /**
+   * @deprecated Use {@link defaultFontFamily}, which wins when both are given. Removed in 1.0.
+   */
   readonly defaultFont?: string;
-  /** Default font size in points (default: 11). */
+  /**
+   * Default font size in **points** (default: 11), for text whose style gives none.
+   *
+   * Not half-points: `WordHtml.toDocx` and `WordMarkdown.toDocx` take `defaultFontSize` in
+   * Word's half-points (`24` is 12 pt). Here `12` is 12 pt.
+   */
   readonly defaultFontSize?: number;
-  /**
-   * Embedded families used both to measure Word layout and to render PDF text.
-   * Family names and aliases match Word font names case-insensitively; configured
-   * fallback is applied per grapheme. OpenType shaping, bidi reordering, and
-   * color emoji are not supported.
-   */
-  readonly fonts?: PdfFontConfig;
-  /**
-   * System font families auto-discovery should prefer, in order, when
-   * {@link fonts} is not given.
-   *
-   * @see `PdfExportOptions.preferSystemFonts`
-   */
-  readonly preferSystemFonts?: readonly string[];
-
-  /**
-   * Turn off the host font scan entirely, for byte-stable output across hosts.
-   *
-   * @see `PdfExportOptions.disableFontAutoDiscovery`
-   */
-  readonly disableFontAutoDiscovery?: boolean;
-  /**
-   * The East Asian written language of the document, so auto-discovery picks a
-   * face drawn in that regional hand.
-   *
-   * @see `PdfExportOptions.textLanguage`
-   */
-  readonly textLanguage?: CjkLanguage;
-  /**
-   * Receive non-fatal font diagnostics raised while converting.
-   *
-   * @see `PdfExportOptions.onWarning`
-   */
-  readonly onWarning?: (message: string) => void;
   /**
    * Header band distance from the top edge of the page, in points
    * (default: section's `pgMar.header`, or 36pt / 0.5").
@@ -126,16 +118,20 @@ export interface DocxToPdfOptions {
    */
   readonly footerMargin?: number;
   /**
-   * Optional high-quality chart renderer callback.
+   * Optional chart renderer callback, for drawing classic charts yourself.
    *
-   * When provided, Word charts are rendered using the injected renderer
-   * instead of the built-in simplified renderer. This allows consumers
-   * to plug in the Excel chart renderer for publication-quality output:
+   * Without it, every chart — classic `<c:chart>` and modern ChartEx `<cx:chartSpace>`
+   * (sunburst / treemap / waterfall / funnel / boxWhisker / histogram / pareto /
+   * regionMap) — is drawn as vector PDF by the built-in Excel chart engine. Supply a
+   * callback only to draw classic charts differently:
    *
    * ```typescript
    * import { Pdf } from "documonster/pdf";
    * const pdfBytes = await Pdf.fromDocx(doc, {
-   *   chartRenderer: await Pdf.wordChartRenderer()
+   *   chartRenderer: (chart, page, rect) => {
+   *     if (chart.type !== "pie") return false; // let the built-in renderer draw it
+   *     page.drawRect({ ...rect, stroke: { r: 0, g: 0, b: 0 } });
+   *   }
    * });
    * ```
    *
@@ -150,8 +146,7 @@ export interface DocxToPdfOptions {
    * and finally to a placeholder rectangle with the chart title
    * centred. Return `void` or `true` to indicate the chart was handled.
    *
-   * Note: `chartEx` charts (sunburst / treemap / waterfall / funnel /
-   * boxWhisker / …) never reach this `Chart`-typed callback because
+   * Note: `chartEx` charts never reach this `Chart`-typed callback because
    * there is no classic `Chart` instance to pass. They are rendered by
    * the built-in layout-aware renderer instead (full vector output).
    */
@@ -165,7 +160,7 @@ export interface DocxToPdfOptions {
 /**
  * Convert a `DocxDocument` to PDF bytes.
  *
- * @param doc - The DOCX document model (from `readDocx` or `Document.build()`).
+ * @param doc - The document (from `Io.read` or `Document.create()`).
  * @param options - Page geometry, fonts, optional chart renderer, …
  * @returns PDF bytes ready to write to disk or stream over HTTP.
  */
@@ -173,6 +168,9 @@ export async function docxToPdf(
   doc: DocxDocument,
   options?: DocxToPdfOptions
 ): Promise<Uint8Array> {
+  // A document assembled with `Document.create()` gets the East Asian defaults
+  // it would be written with, so the PDF uses the same faces as the DOCX.
+  doc = finalizeDocument(doc);
   // 1. Resolve effective page geometry. Section properties win unless the
   //    caller explicitly overrode an axis. Margins are independent: the
   //    section's margins are applied unless the caller overrode them.
@@ -193,6 +191,17 @@ export async function docxToPdf(
     }
   });
 
+  // Without embedded fonts the text is drawn in the standard PDF faces, so it
+  // is measured in them: the layout's own default measures the face a Word
+  // document names (Calibri), whose glyphs are not the ones drawn.
+  const withStandardFontWidths = (base: FullLayoutOptions): FullLayoutOptions => ({
+    ...base,
+    measureText:
+      base.measureText ??
+      ((text, fontName, fontSize, bold = false, italic = false) =>
+        measureTextWidth(text, styledFontVariant(fontName, bold, italic), fontSize))
+  });
+
   // 2. Try to obtain the built-in, layout-aware Excel chart renderer.
   //    It handles BOTH classic `<c:chart>` and modern `<cx:chartSpace>`
   //    ChartEx families (sunburst / treemap / waterfall / …). It is used
@@ -209,7 +218,11 @@ export async function docxToPdf(
   try {
     const mod = await import("@pdf/word-chart-bridge");
     if (typeof mod.createWordLayoutChartPdfRenderer === "function") {
-      builtInLayoutRenderer = mod.createWordLayoutChartPdfRenderer();
+      // The document's theme colours: its charts' automatic and scheme colours are its theme's.
+      const themeColors = doc.theme?.colorScheme?.colors;
+      builtInLayoutRenderer = mod.createWordLayoutChartPdfRenderer(
+        themeColors === undefined ? {} : { themeColors }
+      );
     }
   } catch {
     // Chart support not available — placeholder rendering takes over.
@@ -243,7 +256,10 @@ export async function docxToPdf(
           options?.textLanguage,
           concludeCjkLanguage(predicted!.evidence)
         );
-  let layout = layoutDocumentFull(doc, fontManager ? withFontMetrics(fontManager) : layoutOptions);
+  let layout = layoutDocumentFull(
+    doc,
+    fontManager ? withFontMetrics(fontManager) : withStandardFontWidths(layoutOptions)
+  );
 
   // 3a. Verify the prediction against what was actually laid out. Walking the
   //     finished runs is far cheaper than laying out again, so the common case
@@ -259,7 +275,10 @@ export async function docxToPdf(
         options?.textLanguage,
         concludeCjkLanguage(drawn.evidence)
       );
-      layout = layoutDocumentFull(doc, fontManager ? withFontMetrics(fontManager) : layoutOptions);
+      layout = layoutDocumentFull(
+        doc,
+        fontManager ? withFontMetrics(fontManager) : withStandardFontWidths(layoutOptions)
+      );
     }
   }
 
@@ -272,11 +291,21 @@ export async function docxToPdf(
   //      c. neither available / both decline → translator fallback
   //         (inline SVG, then a titled placeholder box).
   const userChartRenderer = options?.chartRenderer;
+  // An option wins, then the document's own properties — as `Pdf.fromExcel` takes the
+  // workbook's. An empty string falls back too, as it does there.
+  const core = doc.coreProperties;
   const renderOptions: RenderLayoutOptions = {
-    title: doc.coreProperties?.title,
-    author: doc.coreProperties?.creator,
-    subject: doc.coreProperties?.subject,
-    defaultFont: options?.defaultFont ?? "Helvetica",
+    metadata: {
+      title: options?.title || core?.title || undefined,
+      author: options?.author || core?.creator || undefined,
+      subject: options?.subject || core?.subject || undefined,
+      keywords: options?.keywords || core?.keywords || undefined,
+      creator: options?.creator ?? "documonster",
+      creationDate: options?.creationDate,
+      modDate: options?.modDate
+    },
+    encryption: options?.encryption,
+    defaultFont: options?.defaultFontFamily ?? options?.defaultFont ?? "Helvetica",
     defaultFontSize: options?.defaultFontSize ?? 11,
     fonts: options?.fonts,
     // The engine the layout above was measured with. Handing it over stops
@@ -313,11 +342,11 @@ export async function docxToPdf(
   };
 
   const builder = renderLayoutDocumentToPdf(layout, renderOptions);
-  return builder.build();
+  return builder.toBuffer();
 }
 
 /**
- * A font engine for the faces `PdfDocumentBuilder.build()` will auto-embed, or
+ * A font engine for the faces `PdfDocumentBuilder.toBuffer()` will auto-embed, or
  * `undefined` when the laid-out text is entirely WinAnsi and the built-in
  * standard-font tables are already exact.
  *
@@ -516,10 +545,10 @@ function mapToLayoutOptions(options: DocxToPdfOptions | undefined): FullLayoutOp
   const pageGeometry: PageGeometryOverride = {
     pageWidth: options?.pageWidth,
     pageHeight: options?.pageHeight,
-    marginTop: options?.marginTop,
-    marginBottom: options?.marginBottom,
-    marginLeft: options?.marginLeft,
-    marginRight: options?.marginRight,
+    marginTop: options?.margins?.top ?? options?.marginTop,
+    marginBottom: options?.margins?.bottom ?? options?.marginBottom,
+    marginLeft: options?.margins?.left ?? options?.marginLeft,
+    marginRight: options?.margins?.right ?? options?.marginRight,
     headerMargin: options?.headerMargin,
     footerMargin: options?.footerMargin
   };

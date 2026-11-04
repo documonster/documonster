@@ -38,14 +38,14 @@ export function runZipEditTests(): void {
         const original = await zip({ level: 6, reproducible: true })
           .add("a.txt", encode("aaaaa aaaaa aaaaa aaaaa aaaaa"))
           .add("b.txt", encode("bbbbb bbbbb bbbbb bbbbb bbbbb"))
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { level: 6, reproducible: true });
         editor.delete("b.txt");
         editor.set("a.txt", encode("AAA"));
         editor.set("c.txt", "CCC");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         const parser = new ZipParser(out);
         const paths = parser
@@ -64,7 +64,7 @@ export function runZipEditTests(): void {
 
       it("should preserve raw compressed bytes for unchanged entries (rename)", async () => {
         const big = encode("x".repeat(1024 * 64));
-        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).bytes();
+        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).toBuffer();
 
         const originalParser = new ZipParser(original);
         const originalRaw = originalParser.getRawCompressedData("big.txt");
@@ -72,7 +72,7 @@ export function runZipEditTests(): void {
 
         const editor = await editZip(original, { level: 6, reproducible: true });
         editor.rename("big.txt", "moved.txt");
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         const outParser = new ZipParser(out);
         const movedRaw = outParser.getRawCompressedData("moved.txt");
@@ -87,7 +87,7 @@ export function runZipEditTests(): void {
 
       it("should fall back to recompress when raw passthrough is unavailable (bytes)", async () => {
         const big = encode("x".repeat(1024 * 64));
-        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).bytes();
+        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).toBuffer();
 
         const onWarning = vi.fn<(w: ZipEditWarning) => void>();
         const editor = await editZip(original, {
@@ -108,7 +108,7 @@ export function runZipEditTests(): void {
         };
 
         editor.rename("big.txt", "moved.txt");
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         expect(onWarning).toHaveBeenCalled();
         expect(onWarning.mock.calls.some(c => c[0].code === "raw_unavailable")).toBe(true);
@@ -121,7 +121,7 @@ export function runZipEditTests(): void {
 
       it("should fall back to recompress when raw passthrough is unavailable (stream)", async () => {
         const big = encode("x".repeat(1024 * 64));
-        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).bytes();
+        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).toBuffer();
 
         const onWarning = vi.fn<(w: ZipEditWarning) => void>();
         const editor = await editZip(original, {
@@ -180,7 +180,7 @@ export function runZipEditTests(): void {
 
         // Add a new file so the output isn't empty.
         editor.set("public.txt", "OK");
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         expect(onWarning.mock.calls.some(c => c[0].code === "encryption_unsupported")).toBe(true);
 
@@ -195,7 +195,7 @@ export function runZipEditTests(): void {
 
       it("should support RandomAccessReader input (BufferReader)", async () => {
         const big = encode("x".repeat(1024 * 64));
-        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).bytes();
+        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).toBuffer();
 
         const originalParser = new ZipParser(original);
         const originalRaw = originalParser.getRawCompressedData("big.txt");
@@ -206,7 +206,7 @@ export function runZipEditTests(): void {
           reproducible: true
         });
         editor.rename("big.txt", "moved.txt");
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         const outParser = new ZipParser(out);
         const movedRaw = outParser.getRawCompressedData("moved.txt");
@@ -217,7 +217,7 @@ export function runZipEditTests(): void {
 
       it("should support URL input via HTTP Range (editZipUrl)", async () => {
         const big = encode("x".repeat(1024 * 64));
-        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).bytes();
+        const original = await zip({ level: 6, reproducible: true }).add("big.txt", big).toBuffer();
 
         const originalParser = new ZipParser(original);
         const originalRaw = originalParser.getRawCompressedData("big.txt");
@@ -256,7 +256,7 @@ export function runZipEditTests(): void {
           reproducible: true
         });
         editor.rename("big.txt", "moved.txt");
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         const outParser = new ZipParser(out);
         const movedRaw = outParser.getRawCompressedData("moved.txt");
@@ -270,7 +270,7 @@ export function runZipEditTests(): void {
         const original = await zip({ level: 6, reproducible: true })
           .add("a.txt", encode("aaaaa aaaaa aaaaa aaaaa aaaaa"))
           .add("b.txt", encode("bbbbb bbbbb bbbbb bbbbb bbbbb"))
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { level: 6, reproducible: true });
         editor.delete("b.txt");
@@ -301,7 +301,7 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("a.txt", "A")
           .add("b.txt", "B")
-          .bytes();
+          .toBuffer();
 
         const plan = new ZipEditPlan()
           .rename("a.txt", "renamed.txt")
@@ -312,7 +312,7 @@ export function runZipEditTests(): void {
         const editor = await editZip(original, { reproducible: true });
         editor.apply(plan);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser
           .getEntries()
@@ -332,25 +332,25 @@ export function runZipEditTests(): void {
           .setComment("test comment");
 
         // Serialize to JSON
-        const json = await plan.toJSON();
+        const json = await plan.toJson();
         expect(typeof json).toBe("string");
 
         // Deserialize
-        const restored = ZipEditPlan.fromJSON(json);
+        const restored = ZipEditPlan.fromJson(json);
 
         // Apply both to fresh archives and compare
         const original = await zip({ reproducible: true })
           .add("old.txt", "will be deleted")
           .add("from.txt", "will be renamed")
-          .bytes();
+          .toBuffer();
 
         const editor1 = await editZip(original, { reproducible: true });
         editor1.apply(plan);
-        const out1 = await editor1.bytes();
+        const out1 = await editor1.toBuffer();
 
         const editor2 = await editZip(original, { reproducible: true });
         editor2.apply(restored);
-        const out2 = await editor2.bytes();
+        const out2 = await editor2.toBuffer();
 
         // Both should produce identical archives
         expect(out1).toEqual(out2);
@@ -366,30 +366,30 @@ export function runZipEditTests(): void {
 
       it("should handle empty ZipEditPlan serialization", async () => {
         const plan = new ZipEditPlan();
-        const json = await plan.toJSON();
-        const restored = ZipEditPlan.fromJSON(json);
+        const json = await plan.toJson();
+        const restored = ZipEditPlan.fromJson(json);
         expect(restored.getOperations()).toHaveLength(0);
       });
 
       it("should handle empty archive", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.set("new.txt", "hello");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser.getEntries().map(e => e.path);
         expect(paths).toEqual(["new.txt"]);
       });
 
       it("should produce empty archive when all entries deleted", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.delete("a.txt");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().length).toBe(0);
       });
@@ -401,7 +401,7 @@ export function runZipEditTests(): void {
 
     describe("has()", () => {
       it("should return true for existing entries", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
         const editor = await editZip(original);
 
         expect(editor.has("a.txt")).toBe(true);
@@ -409,7 +409,7 @@ export function runZipEditTests(): void {
       });
 
       it("should return false for deleted entries", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
         const editor = await editZip(original);
 
         editor.delete("a.txt");
@@ -417,7 +417,7 @@ export function runZipEditTests(): void {
       });
 
       it("should return true for newly added entries", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
         const editor = await editZip(original);
 
         expect(editor.has("new.txt")).toBe(false);
@@ -432,7 +432,7 @@ export function runZipEditTests(): void {
 
     describe("rename()", () => {
       it("should rename an entry", async () => {
-        const original = await zip({ reproducible: true }).add("old.txt", "content").bytes();
+        const original = await zip({ reproducible: true }).add("old.txt", "content").toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const result = editor.rename("old.txt", "new.txt");
@@ -441,7 +441,7 @@ export function runZipEditTests(): void {
         expect(editor.has("old.txt")).toBe(false);
         expect(editor.has("new.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser.getEntries().map(e => e.path);
         expect(paths).toEqual(["new.txt"]);
@@ -451,7 +451,7 @@ export function runZipEditTests(): void {
       });
 
       it("should return false when source does not exist", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
         const editor = await editZip(original);
 
         const result = editor.rename("nonexistent.txt", "new.txt");
@@ -462,7 +462,7 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("src.txt", "source content")
           .add("dst.txt", "destination content")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const result = editor.rename("src.txt", "dst.txt");
@@ -471,7 +471,7 @@ export function runZipEditTests(): void {
         expect(editor.has("src.txt")).toBe(false);
         expect(editor.has("dst.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser.getEntries().map(e => e.path);
         expect(paths).toEqual(["dst.txt"]);
@@ -482,7 +482,7 @@ export function runZipEditTests(): void {
       });
 
       it("should handle rename to same name as no-op", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
         const editor = await editZip(original);
 
         const result = editor.rename("a.txt", "a.txt");
@@ -491,7 +491,7 @@ export function runZipEditTests(): void {
       });
 
       it("should rename a pending set entry", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
         const editor = await editZip(original);
 
         editor.set("temp.txt", "data");
@@ -500,19 +500,19 @@ export function runZipEditTests(): void {
         expect(editor.has("temp.txt")).toBe(false);
         expect(editor.has("final.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().map(e => e.path)).toEqual(["final.txt"]);
       });
 
       it("should support chained renames (rename target)", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         expect(editor.rename("a.txt", "b.txt")).toBe(true);
         expect(editor.rename("b.txt", "c.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().map(e => e.path)).toEqual(["c.txt"]);
         expect(decode((await parser.extract("c.txt"))!)).toBe("hello");
@@ -522,13 +522,13 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("a.txt", "A")
           .add("c.txt", "C")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         expect(editor.rename("a.txt", "b.txt")).toBe(true);
         expect(editor.rename("c.txt", "b.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().map(e => e.path)).toEqual(["b.txt"]);
         expect(decode((await parser.extract("b.txt"))!)).toBe("C");
@@ -537,13 +537,13 @@ export function runZipEditTests(): void {
 
     describe("delete()", () => {
       it("should return true when deleting a rename target", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
         const editor = await editZip(original, { reproducible: true });
 
         editor.rename("a.txt", "b.txt");
         expect(editor.delete("b.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().length).toBe(0);
       });
@@ -563,7 +563,7 @@ export function runZipEditTests(): void {
           .add("folder/sub/", "")
           .add("folder/sub/deep.txt", "deep")
           .add("other.txt", "other")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const count = editor.deleteDirectory("folder");
@@ -575,7 +575,7 @@ export function runZipEditTests(): void {
         expect(editor.has("root.txt")).toBe(true);
         expect(editor.has("other.txt")).toBe(true);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser
           .getEntries()
@@ -589,7 +589,7 @@ export function runZipEditTests(): void {
           .add("folder/", "")
           .add("folder/file.txt", "content")
           .add("other.txt", "other")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const count = editor.deleteDirectory("folder/");
@@ -601,7 +601,7 @@ export function runZipEditTests(): void {
       });
 
       it("should return 0 when directory does not exist", async () => {
-        const original = await zip({ reproducible: true }).add("file.txt", "content").bytes();
+        const original = await zip({ reproducible: true }).add("file.txt", "content").toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const count = editor.deleteDirectory("nonexistent");
@@ -614,7 +614,7 @@ export function runZipEditTests(): void {
           .add("test/file.txt", "in folder")
           .add("test-file.txt", "similar prefix")
           .add("testing/file.txt", "different folder")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const count = editor.deleteDirectory("test");
@@ -630,7 +630,7 @@ export function runZipEditTests(): void {
           .add("a/b/c/file.txt", "deep")
           .add("a/b/other.txt", "mid")
           .add("a/top.txt", "top")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         const count = editor.deleteDirectory("a/b");
@@ -646,14 +646,14 @@ export function runZipEditTests(): void {
           .add("keep.txt", "keep")
           .add("delete/a.txt", "a")
           .add("delete/b.txt", "b")
-          .bytes();
+          .toBuffer();
 
         const plan = new ZipEditPlan().deleteDirectory("delete").set("new.txt", "new");
 
         const editor = await editZip(original, { reproducible: true });
         editor.apply(plan);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser
           .getEntries()
@@ -663,7 +663,9 @@ export function runZipEditTests(): void {
       });
 
       it("should delete pending set entries in the directory", async () => {
-        const original = await zip({ reproducible: true }).add("existing.txt", "existing").bytes();
+        const original = await zip({ reproducible: true })
+          .add("existing.txt", "existing")
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.set("folder/new1.txt", "new1");
@@ -685,12 +687,12 @@ export function runZipEditTests(): void {
 
     describe("setComment()", () => {
       it("should set archive comment", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.setComment("Test comment 测试");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getZipComment()).toBe("Test comment 测试");
       });
@@ -698,12 +700,12 @@ export function runZipEditTests(): void {
       it("should remove comment when set to undefined", async () => {
         const original = await zip({ reproducible: true, comment: "Original comment" })
           .add("a.txt", "hello")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true, comment: "Keep this" });
         editor.setComment(undefined);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getZipComment()).toBe("");
       });
@@ -719,7 +721,7 @@ export function runZipEditTests(): void {
           .add("a.txt", "a")
           .add("b.txt", "b")
           .add("c.txt", "c")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original);
         editor.delete("b.txt");
@@ -737,7 +739,7 @@ export function runZipEditTests(): void {
 
     describe("path normalization", () => {
       it("should normalize paths with safe mode", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         const editor = await editZip(original, {
           reproducible: true,
@@ -747,14 +749,14 @@ export function runZipEditTests(): void {
         // Backslash should be converted to forward slash
         editor.set("folder\\file.txt", "content");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser.getEntries().map(e => e.path);
         expect(paths).toEqual(["folder/file.txt"]);
       });
 
       it("should reject absolute paths in safe mode", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         const editor = await editZip(original, {
           reproducible: true,
@@ -765,7 +767,7 @@ export function runZipEditTests(): void {
       });
 
       it("should reject traversal paths in safe mode", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         const editor = await editZip(original, {
           reproducible: true,
@@ -776,7 +778,7 @@ export function runZipEditTests(): void {
       });
 
       it("should normalize ./prefix paths", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         const editor = await editZip(original, {
           reproducible: true,
@@ -785,7 +787,7 @@ export function runZipEditTests(): void {
 
         editor.set("./file.txt", "content");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser.getEntries().map(e => e.path);
         expect(paths).toEqual(["file.txt"]);
@@ -801,12 +803,12 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("folder/", new Uint8Array(0))
           .add("folder/file.txt", "content")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.set("folder/another.txt", "more content");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser
           .getEntries()
@@ -819,13 +821,13 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("folder/", new Uint8Array(0))
           .add("folder/file.txt", "content")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.delete("folder/");
         editor.delete("folder/file.txt");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().length).toBe(0);
       });
@@ -838,7 +840,7 @@ export function runZipEditTests(): void {
     describe("onWarning callback", () => {
       it("should call onWarning when entry cannot be preserved", async () => {
         // Create a valid ZIP first
-        const original = await zip({ reproducible: true }).add("test.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("test.txt", "hello").toBuffer();
 
         const warnings: ZipEditWarning[] = [];
         const editor = await editZip(original, {
@@ -847,7 +849,7 @@ export function runZipEditTests(): void {
 
         // Normal operation should not produce warnings
         editor.set("new.txt", "world");
-        await editor.bytes();
+        await editor.toBuffer();
 
         // No warnings for normal operations
         expect(warnings.length).toBe(0);
@@ -863,13 +865,13 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("a.txt", "aaaaa")
           .add("b.txt", "bbbbb")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.set("c.txt", "ccccc");
 
         const progressUpdates: Array<{ entriesDone: number; entriesTotal: number }> = [];
-        await editor.bytes({
+        await editor.toBuffer({
           onProgress: p => {
             progressUpdates.push({ entriesDone: p.entriesDone, entriesTotal: p.entriesTotal });
           }
@@ -883,7 +885,7 @@ export function runZipEditTests(): void {
       it("should support cancellation via AbortSignal", async () => {
         const original = await zip({ reproducible: true })
           .add("a.txt", encode("x".repeat(10000)))
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         // Add many entries to give time for abort
@@ -896,7 +898,7 @@ export function runZipEditTests(): void {
         // Abort immediately
         controller.abort();
 
-        await expect(editor.bytes({ signal: controller.signal })).rejects.toThrow();
+        await expect(editor.toBuffer({ signal: controller.signal })).rejects.toThrow();
       });
     });
 
@@ -906,7 +908,7 @@ export function runZipEditTests(): void {
 
     describe("pipeTo()", () => {
       it("should pipe output to a sink", async () => {
-        const original = await zip({ reproducible: true }).add("a.txt", "hello").bytes();
+        const original = await zip({ reproducible: true }).add("a.txt", "hello").toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.set("b.txt", "world");
@@ -941,14 +943,14 @@ export function runZipEditTests(): void {
         const data = encode("This is stored without compression");
         const original = await zip({ level: 0, reproducible: true })
           .add("stored.txt", data)
-          .bytes();
+          .toBuffer();
 
         const originalParser = new ZipParser(original);
         const originalInfo = originalParser.getEntries()[0]!;
         expect(originalInfo.compressionMethod).toBe(0); // STORE
 
         const editor = await editZip(original, { level: 6, reproducible: true });
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
 
         const outParser = new ZipParser(out);
         const outInfo = outParser.getEntries()[0]!;
@@ -958,12 +960,12 @@ export function runZipEditTests(): void {
 
       it("should apply compression level to new entries", async () => {
         const data = encode("x".repeat(1000)); // Highly compressible
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         const editor = await editZip(original, { level: 9, reproducible: true });
         editor.set("compressed.txt", data);
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const info = parser.getEntries()[0]!;
 
@@ -983,11 +985,11 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("a.txt", "a")
           .add("b.txt", "b")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.delete("a.txt");
-        const out = await editor.set("c.txt", "c").setComment("chained").bytes();
+        const out = await editor.set("c.txt", "c").setComment("chained").toBuffer();
 
         const parser = new ZipParser(out);
         const paths = parser
@@ -1008,12 +1010,12 @@ export function runZipEditTests(): void {
         const original = await zip({ reproducible: true })
           .add("文件.txt", "中文内容")
           .add("file with spaces.txt", "content")
-          .bytes();
+          .toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         editor.rename("文件.txt", "重命名.txt");
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const paths = parser
           .getEntries()
@@ -1035,7 +1037,7 @@ export function runZipEditTests(): void {
         for (const e of entries) {
           archive.add(e.name, e.data);
         }
-        const original = await archive.bytes();
+        const original = await archive.toBuffer();
 
         const editor = await editZip(original, { reproducible: true });
         // Delete every other entry
@@ -1043,23 +1045,24 @@ export function runZipEditTests(): void {
           editor.delete(`file${i.toString().padStart(3, "0")}.txt`);
         }
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         expect(parser.getEntries().length).toBe(50);
       });
 
       it("should throw on empty entry name", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
         const editor = await editZip(original);
 
-        expect(() => editor.set("", "content")).toThrow(/Entry name is required/);
-        expect(() => editor.delete("")).toThrow(/Entry name is required/);
-        expect(() => editor.rename("", "new")).toThrow(/Entry name is required/);
-        expect(() => editor.rename("old", "")).toThrow(/Entry name is required/);
+        const required = /Entry name is required|name must be a non-empty string/;
+        expect(() => editor.set("", "content")).toThrow(required);
+        expect(() => editor.delete("")).toThrow(required);
+        expect(() => editor.rename("", "new")).toThrow(required);
+        expect(() => editor.rename("old", "")).toThrow(required);
       });
 
       it("should handle async iterable source in bytes()", async () => {
-        const original = await zip({ reproducible: true }).bytes();
+        const original = await zip({ reproducible: true }).toBuffer();
 
         async function* generateChunks(): AsyncGenerator<Uint8Array> {
           yield encode("hello ");
@@ -1069,7 +1072,7 @@ export function runZipEditTests(): void {
         const editor = await editZip(original, { reproducible: true });
         editor.set("async.txt", generateChunks());
 
-        const out = await editor.bytes();
+        const out = await editor.toBuffer();
         const parser = new ZipParser(out);
         const content = await parser.extract("async.txt");
         expect(decode(content!)).toBe("hello world");

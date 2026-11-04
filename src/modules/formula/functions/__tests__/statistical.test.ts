@@ -429,8 +429,8 @@ describe("CONFIDENCE.T", () => {
     expect(fnCONFIDENCE_T([rvNumber(1), rvNumber(1), rvNumber(10)])).toEqual(ERRORS.NUM);
   });
 
-  it("rejects size < 2 (need df >= 1)", () => {
-    expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(1), rvNumber(1)])).toEqual(ERRORS.NUM);
+  it("is #DIV/0! for size 1 (no degrees of freedom), as in Excel", () => {
+    expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(1), rvNumber(1)])).toEqual(ERRORS.DIV0);
   });
 
   it("rejects non-positive stddev", () => {
@@ -1132,11 +1132,9 @@ describe("BINOM.INV comprehensive", () => {
     expect(v).toBeGreaterThanOrEqual(4);
     expect(v).toBeLessThanOrEqual(5);
   });
-  it("BINOM.INV alpha=0 → 0", () => {
-    expect(asNumber(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(0)]))).toBe(0);
-  });
-  it("BINOM.INV alpha=1 → n", () => {
-    expect(asNumber(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(1)]))).toBe(10);
+  it("BINOM.INV alpha=0 or 1 → #NUM! (as Excel)", () => {
+    expect(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(0)])).toEqual(ERRORS.NUM);
+    expect(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(1)])).toEqual(ERRORS.NUM);
   });
   it("BINOM.INV p<0 → #NUM!", () => {
     expect(fnBINOM_INV([rvNumber(10), rvNumber(-0.1), rvNumber(0.5)])).toEqual(ERRORS.NUM);
@@ -1826,11 +1824,15 @@ describe("FREQUENCY comprehensive", () => {
     expect((r.rows[1][0] as NumberValue).value).toBe(2);
     expect((r.rows[2][0] as NumberValue).value).toBe(1);
   });
-  it("FREQUENCY non-array first arg → #VALUE!", () => {
-    expect(fnFREQUENCY([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
+  it("FREQUENCY single-value data is 1×1", () => {
+    expect(fnFREQUENCY([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(
+      rvArray([[rvNumber(1)], [rvNumber(0)]])
+    );
   });
-  it("FREQUENCY non-array second arg → #VALUE!", () => {
-    expect(fnFREQUENCY([rvArray([[rvNumber(1)]]), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("FREQUENCY single-value bins is 1×1", () => {
+    expect(fnFREQUENCY([rvArray([[rvNumber(1)]]), rvNumber(1)])).toEqual(
+      rvArray([[rvNumber(1)], [rvNumber(0)]])
+    );
   });
   it("FREQUENCY result has bins.length+1 rows", () => {
     const data = rvArray([[rvNumber(5)]]);
@@ -2440,13 +2442,10 @@ describe("COVARIANCE.S (extra coverage)", () => {
     const ys = rvArray([[rvNumber(5), rvNumber(5), rvNumber(5)]]);
     expect(asNumber(fnCOVARIANCE_S([xs, ys]))).toBeCloseTo(0, 10);
   });
-  it("truncates to shorter length for mismatched shapes (no #N/A)", () => {
-    // engine uses min(len, len); matching truncated ranges
+  it("mismatched sizes are #N/A, as Excel answers COVAR({1,2},{3})", () => {
     const xs = rvArray([[rvNumber(1), rvNumber(2)]]);
     const ys = rvArray([[rvNumber(1), rvNumber(2), rvNumber(100)]]);
-    // After truncation: xs=[1,2], ys=[1,2] → cov_s = (0 + 0.5*0.5*2)/1 = 0.5
-    const r = asNumber(fnCOVARIANCE_S([xs, ys]));
-    expect(r).toBeCloseTo(0.5, 5);
+    expect(fnCOVARIANCE_S([xs, ys])).toEqual(ERRORS.NA);
   });
   it("propagates errors from the input arrays", () => {
     expect(fnCOVARIANCE_S([rvArray([[ERRORS.NA]]), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.NA);
@@ -3375,11 +3374,9 @@ describe("BINOM.INV saturation", () => {
   it("BINOM.INV(6, 0.5, 0.75) = 4 — Excel doc example", () => {
     expect(asNumber(fnBINOM_INV([rvNumber(6), rvNumber(0.5), rvNumber(0.75)]))).toBe(4);
   });
-  it("alpha=0 → 0 (first integer whose CDF >= 0)", () => {
-    expect(asNumber(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(0)]))).toBe(0);
-  });
-  it("alpha=1 → n (always satisfied only at n)", () => {
-    expect(asNumber(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(1)]))).toBe(10);
+  it("alpha=0 and alpha=1 → #NUM!, as Excel answers", () => {
+    expect(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(0)])).toEqual(ERRORS.NUM);
+    expect(fnBINOM_INV([rvNumber(10), rvNumber(0.5), rvNumber(1)])).toEqual(ERRORS.NUM);
   });
   it("rejects n < 0 → #NUM!", () => {
     expect(fnBINOM_INV([rvNumber(-1), rvNumber(0.5), rvNumber(0.5)])).toEqual(ERRORS.NUM);
@@ -3813,8 +3810,9 @@ describe("CONFIDENCE.T saturation", () => {
     expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(0), rvNumber(30)])).toEqual(ERRORS.NUM);
     expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(-1), rvNumber(30)])).toEqual(ERRORS.NUM);
   });
-  it("rejects size < 2 → #NUM!", () => {
-    expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(1), rvNumber(1)])).toEqual(ERRORS.NUM);
+  it("size 1 → #DIV/0!, size < 1 → #NUM!", () => {
+    expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(1), rvNumber(1)])).toEqual(ERRORS.DIV0);
+    expect(fnCONFIDENCE_T([rvNumber(0.05), rvNumber(1), rvNumber(0.5)])).toEqual(ERRORS.NUM);
   });
   it("propagates alpha error", () => {
     expect(fnCONFIDENCE_T([rvError("#N/A"), rvNumber(2), rvNumber(30)])).toEqual({
@@ -4211,8 +4209,12 @@ describe("T.INV.2T saturation", () => {
     expect(fnT_INV_2T([rvNumber(0), rvNumber(5)])).toEqual(ERRORS.NUM);
     expect(fnT_INV_2T([rvNumber(-0.1), rvNumber(5)])).toEqual(ERRORS.NUM);
   });
-  it("rejects p > 1 → #NUM!", () => {
-    expect(fnT_INV_2T([rvNumber(1.1), rvNumber(5)])).toEqual(ERRORS.NUM);
+  it("answers 1 < p < 2 with the negative t, as Excel, and rejects p >= 2", () => {
+    expect(asNumber(fnT_INV_2T([rvNumber(1.2), rvNumber(5)]))).toBeCloseTo(
+      -asNumber(fnT_INV_2T([rvNumber(0.8), rvNumber(5)])),
+      12
+    );
+    expect(fnT_INV_2T([rvNumber(2), rvNumber(5)])).toEqual(ERRORS.NUM);
   });
   it("rejects df < 1 → #NUM!", () => {
     expect(fnT_INV_2T([rvNumber(0.5), rvNumber(0)])).toEqual(ERRORS.NUM);
@@ -4758,11 +4760,9 @@ describe("BETA.INV saturation", () => {
       ).toBeCloseTo(p, 6);
     }
   });
-  it("BETA.INV(0, α, β) = 0", () => {
-    expect(asNumber(fnBETA_INV([rvNumber(0), rvNumber(2), rvNumber(3)]))).toBeCloseTo(0, 8);
-  });
-  it("BETA.INV(1, α, β) = 1 (default A=0, B=1)", () => {
-    expect(asNumber(fnBETA_INV([rvNumber(1), rvNumber(2), rvNumber(3)]))).toBeCloseTo(1, 4);
+  it("BETA.INV(0, α, β) and BETA.INV(1, α, β) are #NUM!, as Excel answers", () => {
+    expect(fnBETA_INV([rvNumber(0), rvNumber(2), rvNumber(3)])).toEqual(ERRORS.NUM);
+    expect(fnBETA_INV([rvNumber(1), rvNumber(2), rvNumber(3)])).toEqual(ERRORS.NUM);
   });
   it("BETA.INV rejects p outside [0, 1]", () => {
     expect(fnBETA_INV([rvNumber(-0.1), rvNumber(2), rvNumber(3)])).toEqual(ERRORS.NUM);
@@ -5347,11 +5347,15 @@ describe("FREQUENCY saturation", () => {
       expect(asNumber(a.rows[i][0])).toBe(0);
     }
   });
-  it("FREQUENCY requires array data — scalar → #VALUE!", () => {
-    expect(fnFREQUENCY([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
+  it("FREQUENCY data scalar is 1×1", () => {
+    expect(fnFREQUENCY([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(
+      rvArray([[rvNumber(1)], [rvNumber(0)]])
+    );
   });
-  it("FREQUENCY requires array bins — scalar → #VALUE!", () => {
-    expect(fnFREQUENCY([rvArray([[rvNumber(1)]]), rvNumber(1)])).toEqual(ERRORS.VALUE);
+  it("FREQUENCY bins scalar is 1×1", () => {
+    expect(fnFREQUENCY([rvArray([[rvNumber(1)]]), rvNumber(1)])).toEqual(
+      rvArray([[rvNumber(1)], [rvNumber(0)]])
+    );
   });
   it("FREQUENCY propagates data error", () => {
     expect(fnFREQUENCY([rvArray([[rvNumber(1), ERRORS.NA]]), rvArray([[rvNumber(1)]])])).toEqual(
@@ -5910,8 +5914,8 @@ describe("CHISQ.TEST", () => {
     expect(fnCHISQ_TEST([a, b])).toEqual(ERRORS.NUM);
   });
 
-  it("non-array arg → #VALUE!", () => {
-    expect(fnCHISQ_TEST([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.VALUE);
+  it("single values: one cell, no degrees of freedom → #N/A", () => {
+    expect(fnCHISQ_TEST([rvNumber(1), rvArray([[rvNumber(1)]])])).toEqual(ERRORS.NA);
   });
 
   it("error propagation", () => {

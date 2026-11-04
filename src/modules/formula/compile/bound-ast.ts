@@ -32,6 +32,8 @@
  * - `BoundLambda` — LAMBDA expression (params + body)
  */
 
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
+
 // ============================================================================
 // Bound Expression Tag Enum
 // ============================================================================
@@ -169,6 +171,12 @@ export interface BoundCall {
   readonly name: string;
   /** Bound argument expressions. */
   readonly args: readonly BoundExpr[];
+  /**
+   * An argument list applied to the result of an expression — `LAMBDA(n,n*2)(3)`, `f(1)(2)`. When present, `args`
+   * are passed to whatever `callee` evaluates to and `name` is empty: a lambda is invoked, an error passes through,
+   * and anything else is `#VALUE!`.
+   */
+  readonly callee?: BoundExpr;
 }
 
 /**
@@ -228,8 +236,33 @@ export interface BoundNameExpr {
   readonly kind: BoundExprKind.NameExpr;
   /** The original name (case-preserved). */
   readonly name: string;
-  /** Uppercase name for lookup. */
+  /**
+   * Upper-cased name.
+   *
+   * @deprecated Not how Excel compares names (`ı` upper-cases to `I`); lookups use {@link nameKey} and
+   * {@link localKey}. Still populated. Removed in 1.0.
+   */
   readonly upperName: string;
+  /**
+   * The key a defined name of this name is found by — `excelNameKey`. Always set by the binder; optional so a value
+   * built in the earlier shape still type-checks, and read through {@link nameExprKey}.
+   */
+  readonly nameKey?: string;
+  /**
+   * The key a `LET` / `LAMBDA` parameter of this name is bound under — `sheetNameKey`, Excel's rule for those. Read
+   * through {@link nameExprLocalKey}.
+   */
+  readonly localKey?: string;
+}
+
+/** The defined-name key of a name expression. */
+export function nameExprKey(expr: BoundNameExpr): string {
+  return expr.nameKey ?? excelNameKey(expr.name);
+}
+
+/** The `LET` / `LAMBDA` binding key of a name expression. */
+export function nameExprLocalKey(expr: BoundNameExpr): string {
+  return expr.localKey ?? sheetNameKey(expr.name);
 }
 
 /**
@@ -335,7 +368,13 @@ export function boundSpecialCall(name: SpecialFormName, args: BoundExpr[]): Boun
 }
 
 export function boundNameExpr(name: string): BoundNameExpr {
-  return { kind: BoundExprKind.NameExpr, name, upperName: name.toUpperCase() };
+  return {
+    kind: BoundExprKind.NameExpr,
+    name,
+    upperName: name.toUpperCase(),
+    nameKey: excelNameKey(name),
+    localKey: sheetNameKey(name)
+  };
 }
 
 export function boundErrorLiteral(errorCode: string): BoundLiteral {

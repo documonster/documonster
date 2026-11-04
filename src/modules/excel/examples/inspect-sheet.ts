@@ -17,8 +17,8 @@
  *
  * Three things matter if you adapt it:
  *
- * - **Iterate when you scan.** `Worksheet.eachRow` and `Row.eachCell` visit only cells that exist and hand
- *   over the cell itself, so a sparse sheet is not walked as its bounding rectangle. Reading one known
+ * - **Iterate when you scan.** `Row.each` and `Row.eachAddress` visit only cells that exist and hand
+ *   over their position, so a sparse sheet is not walked as its bounding rectangle. Reading one known
  *   address — the first data row under a header — is fine with `Cell.getValue`: value readers create
  *   nothing.
  * - **Ask the raw value how a formula is held.** It says whether a cell defines its formula (`formula`), is
@@ -127,9 +127,9 @@ function contains(b: Box, r: number, c: number): boolean {
   return b.top <= r && r <= b.bottom && b.left <= c && c <= b.right;
 }
 
-function autoFilterRef(filter: AutoFilter | null): string | undefined {
-  if (filter === null || typeof filter === "string") {
-    return filter ?? undefined;
+function autoFilterRef(filter: AutoFilter | undefined): string | undefined {
+  if (filter === undefined || typeof filter === "string") {
+    return filter;
   }
   const corner = (c: string | { row: number; col: number }) =>
     typeof c === "string" ? c : Address.encodeCell({ r: c.row - 1, c: c.col - 1 });
@@ -181,11 +181,11 @@ function isArrayAnchor(value: CellValue): value is CellValue & { formula: string
  */
 function arrayFormulas(ws: Worksheet.Handle): ArrayFormula[] {
   const found: ArrayFormula[] = [];
-  Worksheet.eachRow(ws, (_row, r) => {
-    Row.eachCell(ws, r, cell => {
-      const value = Cell.view(cell).value;
+  Row.each(ws, r => {
+    Row.eachAddress(ws, r, address => {
+      const value = Cell.getView(ws, address)!.value;
       if (isArrayAnchor(value)) {
-        found.push({ ...box(value.ref), anchor: cell.address, text: value.formula });
+        found.push({ ...box(value.ref), anchor: address, text: value.formula });
       }
     });
   });
@@ -219,13 +219,13 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
   // The regions the file declares. Tables first, so a cell of a table inside a filtered range is the table's.
   const declared: DeclaredRegion[] = [];
   for (const t of Table.list(ws)) {
-    const bounds = box(Table.ref(t));
-    const hasHeader = Table.headerRow(t) !== false;
-    const hasTotals = Table.totalsRow(t) === true;
+    const bounds = box(Table.getRef(t));
+    const hasHeader = Table.hasHeaderRow(t) !== false;
+    const hasTotals = Table.hasTotalsRow(t) === true;
     declared.push({
       kind: "table",
-      name: Table.name(t),
-      ref: Table.ref(t),
+      name: Table.getName(t),
+      ref: Table.getRef(t),
       headerRow: hasHeader ? bounds.top : null,
       headerSource: "table",
       firstDataRow: hasHeader ? bounds.top + 1 : bounds.top,
@@ -233,11 +233,11 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
       totalsRow: hasTotals ? bounds.bottom : null,
       bounds,
       columns: new Map(),
-      declaredColumns: Table.model(t).columns.map(column => column.name),
+      declaredColumns: Table.getModel(t).columns.map(column => column.name),
       hasData: false
     });
   }
-  const filterRef = autoFilterRef(Worksheet.autoFilter(ws));
+  const filterRef = autoFilterRef(Worksheet.getAutoFilter(ws));
   if (filterRef) {
     const bounds = box(filterRef);
     declared.push({
@@ -255,8 +255,8 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
   }
 
   // Everything else. Its header is the caller's word, else a guess.
-  const panes = Worksheet.panes(ws);
-  const frozenRows = panes?.state === "frozen" ? (panes.ySplit ?? 0) : 0;
+  const panes = Worksheet.getPanes(ws);
+  const frozenRows = panes?.state === "frozen" ? panes.rows : 0;
   const [headerRow, headerSource]: [number, HeaderSource] =
     explicitHeaderRow !== undefined
       ? [explicitHeaderRow, "explicit"]
@@ -308,15 +308,15 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
     });
   }
 
-  Worksheet.eachRow(ws, (_row, r) => {
-    Row.eachCell(ws, r, (cell, c) => {
+  Row.each(ws, r => {
+    Row.eachAddress(ws, r, (address, _r, c) => {
       const region = regionAt(r, c);
       if (region.headerRow !== null && r < region.headerRow) {
         return; // a title or note above the header, not part of the region
       }
       const info = columnOf(region, c);
       if (r === region.headerRow) {
-        info.header = Cell.view(cell).text;
+        info.header = Cell.getView(ws, address)!.text;
         return;
       }
       if (r === region.totalsRow) {
@@ -326,7 +326,7 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
       region.hasData = true;
       info.sample ||= Cell.getDisplayText(ws, r, c);
 
-      const formula = formulaOf(ws, Cell.view(cell).value, cell.address, arrays, r, c);
+      const formula = formulaOf(ws, Cell.getView(ws, address)!.value, address, arrays, r, c);
       if (formula) {
         info.formulas[formula.kind]++;
         info.firstFormula ??= formula;
@@ -339,8 +339,8 @@ export function describeSheet(ws: Worksheet.Handle, explicitHeaderRow?: number):
   const reported: WorkingRegion[] = rest.hasData ? [...declared, rest] : declared;
   return {
     sheet: Worksheet.getName(ws),
-    rowCount: Worksheet.rowCount(ws),
-    actualRowCount: Worksheet.actualRowCount(ws),
+    rowCount: Row.getCount(ws),
+    actualRowCount: Row.getActualCount(ws),
     frozenRows,
     regions: reported.map(region => ({
       kind: region.kind,
@@ -375,9 +375,8 @@ if (!process.argv[2]) {
   await buildSample(input);
 }
 
-const wb = Workbook.create();
-await Workbook.readFile(wb, input);
-const report = Workbook.getWorksheets(wb).map(ws => describeSheet(ws, explicitHeaderRow));
+const wb = await Workbook.readFile(input);
+const report = Workbook.listWorksheets(wb).map(ws => describeSheet(ws, explicitHeaderRow));
 console.log(JSON.stringify({ workbook: path.basename(input), sheets: report }, null, 2));
 if (!process.argv[2]) {
   verifySample(report);

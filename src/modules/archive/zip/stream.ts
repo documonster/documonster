@@ -14,7 +14,12 @@ import {
 } from "@archive/compression/streaming-compress";
 import { EMPTY_UINT8ARRAY } from "@archive/core/bytes";
 import { DEFAULT_ZIP_LEVEL, DEFAULT_ZIP_TIMESTAMPS } from "@archive/core/defaults";
-import { createAbortError, toError, ArchiveError } from "@archive/core/errors";
+import {
+  ArchiveArgumentError,
+  createAbortError,
+  toError,
+  ArchiveError
+} from "@archive/core/errors";
 import type { ZipStringCodec, ZipStringEncoding } from "@archive/core/text";
 import { encodeZipStringWithCodec, resolveZipStringCodec } from "@archive/core/text";
 import type { ZipCryptoState, AesKeyStrength, ZipEncryptionMethod } from "@archive/crypto";
@@ -36,6 +41,7 @@ import type { Zip64Mode } from "@archive/zip-spec/zip-records";
 import {
   buildDataDescriptor,
   buildDataDescriptorZip64,
+  buildZip64ExtraField,
   concatExtraFields,
   UINT16_MAX,
   UINT32_MAX,
@@ -198,7 +204,7 @@ export class ZipDeflateFile {
     this._encryptionMethod = options?.encryptionMethod ?? "none";
     this._password = options?.password;
     if (this._encryptionMethod !== "none" && !this._password) {
-      throw new ArchiveError("Password is required for encryption");
+      throw new ArchiveArgumentError("password", "Password is required for encryption");
     }
     if (isAesEncryption(this._encryptionMethod)) {
       this._aesKeyStrength = getAesKeyStrength(this._encryptionMethod);
@@ -1221,6 +1227,7 @@ export class ZipRawFile implements ZipWritableFile {
   private readonly _uncompressedSize: number;
   private readonly _externalAttributes: number;
   private readonly _versionMadeBy?: number;
+  private readonly _dataDescriptor: boolean;
 
   private _source: Uint8Array | AsyncIterable<Uint8Array>;
   private _chunkSize: number;
@@ -1248,6 +1255,12 @@ export class ZipRawFile implements ZipWritableFile {
       versionMadeBy?: number;
       chunkSize?: number;
       codec?: ZipStringCodec;
+      /**
+       * Write the CRC and sizes in a data descriptor after the payload (flag bit 3), the
+       * default. `false` writes them in the local header instead — for a copied ZipCrypto
+       * entry without bit 3, whose check byte readers then take from the CRC.
+       */
+      dataDescriptor?: boolean;
     }
   ) {
     this.name = name;
@@ -1272,10 +1285,12 @@ export class ZipRawFile implements ZipWritableFile {
       this._compressedSize > UINT32_MAX ||
       this._uncompressedSize > UINT32_MAX;
 
-    // Always write data descriptor for passthrough entries to avoid
-    // local-header ZIP64 complexity.
+    // A data descriptor by default, which avoids local-header ZIP64 complexity.
+    this._dataDescriptor = options.dataDescriptor ?? true;
     this._flags =
-      (options.flags ?? 0) | (this._stringCodec.useUtf8Flag ? FLAG_UTF8 : 0) | FLAG_DATA_DESCRIPTOR;
+      ((options.flags ?? 0) & ~FLAG_DATA_DESCRIPTOR) |
+      (this._stringCodec.useUtf8Flag ? FLAG_UTF8 : 0) |
+      (this._dataDescriptor ? FLAG_DATA_DESCRIPTOR : 0);
 
     this._centralDirEntryInfo = {
       name: this.nameBytes,
@@ -1394,6 +1409,30 @@ export class ZipRawFile implements ZipWritableFile {
   }
 
   private _buildLocalHeader(): Uint8Array {
+    if (!this._dataDescriptor) {
+      // The sizes go in the header: as ZIP64 placeholders plus a ZIP64 extra field when they
+      // do not fit 32 bits.
+      return buildLocalFileHeader({
+        fileName: this.nameBytes,
+        extraField: this._zip64
+          ? concatExtraFields(
+              this.extraField,
+              buildZip64ExtraField({
+                uncompressedSize: this._uncompressedSize,
+                compressedSize: this._compressedSize
+              })
+            )
+          : this.extraField,
+        flags: this._flags,
+        compressionMethod: this._compressionMethod,
+        dosTime: this.dosTime,
+        dosDate: this.dosDate,
+        crc32: this._crc32,
+        compressedSize: this._zip64 ? UINT32_MAX : this._compressedSize,
+        uncompressedSize: this._zip64 ? UINT32_MAX : this._uncompressedSize,
+        versionNeeded: this._zip64 ? VERSION_ZIP64 : VERSION_NEEDED
+      });
+    }
     return buildLocalFileHeader({
       fileName: this.nameBytes,
       extraField: this.extraField,
@@ -1451,7 +1490,10 @@ export class ZipRawFile implements ZipWritableFile {
 
       if (!this._finalized) {
         this._finalized = true;
-        this._enqueueData(this._buildDataDescriptor(), true);
+        this._enqueueData(
+          this._dataDescriptor ? this._buildDataDescriptor() : EMPTY_UINT8ARRAY,
+          true
+        );
         await this._outputTail;
       }
     } catch (e) {

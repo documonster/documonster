@@ -17,10 +17,9 @@ const filenameOut = process.argv[3] ?? path.join(outDir, "copy-workbook.xlsx");
 // useful for testing for lost properties
 
 const stopwatch = new HrStopwatch();
-const wb = Workbook.create();
 stopwatch.start();
-Workbook.readFile(wb, filenameIn)
-  .then(() => writeBothFormats(wb, filenameOut))
+Workbook.readFile(filenameIn)
+  .then(wb => writeBothFormats(wb, filenameOut))
   .then(() => {
     const micros = stopwatch.microseconds;
     console.log("Done.");

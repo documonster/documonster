@@ -9,6 +9,7 @@ import {
 import { buildChartModel } from "@excel/chart/build/chart-builder";
 import { buildChartExModel } from "@excel/chart/build/chart-ex-builder";
 import type { ChartModel, NumberReference, StringReference } from "@excel/chart/model/types";
+import { ExcelError } from "@excel/errors";
 import { Cell, Chart, Workbook } from "@excel/index";
 import { describe, expect, it } from "vitest";
 
@@ -95,7 +96,11 @@ describe("chart cache planning", () => {
     };
     target.val!.numRef!.formula = "Data!$B$2:$B$2";
 
-    expect(() => applyChartCachePlan(plan)).toThrow("Chart reference changed after cache planning");
+    expect(() => applyChartCachePlan(plan)).toThrow(
+      "A chart reference changed while its cached values were being filled."
+    );
+    // A typed error of the module, not a plain `Error`.
+    expect(() => applyChartCachePlan(plan)).toThrow(ExcelError);
   });
 
   it("validates every cache write before applying any of them", () => {
@@ -107,7 +112,9 @@ describe("chart cache planning", () => {
     };
     series.val!.numRef!.formula = "Data!$B$2:$B$2";
 
-    expect(() => applyChartCachePlan(plan)).toThrow("Chart reference changed after cache planning");
+    expect(() => applyChartCachePlan(plan)).toThrow(
+      "A chart reference changed while its cached values were being filled."
+    );
     expect(series.cat?.strRef?.cache?.points).toEqual([]);
   });
 
@@ -155,6 +162,19 @@ describe("chart cache planning", () => {
     expect(cache.points).toHaveLength(2);
   });
 
+  it("ChartClassic.fillNumRef / fillStrRef take the worksheet as an option", async () => {
+    const { workbook, worksheet } = createFixture();
+    const { ChartClassic } = await import("@excel/chart/index");
+    const num: NumberReference = { formula: "Data!$B$1:$B$2", cache: { points: [] } };
+    const str: StringReference = { formula: "Data!$A$1:$A$2", cache: { points: [] } };
+
+    ChartClassic.fillNumRef(num, workbook, { worksheet });
+    ChartClassic.fillStrRef(str, workbook, { worksheet });
+
+    expect(num.cache?.points.map(p => p.value)).toEqual([10, 20]);
+    expect(str.cache?.points.map(p => p.value)).toEqual(["Q1", "Q2"]);
+  });
+
   it("fills skipped ChartEx dimensions for rendering without mutating the skip flag", () => {
     const { workbook, worksheet } = createFixture();
     const model = buildChartExModel({
@@ -188,8 +208,8 @@ describe("chart mutation transactions", () => {
       { type: "line", series: [{ values: "S!$A$1:$A$2" }] },
       "C1:H12"
     );
-    const chart = Chart.get(worksheet).find(item => item.chartNumber === number)!;
-    const model = Chart.chartModel(chart)!;
+    const chart = Chart.list(worksheet).find(item => item.chartNumber === number)!;
+    const model = Chart.getModel(chart)!;
     const before = structuredClone(model);
 
     expect(() =>
@@ -199,7 +219,7 @@ describe("chart mutation transactions", () => {
       })
     ).toThrow("injected mutation failure");
 
-    expect(Chart.chartModel(chart)).toBe(model);
+    expect(Chart.getModel(chart)).toBe(model);
     expect(model).toEqual(before);
   });
 
@@ -211,18 +231,18 @@ describe("chart mutation transactions", () => {
       { type: "funnel", series: [{ values: "S!$A$1:$A$2" }] },
       "C1:H12"
     );
-    const chart = Chart.get(worksheet).find(item => item.chartExNumber === number)!;
-    const model = Chart.chartExModel(chart)!;
+    const chart = Chart.list(worksheet).find(item => item.chartExNumber === number)!;
+    const model = Chart.getExModel(chart)!;
     const before = structuredClone(model);
 
     expect(() =>
-      Chart.mutateChartEx(chart, draft => {
+      Chart.mutateEx(chart, draft => {
         draft.rawXml = undefined;
         throw new Error("injected mutation failure");
       })
     ).toThrow("injected mutation failure");
 
-    expect(Chart.chartExModel(chart)).toBe(model);
+    expect(Chart.getExModel(chart)).toBe(model);
     expect(model).toEqual(before);
   });
 
@@ -234,12 +254,12 @@ describe("chart mutation transactions", () => {
       { type: "funnel", series: [{ values: "S!$A$1:$A$2" }] },
       "C1:H12"
     );
-    const chart = Chart.get(worksheet).find(item => item.chartExNumber === number)!;
-    const model = Chart.chartExModel(chart)!;
+    const chart = Chart.list(worksheet).find(item => item.chartExNumber === number)!;
+    const model = Chart.getExModel(chart)!;
     const before = structuredClone(model);
 
     expect(() =>
-      Chart.mutateChartEx(chart, draft => {
+      Chart.mutateEx(chart, draft => {
         draft.chartSpace = undefined!;
       })
     ).toThrow("produced an invalid model");
@@ -254,8 +274,8 @@ describe("chart mutation transactions", () => {
       { type: "line", series: [{ values: "S!$A$1:$A$2" }] },
       "C1:H12"
     );
-    const chart = Chart.get(worksheet).find(item => item.chartNumber === number)!;
-    const model = Chart.chartModel(chart)!;
+    const chart = Chart.list(worksheet).find(item => item.chartNumber === number)!;
+    const model = Chart.getModel(chart)!;
     const plotArea = model.chart!.plotArea!;
     const series = plotArea.chartTypes[0].series[0];
 
@@ -275,8 +295,8 @@ describe("chart mutation transactions", () => {
       { type: "line", series: [{ values: "S!$A$1:$A$2" }] },
       "C1:H12"
     );
-    const chart = Chart.get(worksheet).find(item => item.chartNumber === number)!;
-    const model = Chart.chartModel(chart)!;
+    const chart = Chart.list(worksheet).find(item => item.chartNumber === number)!;
+    const model = Chart.getModel(chart)!;
 
     expect(() =>
       Chart.mutate(chart, draft => {

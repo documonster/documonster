@@ -6,6 +6,8 @@ interface IntegerXformOptions {
   attr?: string;
   attrs?: XmlAttributes;
   zero?: boolean;
+  /** Render a 0 the model holds, where `zero` renders one for an absent value too. */
+  writeZero?: boolean;
 }
 
 class IntegerXform extends BaseXform {
@@ -13,6 +15,7 @@ class IntegerXform extends BaseXform {
   declare private attr?: string;
   declare private attrs?: XmlAttributes;
   declare private zero?: boolean;
+  declare private writeZero?: boolean;
   declare private text: string[];
 
   constructor(options: IntegerXformOptions) {
@@ -24,12 +27,13 @@ class IntegerXform extends BaseXform {
 
     // option to render zero
     this.zero = options.zero;
+    this.writeZero = options.writeZero;
     this.text = [];
   }
 
   render(xmlStream: XmlSink, model?: number): void {
     // int is different to float in that zero is not rendered
-    if (model || this.zero) {
+    if (model || this.zero || (this.writeZero && model === 0)) {
       // When rendering the zero case (`this.zero` set and model falsy/absent),
       // emit a concrete 0 rather than letting `undefined` through.
       const value = model ?? 0;

@@ -6,27 +6,26 @@
  * supplies only values. "Fill in this form" is also one of the most concrete
  * requests a user can make, which makes it hard to get subtly wrong.
  *
- * One implementation detail is load-bearing. A PDF must be saved with
- * `saveIncremental()`, not `save()`: the full rebuild path drops AcroForm
- * values, so `save()` produces a document that looks fine and contains none of
- * the answers. Verified empirically — do not "simplify" this.
+ * A PDF is saved with `toBuffer({ incremental: true })`: the answers are appended to
+ * the original bytes, so whatever the user had — including a signature over an earlier
+ * revision — is left exactly as it was. Where the editor cannot append (it falls back
+ * to a full rewrite), the rewrite keeps the filled values too; documonster up to 0.21
+ * lost them on that path, which is why this tool used to refuse such files.
  *
- * The corollary is that a PDF whose format cannot take an incremental update
- * (a cross-reference stream file) cannot be filled correctly at all here. Such a
- * file is refused rather than written, because the failure is invisible: the
- * output opens, looks like the right form, and is blank.
+ * Either way the output is re-read and checked before anything is written, because a
+ * form that silently lost its answers looks exactly like a filled one.
  */
 
 import { readFile } from "node:fs/promises";
 
-import { Pdf } from "documonster/pdf";
-import { Io, Query } from "documonster/word";
+import { Pdf, PdfSignatureInvalidationError, PdfXfaFormError } from "documonster/pdf";
+import { Io, Query, Transform } from "documonster/word";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
 import { toolError } from "../errors.js";
 import { assertWritable, resolveEditTarget, resolveInRoot, type WriteTarget } from "../sandbox.js";
-import { requireFormat, supportsIncrementalUpdate } from "./document.js";
+import { requireFormat, saveKind } from "./document.js";
 import {
   assertReadableSize,
   assertUnchanged,
@@ -154,7 +153,7 @@ export const formFillTool = defineTool({
 
 async function listWordFields(resolved: string, displayPath: string): Promise<string> {
   const doc = await readWord(resolved, displayPath);
-  const fields = Query.extractFormFields(doc);
+  const fields = Query.listFormFields(doc);
 
   if (fields.length === 0) {
     return [
@@ -201,7 +200,7 @@ async function fillWordFields(
   args: { readonly path: string; readonly out?: string; readonly values?: Record<string, unknown> }
 ): Promise<string> {
   const doc = await readWord(resolved, args.path);
-  const before = Query.extractFormFields(doc);
+  const before = Query.listFormFields(doc);
 
   if (before.length === 0) {
     throw toolError.invalidInput(
@@ -222,14 +221,14 @@ async function fillWordFields(
     );
   }
 
-  const filled = Query.fillFormFields(
+  const filled = Transform.fillFormFields(
     doc,
     new Map(supplied.map(([name, value]) => [name, value as string | boolean | number]))
   );
   const backupPath = write.takeBackup ? await backupOnce(write.target) : undefined;
   await replaceAtomically(write.target.path, temporary => Io.writeFile(filled, temporary));
 
-  const after = Query.extractFormFields(filled);
+  const after = Query.listFormFields(filled);
   const untouched = after.filter(
     field => !known.has(field.name) || !(field.name in (args.values ?? {}))
   );
@@ -254,7 +253,7 @@ async function fillWordFields(
 
 async function listPdfFields(resolved: string, displayPath: string): Promise<string> {
   const bytes = await readFile(resolved);
-  const result = await Pdf.read(new Uint8Array(bytes), {
+  const result = await Pdf.extract(new Uint8Array(bytes), {
     extractFormFields: true,
     extractText: false,
     extractImages: false
@@ -299,18 +298,10 @@ async function fillPdfFields(
 ): Promise<string> {
   const bytes = new Uint8Array(await readFile(resolved));
 
-  // Refuse rather than write a blank form: filling depends on the incremental
-  // save path, and this format cannot take one.
-  if (!supportsIncrementalUpdate(bytes)) {
-    throw toolError.unsupported(
-      `${args.path} uses a cross-reference stream, which cannot be filled without discarding the values`,
-      "Saving such a file rebuilds it, and the rebuild drops AcroForm values — the result would open as an empty form. Nothing was written. Ask the user for a form saved in the classic format, or fill it in a PDF viewer."
-    );
-  }
-  // Editor.load is synchronous.
-  let editor: ReturnType<typeof Pdf.Editor.load>;
+  // Editor.read is synchronous.
+  let editor: ReturnType<typeof Pdf.Editor.read>;
   try {
-    editor = Pdf.Editor.load(bytes);
+    editor = Pdf.Editor.read(bytes);
   } catch (cause) {
     throw toolError.unsupported(
       `could not open ${args.path} for editing`,
@@ -342,14 +333,40 @@ async function fillPdfFields(
     Object.fromEntries(supplied.map(([name, value]) => [name, stringifyPdfValue(value)]))
   );
 
-  // saveIncremental, never save: the full rebuild drops AcroForm values, so
-  // save() would write a form that still contains none of the answers.
-  const out = await editor.saveIncremental();
+  // Incremental, so the original bytes — and any signature over them — survive. The
+  // editor refuses (PdfSignatureInvalidationError) rather than fall back to a rewrite
+  // that would break a signature.
+  let out: Uint8Array;
+  try {
+    out = await editor.toBuffer({ incremental: true });
+  } catch (cause) {
+    if (cause instanceof PdfSignatureInvalidationError) {
+      throw toolError.unsupported(
+        `could not save ${args.path} with the filled values`,
+        "Nothing was written. A signed form that cannot take an incremental update cannot be filled without invalidating its signature.",
+        { cause }
+      );
+    }
+    if (cause instanceof PdfXfaFormError) {
+      throw toolError.unsupported(
+        `${args.path} is a dynamic XFA form, which cannot be filled through its AcroForm fields`,
+        "Nothing was written. Its XFA packet is the form's only definition; fill it with an XFA-capable tool, or work on a flattened copy.",
+        { cause }
+      );
+    }
+    throw toolError.unsupported(
+      `could not save ${args.path} with the filled values: ${cause instanceof Error ? cause.message : String(cause)}`,
+      "Nothing was written.",
+      { cause }
+    );
+  }
+
+  const saved = saveKind(bytes, out);
 
   // Verify in memory before either backing up or writing. A silently unfilled
   // form is the failure this path exists to avoid, and a failed verification
   // must have no filesystem side effects.
-  const verified = await Pdf.read(new Uint8Array(out), {
+  const verified = await Pdf.extract(new Uint8Array(out), {
     extractFormFields: true,
     extractText: false,
     extractImages: false
@@ -374,7 +391,11 @@ async function fillPdfFields(
     `Filled **${supplied.length - missed.length}** of ${supplied.length} supplied field(s) in ${args.path}.`,
     `- written to ${write.target.display}${write.inPlace ? " (in place)" : ""}`,
     ...describeBackup(write.target.display, backupPath),
-    "- saved as an incremental update, so original signature bytes are preserved; a certified signature may still report the form as modified if its DocMDP permissions forbid filling fields",
+    saved === "appended"
+      ? "- saved as an incremental update, so original signature bytes are preserved; a certified signature may still report the form as modified if its DocMDP permissions forbid filling fields"
+      : saved === "unchanged"
+        ? "- the output is byte-identical to the input: the editor had no object to change, so nothing was appended; the values read back from it match the ones supplied"
+        : "- saved as a full rewrite (this file could not take an incremental update); the values were kept, but object numbering changed",
     "",
     "| field | value now |",
     "| --- | --- |",

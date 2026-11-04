@@ -28,8 +28,8 @@ Cell.setValue(grid, "A1", "Column widths and row heights");
 Cell.setStyle(grid, "A1", { font: { bold: true, size: 14 } });
 Worksheet.merge(grid, "A1:E1");
 
-Worksheet.addRow(grid, []);
-Worksheet.addRow(grid, ["narrow", "default", "wide", "wider", "widest"]);
+Row.add(grid, []);
+Row.add(grid, ["narrow", "default", "wide", "wider", "widest"]);
 for (const [column, width] of [
   [1, 6],
   [3, 20],
@@ -65,7 +65,7 @@ Row.setHeight(merges, 1, 30);
 Cell.setValue(merges, "A3", "two rows tall");
 Cell.setStyle(merges, "A3", { alignment: { vertical: "middle", horizontal: "center" } });
 Worksheet.merge(merges, "A3:A4");
-Worksheet.addRow(merges, []);
+Row.add(merges, []);
 Cell.setValue(merges, "B3", "b3");
 Cell.setValue(merges, "C3", "c3");
 Cell.setValue(merges, "B4", "b4");
@@ -82,9 +82,8 @@ Cell.setValue(veryHidden, "A1", "only VBA can unhide me");
 await Workbook.writeFile(wb, filename);
 console.log(`wrote ${filename}`);
 
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
-const [readGrid, readMerges, readHidden, readVeryHidden] = Workbook.getWorksheets(reopened);
+const reopened = await Workbook.readFile(filename);
+const [readGrid, readMerges, readHidden, readVeryHidden] = Workbook.listWorksheets(reopened);
 
 console.log(
   "column widths:",
@@ -94,10 +93,10 @@ console.log("row heights:", [4, 5, 7].map(row => Row.getHeight(readGrid!, row)).
 console.log(
   `sheet defaults: rowHeight=${readGrid!.properties.defaultRowHeight} colWidth=${readGrid!.properties.defaultColWidth}`
 );
-console.log("merges:", JSON.stringify(Worksheet.mergedRegions(readMerges!)));
+console.log("merges:", JSON.stringify(Worksheet.getMergedRegions(readMerges!)));
 console.log(
   "visibility:",
-  Workbook.getWorksheets(reopened)
+  Workbook.listWorksheets(reopened)
     .map(sheet => `${Worksheet.getName(sheet)}=${sheet.state ?? "visible"}`)
     .join(" ")
 );

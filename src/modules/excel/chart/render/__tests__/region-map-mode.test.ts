@@ -12,13 +12,13 @@
  * themselves unreported.
  */
 
-import { buildChartExModel, renderChartExSvg } from "@excel/chart";
+import { ChartEx } from "@excel/chart";
 import { describe, expect, it } from "vitest";
 
 /** A region map over the given category labels. */
-function mapOf(categories: string[], options: Parameters<typeof renderChartExSvg>[1] = {}): string {
-  return renderChartExSvg(
-    buildChartExModel({
+function mapOf(categories: string[], options: Parameters<typeof ChartEx.toSvg>[1] = {}): string {
+  return ChartEx.toSvg(
+    ChartEx.createModel({
       type: "regionMap",
       series: [
         {
@@ -28,7 +28,7 @@ function mapOf(categories: string[], options: Parameters<typeof renderChartExSvg
         }
       ],
       layout: { regionLabels: "showAll" }
-    } as Parameters<typeof buildChartExModel>[0]),
+    } as Parameters<typeof ChartEx.createModel>[0]),
     { width: 420, height: 260, ...options }
   );
 }

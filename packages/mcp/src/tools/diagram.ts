@@ -24,12 +24,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { encodePng } from "documonster/archive";
-import { cssColour, rasterizeToRgba, renderDrawList, toSvg } from "documonster/draw";
+import { Archive } from "documonster/archive";
+import { Draw } from "documonster/draw";
 import type { DrawList, RasterFontSource } from "documonster/draw";
-import { MermaidSyntaxError, mermaidToDrawList, parseMermaid } from "documonster/mermaid";
+import { Mermaid, MermaidParseError } from "documonster/mermaid";
 import type { MermaidDiagram, MermaidRenderOptions, ThemeOptions } from "documonster/mermaid";
-import { Pdf, createPdfDrawSurface } from "documonster/pdf";
+import { Pdf } from "documonster/pdf";
 import type { PdfFontConfig } from "documonster/pdf";
 import { z } from "zod";
 
@@ -299,7 +299,7 @@ function requireColour(token: string, field: string): string {
     return token;
   }
   const normalised = token.trim().toLowerCase();
-  const parsed = cssColour(normalised);
+  const parsed = Draw.parseColor(normalised);
   const isBlack = parsed.r === 0 && parsed.g === 0 && parsed.b === 0 && parsed.a === 1;
   const spelledBlack =
     normalised === "black" ||
@@ -521,11 +521,11 @@ export async function resolveDiagramSource(
 /** Parse mermaid text, reporting a syntax error as a model-facing tool error. */
 export function parseDiagram(source: string): MermaidDiagram {
   try {
-    return parseMermaid(source);
+    return Mermaid.parse(source);
   } catch (cause) {
-    if (cause instanceof MermaidSyntaxError) {
+    if (cause instanceof MermaidParseError) {
       throw toolError.invalidInput(
-        `the diagram could not be parsed: ${cause.message}`,
+        `the diagram could not be parsed${locate(cause)}: ${cause.message}`,
         DIAGRAM_HINT,
         {
           cause
@@ -539,11 +539,11 @@ export function parseDiagram(source: string): MermaidDiagram {
 /** Build the display list, mapping a syntax error the same way. */
 export function buildDrawList(source: string, options: MermaidRenderOptions): DrawList {
   try {
-    return mermaidToDrawList(source, options);
+    return Mermaid.toDrawList(source, options);
   } catch (cause) {
-    if (cause instanceof MermaidSyntaxError) {
+    if (cause instanceof MermaidParseError) {
       throw toolError.invalidInput(
-        `the diagram could not be drawn: ${cause.message}`,
+        `the diagram could not be drawn${locate(cause)}: ${cause.message}`,
         DIAGRAM_HINT,
         {
           cause
@@ -552,6 +552,20 @@ export function buildDrawList(source: string, options: MermaidRenderOptions): Dr
     }
     throw cause;
   }
+}
+
+/**
+ * Where in the diagram's own text the parser stopped (` at line 3, column 1`), when it knows.
+ * The position counts from the start of the diagram source — inside a Markdown file, from the
+ * first line of the fence's content.
+ */
+function locate(error: MermaidParseError): string {
+  if (error.line === undefined) {
+    return "";
+  }
+  return error.column === undefined
+    ? ` at line ${error.line}`
+    : ` at line ${error.line}, column ${error.column}`;
 }
 
 const DIAGRAM_HINT =
@@ -605,7 +619,7 @@ export async function renderDiagram(
   const height = size.height ?? list.height;
 
   if (format === "svg") {
-    const svg = toSvg(list, {
+    const svg = Draw.toSvg(list, {
       ...(size.width === undefined ? {} : { width }),
       ...(size.height === undefined ? {} : { height }),
       ...(background === "transparent" ? {} : { background })
@@ -622,7 +636,7 @@ export async function renderDiagram(
         "Lower `scale`, or render SVG instead — it is resolution-independent and much smaller."
       );
     }
-    const image = rasterizeToRgba(list, {
+    const image = Draw.toRgba(list, {
       scale,
       ...(size.width === undefined ? {} : { width }),
       ...(size.height === undefined ? {} : { height }),
@@ -636,7 +650,9 @@ export async function renderDiagram(
       // A display list's unit is a point, so `scale` pixels per point is
       // `72 * scale` dots per inch. Word, Excel and print pipelines read this
       // instead of assuming 96, and getting it wrong resizes the picture.
-      bytes: encodePng(image.data, image.width, image.height, { dpi: Math.round(72 * scale) }),
+      bytes: Archive.encodePng(image.data, image.width, image.height, {
+        dpi: Math.round(72 * scale)
+      }),
       width: image.width,
       height: image.height,
       ...(image.uncoveredCodePoints.length === 0
@@ -657,9 +673,9 @@ export async function renderDiagram(
     // leaves the margin unpainted, and a PDF's unpainted area is not white.
     page.drawRect({ x: 0, y: 0, width, height, fill: toPdfColour(background) });
   }
-  renderDrawList(
+  Draw.render(
     list,
-    createPdfDrawSurface(
+    Pdf.createDrawSurface(
       page,
       {
         x: (width - drawnWidth) / 2,
@@ -667,10 +683,10 @@ export async function renderDiagram(
         width: drawnWidth,
         height: drawnHeight
       },
-      fit
+      { scale: fit }
     )
   );
-  return { bytes: await builder.build(), width, height };
+  return { bytes: await builder.toBuffer(), width, height };
 }
 
 /** `U+4E2D`, the form an operator can search a font for. */
@@ -693,7 +709,7 @@ export interface DiagramFontOptions {
 }
 
 function toPdfColour(token: string): { r: number; g: number; b: number; a?: number } {
-  const colour = cssColour(token);
+  const colour = Draw.parseColor(token);
   return colour.a >= 1
     ? { r: colour.r, g: colour.g, b: colour.b }
     : { r: colour.r, g: colour.g, b: colour.b, a: colour.a };

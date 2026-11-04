@@ -89,10 +89,13 @@ describe("Style Converter", () => {
 
   describe("applyTint", () => {
     it("should lighten colors", () => {
+      // SpreadsheetML tint (ECMA-376 §18.8.19) lightens the HSL luminance, as Excel does:
+      // L 0.4 → 0.4·(1 − 0.5) + 0.5 = 0.7 at the same hue and saturation. (It was an RGB mix
+      // toward white, which gave 0.6 / 0.7 / 0.8 — a different, greyer colour.)
       const color = applyTint({ r: 0.2, g: 0.4, b: 0.6 }, 0.5);
-      expect(color.r).toBeCloseTo(0.6, 10);
+      expect(color.r).toBeCloseTo(0.55, 10);
       expect(color.g).toBeCloseTo(0.7, 10);
-      expect(color.b).toBeCloseTo(0.8, 10);
+      expect(color.b).toBeCloseTo(0.85, 10);
     });
 
     it("should darken colors", () => {

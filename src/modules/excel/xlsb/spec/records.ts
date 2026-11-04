@@ -191,6 +191,14 @@ const SCOPE_PAIRS: readonly (readonly [number, number, string, string])[] = [
   [0x015b, 0x015c, "BrtBeginListCol", "BrtEndListCol"],
   [0x0294, 0x0296, "BrtBeginListParts", "BrtEndListParts"],
 
+  // Metadata part (`xl/metadata.bin`). Excel writes it for a dynamic array: one `XLDAPR` metadata type whose
+  // formula metadata is a `BrtBeginDynamicArrayPr` block, and one cell-metadata block naming it.
+  [0x014c, 0x014d, "BrtBeginMetadata", "BrtEndMetadata"],
+  [0x0151, 0x0152, "BrtBeginEsmdb", "BrtEndEsmdb"],
+  [0x0153, 0x0154, "BrtBeginEsfmd", "BrtEndEsfmd"],
+  [0x0034, 0x0035, "BrtBeginFmd", "BrtEndFmd"],
+  [0x1000, 0x1001, "BrtBeginDynamicArrayPr", "BrtEndDynamicArrayPr"],
+
   // Comments part.
   [0x0274, 0x0275, "BrtBeginComments", "BrtEndComments"],
   [0x0276, 0x0277, "BrtBeginCommentAuthors", "BrtEndCommentAuthors"],
@@ -237,6 +245,8 @@ const SCOPE_PAIRS: readonly (readonly [number, number, string, string])[] = [
  */
 const NON_CONTIGUOUS_SCOPE_PAIRS: readonly (readonly [number, number, string, string])[] = [
   [0x0288, 0x028a, "BrtBeginCellIgnoreECs", "BrtEndCellIgnoreECs"],
+  // `BrtMdtinfo` (0x014F) sits between these two.
+  [0x014e, 0x0150, "BrtBeginEsmdtinfo", "BrtEndEsmdtinfo"],
 
   // Two pivot pairs whose `End` identifier is **lower** than its `Begin` — not merely
   // non-contiguous but *decreasing*. `BrtEndSXVI` is 281 against a `Begin` of 282, and
@@ -611,6 +621,14 @@ const UNSCOPED_RECORDS: readonly BiffRecordSpec[] = [
   { id: 0x01fb, name: "BrtDXF" },
   { id: 0x0289, name: "BrtCellIgnoreEC" },
   { id: 0x01aa, name: "BrtArrFmla" },
+  // The cell-metadata index (one-based, into the metadata part's `BrtMdb` list) of the cell record that follows.
+  {
+    id: 0x0031,
+    name: "BrtCellMeta",
+    fields: [{ name: "icmb", type: "u32" }]
+  },
+  { id: 0x0033, name: "BrtMdb" },
+  { id: 0x014f, name: "BrtMdtinfo" },
   { id: 0x01ab, name: "BrtShrFmla" },
 
   // --- AutoFilter -----------------------------------------------------------

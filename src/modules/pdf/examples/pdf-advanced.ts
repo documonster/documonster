@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -36,7 +36,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const wb1 = Workbook.create();
 const ws1 = Workbook.addWorksheet(wb1, "Inventory");
-Worksheet.setColumns(ws1, [
+Column.setDefinitions(ws1, [
   { header: "ID", key: "id", width: 8 },
   { header: "Product Name", key: "name", width: 25 },
   { header: "Category", key: "category", width: 15 },
@@ -56,7 +56,7 @@ Row.setAlignment(ws1, 1, { horizontal: "center" });
 // Add 100 rows to force pagination
 const categories = ["Electronics", "Clothing", "Food", "Tools", "Books"];
 for (let i = 1; i <= 100; i++) {
-  Worksheet.addRow(ws1, {
+  Row.add(ws1, {
     id: i,
     name: `Product ${i}`,
     category: categories[i % categories.length],

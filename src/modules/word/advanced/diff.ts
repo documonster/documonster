@@ -9,11 +9,12 @@
  * ```ts
  * import { Diff } from "documonster/word";
  *
- * const changes = Diff.documents(oldDoc, newDoc);
+ * const changes = Diff.compare(oldDoc, newDoc);
  * console.log(changes.filter(c => c.type === "modified"));
  * ```
  */
 
+import { checkHandle, checkRecord } from "@word/core/argument-checks";
 import { extractParagraphText } from "@word/core/text-utils";
 import { walkBlocks } from "@word/core/walker";
 import type { DocxDocument, BodyContent } from "@word/types";
@@ -67,6 +68,9 @@ export interface DiffResult {
  * @returns DiffResult with entries and summary.
  */
 export function diffDocuments(oldDoc: DocxDocument, newDoc: DocxDocument): DiffResult {
+  checkHandle(oldDoc, "document", "oldDoc", "Diff.compare");
+  checkRecord(oldDoc, "oldDoc", "Diff.compare");
+  checkRecord(newDoc, "newDoc", "Diff.compare");
   const oldTexts = extractParagraphTexts(oldDoc.body);
   const newTexts = extractParagraphTexts(newDoc.body);
 

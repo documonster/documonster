@@ -11,7 +11,7 @@
 // so the mismatch is a compile error. The `@ts-expect-error` blocks below fail
 // the build if that masking ever returns.
 
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import type { Workbook } from "@excel/index";
 import type { ExcelToPdfOptions } from "@pdf/index";
 import { Pdf } from "@pdf/index";
@@ -19,7 +19,7 @@ import { Pdf } from "@pdf/index";
 declare const wb: Workbook.Handle;
 
 // Correct injection — the excel-side recalculator.
-void Pdf.fromExcel(wb, { recalculate: calculateFormulas });
+void Pdf.fromExcel(wb, { recalculate: ExcelFormula.calculate });
 
 // Omitting it keeps the cached XLSX results (engine stays out of the bundle).
 void Pdf.fromExcel(wb, { title: "no recalc" });

@@ -7,23 +7,13 @@ import { extractAll } from "@archive/unzip/extract";
  * Shared helpers and imports live in `chart-builder.helpers.ts`.
  */
 import type { AddChartOptions } from "@excel/chart";
-import {
-  buildChartModel,
-  buildComboChartModel,
-  parseSpPr,
-  setSpPrFill,
-  parseChartEx,
-  buildChartExModel,
-  renderChartEx,
-  renderChartExSvg,
-  drawChartExPdf
-} from "@excel/chart";
+import { DrawingMl, ChartEx, ChartClassic, drawChartExPdf } from "@excel/chart";
 import { chartsheetChart } from "@excel/core/chartsheet";
 import { getChartEntry } from "@excel/core/workbook";
 import { addWorkbookImage } from "@excel/core/workbook-core";
 import { addChart, addChartEx, getCharts } from "@excel/core/worksheet";
 import type { WorksheetData } from "@excel/core/worksheet-core";
-import { Cell, Chart, Workbook, Worksheet } from "@excel/index";
+import { Cell, Chart, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 import { VALUES_B, baseSeries, bubbleSeries, ctg, scatterSeries } from "./chart-builder.helpers";
@@ -34,14 +24,14 @@ describe("BUG-7+8: parseSpPr handles malformed XML", () => {
   it("parseSpPr handles missing end tag gracefully", () => {
     // A truncated raw XML where </a:srgbClr> is missing
     const rawXml = '<c:spPr><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></c:spPr>';
-    const parsed = parseSpPr({ _rawXml: rawXml } as any);
+    const parsed = DrawingMl.parseSpPr({ _rawXml: rawXml } as any);
     expect(parsed.fill?.solid?.srgb).toBe("FF0000");
   });
 });
 
 describe("BUG-11: funnel chart has no axes", () => {
   it("funnel chartEx has no axes", () => {
-    const m = buildChartExModel({
+    const m = ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$5",
       series: [{ name: "F", values: "Sheet1!$B$1:$B$5" }]
@@ -74,8 +64,7 @@ describe("ROBUST-4: Excel 1900 leap year bug in date serial", () => {
       },
       "C1:J10"
     );
-    const series = Chart.chartModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0]
-      .series[0] as any;
+    const series = Chart.getModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0].series[0] as any;
     const serial = series.val.numRef.cache.points[0].value;
     expect(Math.floor(serial)).toBe(61);
   });
@@ -95,7 +84,7 @@ describe("ROBUST-6: _renderTxPr includes rotation", () => {
     const wb2 = Workbook.create();
     await Workbook.read(wb2, buf);
     // After round-trip, axis txPr should contain rotation
-    const catAx = Chart.chartModel(
+    const catAx = Chart.getModel(
       getCharts(Workbook.getWorksheet(wb2, "Sheet1")!)[0]
     )!.chart.plotArea.axes.find(a => a.axisType === "cat")!;
     // txPr comes back as raw XML — check it contains rot="-2700000" (−45° × 60000)
@@ -105,7 +94,9 @@ describe("ROBUST-6: _renderTxPr includes rotation", () => {
 
 describe("supplementary edge cases", () => {
   it("buildChartModel rejects empty series array", () => {
-    expect(() => buildChartModel({ type: "bar", series: [] })).toThrow(/at least one series/);
+    expect(() => ChartClassic.createModel({ type: "bar", series: [] })).toThrow(
+      /at least one series/
+    );
   });
 
   it("cache populator handles cells with null/undefined values", () => {
@@ -121,15 +112,14 @@ describe("supplementary edge cases", () => {
       },
       "C1:J10"
     );
-    const series = Chart.chartModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0]
-      .series[0] as any;
+    const series = Chart.getModel(getCharts(ws)[0])!.chart.plotArea.chartTypes[0].series[0] as any;
     // null value should produce empty cache points (nothing at index 0)
     expect(series.val.numRef.cache.points).toHaveLength(0);
     expect(series.val.numRef.cache.pointCount).toBe(1);
   });
 
   it("combo chart supports 3 or more groups", () => {
-    const m = buildComboChartModel({
+    const m = ChartClassic.createComboModel({
       groups: [
         { type: "bar", series: [baseSeries("Bar")] },
         { type: "line", series: [baseSeries("Line", VALUES_B)] },
@@ -143,9 +133,17 @@ describe("supplementary edge cases", () => {
   });
 
   it("doughnut chart with holeSize 0 and 90", () => {
-    const m0 = buildChartModel({ type: "doughnut", series: [baseSeries("S")], holeSize: 0 });
+    const m0 = ChartClassic.createModel({
+      type: "doughnut",
+      series: [baseSeries("S")],
+      holeSize: 0
+    });
     expect((ctg(m0) as any).holeSize).toBe(0);
-    const m90 = buildChartModel({ type: "doughnut", series: [baseSeries("S")], holeSize: 90 });
+    const m90 = ChartClassic.createModel({
+      type: "doughnut",
+      series: [baseSeries("S")],
+      holeSize: 90
+    });
     expect((ctg(m90) as any).holeSize).toBe(90);
   });
 
@@ -203,7 +201,7 @@ describe("supplementary edge cases", () => {
     const ws2 = Workbook.getWorksheet(wb2, "Sheet1")!;
     expect(getCharts(ws2)).toHaveLength(16);
     for (let i = 0; i < types.length; i++) {
-      expect(Chart.chartTypes(getCharts(ws2)[i])[0].type).toBe(types[i]);
+      expect(Chart.getChartTypes(getCharts(ws2)[i])[0].type).toBe(types[i]);
     }
   });
 });
@@ -251,7 +249,7 @@ describe("ChartEx structured spPr / txPr", () => {
   }
 
   it("parser populates structured fill/line fields on cx:spPr while preserving rawXml", () => {
-    const model = parseChartEx(makeWaterfallWithSpPr("FF0000"));
+    const model = ChartEx.fromXml(makeWaterfallWithSpPr("FF0000"));
     const series = model.chartSpace.chart.plotArea.plotAreaRegion!.series[0];
 
     // Structured fields are populated
@@ -267,21 +265,21 @@ describe("ChartEx structured spPr / txPr", () => {
   });
 
   it("round-trip via parseChartEx(renderChartEx(model)) preserves spPr bytes when unmodified", () => {
-    const first = parseChartEx(makeWaterfallWithSpPr("00FF00"));
-    const rebuilt = parseChartEx(renderChartEx(first));
+    const first = ChartEx.fromXml(makeWaterfallWithSpPr("00FF00"));
+    const rebuilt = ChartEx.fromXml(ChartEx.toXml(first));
     const series = rebuilt.chartSpace.chart.plotArea.plotAreaRegion!.series[0];
     expect(series.spPr?.fill?.solid?.srgb).toBe("00FF00");
     expect(series.spPr?.line?.dash).toBe("dash");
   });
 
   it("structural mutation via setSpPrFill drops rawXml and writes the new fill", () => {
-    const model = parseChartEx(makeWaterfallWithSpPr("FF0000"));
+    const model = ChartEx.fromXml(makeWaterfallWithSpPr("FF0000"));
     const region = model.chartSpace.chart.plotArea.plotAreaRegion!;
 
     // Mutate: replace the fill using the shape-properties API. This returns
     // a new ShapeProperties object without `_rawXml`, which forces the
     // spPr writer to take the structured path.
-    region.series[0].spPr = setSpPrFill(region.series[0].spPr, {
+    region.series[0].spPr = DrawingMl.setSpPrFill(region.series[0].spPr, {
       solid: { srgb: "1122AA" }
     });
     expect(region.series[0].spPr._rawXml).toBeUndefined();
@@ -294,12 +292,12 @@ describe("ChartEx structured spPr / txPr", () => {
     model.rawXml = undefined;
 
     // Round-trip and observe the new colour.
-    const rendered = renderChartEx(model);
+    const rendered = ChartEx.toXml(model);
     expect(rendered).toContain("1122AA");
     expect(rendered).not.toContain("FF0000");
 
     // The new XML parses back to the expected structured value.
-    const reparsed = parseChartEx(rendered);
+    const reparsed = ChartEx.fromXml(rendered);
     expect(
       reparsed.chartSpace.chart.plotArea.plotAreaRegion!.series[0].spPr?.fill?.solid?.srgb
     ).toBe("1122AA");
@@ -336,7 +334,7 @@ describe("ChartEx structured spPr / txPr", () => {
     </cx:plotArea>
   </cx:chart>
 </cx:chartSpace>`;
-    const model = parseChartEx(rawXml);
+    const model = ChartEx.fromXml(rawXml);
     const dl = model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].dataLabels!;
 
     // Structured fields are extracted from the raw XML.
@@ -355,7 +353,7 @@ describe("ChartEx structured spPr / txPr", () => {
     // and sp3d on a series, then round-trip through render+parse and assert
     // the structured fields survive. This is the path user code takes when
     // constructing a chart with shadow / bevel effects.
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "funnel",
       series: [
         {
@@ -379,13 +377,13 @@ describe("ChartEx structured spPr / txPr", () => {
       ]
     });
 
-    const rendered = renderChartEx(model);
+    const rendered = ChartEx.toXml(model);
     expect(rendered).toContain("<a:effectLst>");
     expect(rendered).toContain("<a:outerShdw");
     expect(rendered).toContain("<a:sp3d");
     expect(rendered).toContain("<a:bevelT");
 
-    const reparsed = parseChartEx(rendered);
+    const reparsed = ChartEx.fromXml(rendered);
     const parsedSeries = reparsed.chartSpace.chart.plotArea.plotAreaRegion!.series[0];
     expect(parsedSeries.spPr?.effectList?.outerShadow?.blurRadius).toBe(50800);
     expect(parsedSeries.spPr?.sp3d?.extrusionHeight).toBe(76200);
@@ -393,7 +391,7 @@ describe("ChartEx structured spPr / txPr", () => {
   });
 
   it("structured axis txPr round-trips with rotation and font family", () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "histogram",
       series: [{ values: "Sheet1!$A$1:$A$6" }]
     });
@@ -410,11 +408,11 @@ describe("ChartEx structured spPr / txPr", () => {
       color: { srgb: "333333" }
     };
 
-    const rendered = renderChartEx(model);
+    const rendered = ChartEx.toXml(model);
     expect(rendered).toContain('rot="-5400000"');
     expect(rendered).toContain('typeface="Arial"');
 
-    const reparsed = parseChartEx(rendered);
+    const reparsed = ChartEx.fromXml(rendered);
     const parsedAxis = reparsed.chartSpace.chart.plotArea.axis![0];
     expect(parsedAxis.txPr?.size).toBe(900);
     expect(parsedAxis.txPr?.italic).toBe(true);
@@ -571,7 +569,7 @@ describe("bar chart pictureFill.image (high-level)", () => {
 
 describe("scatter/bubble xValueType", () => {
   it("defaults xValues to numRef for scatter (OOXML standard)", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [{ xValues: "Sheet1!$A$1:$A$3", values: "Sheet1!$B$1:$B$3" }]
     });
@@ -583,7 +581,7 @@ describe("scatter/bubble xValueType", () => {
   });
 
   it('wraps xValues as strRef when xValueType is "text"', () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "scatter",
       series: [
         {
@@ -601,7 +599,7 @@ describe("scatter/bubble xValueType", () => {
   });
 
   it("bubble chart also honours text xValueType", () => {
-    const m = buildChartModel({
+    const m = ChartClassic.createModel({
       type: "bubble",
       series: [
         {
@@ -626,7 +624,7 @@ describe("scatter/bubble xValueType", () => {
 describe("Chartsheet.chart worksheet proxy", () => {
   it("exposes chartModel through the proxy without throwing", async () => {
     const wb = Workbook.create();
-    Worksheet.addRows(Workbook.addWorksheet(wb, "Data"), [
+    Row.addMany(Workbook.addWorksheet(wb, "Data"), [
       ["A", 1],
       ["B", 2]
     ]);
@@ -641,12 +639,12 @@ describe("Chartsheet.chart worksheet proxy", () => {
     // reads/writes to chart-level properties work through it.
     const chart = chartsheetChart(chartsheet)!;
     expect(chart.chartNumber).toBe(1);
-    expect(Chart.chartModel(chart)?.chart.plotArea).toBeDefined();
+    expect(Chart.getModel(chart)?.chart.plotArea).toBeDefined();
   });
 
   it("host proxy rejects grid operations with a helpful error", () => {
     const wb = Workbook.create();
-    Worksheet.addRows(Workbook.addWorksheet(wb, "Data"), [["X", 1]]);
+    Row.addMany(Workbook.addWorksheet(wb, "Data"), [["X", 1]]);
     const chartsheet = Workbook.addChartsheet(wb, "Chart Sheet", {
       chart: {
         type: "bar",
@@ -674,7 +672,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
     // Shadow in the chart pane.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -704,7 +702,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
+    const svg = Chart.toSvg(chart, { width: 400, height: 200 });
 
     // The SVG must contain a <defs> block with a <filter> inside.
     expect(svg).toContain("<defs>");
@@ -720,7 +718,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
   it("deduplicates filters when multiple series share the same effect list", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10, 20],
       ["B", 20, 30]
     ]);
@@ -747,7 +745,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
+    const svg = Chart.toSvg(chart, { width: 400, height: 200 });
     // Exactly one <filter> definition even though two series share it.
     const filterDefs = (svg.match(/<filter id="documonster-fx-/g) ?? []).length;
     expect(filterDefs).toBe(1);
@@ -759,7 +757,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
   it("omits <defs> entirely when no series carry an effectList", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [["A", 1]]);
+    Row.addMany(ws, [["A", 1]]);
     addChart(
       ws,
       {
@@ -769,7 +767,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
+    const svg = Chart.toSvg(chart, { width: 400, height: 200 });
     expect(svg).not.toContain("<defs>");
     expect(svg).not.toContain("<filter");
     expect(svg).not.toContain('filter="url');
@@ -780,7 +778,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
     // effect show up as a distinct assertion failure.
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [["A", 5]]);
+    Row.addMany(ws, [["A", 5]]);
     addChart(
       ws,
       {
@@ -815,7 +813,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
       "D1:K10"
     );
     const chart = getCharts(ws)[0];
-    const svg = Chart.toSVG(chart, { width: 400, height: 200 });
+    const svg = Chart.toSvg(chart, { width: 400, height: 200 });
     // Every filter primitive ends up somewhere in the single generated
     // <filter> element.
     expect(svg).toContain("<feGaussianBlur");
@@ -831,7 +829,7 @@ describe("renderChartSvg auto-injects effectList filters", () => {
 
 describe("shape-properties structured DrawingML geometry", () => {
   it("extracts a:xfrm offset / ext / rot / flips from raw spPr XML", () => {
-    const spPr = parseSpPr({
+    const spPr = DrawingMl.parseSpPr({
       _rawXml:
         '<c:spPr><a:xfrm rot="5400000" flipH="1">' +
         '<a:off x="123456" y="789012"/>' +
@@ -849,7 +847,7 @@ describe("shape-properties structured DrawingML geometry", () => {
   });
 
   it("extracts a:prstGeom preset + avLst adjustments", () => {
-    const spPr = parseSpPr({
+    const spPr = DrawingMl.parseSpPr({
       _rawXml:
         '<c:spPr><a:prstGeom prst="roundRect">' +
         '<a:avLst><a:gd name="adj" fmla="val 16667"/></a:avLst>' +
@@ -860,7 +858,7 @@ describe("shape-properties structured DrawingML geometry", () => {
   });
 
   it("extracts a:custGeom path commands (moveTo / lnTo / arcTo / close)", () => {
-    const spPr = parseSpPr({
+    const spPr = DrawingMl.parseSpPr({
       _rawXml:
         "<c:spPr><a:custGeom><a:pathLst>" +
         '<a:path w="100000" h="100000" fill="norm" stroke="1">' +
@@ -894,7 +892,7 @@ describe("chartToPdf bridge", () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -928,7 +926,7 @@ describe("chartToPdf bridge", () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -976,7 +974,7 @@ describe("chartToPdf bridge", () => {
     for (const layout of ["sunburst", "treemap"] as const) {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Sheet1");
-      Worksheet.addRows(ws, [
+      Row.addMany(ws, [
         ["A", 10],
         ["B", 20],
         ["C", 15]
@@ -1092,7 +1090,7 @@ describe("chartToPdf bridge", () => {
     for (const fixture of fixtures) {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "S");
-      Worksheet.addRows(ws, [
+      Row.addMany(ws, [
         ["A", 10],
         ["B", 20],
         ["C", 15],
@@ -1113,7 +1111,7 @@ describe("chartToPdf bridge", () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20],
       ["C", 15]
@@ -1136,7 +1134,7 @@ describe("chartToPdf bridge", () => {
     const { chartToPdf } = await import("@pdf/excel-bridge");
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 10],
       ["B", 20]
     ]);
@@ -1161,7 +1159,6 @@ describe("chartToPdf bridge", () => {
     // change the outlier emitter silently skipped (no circle, no
     // fallback). Now it emits a stroke-only rect so the outlier stays
     // visible.
-    const { drawChartExPdf } = await import("@excel/chart");
     let outlierRects = 0;
     const rects: Array<{ width: number; height: number; fill?: unknown; stroke?: unknown }> = [];
     const surface = {
@@ -1206,7 +1203,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, Chart.chartExModel(getCharts(ws)[0])!, {
+    drawChartExPdf(surface, Chart.getExModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1220,7 +1217,6 @@ describe("chartToPdf bridge", () => {
     // map panel used to come out square in a PDF — the old renderer documented that
     // as the one unavoidable divergence for this layout. It is avoidable whenever
     // the surface can take a path.
-    const { drawChartExPdf } = await import("@excel/chart");
     const paths: Array<{ ops: Array<{ op: string }> }> = [];
     const rects: Array<{ width: number; height: number }> = [];
     const surface = {
@@ -1255,7 +1251,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, Chart.chartExModel(getCharts(ws)[0])!, {
+    drawChartExPdf(surface, Chart.getExModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1273,7 +1269,6 @@ describe("chartToPdf bridge", () => {
     // flatten every command into one point list — drawing a connector from the end
     // of the mainland ring to the start of the island, and leaving both rings with
     // a missing closing edge.
-    const { drawChartExPdf } = await import("@excel/chart");
     const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
     const surface = {
       drawRect() {
@@ -1331,7 +1326,7 @@ describe("chartToPdf bridge", () => {
     } as const;
     drawChartExPdf(
       surface,
-      Chart.chartExModel(getCharts(ws)[0])!,
+      Chart.getExModel(getCharts(ws)[0])!,
       {
         x: 0,
         y: 0,
@@ -1357,7 +1352,6 @@ describe("chartToPdf bridge", () => {
     // (a) fill a colour rect so the data magnitude is visible and
     // (b) trace four outline lines so the trapezoid silhouette
     // remains recognisable despite the polygon fill being unavailable.
-    const { drawChartExPdf } = await import("@excel/chart");
     let coloredRects = 0;
     let outlineLines = 0;
     const surface = {
@@ -1379,7 +1373,7 @@ describe("chartToPdf bridge", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["A", 100],
       ["B", 80],
       ["C", 50],
@@ -1394,7 +1388,7 @@ describe("chartToPdf bridge", () => {
       },
       "D1:J10"
     );
-    drawChartExPdf(surface, Chart.chartExModel(getCharts(ws)[0])!, {
+    drawChartExPdf(surface, Chart.getExModel(getCharts(ws)[0])!, {
       x: 0,
       y: 0,
       width: 400,
@@ -1422,7 +1416,6 @@ describe("chartToPdf bridge", () => {
 
 describe("drawChartExPdf regionMap with TopoJSON topology", () => {
   it("draws polygon paths when a matching topology is provided", async () => {
-    const { drawChartExPdf } = await import("@excel/chart");
     const paths: Array<{ ops: unknown[] }> = [];
     const texts: string[] = [];
     const surface = {
@@ -1446,7 +1439,7 @@ describe("drawChartExPdf regionMap with TopoJSON topology", () => {
     };
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Geo");
-    Worksheet.addRows(ws, [
+    Row.addMany(ws, [
       ["USA", 300],
       ["CAN", 150],
       ["MEX", 80]
@@ -1499,7 +1492,7 @@ describe("drawChartExPdf regionMap with TopoJSON topology", () => {
     };
     drawChartExPdf(
       surface,
-      Chart.chartExModel(getCharts(ws)[0])!,
+      Chart.getExModel(getCharts(ws)[0])!,
       { x: 0, y: 0, width: 400, height: 300 },
       { regionMap: { topology, objectName: "countries", match: "id" } }
     );
@@ -1512,7 +1505,7 @@ describe("drawChartExPdf regionMap with TopoJSON topology", () => {
 describe("ChartEx legend parity between the SVG and vector-PDF backends", () => {
   /** A funnel chartEx with a legend at the requested position. */
   function funnelWithLegend(legendPosition: "b" | "l" | "r" | "t" | "tr") {
-    return buildChartExModel({
+    return ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$3",
       series: [{ name: "Stage", values: "Sheet1!$B$1:$B$3", literalValues: [10, 6, 3] }],
@@ -1547,7 +1540,7 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
     // Regression: `drawChartExPdf` had no legend code at all, so an authored
     // `legendPos` showed up in SVG and PNG but never in a PDF.
     const model = funnelWithLegend("b");
-    const svg = renderChartExSvg(model, { width: 300, height: 200 });
+    const svg = ChartEx.toSvg(model, { width: 300, height: 200 });
     expect(svg).toContain('width="10" height="10"');
     expect(svg).toContain("Stage");
 
@@ -1558,13 +1551,13 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
   });
 
   it("omits the legend from both backends when the model has none", () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$3",
       series: [{ name: "Stage", values: "Sheet1!$B$1:$B$3", literalValues: [10, 6, 3] }],
       showLegend: false
     });
-    expect(renderChartExSvg(model, { width: 300, height: 200 })).not.toContain(
+    expect(ChartEx.toSvg(model, { width: 300, height: 200 })).not.toContain(
       'width="10" height="10"'
     );
 
@@ -1581,7 +1574,7 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
     const SWATCH = 10;
     for (const position of ["b", "l", "r", "t", "tr"] as const) {
       const model = funnelWithLegend(position);
-      const svg = renderChartExSvg(model, { width: 300, height: HEIGHT });
+      const svg = ChartEx.toSvg(model, { width: 300, height: HEIGHT });
       const svgSwatch = /<rect x="([\d.-]+)" y="([\d.-]+)" width="10" height="10"/.exec(svg);
       expect(svgSwatch, `no SVG swatch for legendPos=${position}`).not.toBeNull();
 
@@ -1603,7 +1596,7 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
     const HEIGHT = 200;
     for (const position of ["b", "l", "r", "t", "tr"] as const) {
       for (const title of [undefined, "T"]) {
-        const model = buildChartExModel({
+        const model = ChartEx.createModel({
           type: "funnel",
           categories: "Sheet1!$A$1:$A$3",
           series: [{ name: "Stage", values: "Sheet1!$B$1:$B$3", literalValues: [10, 6, 3] }],
@@ -1624,8 +1617,9 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
           drawRect(options: { x: number; y: number; width: number; height: number }) {
             if (options.width === 10 && options.height === 10) {
               swatches.push({ x: options.x, y: options.y });
-            } else if (options.width < WIDTH && options.height < HEIGHT) {
-              // Skip the full-bleed chart background; everything else is data.
+            } else if (options.width < WIDTH - 2 && options.height < HEIGHT - 2) {
+              // Skip the chart area (it covers the box, less half its border); everything
+              // else is data.
               note(options.x, options.y);
               note(options.x + options.width, options.y + options.height);
             }
@@ -1669,7 +1663,7 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
   });
 
   it("flattens a multi-paragraph series caption onto the legend row", () => {
-    const model = buildChartExModel({
+    const model = ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$3",
       series: [{ name: "North\nRegion", values: "Sheet1!$B$1:$B$3", literalValues: [3, 2, 1] }],
@@ -1685,7 +1679,7 @@ describe("ChartEx legend parity between the SVG and vector-PDF backends", () => 
 
 describe("ChartEx data labels are driven by the model, not hard-coded", () => {
   const funnel = (dataLabels?: unknown) =>
-    buildChartExModel({
+    ChartEx.createModel({
       type: "funnel",
       categories: "Sheet1!$A$1:$A$3",
       series: [
@@ -1696,10 +1690,10 @@ describe("ChartEx data labels are driven by the model, not hard-coded", () => {
           ...(dataLabels === undefined ? {} : { dataLabels })
         }
       ]
-    } as Parameters<typeof buildChartExModel>[0]);
+    } as Parameters<typeof ChartEx.createModel>[0]);
 
   /** Every string the PDF backend draws. */
-  function pdfTexts(model: ReturnType<typeof buildChartExModel>): string[] {
+  function pdfTexts(model: ReturnType<typeof ChartEx.createModel>): string[] {
     const out: string[] = [];
     const page = {
       drawRect() {
@@ -1726,7 +1720,7 @@ describe("ChartEx data labels are driven by the model, not hard-coded", () => {
       model.chartSpace.chart.plotArea.plotAreaRegion!.series[0].dataLabels?.visibility?.value
     ).toBe(true);
     expect(pdfTexts(model)).toEqual(expect.arrayContaining(["10", "6", "3"]));
-    expect(renderChartExSvg(model, { width: 300, height: 200 })).toContain(">10<");
+    expect(ChartEx.toSvg(model, { width: 300, height: 200 })).toContain(">10<");
   });
 
   it("honours an authored categoryName-only visibility", () => {
@@ -1746,7 +1740,7 @@ describe("ChartEx data labels are driven by the model, not hard-coded", () => {
     for (const value of ["10", "6", "3", "1", "2"]) {
       expect(texts, `unexpected label ${value}`).not.toContain(value);
     }
-    const svg = renderChartExSvg(funnel({ showCategory: false, showValue: false }), {
+    const svg = ChartEx.toSvg(funnel({ showCategory: false, showValue: false }), {
       width: 300,
       height: 200
     });
@@ -1760,7 +1754,7 @@ describe("ChartEx data labels are driven by the model, not hard-coded", () => {
       { showCategory: true, showValue: true, separator: "/" }
     ]) {
       const model = funnel(labels);
-      const svg = renderChartExSvg(model, { width: 300, height: 200 });
+      const svg = ChartEx.toSvg(model, { width: 300, height: 200 });
       for (const text of pdfTexts(model)) {
         if (text === "Stage") {
           continue; // legend entry, not a data label

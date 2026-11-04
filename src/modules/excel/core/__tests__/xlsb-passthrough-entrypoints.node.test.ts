@@ -86,13 +86,13 @@ describe("XLSB passthrough is a property of the workbook, not of the entry point
     const original = Uint8Array.from(await readFile(source));
     const workbook = Workbook.create();
     await Workbook.readFile(workbook, source);
-    Cell.setValue(Workbook.getWorksheets(workbook)[0]!, "ZZ999", "edited");
+    Cell.setValue(Workbook.listWorksheets(workbook)[0]!, "ZZ999", "edited");
     const written = await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" });
     expect([...written]).not.toEqual([...original]);
 
     const edited = Workbook.create();
     await Workbook.readFile(edited, source);
-    Cell.setValue(Workbook.getWorksheets(edited)[0]!, "ZZ999", "edited");
+    Cell.setValue(Workbook.listWorksheets(edited)[0]!, "ZZ999", "edited");
     const target = join(directory, "edited.xlsb");
     const stream = createWriteStream(target);
     await Workbook.writeStream(edited, stream, { format: "xlsb", unsupported: "ignore" });

@@ -356,7 +356,7 @@ describe("sort state round-trip", () => {
 
     const wb = Workbook.create();
     await Workbook.read(wb, source);
-    const table = Table.get(Workbook.getWorksheet(wb, "Data")!, "SortTable");
+    const table = Table.get(Workbook.getWorksheet(wb, "Data")!, "SortTable")!;
     tableSetRef(table, "C2");
 
     const tableXml = requireEntryText(
@@ -383,7 +383,7 @@ describe("sort state round-trip", () => {
 
     const wb = Workbook.create();
     await Workbook.read(wb, source);
-    const table = Table.get(Workbook.getWorksheet(wb, "Data")!, "SortTable");
+    const table = Table.get(Workbook.getWorksheet(wb, "Data")!, "SortTable")!;
     tableSetRef(table, "A1:B2");
     tableSetHeaderRow(table, true);
 
@@ -413,7 +413,7 @@ describe("sort state round-trip", () => {
 
     const wb = Workbook.create();
     await Workbook.read(wb, source);
-    const table = Table.get(Workbook.getWorksheet(wb, "Data")!, "OverrideTable");
+    const table = Table.get(Workbook.getWorksheet(wb, "Data")!, "OverrideTable")!;
     tableSetTotalsRow(table, true);
     tableColumnSetFilterButton(tableGetColumn(table, 0), false);
 

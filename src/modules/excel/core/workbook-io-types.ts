@@ -11,9 +11,25 @@
  * What genuinely differs stays in the variants: `toBuffer` returns a `Buffer` on Node and a
  * `Uint8Array` in a browser, the stream types are each platform's own, and file-path IO is Node-only.
  */
+import type { EncryptOptions } from "@archive/office-crypto/agile";
+import type { SyntaxProbe } from "@excel/core/defined-names";
+import type { UnrecognizedValue } from "@excel/core/unrecognized-values";
+import { keptSettingsReport } from "@excel/core/unrecognized-values";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import type { WorkbookFormat } from "@excel/core/workbook-format";
-import type { XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
+import { isArrayBufferLike } from "@excel/core/workbook-format";
+import { ExcelArgumentError } from "@excel/errors";
+import type { ArgumentChecks } from "@excel/utils/arguments";
+import { argumentChecks } from "@excel/utils/arguments";
+import { decryptionOf, openWorkbookPackage } from "@excel/utils/container-errors";
+import type { WorkbookDecryption } from "@excel/utils/container-errors";
+import type { IParseStream, XlsxReadOptions, XlsxWriteOptions } from "@excel/xlsx/types";
+
+/** What `Workbook.create` takes — and what a read that returns a new workbook accepts beside its own options. */
+export interface WorkbookCreateOptions {
+  /** Classifies defined-name text as formula or opaque when reading; see {@link SyntaxProbe}. */
+  readonly formulaSyntaxProbe?: SyntaxProbe;
+}
 
 /**
  * Options common to reading either format.
@@ -99,6 +115,19 @@ export interface WorkbookWriteOptions extends XlsxWriteOptions {
    * everything this library models.
    */
   readonly unsupported?: "error" | "ignore";
+  /**
+   * Encrypt the workbook with this password (1 to 255 characters) — Agile Encryption in an OLE compound file, what
+   * Excel writes for "Encrypt with Password", for XLSX and XLSB alike; `Workbook.read(bytes, { password })` reads it
+   * back. The same option Word's `Io.toBuffer` takes. The encryption code is loaded only for a write given one, and
+   * the package is assembled in memory before it is encrypted — `writeStream` and `toStream` included. Not
+   * `Workbook.protect`'s password, which only locks the workbook's structure.
+   */
+  readonly password?: string;
+  /**
+   * How {@link password} encrypts: key size, hash algorithm, spin count. Default: AES-256, SHA-512 and 100,000
+   * iterations, as Office writes. Only with `password`.
+   */
+  readonly encryption?: EncryptOptions;
 }
 
 /**
@@ -116,7 +145,8 @@ export interface WorkbookReadReport {
    * Content that did not reach the workbook, as `Sheet!A1: reason` or `Sheet: reason`.
    *
    * Empty for an XLSX read, which has no equivalent channel — not because nothing is ever lost there, but
-   * because that reader does not collect one. Saying so is better than implying a guarantee.
+   * because that reader does not collect one. Saying so is better than implying a guarantee. A setting whose value is
+   * outside its vocabulary is not lost by either reader; see `unrecognizedValues`.
    */
   readonly lost: readonly string[];
   /**
@@ -140,6 +170,232 @@ export interface WorkbookReadReport {
    * to know anyway can look here.
    */
   readonly unknownRecords: ReadonlyMap<number, number>;
+  /**
+   * Settings the file states with a value outside what the setting takes, one entry each:
+   * `{ sheet: "S", path: "pageSetup.orientation", value: "sideways" }` — the shape the
+   * `Workbook.discardUnrecognizedValues` filter receives, and the `{ path, value }` Word reports.
+   *
+   * Not losses, and that is why they are not in `lost`: each is kept as read — its field reads as absent — and written
+   * back unchanged by an XLSX write while the field is absent; `Workbook.discardUnrecognizedValues` drops them. Both
+   * readers fill it. An entry for a value the
+   * format does allow means this library's vocabulary for it is too narrow, which is worth reporting.
+   */
+  readonly unrecognizedValues: readonly UnrecognizedValue[];
+}
+
+export type { UnrecognizedValue } from "@excel/core/unrecognized-values";
+export type { EncryptOptions } from "@archive/office-crypto/agile";
+
+/**
+ * Whether the first argument of a read is the workbook to read *into* — the deprecated form — rather than the input.
+ *
+ * Decided structurally, because neither side has a brand to test: a workbook handle is a plain object that carries
+ * its sheet list, and no input a read accepts does — bytes are typed arrays or `ArrayBuffer`s, a path or base64 text
+ * is a string, and a stream is an object with no `_worksheets`. Typed arrays are excluded explicitly so a caller's
+ * `Uint8Array` subclass with arbitrary own properties can never be taken for a workbook.
+ */
+export function isReadTarget(value: unknown): value is WorkbookData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !ArrayBuffer.isView(value) &&
+    !(value instanceof ArrayBuffer) &&
+    Array.isArray((value as { _worksheets?: unknown })._worksheets)
+  );
+}
+
+/** Split the create options a new-workbook read accepts from the read's own. */
+export function splitCreateOptions<T extends object>(
+  options: (T & WorkbookCreateOptions) | undefined
+): { create: WorkbookCreateOptions | undefined; read: T | undefined } {
+  // Anything but an object is passed through for the read's own option check to refuse.
+  if (typeof options !== "object" || options === null || !("formulaSyntaxProbe" in options)) {
+    return { create: undefined, read: options };
+  }
+  const { formulaSyntaxProbe, ...read } = options;
+  return { create: { formulaSyntaxProbe }, read: read as T };
+}
+
+const FORMATS: readonly WorkbookFormat[] = ["xlsx", "xlsb"];
+
+/**
+ * A read's or a write's options: an object, if given, whose `format` is one this library reads and writes. A format it
+ * did not know was ignored — `toBuffer(wb, { format: "csv" })` wrote XLSX — and options that were not an object reached
+ * an `in` test as a raw `TypeError`.
+ */
+export function checkIoOptions(where: string, options: unknown, direction: "read" | "write"): void {
+  const check = argumentChecks(where);
+  if (options === null || !check.record("options", options)) {
+    return;
+  }
+  check.oneOf("options.format", options.format, FORMATS);
+  check.oneOf("options.unsupported", options.unsupported, ["error", "ignore"]);
+  if (direction === "read") {
+    checkReadValues(check, options);
+  } else {
+    checkWriteValues(check, options);
+  }
+}
+
+/** A limit: a whole number of at least `min`, or `Infinity` to lift it. `NaN` and `0` used to disable a guard. */
+function checkLimit(check: ArgumentChecks, field: string, value: unknown, min: number): void {
+  if (value !== Infinity) {
+    check.number(field, value, { min, integer: true });
+  }
+}
+
+function checkReadValues(check: ArgumentChecks, options: Record<string, unknown>): void {
+  check.boolean("options.base64", options.base64);
+  checkLimit(check, "options.maxRows", options.maxRows, 1);
+  checkLimit(check, "options.maxCols", options.maxCols, 1);
+  // A string matched every node name containing it: `"sheetData"` dropped every cell of every sheet.
+  if (check.array("options.ignoreNodes", options.ignoreNodes)) {
+    options.ignoreNodes.forEach((node, i) =>
+      check.string(`options.ignoreNodes[${i}]`, node, { nonEmpty: true })
+    );
+  }
+  if (check.record("options.zip", options.zip)) {
+    checkLimit(check, "options.zip.maxEntrySize", options.zip.maxEntrySize, 0);
+    checkLimit(
+      check,
+      "options.zip.maxTotalUncompressedSize",
+      options.zip.maxTotalUncompressedSize,
+      0
+    );
+    checkLimit(check, "options.zip.maxEntries", options.zip.maxEntries, 0);
+    check.boolean("options.zip.checkCrc32", options.zip.checkCrc32);
+  }
+  check.oneOf("options.blankCells", options.blankCells, ["keep", "collapse"]);
+  check.oneOf("options.formulas", options.formulas, ["preserve", "cached", "error"]);
+  check.string("options.password", options.password);
+}
+
+function checkWriteValues(check: ArgumentChecks, options: Record<string, unknown>): void {
+  if (check.record("options.zip", options.zip)) {
+    // Past 0–9 the deflater refuses the level, and the refusal used to leave the write pending forever.
+    check.number("options.zip.level", options.zip.level, { min: 0, max: 9, integer: true });
+    const { modTime } = options.zip;
+    if (modTime !== undefined && !(modTime instanceof Date && !Number.isNaN(modTime.getTime()))) {
+      check.fail("options.zip.modTime", "a valid Date", modTime);
+    }
+    check.oneOf("options.zip.timestamps", options.zip.timestamps, [
+      "dos",
+      "dos+utc",
+      "dos+utc+ntfs"
+    ]);
+  }
+  check.boolean("options.useSharedStrings", options.useSharedStrings);
+  check.boolean("options.useStyles", options.useStyles);
+  check.oneOf("options.templateMode", options.templateMode, ["preserve", "strict"]);
+  check.boolean("options.strictTemplateMode", options.strictTemplateMode);
+  check.boolean("options.validate", options.validate);
+  checkWriteEncryption(check, options);
+}
+
+const KEY_BITS = [128, 192, 256];
+const HASH_NAMES = ["SHA-1", "SHA-256", "SHA-384", "SHA-512", "SHA1", "SHA256", "SHA384", "SHA512"];
+
+/**
+ * A write's `password` and `encryption`: a password of 1 to 255 characters (MS-OFFCRYPTO caps it at 255, and an
+ * empty one would be the absence of one), and encryption settings only beside one — checked as Word checks them.
+ */
+function checkWriteEncryption(check: ArgumentChecks, options: Record<string, unknown>): void {
+  const { password, encryption } = options;
+  if (
+    password !== undefined &&
+    (typeof password !== "string" || password.length === 0 || password.length > 255)
+  ) {
+    check.fail("options.password", "a string of 1 to 255 characters", password);
+  }
+  if (encryption === undefined) {
+    return;
+  }
+  if (password === undefined) {
+    check.fail("options.encryption", "set only with options.password", encryption);
+  }
+  if (check.record("options.encryption", encryption)) {
+    if (encryption.keyBits !== undefined && !KEY_BITS.includes(encryption.keyBits as number)) {
+      check.fail("options.encryption.keyBits", "one of 128, 192, 256", encryption.keyBits);
+    }
+    check.oneOf("options.encryption.hashAlgorithm", encryption.hashAlgorithm, HASH_NAMES);
+    check.number("options.encryption.spinCount", encryption.spinCount, {
+      min: 0,
+      max: 10_000_000,
+      integer: true
+    });
+  }
+}
+
+/** Whether `value` is a `Blob` (a `File` included) — recognised structurally, as a Blob from another realm is one. */
+export function isBlob(value: unknown): value is Blob {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Blob).arrayBuffer === "function" &&
+    typeof (value as Blob).size === "number" &&
+    typeof (value as Blob).type === "string"
+  );
+}
+
+/** `data` with a `Blob` read to its bytes — what the async whole-workbook readers take besides bytes and base64 text. */
+export async function blobBytes<T>(data: T | Blob): Promise<T | Uint8Array> {
+  return isBlob(data) ? new Uint8Array(await data.arrayBuffer()) : data;
+}
+
+/**
+ * The input of `read` / `readWithDiagnostics`: bytes — a `Uint8Array` or any other `ArrayBufferView`, an
+ * `ArrayBuffer` from any realm, a `Blob` (read first, by {@link blobBytes}) — or base64 text with `{ base64: true }`. Anything else (`42`, `null`, `{}`, text without
+ * the flag) is an argument error, as it is for `readStream`; it used to reach the ZIP loader and come back as an
+ * `ExcelFileError` about "the loaded zip file". Real bytes that are not a workbook stay an `ExcelFileError`.
+ */
+export function checkReadData(where: string, data: unknown, base64: unknown): void {
+  if (ArrayBuffer.isView(data) || isArrayBufferLike(data)) {
+    return;
+  }
+  if (typeof data === "string" && base64 === true) {
+    return;
+  }
+  const got =
+    typeof data === "string"
+      ? "a string without { base64: true }"
+      : data === null
+        ? "null"
+        : Array.isArray(data)
+          ? "an array"
+          : typeof data;
+  throw new ExcelArgumentError(
+    "data",
+    `${where}: data must be bytes (Uint8Array, ArrayBuffer, a typed-array view, a Blob) or a base64 string with { base64: true }, got ${got}`
+  );
+}
+
+/**
+ * The input of `readStream`: something the read can pump — a Node stream, a web `ReadableStream`, or an (async)
+ * iterable of chunks. Anything else used to reach the pipeline, whose refusal was never observed: the read waited for
+ * entries that could not come, and the error surfaced as an unhandled rejection.
+ */
+export function checkReadStreamInput(where: string, value: unknown): void {
+  const candidate = value as {
+    pipe?: unknown;
+    getReader?: unknown;
+    [Symbol.asyncIterator]?: unknown;
+    [Symbol.iterator]?: unknown;
+  } | null;
+  if (
+    typeof value === "object" &&
+    candidate !== null &&
+    (typeof candidate.pipe === "function" ||
+      typeof candidate.getReader === "function" ||
+      typeof candidate[Symbol.asyncIterator] === "function" ||
+      typeof candidate[Symbol.iterator] === "function")
+  ) {
+    return;
+  }
+  argumentChecks(where).fail(
+    "stream",
+    "a readable stream, a ReadableStream or an iterable of byte chunks",
+    value
+  );
 }
 
 /**
@@ -160,7 +416,7 @@ export interface WorkbookReadReport {
  */
 export async function readWorkbookWithDiagnostics(
   wb: WorkbookData,
-  data: Uint8Array | ArrayBuffer | ArrayBufferView | string,
+  input: Uint8Array | ArrayBuffer | ArrayBufferView | Blob | string,
   options: WorkbookDiagnosticReadOptions | undefined,
   platform: {
     readonly read: (
@@ -175,7 +431,12 @@ export async function readWorkbookWithDiagnostics(
     readonly resolveReadFormat: (bytes: Uint8Array, format?: WorkbookFormat) => WorkbookFormat;
   }
 ): Promise<WorkbookReadReport> {
-  const bytes = platform.normalizeBytes(data, options?.base64);
+  checkIoOptions("Workbook.readWithDiagnostics", options, "read");
+  const data = await blobBytes(input);
+  checkReadData("Workbook.readWithDiagnostics", data, options?.base64);
+  const raw = platform.normalizeBytes(data, options?.base64);
+  // An encrypted workbook is decrypted first, so its package's format is the one detected.
+  const bytes = raw && (await openWorkbookPackage(raw, workbookDecryption(options)));
   if (bytes !== undefined && platform.resolveReadFormat(bytes, options?.format) === "xlsb") {
     // Loaded here rather than injected by the caller, and on demand rather than statically. The two
     // platform variants passed in the *same* two functions — they are not platform-specific — and a
@@ -191,20 +452,74 @@ export async function readWorkbookWithDiagnostics(
     });
     commitXlsbRead(wb, parsed);
     wb.sourceFilePath = undefined;
-    return { workbook: wb, ...parsed.diagnostics };
+    return { workbook: wb, ...parsed.diagnostics, unrecognizedValues: keptSettingsReport(wb) };
   }
+  const workbook = await platform.read(wb, bytes ?? data, options);
   return {
-    // **An XLSX read reports nothing because that reader collects nothing, not because nothing can be lost.** So an empty
+    // **An XLSX read reports no losses because that reader collects nothing, not because nothing can be lost.** So an empty
     // report here means "not measured", which `WorkbookReadReport.lost` says in prose.
     //
     // It does *not* mean the reader truncates behind the caller's back: `maxRows` and `maxCols` throw
     // `MaxItemsExceededError` rather than skipping, which their own documentation used to deny and their tests have
     // always required.
-    workbook: await platform.read(wb, data, options),
+    workbook,
     lost: [],
     unreadRecords: new Map(),
     undecodedFormulas: [],
     sharedFormulaCells: [],
-    unknownRecords: new Map()
+    unknownRecords: new Map(),
+    unrecognizedValues: keptSettingsReport(workbook)
+  };
+}
+
+/**
+ * What `Workbook.readStream` reads: a Node `Readable`, a web `ReadableStream`, or any (async) iterable of the
+ * package's byte chunks.
+ */
+export type WorkbookStreamInput =
+  | AsyncIterable<Uint8Array | string>
+  | ReadableStream<Uint8Array>
+  | Iterable<Uint8Array>
+  | IParseStream;
+
+/**
+ * `readStream`, once, for both platforms: an XLSX package is read as it streams; an XLSB one — named by
+ * `options.format`, since a stream cannot be looked at before it is read — is collected and read as `Workbook.read`
+ * reads its bytes. `readStream` used to take XLSX only, and on an XLSB stream its error told the caller to pass a
+ * `format: "xlsb"` it then ignored.
+ */
+export async function readWorkbookStream(
+  wb: WorkbookData,
+  stream: unknown,
+  options: WorkbookReadOptions | undefined,
+  platform: {
+    readonly read: (
+      wb: WorkbookData,
+      data: Uint8Array,
+      options?: WorkbookReadOptions
+    ) => Promise<WorkbookData>;
+  }
+): Promise<WorkbookData> {
+  checkReadStreamInput("Workbook.readStream", stream);
+  checkIoOptions("Workbook.readStream", options, "read");
+  if (options?.format === "xlsb") {
+    const { streamToUint8Array } = await import("@stream/core/stream-helpers");
+    const bytes = await streamToUint8Array(
+      stream as AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | Iterable<Uint8Array>
+    );
+    return platform.read(wb, bytes, options);
+  }
+  const { readXlsxStreamInto } = await import("@excel/xlsx/read/stream");
+  return readXlsxStreamInto(wb, stream as never, options);
+}
+
+/** The decryption a buffered read's options ask for, its errors naming the format read. */
+export function workbookDecryption(
+  options: WorkbookReadOptions | undefined,
+  source?: string
+): WorkbookDecryption {
+  return {
+    ...decryptionOf(options, source),
+    format: options?.format === "xlsb" ? "XLSB" : "XLSX"
   };
 }

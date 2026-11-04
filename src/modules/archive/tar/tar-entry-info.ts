@@ -4,6 +4,7 @@
  * Represents metadata about a single entry in a TAR archive.
  */
 
+import { ArchiveArgumentError } from "@archive/core/errors";
 import type { TarType } from "@archive/tar/tar-constants";
 import { TAR_TYPE } from "@archive/tar/tar-constants";
 
@@ -51,7 +52,18 @@ export interface TarEntryInfo {
 /**
  * Check if entry is a regular file
  */
+/** A predicate's argument: a TarEntryInfo-shaped object. */
+function checkEntryInfo(where: string, entry: unknown): void {
+  if (typeof entry !== "object" || entry === null) {
+    throw new ArchiveArgumentError(
+      "entry",
+      `Archive.${where}: entry must be a TarEntryInfo, got ${entry === null ? "null" : typeof entry}`
+    );
+  }
+}
+
 export function isFile(entry: TarEntryInfo): boolean {
+  checkEntryInfo("isTarFile", entry);
   return (
     entry.type === TAR_TYPE.FILE ||
     entry.type === TAR_TYPE.FILE_OLD ||
@@ -63,6 +75,7 @@ export function isFile(entry: TarEntryInfo): boolean {
  * Check if entry is a directory
  */
 export function isDirectory(entry: TarEntryInfo): boolean {
+  checkEntryInfo("isTarDirectory", entry);
   return entry.type === TAR_TYPE.DIRECTORY;
 }
 
@@ -70,6 +83,7 @@ export function isDirectory(entry: TarEntryInfo): boolean {
  * Check if entry is a symbolic link
  */
 export function isSymlink(entry: TarEntryInfo): boolean {
+  checkEntryInfo("isTarSymlink", entry);
   return entry.type === TAR_TYPE.SYMLINK;
 }
 
@@ -77,6 +91,7 @@ export function isSymlink(entry: TarEntryInfo): boolean {
  * Check if entry is a hard link
  */
 export function isHardLink(entry: TarEntryInfo): boolean {
+  checkEntryInfo("isTarHardLink", entry);
   return entry.type === TAR_TYPE.HARD_LINK;
 }
 

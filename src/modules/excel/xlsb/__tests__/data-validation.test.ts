@@ -144,8 +144,9 @@ describe("BrtDVal structure", () => {
       "test"
     )!;
     expect(oneSided.length).toBeLessThan(twoSided.length);
-    expect(readValidation(oneSided, "test")?.rule).toMatchObject({ formulae: ["5"] });
-    expect(readValidation(twoSided, "test")?.rule).toMatchObject({ formulae: ["5", "9"] });
+    // Numbers, as the XLSX reader gives a numeric bound — the container must not decide the type.
+    expect(readValidation(oneSided, "test")?.rule).toMatchObject({ formulae: [5] });
+    expect(readValidation(twoSided, "test")?.rule).toMatchObject({ formulae: [5, 9] });
   });
 
   it("survives a truncated payload without costing the sheet", () => {
@@ -211,7 +212,7 @@ describe("data validation through a workbook", () => {
     expect(validations.C1).toMatchObject({
       type: "whole",
       operator: "between",
-      formulae: ["1", "100"]
+      formulae: [1, 100]
     });
   });
 
@@ -230,6 +231,32 @@ describe("data validation through a workbook", () => {
     expect(Object.keys(validations)).toEqual(["range:B2:D10"]);
   });
 
+  it("writes every range of a multi-range sqref, and reads them back as XLSX does", async () => {
+    const build = (workbook: ReturnType<typeof Workbook.create>) => {
+      const sheet = Workbook.addWorksheet(workbook, "S");
+      Cell.setValue(sheet, "A1", 1);
+      // A space-separated key, the form the XLSX writer writes as a `sqref` verbatim.
+      (
+        sheet as unknown as { dataValidations: { model: Record<string, unknown> } }
+      ).dataValidations.model["range:B2:B4 D6:D8"] = {
+        type: "custom",
+        allowBlank: true,
+        formulae: ["B2<A2*10"]
+      };
+    };
+    const workbook = Workbook.create();
+    build(workbook);
+    const fromXlsx = Workbook.create();
+    await Workbook.read(fromXlsx, await Workbook.toBuffer(workbook));
+    const viaXlsx = (
+      Workbook.getModel(fromXlsx).worksheets[0] as unknown as {
+        dataValidations?: Record<string, unknown>;
+      }
+    ).dataValidations;
+    expect(Object.keys(viaXlsx ?? {})).toEqual(["range:B2:B4", "range:D6:D8"]);
+    expect(await roundTrip(build)).toEqual(viaXlsx);
+  });
+
   it("groups cells that share a rule into one record", async () => {
     const validations = await roundTrip(workbook => {
       const sheet = Workbook.addWorksheet(workbook, "S");
@@ -245,7 +272,7 @@ describe("data validation through a workbook", () => {
     // Three addresses in, three addresses out — but one `BrtDVal` in between, which is the shape the
     // record's range *set* exists for.
     expect(Object.keys(validations).sort()).toEqual(["D1", "D2", "D3"]);
-    expect(validations.D2).toMatchObject({ type: "decimal", formulae: ["0"] });
+    expect(validations.D2).toMatchObject({ type: "decimal", formulae: [0] });
   });
 
   it("round-trips a custom formula's reference", async () => {
@@ -255,5 +282,41 @@ describe("data validation through a workbook", () => {
       Cell.setValidation(sheet, "G1", { type: "custom", formulae: ["=A1>0"] } as never);
     });
     expect(validations.G1).toMatchObject({ type: "custom", formulae: ["A1>0"] });
+  });
+});
+
+describe("a validation formula in the relative tokens", () => {
+  it("reads a PtgRefN against the top-left of the first range", () => {
+    // Hand-built from MS-XLSB 2.4.356: flags (custom = 7), one `RfX` B2:B5, four NULL strings, then formula1 =
+    // `PtgRefN(-1 row, -1 column) > 0` and an empty formula2. 2.5.98.8 names `PtgAreaN` among the tokens a
+    // `DVParsedFormula` may carry, and offsets are from the cell evaluated — so B2 reads `A1`.
+    const u32 = (value: number) => [
+      value & 0xff,
+      (value >>> 8) & 0xff,
+      (value >>> 16) & 0xff,
+      value >>> 24
+    ];
+    const tokens = [0x4c, ...u32(0xfffff), 0xff, 0xff, 0x1e, 0, 0, 0x0d];
+    const payload = Uint8Array.from([
+      ...u32(7),
+      ...u32(1),
+      ...u32(1),
+      ...u32(4),
+      ...u32(1),
+      ...u32(1),
+      ...u32(0xffffffff),
+      ...u32(0xffffffff),
+      ...u32(0xffffffff),
+      ...u32(0xffffffff),
+      ...u32(tokens.length),
+      ...tokens,
+      ...u32(0),
+      ...u32(0),
+      ...u32(0)
+    ]);
+    expect(readValidation(payload, "test")).toMatchObject({
+      ranges: ["B2:B5"],
+      rule: { type: "custom", formulae: ["A1>0"] }
+    });
   });
 });

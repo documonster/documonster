@@ -2,6 +2,7 @@ import type { AutoFilterCriteria } from "@excel/core/worksheet-core";
 import type { AutoFilter } from "@excel/types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 import { XmlWriter } from "@xml/writer";
 
@@ -30,6 +31,10 @@ function resolveAutoFilterRef(model: AutoFilter): string | undefined {
 class AutoFilterXform extends BaseXform<AutoFilter> {
   declare private depth: number;
   declare private writer?: XmlWriter;
+  /** The criterion being captured: its text views and declarations — see `fragment-namespaces.ts`. */
+  declare private namespaces?: FragmentNamespaces;
+  /** Each criterion captured so far, as namespace-correct text. */
+  declare private parts: string[];
   declare private namespaceAttributes?: Record<string, string>;
   /** Criteria captured during the last parse, consumed by `WorksheetXform`. */
   declare public criteria?: AutoFilterCriteria;
@@ -37,6 +42,7 @@ class AutoFilterXform extends BaseXform<AutoFilter> {
   constructor() {
     super();
     this.depth = 0;
+    this.parts = [];
   }
 
   get tag(): string {
@@ -72,13 +78,17 @@ class AutoFilterXform extends BaseXform<AutoFilter> {
       ) as Record<string, string>;
       this.depth = 0;
       this.writer = undefined;
+      this.parts = [];
       return true;
     }
-    // Child criteria: capture the whole subtree verbatim.
-    if (!this.writer) {
+    // Child criteria: capture each subtree verbatim. Each is its own fragment, written back inside an
+    // `<autoFilter>` that carries the declarations kept above.
+    if (this.depth === 0) {
       this.writer = new XmlWriter();
+      this.namespaces = new FragmentNamespaces({ enclosing: this.namespaceAttributes });
     }
-    this.writer.openNode(node.name, node.attributes);
+    const tag = this.namespaces!.open(node);
+    this.writer!.openNode(tag.name, tag.attributes);
     this.depth += 1;
     return true;
   }
@@ -91,21 +101,28 @@ class AutoFilterXform extends BaseXform<AutoFilter> {
 
   parseClose(name: string): boolean {
     if (this.depth > 0) {
+      this.namespaces!.close(name);
       this.writer!.closeNode();
       this.depth -= 1;
+      if (this.depth === 0) {
+        this.parts.push(this.namespaces!.finish(this.writer!.xml));
+        this.writer = undefined;
+        this.namespaces = undefined;
+      }
       return true;
     }
     if (name === this.tag) {
-      if (this.writer && typeof this.model === "string" && this.model) {
+      if (this.parts.length > 0 && typeof this.model === "string" && this.model) {
         this.criteria = {
           ref: this.model,
-          xml: this.writer.xml,
+          xml: this.parts.join(""),
           ...(this.namespaceAttributes && Object.keys(this.namespaceAttributes).length > 0
             ? { namespaceAttributes: this.namespaceAttributes }
             : {})
         };
       }
       this.writer = undefined;
+      this.parts = [];
       this.namespaceAttributes = undefined;
       return false;
     }
@@ -116,6 +133,8 @@ class AutoFilterXform extends BaseXform<AutoFilter> {
     super.reset();
     this.depth = 0;
     this.writer = undefined;
+    this.namespaces = undefined;
+    this.parts = [];
     this.criteria = undefined;
     this.namespaceAttributes = undefined;
   }

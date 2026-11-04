@@ -13,6 +13,7 @@
  */
 
 import { crc32UpdateByte } from "@archive/compression/crc32.base";
+import { ArchiveError } from "@archive/core/errors";
 import { stringToUint8Array as encodeUtf8 } from "@utils/binary";
 
 /**
@@ -185,6 +186,34 @@ export function zipCryptoDecrypt(
     output[i] = zipCryptoDecryptByte(state, encryptedData[ZIP_CRYPTO_HEADER_SIZE + i]!);
   }
   return output;
+}
+
+/**
+ * Decrypt ZipCrypto data, throwing when it cannot — the form `Archive.Crypto` publishes
+ * as `zipCryptoDecrypt`, matching `aesDecrypt`, which also throws.
+ *
+ * @param encryptedData - Full encrypted data including 12-byte header
+ * @param password - Password string or bytes
+ * @param crc32 - Expected CRC32 for header verification
+ * @param lastModTime - Optional last modified time for alternative verification
+ * @returns Decrypted data (excluding header)
+ * @throws {ArchiveError} When the data is shorter than the header or the password fails
+ * the header check
+ */
+export function zipCryptoDecryptOrThrow(
+  encryptedData: Uint8Array,
+  password: string | Uint8Array,
+  crc32: number,
+  lastModTime?: number
+): Uint8Array {
+  if (encryptedData.length < ZIP_CRYPTO_HEADER_SIZE) {
+    throw new ArchiveError("Encrypted data too short");
+  }
+  const decrypted = zipCryptoDecrypt(encryptedData, password, crc32, lastModTime);
+  if (!decrypted) {
+    throw new ArchiveError("Password verification failed");
+  }
+  return decrypted;
 }
 
 /**

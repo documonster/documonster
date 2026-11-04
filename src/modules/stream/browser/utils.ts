@@ -5,7 +5,6 @@
 import { finished, pipeline } from "@stream/browser/pipeline";
 import { createAddAbortSignal } from "@stream/core/add-abort-signal";
 import { createConsumers } from "@stream/core/consumers";
-import { streamToString, streamToUint8Array } from "@stream/core/stream-helpers";
 import { createIsDuplex, createIsStream, createIsTransform } from "@stream/core/type-guards";
 import { Duplex, Readable, Transform } from "@stream/kernel/classes";
 import { Writable } from "@stream/kernel/writable";
@@ -45,6 +44,6 @@ export const addAbortSignal = /* @__PURE__ */ createAddAbortSignal({
   }
 });
 
-export const consumers = /* @__PURE__ */ createConsumers({ streamToUint8Array, streamToString });
+export const consumers = /* @__PURE__ */ createConsumers();
 
 export const promises = { pipeline, finished };

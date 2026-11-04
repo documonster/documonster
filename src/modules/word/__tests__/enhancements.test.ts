@@ -31,7 +31,7 @@ describe("Chart data editing round-trip", () => {
         ]
       })
     );
-    const doc1 = Document.build(h);
+    const doc1 = h;
 
     // Step 2: Package and read back
     const buffer1 = await Io.toBuffer(doc1);
@@ -65,7 +65,7 @@ describe("Chart data editing round-trip", () => {
     };
 
     // Step 4: Re-package
-    const buffer2 = await Io.package(modifiedDoc);
+    const buffer2 = await Io.toBuffer(modifiedDoc);
 
     // Step 5: Read back and verify updated data
     const parsed2 = await Io.read(buffer2);
@@ -91,7 +91,7 @@ describe("Chart data editing round-trip", () => {
         ]
       })
     );
-    const doc = Document.build(h);
+    const doc = h;
     const buffer1 = await Io.toBuffer(doc);
     const parsed1 = await Io.read(buffer1);
 
@@ -116,7 +116,7 @@ describe("Chart data editing round-trip", () => {
       })
     };
 
-    const buffer2 = await Io.package(modifiedDoc);
+    const buffer2 = await Io.toBuffer(modifiedDoc);
     const parsed2 = await Io.read(buffer2);
     const chartItems = parsed2.body.filter(b => b.type === "chart");
     expect(chartItems.length).toBe(1);
@@ -135,7 +135,7 @@ describe("Chart data editing round-trip", () => {
         series: [{ name: "Data", categories: ["A", "B"], values: [10, 20] }]
       })
     );
-    const doc = Document.build(h);
+    const doc = h;
     const buffer1 = await Io.toBuffer(doc);
     const parsed1 = await Io.read(buffer1);
 
@@ -163,7 +163,7 @@ describe("Chart data editing round-trip", () => {
       })
     };
 
-    const buffer2 = await Io.package(modifiedDoc);
+    const buffer2 = await Io.toBuffer(modifiedDoc);
     const parsed2 = await Io.read(buffer2);
     const chartItems = parsed2.body.filter(b => b.type === "chart");
     const cc = chartItems[0] as ChartContent;
@@ -187,7 +187,7 @@ describe("RTL/BiDi support round-trip", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     expect(para.properties?.bidi).toBe(true);
@@ -207,7 +207,7 @@ describe("RTL/BiDi support round-trip", () => {
         }
       ]
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     const para = parsed.body[0] as Paragraph;
     const run = para.children[0] as Run;
@@ -226,7 +226,7 @@ describe("RTL/BiDi support round-trip", () => {
         textDirection: "tbRl"
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.textDirection).toBe("tbRl");
   });
@@ -245,7 +245,7 @@ describe("RTL/BiDi support round-trip", () => {
         textDirection: "tbRl"
       }
     };
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const parsed = await Io.read(buffer);
     expect(parsed.sectionProperties?.bidi).toBe(true);
     expect(parsed.sectionProperties?.textDirection).toBe("tbRl");
@@ -278,7 +278,7 @@ describe("Large file performance", () => {
 
     // Time the packaging
     const startPackage = performance.now();
-    const buffer = await Io.package(doc);
+    const buffer = await Io.toBuffer(doc);
     const packageTime = performance.now() - startPackage;
 
     // Should complete within 5 seconds

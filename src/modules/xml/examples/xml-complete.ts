@@ -8,7 +8,7 @@
  * - Text content, CDATA sections, comments
  * - Save/commit/rollback (transactional writes)
  * - DOM parsing with Xml.parse
- * - DOM navigation: Xml.findChild, Xml.findChildren, Xml.attr, Xml.textContent, Xml.walk
+ * - DOM navigation: Xml.findChild, Xml.listChildren, Xml.getAttr, Xml.getText, Xml.eachElement
  * - Query engine: Xml.query, Xml.queryAll (XPath-like syntax)
  * - SAX streaming parser: Xml.SaxParser, Xml.parseSax
  * - Xml.parseToObject: convert XML to plain JS objects
@@ -188,7 +188,7 @@ console.log("Root element:", doc.root.name);
 console.log("Children:", doc.root.children.length);
 
 // =============================================================================
-// 8. DOM navigation — Xml.findChild, Xml.findChildren, Xml.attr, Xml.textContent
+// 8. DOM navigation — Xml.findChild, Xml.listChildren, Xml.getAttr, Xml.getText
 // =============================================================================
 
 console.log("\n=== 8. DOM Navigation ===");
@@ -196,22 +196,22 @@ console.log("\n=== 8. DOM Navigation ===");
 // Find first book
 const firstBook = Xml.findChild(doc.root, "book");
 if (firstBook) {
-  console.log("First book id:", Xml.attr(firstBook, "id"));
-  console.log("First book genre:", Xml.attr(firstBook, "genre"));
+  console.log("First book id:", Xml.getAttr(firstBook, "id"));
+  console.log("First book genre:", Xml.getAttr(firstBook, "genre"));
 
   const titleEl = Xml.findChild(firstBook, "title");
   if (titleEl) {
-    console.log("Title:", Xml.textContent(titleEl));
+    console.log("Title:", Xml.getText(titleEl));
   }
 }
 
 // Find all books
-const allBooks = Xml.findChildren(doc.root, "book");
+const allBooks = Xml.listChildren(doc.root, "book");
 console.log("Total books:", allBooks.length);
 for (const book of allBooks) {
   const title = Xml.findChild(book, "title");
   const author = Xml.findChild(book, "author");
-  console.log(`  "${Xml.textContent(title!)}" by ${Xml.textContent(author!)}`);
+  console.log(`  "${Xml.getText(title!)}" by ${Xml.getText(author!)}`);
 }
 
 // =============================================================================
@@ -221,7 +221,7 @@ for (const book of allBooks) {
 console.log("\n=== 9. Walk ===");
 
 const elementNames: string[] = [];
-Xml.walk(doc.root, el => {
+Xml.eachElement(doc.root, el => {
   elementNames.push(el.name);
 });
 console.log("All elements:", elementNames);
@@ -234,26 +234,26 @@ console.log("\n=== 10. Query Engine ===");
 
 // Direct path
 const firstTitle = Xml.query(doc.root, "book/title");
-console.log("First title:", firstTitle ? Xml.textContent(firstTitle) : "not found");
+console.log("First title:", firstTitle ? Xml.getText(firstTitle) : "not found");
 
 // All titles
 const allTitles = Xml.queryAll(doc.root, "book/title");
 console.log(
   "All titles:",
-  allTitles.map(t => Xml.textContent(t))
+  allTitles.map(t => Xml.getText(t))
 );
 
 // Attribute filter
 const fictionBooks = Xml.queryAll(doc.root, "book[@genre='fiction']");
 console.log(
   "Fiction books:",
-  fictionBooks.map(b => Xml.textContent(Xml.findChild(b, "title")!))
+  fictionBooks.map(b => Xml.getText(Xml.findChild(b, "title")!))
 );
 
 // Indexed access
 const secondBook = Xml.query(doc.root, "book[1]");
 if (secondBook) {
-  console.log("Second book:", Xml.textContent(Xml.findChild(secondBook, "title")!));
+  console.log("Second book:", Xml.getText(Xml.findChild(secondBook, "title")!));
 }
 
 // Wildcard
@@ -366,14 +366,14 @@ console.log("CDATA encoded:", cdataEncoded);
 console.log("\n=== 16. Name Validation ===");
 
 try {
-  Xml.validateXmlName("valid-name");
+  Xml.validateName("valid-name");
   console.log("'valid-name' is valid");
 } catch {
   // won't reach here
 }
 
 try {
-  Xml.validateXmlName("123invalid");
+  Xml.validateName("123invalid");
   console.log("'123invalid' is valid");
 } catch (err) {
   if (isXmlError(err)) {
@@ -419,7 +419,7 @@ try {
 const xmlWithBadChars = "<root>text with \x01 control char</root>";
 try {
   const tolerantDoc = Xml.parse(xmlWithBadChars, { invalidCharHandling: "replace" });
-  console.log("Tolerant parse OK:", Xml.textContent(tolerantDoc.root).length, "chars");
+  console.log("Tolerant parse OK:", Xml.getText(tolerantDoc.root).length, "chars");
 } catch (err) {
   console.log("Even tolerant mode failed:", (err as Error).message);
 }
@@ -460,12 +460,12 @@ const roundTrip = Xml.parse(w19.xml);
 const sheets = Xml.queryAll(roundTrip.root, "sheets/sheet");
 console.log("Sheets found:", sheets.length);
 for (const sheet of sheets) {
-  console.log(`  Sheet: name="${Xml.attr(sheet, "name")}" id=${Xml.attr(sheet, "sheetId")}`);
+  console.log(`  Sheet: name="${Xml.getAttr(sheet, "name")}" id=${Xml.getAttr(sheet, "sheetId")}`);
 }
 
 const printArea = Xml.query(roundTrip.root, "definedNames/definedName[@name='_xlnm.Print_Area']");
 if (printArea) {
-  console.log("Print area:", Xml.textContent(printArea));
+  console.log("Print area:", Xml.getText(printArea));
 }
 
 console.log("\n=== XML Examples Complete ===");

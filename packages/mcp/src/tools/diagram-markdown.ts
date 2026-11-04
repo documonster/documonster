@@ -19,8 +19,8 @@
  * document and a broken one.
  */
 
-import { encodePng } from "documonster/archive";
-import { rasterizeToRgba, translate, type DrawList, type RasterFontSource } from "documonster/draw";
+import { Archive } from "documonster/archive";
+import { Draw, Matrix, type DrawList, type RasterFontSource } from "documonster/draw";
 import type { MermaidRenderOptions } from "documonster/mermaid";
 import type { MarkdownImageData, MarkdownImportOptions } from "documonster/word/markdown";
 
@@ -268,12 +268,12 @@ export async function prepareMarkdownDiagrams(
           children: [
             {
               kind: "group",
-              transform: translate(0, -cut.top / fit),
+              transform: Matrix.translate(0, -cut.top / fit),
               children: list.children
             }
           ]
         };
-        const piece = rasterizeToRgba(slice, {
+        const piece = Draw.toRgba(slice, {
           scale: EMBED_SCALE * fit,
           // An embedded diagram is rasterised, so it needs the operator's faces exactly as a
           // standalone PNG does. Without them, `--pdf-font` made the prose of a converted
@@ -282,7 +282,7 @@ export async function prepareMarkdownDiagrams(
           ...(fonts?.useSystemFonts === undefined ? {} : { useSystemFonts: fonts.useSystemFonts })
         });
         const encoded = {
-          bytes: encodePng(piece.data, piece.width, piece.height, {
+          bytes: Archive.encodePng(piece.data, piece.width, piece.height, {
             // Pixels and the OOXML extent have both already been reduced by
             // `fit`, so their ratio remains 2 px/pt = 144 DPI. Multiplying by
             // fit again made a 50%-fitted PNG falsely claim 72 DPI.

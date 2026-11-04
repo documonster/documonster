@@ -17,8 +17,14 @@
  * sheet suppresses.
  */
 import type { IgnoredError } from "@excel/types";
-import { encodeRange, rangeReference, readRange, tryDecodeRange } from "@excel/xlsb/binary";
-import { BinaryReader, BinaryWriter, concatUint8Arrays } from "@utils/binary";
+import {
+  encodeRange,
+  rangeReference,
+  readSheetRange,
+  tryDecodeRange,
+  XlsbReader
+} from "@excel/xlsb/binary";
+import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 
 /** Serialise a `BrtBeginAFilter`, or `undefined` when the reference does not decode. */
 export function encodeAutoFilter(reference: string): Uint8Array | undefined {
@@ -29,7 +35,7 @@ export function encodeAutoFilter(reference: string): Uint8Array | undefined {
 /** Read a `BrtBeginAFilter` back to an `A1:B2` reference. */
 export function readAutoFilter(payload: Uint8Array, part: string): string | undefined {
   try {
-    return rangeReference(readRange(new BinaryReader(payload, 0, part)));
+    return rangeReference(readSheetRange(new XlsbReader(payload, 0, part), "BrtBeginAFilter"));
   } catch {
     return undefined;
   }
@@ -76,7 +82,7 @@ export function encodeIgnoredError(entry: IgnoredError): Uint8Array | undefined 
 /** Read a `BrtCellIgnoreEC`. One entry per range it covers, because the model keys them by range. */
 export function readIgnoredErrors(payload: Uint8Array, part: string): readonly IgnoredError[] {
   try {
-    const reader = new BinaryReader(payload, 0, part);
+    const reader = new XlsbReader(payload, 0, part);
     const flags = reader.readUint32();
     const count = reader.readInt32();
     if (count < 1 || count >= 8192) {
@@ -90,7 +96,7 @@ export function readIgnoredErrors(payload: Uint8Array, part: string): readonly I
     });
     const entries: IgnoredError[] = [];
     for (let index = 0; index < count; index++) {
-      entries.push({ ...settings, ref: rangeReference(readRange(reader)) });
+      entries.push({ ...settings, ref: rangeReference(readSheetRange(reader, "BrtCellIgnoreEC")) });
     }
     return entries;
   } catch {

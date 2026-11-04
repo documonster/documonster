@@ -25,16 +25,22 @@ function assertEntryExtractableInMemory(entry: ZipEntryRecord): void {
     entry.uncompressedSize64 !== undefined &&
     entry.uncompressedSize64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1");
+    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
+      allowed: Number.MAX_SAFE_INTEGER
+    });
   }
   if (entry.compressedSize64 !== undefined && entry.compressedSize64 > MAX_SAFE_INTEGER_BIGINT) {
-    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1");
+    throw new FileTooLargeError(entry.path, "ZIP64 size > 2^53-1", {
+      allowed: Number.MAX_SAFE_INTEGER
+    });
   }
   if (
     entry.localHeaderOffset64 !== undefined &&
     entry.localHeaderOffset64 > MAX_SAFE_INTEGER_BIGINT
   ) {
-    throw new FileTooLargeError(entry.path, "ZIP64 offset > 2^53-1");
+    throw new FileTooLargeError(entry.path, "ZIP64 offset > 2^53-1", {
+      allowed: Number.MAX_SAFE_INTEGER
+    });
   }
 }
 
@@ -78,6 +84,15 @@ export interface ZipParseOptions {
    * default; a 46-byte-per-record sanity check only rules out impossible counts.
    */
   maxEntries?: number;
+
+  /**
+   * Whether to verify each extracted entry against its recorded CRC-32, throwing
+   * `Crc32MismatchError` on a mismatch. Set `false` to read damaged archives as far as
+   * they go. AES entries carry an HMAC instead and are always authenticated; ZipCrypto
+   * entries are always verified.
+   * @default true
+   */
+  checkCrc32?: boolean;
 }
 
 /**
@@ -107,6 +122,8 @@ export interface ExtractOptions {
   password?: string | Uint8Array;
   /** See {@link ZipParseOptions.maxEntrySize}. */
   maxEntrySize?: number;
+  /** See {@link ZipParseOptions.checkCrc32}. */
+  checkCrc32?: boolean;
 }
 
 /**
@@ -128,7 +145,7 @@ async function extractEntryData(
     entry,
     compressedData,
     options.password,
-    false,
+    options.checkCrc32 ?? true,
     true,
     options.maxEntrySize
   );
@@ -149,7 +166,14 @@ function extractEntryDataSync(
   assertEntryExtractableInMemory(entry);
 
   const compressedData = readEntryCompressedData(data, entry);
-  return processEntryDataSync(entry, compressedData, options.password, true, options.maxEntrySize);
+  return processEntryDataSync(
+    entry,
+    compressedData,
+    options.password,
+    true,
+    options.maxEntrySize,
+    options.checkCrc32 ?? true
+  );
 }
 
 /**
@@ -162,6 +186,7 @@ export class ZipParser {
   private password?: string | Uint8Array;
   private archiveComment: string;
   private maxEntrySize: number | undefined;
+  private checkCrc32: boolean;
   private maxTotalUncompressedSize: number;
 
   constructor(data: Uint8Array | ArrayBuffer, options: ZipParseOptions = {}) {
@@ -174,6 +199,7 @@ export class ZipParser {
     this.entryMap = new Map(this.entries.map(e => [e.path, e]));
     this.password = options.password;
     this.maxEntrySize = options.maxEntrySize;
+    this.checkCrc32 = options.checkCrc32 ?? true;
     this.maxTotalUncompressedSize = options.maxTotalUncompressedSize ?? Infinity;
   }
 
@@ -323,7 +349,8 @@ export class ZipParser {
     }
     return extractEntryData(this.data, entry, {
       password: password ?? this.password,
-      maxEntrySize: this.maxEntrySize
+      maxEntrySize: this.maxEntrySize,
+      checkCrc32: this.checkCrc32
     });
   }
 
@@ -343,7 +370,8 @@ export class ZipParser {
     }
     return extractEntryDataSync(this.data, entry, {
       password: password ?? this.password,
-      maxEntrySize: this.maxEntrySize
+      maxEntrySize: this.maxEntrySize,
+      checkCrc32: this.checkCrc32
     });
   }
 
@@ -358,7 +386,8 @@ export class ZipParser {
     for (const entry of this.entries) {
       const data = await extractEntryData(this.data, entry, {
         password: pw,
-        maxEntrySize: this.maxEntrySize
+        maxEntrySize: this.maxEntrySize,
+        checkCrc32: this.checkCrc32
       });
       result.set(entry.path, data);
     }
@@ -381,7 +410,8 @@ export class ZipParser {
     for (const entry of this.entries) {
       result[entry.path] = extractEntryDataSync(this.data, entry, {
         password: pw,
-        maxEntrySize: this.maxEntrySize
+        maxEntrySize: this.maxEntrySize,
+        checkCrc32: this.checkCrc32
       });
     }
     return result;
@@ -407,7 +437,8 @@ export class ZipParser {
         if (!dataPromise) {
           dataPromise = extractEntryData(this.data, entry, {
             password: pw,
-            maxEntrySize: this.maxEntrySize
+            maxEntrySize: this.maxEntrySize,
+            checkCrc32: this.checkCrc32
           }).then(bytes => {
             produced += bytes.length;
             if (produced > this.maxTotalUncompressedSize) {

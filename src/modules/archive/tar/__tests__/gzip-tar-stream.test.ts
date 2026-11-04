@@ -33,8 +33,10 @@ function createBlockedGzip(): {
 function expectNoPumpListeners(stream: Transform): void {
   expect(stream.listenerCount("data")).toBe(0);
   expect(stream.listenerCount("drain")).toBe(0);
-  expect(stream.listenerCount("error")).toBe(0);
+  expect(stream.listenerCount("end")).toBe(0);
   expect(stream.listenerCount("close")).toBe(0);
+  // One sink stays, so an error the stream reports after the pump stopped is not unhandled
+  expect(stream.listenerCount("error")).toBe(1);
 }
 
 describe("gzipTarChunks", () => {
@@ -103,5 +105,45 @@ describe("gzipTarChunks", () => {
 
     await expect(pending).rejects.toThrow("Gzip stream closed before completing");
     expectNoPumpListeners(gzip.stream);
+  });
+
+  it("absorbs an error the stream reports after the consumer stopped", async () => {
+    const stream = new Transform({
+      transform(chunk, _encoding, callback) {
+        callback(null, chunk);
+      }
+    });
+    const output = gzipTarChunks(
+      (async function* () {
+        yield new Uint8Array([1]);
+        yield new Uint8Array([2]);
+      })(),
+      stream
+    )[Symbol.asyncIterator]();
+    await output.next();
+    await output.return!(undefined);
+    // Like zlib finishing the input it was processing when it was destroyed
+    expect(() => stream.emit("error", new Error("late"))).not.toThrow();
+  });
+
+  it("yields the output produced before a failure, then throws it", async () => {
+    const error = new Error("truncated");
+    const stream = new Transform({
+      transform(chunk, _encoding, callback) {
+        callback(null, chunk);
+      },
+      flush(callback) {
+        callback(error);
+      }
+    });
+    const output = gzipTarChunks(
+      (async function* () {
+        yield new Uint8Array([1, 2]);
+      })(),
+      stream
+    )[Symbol.asyncIterator]();
+    const first = await output.next();
+    expect(Array.from(first.value!)).toEqual([1, 2]);
+    await expect(output.next()).rejects.toBe(error);
   });
 });

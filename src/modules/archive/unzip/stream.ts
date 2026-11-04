@@ -1,5 +1,6 @@
 import zlib from "zlib";
 
+import { isZlibError, toInflateError } from "@archive/core/errors";
 import type { CrxHeader, ParseDriverState, ParseOptions } from "@archive/unzip/parser-core";
 import { DATA_DESCRIPTOR_SIGNATURE_BYTES } from "@archive/unzip/parser-core";
 import type {
@@ -11,6 +12,7 @@ import type {
 } from "@archive/unzip/stream.base";
 import {
   PullStream,
+  failCurrentEntry,
   runParseLoop,
   streamUntilValidatedDataDescriptor
 } from "@archive/unzip/stream.base";
@@ -18,9 +20,24 @@ import type { Duplex, PassThrough, Transform } from "@stream";
 
 /**
  * Creates an InflateRaw stream using Node.js native zlib.
+ *
+ * zlib fails a stream by destroying it with its own error, and that error reaches whoever reads the entry before the
+ * parser sees it, so it is typed here, where it is raised. Only zlib's own errors are: a stream torn down by its
+ * pipeline is destroyed with someone else's error, which is not this stream's to rename.
  */
 function createInflateRaw(): Transform {
-  return zlib.createInflateRaw({ chunkSize: 64 * 1024 });
+  const inflater = zlib.createInflateRaw({ chunkSize: 64 * 1024 });
+  const destroy = inflater.destroy.bind(inflater);
+  inflater.destroy = (error?: Error) => destroy(isZlibError(error) ? toInflateError(error) : error);
+  return inflater;
+}
+
+function inflateRawSync(data: Uint8Array): Uint8Array {
+  try {
+    return zlib.inflateRawSync(data);
+  } catch (error) {
+    throw toInflateError(error);
+  }
 }
 
 export type { CrxHeader, EntryProps, EntryVars, ParseOptions } from "@archive/unzip/parser-core";
@@ -152,7 +169,7 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
         emitter,
         createInflateRawFn,
         this._driverState,
-        (data: Uint8Array) => zlib.inflateRawSync(data)
+        inflateRawSync
       ).then(
         () => {
           // If an error was emitted during parsing (e.g. invalid signature),
@@ -180,6 +197,12 @@ export function createParseClass(createInflateRawFn: InflateFactory): {
     // ---------------------------------------------------------------
     // Entry queue management
     // ---------------------------------------------------------------
+
+    /** Torn down mid-entry: fail the entry being read, then release the input. */
+    override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+      failCurrentEntry(this._driverState, error);
+      super._destroy(error, callback);
+    }
 
     private _enqueueEntry(entry: ZipEntry): void {
       if (this._entryWaiter) {

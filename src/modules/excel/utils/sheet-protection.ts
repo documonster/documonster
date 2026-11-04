@@ -1,4 +1,5 @@
 import { Encryptor } from "@excel/utils/encryptor";
+import { isRecordArgument } from "@utils/object";
 import { base64ToUint8Array, uint8ArrayToBase64 } from "@utils/utils";
 
 // =============================================================================
@@ -104,4 +105,21 @@ export async function verifySheetPassword(
     difference |= (candidate[i] ?? 0) ^ (expected[i] ?? 0);
   }
   return difference === 0;
+}
+
+/**
+ * The two call forms of a `protect`: `(password?, options?)` or `({ password, ...options })`. The
+ * options are returned without `password`, because the protection builder copies every option into
+ * the stored record. Anything but an options object is the positional password and is passed on
+ * unchanged, `null` included, so the deprecated form behaves exactly as it always did.
+ */
+export function splitPasswordOptions<T extends object>(
+  passwordOrOptions: string | (T & { password?: string }) | undefined,
+  legacyOptions: T | undefined
+): [string | undefined, T | undefined] {
+  if (isRecordArgument(passwordOrOptions)) {
+    const { password, ...options } = passwordOrOptions;
+    return [password, options as T];
+  }
+  return [passwordOrOptions as string | undefined, legacyOptions];
 }

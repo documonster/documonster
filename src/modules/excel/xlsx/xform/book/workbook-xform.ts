@@ -162,17 +162,17 @@ class WorkbookXform extends BaseXform {
     this.map.workbookProtection.render(xmlStream, model.protection);
     this.map.bookViews.render(xmlStream, model.views);
     this.map.sheets.render(xmlStream, model.sheets);
-    this.map.definedNames.render(xmlStream, model.definedNames);
 
-    // <externalReferences> must appear BEFORE <calcPr> per ECMA-376
-    // CT_Workbook sequence: sheets → definedNames → externalReferences →
-    // calcPr → pivotCaches. Violating this order causes Excel to reject
-    // the file as corrupt.
+    // CT_Workbook (ECMA-376 §18.2.27) is a sequence: … sheets → functionGroups → externalReferences →
+    // definedNames → calcPr → … → pivotCaches. Excel refuses an out-of-order child as corruption, and
+    // `<externalReferences>` written after `<definedNames>` was exactly that whenever a workbook had both.
     const externalLinks = model.externalLinks ?? [];
     if (externalLinks.length > 0) {
       const externalReferenceModels = externalLinks.map((link: any) => ({ rId: link.rId }));
       this.map.externalReferences.render(xmlStream, externalReferenceModels);
     }
+
+    this.map.definedNames.render(xmlStream, model.definedNames);
 
     this.map.calcPr.render(xmlStream, model.calcProperties);
     // R9-B6: Deduplicate pivot caches by cacheId before rendering.
@@ -294,7 +294,8 @@ class WorkbookXform extends BaseXform {
 
     (model.sheets ?? []).forEach((sheet: any) => {
       const rel = rels[sheet.rId];
-      if (!rel) {
+      // A relationship with no `Target` names no part, so it is the same as no relationship.
+      if (!rel || typeof rel.Target !== "string") {
         sheetPosition += 1;
         return;
       }
@@ -377,7 +378,11 @@ class WorkbookXform extends BaseXform {
               ? splitPrintAreaInput(definedName.rawText)
               : [];
 
-        if (definedName.name === "_xlnm.Print_Area") {
+        // A workbook-scoped print name belongs to no sheet — Excel leaves `_xlnm.Print_Area` = `#REF!` behind when
+        // the sheet it described is deleted — so it stays a name rather than being applied to nothing and lost.
+        if (definedName.localSheetId === undefined) {
+          definedNames.push(definedName);
+        } else if (definedName.name === "_xlnm.Print_Area") {
           worksheet = worksheets[definedName.localSheetId];
           if (worksheet && effectiveRanges.length > 0) {
             if (!worksheet.pageSetup) {

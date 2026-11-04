@@ -29,9 +29,11 @@
 import type { HeaderFooter } from "@excel/types";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
 import type { RelationshipModel } from "@excel/xlsx/xform/core/relationship-xform";
+import { FragmentNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { HeaderFooterXform } from "@excel/xlsx/xform/sheet/header-footer-xform";
 import { parseXsdBoolean, parseXsdInt } from "@excel/xlsx/xform/xsd-values";
-import { xmlEncode as escapeXml, xmlEncodeAttr } from "@xml/encode";
+import { xmlEncode as escapeXml, xmlEncodeAttr, xmlValue } from "@xml/encode";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
 
 export interface ChartsheetModel {
@@ -169,7 +171,14 @@ const CHARTSHEET_ATTRIBUTES = {
   "xmlns:r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 };
 
+/** The chartsheet writer declares the main namespace and `r`, whatever the source declared. */
+const CHARTSHEET_WRITER_NAMESPACES: WriterNamespaces = { fixed: CHARTSHEET_ATTRIBUTES };
+
 class ChartsheetXform extends BaseXform<ChartsheetModel> {
+  get writerNamespaces(): WriterNamespaces {
+    return CHARTSHEET_WRITER_NAMESPACES;
+  }
+
   private inSheetView = false;
   /**
    * Raw-capture state for elements the structured parser doesn't model.
@@ -196,6 +205,8 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
   private captureRoot: string | undefined;
   private captureDepth = 0;
   private captureParts: string[] = [];
+  /** The capture's text views and the declarations it needs — see `fragment-namespaces.ts`. */
+  private captureNamespaces: FragmentNamespaces | undefined;
   private skipNextCaptureClose = false;
   private sheetDepth = 0;
   private headerFooterXform = new HeaderFooterXform();
@@ -244,13 +255,13 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
     // workbook's `<bookViews>` list). Default is 0 per schema; writing
     // 0 explicitly is harmless and matches the wire shape Excel emits.
     const svAttrs: Record<string, string> = {
-      workbookViewId: String(m.workbookViewId ?? 0)
+      workbookViewId: xmlValue(m.workbookViewId ?? 0, "workbookViewId")
     };
     if (m.tabSelected) {
       svAttrs.tabSelected = "1";
     }
     if (m.zoomScale !== undefined) {
-      svAttrs.zoomScale = String(m.zoomScale);
+      svAttrs.zoomScale = xmlValue(m.zoomScale, "zoomScale");
     }
     if (m.zoomToFit) {
       svAttrs.zoomToFit = "1";
@@ -333,11 +344,11 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
         // verbatim and instruct `parseClose` to skip the synthetic
         // close SAX will fire next. Depth stays where it was — a
         // self-close neither enters nor leaves a level.
-        this.captureParts.push(selfCloseTag(node));
+        this.captureParts.push(selfCloseTag(this.captureNamespaces!.open(node)));
         this.skipNextCaptureClose = true;
       } else {
         this.captureDepth++;
-        this.captureParts.push(openTag(node));
+        this.captureParts.push(openTag(this.captureNamespaces!.open(node)));
       }
       return true;
     }
@@ -374,14 +385,18 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
         // verbatim and don't enter the multi-event capture loop.
         // The matching `parseClose` must also decrement
         // `sheetDepth`, so we flag to skip stateful close work.
-        (this.model!.rawChildren ??= {})[name] = selfCloseTag(node);
+        const namespaces = new FragmentNamespaces();
+        (this.model!.rawChildren ??= {})[name] = namespaces.finish(
+          selfCloseTag(namespaces.open(node))
+        );
         // No capture state to clear; `parseClose` handles the
         // close via its fall-through and decrements `sheetDepth`.
         return true;
       }
       this.captureRoot = name;
       this.captureDepth = 1;
-      this.captureParts = [openTag(node)];
+      this.captureNamespaces = new FragmentNamespaces();
+      this.captureParts = [openTag(this.captureNamespaces.open(node))];
       return true;
     }
 
@@ -535,15 +550,19 @@ class ChartsheetXform extends BaseXform<ChartsheetModel> {
         // already wrote as `<foo/>`. Swallow it without touching
         // `captureDepth`.
         this.skipNextCaptureClose = false;
+        this.captureNamespaces!.close(name);
         return true;
       }
       this.captureDepth--;
-      this.captureParts.push(`</${name}>`);
+      this.captureParts.push(`</${this.captureNamespaces!.close(name)}>`);
       if (this.captureDepth === 0) {
         // Capture complete — store the serialised XML and reset state.
         if (this.model) {
-          (this.model.rawChildren ??= {})[this.captureRoot] = this.captureParts.join("");
+          (this.model.rawChildren ??= {})[this.captureRoot] = this.captureNamespaces!.finish(
+            this.captureParts.join("")
+          );
         }
+        this.captureNamespaces = undefined;
         this.captureRoot = undefined;
         this.captureParts = [];
         this.sheetDepth -= 1;

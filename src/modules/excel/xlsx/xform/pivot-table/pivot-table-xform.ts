@@ -8,6 +8,7 @@ import type {
 import { VALID_SUBTOTALS, METRIC_DISPLAY_NAMES } from "@excel/core/pivot-table-types";
 import { colCache } from "@excel/utils/col-cache";
 import { BaseXform } from "@excel/xlsx/xform/base-xform";
+import type { WriterNamespaces } from "@excel/xlsx/xform/fragment-namespaces";
 import { RawXmlCollector } from "@excel/xlsx/xform/pivot-table/raw-xml-collector";
 import { parseXsdBoolean } from "@excel/xlsx/xform/xsd-values";
 import type { ParseOpenTag, XmlSink } from "@xml/types";
@@ -386,6 +387,10 @@ const KNOWN_PIVOT_FIELD_KEYS = new Set([
 ]);
 
 class PivotTableXform extends BaseXform<ParsedPivotTableModel | null> {
+  get writerNamespaces(): WriterNamespaces {
+    return PIVOT_TABLE_WRITER_NAMESPACES;
+  }
+
   // Parser state consolidated into object for easier reset
   private state: ParserState = createDefaultParserState();
 
@@ -1721,5 +1726,11 @@ function renderPivotField(
   attrs.defaultSubtotal = "0";
   xmlStream.leafNode("pivotField", attrs);
 }
+
+/** The pivot table writer declares the main namespace, and writes back the root's other declarations. */
+const PIVOT_TABLE_WRITER_NAMESPACES: WriterNamespaces = {
+  fixed: PivotTableXform.PIVOT_TABLE_ATTRIBUTES,
+  preservesDocumentPrefixes: true
+};
 
 export { PivotTableXform, type ParsedPivotTableModel };

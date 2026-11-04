@@ -14,8 +14,10 @@
  * - generate.ts: Test data generation
  */
 
-import { CsvError } from "@csv/errors";
+import { CsvArgumentError } from "@csv/errors";
 import { detectDelimiterFor } from "@csv/parse/delimiter-detector";
+import { checkDetectDelimiterOptions, checkTextInput } from "@csv/utils/check-options";
+import { isRecordArgument } from "@utils/object";
 
 // =============================================================================
 // Utility Functions
@@ -102,7 +104,8 @@ const FORMULA_ESCAPE_CHARS = new Set([
  */
 export function applyFirstChunkPreprocessing(
   input: string,
-  beforeFirstChunk: ((chunk: string) => string | void) | undefined
+  beforeFirstChunk: ((chunk: string) => string | void) | undefined,
+  where = "Csv.parse"
 ): string {
   let text = input;
   if (beforeFirstChunk) {
@@ -110,8 +113,9 @@ export function applyFirstChunkPreprocessing(
     if (typeof result === "string") {
       text = result;
     } else if (result !== undefined && result !== null) {
-      throw new CsvError(
-        `beforeFirstChunk must return a string or undefined, got ${typeof result}`
+      throw new CsvArgumentError(
+        "options.beforeFirstChunk",
+        `${where}: beforeFirstChunk must return a string or undefined, got ${typeof result}`
       );
     }
   }
@@ -126,6 +130,7 @@ export function applyFirstChunkPreprocessing(
  * @returns String without BOM
  */
 export function stripBom(input: string): string {
+  checkTextInput("Csv.stripBom", input);
   return input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
 }
 
@@ -146,7 +151,7 @@ export function startsWithFormulaChar(str: string): boolean {
  * Uses quote-aware detection to avoid detecting newlines inside quoted fields.
  *
  * @param input - String to analyze
- * @param quote - Quote character (default: '"')
+ * @param options - `quote`: quote character (default `'"'`)
  * @returns Detected line terminator or '\n' as default
  *
  * @example
@@ -156,7 +161,21 @@ export function startsWithFormulaChar(str: string): boolean {
  * detectLinebreak('a,b,c') // '\n' (default)
  * detectLinebreak('"a\nb",c\r\nd') // '\r\n' (ignores newline in quotes)
  */
-export function detectLinebreak(input: string, quote = '"'): string {
+export function detectLinebreak(input: string, options?: CsvDetectLinebreakOptions): string;
+/** @deprecated Pass `{ quote }`. The positional form is removed in 1.0. */
+export function detectLinebreak(input: string, quote: string): string;
+export function detectLinebreak(
+  input: string,
+  optionsOrQuote?: CsvDetectLinebreakOptions | string
+): string {
+  checkTextInput("Csv.detectLinebreak", input);
+  // Only `undefined` defaults the positional quote: a `null` placeholder there has always meant
+  // "no quote character", so line breaks inside quotes are not skipped.
+  const quote = isRecordArgument(optionsOrQuote)
+    ? (optionsOrQuote.quote ?? '"')
+    : optionsOrQuote === undefined
+      ? '"'
+      : optionsOrQuote;
   let inQuote = false;
 
   for (let i = 0; i < input.length; i++) {
@@ -195,6 +214,24 @@ export function detectLinebreak(input: string, quote = '"'): string {
 // Delimiter Detection
 // =============================================================================
 
+/** Options for `Csv.detectDelimiter`. */
+export interface CsvDetectDelimiterOptions {
+  /** Quote character. Default `'"'`. */
+  quote?: string;
+  /** Candidates, in tie-break order. Default `[",", ";", "\t", "|"]`. */
+  delimitersToGuess?: readonly string[];
+  /** Comment prefix; commented lines are not scored. */
+  comment?: string;
+}
+
+/** Options for `Csv.detectLinebreak`. */
+export interface CsvDetectLinebreakOptions {
+  /** Quote character; line breaks inside quotes are ignored. Default `'"'`. */
+  quote?: string;
+}
+
+// =============================================================================
+
 /**
  * Auto-detect the delimiter used in a CSV string
  *
@@ -213,26 +250,52 @@ export function detectLinebreak(input: string, quote = '"'): string {
  *    (default order: comma, semicolon, tab, pipe)
  *
  * @param input - CSV string to analyze
- * @param quote - Quote character (default: '"')
- * @param delimitersToGuess - Custom list of delimiters to try (default: [",", ";", "\t", "|"])
+ * @param options - `quote` (default `'"'`), `delimitersToGuess` (default
+ *   `[",", ";", "\t", "|"]`) and `comment`
  * @returns Detected delimiter or first delimiter in list
  *
  * @example
  * detectDelimiter('a,b,c\n1,2,3') // ','
  * detectDelimiter('a;b;c\n1;2;3') // ';'
  * detectDelimiter('a\tb\tc\n1\t2\t3') // '\t'
- * detectDelimiter('a:b:c\n1:2:3', '"', [':']) // ':'
+ * detectDelimiter('a:b:c\n1:2:3', { delimitersToGuess: [':'] }) // ':'
+ */
+export function detectDelimiter(input: string, options?: CsvDetectDelimiterOptions): string;
+/**
+ * @deprecated Pass `{ quote, delimitersToGuess, comment }`. The positional form is removed
+ * in 1.0.
+ * @param skipEmptyLines - Ignored. Kept so existing five-argument calls still compile; an
+ *   empty or whitespace-only record is never scored, whatever this says.
  */
 export function detectDelimiter(
   input: string,
-  quote: string = '"',
+  quote?: string,
   delimitersToGuess?: string[],
   comment?: string,
-  // Accepted for call-site compatibility and deliberately unused: a record that is empty or
-  // only whitespace is never scored, whatever this says, because it cannot indicate a
-  // delimiter. See isScorableDetectionRecord.
   skipEmptyLines?: boolean | "greedy"
+): string;
+export function detectDelimiter(
+  input: string,
+  optionsOrQuote?: CsvDetectDelimiterOptions | string,
+  delimitersToGuess?: string[],
+  comment?: string
+  // The deprecated overload's fifth `skipEmptyLines` argument is not read: a record that is
+  // empty or only whitespace cannot indicate a delimiter and is never scored. See
+  // isScorableDetectionRecord.
 ): string {
-  void skipEmptyLines;
-  return detectDelimiterFor(input, { quote, comment, delimitersToGuess });
+  checkTextInput("Csv.detectDelimiter", input);
+  if (isRecordArgument(optionsOrQuote)) {
+    checkDetectDelimiterOptions(optionsOrQuote as Record<string, unknown>);
+    return detectDelimiterFor(input, {
+      quote: optionsOrQuote.quote ?? '"',
+      comment: optionsOrQuote.comment,
+      delimitersToGuess: optionsOrQuote.delimitersToGuess
+    });
+  }
+  // As in `detectLinebreak`, only `undefined` defaults the positional quote.
+  return detectDelimiterFor(input, {
+    quote: optionsOrQuote === undefined ? '"' : optionsOrQuote,
+    comment,
+    delimitersToGuess
+  });
 }

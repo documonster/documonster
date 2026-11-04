@@ -81,7 +81,7 @@
  *    count drops from 32 to 30.
  */
 
-import { buildChartExModel, drawChartExPdf, renderChartExSvg } from "@excel/chart";
+import { ChartEx, drawChartExPdf } from "@excel/chart";
 import { collectTreemapCells } from "@excel/chart/render/chart-ex-renderer";
 import { recordChartPdf } from "@test/pdf-draw-record";
 import { describeSvgGeometry, extractSvgGeometry } from "@test/svg-geometry";
@@ -100,22 +100,22 @@ interface Baseline {
 }
 
 const BASELINES: Record<string, Baseline> = {
-  sunburst: { svg: ["6ccf8500", 8, "path:4 rect:2 text:2"], pdf: ["08f6ba6b", 8] },
-  treemap: { svg: ["66f96b37", 10, "rect:6 text:4"], pdf: ["0e4930be", 10] },
-  funnel: { svg: ["d806a5e0", 12, "polygon:4 rect:2 text:6"], pdf: ["8a2581df", 12] },
-  waterfall: { svg: ["840202d7", 27, "polyline:9 rect:6 text:12"], pdf: ["2156017f", 27] },
-  histogram: { svg: ["d6a362f8", 18, "polyline:6 rect:3 text:9"], pdf: ["be217693", 18] },
-  pareto: { svg: ["9c2fc671", 30, "circle:4 polyline:7 rect:6 text:13"], pdf: ["123152db", 30] },
+  sunburst: { svg: ["b11da9b4", 8, "path:4 rect:2 text:2"], pdf: ["9b17605d", 8] },
+  treemap: { svg: ["d4c568ab", 10, "rect:6 text:4"], pdf: ["c085973c", 10] },
+  funnel: { svg: ["cecab3f4", 12, "polygon:4 rect:2 text:6"], pdf: ["aacf72d5", 12] },
+  waterfall: { svg: ["e9a13bdb", 27, "polyline:9 rect:6 text:12"], pdf: ["7011f1d5", 27] },
+  histogram: { svg: ["1c804dd4", 18, "polyline:6 rect:3 text:9"], pdf: ["fefdc47d", 18] },
+  pareto: { svg: ["70be289d", 30, "circle:4 polyline:7 rect:6 text:13"], pdf: ["5ecfa47d", 30] },
   boxWhisker: {
-    svg: ["31583b22", 32, "circle:4 polyline:14 rect:2 text:12"],
-    pdf: ["c314b258", 32]
+    svg: ["506a3226", 32, "circle:4 polyline:14 rect:2 text:12"],
+    pdf: ["1fca1e42", 32]
   },
-  regionMap: { svg: ["93099fd1", 12, "polygon:4 rect:2 text:6"], pdf: ["0616ecc0", 12] }
+  regionMap: { svg: ["342c350d", 12, "polygon:4 rect:2 text:6"], pdf: ["b97a60c2", 12] }
 };
 
 /** A minimal but non-degenerate chart of the given layout, with a legend. */
 function modelOf(type: string) {
-  return buildChartExModel({
+  return ChartEx.createModel({
     type,
     categories: "Sheet1!$A$1:$A$4",
     series: [
@@ -129,7 +129,7 @@ function modelOf(type: string) {
     showLegend: true,
     legendPosition: "r",
     title: "T"
-  } as Parameters<typeof buildChartExModel>[0]);
+  } as Parameters<typeof ChartEx.createModel>[0]);
 }
 
 /** Census of shape kinds, e.g. `"rect:6 text:2"`. */
@@ -164,7 +164,7 @@ describe("ChartEx SVG geometry is stable", () => {
     }
   ] of Object.entries(BASELINES)) {
     it(`${type} draws the same picture`, () => {
-      const svg = renderChartExSvg(modelOf(type), { width: WIDTH, height: HEIGHT });
+      const svg = ChartEx.toSvg(modelOf(type), { width: WIDTH, height: HEIGHT });
       expect(census(svg)).toBe(kinds);
       expect(extractSvgGeometry(svg)).toHaveLength(count);
       expect(stableHash(describeSvgGeometry(svg))).toBe(hash);
@@ -277,7 +277,7 @@ describe("ChartEx backends agree", () => {
       // constants instead would be a statement about this file, not the renderer,
       // and counting primitives alone would pass while every colour was wrong.
       const svgShapes = extractSvgGeometry(
-        renderChartExSvg(modelOf(type), { width: WIDTH, height: HEIGHT })
+        ChartEx.toSvg(modelOf(type), { width: WIDTH, height: HEIGHT })
       );
       const pdfShapes = record(type).shapes;
       // The first mark of each is the canvas: SVG fills the viewport, while the PDF
@@ -319,8 +319,8 @@ describe("ChartEx PDF output is stable", () => {
 describe("the plot keeps a usable share of a small canvas", () => {
   /** The plot rectangle, read back from the axis gridlines. */
   const plotOf = (width: number, height: number, legendPosition: string) => {
-    const svg = renderChartExSvg(
-      buildChartExModel({
+    const svg = ChartEx.toSvg(
+      ChartEx.createModel({
         type: "waterfall",
         categories: "S!$A$1:$A$3",
         series: [
@@ -334,7 +334,7 @@ describe("the plot keeps a usable share of a small canvas", () => {
         showLegend: true,
         legendPosition,
         title: "T"
-      } as Parameters<typeof buildChartExModel>[0]),
+      } as Parameters<typeof ChartEx.createModel>[0]),
       { width, height }
     );
     const shapes = extractSvgGeometry(svg);
@@ -422,8 +422,8 @@ describe("the plot keeps a usable share of a small canvas", () => {
 
 describe("the region map frames its data", () => {
   const preview = (categories: string[]) =>
-    renderChartExSvg(
-      buildChartExModel({
+    ChartEx.toSvg(
+      ChartEx.createModel({
         type: "regionMap",
         series: [
           {
@@ -433,7 +433,7 @@ describe("the region map frames its data", () => {
           }
         ],
         layout: { regionLabels: "showAll" }
-      } as Parameters<typeof buildChartExModel>[0]),
+      } as Parameters<typeof ChartEx.createModel>[0]),
       { width: 420, height: 260 }
     );
 
@@ -466,8 +466,8 @@ describe("the region map frames its data", () => {
     // came out a different shape on a landscape panel than on a portrait one.
     const ratio = (width: number, height: number): number => {
       const drawn = circles(
-        renderChartExSvg(
-          buildChartExModel({
+        ChartEx.toSvg(
+          ChartEx.createModel({
             type: "regionMap",
             series: [
               {
@@ -477,7 +477,7 @@ describe("the region map frames its data", () => {
               }
             ],
             layout: { regionLabels: "showAll" }
-          } as Parameters<typeof buildChartExModel>[0]),
+          } as Parameters<typeof ChartEx.createModel>[0]),
           { width, height }
         )
       );
@@ -535,7 +535,7 @@ describe("the treemap layout is squarified", () => {
     children: [leaf("A", 40), leaf("B", 25), leaf("C", 18), leaf("D", 12), leaf("E", 5)]
   };
   const box = { x: 0, y: 0, width: 400, height: 260 };
-  const cells = collectTreemapCells(root as never, box);
+  const cells = collectTreemapCells(undefined, root as never, box);
 
   it("gives every tile a usable aspect ratio", () => {
     // The old slice-and-dice layout split the plot along one axis in a single pass,
@@ -584,7 +584,7 @@ describe("ChartEx legend clears a multi-paragraph title", () => {
    * paragraphs. Both backends share the layout, so both were wrong.
    */
   const titled = (title: string) =>
-    buildChartExModel({
+    ChartEx.createModel({
       type: "funnel",
       categories: "S!$A$1:$A$3",
       series: [
@@ -598,7 +598,7 @@ describe("ChartEx legend clears a multi-paragraph title", () => {
       showLegend: true,
       legendPosition: "t",
       title
-    } as Parameters<typeof buildChartExModel>[0]);
+    } as Parameters<typeof ChartEx.createModel>[0]);
 
   /** Baselines of the title's paragraphs, in document order. */
   const titleBaselines = (svg: string): number[] => {
@@ -619,7 +619,7 @@ describe("ChartEx legend clears a multi-paragraph title", () => {
     [3, "A\nB\nC"]
   ] as const) {
     it(`${lines}-paragraph title does not overlap the top legend`, () => {
-      const svg = renderChartExSvg(titled(title), { width: 360, height: 240 });
+      const svg = ChartEx.toSvg(titled(title), { width: 360, height: 240 });
       const baselines = titleBaselines(svg);
       expect(baselines).toHaveLength(lines);
       // The swatch has to start below the last paragraph's descender. 18-unit text
@@ -632,7 +632,7 @@ describe("ChartEx legend clears a multi-paragraph title", () => {
   it("keeps the legend above the plot area", () => {
     // Clearing the title is only half of it — the row must still sit in the band
     // between the title and the plot, not get pushed into the data.
-    const svg = renderChartExSvg(titled("A\nB\nC"), { width: 360, height: 240 });
+    const svg = ChartEx.toSvg(titled("A\nB\nC"), { width: 360, height: 240 });
     const gridlineTop = Math.min(
       ...extractSvgGeometry(svg)
         .filter(shape => shape.kind === "polyline")
@@ -655,7 +655,7 @@ describe("ChartEx backends agree with each other", () => {
         return;
       }
       const svgSwatches = extractSvgGeometry(
-        renderChartExSvg(modelOf(type), { width: WIDTH, height: HEIGHT })
+        ChartEx.toSvg(modelOf(type), { width: WIDTH, height: HEIGHT })
       )
         .filter(shape => shape.kind === "rect" && shape.coords[2] === 10 && shape.coords[3] === 10)
         .map(shape => ({ x: shape.coords[0], y: shape.coords[1] }));

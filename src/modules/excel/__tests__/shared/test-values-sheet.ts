@@ -24,9 +24,9 @@ import {
 } from "@excel/core/cell";
 import { columnCollapsed } from "@excel/core/column";
 import { ValueType } from "@excel/core/enums";
-import { rowCollapsed, rowOutlineLevel, rowSetOutlineLevel } from "@excel/core/row";
-import { rowCommit, rowGetCell, getColumn, fillFormula } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { rowGetCell, getColumn, fillFormula } from "@excel/core/worksheet";
+import { getRow } from "@excel/core/worksheet-core";
+import { Row, Workbook } from "@excel/index";
 
 const testValues = fix(testValuesJson);
 const styles = fix(stylesJson);
@@ -50,7 +50,7 @@ export const values = {
 
     cellSetValue(cellAt(ws, "J10"), 1);
     getColumn(ws, 10).outlineLevel = 1;
-    rowSetOutlineLevel(Worksheet.getRow(ws, 10), 1);
+    Row.setOutlineLevel(ws, 10, 1);
 
     cellSetValue(cellAt(ws, "A1"), 7);
     cellSetValue(cellAt(ws, "B1"), (testValues as any).str);
@@ -65,7 +65,7 @@ export const values = {
     cellSetValue(cellAt(ws, "K1"), (testValues as any).Errors.NotApplicable);
     cellSetValue(cellAt(ws, "L1"), (testValues as any).Errors.Value);
 
-    rowCommit(Worksheet.getRow(ws, 1));
+    Row.commit(ws, 1);
 
     // merge cell square with numerical value
     cellSetValue(cellAt(ws, "A2"), 5);
@@ -73,7 +73,7 @@ export const values = {
 
     // merge cell square with null value
     mergeAt(ws, "C2:D3");
-    rowCommit(Worksheet.getRow(ws, 3));
+    Row.commit(ws, 3);
 
     cellSetValue(cellAt(ws, "A4"), 1.5);
     cellSetNumFmt(cellAt(ws, "A4"), (testValues as any).numFmt1);
@@ -83,7 +83,7 @@ export const values = {
     cellSetBorder(cellAt(ws, "C4"), (styles as any).borders.doubleRed);
     cellSetValue(cellAt(ws, "E4"), 1.5);
     cellSetBorder(cellAt(ws, "E4"), (styles as any).borders.thickRainbow);
-    rowCommit(Worksheet.getRow(ws, 4));
+    Row.commit(ws, 4);
 
     // test fonts and formats
     cellSetValue(cellAt(ws, "A5"), (testValues as any).str);
@@ -104,9 +104,9 @@ export const values = {
     cellSetValue(cellAt(ws, "F5"), (testValues as any).date);
     cellSetNumFmt(cellAt(ws, "F5"), (testValues as any).numFmtDate);
     cellSetFont(cellAt(ws, "F5"), (styles as any).fonts.comicSansUdB16);
-    rowCommit(Worksheet.getRow(ws, 5));
+    Row.commit(ws, 5);
 
-    Worksheet.getRow(ws, 6).height = 42;
+    Row.setHeight(ws, 6, 42);
     (styles as any).alignments.forEach((alignment: any, index: number) => {
       const rowNumber = 6;
       const colNumber = index + 1;
@@ -114,7 +114,7 @@ export const values = {
       cellSetValue(cell, alignment.text);
       cellSetAlignment(cell, alignment.alignment);
     });
-    rowCommit(Worksheet.getRow(ws, 6));
+    Row.commit(ws, 6);
 
     if (options.checkBadAlignments) {
       (styles as any).badAlignments.forEach((alignment: any, index: number) => {
@@ -125,9 +125,9 @@ export const values = {
         cellSetAlignment(cell, alignment.alignment);
       });
     }
-    rowCommit(Worksheet.getRow(ws, 7));
+    Row.commit(ws, 7);
 
-    const row8 = Worksheet.getRow(ws, 8);
+    const row8 = getRow(ws, 8);
     row8.height = 40;
     cellSetValue(rowGetCell(row8, 1), "Blue White Horizontal Gradient");
     cellSetFill(rowGetCell(row8, 1), (styles as any).fills.blueWhiteHGrad);
@@ -137,7 +137,7 @@ export const values = {
     cellSetFill(rowGetCell(row8, 3), (styles as any).fills.redGreenDarkTrellis);
     cellSetValue(rowGetCell(row8, 4), "RGB Path Gradient");
     cellSetFill(rowGetCell(row8, 4), (styles as any).fills.rgbPathGrad);
-    rowCommit(row8);
+    Row.commit(ws, 8);
 
     // Old Shared Formula
     cellSetValue(cellAt(ws, "A9"), 1);
@@ -164,8 +164,8 @@ export const values = {
     if (options.checkSheetProperties) {
       expect(getColumn(ws, 10).outlineLevel).toBe(1);
       expect(columnCollapsed(getColumn(ws, 10))).toBe(true);
-      expect(rowOutlineLevel(Worksheet.getRow(ws, 10))).toBe(1);
-      expect(rowCollapsed(Worksheet.getRow(ws, 10))).toBe(true);
+      expect(Row.getOutlineLevel(ws, 10)).toBe(1);
+      expect(Row.isCollapsed(ws, 10)).toBe(true);
       expect(ws.properties.outlineLevelCol).toBe(1);
       expect(ws.properties.outlineLevelRow).toBe(1);
       expect(ws.properties.tabColor).toEqual({ argb: "FF00FF00" });
@@ -287,8 +287,8 @@ export const values = {
       expect(cellNumFmt(cellAt(ws, "F5"))).toBe((testValues as any).numFmtDate);
       expect(cellFont(cellAt(ws, "F5"))).to.deep.equal((styles as any).fonts.comicSansUdB16);
 
-      expect(Worksheet.getRow(ws, 5).height).toBeUndefined();
-      expect(Worksheet.getRow(ws, 6).height).toBe(42);
+      expect(Row.getHeight(ws, 5)).toBeUndefined();
+      expect(Row.getHeight(ws, 6)).toBe(42);
       (styles as any).alignments.forEach((alignment: any, index: number) => {
         const rowNumber = 6;
         const colNumber = index + 1;
@@ -307,7 +307,7 @@ export const values = {
         });
       }
 
-      const row8 = Worksheet.getRow(ws, 8);
+      const row8 = getRow(ws, 8);
       expect(row8.height).toBe(40);
       expect(cellFill(rowGetCell(row8, 1))).to.deep.equal((styles as any).fills.blueWhiteHGrad);
       expect(cellFill(rowGetCell(row8, 2))).to.deep.equal((styles as any).fills.redDarkVertical);

@@ -151,7 +151,7 @@ describe("the streaming XLSB writer and the 1904 date system", () => {
     // that stopped producing either would make `serialOf` return `undefined` and the comparisons pass on nothing.
     const reopened = Workbook.create();
     await Workbook.read(reopened, await streamed(false));
-    expect(Workbook.getWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual(["S"]);
+    expect(Workbook.listWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual(["S"]);
     expect(await serialOf(await streamed(false))).not.toBeUndefined();
   });
 });

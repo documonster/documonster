@@ -125,7 +125,7 @@ Document.addParagraph(
 // behindDoc image (whose vertical anchor is "page-center") would render on
 // whatever page the previous section happens to end on, visually overlapping
 // section 2's text.
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "3. Floating image — behind text", 2);
 Document.addFloatingImage(doc, watermarkPng, "png", Units.cmToEmu(8), Units.cmToEmu(8), {
   altText: "Background mark",
@@ -149,7 +149,7 @@ Document.addParagraph(
 // ---------------------------------------------------------------------------
 // 4. Floating image in-front-of text (overlay)
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "4. Floating image — in front (overlay)", 2);
 // Body text so the page is not blank — the yellow sticker is anchored to
 // the page bottom-left, this body explains where to look.
@@ -170,7 +170,7 @@ Document.addFloatingImage(doc, yellowPixelPng, "png", Units.cmToEmu(2), Units.cm
 // ---------------------------------------------------------------------------
 // 5. Rotation & flip
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "5. Rotation / flip", 2);
 Document.addFloatingImage(doc, redPixelPng, "png", Units.cmToEmu(3), Units.cmToEmu(3), {
   altText: "Rotated 30°",
@@ -236,7 +236,7 @@ const cellLogoParagraph = Build.paragraph([
     ]
   }
 ]);
-Document.addTableElement(
+Document.addTable(
   doc,
   Build.table(
     [
@@ -249,8 +249,11 @@ Document.addTableElement(
         ])
       ])
     ],
-    { width: { value: 5000, type: "pct" }, borders: Build.gridBorders() },
-    [Units.cmToTwips(2.5), Units.cmToTwips(12)]
+    {
+      width: { value: 5000, type: "pct" },
+      borders: Build.gridBorders(),
+      columnWidths: [Units.cmToTwips(2.5), Units.cmToTwips(12)]
+    }
   )
 );
 
@@ -282,7 +285,7 @@ Document.addImage(doc, watermarkPng, "png", Units.cmToEmu(0.3), Units.cmToEmu(0.
 //    rare fields like srcRect (image cropping) that the convenience helper
 //    omits.
 // ---------------------------------------------------------------------------
-Document.addParagraphElement(doc, Build.paragraph([Build.pageBreak()]));
+Document.addParagraph(doc, Build.paragraph([Build.pageBreak()]));
 Document.addHeading(doc, "8. Raw floatingImage builder (with cropping)", 2);
 Document.addParagraph(
   doc,
@@ -332,6 +335,6 @@ Document.addContent(
   })
 );
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "07-images.docx"), buf);
 console.log(`  → 07-images.docx (${buf.length} bytes)`);

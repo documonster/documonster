@@ -41,7 +41,7 @@ describe("sheet visibility", () => {
 
     const reopened = await roundTrip(source);
     expect(
-      Workbook.getWorksheets(reopened).map(sheet => [
+      Workbook.listWorksheets(reopened).map(sheet => [
         Worksheet.getName(sheet),
         Worksheet.getModel(sheet).state
       ])
@@ -68,7 +68,7 @@ describe("sheet visibility", () => {
     const source = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(source, "Only"), "A1", 1);
     const reopened = await roundTrip(source);
-    expect(Worksheet.getModel(Workbook.getWorksheets(reopened)[0]!).state).toBe("visible");
+    expect(Worksheet.getModel(Workbook.listWorksheets(reopened)[0]!).state).toBe("visible");
   });
 });
 
@@ -82,7 +82,7 @@ describe("merged ranges", () => {
     Worksheet.merge(sheet, "A3:B5");
 
     const reopened = await roundTrip(source);
-    expect(Worksheet.getModel(Workbook.getWorksheets(reopened)[0]!).mergeCells).toEqual([
+    expect(Worksheet.getModel(Workbook.listWorksheets(reopened)[0]!).mergeCells).toEqual([
       "A1:C1",
       "A3:B5"
     ]);
@@ -97,7 +97,7 @@ describe("merged ranges", () => {
     Worksheet.merge(sheet, "A1:C2");
 
     const reopened = await roundTrip(source);
-    expect(Cell.getValue(Workbook.getWorksheets(reopened)[0]!, "A1")).toBe("kept");
+    expect(Cell.getValue(Workbook.listWorksheets(reopened)[0]!, "A1")).toBe("kept");
     expect(describeWorkbook(reopened)).toBe(describeWorkbook(source));
   });
 
@@ -131,7 +131,7 @@ describe("column widths", () => {
     Column.setWidth(sheet, 2, 22.5);
     Column.setWidth(sheet, 4, 8);
 
-    const worksheet = Workbook.getWorksheets(await roundTrip(source))[0]!;
+    const worksheet = Workbook.listWorksheets(await roundTrip(source))[0]!;
     expect(Column.getWidth(worksheet, 1)).toBe(22.5);
     expect(Column.getWidth(worksheet, 2)).toBe(22.5);
     // The gap stays a gap: a column with no width must not acquire one.
@@ -177,7 +177,7 @@ describe("row heights", () => {
     Cell.setValue(sheet, "A2", 2);
     Row.setHeight(sheet, 1, 33);
 
-    const worksheet = Workbook.getWorksheets(await roundTrip(source))[0]!;
+    const worksheet = Workbook.listWorksheets(await roundTrip(source))[0]!;
     expect(Row.getHeight(worksheet, 1)).toBe(33);
     // A row that never had a height set must not acquire the default as an explicit one.
     expect(Row.getHeight(worksheet, 2)).toBeUndefined();
@@ -229,14 +229,14 @@ describe("everything together", () => {
     Workbook.addWorksheet(source, "Notes", { state: "hidden" });
 
     const reopened = await roundTrip(source);
-    const worksheet = Workbook.getWorksheets(reopened)[0]!;
+    const worksheet = Workbook.listWorksheets(reopened)[0]!;
 
     expect(describeWorkbook(reopened)).toBe(describeWorkbook(source));
     expect(Cell.getStyle(worksheet, "B2")?.numFmt).toBe("#,##0.00");
     expect(Worksheet.getModel(worksheet).mergeCells).toEqual(["A4:C4"]);
     expect(Column.getWidth(worksheet, 1)).toBe(18);
     expect(Row.getHeight(worksheet, 1)).toBe(28);
-    expect(Worksheet.getModel(Workbook.getWorksheets(reopened)[1]!).state).toBe("hidden");
+    expect(Worksheet.getModel(Workbook.listWorksheets(reopened)[1]!).state).toBe("hidden");
   });
 });
 
@@ -288,39 +288,97 @@ describe("content this writer cannot express is named, not dropped", () => {
     );
   });
 
-  it("reports a dynamic array formula", async () => {
+  // How a damaged file reads back: a second master inside an earlier one's range. Expanding the first turned the
+  // second into its follower and stripped its `ref`, and the loop then parsed that `undefined` as a range — an
+  // untyped `TypeError`. A cell holds one record, so the earlier range keeps it, and the formula it loses is reported.
+  function overlapping(isDynamicArray: boolean): Workbook.Handle {
+    const workbook = Workbook.create();
+    const sheet = Workbook.addWorksheet(workbook, "S");
+    Cell.setValue(sheet, "D2", {
+      formula: "B2:B5*2",
+      result: 0,
+      shareType: "array",
+      ref: "D2:D5",
+      isDynamicArray
+    } as never);
+    Cell.setValue(sheet, "D4", {
+      formula: "SUM(B2:B4)",
+      result: 0,
+      shareType: "array",
+      ref: "D4",
+      isDynamicArray
+    } as never);
+    return workbook;
+  }
+
+  it.each([false, true])(
+    "refuses a master inside an earlier array range (dynamic: %s)",
+    async isDynamicArray => {
+      await expect(
+        Workbook.toBuffer(overlapping(isDynamicArray), { format: "xlsb" })
+      ).rejects.toThrow(/S!D4: array formula \(overlaps the array range D2:D5 of D2\)/);
+    }
+  );
+
+  it.each([false, true])(
+    "writes an ignored master inside an earlier array range as a follower (dynamic: %s)",
+    async isDynamicArray => {
+      const bytes = await Workbook.toBuffer(overlapping(isDynamicArray), {
+        format: "xlsb",
+        unsupported: "ignore"
+      });
+      await expectValidXlsb(bytes, { includeWarnings: true });
+      const listing = describeBiffStream(
+        (await extractAll(bytes)).get("xl/worksheets/sheet1.bin")!.data
+      );
+      expect(listing.match(/BrtArrFmla/g)).toHaveLength(1);
+    }
+  );
+
+  // **These three pinned dynamic arrays as unwritable.** They are written now, as Excel writes them — `BrtCellMeta`,
+  // the master and `BrtArrFmla`, PtgExp followers, `xl/metadata.bin` — and `dynamic-array.node.test.ts` compares the
+  // records with Excel's own. What remains of the cases is that a dynamic array is not reported, and that one with no
+  // range of its own is the single-cell array Excel writes for one that does not spill.
+  it("writes a dynamic array formula and reports nothing", async () => {
     const workbook = Workbook.create();
     Cell.setValue(Workbook.addWorksheet(workbook, "S1"), "A1", {
       formula: "A2:A4",
       result: 1,
       isDynamicArray: true
     } as never);
-    await expect(Workbook.toBuffer(workbook, { format: "xlsb" })).rejects.toThrow(
-      /S1!A1: dynamic array formula/
+    const bytes = await Workbook.toBuffer(workbook, { format: "xlsb" });
+    await expectValidXlsb(bytes, { includeWarnings: true });
+    const listing = describeBiffStream(
+      (await extractAll(bytes)).get("xl/worksheets/sheet1.bin")!.data
     );
+    expect(listing).toMatch(/BrtCellMeta[\s\S]*BrtFmlaNum[\s\S]*BrtArrFmla/);
   });
 
   /**
    * What `unsupported: "ignore"` actually writes, which is the half the tests above never looked at.
    *
-   * Both cases were reported correctly and then written anyway: the report is produced by the model
+   * The case was reported correctly and then written anyway: the report is produced by the model
    * adapter, and the adapter went on to pass the formula down to the cell encoder regardless. So the
-   * documented outcome — "write them as blanks instead" — was not what happened, and asserting only
-   * the rejection could not see it. An array formula reached the file as an *ordinary* formula, which
-   * is a different formula: it computes one value where the author asked for a spilled range.
+   * documented outcome was not what happened, and asserting only the rejection could not see it. An array formula
+   * reached the file as an *ordinary* formula, which is a different formula: it computes one value where the author
+   * asked for a spilled range.
+   *
+   * **The cached value stays.** This asserted a `BrtCellBlank`, which took the value along with the reported formula —
+   * a loss nothing reported.
    */
-  it.each([
-    ["array formula with no range", { formula: "SUM(A2:A3)", result: 1, shareType: "array" }],
-    ["dynamic array", { formula: "A2:A4", result: 1, isDynamicArray: true }]
-  ])("writes an ignored %s as a blank, not as a formula", async (_kind, value) => {
+  it("writes an ignored array formula with no range as its cached value, not as a formula", async () => {
     const workbook = Workbook.create();
-    Cell.setValue(Workbook.addWorksheet(workbook, "S1"), "A1", value as never);
+    Cell.setValue(Workbook.addWorksheet(workbook, "S1"), "A1", {
+      formula: "SUM(A2:A3)",
+      result: 1,
+      shareType: "array"
+    } as never);
     const entries = await extractAll(
       await Workbook.toBuffer(workbook, { format: "xlsb", unsupported: "ignore" })
     );
     const listing = describeBiffStream(entries.get("xl/worksheets/sheet1.bin")!.data);
-    expect(listing).toContain("BrtCellBlank");
-    expect(listing).not.toMatch(/BrtFmla/);
+    expect(listing).toContain("BrtCellRk");
+    expect(listing).not.toMatch(/BrtFmla|BrtCellBlank/);
   });
 
   /**
@@ -420,7 +478,7 @@ describe("row and column formatting", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const style = Row.getStyle(Workbook.getWorksheets(reopened)[0]!, 5);
+    const style = Row.getStyle(Workbook.listWorksheets(reopened)[0]!, 5);
     expect(style?.numFmt).toBe("0.00%");
     expect(style?.font?.bold).toBe(true);
   });
@@ -437,7 +495,7 @@ describe("row and column formatting", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     expect(Column.getWidth(read, 2)).toBe(20);
     expect(Column.getStyle(read, 2)).toMatchObject({
       font: { italic: true },
@@ -456,7 +514,7 @@ describe("row and column formatting", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     expect(Row.getStyle(read, 1)).toEqual({});
     expect(Column.getStyle(read, 1)).toEqual({});
   });
@@ -533,8 +591,8 @@ describe("index zero of each style table", () => {
     );
 
     const workbook = Workbook.create();
-    await Workbook.read(workbook, await archive.bytes());
-    const sheet = Workbook.getWorksheets(workbook)[0]!;
+    await Workbook.read(workbook, await archive.toBuffer());
+    const sheet = Workbook.listWorksheets(workbook)[0]!;
     // The *cell* is what pins this. Its `BrtXF` names font 0, and font 0 is bold in this file — so
     // a reader that resolved index 0 as an index would report a bold cell. The row is a weaker
     // assertion because the row path skips a zero `ixfe` before `readStyles` is consulted at all.
@@ -554,14 +612,14 @@ describe("a cell's own format wins over its row's", () => {
     // cell comes back with the header's alignment and no rotation at all.
     const source = Workbook.create();
     const sheet = Workbook.addWorksheet(source, "S");
-    Worksheet.addRow(sheet, ["a", "b"]);
+    Row.add(sheet, ["a", "b"]);
     Row.setStyle(sheet, 1, { alignment: { horizontal: "center", vertical: "middle" } });
     Cell.setValue(sheet, "F1", "rotated");
     Cell.setStyle(sheet, "F1", { alignment: { textRotation: 90 } });
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
 
     expect(Cell.getStyle(read, "F1")?.alignment).toEqual({ textRotation: 90 });
     // The rest of the row still has the row's format.
@@ -578,7 +636,7 @@ describe("a cell's own format wins over its row's", () => {
     const build = (): ReturnType<typeof Workbook.create> => {
       const workbook = Workbook.create();
       const sheet = Workbook.addWorksheet(workbook, "S");
-      Worksheet.addRow(sheet, ["a", "b"]);
+      Row.add(sheet, ["a", "b"]);
       Row.setStyle(sheet, 1, { font: { bold: true } });
       Cell.setValue(sheet, "C1", "italic");
       Cell.setStyle(sheet, "C1", { font: { italic: true } });
@@ -589,7 +647,7 @@ describe("a cell's own format wins over its row's", () => {
     for (const format of ["xlsx", "xlsb"] as const) {
       const reopened = Workbook.create();
       await Workbook.read(reopened, await Workbook.toBuffer(build(), { format }));
-      const style = Cell.getStyle(Workbook.getWorksheets(reopened)[0]!, "C1");
+      const style = Cell.getStyle(Workbook.listWorksheets(reopened)[0]!, "C1");
       results[format] = { italic: style?.font?.italic, bold: style?.font?.bold };
     }
     expect(results.xlsb).toEqual(results.xlsx);
@@ -606,7 +664,7 @@ describe("a cell's own format wins over its row's", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     expect(Row.getHeight(read, 3)).toBe(32);
     expect(Row.getStyle(read, 3)?.font?.bold).toBe(true);
   });

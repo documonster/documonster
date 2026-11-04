@@ -16,7 +16,7 @@ describe("TAR Module", () => {
   describe("TarArchive class", () => {
     it("should create empty tar archive", async () => {
       const archive = new TarArchive();
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       // Minimum tar is just end marker (2 blocks)
       expect(bytes.length).toBe(TAR_BLOCK_SIZE * 2);
@@ -31,7 +31,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("hello.txt", "Hello, TAR!");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(1);
@@ -46,7 +46,7 @@ describe("TAR Module", () => {
       archive.add("file2.txt", "Content 2");
       archive.add("file3.txt", "Content 3");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(3);
@@ -61,7 +61,7 @@ describe("TAR Module", () => {
       archive.addDirectory("mydir");
       archive.add("mydir/file.txt", "Hello");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(2);
@@ -76,7 +76,7 @@ describe("TAR Module", () => {
       archive.add("original.txt", "Original content");
       archive.addSymlink("link.txt", "original.txt");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(2);
@@ -90,7 +90,7 @@ describe("TAR Module", () => {
       archive.add("executable.sh", "#!/bin/bash\necho hello", { mode: 0o755 });
       archive.add("readonly.txt", "readonly content", { mode: 0o444 });
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries[0].info.mode).toBe(0o755);
@@ -102,7 +102,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("file.txt", "content", { mtime });
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       // TAR only stores seconds precision
@@ -183,7 +183,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add(filename, "short filename content");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(1);
@@ -197,7 +197,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add(filename, "long filename content");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(1);
@@ -213,7 +213,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add(filename, "very long path");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(1);
@@ -231,7 +231,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("binary.bin", binaryData);
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(1);
@@ -249,7 +249,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("large.bin", largeData);
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries[0].info.size).toBe(largeData.length);
@@ -261,7 +261,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("empty.txt", new Uint8Array(0));
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries[0].info.size).toBe(0);
@@ -282,7 +282,7 @@ describe("TAR Module", () => {
         const archive = new TarArchive();
         archive.add("test.bin", data);
 
-        const bytes = await archive.bytes();
+        const bytes = await archive.toBuffer();
 
         // Total size should be block-aligned
         expect(bytes.length % TAR_BLOCK_SIZE).toBe(0);
@@ -303,7 +303,7 @@ describe("TAR Module", () => {
       archive.add("ファイル.txt", "日本語コンテンツ");
       archive.add("🎉emoji🎊.txt", "emoji content 🚀");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(3);
@@ -321,7 +321,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("unicode.txt", content);
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(await entries[0].text()).toBe(content);
@@ -330,11 +330,13 @@ describe("TAR Module", () => {
 
   describe("Streaming output", () => {
     it("should produce same result via stream() and bytes()", async () => {
-      const archive1 = new TarArchive();
+      // A fixed mtime: two archives built a second apart would otherwise differ in the header.
+      const modTime = new Date("2024-01-01T00:00:00Z");
+      const archive1 = new TarArchive({ modTime });
       archive1.add("file.txt", "content");
-      const direct = await archive1.bytes();
+      const direct = await archive1.toBuffer();
 
-      const archive2 = new TarArchive();
+      const archive2 = new TarArchive({ modTime });
       archive2.add("file.txt", "content");
       const chunks: Uint8Array[] = [];
       for await (const chunk of archive2.stream()) {
@@ -354,7 +356,7 @@ describe("TAR Module", () => {
       archive.add("a.txt", "A");
       archive.add("b.txt", "B");
 
-      await archive.bytes();
+      await archive.toBuffer();
 
       expect(progress.length).toBeGreaterThan(0);
       expect(progress[progress.length - 1].count).toBe(2);
@@ -369,7 +371,7 @@ describe("TAR Module", () => {
       archive.addDirectory("dir");
       archive.add("dir/three.txt", "Third");
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const files = await untar(bytes);
 
       // untar includes all entries including directories
@@ -401,7 +403,7 @@ describe("TAR Module", () => {
     it("should reject files exceeding maxFileSize", async () => {
       const archive = new TarArchive();
       archive.add("large.bin", new Uint8Array(1000));
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       // Parse with very small maxFileSize
       expect(() => parseTar(bytes, { maxFileSize: 100 })).toThrow(/exceeds maximum file size/);
@@ -418,7 +420,7 @@ describe("TAR Module", () => {
         linkname: "original.txt"
       });
 
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
       const entries = parseTar(bytes);
 
       expect(entries.length).toBe(2);
@@ -432,7 +434,7 @@ describe("TAR Module", () => {
       const archive = new TarArchive();
       archive.add("a.txt", "A");
       archive.add("b.txt", "B");
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       const { TarReader } = await import("@archive/tar");
       const reader = new TarReader(bytes);
@@ -448,7 +450,7 @@ describe("TAR Module", () => {
     it("should get entry by path", async () => {
       const archive = new TarArchive();
       archive.add("file.txt", "Hello");
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       const { TarReader } = await import("@archive/tar");
       const reader = new TarReader(bytes);
@@ -461,7 +463,7 @@ describe("TAR Module", () => {
     it("should return null for non-existent path", async () => {
       const archive = new TarArchive();
       archive.add("file.txt", "Hello");
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       const { TarReader } = await import("@archive/tar");
       const reader = new TarReader(bytes);
@@ -475,7 +477,7 @@ describe("TAR Module", () => {
       archive.add("x.txt", "X");
       archive.add("y.txt", "Y");
       archive.addDirectory("dir");
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       const { TarReader } = await import("@archive/tar");
       const reader = new TarReader(bytes);
@@ -487,7 +489,7 @@ describe("TAR Module", () => {
     it("should get bytes by path", async () => {
       const archive = new TarArchive();
       archive.add("data.bin", new Uint8Array([1, 2, 3]));
-      const bytes = await archive.bytes();
+      const bytes = await archive.toBuffer();
 
       const { TarReader } = await import("@archive/tar");
       const reader = new TarReader(bytes);
@@ -510,7 +512,7 @@ describe("TAR via unified API (format switching)", () => {
     archive.add("hello.txt", "Hello from TAR!");
     archive.add("world.txt", "World content");
 
-    const bytes = await archive.bytes();
+    const bytes = await archive.toBuffer();
 
     // Parse and verify
     const entries = parseTar(bytes);
@@ -524,7 +526,7 @@ describe("TAR via unified API (format switching)", () => {
     const archive = new TarArchive();
     archive.add("file1.txt", "Content 1");
     archive.add("file2.txt", "Content 2");
-    const bytes = await archive.bytes();
+    const bytes = await archive.toBuffer();
 
     // Read using unified API
     const reader = unzip(bytes, { format: "tar" });
@@ -546,8 +548,8 @@ describe("TAR via unified API (format switching)", () => {
     tarArchive.add("test.txt", "content");
 
     // Same API for getting bytes
-    const zipBytes = await zipArchive.bytes();
-    const tarBytes = await tarArchive.bytes();
+    const zipBytes = await zipArchive.toBuffer();
+    const tarBytes = await tarArchive.toBuffer();
 
     expect(zipBytes).toBeInstanceOf(Uint8Array);
     expect(tarBytes).toBeInstanceOf(Uint8Array);

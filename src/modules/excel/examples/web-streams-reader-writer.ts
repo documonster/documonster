@@ -52,8 +52,8 @@ async function main(): Promise<void> {
   for await (const sheet of reader) {
     console.log("Reading sheet:", sheet.name);
     for await (const row of sheet) {
-      // Row.values includes a leading empty slot at index 0 in many sheet models.
-      console.log("Row", row.number, Stream.rowValues(row));
+      // 0-based, as `Row.getValues` reads a row: column A is at index 0.
+      console.log("Row", row.number, Stream.getRowValues(row));
     }
   }
 }

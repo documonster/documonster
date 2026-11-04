@@ -26,12 +26,12 @@ Works in Node.js 22+ and modern browsers.
 - **Form fields and content controls (SDT)** — extract and fill; OpenDoPE data binding
 - **Font embedding** — with automatic glyph subsetting
 - **Document protection** — read-only/comments/forms with password
-- **Encryption** — decrypt password-protected DOCX (Agile Encryption)
+- **Encryption** — read and write password-protected DOCX (Agile Encryption, as Word writes it)
 - **Digital signatures** — detection and metadata extraction
 - **Conversion** — DOCX ↔ HTML, DOCX ↔ Markdown, Excel → Word, Word → PDF
 - **Flat OPC** — single-XML `.xml` representation round-trip
 - **Diff and merge** — compare two documents, combine multiple documents
-- **Streaming writer** — `createDocxStream()` for large documents
+- **Streaming writer** — `Streaming.createWriter()` for large documents
 - **Validation** — structural checks with severity-tagged issues
 - **OOXML Strict** — transparent normalization to Transitional on read
 - **Browser support** — the same `documonster/word` import works in Node.js and browsers
@@ -50,7 +50,7 @@ Document.addTable(doc, [
   ["1", "2"]
 ]);
 
-const buffer = await Io.toBuffer(Document.build(doc));
+const buffer = await Io.toBuffer(doc);
 // Write to file, send as response, etc.
 
 // Read a document
@@ -69,7 +69,7 @@ const doc = Document.create();
 
 // Text
 Document.addParagraph(doc, "Simple text");
-Document.addParagraphElement(
+Document.addParagraph(
   doc,
   Build.paragraph([Build.text("Normal "), Build.bold("bold "), Build.italic("italic")])
 );
@@ -103,8 +103,7 @@ Document.setSectionProperties(doc, {
 Document.setHeader(doc, "default", { children: [Build.textParagraph("Page Header")] });
 
 // Build & export
-const model = Document.build(doc);
-const bytes = await Io.toBuffer(model);
+const bytes = await Io.toBuffer(doc);
 ```
 
 ### Reading Documents
@@ -115,20 +114,121 @@ import { Io, Query } from "documonster/word";
 const doc = await Io.read(fileBuffer);
 
 // Extract text content
-const text = Query.extractText(doc);
+const text = Query.getText(doc);
 
 // Search
 const results = Query.searchText(doc, /pattern/g);
 ```
 
+### One Document Object
+
+`Document.create()` and `Io.read()` return the same thing — a
+`DocxDocument`, the document's content tree — and every namespace takes it.
+`Document.*` helpers therefore work on a document you read as well as on one
+you created. Its fields are public, so you may also edit the tree directly,
+interleaved with helper calls. New footnotes, endnotes, comments, images and
+lists get ids that do not collide with the ones the document uses at that
+moment, provided each edit between helper calls either
+
+- gives a collection a new array — on the document, or on a copy such as
+  `{ ...doc, footnotes: [...] }`, which is how the `readonly` model types
+  express an edit — or
+- appends entries to the end of a collection (`push`).
+
+Both are tracked exactly and cost the helpers O(1) per call, so a loop of
+100,000 additions stays linear. To replace, remove or reorder entries, assign
+a new array: an entry changed in place (`doc.footnotes[0] = …`, `splice`,
+`sort`, editing an entry object) is not seen by the next helper call. Such an
+edit never reaches the file silently, though — if it leaves two footnotes,
+endnotes, comments or numbering definitions with the same id, or two different
+images under one key, `Io.toBuffer` rejects with a `DocxDuplicateIdError` that names
+the collection and the id, because content refers to those entries by id and
+the writer cannot tell which entry a reference meant. Bookmark and drawing ids
+are renumbered by the writer whenever they clash, so any edit is safe there.
+
+`Document.*` and `Build.*` check what they are given before they change
+anything. A value with no valid form in the file — a `NaN` or fractional font
+size, a heading level outside 1–9, a color written `"#FF0000"` instead of
+`"FF0000"`, an underline style Word does not define, `null` where text belongs,
+an `insertContent` index past the end — throws a `DocxArgumentError`
+whose `field` names the argument (`properties.run.size`) and whose message
+names the call: `Document.addHeading: level must be an integer 1–9, got 12`.
+A drawing's size or position is reported the same way, as its subclass
+`DocxInvalidDrawingError`. Content you build by hand is not checked until it is
+written.
+
+An image's key — `ImageDef.rId`, or one of its `aliasRIds` — names the picture
+in every part: the body, headers, footers, notes, comments and picture bullets
+all refer to `doc.images` by key. A package's relationship ids, by contrast,
+are local to each part (two headers may each call their own logo `rId1`), so
+`Io.read` gives a picture whose local id another picture already holds a fresh
+key, and the writer gives every part that shows a picture a relationship of
+its own. `Transform.merge` renames the keys of an appended document that
+collide with the base's, wherever they are used.
+
+A document from `Document.create()` carries `deriveEastAsianDefaults: true`:
+when it is written, laid out or converted, the East Asian proofing language
+and typeface are derived from its text unless you stated them. A document from
+`Io.read()` does not, so a round trip never acquires a language its author did
+not choose. It is an ordinary field — copies keep it, and you may set or clear
+it on any document.
+
+The same flag states the document defaults current Word gives a new document —
+Aptos 12pt, `en-US`, 8pt after each paragraph, 1.16 line spacing — wherever you
+left them out (`Document.setDocDefaults` and `Document.useDefaultStyles` values
+are kept). The document is laid out and written with them, so it opens in any
+Word version, whatever its Normal template, exactly as the library paginated
+it. A file read without `w:docDefaults` keeps lacking them; the library lays it
+out in Calibri 11pt, single spaced, which is a guess — Word takes such a file's
+defaults from the user's Normal template.
+
+```typescript
+import { Document, Io } from "documonster/word";
+
+const doc = await Io.read(fileBuffer);
+Document.addParagraph(doc, "Appended paragraph");
+Document.addFootnote(doc, "A new footnote");
+const bytes = await Io.toBuffer(doc);
+```
+
+#### Who changes what
+
+One rule decides whether a function edits the document you give it:
+
+- **`Document.*` edits the document you pass, in place** — the builders, and
+  the whole-document edits `Document.replaceText`, `Document.mailMerge`,
+  `Document.acceptAllRevisions` / `rejectAllRevisions` / `acceptRevision` /
+  `rejectRevision` and `Document.setCompatibilityMode`.
+- **Every other namespace function that returns a `DocxDocument` leaves its
+  input unchanged** — `Template.fill` / `fillFromSource`, `Transform.*`, `Security.*`, `Ole.add`,
+  `Vba.add` / `remove`, `Font.addEmbedded`. The result may share unchanged
+  nodes with the input (or be the input itself when there is nothing to
+  change), so before editing a result in place while you still use the input,
+  take `Document.clone(...)`.
+
+`Query.*` only reads.
+
+```typescript
+import { Document, Io, Template } from "documonster/word";
+
+const template = await Io.read(templateBytes);
+for (const row of rows) {
+  // `fill` leaves `template` alone, but its result shares the nodes it did not
+  // change — clone before editing the result in place.
+  const letter = Document.clone(Template.fill(template, row));
+  Document.replaceText(letter, "DRAFT", "FINAL");
+  await Io.writeFile(letter, `out/${row.id}.docx`);
+}
+```
+
 ### Modifying Documents
 
 ```typescript
-import { Io, Query } from "documonster/word";
+import { Document, Io } from "documonster/word";
 
 const doc = await Io.read(buffer);
-const modified = Query.replaceText(doc, "OLD_TEXT", "NEW_TEXT");
-const output = await Io.toBuffer(modified);
+const count = Document.replaceText(doc, "OLD_TEXT", "NEW_TEXT"); // edits `doc`, returns the number replaced
+const output = await Io.toBuffer(doc);
 ```
 
 ## Advanced Features
@@ -138,7 +238,7 @@ const output = await Io.toBuffer(modified);
 ```typescript
 import { Template } from "documonster/word";
 
-const filled = Template.fillTemplate(doc, {
+const filled = Template.fill(doc, {
   name: "John",
   showDetails: true,
   items: ["A", "B", "C"]
@@ -146,19 +246,67 @@ const filled = Template.fillTemplate(doc, {
 // Supports: {{variable}}, {{#if cond}}...{{/if}}, {{#each arr}}...{{/each}}
 ```
 
+`Template.fill` (and `Package.fillTemplate`, the same engine on `.docx`
+bytes) resolves variables, conditionals and loops from one data object,
+comment bodies included. `Package.patch` / `Package.patchTemplate` are a
+different engine: each named placeholder is replaced exactly with text, a
+paragraph, a table or an image — no data object, no conditionals or loops,
+comments left alone. Use `fill` when the template carries logic, `patch` when
+you only swap placeholders for ready-made content.
+
+### Fields
+
+```typescript
+import { Document, Query, Transform } from "documonster/word";
+
+// Every field as it reads — whole, or held in pieces across runs and paragraphs
+const fields = Query.listFields(doc);
+// → [{ type: "PAGE", instruction: " PAGE ", result: "3", split: false, part: "footer", … }, …]
+
+// Merge fields replaced with values; page numbers, SEQ, REF, formulas and
+// tables of contents recomputed — the result between a field's separate and
+// end characters replaced, the field kept
+Document.mailMerge(doc, { Name: "Alice" }); // in place
+const updated = Transform.updateFields(doc);
+```
+
+Both apply a field's switches as Word does: `\* Upper` / `Lower` / `Caps` /
+`FirstCap`, the number formats (`roman`, `ALPHABETIC`, `Ordinal`, …) and English
+words (`CardText`, `OrdText`, `DollarText`), `\#`
+numeric pictures (`\# "#,##0.00"`) and `\@` date pictures
+(`\@ "d MMMM yyyy"`); a `MERGEFIELD`'s `\b` / `\f` text is added only around a
+non-empty value. `updateFields` also evaluates `QUOTE` (its text, then its
+switches). After merging, an `IF` that tests a merge field is evaluated
+again with the merged value. In `listFields`, a field nested in another's
+instruction appears as Word's field codes view shows it
+(`IF { MERGEFIELD Vip } = "Y" …`), and `split` tells how the model stores the
+field (as its `w:fldChar` pieces, or as one `FieldContent`).
+
+Page numbers computed here (`PAGE`, `NUMPAGES`, `SECTIONPAGES`, `PAGEREF`,
+`INDEX`, table of contents entries) come from the library's own page layout —
+the pages `Layout.compute` and the PDF export produce — with each face's own
+metrics, Word's paragraph spacing, widow control and keep rules. A table of
+contents is laid out with its new entries before they are numbered, as Word
+does, and a `PAGEREF` or table of contents entry shows a page's number as its
+section numbers it (`ii`, or `1` after a restart). No `w:updateFields` is set:
+Word opens the document without asking to update its fields. A caller can still
+set `settings.updateFieldsOnOpen` themselves.
+
 ### Form Fields
 
 ```typescript
-import { Query, Build } from "documonster/word";
+import { Query, Transform } from "documonster/word";
 
 // `Build.formTextField` / `Build.formCheckboxField` build form-field runs.
 
 // Extract form data
-const fields = Query.extractFormFields(doc);
+const fields = Query.listFormFields(doc);
 // → [{ name: "FullName", type: "text", value: "..." }, ...]
 
-// Fill form data
-const filled = Query.fillFormFields(
+// Fill form data (a new document; `doc` is unchanged). A text field takes a
+// string, a checkbox a boolean, a drop-down an entry's index or its text; a
+// name no field has is refused.
+const filled = Transform.fillFormFields(
   doc,
   new Map([
     ["FullName", "Jane Doe"],
@@ -171,13 +319,13 @@ const filled = Query.fillFormFields(
 ### Data Binding (OpenDoPE)
 
 ```typescript
-import { Query } from "documonster/word";
+import { Transform } from "documonster/word";
 
-// Resolve SDT data bindings against CustomXML parts
-const resolved = Query.resolveDataBindings(doc);
+// Resolve SDT data bindings against CustomXML parts (a new document)
+const resolved = Transform.resolveDataBindings(doc);
 
 // Or with override data
-const resolved2 = Query.resolveDataBindings(
+const resolved2 = Transform.resolveDataBindings(
   doc,
   new Map([["{GUID}", "<root><field>value</field></root>"]])
 );
@@ -188,7 +336,7 @@ const resolved2 = Query.resolveDataBindings(
 ```typescript
 import { Build } from "documonster/word";
 
-const shape = Build.createShape({
+const shape = Build.shape({
   shapeType: "roundRect",
   width: 3000000, // EMU
   height: 2000000,
@@ -238,10 +386,14 @@ const docWithFonts = Font.addEmbedded(doc, [result]);
 ### Track Changes
 
 ```typescript
-import { Query } from "documonster/word";
+import { Document } from "documonster/word";
 
-const accepted = Query.acceptAllRevisions(doc);
-const rejected = Query.rejectAllRevisions(doc);
+// Both edit the document in place and return how many revisions they resolved;
+// clone first to keep the original.
+const accepted = Document.clone(doc);
+Document.acceptAllRevisions(accepted);
+const rejected = Document.clone(doc);
+Document.rejectAllRevisions(rejected);
 ```
 
 ### Document Diff
@@ -249,16 +401,16 @@ const rejected = Query.rejectAllRevisions(doc);
 ```typescript
 import { Diff } from "documonster/word";
 
-const diff = Diff.documents(docA, docB);
+const diff = Diff.compare(docA, docB);
 // → { changes: [{ type: "added"|"removed"|"modified", ... }] }
 ```
 
 ### Document Merge
 
 ```typescript
-import { Io } from "documonster/word";
+import { Transform } from "documonster/word";
 
-const merged = Io.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
+const merged = Transform.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```
 
 ### Streaming Writer
@@ -266,7 +418,7 @@ const merged = Io.merge([doc1, doc2, doc3], { sectionBreak: "nextPage" });
 ```typescript
 import { Streaming } from "documonster/word";
 
-const stream = Streaming.createDocxStream();
+const stream = Streaming.createWriter();
 stream.addText("Title", { style: "Heading1" });
 for (const item of largeDataset) {
   stream.addText(item.text);
@@ -279,21 +431,36 @@ const buffer = await stream.finalize();
 ```typescript
 import { Security } from "documonster/word";
 
-const protectedDoc = Security.protect(doc, { type: "readOnly", password: "secret" });
+// Returns a new document; `doc` is left as it was.
+const protectedDoc = await Security.protect(doc, { edit: "readOnly", password: "secret" });
 const isProtected = Security.isProtected(protectedDoc); // true
-const valid = Security.verifyPassword(protectedDoc, "secret"); // true
+const valid = await Security.verifyPassword(protectedDoc, "secret"); // true
 ```
+
+A hash algorithm is written `"SHA-256"` (as `Security.getState` reports it) here and in `WordCrypto.encrypt`; the
+encryption format's own spelling `"SHA256"` is accepted by both as well.
+
+Protection restricts editing in Word; it does not encrypt the file. To write a
+password-protected file, pass `password` to `Io.toBuffer` (see
+[Encryption & Signatures](#encryption--signatures)).
 
 ### Validation
 
 ```typescript
 import { Validation } from "documonster/word";
 
-const result = Validation.document(doc);
+const result = Validation.validate(doc);
 if (!result.valid) {
   console.log(result.issues); // [{ severity, message, path }]
 }
 ```
+
+A read document may state a value a field does not take — `<w:jc w:val="bogus"/>`. The field then reads as absent,
+the text is kept and written back unchanged while the field is absent, and `Validation.validate` reports it as a
+warning with rule `"unrecognized-value"` and the path to the field (`body[3].properties.alignment`). A value you set
+takes over; clearing the field again brings the kept text back, so `Document.discardUnrecognizedValues(doc)` is how
+to remove them — all, or with `{ filter }` the ones you pick by path and text. `Document.listUnrecognizedValues(doc)`
+lists the ones kept now, each an `UnrecognizedValue` (`{ path, value }`), the same objects the filter is given.
 
 ### HTML/Markdown Conversion
 
@@ -301,68 +468,117 @@ if (!result.valid) {
 // DOCX → Markdown (GFM: headings, bold/italic/strike, inline code,
 // code blocks, blockquotes, ordered/unordered lists, tables with
 // alignment, links, images, footnotes)
-import { renderToMarkdown } from "documonster/word/markdown";
-const md = renderToMarkdown(doc);
-const mdSetext = renderToMarkdown(doc, { headingStyle: "setext" });
+import { WordMarkdown } from "documonster/word/markdown";
+const md = WordMarkdown.fromDocx(doc);
+const mdSetext = WordMarkdown.fromDocx(doc, { headingStyle: "setext" });
 
 // Markdown → DOCX (full document or body fragment)
-import { markdownToDocx, markdownToDocxBody } from "documonster/word/markdown";
-const doc = markdownToDocx("# Title\n\nHello **world**");
-const bodyItems = markdownToDocxBody("- a\n- b");
+const doc = await WordMarkdown.toDocx("# Title\n\nHello **world**");
+const { body: bodyItems } = await WordMarkdown.toDocxBody("- a\n- b");
 
 // Table columns are sized from their content and a fenced code block is set
 // small enough that its longest line does not wrap — both are decisions the
 // producer has to make, because a `.docx` carries a column grid and a run size,
 // not an instruction to work them out later. Say which measure they should be
 // sized against if the body is going somewhere other than a Letter page:
-const wide = markdownToDocx(markdown, {
+const wide = await WordMarkdown.toDocx(markdown, {
   contentWidth: 15840 - 2 * 720, // landscape Letter, half-inch margins
   codeBlockFit: "shrink" // the default; "wrap" keeps the size and breaks lines
 });
 
 // DOCX → HTML
-import { renderToHtml } from "documonster/word/html";
-const html = renderToHtml(doc);
+import { WordHtml } from "documonster/word/html";
+const { html } = WordHtml.fromDocx(doc);
 
-// HTML → DOCX body content
-import { htmlToDocxBody } from "documonster/word/html";
-const body = htmlToDocxBody("<h1>Hello</h1><p>World</p>");
+// HTML → body content, with the styles, list numbering and images it refers to
+const { body, styles, numberingInstances, images } = WordHtml.toDocxBody(
+  "<h1>Hello</h1><p>World</p>"
+);
+
+// HTML → a complete document (heading styles and list numbering included)
+const htmlDoc = WordHtml.toDocx("<h1>Hello</h1><ul><li>World</li></ul>");
 ```
 
 ### Flat OPC Format
 
 ```typescript
-import { Convert } from "documonster/word";
+import { Convert, Io } from "documonster/word";
 
 // Single-XML representation of a DOCX
-const flatXml = Convert.toFlatOpc(doc);
-const doc = Convert.parseFlatOpc(flatXmlString);
+const flatXml = await Io.toFlatOpc(doc);
+const again = await Io.read(flatXml); // Io.read takes Flat OPC text (or bytes) too
+const parts = Convert.flatOpcToParts(flatXml); // Map<partPath, bytes>
+
+// Base64, as Io.toBase64 writes it
+const fromBase64 = await Io.read(await Io.toBase64(doc), { base64: true });
 ```
 
 ### Encryption & Signatures
 
-Low-level cryptography helpers live on the `documonster/word/crypto`
-subpath so they stay out of bundles that only read/write plain DOCX.
+A password-protected DOCX — Agile Encryption in an OLE compound file, what Word writes for "Encrypt with
+Password" — is read with `{ password }` (`Io.read`, `Io.readFile`, the `Package` functions,
+`Streaming.createReader`) and written with it (`Io.toBuffer`, `Io.toBase64`, `Io.writeFile`); `encryption` tunes
+it (Office's defaults: AES-256, SHA-512, 100,000 iterations). Excel's `Workbook.read` / `toBuffer` take the same
+options, and both modules share one implementation. The encryption code is loaded only when a password is given.
+Without a password an encrypted file is a `DocxEncryptedError`; a wrong one is a `DocxDecryptionError` whose
+`reason` is `"password"`. Only Agile Encryption is implemented: Word 2007's Standard Encryption is refused with
+`reason: "unsupported"`.
 
 ```typescript
-import {
-  isEncryptedDocx,
-  decryptDocx,
-  encryptDocx,
-  extractSignatures,
-  hasDigitalSignatures
-} from "documonster/word/crypto";
+import { Io } from "documonster/word";
 
-// Decrypt a password-protected DOCX (Agile Encryption)
-if (isEncryptedDocx(bytes)) {
-  const plain = await decryptDocx(bytes, "password");
+const encrypted = await Io.toBuffer(doc, { password: "password" });
+const reread = await Io.read(encrypted, { password: "password" });
+const tuned = await Io.toBuffer(doc, {
+  password: "password",
+  encryption: { keyBits: 128, hashAlgorithm: "SHA-256", spinCount: 50_000 }
+});
+```
+
+Lower-level helpers live on the `documonster/word/crypto` subpath, so they stay
+out of bundles that only read/write plain DOCX.
+
+```typescript
+import { Io } from "documonster/word";
+import { WordCrypto } from "documonster/word/crypto";
+
+// Decrypt a password-protected DOCX to its package (Agile Encryption)
+if (WordCrypto.isEncrypted(bytes)) {
+  const plain = await WordCrypto.decrypt(bytes, "password");
 }
 
-// Encrypt a DOCX with a password
-const encrypted = await encryptDocx(docxBytes, "password");
+// Encrypt package bytes you already have
+const encrypted = await WordCrypto.encrypt(await Io.toBuffer(doc), "password");
+
+// Check a password without decrypting the package
+const ok = await WordCrypto.verifyPassword(bytes, "password");
 
 // Inspect embedded XMLDSig signatures (read-only; no verification)
-const signatures = extractSignatures(opaqueParts);
+const signatures = WordCrypto.listSignatures(doc);
+```
+
+The building blocks behind `decrypt` are public too, for custom pipelines, in
+two low-level sub-namespaces: `WordCrypto.Cfb` (`read` / `write` for OLE2
+compound files) and `WordCrypto.Agile` (`parseEncryptionInfo`, `deriveKey` with
+`BLOCK_KEYS`, `verifyPassword` against parsed info, and `decryptPackage`, which
+takes the size cap as `{ maxDecryptedSize }` as `decrypt` does). The
+ODTTF font obfuscation primitives are font tools and live in `Font`
+(`Font.obfuscate` / `Font.deobfuscate` / `Font.generateObfuscationKey`, from
+`documonster/word`).
+
+```typescript
+import { WordCrypto } from "documonster/word/crypto";
+
+const entries = WordCrypto.Cfb.read(bytes);
+const infoXml = new TextDecoder().decode(
+  entries.find(e => e.name === "EncryptionInfo")!.data.slice(8)
+);
+const info = WordCrypto.Agile.parseEncryptionInfo(infoXml);
+const zip = await WordCrypto.Agile.decryptPackage(
+  entries.find(e => e.name === "EncryptedPackage")!.data,
+  info,
+  "password"
+);
 ```
 
 ### Excel → Word
@@ -373,29 +589,44 @@ borders), column widths, rich-text runs, and an optional title page.
 Hidden sheets are skipped; rows/columns can be capped.
 
 ```typescript
-import { excelToDocx, extractTablesToExcel } from "documonster/word/excel";
+import { WordExcel } from "documonster/word/excel";
 import { Io } from "documonster/word";
 
 // Workbook → DocxDocument (all visible sheets, formatting preserved)
-const doc = excelToDocx(workbook);
-const docxBytes = await Io.package(doc);
+const doc = WordExcel.toDocx(workbook);
+const docxBytes = await Io.toBuffer(doc);
 
-// With options: a title page, only some sheets, capped dimensions
-const doc2 = excelToDocx(workbook, {
-  titlePage: { title: "Q3 Report", subtitle: "Sales" },
-  sheets: ["Summary", 2], // by name or zero-based index
+// With options: a title page, only some sheets, capped dimensions.
+// Name the sheets: numeric positions are deprecated (removed in 1.0) — they
+// are 0-based here but 1-based in `Pdf.fromExcel` and sheet ids in
+// `Workbook.getWorksheet`.
+const doc2 = WordExcel.toDocx(workbook, {
+  includeTitlePage: true,
+  sheets: ["Summary", "Regions"],
   maxRows: 100,
   maxColumns: 12,
   preserveFormatting: true
 });
 
 // Reverse direction: pull the tables out of a DOCX into a Workbook
-const extracted = extractTablesToExcel(doc);
+const extracted = WordExcel.extractTables(doc);
 ```
 
 Charts embedded in a Word document also bridge to the Excel chart engine
-(27 chart families, classic and modern ChartEx). See `Pdf.wordChartRenderer`
-for the PDF rendering side.
+(27 chart families, classic and modern ChartEx); `Pdf.fromDocx` draws them with it by
+default (see "Charts" below). The bridge pieces are public: `WordExcel.toChartSvg(chart)`
+renders a chart, `WordExcel.toChartModel(chart)` returns the Excel chart model,
+`WordExcel.toChartXlsx(series)` builds the embedded data workbook (`.xlsx` bytes) and
+`WordExcel.toChartExXml(options)` builds a ChartEx part. A chart's automatic series colours
+and scheme colours are its document theme's: `Pdf.fromDocx` uses `doc.theme`, and
+`WordExcel.toChartSvg(chart, { themeColors: doc.theme?.colorScheme.colors })` takes them —
+`Layout.toSvg` hands its `renderChart` callback the same colours as `context.themeColors`.
+A chart read from a file and written back loses nothing: what `Chart` has no field for — scheme
+colours and their transforms, gradients, line styles, gridlines, text formatting, layouts, per-label
+data labels, data references, extension lists, the part's style and colour parts — is written back
+as it was read (and drawn), and setting a field rewrites only what it governs (`values`, an axis'
+`min`, `title`, `color`, `pointColors[i]`, …). `pointColors` is by point index: entry `i` colours
+point `i`, and a point without a colour of its own is a hole.
 
 ### Word → PDF
 
@@ -416,29 +647,37 @@ const pdfBytes = await Pdf.fromDocx(doc);
 const pdf2 = await Pdf.fromDocx(doc, {
   pageWidth: 595, // A4 width
   pageHeight: 842, // A4 height
-  marginTop: 72,
-  marginBottom: 72,
-  marginLeft: 72,
-  marginRight: 72,
+  margins: { top: 72, right: 72, bottom: 72, left: 72 },
   headerMargin: 36, // header band offset from the top edge
   footerMargin: 36, // footer band offset from the bottom edge
-  defaultFont: "Helvetica",
+  defaultFontFamily: "Helvetica",
   defaultFontSize: 11
+});
+
+// Document options, as every converter takes them: metadata (each field left out comes
+// from the document's core properties, keywords included), a fixed creation date for
+// reproducible bytes, and a password.
+const pdf3 = await Pdf.fromDocx(doc, {
+  title: "Quarterly report",
+  creationDate: new Date("2026-01-01T00:00:00Z"),
+  encryption: { ownerPassword: "owner", userPassword: "open" }
 });
 ```
 
-**Charts.** When a chart renderer is supplied via `Pdf.wordChartRenderer()`,
-both classic (`<c:chart>`) and modern ChartEx (`<cx:chartSpace>` — sunburst, treemap,
-waterfall, funnel, boxWhisker, histogram, pareto, regionMap) charts render
-as full vector PDF automatically. Without a chart renderer, charts
-degrade to a titled placeholder box (no throw, no blank page). To supply
-your own classic-chart renderer:
+**Charts.** Both classic (`<c:chart>`) and modern ChartEx (`<cx:chartSpace>` — sunburst,
+treemap, waterfall, funnel, boxWhisker, histogram, pareto, regionMap) charts render as
+full vector PDF by default, drawn by the Excel chart engine; nothing needs to be passed.
+A chart the engine cannot draw falls back to its inline SVG, then to a titled placeholder
+box (no throw, no blank page). To draw classic charts yourself, supply a `chartRenderer`:
 
 ```typescript
 import { Pdf } from "documonster/pdf";
 
 const pdf = await Pdf.fromDocx(doc, {
-  chartRenderer: await Pdf.wordChartRenderer()
+  chartRenderer: (chart, page, rect) => {
+    if (chart.type !== "pie") return false; // decline: the built-in renderer draws it
+    page.drawRect({ ...rect, stroke: { r: 0, g: 0, b: 0 } });
+  }
 });
 ```
 
@@ -463,7 +702,7 @@ transparently normalized to their Transitional equivalents — no user action re
 | .dotm (macro template) | ✅ Round-trip                                                  |
 | Flat OPC (.xml)        | ✅                                                             |
 | ISO 29500 Strict       | ✅ Auto-normalized                                             |
-| Encrypted .docx        | ✅ Decrypt with password (Agile Encryption)                    |
+| Encrypted .docx        | ✅ Read and write with a password (Agile Encryption)           |
 | Digital Signatures     | 🔍 Detection & metadata extraction (no signing/verification)   |
 | Browser                | ✅ (same `documonster/word` import)                            |
 | Node.js 22+            | ✅                                                             |

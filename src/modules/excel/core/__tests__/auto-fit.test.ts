@@ -1,4 +1,12 @@
-import { getColumn, getRow } from "@excel/core/worksheet";
+import {
+  getColumn,
+  getRow,
+  autoFitColumns,
+  autoFitColumn,
+  autoFitRows,
+  autoFitRow
+} from "@excel/core/worksheet";
+import { getRow as coreGetRow } from "@excel/core/worksheet-core";
 import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import {
   measureTextWidthPx,
@@ -370,7 +378,7 @@ describe("Wrapped Line Count", () => {
 // Worksheet Integration Tests
 // =============================================================================
 
-describe("Worksheet.autoFitColumns", () => {
+describe("autoFitColumns", () => {
   it("auto-fits a single column", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "test");
@@ -378,7 +386,7 @@ describe("Worksheet.autoFitColumns", () => {
     Cell.setValue(ws, "A1", "Short");
     Cell.setValue(ws, "A2", "A much longer string value");
 
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     const col = getColumn(ws, "A");
     expect(col.width).toBeGreaterThan(9); // > default width
@@ -393,7 +401,7 @@ describe("Worksheet.autoFitColumns", () => {
     Cell.setValue(ws, "B1", "A very long description field");
     Cell.setValue(ws, "C1", 12345);
 
-    Worksheet.autoFitColumns(ws);
+    autoFitColumns(ws);
 
     expect(getColumn(ws, "A").bestFit).toBe(true);
     expect(getColumn(ws, "B").bestFit).toBe(true);
@@ -411,7 +419,7 @@ describe("Worksheet.autoFitColumns", () => {
     Cell.setValue(ws, "B1", "Col B with more text");
     Cell.setValue(ws, "C1", "Col C");
 
-    Worksheet.autoFitColumns(ws, "B", "C");
+    autoFitColumns(ws, "B", "C");
 
     // A should not be affected
     expect(getColumn(ws, "A").bestFit).toBeUndefined();
@@ -424,7 +432,7 @@ describe("Worksheet.autoFitColumns", () => {
     const ws = Workbook.addWorksheet(wb, "test");
 
     // Should not throw
-    Worksheet.autoFitColumns(ws);
+    autoFitColumns(ws);
   });
 
   it("skips merged cells spanning multiple columns", () => {
@@ -435,7 +443,7 @@ describe("Worksheet.autoFitColumns", () => {
     Cell.setValue(ws, "A2", "This is merged across A2:C2");
     Worksheet.merge(ws, "A2:C2");
 
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     // Width should be based on A1 "Short", not the merged cell
     const col = getColumn(ws, "A");
@@ -447,23 +455,23 @@ describe("Worksheet.autoFitColumns", () => {
     const ws = Workbook.addWorksheet(wb, "test");
     Cell.setValue(ws, "A1", "test");
 
-    const result = Worksheet.autoFitColumn(ws, "A");
+    const result = autoFitColumn(ws, "A");
     expect(result).toBe(ws);
 
-    const result2 = Worksheet.autoFitColumns(ws);
+    const result2 = autoFitColumns(ws);
     expect(result2).toBe(ws);
   });
 });
 
-describe("Worksheet.autoFitRows", () => {
+describe("autoFitRows", () => {
   it("auto-fits a single row", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "test");
 
     Cell.setValue(ws, "A1", "Hello");
-    Worksheet.autoFitRow(ws, 1);
+    Row.autoFit(ws, 1);
 
-    const row = Worksheet.getRow(ws, 1);
+    const row = coreGetRow(ws, 1);
     expect(row.height).toBeGreaterThan(0);
     expect(row.customHeight).toBe(true);
   });
@@ -475,7 +483,7 @@ describe("Worksheet.autoFitRows", () => {
     Cell.setValue(ws, "A1", "Row 1");
     Cell.setValue(ws, "A2", "Row 2");
 
-    Worksheet.autoFitRows(ws);
+    autoFitRows(ws);
 
     expect(getRow(ws, 1).customHeight).toBe(true);
     expect(getRow(ws, 2).customHeight).toBe(true);
@@ -488,7 +496,7 @@ describe("Worksheet.autoFitRows", () => {
     Cell.setValue(ws, "A1", "Single line");
     Cell.setValue(ws, "A2", "Line 1\nLine 2\nLine 3");
 
-    Worksheet.autoFitRows(ws);
+    autoFitRows(ws);
 
     // Row 2 should be taller than row 1
     expect(Row.getHeight(ws, 2)).toBeGreaterThan(Row.getHeight(ws, 1)!);
@@ -501,7 +509,7 @@ describe("Worksheet.autoFitRows", () => {
     Cell.setValue(ws, "A3", "Only row 3");
 
     // Should not throw for empty rows
-    Worksheet.autoFitRows(ws);
+    autoFitRows(ws);
   });
 
   it("returns this for chaining", () => {
@@ -509,10 +517,10 @@ describe("Worksheet.autoFitRows", () => {
     const ws = Workbook.addWorksheet(wb, "test");
     Cell.setValue(ws, "A1", "test");
 
-    const result = Worksheet.autoFitRow(ws, 1);
+    const result = autoFitRow(ws, 1);
     expect(result).toBe(ws);
 
-    const result2 = Worksheet.autoFitRows(ws);
+    const result2 = autoFitRows(ws);
     expect(result2).toBe(ws);
   });
 });
@@ -531,7 +539,7 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws, "A2", "Alice");
     Cell.setValue(ws, "B2", "A very long description that should make column B wider");
 
-    Worksheet.autoFitRows(Worksheet.autoFitColumns(ws));
+    autoFitRows(autoFitColumns(ws));
 
     // Verify columns are fitted
     expect(getColumn(ws, "A").bestFit).toBe(true);
@@ -550,7 +558,7 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws, "A1", 1234567.89);
     Cell.setStyle(ws, "A1", { numFmt: "#,##0.00" });
 
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     // Should fit to the formatted string "1,234,567.89" width, not "1234567.89"
     expect(getColumn(ws, "A").bestFit).toBe(true);
@@ -562,7 +570,7 @@ describe("Auto-Fit Integration", () => {
     const ws = Workbook.addWorksheet(wb, "test");
 
     Cell.setValue(ws, "A1", new Date(2024, 0, 15));
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     expect(getColumn(ws, "A").bestFit).toBe(true);
     expect(Column.getWidth(ws, "A")).toBeGreaterThan(0);
@@ -574,7 +582,7 @@ describe("Auto-Fit Integration", () => {
 
     Cell.setValue(ws, "A1", true);
     Cell.setValue(ws, "A2", false);
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     expect(getColumn(ws, "A").bestFit).toBe(true);
   });
@@ -587,7 +595,7 @@ describe("Auto-Fit Integration", () => {
       richText: [{ text: "Bold part", font: { bold: true } }, { text: " normal part" }]
     });
 
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
     expect(getColumn(ws, "A").bestFit).toBe(true);
     expect(Column.getWidth(ws, "A")).toBeGreaterThan(9);
   });
@@ -602,7 +610,7 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws, "B1", "Arial Text");
     Cell.setStyle(ws, "B1", { font: { name: "Calibri", size: 11 } });
 
-    Worksheet.autoFitColumns(ws);
+    autoFitColumns(ws);
 
     // Arial 14pt should be wider than Calibri 11pt
     expect(Column.getWidth(ws, "A")).toBeGreaterThan(Column.getWidth(ws, "B")!);
@@ -617,7 +625,7 @@ describe("Auto-Fit Integration", () => {
     Row.setHidden(ws, 2, true);
     Cell.setValue(ws, "A3", "Medium text");
 
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     // Width should be based on visible rows only (A1 "Short" or A3 "Medium text")
     const col = getColumn(ws, "A");
@@ -629,7 +637,7 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws2, "A1", "Short");
     Cell.setValue(ws2, "A2", "This is a very long hidden row value");
     Cell.setValue(ws2, "A3", "Medium text");
-    Worksheet.autoFitColumn(ws2, "A");
+    Column.autoFit(ws2, "A");
     // Width with hidden row should be less than without hiding
     expect(col.width).toBeLessThan(Column.getWidth(ws2, "A")!);
   });
@@ -646,12 +654,12 @@ describe("Auto-Fit Integration", () => {
     const reference = Workbook.addWorksheet(Workbook.create(), "ref");
     Cell.setValue(reference, "A1", "Short");
     Cell.setValue(reference, "A2", "This is a very long hidden row value");
-    Worksheet.autoFitColumn(reference, "A");
+    Column.autoFit(reference, "A");
     const expected = Column.getWidth(reference, "A");
 
-    const single = Worksheet.autoFitColumn(build(), "A", { includeHiddenRows: true });
-    const all = Worksheet.autoFitColumns(build(), { includeHiddenRows: true });
-    const range = Worksheet.autoFitColumns(build(), "A", "A", { includeHiddenRows: true });
+    const single = autoFitColumn(build(), "A", { includeHiddenRows: true });
+    const all = autoFitColumns(build(), { includeHiddenRows: true });
+    const range = autoFitColumns(build(), "A", "A", { includeHiddenRows: true });
     expect(Column.getWidth(single, "A")).toBe(expected);
     expect(Column.getWidth(all, "A")).toBe(expected);
     expect(Column.getWidth(range, "A")).toBe(expected);
@@ -673,7 +681,7 @@ describe("Auto-Fit Integration", () => {
       for (const r of hideRows) {
         Row.setHidden(ws, r, true);
       }
-      return Column.getWidth(Worksheet.autoFitColumn(ws, "A", { includeHiddenRows }), "A")!;
+      return Column.getWidth(autoFitColumn(ws, "A", { includeHiddenRows }), "A")!;
     };
     const visible = build([]);
 
@@ -704,7 +712,7 @@ describe("Auto-Fit Integration", () => {
       for (const c of hideCols) {
         Column.setHidden(ws, c, true);
       }
-      return Row.getHeight(Worksheet.autoFitRow(ws, 1), 1)!;
+      return Row.getHeight(autoFitRow(ws, 1), 1)!;
     };
     const visible = build([]);
     expect(build(["A"])).toBe(visible);
@@ -724,7 +732,7 @@ describe("Auto-Fit Integration", () => {
       for (const c of hidden) {
         Column.setHidden(ws, c, true);
       }
-      return Row.getHeight(Worksheet.autoFitRow(ws, 1), 1)!;
+      return Row.getHeight(autoFitRow(ws, 1), 1)!;
     };
 
     it("wraps across the combined width of the merged columns", () => {
@@ -752,9 +760,9 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws, "B1", "Hidden\ncol\nwith\nmany\nlines");
     Column.setHidden(ws, "B", true);
 
-    Worksheet.autoFitRow(ws, 1);
+    Row.autoFit(ws, 1);
 
-    const row = Worksheet.getRow(ws, 1);
+    const row = coreGetRow(ws, 1);
     expect(row.customHeight).toBe(true);
     // Height should be based on A1 (single line), not B1 (multi-line hidden)
     const singleLineHeight = row.height!;
@@ -763,7 +771,7 @@ describe("Auto-Fit Integration", () => {
     const ws2 = Workbook.addWorksheet(wb2, "test2");
     Cell.setValue(ws2, "A1", "Normal");
     Cell.setValue(ws2, "B1", "Hidden\ncol\nwith\nmany\nlines");
-    Worksheet.autoFitRow(ws2, 1);
+    Row.autoFit(ws2, 1);
     // Without hiding, row should be taller
     expect(singleLineHeight).toBeLessThan(Row.getHeight(ws2, 1)!);
   });
@@ -776,7 +784,7 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws, "B1", "No indent");
     Cell.setStyle(ws, "B1", { alignment: { indent: 3 } });
 
-    Worksheet.autoFitColumns(ws);
+    autoFitColumns(ws);
 
     // Column B with indent should be wider than A with same text
     expect(Column.getWidth(ws, "B")).toBeGreaterThan(Column.getWidth(ws, "A")!);
@@ -790,7 +798,7 @@ describe("Auto-Fit Integration", () => {
     Cell.setValue(ws, "A2", "This very long text has shrinkToFit enabled");
     Cell.setStyle(ws, "A2", { alignment: { shrinkToFit: true } });
 
-    Worksheet.autoFitColumn(ws, "A");
+    Column.autoFit(ws, "A");
 
     // Width should be based on A1 "Short" only, not the shrinkToFit cell
     const col = getColumn(ws, "A");
@@ -800,7 +808,7 @@ describe("Auto-Fit Integration", () => {
     const ws2 = Workbook.addWorksheet(wb2, "test2");
     Cell.setValue(ws2, "A1", "Short");
     Cell.setValue(ws2, "A2", "This very long text has shrinkToFit enabled");
-    Worksheet.autoFitColumn(ws2, "A");
+    Column.autoFit(ws2, "A");
     // Without shrinkToFit, column should be wider
     expect(col.width).toBeLessThan(Column.getWidth(ws2, "A")!);
   });

@@ -83,7 +83,7 @@ describe("a streaming writer's tab order", () => {
     // Through the model as well, since `getWorksheets` is the sort that was running on `NaN`.
     const reopened = Workbook.create();
     await Workbook.read(reopened, await written(format));
-    expect(Workbook.getWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual([
+    expect(Workbook.listWorksheets(reopened).map(sheet => Worksheet.getName(sheet))).toEqual([
       "Alpha",
       "Beta",
       "Gamma"

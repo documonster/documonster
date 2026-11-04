@@ -1,4 +1,4 @@
-import { calculateFormulas, FormulaValueKind } from "@excel/bridge/formula";
+import { ExcelFormula, FormulaValueKind } from "@excel/bridge/formula";
 import type { FormulaValue } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
@@ -95,7 +95,7 @@ Cell.setValue(ws, "B7", { formula: 'IF(ISPOSITIVE(A4), "pos", "neg")' }); // "ne
 Cell.setValue(ws, "B8", { formula: "ISPOSITIVE(A3)" }); // #N/A (text input)
 Cell.setValue(ws, "B9", { formula: "SUM(A5)" }); // 20 (shadowed: 10 * 2)
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 console.log("=== Custom Function Registration ===\n");
 const labels: Record<string, string> = {
@@ -120,6 +120,6 @@ Workbook.unregisterFunction(wb, "TAX");
 // Re-set the formulas so no cached result masks the change.
 Cell.setValue(ws, "B9", { formula: "SUM(A1, A5)" }); // built-in again → 210
 Cell.setValue(ws, "B1", { formula: "TAX(A1, A2)" }); // unknown now → #NAME?
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 console.log(`  SUM(A1, A5)  [built-in restored] = ${JSON.stringify(Cell.getResult(ws, "B9"))}`);
 console.log(`  TAX(A1, A2)  [unregistered]      = ${JSON.stringify(Cell.getResult(ws, "B1"))}`);

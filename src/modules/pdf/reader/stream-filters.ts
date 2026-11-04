@@ -77,6 +77,8 @@ export function decodeStreamFilters(
   if (isPdfArray(filter)) {
     if (filter.length > MAX_FILTER_CHAIN) {
       throw new PdfLimitExceededError(
+        "filterChain",
+        MAX_FILTER_CHAIN,
         `Stream filter chain has ${filter.length} filters; the limit is ${MAX_FILTER_CHAIN}`
       );
     }
@@ -97,6 +99,8 @@ export function decodeStreamFilters(
 
 function decodedTooLarge(filter: string, maxBytes: number): PdfLimitExceededError {
   return new PdfLimitExceededError(
+    "maxDecodedBytes",
+    maxBytes,
     `Decoded ${filter} stream exceeds the limit of ${maxBytes} bytes (maxDecodedBytes)`
   );
 }
@@ -244,9 +248,13 @@ function decodeFlateDecode(
  */
 function undoPredictor(data: Uint8Array, parms: PdfDictValue): Uint8Array {
   const predictor = dictGetNumber(parms, "Predictor") ?? 1;
-  const columns = dictGetNumber(parms, "Columns") ?? 1;
-  const colors = dictGetNumber(parms, "Colors") ?? 1;
-  const bitsPerComponent = dictGetNumber(parms, "BitsPerComponent") ?? 8;
+  // The row geometry divides the data, so a value of 0 made the TIFF predictor's row count
+  // Infinity and its loop never ended; a negative one sized the PNG output by the product
+  // of two negatives. Each must be a positive integer, and anything else takes the default
+  // the specification gives for an absent entry (ISO 32000-1 Table 8).
+  const columns = positiveInteger(dictGetNumber(parms, "Columns"), 1);
+  const colors = positiveInteger(dictGetNumber(parms, "Colors"), 1);
+  const bitsPerComponent = positiveInteger(dictGetNumber(parms, "BitsPerComponent"), 8);
 
   if (predictor === 1) {
     return data; // No prediction
@@ -263,6 +271,10 @@ function undoPredictor(data: Uint8Array, parms: PdfDictValue): Uint8Array {
   }
 
   return data;
+}
+
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return value !== undefined && Number.isInteger(value) && value >= 1 ? value : fallback;
 }
 
 /**

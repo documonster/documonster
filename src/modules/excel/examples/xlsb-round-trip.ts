@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, DefinedNames, Workbook, Worksheet } from "@excel/index";
+import { Cell, DefinedNames, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -24,10 +24,10 @@ const filename = process.argv[2] ?? path.join(outDir, "xlsb-round-trip.xlsb");
 const wb = Workbook.create();
 
 const data = Workbook.addWorksheet(wb, "Data");
-Worksheet.addRow(data, ["Region", "Units", "Unit price", "Booked"]);
-Worksheet.addRow(data, ["North", 120, 19.99, new Date(Date.UTC(2024, 0, 15))]);
-Worksheet.addRow(data, ["South", 84, 24.5, new Date(Date.UTC(2024, 1, 3))]);
-Worksheet.addRow(data, ["East", 203, 12.75, new Date(Date.UTC(2024, 1, 27))]);
+Row.add(data, ["Region", "Units", "Unit price", "Booked"]);
+Row.add(data, ["North", 120, 19.99, new Date(Date.UTC(2024, 0, 15))]);
+Row.add(data, ["South", 84, 24.5, new Date(Date.UTC(2024, 1, 3))]);
+Row.add(data, ["East", 203, 12.75, new Date(Date.UTC(2024, 1, 27))]);
 
 // A number format is the difference between a correct number and a correct *answer*: without it
 // 45306 is a plausible integer rather than a date.
@@ -60,18 +60,17 @@ console.log(`wrote ${filename}`);
 // Reading it back. The formulas come back as expressions, not as the numbers they happened to
 // evaluate to — which is the assertion worth making, because a reader that lost the expression and
 // kept the cached result looks correct until you edit a cell.
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
+const reopened = await Workbook.readFile(filename);
 
-const readSummary = Workbook.getWorksheets(reopened)[1]!;
+const readSummary = Workbook.listWorksheets(reopened)[1]!;
 console.log("B1:", JSON.stringify(Cell.getValue(readSummary, "B1")));
 console.log("B2:", JSON.stringify(Cell.getValue(readSummary, "B2")));
 console.log(
   "defined names:",
-  JSON.stringify(DefinedNames.getAllEntries(Workbook.getDefinedNames(reopened)))
+  JSON.stringify(DefinedNames.list(Workbook.getDefinedNames(reopened)))
 );
 
-const readData = Workbook.getWorksheets(reopened)[0]!;
+const readData = Workbook.listWorksheets(reopened)[0]!;
 const booked = Cell.getValue(readData, "D2");
 console.log(
   "D2 is a Date:",
@@ -82,6 +81,9 @@ console.log(
 // The same bytes, without a filename to go by. `format` is only needed when writing to a buffer;
 // reading detects it from the content.
 const bytes = await Workbook.toBuffer(wb, { format: "xlsb" });
-const fromBytes = Workbook.create();
-await Workbook.read(fromBytes, bytes);
-console.log("read from a buffer with no name:", Workbook.getWorksheets(fromBytes).length, "sheets");
+const fromBytes = await Workbook.read(bytes);
+console.log(
+  "read from a buffer with no name:",
+  Workbook.listWorksheets(fromBytes).length,
+  "sheets"
+);

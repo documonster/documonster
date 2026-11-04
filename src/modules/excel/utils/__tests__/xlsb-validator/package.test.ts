@@ -136,7 +136,7 @@ async function xlsbPackage(options: PackageOptions = {}): Promise<Uint8Array> {
     }
     archive.add(path, data);
   }
-  return await archive.bytes();
+  return await archive.toBuffer();
 }
 
 describe("package structure", () => {

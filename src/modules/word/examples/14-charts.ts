@@ -279,6 +279,6 @@ Document.addContent(
   })
 );
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "14-charts.docx"), buf);
 console.log(`  → 14-charts.docx (${buf.length} bytes)`);

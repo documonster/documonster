@@ -12,7 +12,7 @@
  *      sunburst, boxWhisker, regionMap).
  *  4.  Combo charts with secondary axis, data-table, up-down bars.
  *  5.  Convenience series builders: `addChartFromTable` /
- *      `addChartFromRows`, their ChartEx siblings, `seriesFromColumns`.
+ *      `addChartFromRows`, their ChartEx siblings, `ChartClassic.createSeriesFromColumns`.
  *  6.  Axes: value/category axis, log scale, custom units, date axis,
  *      rotated labels, hidden axis.
  *  7.  Rich titles, legend entries, plot-area layout, picture fills.
@@ -31,8 +31,8 @@
  * 14.  Chart editing — `addSeries` / `removeSeries` / `updateSeries` /
  *      `addSeriesFromOptions` / `setStyle` / `getSeries` / `chartTypes` /
  *      `removeUserShapes` / `mutateChartEx`.
- * 15.  Low-level builders — `buildChartModel` / `buildComboChartModel` /
- *      `buildChartExModel` invoked directly for programmatic workflows.
+ * 15.  Low-level builders — `ChartClassic.createModel` / `ChartClassic.createComboModel` /
+ *      `ChartEx.createModel` invoked directly for programmatic workflows.
  * 16.  `workbook.addImage` + picture fill via `workbookImageId`.
  * 17.  Full preset catalogue — all 99 classic presets on one sheet so
  *      you can see what each name produces.
@@ -44,7 +44,7 @@
  *      `bandFormats`.
  * 20.  Chart copying + vendor extensions + external parser —
  *      `chart.copyTo(targetWorksheet)`, `chart.unknownElements` for
- *      `c15:` / `cx14:` passthrough, `parseChartEx(xml)` against a
+ *      `c15:` / `cx14:` passthrough, `ChartEx.fromXml(xml)` against a
  *      synthetic XML string.
  * 21.  Chartsheet lifecycle — `rename` / `state` / `copy` / `remove` /
  *      `zoomScale` / `zoomToFit` / `replaceChart`.
@@ -54,22 +54,22 @@
  *      (`multiLvlStrRef`), view3D `depthPercent` / `hPercent`, ChartEx
  *      `rawLayoutId` vendor passthrough, `PresetGeometry` +
  *      `CustomGeometry` + `ShapeTransform` on series `spPr`.
- * 24.  Shape / text helpers — `parseSpPr` / `buildSpPr` /
- *      `getSpPrFillColor` / `getSpPrLine` / `getSpPrGradient` /
- *      `getSpPrPattern` / `setSpPrFill` / `setSpPrLine` / `parseTxPr` /
- *      `buildTxPr` / `getTxPrFontSize` / `getTxPrColor`.
- * 25.  Sidecar parsers / writers — `parseChartStyle` / `buildChartStyle`
- *      and `parseChartColors` / `buildChartColors`, plus attaching the
+ * 24.  Shape / text helpers — `DrawingMl.parseSpPr` / `DrawingMl.createSpPr` /
+ *      `DrawingMl.getSpPrFillColor` / `DrawingMl.getSpPrLine` / `DrawingMl.getSpPrGradient` /
+ *      `DrawingMl.getSpPrPattern` / `DrawingMl.setSpPrFill` / `DrawingMl.setSpPrLine` / `DrawingMl.parseTxPr` /
+ *      `DrawingMl.createTxPr` / `DrawingMl.getTxPrFontSize` / `DrawingMl.getTxPrColor`.
+ * 25.  Sidecar parsers / writers — `ChartClassic.fromStyleXml` / `ChartClassic.toStyleXml`
+ *      and `ChartClassic.fromColorsXml` / `ChartClassic.toColorsXml`, plus attaching the
  *      round-tripped sidecars to an actual chart.
- * 26.  Cache populator API — `fillChartCaches` / `fillChartExCaches` /
- *      `fillNumRef` / `fillStrRef` called directly against programmatic
+ * 26.  Cache populator API — `ChartClassic.fillCaches` / `ChartEx.fillCaches` /
+ *      `ChartClassic.fillNumRef` / `ChartClassic.fillStrRef` called directly against programmatic
  *      chart models.
- * 27.  Low-level rendering & TopoJSON — direct `renderChartSvg` /
- *      `renderChartPng` / `renderChartExSvg` / `renderChartExPng`;
- *      `buildChartScene` IR; `applyAxisTransform`; `buildEffectFilter`;
- *      `VECTOR_PDF_CHART_EX_LAYOUT_IDS`; `resolveTopologyObject` against
- *      a synthetic two-country TopoJSON; `applyChartPreset` /
- *      `applyChartExPreset` direct invocation.
+ * 27.  Low-level rendering & TopoJSON — direct `ChartClassic.toSvg` /
+ *      `ChartClassic.toPng` / `ChartEx.toSvg` / `ChartEx.toPng`;
+ *      `ChartClassic.Backend.toScene` IR; `ChartClassic.Backend.applyAxisTransform`; `ChartClassic.Backend.toSvgFilter`;
+ *      `VECTOR_PDF_CHART_EX_LAYOUT_IDS`; `ChartClassic.Backend.resolveTopologyObject` against
+ *      a synthetic two-country TopoJSON; `ChartClassic.applyPreset` /
+ *      `ChartEx.applyPreset` direct invocation.
  * 28.  Axis edge cases — `invertIfNegative`, reversed axis
  *      (`orientation: "maxMin"`), `crossesAt` / `crosses: "max"`,
  *      `crossBetween: "midCat"`, `tickLblSkip` / `tickMarkSkip`,
@@ -93,7 +93,7 @@
  * 33.  Stress & robustness — 100 data points, 20 series, very long
  *      titles, Unicode / emoji / RTL text, extreme `view3D`, layered
  *      data-label cascade, 12 tile charts on one sheet.
- * 34.  Preview export — `chart.toSVG()`, `chart.toPNG()`, `chartToPdf()`.
+ * 34.  Preview export — `Chart.toSvg()`, `Chart.toPng()`, `toDrawList()` on a PDF page, `Pdf.fromChart()`.
  * 35.  Loading + mutating a chart (`chart.mutate(fn, { preferRawPatch })`).
  *
  * Output:
@@ -111,6 +111,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { encodePng } from "@archive/png";
+import { Draw } from "@draw/index";
 import type {
   AddChartSeriesOptions,
   AddChartOptions,
@@ -126,49 +127,16 @@ import type {
   StringReference
 } from "@excel/chart/index";
 import {
+  DrawingMl,
+  ChartEx,
+  ChartClassic,
   EXCEL_CHART_PRESETS,
   EXCEL_CHART_EX_PRESETS,
   CHART_PRESETS,
-  buildChartModel,
-  buildComboChartModel,
-  buildChartExModel,
-  canRenderChartExAsVectorPdf,
-  parseChartEx,
-  applyChartPreset,
-  applyChartExPreset,
-  fillChartCaches,
-  fillChartExCaches,
-  fillNumRef,
-  fillStrRef,
-  parseChartStyle,
-  buildChartStyle,
-  parseChartColors,
-  buildChartColors,
-  parseSpPr,
-  buildSpPr,
-  getSpPrFillColor,
-  getSpPrLine,
-  getSpPrGradient,
-  getSpPrPattern,
-  setSpPrFill,
-  setSpPrLine,
-  parseTxPr,
-  buildTxPr,
-  getTxPrFontSize,
-  getTxPrColor,
-  resolveTopologyObject,
-  renderChartSvg,
-  renderChartPng,
-  renderChartExSvg,
-  renderChartExPng,
-  buildChartScene,
-  buildEffectFilter,
-  applyAxisTransform,
-  drawChartPdf,
-  drawChartExPdf,
   VECTOR_PDF_CHART_EX_LAYOUT_IDS
 } from "@excel/chart/index";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
+import type { AddSparklineGroupOptions, ChartHandle, SparklineGroup } from "@excel/index";
 import {
   Cell,
   Chart,
@@ -183,7 +151,6 @@ import {
   Workbook,
   Worksheet
 } from "@excel/index";
-import { chartToPdf } from "@pdf/excel-bridge";
 import { Pdf } from "@pdf/index";
 
 const OUT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tmp/excel-examples");
@@ -239,7 +206,7 @@ async function main(): Promise<void> {
   // enough to fit in printouts yet rich enough to exercise trendlines,
   // error bars and secondary axes.
   const sales = Workbook.addWorksheet(wb, "Sales");
-  Worksheet.setColumns(sales, [
+  Column.setDefinitions(sales, [
     { header: "Month", key: "month", width: 12 },
     { header: "Revenue", key: "revenue", width: 14 },
     { header: "Profit", key: "profit", width: 14 },
@@ -247,7 +214,7 @@ async function main(): Promise<void> {
     { header: "Units", key: "units", width: 10 },
     { header: "Growth %", key: "growth", width: 12 }
   ]);
-  Worksheet.addRows(sales, [
+  Row.addMany(sales, [
     { month: "Jan", revenue: 120, profit: 32, cost: 88, units: 540, growth: 0.04 },
     { month: "Feb", revenue: 180, profit: 49, cost: 131, units: 620, growth: 0.08 },
     { month: "Mar", revenue: 160, profit: 41, cost: 119, units: 610, growth: 0.02 },
@@ -264,7 +231,7 @@ async function main(): Promise<void> {
   // bubble charts have the right shape without interfering with the
   // category-axis data on the Sales sheet.
   const scatter = Workbook.addWorksheet(wb, "Scatter");
-  Worksheet.addRows(scatter, [
+  Row.addMany(scatter, [
     ["Hours", "Score", "Attempts"],
     [1, 45, 3],
     [2, 55, 5],
@@ -279,9 +246,9 @@ async function main(): Promise<void> {
   // chart. Dates are real Date objects so Excel renders them as a date
   // axis.
   const stockSheet = Workbook.addWorksheet(wb, "Stock");
-  Worksheet.addRow(stockSheet, ["Date", "Open", "High", "Low", "Close"]);
+  Row.add(stockSheet, ["Date", "Open", "High", "Low", "Close"]);
   const d = (iso: string): Date => new Date(iso);
-  Worksheet.addRows(stockSheet, [
+  Row.addMany(stockSheet, [
     [d("2024-01-02"), 150, 156, 149, 154],
     [d("2024-01-03"), 154, 158, 152, 157],
     [d("2024-01-04"), 157, 161, 155, 159],
@@ -293,15 +260,15 @@ async function main(): Promise<void> {
   // "Surface" — z values on a cat × series grid so surface / surface3D
   // charts have the 2-D matrix they expect.
   const surfaceSheet = Workbook.addWorksheet(wb, "Surface");
-  Worksheet.addRow(surfaceSheet, ["", "Q1", "Q2", "Q3", "Q4"]);
-  Worksheet.addRow(surfaceSheet, ["North", 10, 22, 34, 40]);
-  Worksheet.addRow(surfaceSheet, ["South", 15, 25, 37, 48]);
-  Worksheet.addRow(surfaceSheet, ["East", 12, 20, 30, 42]);
-  Worksheet.addRow(surfaceSheet, ["West", 18, 28, 39, 50]);
+  Row.add(surfaceSheet, ["", "Q1", "Q2", "Q3", "Q4"]);
+  Row.add(surfaceSheet, ["North", 10, 22, 34, 40]);
+  Row.add(surfaceSheet, ["South", 15, 25, 37, 48]);
+  Row.add(surfaceSheet, ["East", 12, 20, 30, 42]);
+  Row.add(surfaceSheet, ["West", 18, 28, 39, 50]);
 
   // "Hierarchy" — 3-level category data for sunburst / treemap.
   const hier = Workbook.addWorksheet(wb, "Hierarchy");
-  Worksheet.addRows(hier, [
+  Row.addMany(hier, [
     ["Region", "Country", "City", "Sales"],
     ["Americas", "USA", "New York", 420],
     ["Americas", "USA", "San Francisco", 360],
@@ -316,7 +283,7 @@ async function main(): Promise<void> {
 
   // "Distribution" — raw samples for histogram / pareto / boxWhisker.
   const dist = Workbook.addWorksheet(wb, "Distribution");
-  Worksheet.addRow(dist, ["Sample"]);
+  Row.add(dist, ["Sample"]);
   // 40 synthetic samples clustered around two modes to give the
   // histogram a bi-modal shape and the box-whisker chart visible
   // whiskers + outliers.
@@ -324,11 +291,11 @@ async function main(): Promise<void> {
     52, 54, 57, 59, 60, 61, 62, 63, 63, 64, 65, 66, 67, 68, 69, 70, 72, 73, 75, 76, 78, 80, 82, 84,
     85, 86, 88, 90, 92, 94, 28, 35, 42, 96, 98, 102, 110, 115, 118, 122
   ];
-  samples.forEach(n => Worksheet.addRow(dist, [n]));
+  samples.forEach(n => Row.add(dist, [n]));
 
   // "Regions" — country → value for a region-map chart.
   const regions = Workbook.addWorksheet(wb, "Regions");
-  Worksheet.addRows(regions, [
+  Row.addMany(regions, [
     ["Country", "Revenue"],
     ["United States", 840],
     ["Germany", 410],
@@ -343,7 +310,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const gallery = Workbook.addWorksheet(wb, "1-Classic Gallery");
-  Worksheet.addRow(gallery, ["Type", "Notes"]);
+  Row.add(gallery, ["Type", "Notes"]);
 
   // Compact helper that stamps a label row, then positions the chart in
   // a 9-column × 15-row block to the right of the label so the gallery
@@ -353,14 +320,14 @@ async function main(): Promise<void> {
     label: string,
     options: AddChartOptions,
     opts?: { rows?: number }
-  ): number => {
+  ): ChartHandle => {
     Cell.setValue(gallery, `A${galleryRow}`, label);
     Cell.setStyle(gallery, `A${galleryRow}`, { font: { bold: true } });
     const rows = opts?.rows ?? 15;
     const top = galleryRow;
     const bottom = galleryRow + rows;
     galleryRow = bottom + 1;
-    return Chart.add(gallery, options, `B${top}:J${bottom}`);
+    return Chart.place(gallery, `B${top}:J${bottom}`, options);
   };
 
   // -- Bar / Column family
@@ -717,7 +684,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const presets = Workbook.addWorksheet(wb, "2-Presets");
-  Worksheet.addRow(presets, ["Preset", "Notes"]);
+  Row.add(presets, ["Preset", "Notes"]);
   Cell.setStyle(presets, "A1", { font: { bold: true } });
 
   // Demonstrate a representative sample from every preset family.
@@ -791,11 +758,13 @@ async function main(): Promise<void> {
                   }
                 ];
 
-    Chart.addPreset(
+    Chart.place(
       presets,
-      entry.preset as (typeof EXCEL_CHART_PRESETS)[number],
-      { title: entry.title, series },
-      `B${row}:J${row + 14}`
+      `B${row}:J${row + 14}`,
+      Chart.applyPreset(entry.preset as (typeof EXCEL_CHART_PRESETS)[number], {
+        title: entry.title,
+        series
+      })
     );
   });
 
@@ -804,7 +773,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const ex = Workbook.addWorksheet(wb, "3-ChartEx Gallery");
-  Worksheet.addRow(ex, ["Type"]);
+  Row.add(ex, ["Type"]);
   Cell.setStyle(ex, "A1", { font: { bold: true } });
   let exRow = 2;
   const addExChart = (label: string, anchorHeight: number, cb: (range: string) => void): void => {
@@ -817,150 +786,125 @@ async function main(): Promise<void> {
   };
 
   addExChart("histogram", 15, range => {
-    Chart.addHistogram(
-      ex,
-      {
-        title: "Histogram",
-        series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }],
-        binning: { binType: "auto" }
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "histogram",
+      title: "Histogram",
+      series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }],
+      binning: { binType: "auto" }
+    });
   });
 
   addExChart("pareto", 15, range => {
-    Chart.addPareto(
-      ex,
-      {
-        title: "Pareto (histogram + cumulative)",
-        series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }],
-        binning: { binType: "binCount", binCount: 8 }
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "pareto",
+      title: "Pareto (histogram + cumulative)",
+      series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }],
+      binning: { binType: "binCount", binCount: 8 }
+    });
   });
 
   addExChart("waterfall", 15, range => {
-    Chart.addWaterfall(
-      ex,
-      {
-        title: "Revenue waterfall",
-        categories: "Sales!$A$2:$A$7",
-        series: [
-          {
-            name: "Delta",
-            values: "Sales!$C$2:$C$7",
-            subtotals: [0, 5] // Mark first & last data points as subtotals
-          }
-        ],
-        layout: { connectorLines: true }
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "waterfall",
+      title: "Revenue waterfall",
+      categories: "Sales!$A$2:$A$7",
+      series: [
+        {
+          name: "Delta",
+          values: "Sales!$C$2:$C$7",
+          subtotals: [0, 5] // Mark first & last data points as subtotals
+        }
+      ],
+      layout: { connectorLines: true }
+    });
   });
 
   addExChart("funnel", 15, range => {
-    Chart.addFunnel(
-      ex,
-      {
-        title: "Sales funnel",
-        categories: "Sales!$A$2:$A$7",
-        series: [{ name: "Stages", values: "Sales!$B$2:$B$7" }]
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "funnel",
+      title: "Sales funnel",
+      categories: "Sales!$A$2:$A$7",
+      series: [{ name: "Stages", values: "Sales!$B$2:$B$7" }]
+    });
   });
 
   addExChart("treemap", 15, range => {
-    Chart.addTreemap(
-      ex,
-      {
-        title: "Sales treemap",
-        categories: "Hierarchy!$C$2:$C$10",
-        series: [
-          {
-            name: "Sales",
-            values: "Hierarchy!$D$2:$D$10",
-            hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
-          }
-        ],
-        layout: { parentLabelLayout: "banner" }
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "treemap",
+      title: "Sales treemap",
+      categories: "Hierarchy!$C$2:$C$10",
+      series: [
+        {
+          name: "Sales",
+          values: "Hierarchy!$D$2:$D$10",
+          hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
+        }
+      ],
+      layout: { parentLabelLayout: "banner" }
+    });
   });
 
   addExChart("sunburst", 15, range => {
-    Chart.addSunburst(
-      ex,
-      {
-        title: "Sales sunburst",
-        categories: "Hierarchy!$C$2:$C$10",
-        series: [
-          {
-            name: "Sales",
-            values: "Hierarchy!$D$2:$D$10",
-            hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
-          }
-        ]
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "sunburst",
+      title: "Sales sunburst",
+      categories: "Hierarchy!$C$2:$C$10",
+      series: [
+        {
+          name: "Sales",
+          values: "Hierarchy!$D$2:$D$10",
+          hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
+        }
+      ]
+    });
   });
 
   addExChart("boxWhisker", 15, range => {
-    Chart.addBoxWhisker(
-      ex,
-      {
-        title: "Distribution box-whisker",
-        categories: "Distribution!$A$1:$A$1",
-        series: [
-          {
-            name: "Samples",
-            values: "Distribution!$A$2:$A$41"
-          }
-        ],
-        layout: {
-          quartileMethod: "inclusive",
-          showMeanLine: true,
-          showMeanMarker: true,
-          showInnerPoints: true,
-          showOutlierPoints: true
+    Chart.place(ex, range, {
+      type: "boxWhisker",
+      title: "Distribution box-whisker",
+      categories: "Distribution!$A$1:$A$1",
+      series: [
+        {
+          name: "Samples",
+          values: "Distribution!$A$2:$A$41"
         }
-      },
-      range
-    );
+      ],
+      layout: {
+        quartileMethod: "inclusive",
+        showMeanLine: true,
+        showMeanMarker: true,
+        showInnerPoints: true,
+        showOutlierPoints: true
+      }
+    });
   });
 
   addExChart("regionMap", 15, range => {
-    Chart.addRegionMap(
-      ex,
-      {
-        title: "Revenue by country",
-        categories: "Regions!$A$2:$A$7",
-        series: [{ name: "Revenue", values: "Regions!$B$2:$B$7" }],
-        layout: {
-          projection: "mercator",
-          regionLabels: "bestFit",
-          geoMappingLevel: "country"
-        }
-      },
-      range
-    );
+    Chart.place(ex, range, {
+      type: "regionMap",
+      title: "Revenue by country",
+      categories: "Regions!$A$2:$A$7",
+      series: [{ name: "Revenue", values: "Regions!$B$2:$B$7" }],
+      layout: {
+        projection: "mercator",
+        regionLabels: "bestFit",
+        geoMappingLevel: "country"
+      }
+    });
   });
 
   // ChartEx presets — same shape as classic presets but using
   // `addPresetChartEx` / `EXCEL_CHART_EX_PRESETS`.
   addExChart("preset: boxAndWhisker alias", 15, range => {
-    Chart.addPresetEx(
+    Chart.place(
       ex,
-      "boxAndWhisker",
-      {
+      range,
+      Chart.applyPreset("boxAndWhisker", {
         title: "Preset alias",
         categories: "Distribution!$A$1:$A$1",
         series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }]
-      },
-      range
+      })
     );
   });
   console.log(`ChartEx presets known: ${EXCEL_CHART_EX_PRESETS.join(", ")}`);
@@ -971,172 +915,168 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const combo = Workbook.addWorksheet(wb, "4-Combo");
-  Worksheet.addRow(combo, ["Combo charts"]);
+  Row.add(combo, ["Combo charts"]);
   Cell.setStyle(combo, "A1", { font: { bold: true } });
 
   // Column + line on secondary axis — the canonical combo layout.
-  Chart.addCombo(
-    combo,
-    {
-      title: "Revenue (bars) vs Growth (line, secondary axis)",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          grouping: "clustered",
-          series: [
-            {
-              name: "Revenue",
-              categories: "Sales!$A$2:$A$7",
-              values: "Sales!$B$2:$B$7",
-              fill: "4472C4"
-            }
-          ]
-        },
-        {
-          type: "line",
-          useSecondaryAxis: true,
-          series: [
-            {
-              name: "Growth",
-              categories: "Sales!$A$2:$A$7",
-              values: "Sales!$F$2:$F$7",
-              line: "ED7D31",
-              lineWidth: 2,
-              marker: { symbol: "circle", size: 7, fill: "ED7D31", border: "FFFFFF" }
-            }
-          ]
-        }
-      ],
-      showLegend: true,
-      legendPosition: "b",
-      dataTable: { showHorzBorder: true, showVertBorder: true, showOutline: true, showKeys: true }
-    },
-    "A3:L22"
-  );
+  Chart.place(combo, "A3:L22", {
+    title: "Revenue (bars) vs Growth (line, secondary axis)",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "clustered",
+        series: [
+          {
+            name: "Revenue",
+            categories: "Sales!$A$2:$A$7",
+            values: "Sales!$B$2:$B$7",
+            fill: "4472C4"
+          }
+        ]
+      },
+      {
+        type: "line",
+        useSecondaryAxis: true,
+        series: [
+          {
+            name: "Growth",
+            categories: "Sales!$A$2:$A$7",
+            values: "Sales!$F$2:$F$7",
+            line: "ED7D31",
+            lineWidth: 2,
+            marker: { symbol: "circle", size: 7, fill: "ED7D31", border: "FFFFFF" }
+          }
+        ]
+      }
+    ],
+    showLegend: true,
+    legendPosition: "b",
+    dataTable: { showHorzBorder: true, showVertBorder: true, showOutline: true, showKeys: true }
+  });
 
   // Stacked bar + line trend combo
-  Chart.addCombo(
-    combo,
-    {
-      title: "Stacked revenue + total trend",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          grouping: "stacked",
-          series: [
-            { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" },
-            { name: "Cost", categories: "Sales!$A$2:$A$7", values: "Sales!$D$2:$D$7" }
-          ]
-        },
-        {
-          type: "line",
-          series: [
-            {
-              name: "Revenue",
-              categories: "Sales!$A$2:$A$7",
-              values: "Sales!$B$2:$B$7",
-              smooth: true,
-              line: "C00000",
-              lineWidth: 2.5,
-              marker: { symbol: "square", size: 7 }
-            }
-          ]
-        }
-      ]
-    },
-    "A24:L43"
-  );
+  Chart.place(combo, "A24:L43", {
+    title: "Stacked revenue + total trend",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "stacked",
+        series: [
+          { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" },
+          { name: "Cost", categories: "Sales!$A$2:$A$7", values: "Sales!$D$2:$D$7" }
+        ]
+      },
+      {
+        type: "line",
+        series: [
+          {
+            name: "Revenue",
+            categories: "Sales!$A$2:$A$7",
+            values: "Sales!$B$2:$B$7",
+            smooth: true,
+            line: "C00000",
+            lineWidth: 2.5,
+            marker: { symbol: "square", size: 7 }
+          }
+        ]
+      }
+    ]
+  });
 
   // Volume-HLC: bar for volume on primary axis + stock on secondary
   // axis — the exact combo that used to be named `stockVHLC` in the
   // preset registry; see `chart-presets.ts` for the removal note.
-  Chart.addCombo(
-    combo,
-    {
-      title: "Volume + HLC (combo)",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          series: [
-            {
-              name: "Volume",
-              categories: "Stock!$A$2:$A$6",
-              values: "Stock!$E$2:$E$6",
-              fill: "A6A6A6"
-            }
-          ]
-        },
-        {
-          type: "stock",
-          useSecondaryAxis: true,
-          hiLowLines: true,
-          series: [
-            { name: "High", categories: "Stock!$A$2:$A$6", values: "Stock!$C$2:$C$6" },
-            { name: "Low", categories: "Stock!$A$2:$A$6", values: "Stock!$D$2:$D$6" },
-            { name: "Close", categories: "Stock!$A$2:$A$6", values: "Stock!$E$2:$E$6" }
-          ]
-        }
-      ]
-    },
-    "A45:L64"
-  );
+  Chart.place(combo, "A45:L64", {
+    title: "Volume + HLC (combo)",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        series: [
+          {
+            name: "Volume",
+            categories: "Stock!$A$2:$A$6",
+            values: "Stock!$E$2:$E$6",
+            fill: "A6A6A6"
+          }
+        ]
+      },
+      {
+        type: "stock",
+        useSecondaryAxis: true,
+        hiLowLines: true,
+        series: [
+          { name: "High", categories: "Stock!$A$2:$A$6", values: "Stock!$C$2:$C$6" },
+          { name: "Low", categories: "Stock!$A$2:$A$6", values: "Stock!$D$2:$D$6" },
+          { name: "Close", categories: "Stock!$A$2:$A$6", values: "Stock!$E$2:$E$6" }
+        ]
+      }
+    ]
+  });
 
   // ---------------------------------------------------------------------------
   // 5. Helper APIs — `addChartFromRows`, `addChartFromTable`,
-  //    `addColumnChartFromRows`, `addChartExFromRows`, `seriesFromColumns`.
+  //    `addColumnChartFromRows`, `addChartExFromRows`, `ChartClassic.createSeriesFromColumns`.
   // ---------------------------------------------------------------------------
 
   const helpers = Workbook.addWorksheet(wb, "5-Helper APIs");
-  Worksheet.addRow(helpers, ["Helper APIs"]);
+  Row.add(helpers, ["Helper APIs"]);
   Cell.setStyle(helpers, "A1", { font: { bold: true } });
 
   // -- `addChartFromRows`: write rows + build chart from the JS array.
   // Returns a regular chart, so you can chain formatting later.
   Cell.setValue(helpers, "A3", "addChartFromRows");
   Cell.setStyle(helpers, "A3", { font: { bold: true } });
-  Chart.addFromRows(
+  Chart.place(
     helpers,
-    [
-      { day: "Mon", visits: 312 },
-      { day: "Tue", visits: 400 },
-      { day: "Wed", visits: 280 },
-      { day: "Thu", visits: 530 },
-      { day: "Fri", visits: 470 }
-    ],
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Visitors this week",
-      startCell: "A4",
-      x: "day",
-      y: "visits"
-    },
-    "C3:K17"
+    "C3:K17",
+    Chart.createOptionsFromRows(
+      helpers,
+      [
+        { day: "Mon", visits: 312 },
+        { day: "Tue", visits: 400 },
+        { day: "Wed", visits: 280 },
+        { day: "Thu", visits: 530 },
+        { day: "Fri", visits: 470 }
+      ],
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "clustered",
+        title: "Visitors this week",
+        startCell: "A4",
+        x: "day",
+        y: "visits"
+      }
+    )
   );
 
   // -- `addColumnChartFromRows`: shortcut — same as above but `type` /
   // `barDir` are implied.
   Cell.setValue(helpers, "A20", "addColumnChartFromRows");
   Cell.setStyle(helpers, "A20", { font: { bold: true } });
-  Chart.addColumnFromRows(
+  Chart.place(
     helpers,
-    [
-      { quarter: "Q1", revenue: 1.2 },
-      { quarter: "Q2", revenue: 1.8 },
-      { quarter: "Q3", revenue: 1.5 },
-      { quarter: "Q4", revenue: 2.1 }
-    ],
-    {
-      title: "Quarterly revenue",
-      startCell: "A21",
-      x: "quarter",
-      y: "revenue"
-    },
-    "C20:K34"
+    "C20:K34",
+    Chart.createOptionsFromRows(
+      helpers,
+      [
+        { quarter: "Q1", revenue: 1.2 },
+        { quarter: "Q2", revenue: 1.8 },
+        { quarter: "Q3", revenue: 1.5 },
+        { quarter: "Q4", revenue: 2.1 }
+      ],
+      {
+        type: "bar",
+        barDir: "col",
+        title: "Quarterly revenue",
+        startCell: "A21",
+        x: "quarter",
+        y: "revenue"
+      }
+    )
   );
 
   // -- `addChartFromTable`: pull series out of a structured Excel Table
@@ -1163,55 +1103,49 @@ async function main(): Promise<void> {
     ]
   });
 
-  Chart.addFromTable(
+  Chart.place(
     tblSheet,
-    table,
-    {
+    "F1:N18",
+    Chart.createOptionsFromTable(tblSheet, table, {
       type: "bar",
       barDir: "col",
       grouping: "clustered",
       title: "Table-backed — expands with data",
       categoryColumn: "Month",
       valueColumns: ["Revenue", "Profit"]
-    },
-    "F1:N18"
+    })
   );
 
-  // -- `seriesFromColumns`: compose series from raw column ranges.
-  Cell.setValue(helpers, "A38", "seriesFromColumns");
+  // -- `ChartClassic.createSeriesFromColumns`: compose series from raw column ranges.
+  Cell.setValue(helpers, "A38", "ChartClassic.createSeriesFromColumns");
   Cell.setStyle(helpers, "A38", { font: { bold: true } });
-  const seriesA = Chart.seriesFromColumns(helpers, {
+  const seriesA = Chart.createSeriesFromColumns(helpers, {
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$B$2:$B$7",
     name: "Revenue"
   });
-  const seriesB = Chart.seriesFromColumns(helpers, {
+  const seriesB = Chart.createSeriesFromColumns(helpers, {
     categories: "Sales!$A$2:$A$7",
     values: "Sales!$C$2:$C$7",
     name: "Profit"
   });
-  Chart.add(
-    helpers,
-    {
-      type: "line",
-      title: "Built via seriesFromColumns",
-      showMarker: true,
-      series: [seriesA, seriesB]
-    },
-    "C38:K52"
-  );
+  Chart.place(helpers, "C38:K52", {
+    type: "line",
+    title: "Built via ChartClassic.createSeriesFromColumns",
+    showMarker: true,
+    series: [seriesA, seriesB]
+  });
 
   // -- `addChartExFromTable`: same idea, for modern ChartEx types.
-  Chart.addExFromTable(
+  Chart.place(
     tblSheet,
-    table,
-    {
+    "F20:N37",
+    Chart.createOptionsFromTable(tblSheet, table, {
       type: "funnel",
       title: "Funnel from table",
       categoryColumn: "Month",
       valueColumns: ["Revenue"]
-    },
-    "F20:N37"
+    })
   );
 
   // ---------------------------------------------------------------------------
@@ -1220,84 +1154,72 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const axes = Workbook.addWorksheet(wb, "6-Axes");
-  Worksheet.addRow(axes, ["Axis showcase"]);
+  Row.add(axes, ["Axis showcase"]);
   Cell.setStyle(axes, "A1", { font: { bold: true } });
 
-  Chart.add(
-    axes,
-    {
-      type: "line",
-      title: "Log scale axis, rotated labels",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          smooth: true
-        }
-      ],
-      categoryAxis: {
-        title: "Month",
-        textRotation: -45,
-        majorTickMark: "outside",
-        minorTickMark: "none"
-      },
-      valueAxis: {
-        title: "Revenue (USD, log10)",
-        logBase: 10,
-        min: 10,
-        max: 1000,
-        majorGridlines: true,
-        minorGridlines: true,
-        numFmt: "$#,##0"
+  Chart.place(axes, "A3:I22", {
+    type: "line",
+    title: "Log scale axis, rotated labels",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        smooth: true
       }
+    ],
+    categoryAxis: {
+      title: "Month",
+      textRotation: -45,
+      majorTickMark: "outside",
+      minorTickMark: "none"
     },
-    "A3:I22"
-  );
+    valueAxis: {
+      title: "Revenue (USD, log10)",
+      logBase: 10,
+      min: 10,
+      max: 1000,
+      majorGridlines: true,
+      minorGridlines: true,
+      numFmt: "$#,##0"
+    }
+  });
 
-  Chart.add(
-    axes,
-    {
-      type: "line",
-      title: "Display units (thousands)",
-      series: [{ name: "Units", categories: "Sales!$A$2:$A$7", values: "Sales!$E$2:$E$7" }],
-      valueAxis: {
-        title: "Units sold",
-        displayUnits: "thousands",
-        displayUnitsLabel: "× 1 000"
+  Chart.place(axes, "A24:I43", {
+    type: "line",
+    title: "Display units (thousands)",
+    series: [{ name: "Units", categories: "Sales!$A$2:$A$7", values: "Sales!$E$2:$E$7" }],
+    valueAxis: {
+      title: "Units sold",
+      displayUnits: "thousands",
+      displayUnitsLabel: "× 1 000"
+    }
+  });
+
+  Chart.place(axes, "A45:I64", {
+    type: "line",
+    title: "Hidden value axis, minimalist axes",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        line: "4472C4",
+        lineWidth: 3,
+        marker: { symbol: "none" }
       }
-    },
-    "A24:I43"
-  );
-
-  Chart.add(
-    axes,
-    {
-      type: "line",
-      title: "Hidden value axis, minimalist axes",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          line: "4472C4",
-          lineWidth: 3,
-          marker: { symbol: "none" }
-        }
-      ],
-      valueAxis: { hidden: true },
-      categoryAxis: { majorTickMark: "none", minorTickMark: "none" },
-      showLegend: false
-    },
-    "A45:I64"
-  );
+    ],
+    valueAxis: { hidden: true },
+    categoryAxis: { majorTickMark: "none", minorTickMark: "none" },
+    showLegend: false
+  });
 
   // ---------------------------------------------------------------------------
   // 7. Rich titles, legend entries, plot-area layout, picture fills.
   // ---------------------------------------------------------------------------
 
   const rich = Workbook.addWorksheet(wb, "7-Rich Formatting");
-  Worksheet.addRow(rich, ["Rich formatting"]);
+  Row.add(rich, ["Rich formatting"]);
   Cell.setStyle(rich, "A1", { font: { bold: true } });
 
   // Structured rich-text title: two runs, different formatting.
@@ -1316,80 +1238,68 @@ async function main(): Promise<void> {
   // byte is generated here — no external dependency.
   const demoPng = makeSolidColorPng(256, 160, 0x4472c4);
 
-  Chart.add(
-    rich,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: richTitle,
-      titleOptions: { overlay: false, spPr: { border: "BFBFBF" } },
-      legendOptions: {
-        overlay: false,
-        entries: [
-          // Hide the second series' legend entry without hiding the series.
-          { index: 1, hidden: true }
-        ],
-        txPr: { size: 900, color: { srgb: "595959" } }
-      },
-      plotAreaOptions: {
-        spPr: { fill: "FAFAFA", border: "D9D9D9" }
-      },
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          pictureFill: { image: demoPng, fillMode: "stretch" }
-        },
-        {
-          name: "Cost",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$D$2:$D$7",
-          fill: "ED7D31"
-        }
-      ]
+  Chart.place(rich, "A3:I22", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: richTitle,
+    titleOptions: { overlay: false, spPr: { border: "BFBFBF" } },
+    legendOptions: {
+      overlay: false,
+      entries: [
+        // Hide the second series' legend entry without hiding the series.
+        { index: 1, hidden: true }
+      ],
+      txPr: { size: 900, color: { srgb: "595959" } }
     },
-    "A3:I22"
-  );
+    plotAreaOptions: {
+      spPr: { fill: "FAFAFA", border: "D9D9D9" }
+    },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        pictureFill: { image: demoPng, fillMode: "stretch" }
+      },
+      {
+        name: "Cost",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$D$2:$D$7",
+        fill: "ED7D31"
+      }
+    ]
+  });
 
   // Title from a cell formula — stays live when the cell changes.
   Cell.setValue(rich, "A25", "Live chart title →");
   Cell.setStyle(rich, "A25", { font: { bold: true } });
   Cell.setValue(rich, "B25", "Automatic dashboard");
-  Chart.add(
-    rich,
-    {
-      type: "line",
-      title: { formula: "'7-Rich Formatting'!$B$25" },
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A27:I46"
-  );
+  Chart.place(rich, "A27:I46", {
+    type: "line",
+    title: { formula: "'7-Rich Formatting'!$B$25" },
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
 
   // ---------------------------------------------------------------------------
   // 8. Chart styling — built-in 1-48 catalogue + structured sidecars.
   // ---------------------------------------------------------------------------
 
   const styled = Workbook.addWorksheet(wb, "8-Styles");
-  Worksheet.addRow(styled, ["Chart styling"]);
+  Row.add(styled, ["Chart styling"]);
   Cell.setStyle(styled, "A1", { font: { bold: true } });
 
-  const styledChartNum = Chart.add(
-    styled,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Built-in style",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A3:I22"
-  );
-  // `setStyle(N)` == `setBuiltInStyle(N)` — lightweight `<c:style/>` knob
+  const styledChart = Chart.place(styled, "A3:I22", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Built-in style",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
+  // `setStyle(N)` — lightweight `<c:style/>` knob
   // mapped to the 2007/2010 catalogue (1-48).
-  Chart.setStyle(Chart.get(styled)[0], 42);
-  console.log(`Built-in-style chart is #${styledChartNum}`);
+  Chart.setStyle(styledChart, 42);
+  console.log(`Built-in-style chart is #${styledChart.chartNumber}`);
 
   // Modern styleN.xml / colorsN.xml sidecars — full Office 2013+ styling.
   const chartStyle: ChartStyleModel = {
@@ -1405,21 +1315,17 @@ async function main(): Promise<void> {
     id: 10,
     colors: [{ srgb: "4472C4" }, { srgb: "ED7D31" }, { srgb: "A5A5A5" }, { srgb: "FFC000" }]
   };
-  Chart.add(
-    styled,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Structured style sidecar",
-      series: [
-        { name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" },
-        { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" }
-      ],
-      chartStyle,
-      chartColors
-    },
-    "A25:I44"
-  );
+  Chart.place(styled, "A25:I44", {
+    type: "bar",
+    barDir: "col",
+    title: "Structured style sidecar",
+    series: [
+      { name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" },
+      { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" }
+    ],
+    chartStyle,
+    chartColors
+  });
 
   // ---------------------------------------------------------------------------
   // 9. Chartsheet — full-page chart that takes its own tab.
@@ -1484,33 +1390,29 @@ async function main(): Promise<void> {
     metric: "sum"
   });
 
-  Chart.addPivot(
-    pivotSheet,
-    pivot,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Revenue by region / category (pivot)",
-      series: [
-        {
-          name: "Revenue",
-          categories: "'10-Pivot Source'!$A$2:$A$9",
-          values: "'10-Pivot Source'!$D$2:$D$9"
-        }
-      ],
-      pivotChartOptions: {
-        dropZonesVisible: true,
-        dropZoneFilter: true,
-        dropZoneCategories: true,
-        dropZoneData: true,
-        dropZoneSeries: true,
-        refreshOnOpen: true,
-        showExpandCollapseFieldButtons: true
+  Chart.place(pivotSheet, "F1:N20", {
+    pivotTable: pivot,
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Revenue by region / category (pivot)",
+    series: [
+      {
+        name: "Revenue",
+        categories: "'10-Pivot Source'!$A$2:$A$9",
+        values: "'10-Pivot Source'!$D$2:$D$9"
       }
-    },
-    "F1:N20"
-  );
+    ],
+    pivotChartOptions: {
+      dropZonesVisible: true,
+      dropZoneFilter: true,
+      dropZoneCategories: true,
+      dropZoneData: true,
+      dropZoneSeries: true,
+      refreshOnOpen: true,
+      showExpandCollapseFieldButtons: true
+    }
+  });
 
   Workbook.addPivotChartsheet(wb, "Pivot Dashboard", pivot, {
     chart: {
@@ -1532,49 +1434,49 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const anchors = Workbook.addWorksheet(wb, "11-Anchors");
-  Worksheet.addRow(anchors, ["Anchor forms"]);
+  Row.add(anchors, ["Anchor forms"]);
   Cell.setStyle(anchors, "A1", { font: { bold: true } });
 
   // Two-cell anchor (default — tl to br).
-  Chart.add(
+  Chart.place(
     anchors,
+    { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } },
     {
       type: "bar",
       barDir: "col",
       title: "Two-cell anchor",
       series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    { tl: { col: 1, row: 2 }, br: { col: 8, row: 17 } }
+    }
   );
 
   // One-cell anchor — pinned to a cell, fixed EMU extent (5×3 inches).
-  Chart.add(
+  Chart.place(
     anchors,
-    {
-      type: "line",
-      title: "One-cell anchor (5×3 in)",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
     {
       tl: { col: 1, row: 19 },
       ext: { cx: 5 * 914400, cy: 3 * 914400 },
       editAs: "oneCell"
+    },
+    {
+      type: "line",
+      title: "One-cell anchor (5×3 in)",
+      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
     }
   );
 
   // Absolute anchor — fixed EMU position + size; ignores rows/columns.
   // 0.5 inch top margin, 1 inch left margin, 5×3 in size.
-  Chart.add(
+  Chart.place(
     anchors,
-    {
-      type: "pie",
-      title: "Absolute anchor",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
     {
       pos: { x: 914400, y: 36 * 914400 },
       ext: { cx: 5 * 914400, cy: 3 * 914400 },
       editAs: "absolute"
+    },
+    {
+      type: "pie",
+      title: "Absolute anchor",
+      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
     }
   );
 
@@ -1587,7 +1489,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const features = Workbook.addWorksheet(wb, "12-Feature Deep-Dive");
-  Worksheet.addRow(features, ["Feature showcase"]);
+  Row.add(features, ["Feature showcase"]);
   Cell.setStyle(features, "A1", { font: { bold: true } });
 
   // --- 12.1 every trendline type on one chart
@@ -1605,25 +1507,21 @@ async function main(): Promise<void> {
     "12.1 — every trendline type (linear/exp/log/poly/movingAvg/power)"
   );
   Cell.setStyle(features, "A3", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "line",
-      title: "All six trendline types",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          line: "000000",
-          lineWidth: 1,
-          marker: { symbol: "circle", size: 6 },
-          trendline: trendlines
-        }
-      ]
-    },
-    "A4:L22"
-  );
+  Chart.place(features, "A4:L22", {
+    type: "line",
+    title: "All six trendline types",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        line: "000000",
+        lineWidth: 1,
+        marker: { symbol: "circle", size: 6 },
+        trendline: trendlines
+      }
+    ]
+  });
 
   // --- 12.2 every error-bar value type
   //
@@ -1676,22 +1574,18 @@ async function main(): Promise<void> {
   ];
   Cell.setValue(features, "A25", "12.2 — every error-bar type (one per series)");
   Cell.setStyle(features, "A25", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "scatter",
-      scatterStyle: "marker",
-      title: "All five error-bar types",
-      series: errorBarRecipes.map(({ label, colour, eb }) => ({
-        name: label,
-        xValues: "Scatter!$A$2:$A$8",
-        values: "Scatter!$B$2:$B$8",
-        marker: { symbol: "circle", size: 8, fill: colour },
-        errorBars: eb
-      }))
-    },
-    "A26:L44"
-  );
+  Chart.place(features, "A26:L44", {
+    type: "scatter",
+    scatterStyle: "marker",
+    title: "All five error-bar types",
+    series: errorBarRecipes.map(({ label, colour, eb }) => ({
+      name: label,
+      xValues: "Scatter!$A$2:$A$8",
+      values: "Scatter!$B$2:$B$8",
+      marker: { symbol: "circle", size: 8, fill: colour },
+      errorBars: eb
+    }))
+  });
 
   // --- 12.3 every marker symbol
   const markerSymbols: NonNullable<ChartMarker["symbol"]>[] = [
@@ -1707,47 +1601,39 @@ async function main(): Promise<void> {
   ];
   Cell.setValue(features, "A47", "12.3 — every marker symbol");
   Cell.setStyle(features, "A47", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "line",
-      title: "Marker catalogue",
-      showMarker: true,
-      series: markerSymbols.map((sym, i) => ({
-        name: sym,
-        categories: "Sales!$A$2:$A$7",
-        // Fan each series out by an offset so they don't all overlap
-        values: "Sales!$B$2:$B$7",
-        line: "BFBFBF",
-        lineWidth: 1,
-        marker: { symbol: sym, size: 10, fill: HEX_PALETTE[i % HEX_PALETTE.length] }
-      }))
-    },
-    "A48:L67"
-  );
+  Chart.place(features, "A48:L67", {
+    type: "line",
+    title: "Marker catalogue",
+    showMarker: true,
+    series: markerSymbols.map((sym, i) => ({
+      name: sym,
+      categories: "Sales!$A$2:$A$7",
+      // Fan each series out by an offset so they don't all overlap
+      values: "Sales!$B$2:$B$7",
+      line: "BFBFBF",
+      lineWidth: 1,
+      marker: { symbol: sym, size: 10, fill: HEX_PALETTE[i % HEX_PALETTE.length] }
+    }))
+  });
 
   // --- 12.4 dropLines + serLines + hiLowLines + upDownBars on one chart
   Cell.setValue(features, "A70", "12.4 — dropLines / serLines / hiLowLines / upDownBars");
   Cell.setStyle(features, "A70", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "line",
-      title: "Drop lines + hi-low lines + up-down bars",
-      series: [
-        { name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" },
-        { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" }
-      ],
-      dropLines: true,
-      hiLowLines: true,
-      upDownBars: {
-        gapWidth: 150,
-        upBars: { fill: "70AD47" },
-        downBars: { fill: "C00000" }
-      }
-    },
-    "A71:L90"
-  );
+  Chart.place(features, "A71:L90", {
+    type: "line",
+    title: "Drop lines + hi-low lines + up-down bars",
+    series: [
+      { name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" },
+      { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" }
+    ],
+    dropLines: true,
+    hiLowLines: true,
+    upDownBars: {
+      gapWidth: 150,
+      upBars: { fill: "70AD47" },
+      downBars: { fill: "C00000" }
+    }
+  });
 
   Cell.setValue(
     features,
@@ -1755,55 +1641,47 @@ async function main(): Promise<void> {
     "12.5 — pie with serLines (leader) + firstSliceAng + exploded point"
   );
   Cell.setStyle(features, "A93", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "ofPie",
-      ofPieType: "bar",
-      title: "Bar-of-pie — serLines + 45° start",
-      firstSliceAng: 45,
-      splitType: "percent",
-      splitPos: 10,
-      serLines: true,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          dataLabels: { showPercent: true, showCatName: true, position: "bestFit" }
-        }
-      ]
-    },
-    "A94:L113"
-  );
+  Chart.place(features, "A94:L113", {
+    type: "ofPie",
+    ofPieType: "bar",
+    title: "Bar-of-pie — serLines + 45° start",
+    firstSliceAng: 45,
+    splitType: "percent",
+    splitPos: 10,
+    serLines: true,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        dataLabels: { showPercent: true, showCatName: true, position: "bestFit" }
+      }
+    ]
+  });
 
   // --- 12.6 gapWidth / overlap / gapDepth demo — `overlap` is 2-D only
   // (CT_Bar3DChart has no overlap), so we show gapWidth + gapDepth on a
   // bar3D, plus overlap on a 2-D bar alongside.
   Cell.setValue(features, "A116", "12.6 — gapWidth + gapDepth (bar3D)");
   Cell.setStyle(features, "A116", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar3D",
-      barDir: "col",
-      grouping: "clustered",
-      title: "3D bar — gapWidth=50 gapDepth=300",
-      gapWidth: 50,
-      gapDepth: 300,
-      view3D: { rotX: 20, rotY: 25, rAngAx: true, perspective: 30 },
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        },
-        { name: "Cost", categories: "Sales!$A$2:$A$7", values: "Sales!$D$2:$D$7", fill: "ED7D31" }
-      ]
-    },
-    "A117:L136"
-  );
+  Chart.place(features, "A117:L136", {
+    type: "bar3D",
+    barDir: "col",
+    grouping: "clustered",
+    title: "3D bar — gapWidth=50 gapDepth=300",
+    gapWidth: 50,
+    gapDepth: 300,
+    view3D: { rotX: 20, rotY: 25, rAngAx: true, perspective: 30 },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      },
+      { name: "Cost", categories: "Sales!$A$2:$A$7", values: "Sales!$D$2:$D$7", fill: "ED7D31" }
+    ]
+  });
 
   // --- 12.7 doughnut with several holeSize values (via dataPoints)
   Cell.setValue(
@@ -1812,57 +1690,49 @@ async function main(): Promise<void> {
     "12.7 — overlap (2-D bar, bar3D has no overlap in CT_Bar3DChart)"
   );
   Cell.setStyle(features, "A139", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Overlap=-25 (bars visually separated)",
-      overlap: -25,
-      gapWidth: 200,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        },
-        { name: "Cost", categories: "Sales!$A$2:$A$7", values: "Sales!$D$2:$D$7", fill: "ED7D31" }
-      ]
-    },
-    "A140:L159"
-  );
+  Chart.place(features, "A140:L159", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Overlap=-25 (bars visually separated)",
+    overlap: -25,
+    gapWidth: 200,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      },
+      { name: "Cost", categories: "Sales!$A$2:$A$7", values: "Sales!$D$2:$D$7", fill: "ED7D31" }
+    ]
+  });
 
   Cell.setValue(features, "A162", "12.8 — doughnut with holeSize=75");
   Cell.setStyle(features, "A162", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "doughnut",
-      holeSize: 75,
-      firstSliceAng: 0,
-      varyColors: true,
-      title: "Thin doughnut",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          // Doughnut charts do not support `c:dLblPos` — Excel's UI
-          // has no position picker for doughnut labels and any
-          // value causes Excel to strip the drawing part on open.
-          // See `VALID_DLBL_POSITIONS_BY_TYPE` in chart-builder.ts.
-          dataLabels: { showVal: true }
-        }
-      ]
-    },
-    "A163:L182"
-  );
+  Chart.place(features, "A163:L182", {
+    type: "doughnut",
+    holeSize: 75,
+    firstSliceAng: 0,
+    varyColors: true,
+    title: "Thin doughnut",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        // Doughnut charts do not support `c:dLblPos` — Excel's UI
+        // has no position picker for doughnut labels and any
+        // value causes Excel to strip the drawing part on open.
+        // See `VALID_DLBL_POSITIONS_BY_TYPE` in chart-builder.ts.
+        dataLabels: { showVal: true }
+      }
+    ]
+  });
 
   // --- 12.9 data labels with valueFromCells (Excel 2013+)
   const labelsSheet = Workbook.addWorksheet(wb, "12b-Value-From-Cells");
-  Worksheet.addRows(labelsSheet, [
+  Row.addMany(labelsSheet, [
     ["Label", "Units"],
     ["🔥 Hot", 540],
     ["🌤 Warm", 620],
@@ -1877,29 +1747,25 @@ async function main(): Promise<void> {
     "12.9 — data labels valueFromCells (Excel 2013+ 'Value From Cells')"
   );
   Cell.setStyle(features, "A185", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Labels pulled from a separate range",
-      series: [
-        {
-          name: "Units",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$E$2:$E$7",
-          dataLabels: {
-            position: "outEnd",
-            showVal: false,
-            valueFromCells: "'12b-Value-From-Cells'!$A$2:$A$7"
-          }
+  Chart.place(features, "A186:L205", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Labels pulled from a separate range",
+    series: [
+      {
+        name: "Units",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$E$2:$E$7",
+        dataLabels: {
+          position: "outEnd",
+          showVal: false,
+          valueFromCells: "'12b-Value-From-Cells'!$A$2:$A$7"
         }
-      ],
-      showLegend: false
-    },
-    "A186:L205"
-  );
+      }
+    ],
+    showLegend: false
+  });
 
   // --- 12.10 per-entry data label overrides
   Cell.setValue(
@@ -1908,125 +1774,113 @@ async function main(): Promise<void> {
     "12.10 — per-entry data label overrides (hide / custom text / recolour)"
   );
   Cell.setStyle(features, "A208", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Per-entry overrides",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          dataLabels: {
-            showVal: true,
-            position: "outEnd",
-            numFmt: "$#,##0",
-            entries: [
-              // Hide the first label.
-              { index: 0, delete: true },
-              // Replace the second label with a constant string.
-              {
-                index: 1,
-                text: {
-                  paragraphs: [
-                    {
-                      runs: [
-                        {
-                          text: "★ PEAK",
-                          properties: { bold: true, color: { srgb: "C00000" }, size: 1200 }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                // `outEnd` (above the column) is the bar-chart
-                // equivalent of "top"; Excel's bar-chart label
-                // position picker only exposes ctr/inBase/inEnd/
-                // outEnd, and writing `t` here would trip a
-                // "Repaired Records" dialog on open.
-                position: "outEnd"
+  Chart.place(features, "A209:L228", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Per-entry overrides",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        dataLabels: {
+          showVal: true,
+          position: "outEnd",
+          numFmt: "$#,##0",
+          entries: [
+            // Hide the first label.
+            { index: 0, delete: true },
+            // Replace the second label with a constant string.
+            {
+              index: 1,
+              text: {
+                paragraphs: [
+                  {
+                    runs: [
+                      {
+                        text: "★ PEAK",
+                        properties: { bold: true, color: { srgb: "C00000" }, size: 1200 }
+                      }
+                    ]
+                  }
+                ]
               },
-              // Move the last label into the bar, large.
-              {
-                index: 5,
-                position: "inEnd",
-                txPr: { size: 1400, bold: true, color: { srgb: "FFFFFF" } }
-              }
-            ]
-          }
+              // `outEnd` (above the column) is the bar-chart
+              // equivalent of "top"; Excel's bar-chart label
+              // position picker only exposes ctr/inBase/inEnd/
+              // outEnd, and writing `t` here would trip a
+              // "Repaired Records" dialog on open.
+              position: "outEnd"
+            },
+            // Move the last label into the bar, large.
+            {
+              index: 5,
+              position: "inEnd",
+              txPr: { size: 1400, bold: true, color: { srgb: "FFFFFF" } }
+            }
+          ]
         }
-      ]
-    },
-    "A209:L228"
-  );
+      }
+    ]
+  });
 
   // --- 12.11 gradient fill
   Cell.setValue(features, "A231", "12.11 — series filled with a linear gradient");
   Cell.setStyle(features, "A231", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Linear gradient fill",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          spPr: {
-            fill: {
-              gradient: {
-                type: "linear",
-                angle: 90,
-                stops: [
-                  { position: 0, color: { srgb: "4472C4" } },
-                  { position: 1, color: { srgb: "ED7D31" } }
-                ]
-              }
+  Chart.place(features, "A232:L251", {
+    type: "bar",
+    barDir: "col",
+    title: "Linear gradient fill",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        spPr: {
+          fill: {
+            gradient: {
+              type: "linear",
+              angle: 90,
+              stops: [
+                { position: 0, color: { srgb: "4472C4" } },
+                { position: 1, color: { srgb: "ED7D31" } }
+              ]
             }
           }
         }
-      ]
-    },
-    "A232:L251"
-  );
+      }
+    ]
+  });
 
   // --- 12.12 pattern fill
   Cell.setValue(features, "A254", "12.12 — pattern fill (preset 'dashDnDiag')");
   Cell.setStyle(features, "A254", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "DrawingML pattern fill",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          spPr: {
-            fill: {
-              pattern: {
-                preset: "dashDnDiag",
-                foreground: { srgb: "4472C4" },
-                background: { srgb: "FFFFFF" }
-              }
+  Chart.place(features, "A255:L274", {
+    type: "bar",
+    barDir: "col",
+    title: "DrawingML pattern fill",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        spPr: {
+          fill: {
+            pattern: {
+              preset: "dashDnDiag",
+              foreground: { srgb: "4472C4" },
+              background: { srgb: "FFFFFF" }
             }
           }
         }
-      ]
-    },
-    "A255:L274"
-  );
+      }
+    ]
+  });
 
   // --- 12.13 scatter with xValueType: "text"
   const xTextSheet = Workbook.addWorksheet(wb, "12c-Text-X-Axis");
-  Worksheet.addRows(xTextSheet, [
+  Row.addMany(xTextSheet, [
     ["Phase", "Value"],
     ["Alpha", 22],
     ["Beta", 41],
@@ -2036,89 +1890,73 @@ async function main(): Promise<void> {
   ]);
   Cell.setValue(features, "A277", "12.13 — scatter with text x-axis (xValueType='text')");
   Cell.setStyle(features, "A277", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "scatter",
-      scatterStyle: "lineMarker",
-      title: "Scatter over named phases",
-      series: [
-        {
-          name: "Value",
-          xValues: "'12c-Text-X-Axis'!$A$2:$A$6",
-          values: "'12c-Text-X-Axis'!$B$2:$B$6",
-          xValueType: "text",
-          marker: { symbol: "diamond", size: 9, fill: "4472C4" }
-        }
-      ]
-    },
-    "A278:L297"
-  );
+  Chart.place(features, "A278:L297", {
+    type: "scatter",
+    scatterStyle: "lineMarker",
+    title: "Scatter over named phases",
+    series: [
+      {
+        name: "Value",
+        xValues: "'12c-Text-X-Axis'!$A$2:$A$6",
+        values: "'12c-Text-X-Axis'!$B$2:$B$6",
+        xValueType: "text",
+        marker: { symbol: "diamond", size: 9, fill: "4472C4" }
+      }
+    ]
+  });
 
   // --- 12.14 date axis with custom time units
   const timeSheet = Workbook.addWorksheet(wb, "12d-Date-Axis");
-  Worksheet.addRow(timeSheet, ["Date", "Incidents"]);
+  Row.add(timeSheet, ["Date", "Incidents"]);
   for (let i = 0; i < 12; i++) {
     const date = new Date(Date.UTC(2024, i, 15));
-    Worksheet.addRow(timeSheet, [date, 20 + Math.round(Math.sin(i) * 10) + i]);
+    Row.add(timeSheet, [date, 20 + Math.round(Math.sin(i) * 10) + i]);
   }
   Column.setStyle(timeSheet, 1, { numFmt: "yyyy-mm-dd" });
   Cell.setValue(features, "A300", "12.14 — date axis (baseTimeUnit=months)");
   Cell.setStyle(features, "A300", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "line",
-      title: "Incidents per month",
-      series: [
-        {
-          name: "Incidents",
-          categories: "'12d-Date-Axis'!$A$2:$A$13",
-          values: "'12d-Date-Axis'!$B$2:$B$13",
-          smooth: true
-        }
-      ],
-      categoryAxis: {
-        title: "Date",
-        baseTimeUnit: "months",
-        majorTimeUnit: "months",
-        minorTimeUnit: "days",
-        numFmt: "mmm-yy"
+  Chart.place(features, "A301:L320", {
+    type: "line",
+    title: "Incidents per month",
+    series: [
+      {
+        name: "Incidents",
+        categories: "'12d-Date-Axis'!$A$2:$A$13",
+        values: "'12d-Date-Axis'!$B$2:$B$13",
+        smooth: true
       }
-    },
-    "A301:L320"
-  );
+    ],
+    categoryAxis: {
+      title: "Date",
+      baseTimeUnit: "months",
+      majorTimeUnit: "months",
+      minorTimeUnit: "days",
+      numFmt: "mmm-yy"
+    }
+  });
 
   // --- 12.15 null title (autoTitleDeleted)
   Cell.setValue(features, "A323", "12.15 — title: null — Excel will NOT auto-generate a title");
   Cell.setStyle(features, "A323", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "bar",
-      barDir: "col",
-      title: null, // <-- explicitly suppressed
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }],
-      showLegend: false
-    },
-    "A324:L343"
-  );
+  Chart.place(features, "A324:L343", {
+    type: "bar",
+    barDir: "col",
+    title: null, // <-- explicitly suppressed
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }],
+    showLegend: false
+  });
 
   // --- 12.16 plotVisOnly / displayBlanksAs / showDLblsOverMax
   Cell.setValue(features, "A346", "12.16 — plotVisOnly + displayBlanksAs + showDLblsOverMax");
   Cell.setStyle(features, "A346", { font: { bold: true } });
-  Chart.add(
-    features,
-    {
-      type: "line",
-      title: "Interpolated across blanks",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }],
-      plotVisOnly: true,
-      displayBlanksAs: "span",
-      showDLblsOverMax: true
-    },
-    "A347:L366"
-  );
+  Chart.place(features, "A347:L366", {
+    type: "line",
+    title: "Interpolated across blanks",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }],
+    plotVisOnly: true,
+    displayBlanksAs: "span",
+    showDLblsOverMax: true
+  });
 
   // ---------------------------------------------------------------------------
   // 13. Headless charts — series whose cached values do NOT come from any
@@ -2128,7 +1966,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const headless = Workbook.addWorksheet(wb, "13-Headless Literal Data");
-  Worksheet.addRow(headless, ["Literal (no worksheet ranges)"]);
+  Row.add(headless, ["Literal (no worksheet ranges)"]);
   Cell.setStyle(headless, "A1", { font: { bold: true } });
 
   // Literal classic chart — `literalValues` on a regular chart. The
@@ -2147,95 +1985,89 @@ async function main(): Promise<void> {
   // pointing at cells we pre-populate here. Excel renders from the
   // cache so the referenced cells never have to be present, but an
   // addressable range keeps the XML valid when the file is re-opened.
-  Worksheet.addRows(headless, [
+  Row.addMany(headless, [
     ["Alpha", 30],
     ["Beta", 45],
     ["Gamma", 15],
     ["Delta", 10]
   ]);
-  Chart.add(
-    headless,
-    {
-      type: "pie",
-      title: "Literal pie",
-      varyColors: true,
-      series: [
-        {
-          name: "Share",
-          categories: "'13-Headless Literal Data'!$A$2:$A$5",
-          values: "'13-Headless Literal Data'!$B$2:$B$5",
-          dataLabels: { showPercent: true, showCatName: true, position: "bestFit" }
-        }
-      ]
-    },
-    "D1:L20"
-  );
+  Chart.place(headless, "D1:L20", {
+    type: "pie",
+    title: "Literal pie",
+    varyColors: true,
+    series: [
+      {
+        name: "Share",
+        categories: "'13-Headless Literal Data'!$A$2:$A$5",
+        values: "'13-Headless Literal Data'!$B$2:$B$5",
+        dataLabels: { showPercent: true, showCatName: true, position: "bestFit" }
+      }
+    ]
+  });
 
   // ChartEx treemap with `literalHierarchy` — the modern path that
   // genuinely takes literal arrays and produces a self-contained part.
   Cell.setValue(headless, "A23", "13.2 — ChartEx treemap with literalCategories + literalValues");
   Cell.setStyle(headless, "A23", { font: { bold: true } });
-  Chart.addEx(
-    headless,
-    {
-      type: "treemap",
-      title: "Literal treemap",
-      // `values` is a required field. When literal arrays drive the
-      // cache we still need a syntactically-valid reference (Excel
-      // rebuilds the numRef shell from it on open).
-      categories: "A1",
-      series: [
-        {
-          name: "Sales",
-          values: "A1",
-          literalValues: [120, 80, 60, 40, 30, 25, 15, 10],
-          literalCategories: ["NA", "EU", "APAC", "LATAM", "ME", "AF", "IN", "CN"],
-          literalHierarchy: [
-            ["Americas", "Americas", "APAC", "Americas", "EMEA", "EMEA", "APAC", "APAC"],
-            ["USA", "Canada", "Japan", "Mexico", "Germany", "France", "India", "China"]
-          ]
-        }
-      ],
-      layout: { parentLabelLayout: "overlapping" }
-    },
-    "D23:L42"
-  );
+  Chart.place(headless, "D23:L42", {
+    type: "treemap",
+    title: "Literal treemap",
+    // `values` is a required field. When literal arrays drive the
+    // cache we still need a syntactically-valid reference (Excel
+    // rebuilds the numRef shell from it on open).
+    categories: "A1",
+    series: [
+      {
+        name: "Sales",
+        values: "A1",
+        literalValues: [120, 80, 60, 40, 30, 25, 15, 10],
+        literalCategories: ["NA", "EU", "APAC", "LATAM", "ME", "AF", "IN", "CN"],
+        literalHierarchy: [
+          ["Americas", "Americas", "APAC", "Americas", "EMEA", "EMEA", "APAC", "APAC"],
+          ["USA", "Canada", "Japan", "Mexico", "Germany", "France", "India", "China"]
+        ]
+      }
+    ],
+    layout: { parentLabelLayout: "overlapping" }
+  });
 
   // ---------------------------------------------------------------------------
   // 14. Chart editing — getter/setter + mutation APIs on the Chart object.
   // ---------------------------------------------------------------------------
 
   const edit = Workbook.addWorksheet(wb, "14-Chart Editing");
-  Worksheet.addRow(edit, ["Chart editing"]);
+  Row.add(edit, ["Chart editing"]);
   Cell.setStyle(edit, "A1", { font: { bold: true } });
 
-  Chart.add(
-    edit,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Start with one series",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ]
-    },
-    "A3:L22"
-  );
+  // `Chart.place` returns the chart's handle — what every other chart call takes.
+  const editing = Chart.place(edit, "A3:L22", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Start with one series",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      }
+    ]
+  });
 
-  const editing = Chart.get(edit)[0];
+  // A scratch chart, removed again by its handle.
+  const scratch = Chart.place(edit, "N3:T12", {
+    type: "line",
+    series: [{ name: "Scratch", values: "Sales!$B$2:$B$7" }]
+  });
+  Chart.remove(edit, scratch);
 
   // `chartTypes` — inspect the plot-area groups. Classic charts have one
   // entry per chart-type group; combo charts return one per group.
   console.log(
     "Editing chart groups:",
-    Chart.chartTypes(editing).length,
-    Chart.chartTypes(editing)[0]?.type
+    Chart.getChartTypes(editing).length,
+    Chart.getChartTypes(editing)[0]?.type
   );
   console.log("Initial series count:", Chart.getSeriesCount(editing));
 
@@ -2266,18 +2098,14 @@ async function main(): Promise<void> {
   // Low-level `setStyle(N)` toggle — applies one of the 48 built-in styles.
   Chart.setStyle(editing, 26);
 
-  // `setBuiltInStyle(N)` — alias for `setStyle`.
-  Chart.add(
-    edit,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "setBuiltInStyle(42)",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A25:L44"
-  );
-  Chart.setBuiltInStyle(Chart.get(edit)[1], 42);
+  // A second built-in style, on a fresh chart.
+  Chart.place(edit, "A25:L44", {
+    type: "bar",
+    barDir: "col",
+    title: "setStyle(42)",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
+  Chart.setStyle(Chart.list(edit)[1], 42);
 
   // Narrow mutation on an already-built chart via `mutate(fn)`. The
   // callback receives the structured `ChartModel`; any fields touched
@@ -2285,16 +2113,12 @@ async function main(): Promise<void> {
   // `preferRawPatch: true` to keep the bytes for untouched blocks,
   // and `requireRawPatch: true` to FAIL if the edit would force a
   // structural rebuild.
-  Chart.add(
-    edit,
-    {
-      type: "line",
-      title: "Mutated via chart.mutate()",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A47:L66"
-  );
-  const toMutate = Chart.get(edit)[2];
+  Chart.place(edit, "A47:L66", {
+    type: "line",
+    title: "Mutated via chart.mutate()",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
+  const toMutate = Chart.list(edit)[2];
   Chart.mutate(
     toMutate,
     model => {
@@ -2313,24 +2137,20 @@ async function main(): Promise<void> {
   // `mutateChartEx(fn)` — same idea for a ChartEx chart.
   Cell.setValue(edit, "A69", "chart.mutateChartEx() — edit a treemap parentLabelLayout");
   Cell.setStyle(edit, "A69", { font: { bold: true } });
-  Chart.addEx(
-    edit,
-    {
-      type: "treemap",
-      title: "Treemap — parentLabelLayout='banner'",
-      categories: "Hierarchy!$C$2:$C$10",
-      series: [
-        {
-          name: "Sales",
-          values: "Hierarchy!$D$2:$D$10",
-          hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
-        }
-      ]
-    },
-    "A70:L89"
-  );
-  const exChart = Chart.get(edit)[3];
-  Chart.mutateChartEx(
+  Chart.place(edit, "A70:L89", {
+    type: "treemap",
+    title: "Treemap — parentLabelLayout='banner'",
+    categories: "Hierarchy!$C$2:$C$10",
+    series: [
+      {
+        name: "Sales",
+        values: "Hierarchy!$D$2:$D$10",
+        hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
+      }
+    ]
+  });
+  const exChart = Chart.list(edit)[3];
+  Chart.mutateEx(
     exChart,
     model => {
       const series = model.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0];
@@ -2346,16 +2166,16 @@ async function main(): Promise<void> {
   Chart.removeUserShapes(editing);
 
   // ---------------------------------------------------------------------------
-  // 15. Low-level builders — call `buildChartModel` /
-  //     `buildComboChartModel` / `buildChartExModel` directly. Useful
+  // 15. Low-level builders — call `ChartClassic.createModel` /
+  //     `ChartClassic.createComboModel` / `ChartEx.createModel` directly. Useful
   //     when a caller wants a `ChartModel` in hand for headless rendering
   //     or for transforming programmatically before writing.
   // ---------------------------------------------------------------------------
 
-  const standaloneClassic = buildChartModel({
+  const standaloneClassic = ChartClassic.createModel({
     type: "bar",
     barDir: "col",
-    title: "Built via buildChartModel()",
+    title: "Built via ChartClassic.createModel()",
     series: [
       {
         name: "Literal",
@@ -2369,8 +2189,8 @@ async function main(): Promise<void> {
     standaloneClassic.chart.plotArea.chartTypes[0].type
   );
 
-  const standaloneCombo = buildComboChartModel({
-    title: "Built via buildComboChartModel()",
+  const standaloneCombo = ChartClassic.createComboModel({
+    title: "Built via ChartClassic.createComboModel()",
     groups: [
       {
         type: "bar",
@@ -2386,13 +2206,16 @@ async function main(): Promise<void> {
   });
   console.log("Standalone combo model — groups:", standaloneCombo.chart.plotArea.chartTypes.length);
 
-  const standaloneEx = buildChartExModel({
+  const standaloneEx = ChartEx.createModel({
     type: "waterfall",
-    title: "Built via buildChartExModel()",
+    title: "Built via ChartEx.createModel()",
     categories: "Sales!$A$2:$A$7",
     series: [{ name: "Delta", values: "Sales!$C$2:$C$7", subtotals: [0, 5] }]
   });
-  console.log("Standalone ChartEx model — vectorable:", canRenderChartExAsVectorPdf(standaloneEx));
+  console.log(
+    "Standalone ChartEx model — layout:",
+    standaloneEx.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0]?.layoutId
+  );
 
   // ---------------------------------------------------------------------------
   // 16. Picture fill via `workbook.addImage` — referring to a shared
@@ -2404,25 +2227,21 @@ async function main(): Promise<void> {
   const logoId = Image.add(wb, { buffer: logo, extension: "png" });
 
   const pic = Workbook.addWorksheet(wb, "16-Picture Fill");
-  Worksheet.addRow(pic, ["Picture-fill via workbookImageId"]);
+  Row.add(pic, ["Picture-fill via workbookImageId"]);
   Cell.setStyle(pic, "A1", { font: { bold: true } });
-  Chart.add(
-    pic,
-    {
-      type: "bar",
-      barDir: "col",
-      title: `Shared image #${logoId}`,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          pictureFill: { image: { workbookImageId: logoId }, fillMode: "stack" }
-        }
-      ]
-    },
-    "A3:L22"
-  );
+  Chart.place(pic, "A3:L22", {
+    type: "bar",
+    barDir: "col",
+    title: `Shared image #${logoId}`,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        pictureFill: { image: { workbookImageId: logoId }, fillMode: "stack" }
+      }
+    ]
+  });
 
   // ---------------------------------------------------------------------------
   // 17. Full preset catalogue — one chart per classic preset name
@@ -2432,7 +2251,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const catalogue = Workbook.addWorksheet(wb, "17-Full Preset Catalogue");
-  Worksheet.addRow(catalogue, ["All 99 classic presets"]);
+  Row.add(catalogue, ["All 99 classic presets"]);
   Cell.setStyle(catalogue, "A1", { font: { bold: true } });
 
   const presetNames = Object.keys(CHART_PRESETS);
@@ -2487,14 +2306,17 @@ async function main(): Promise<void> {
       ];
     }
 
-    Chart.addPreset(
+    Chart.place(
       catalogue,
-      name as (typeof EXCEL_CHART_PRESETS)[number],
-      { title: name, series, showLegend: false },
       {
         tl: { col: startCol, row: startRow },
         br: { col: endCol, row: endRow }
-      }
+      },
+      Chart.applyPreset(name as (typeof EXCEL_CHART_PRESETS)[number], {
+        title: name,
+        series,
+        showLegend: false
+      })
     );
   });
 
@@ -2518,7 +2340,7 @@ async function main(): Promise<void> {
 
   // `replaceChart` — swap the chart out in-place, preserving the tab
   // settings + page setup we just configured.
-  Workbook.replaceChartsheetChart(wb, Chartsheet.name(cs), {
+  Workbook.replaceChartsheetChart(wb, Chartsheet.getName(cs), {
     type: "line",
     title: "Replaced after creation",
     showMarker: true,
@@ -2551,23 +2373,19 @@ async function main(): Promise<void> {
   // OOXML schema — this shows how to reach in when you need to).
 
   const advanced = Workbook.addWorksheet(wb, "19-Advanced Shape & Effects");
-  Worksheet.addRow(advanced, ["Advanced shape / effects"]);
+  Row.add(advanced, ["Advanced shape / effects"]);
   Cell.setStyle(advanced, "A1", { font: { bold: true } });
 
   // --- 19.1 chart-level frame — rounded corners + gradient background
   Cell.setValue(advanced, "A3", "19.1 — chart-level spPr (background gradient + border)");
   Cell.setStyle(advanced, "A3", { font: { bold: true } });
-  Chart.add(
-    advanced,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Chart frame with gradient",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A4:L23"
-  );
-  const chartFrame = Chart.get(advanced)[0];
+  Chart.place(advanced, "A4:L23", {
+    type: "bar",
+    barDir: "col",
+    title: "Chart frame with gradient",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
+  const chartFrame = Chart.list(advanced)[0];
   Chart.mutate(chartFrame, model => {
     model.spPr = {
       fill: {
@@ -2592,24 +2410,20 @@ async function main(): Promise<void> {
     "19.2 — EffectList: outerShadow + glow + softEdge + reflection + blur"
   );
   Cell.setStyle(advanced, "A26", { font: { bold: true } });
-  Chart.add(
-    advanced,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Effects showcase",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ]
-    },
-    "A27:L46"
-  );
-  const withEffects = Chart.get(advanced)[1];
+  Chart.place(advanced, "A27:L46", {
+    type: "bar",
+    barDir: "col",
+    title: "Effects showcase",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      }
+    ]
+  });
+  const withEffects = Chart.list(advanced)[1];
   Chart.mutate(withEffects, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
@@ -2653,25 +2467,21 @@ async function main(): Promise<void> {
   // --- 19.3 Scene3D + ShapeProperties3D + Bevel on a bar3D chart
   Cell.setValue(advanced, "A49", "19.3 — Scene3D + sp3d bevel/extrusion/contour/material");
   Cell.setStyle(advanced, "A49", { font: { bold: true } });
-  Chart.add(
-    advanced,
-    {
-      type: "bar3D",
-      barDir: "col",
-      title: "3D bar with bevel + extrusion",
-      view3D: { rotX: 20, rotY: 30, rAngAx: true, perspective: 30 },
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "ED7D31"
-        }
-      ]
-    },
-    "A50:L69"
-  );
-  const with3D = Chart.get(advanced)[2];
+  Chart.place(advanced, "A50:L69", {
+    type: "bar3D",
+    barDir: "col",
+    title: "3D bar with bevel + extrusion",
+    view3D: { rotX: 20, rotY: 30, rAngAx: true, perspective: 30 },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "ED7D31"
+      }
+    ]
+  });
+  const with3D = Chart.list(advanced)[2];
   Chart.mutate(with3D, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
@@ -2710,62 +2520,54 @@ async function main(): Promise<void> {
   // --- 19.4 manual plot-area layout in edge mode
   Cell.setValue(advanced, "A72", "19.4 — manual plot-area layout (edge mode pins coordinates)");
   Cell.setStyle(advanced, "A72", { font: { bold: true } });
-  Chart.add(
-    advanced,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Plot area pinned to the right half",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }],
-      plotAreaOptions: {
-        layout: {
-          manualLayout: {
-            layoutTarget: "inner",
-            xMode: "edge",
-            yMode: "edge",
-            wMode: "edge",
-            hMode: "edge",
-            x: 0.5, // 50% from the left of the chart area
-            y: 0.15,
-            w: 0.45,
-            h: 0.7
-          }
-        },
-        spPr: { fill: "F2F9FF", border: "5B9BD5" }
-      }
-    },
-    "A73:L92"
-  );
+  Chart.place(advanced, "A73:L92", {
+    type: "bar",
+    barDir: "col",
+    title: "Plot area pinned to the right half",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }],
+    plotAreaOptions: {
+      layout: {
+        manualLayout: {
+          layoutTarget: "inner",
+          xMode: "edge",
+          yMode: "edge",
+          wMode: "edge",
+          hMode: "edge",
+          x: 0.5, // 50% from the left of the chart area
+          y: 0.15,
+          w: 0.45,
+          h: 0.7
+        }
+      },
+      spPr: { fill: "F2F9FF", border: "5B9BD5" }
+    }
+  });
 
   // --- 19.5 chart-level PictureOptions (bar3D wall picture fills)
   Cell.setValue(advanced, "A95", "19.5 — chart-level PictureOptions (applyTo* for bar3D walls)");
   Cell.setStyle(advanced, "A95", { font: { bold: true } });
-  Chart.add(
-    advanced,
-    {
-      type: "bar3D",
-      barDir: "col",
-      title: "PictureOptions on bar3D series",
-      view3D: { rotX: 20, rotY: 25, rAngAx: true },
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          pictureFill: {
-            image: { workbookImageId: logoId },
-            fillMode: "stackScale",
-            scale: 1,
-            applyToFront: true,
-            applyToSides: true,
-            applyToEnd: true
-          }
+  Chart.place(advanced, "A96:L115", {
+    type: "bar3D",
+    barDir: "col",
+    title: "PictureOptions on bar3D series",
+    view3D: { rotX: 20, rotY: 25, rAngAx: true },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        pictureFill: {
+          image: { workbookImageId: logoId },
+          fillMode: "stackScale",
+          scale: 1,
+          applyToFront: true,
+          applyToSides: true,
+          applyToEnd: true
         }
-      ]
-    },
-    "A96:L115"
-  );
-  const picOpts = Chart.get(advanced)[4];
+      }
+    ]
+  });
+  const picOpts = Chart.list(advanced)[4];
   Chart.mutate(picOpts, model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     // `pictureOptions` is a bar/area-specific slot (CT_BarSer /
@@ -2791,26 +2593,22 @@ async function main(): Promise<void> {
   // --- 19.6 bandFormats on surface chart — colour each contour band
   Cell.setValue(advanced, "A118", "19.6 — bandFormats on surface (per-level colour bands)");
   Cell.setStyle(advanced, "A118", { font: { bold: true } });
-  Chart.add(
-    advanced,
-    {
-      type: "surface",
-      title: "Surface with explicit band colours",
-      series: [
-        { name: "North", categories: "Surface!$B$1:$E$1", values: "Surface!$B$2:$E$2" },
-        { name: "South", categories: "Surface!$B$1:$E$1", values: "Surface!$B$3:$E$3" },
-        { name: "East", categories: "Surface!$B$1:$E$1", values: "Surface!$B$4:$E$4" },
-        { name: "West", categories: "Surface!$B$1:$E$1", values: "Surface!$B$5:$E$5" }
-      ],
-      bandFormats: [
-        { index: 0, spPr: { fill: "1F3864" } },
-        { index: 1, spPr: { fill: "2E75B6" } },
-        { index: 2, spPr: { fill: "8FAADC" } },
-        { index: 3, spPr: { fill: "D9E1F2" } }
-      ]
-    },
-    "A119:L138"
-  );
+  Chart.place(advanced, "A119:L138", {
+    type: "surface",
+    title: "Surface with explicit band colours",
+    series: [
+      { name: "North", categories: "Surface!$B$1:$E$1", values: "Surface!$B$2:$E$2" },
+      { name: "South", categories: "Surface!$B$1:$E$1", values: "Surface!$B$3:$E$3" },
+      { name: "East", categories: "Surface!$B$1:$E$1", values: "Surface!$B$4:$E$4" },
+      { name: "West", categories: "Surface!$B$1:$E$1", values: "Surface!$B$5:$E$5" }
+    ],
+    bandFormats: [
+      { index: 0, spPr: { fill: "1F3864" } },
+      { index: 1, spPr: { fill: "2E75B6" } },
+      { index: 2, spPr: { fill: "8FAADC" } },
+      { index: 3, spPr: { fill: "D9E1F2" } }
+    ]
+  });
 
   // ---------------------------------------------------------------------------
   // 20. Chart copying, vendor extensions, and external ChartEx parsing.
@@ -2821,35 +2619,31 @@ async function main(): Promise<void> {
   //         userShapes XML).
   //   20.2  `chart.unknownElements` — `c15:` / `cx14:` vendor extensions
   //         surviving a parse/serialise round-trip.
-  //   20.3  `parseChartEx(xml)` — parse an external ChartEx XML string
+  //   20.3  `ChartEx.fromXml(xml)` — parse an external ChartEx XML string
   //         directly into a structured model without going through
   //         workbook I/O.
 
   const copyPlayground = Workbook.addWorksheet(wb, "20a-Copy Source");
-  Worksheet.addRow(copyPlayground, ["Chart copy source"]);
+  Row.add(copyPlayground, ["Chart copy source"]);
   Cell.setStyle(copyPlayground, "A1", { font: { bold: true } });
-  Chart.add(
-    copyPlayground,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Original",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ]
-    },
-    "A3:L22"
-  );
-  const sourceChart = Chart.get(copyPlayground)[0];
+  Chart.place(copyPlayground, "A3:L22", {
+    type: "bar",
+    barDir: "col",
+    title: "Original",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      }
+    ]
+  });
+  const sourceChart = Chart.list(copyPlayground)[0];
 
   // --- 20.1 deep-copy the chart to a different worksheet
   const copyDest = Workbook.addWorksheet(wb, "20b-Copy Destination");
-  Worksheet.addRow(copyDest, ["Copies of the chart on the previous sheet"]);
+  Row.add(copyDest, ["Copies of the chart on the previous sheet"]);
   Cell.setStyle(copyDest, "A1", { font: { bold: true } });
   const copy1Num = Chart.copyTo(sourceChart, copyDest, "A3:L22");
   const copy2Num = Chart.copyTo(sourceChart, copyDest, {
@@ -2862,12 +2656,12 @@ async function main(): Promise<void> {
   );
 
   // Modify the copy without touching the source — prove the clone is detached.
-  Chart.setTitle(Chart.get(copyDest)[0], "Copy (independent from source)");
-  Chart.updateSeries(Chart.get(copyDest)[0], 0, { fill: "70AD47" });
+  Chart.setTitle(Chart.list(copyDest)[0], "Copy (independent from source)");
+  Chart.updateSeries(Chart.list(copyDest)[0], 0, { fill: "70AD47" });
 
   // --- 20.2 vendor extensions (`c15:` / `cx14:`) round-trip
   const extSheet = Workbook.addWorksheet(wb, "20c-Vendor Extensions");
-  Worksheet.addRow(extSheet, ["Vendor extensions surviving round-trip"]);
+  Row.add(extSheet, ["Vendor extensions surviving round-trip"]);
   Cell.setStyle(extSheet, "A1", { font: { bold: true } });
 
   // Build a chart programmatically, then inject a synthetic `c15:` /
@@ -2875,17 +2669,13 @@ async function main(): Promise<void> {
   // re-parse the parser will record any child element it doesn't
   // structurally recognise into `ChartModel.unknownElements`; the
   // writer in strict-template-mode can then refuse to drop it.
-  Chart.add(
-    extSheet,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Has a vendor extension",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A3:L22"
-  );
-  const ext = Chart.get(extSheet)[0];
+  Chart.place(extSheet, "A3:L22", {
+    type: "bar",
+    barDir: "col",
+    title: "Has a vendor extension",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
+  const ext = Chart.list(extSheet)[0];
   // Emulate a loaded chart that observed a vendor-only child element.
   // In real usage this happens automatically via `parseChart` when
   // reading an Excel-authored file; here we seed it so we can
@@ -2896,7 +2686,7 @@ async function main(): Promise<void> {
       { name: "c16:cachedValueSource", path: "c:chartSpace/c:extLst/c16:cachedValueSource" }
     ];
   });
-  console.log(`Unknown elements on ext chart:`, Chart.unknownElements(ext));
+  console.log(`Unknown elements on ext chart:`, Chart.getUnknownElements(ext));
 
   // --- 20.3 parse an external ChartEx XML string
   const syntheticChartExXml = [
@@ -2935,9 +2725,9 @@ async function main(): Promise<void> {
     `  </cx:chart>`,
     `</cx:chartSpace>`
   ].join("\n");
-  const parsedEx = parseChartEx(syntheticChartExXml);
+  const parsedEx = ChartEx.fromXml(syntheticChartExXml);
   console.log(
-    `parseChartEx → series count: ${parsedEx.chartSpace.chart.plotArea.plotAreaRegion?.series.length}`,
+    `ChartEx.fromXml → series count: ${parsedEx.chartSpace.chart.plotArea.plotAreaRegion?.series.length}`,
     `first layoutId: ${parsedEx.chartSpace.chart.plotArea.plotAreaRegion?.series[0]?.layoutId}`,
     `data entries: ${parsedEx.chartSpace.chartData.data.length}`
   );
@@ -2958,23 +2748,23 @@ async function main(): Promise<void> {
     }
   });
 
-  // rename — returns true on success
-  Workbook.renameChartsheet(wb, Chartsheet.name(csLifecycle), "Lifecycle-Renamed");
-  console.log(`Renamed chartsheet: ${Chartsheet.name(csLifecycle)}`);
+  // rename — checked against every sheet name in the workbook
+  Chartsheet.setName(csLifecycle, "Lifecycle-Renamed");
+  console.log(`Renamed chartsheet: ${Chartsheet.getName(csLifecycle)}`);
 
   // state — "visible" | "hidden" | "veryHidden"
   Chartsheet.setState(csLifecycle, "hidden"); // hidden from the tab bar; still valid XLSX
-  console.log(`Hidden chartsheet state: ${Chartsheet.state(csLifecycle)}`);
+  console.log(`Hidden chartsheet state: ${Chartsheet.getState(csLifecycle)}`);
 
   // zoomScale / zoomToFit can be adjusted at any time
   Chartsheet.setZoomScale(csLifecycle, 110);
   Chartsheet.setZoomToFit(csLifecycle, false);
 
   // copy — deep-clones the chartsheet into a new tab with its own chart.
-  const csCopy = Workbook.copyChartsheet(wb, Chartsheet.name(csLifecycle), "Lifecycle-Copy");
+  const csCopy = Workbook.copyChartsheet(wb, Chartsheet.getName(csLifecycle), "Lifecycle-Copy");
   if (csCopy) {
     Chartsheet.setState(csCopy, "visible");
-    console.log(`Copied chartsheet: ${Chartsheet.name(csCopy)}`);
+    console.log(`Copied chartsheet: ${Chartsheet.getName(csCopy)}`);
   }
 
   // A throwaway chartsheet we immediately remove to show the API.
@@ -2985,7 +2775,7 @@ async function main(): Promise<void> {
       series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
     }
   });
-  const removed = Workbook.removeChartsheet(wb, Chartsheet.name(doomed));
+  const removed = Workbook.removeChartsheet(wb, Chartsheet.getName(doomed));
   console.log(`Removed 'Lifecycle-Doomed': ${removed}`);
 
   // ---------------------------------------------------------------------------
@@ -3001,10 +2791,10 @@ async function main(): Promise<void> {
   Column.setWidth(spark, 8, 22);
   Row.setValues(spark, 1, ["Metric", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Trend"]);
   Row.setFont(spark, 1, { bold: true });
-  Worksheet.addRow(spark, ["Revenue", 120, 180, 160, 205, 232, 248]);
-  Worksheet.addRow(spark, ["Profit", 32, 49, 41, 64, 75, 81]);
-  Worksheet.addRow(spark, ["Delta", -5, 12, -3, 18, -2, 9]);
-  Worksheet.addRow(spark, ["Units", 540, 620, 610, 710, 805, 880]);
+  Row.add(spark, ["Revenue", 120, 180, 160, 205, 232, 248]);
+  Row.add(spark, ["Profit", 32, 49, 41, 64, 75, 81]);
+  Row.add(spark, ["Delta", -5, 12, -3, 18, -2, 9]);
+  Row.add(spark, ["Units", 540, 620, 610, 710, 805, 880]);
 
   // Line sparkline with high/low/first/last markers
   Sparkline.add(spark, {
@@ -3043,7 +2833,7 @@ async function main(): Promise<void> {
   });
 
   // Grouped sparklines — one group, multiple sparklines sharing styling.
-  const shared: Sparkline.AddSparklineGroupOptions = {
+  const shared: AddSparklineGroupOptions = {
     type: "line",
     markers: true,
     lineColor: "264478",
@@ -3057,7 +2847,7 @@ async function main(): Promise<void> {
   };
   Sparkline.add(spark, shared);
 
-  const allSparklineGroups: Sparkline.SparklineGroup[] = Sparkline.list(spark);
+  const allSparklineGroups: SparklineGroup[] = Sparkline.list(spark);
   console.log(`Sparkline groups on the sheet: ${allSparklineGroups.length}`);
 
   // ---------------------------------------------------------------------------
@@ -3067,87 +2857,75 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const rare = Workbook.addWorksheet(wb, "23-Rare Features");
-  Worksheet.addRow(rare, ["Rare features"]);
+  Row.add(rare, ["Rare features"]);
   Cell.setStyle(rare, "A1", { font: { bold: true } });
 
   // --- 23.1 multi-level categorical axis — Year / Quarter / Month
   const mlData = Workbook.addWorksheet(wb, "23a-MultiLevel Data");
-  Worksheet.addRow(mlData, ["Year", "Quarter", "Value"]);
-  Worksheet.addRow(mlData, ["2023", "Q1", 120]);
-  Worksheet.addRow(mlData, ["", "Q2", 180]);
-  Worksheet.addRow(mlData, ["", "Q3", 160]);
-  Worksheet.addRow(mlData, ["", "Q4", 205]);
-  Worksheet.addRow(mlData, ["2024", "Q1", 232]);
-  Worksheet.addRow(mlData, ["", "Q2", 248]);
-  Worksheet.addRow(mlData, ["", "Q3", 260]);
-  Worksheet.addRow(mlData, ["", "Q4", 290]);
+  Row.add(mlData, ["Year", "Quarter", "Value"]);
+  Row.add(mlData, ["2023", "Q1", 120]);
+  Row.add(mlData, ["", "Q2", 180]);
+  Row.add(mlData, ["", "Q3", 160]);
+  Row.add(mlData, ["", "Q4", 205]);
+  Row.add(mlData, ["2024", "Q1", 232]);
+  Row.add(mlData, ["", "Q2", 248]);
+  Row.add(mlData, ["", "Q3", 260]);
+  Row.add(mlData, ["", "Q4", 290]);
 
   Cell.setValue(rare, "A3", "23.1 — multi-level string reference (category axis Year→Quarter)");
   Cell.setStyle(rare, "A3", { font: { bold: true } });
-  Chart.add(
-    rare,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Revenue per quarter grouped by year",
-      series: [
-        {
-          name: "Revenue",
-          // Passing an AxisDataSource directly — the builder recognises
-          // `multiLvlStrRef` and emits a proper `<c:multiLvlStrRef>` on
-          // the category axis. The formula spans two columns (Year +
-          // Quarter), and cache-populator fills both levels from the
-          // worksheet.
-          categories: { multiLvlStrRef: { formula: "'23a-MultiLevel Data'!$A$2:$B$9" } },
-          values: "'23a-MultiLevel Data'!$C$2:$C$9"
-        }
-      ]
-    },
-    "A4:L23"
-  );
+  Chart.place(rare, "A4:L23", {
+    type: "bar",
+    barDir: "col",
+    title: "Revenue per quarter grouped by year",
+    series: [
+      {
+        name: "Revenue",
+        // Passing an AxisDataSource directly — the builder recognises
+        // `multiLvlStrRef` and emits a proper `<c:multiLvlStrRef>` on
+        // the category axis. The formula spans two columns (Year +
+        // Quarter), and cache-populator fills both levels from the
+        // worksheet.
+        categories: { multiLvlStrRef: { formula: "'23a-MultiLevel Data'!$A$2:$B$9" } },
+        values: "'23a-MultiLevel Data'!$C$2:$C$9"
+      }
+    ]
+  });
 
   // --- 23.2 view3D with depthPercent + hPercent
   Cell.setValue(rare, "A26", "23.2 — view3D depthPercent (z-axis depth) + hPercent (wall height)");
   Cell.setStyle(rare, "A26", { font: { bold: true } });
-  Chart.add(
-    rare,
-    {
-      type: "bar3D",
-      barDir: "col",
-      title: "Deep 3D bar",
-      view3D: {
-        rotX: 20,
-        rotY: 20,
-        rAngAx: true,
-        perspective: 30,
-        depthPercent: 200, // extra depth → bars extruded further
-        hPercent: 150 // walls stretched vertically
-      },
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  Chart.place(rare, "A27:L46", {
+    type: "bar3D",
+    barDir: "col",
+    title: "Deep 3D bar",
+    view3D: {
+      rotX: 20,
+      rotY: 20,
+      rAngAx: true,
+      perspective: 30,
+      depthPercent: 200, // extra depth → bars extruded further
+      hPercent: 150 // walls stretched vertically
     },
-    "A27:L46"
-  );
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
 
   // --- 23.3 ChartEx rawLayoutId passthrough — vendor / future layoutId
   Cell.setValue(rare, "A49", "23.3 — ChartEx rawLayoutId (vendor / future layoutId passthrough)");
   Cell.setStyle(rare, "A49", { font: { bold: true } });
-  Chart.addEx(
-    rare,
-    {
-      type: "treemap",
-      title: "Preserved rawLayoutId",
-      categories: "Hierarchy!$C$2:$C$10",
-      series: [
-        {
-          name: "Sales",
-          values: "Hierarchy!$D$2:$D$10",
-          hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
-        }
-      ]
-    },
-    "A50:L69"
-  );
-  Chart.mutateChartEx(Chart.get(rare)[2], model => {
+  Chart.place(rare, "A50:L69", {
+    type: "treemap",
+    title: "Preserved rawLayoutId",
+    categories: "Hierarchy!$C$2:$C$10",
+    series: [
+      {
+        name: "Sales",
+        values: "Hierarchy!$D$2:$D$10",
+        hierarchy: ["Hierarchy!$A$2:$A$10", "Hierarchy!$B$2:$B$10"]
+      }
+    ]
+  });
+  Chart.mutateEx(Chart.list(rare)[2], model => {
     const series = model.chartSpace.chart.plotArea.plotAreaRegion?.series?.[0];
     if (series) {
       // Simulate a series whose @layoutId is a vendor extension we
@@ -3162,17 +2940,13 @@ async function main(): Promise<void> {
   // --- 23.4 preset geometry + custom geometry on a series spPr
   Cell.setValue(rare, "A72", "23.4 — PresetGeometry (roundRect) + CustomGeometry (star path)");
   Cell.setStyle(rare, "A72", { font: { bold: true } });
-  Chart.add(
-    rare,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "PresetGeometry + CustomGeometry",
-      series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
-    },
-    "A73:L92"
-  );
-  Chart.mutate(Chart.get(rare)[3], model => {
+  Chart.place(rare, "A73:L92", {
+    type: "bar",
+    barDir: "col",
+    title: "PresetGeometry + CustomGeometry",
+    series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
+  });
+  Chart.mutate(Chart.list(rare)[3], model => {
     const firstGroup = model.chart.plotArea.chartTypes[0];
     const firstSeries = firstGroup?.series[0];
     if (firstSeries) {
@@ -3224,10 +2998,10 @@ async function main(): Promise<void> {
   });
 
   // ---------------------------------------------------------------------------
-  // 24. Shape / text property helpers — `parseSpPr` / `buildSpPr` /
-  //     `getSpPrFillColor` / `getSpPrLine` / `getSpPrGradient` /
-  //     `getSpPrPattern` / `setSpPrFill` / `setSpPrLine` / `parseTxPr` /
-  //     `buildTxPr` / `getTxPrFontSize` / `getTxPrColor`.
+  // 24. Shape / text property helpers — `DrawingMl.parseSpPr` / `DrawingMl.createSpPr` /
+  //     `DrawingMl.getSpPrFillColor` / `DrawingMl.getSpPrLine` / `DrawingMl.getSpPrGradient` /
+  //     `DrawingMl.getSpPrPattern` / `DrawingMl.setSpPrFill` / `DrawingMl.setSpPrLine` / `DrawingMl.parseTxPr` /
+  //     `DrawingMl.createTxPr` / `DrawingMl.getTxPrFontSize` / `DrawingMl.getTxPrColor`.
   //
   // These are programmatic helpers for reading / writing the structured
   // `ShapeProperties` + `ChartTextProperties` used throughout the chart
@@ -3242,46 +3016,46 @@ async function main(): Promise<void> {
     '<a:solidFill><a:srgbClr val="4472C4"/></a:solidFill>' +
     '<a:ln w="19050"><a:solidFill><a:srgbClr val="264478"/></a:solidFill><a:prstDash val="dash"/></a:ln>' +
     "</c:spPr>";
-  const parsedSpPr = parseSpPr({ _rawXml: rawSpPrXml });
-  const fillColor = getSpPrFillColor(parsedSpPr);
-  const line = getSpPrLine(parsedSpPr);
-  const gradient = getSpPrGradient(parsedSpPr);
-  const pattern = getSpPrPattern(parsedSpPr);
+  const parsedSpPr = DrawingMl.parseSpPr({ _rawXml: rawSpPrXml });
+  const fillColor = DrawingMl.getSpPrFillColor(parsedSpPr);
+  const line = DrawingMl.getSpPrLine(parsedSpPr);
+  const gradient = DrawingMl.getSpPrGradient(parsedSpPr);
+  const pattern = DrawingMl.getSpPrPattern(parsedSpPr);
   console.log(
-    `parseSpPr → fill=${fillColor?.srgb}, line.dash=${line?.dash}, line.width=${line?.width}, gradient=${gradient ? "yes" : "none"}, pattern=${pattern ? "yes" : "none"}`
+    `DrawingMl.parseSpPr → fill=${fillColor?.srgb}, line.dash=${line?.dash}, line.width=${line?.width}, gradient=${gradient ? "yes" : "none"}, pattern=${pattern ? "yes" : "none"}`
   );
 
-  // `setSpPrFill` / `setSpPrLine` — functional setters that return a new spPr.
-  let mutatedSpPr = setSpPrFill(parsedSpPr, { solid: { srgb: "70AD47" } });
-  mutatedSpPr = setSpPrLine(mutatedSpPr, {
+  // `DrawingMl.setSpPrFill` / `DrawingMl.setSpPrLine` — functional setters that return a new spPr.
+  let mutatedSpPr = DrawingMl.setSpPrFill(parsedSpPr, { solid: { srgb: "70AD47" } });
+  mutatedSpPr = DrawingMl.setSpPrLine(mutatedSpPr, {
     color: { srgb: "375623" },
     width: 25400,
     dash: "solid"
   });
-  const builtXml = buildSpPr(mutatedSpPr);
-  console.log(`buildSpPr → output shape: ${builtXml ? "ShapeProperties" : "empty"}`);
+  const builtXml = DrawingMl.createSpPr(mutatedSpPr);
+  console.log(`DrawingMl.createSpPr → output shape: ${builtXml ? "ShapeProperties" : "empty"}`);
 
   // Text properties round-trip (the tx counterpart of spPr).
   const rawTxPrXml =
     '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="1">' +
     '<a:solidFill><a:srgbClr val="C00000"/></a:solidFill>' +
     '<a:latin typeface="Calibri"/></a:defRPr></a:pPr></a:p></c:txPr>';
-  const parsedTxPr = parseTxPr({ _rawXml: rawTxPrXml });
+  const parsedTxPr = DrawingMl.parseTxPr({ _rawXml: rawTxPrXml });
   console.log(
-    `parseTxPr → fontSize=${getTxPrFontSize(parsedTxPr)} color=${getTxPrColor(parsedTxPr)?.srgb}`
+    `DrawingMl.parseTxPr → fontSize=${DrawingMl.getTxPrFontSize(parsedTxPr)} color=${DrawingMl.getTxPrColor(parsedTxPr)?.srgb}`
   );
-  const rebuiltTxPr = buildTxPr({
+  const rebuiltTxPr = DrawingMl.createTxPr({
     size: 1200,
     bold: false,
     italic: true,
     color: { srgb: "4472C4" },
     fontFamily: "Arial"
   });
-  console.log(`buildTxPr → rebuilt: size=${getTxPrFontSize(rebuiltTxPr)}`);
+  console.log(`DrawingMl.createTxPr → rebuilt: size=${DrawingMl.getTxPrFontSize(rebuiltTxPr)}`);
 
   // ---------------------------------------------------------------------------
-  // 25. Sidecar parsers / writers — `parseChartStyle` / `buildChartStyle` /
-  //     `parseChartColors` / `buildChartColors`. These operate on the
+  // 25. Sidecar parsers / writers — `ChartClassic.fromStyleXml` / `ChartClassic.toStyleXml` /
+  //     `ChartClassic.fromColorsXml` / `ChartClassic.toColorsXml`. These operate on the
   //     `xl/charts/styleN.xml` + `xl/charts/colorsN.xml` payloads
   //     directly, without going through the Chart model. Useful for
   //     tooling that needs to inspect or edit the sidecars.
@@ -3301,10 +3075,10 @@ async function main(): Promise<void> {
       gridlineMajor: { lnRefIdx: 1, effectRefIdx: 0 }
     }
   };
-  const styleXml = buildChartStyle(styleModel);
-  const reparsedStyle = parseChartStyle(styleXml);
+  const styleXml = ChartClassic.toStyleXml(styleModel);
+  const reparsedStyle = ChartClassic.fromStyleXml(styleXml);
   console.log(
-    `buildChartStyle → parseChartStyle — elements: ${Object.keys(reparsedStyle.elements ?? {}).join(", ")}`
+    `ChartClassic.toStyleXml → ChartClassic.fromStyleXml — elements: ${Object.keys(reparsedStyle.elements ?? {}).join(", ")}`
   );
 
   const colorsModel: ChartColorsModel = {
@@ -3318,33 +3092,29 @@ async function main(): Promise<void> {
     ],
     variations: [{ lumMod: 80000, lumOff: 20000 }, { tint: 50000 }]
   };
-  const colorsXml = buildChartColors(colorsModel);
-  const reparsedColors = parseChartColors(colorsXml);
+  const colorsXml = ChartClassic.toColorsXml(colorsModel);
+  const reparsedColors = ChartClassic.fromColorsXml(colorsXml);
   console.log(
-    `buildChartColors → parseChartColors — palette: ${reparsedColors.colors?.length} colours, ${reparsedColors.variations?.length} variations`
+    `ChartClassic.toColorsXml → ChartClassic.fromColorsXml — palette: ${reparsedColors.colors?.length} colours, ${reparsedColors.variations?.length} variations`
   );
 
   // Attach the programmatically-built sidecar to an actual chart.
   const sidecar = Workbook.addWorksheet(wb, "25-Sidecar Attached");
-  Chart.add(
-    sidecar,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Structured sidecar via parse/build round-trip",
-      series: [
-        { name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" },
-        { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" }
-      ],
-      chartStyle: reparsedStyle,
-      chartColors: reparsedColors
-    },
-    "A1:L20"
-  );
+  Chart.place(sidecar, "A1:L20", {
+    type: "bar",
+    barDir: "col",
+    title: "Structured sidecar via parse/build round-trip",
+    series: [
+      { name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" },
+      { name: "Profit", categories: "Sales!$A$2:$A$7", values: "Sales!$C$2:$C$7" }
+    ],
+    chartStyle: reparsedStyle,
+    chartColors: reparsedColors
+  });
 
   // ---------------------------------------------------------------------------
-  // 26. Cache populator API — `fillChartCaches` / `fillChartExCaches` /
-  //     `fillNumRef` / `fillStrRef`. The worksheet-side registration
+  // 26. Cache populator API — `ChartClassic.fillCaches` / `ChartEx.fillCaches` /
+  //     `ChartClassic.fillNumRef` / `ChartClassic.fillStrRef`. The worksheet-side registration
   //     path (`_registerChart`) invokes these automatically, but the
   //     public entry points let tools that build charts outside the
   //     worksheet machinery seed their own caches.
@@ -3354,16 +3124,16 @@ async function main(): Promise<void> {
   // caches against the workbook. Afterwards the number/string caches
   // will have real values even though the model was never attached to
   // a worksheet registrar.
-  const standaloneModel = buildChartModel({
+  const standaloneModel = ChartClassic.createModel({
     type: "line",
     title: "Headless-populated caches",
     series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
   });
-  fillChartCaches(standaloneModel, wb);
+  ChartClassic.fillCaches(standaloneModel, wb);
   const firstSeries = standaloneModel.chart.plotArea.chartTypes[0].series[0];
   const valCache = (firstSeries as { val?: { numRef?: NumberReference } }).val?.numRef?.cache;
   console.log(
-    `fillChartCaches → values cached: ${valCache?.points?.length ?? 0} points (e.g. ${valCache?.points?.[0]?.value})`
+    `ChartClassic.fillCaches → values cached: ${valCache?.points?.length ?? 0} points (e.g. ${valCache?.points?.[0]?.value})`
   );
 
   // Targeted cache fill for a single reference — e.g. a programmatically
@@ -3372,18 +3142,22 @@ async function main(): Promise<void> {
     formula: "Sales!$B$2:$B$7",
     cache: { points: [] }
   };
-  fillNumRef(customNumRef, wb);
-  console.log(`fillNumRef → ${customNumRef.cache?.points?.length ?? 0} number points populated`);
+  ChartClassic.fillNumRef(customNumRef, wb);
+  console.log(
+    `ChartClassic.fillNumRef → ${customNumRef.cache?.points?.length ?? 0} number points populated`
+  );
 
   const customStrRef: StringReference = {
     formula: "Sales!$A$2:$A$7",
     cache: { points: [] }
   };
-  fillStrRef(customStrRef, wb);
-  console.log(`fillStrRef → ${customStrRef.cache?.points?.length ?? 0} string points populated`);
+  ChartClassic.fillStrRef(customStrRef, wb);
+  console.log(
+    `ChartClassic.fillStrRef → ${customStrRef.cache?.points?.length ?? 0} string points populated`
+  );
 
   // ChartEx flavour — same idea, different walker.
-  const cxStandalone = buildChartExModel({
+  const cxStandalone = ChartEx.createModel({
     type: "treemap",
     title: "Headless ChartEx with filled caches",
     categories: "Hierarchy!$C$2:$C$10",
@@ -3395,64 +3169,70 @@ async function main(): Promise<void> {
       }
     ]
   });
-  fillChartExCaches(cxStandalone, wb);
+  ChartEx.fillCaches(cxStandalone, wb);
   const cxData = cxStandalone.chartSpace.chartData.data;
   console.log(
-    `fillChartExCaches → cx:data entries: ${cxData.length} (first levels: ${cxData[0]?.numDim?.levels?.length ?? 0})`
+    `ChartEx.fillCaches → cx:data entries: ${cxData.length} (first levels: ${cxData[0]?.numDim?.levels?.length ?? 0})`
   );
 
   // ---------------------------------------------------------------------------
   // 27. Low-level renderer + TopoJSON region map + preset apply.
   //
-  //   27.1  `renderChartSvg` / `renderChartPng` / `renderChartExSvg` /
-  //         `renderChartExPng` directly against a ChartModel — skip the
+  //   27.1  `ChartClassic.toSvg` / `ChartClassic.toPng` / `ChartEx.toSvg` /
+  //         `ChartEx.toPng` directly against a ChartModel — skip the
   //         Chart wrapper entirely (useful for consumers that already
   //         have a parsed model in hand and don't need a `Worksheet`).
-  //   27.2  `buildChartScene` — the intermediate scene IR that drives
+  //   27.2  `ChartClassic.Backend.toScene` — the intermediate scene IR that drives
   //         SVG / PNG / PDF rendering; emitting it lets consumers
   //         implement their own back-end (e.g. pdfmake, Canvas 2D).
-  //   27.3  `applyAxisTransform` — the log/linear coordinate transform
+  //   27.3  `ChartClassic.Backend.applyAxisTransform` — the log/linear coordinate transform
   //         the scene builder uses internally.
-  //   27.4  `buildEffectFilter` — build an SVG `<filter>` definition
+  //   27.4  `ChartClassic.Backend.toSvgFilter` — build an SVG `<filter>` definition
   //         from an `EffectList`; callers doing custom SVG composition
   //         can reuse it.
   //   27.5  `VECTOR_PDF_CHART_EX_LAYOUT_IDS` — readonly set exposing
   //         which ChartEx layouts take the vector PDF path.
-  //   27.6  `resolveTopologyObject` + regionMap rendered from a
+  //   27.6  `ChartClassic.Backend.resolveTopologyObject` + regionMap rendered from a
   //         synthetic two-country TopoJSON (no external data-set
   //         required).
-  //   27.7  `applyChartPreset` / `applyChartExPreset` invoked directly
+  //   27.7  `ChartClassic.applyPreset` / `ChartEx.applyPreset` invoked directly
   //         (vs via `worksheet.addPresetChart`).
   // ---------------------------------------------------------------------------
 
   // --- 27.1 direct renderChart(Svg|Png)
-  const svgDirect = renderChartSvg(standaloneModel, { width: 640, height: 360 });
+  const svgDirect = ChartClassic.toSvg(standaloneModel, { width: 640, height: 360 });
   writeFileSync(resolve(OUT_DIR, "charts-example-lowlevel.svg"), svgDirect, "utf-8");
-  const pngDirect = await renderChartPng(standaloneModel, { width: 640, height: 360, scale: 2 });
+  const pngDirect = await ChartClassic.toPng(standaloneModel, {
+    width: 640,
+    height: 360,
+    scale: 2
+  });
   writeFileSync(resolve(OUT_DIR, "charts-example-lowlevel.png"), pngDirect);
 
-  // --- 27.1 direct renderChartEx(Svg|Png)
-  const svgExDirect = renderChartExSvg(cxStandalone, { width: 640, height: 360 });
+  // --- 27.1 direct ChartEx.toXml(Svg|Png)
+  const svgExDirect = ChartEx.toSvg(cxStandalone, { width: 640, height: 360 });
   writeFileSync(resolve(OUT_DIR, "charts-example-lowlevel-ex.svg"), svgExDirect, "utf-8");
-  const pngExDirect = await renderChartExPng(cxStandalone, { width: 640, height: 360, scale: 2 });
+  const pngExDirect = await ChartEx.toPng(cxStandalone, { width: 640, height: 360, scale: 2 });
   writeFileSync(resolve(OUT_DIR, "charts-example-lowlevel-ex.png"), pngExDirect);
   console.log(
     `Low-level renderers — classic svg: ${svgDirect.length} bytes, ex svg: ${svgExDirect.length} bytes`
   );
 
-  // --- 27.2 buildChartScene — the shared IR used by all backends.
-  const scene = buildChartScene(standaloneModel, { width: 640, height: 360 });
+  // --- 27.2 ChartClassic.Backend.toScene — the shared IR used by all backends.
+  const scene = ChartClassic.Backend.toScene(standaloneModel, { width: 640, height: 360 });
   console.log(
-    `buildChartScene → bounds=${scene.width}×${scene.height}, series=${scene.series?.length ?? 0}`
+    `ChartClassic.Backend.toScene → bounds=${scene.width}×${scene.height}, series=${scene.series?.length ?? 0}`
   );
 
-  // --- 27.3 applyAxisTransform — log/linear value coordinate mapping.
-  const linear = applyAxisTransform(500, undefined);
-  const log10 = applyAxisTransform(500, 10);
-  console.log(`applyAxisTransform — linear(500)=${linear}, log10(500)=${log10.toFixed(3)}`);
+  // --- 27.3 ChartClassic.Backend.applyAxisTransform — log/linear value coordinate mapping.
+  const linear = ChartClassic.Backend.applyAxisTransform(500, undefined);
+  const log10 = ChartClassic.Backend.applyAxisTransform(500, 10);
+  console.log(
+    `ChartClassic.Backend.applyAxisTransform — linear(500)=${linear}, log10(500)=${log10.toFixed(3)}`
+  );
 
-  // --- 27.4 buildEffectFilter — SVG `<filter>` for a structured EffectList.
-  const effectFilterXml = buildEffectFilter("demoFilter", {
+  // --- 27.4 ChartClassic.Backend.toSvgFilter — SVG `<filter>` for a structured EffectList.
+  const effectFilterXml = ChartClassic.Backend.toSvgFilter("demoFilter", {
     outerShadow: {
       blurRadius: 50800,
       distance: 38100,
@@ -3464,7 +3244,7 @@ async function main(): Promise<void> {
       color: { srgb: "4472C4", alpha: 60000 }
     }
   });
-  console.log(`buildEffectFilter → ${effectFilterXml.length} bytes of <filter> XML`);
+  console.log(`ChartClassic.Backend.toSvgFilter → ${effectFilterXml.length} bytes of <filter> XML`);
 
   // --- 27.5 VECTOR_PDF_CHART_EX_LAYOUT_IDS — which ChartEx layouts
   //         render as PDF vector content (vs. rasterised). The set
@@ -3472,7 +3252,7 @@ async function main(): Promise<void> {
   //         path can inspect it.
   console.log(`VECTOR_PDF_CHART_EX_LAYOUT_IDS: ${VECTOR_PDF_CHART_EX_LAYOUT_IDS.join(", ")}`);
 
-  // --- 27.6 resolveTopologyObject + regionMap with real polygons
+  // --- 27.6 ChartClassic.Backend.resolveTopologyObject + regionMap with real polygons
   //
   // A tiny in-memory TopoJSON with two "countries" encoded as
   // quantised integer arcs. World-atlas bundles look exactly like
@@ -3529,29 +3309,25 @@ async function main(): Promise<void> {
   // Validate the resolver directly — good pattern for applications
   // that want to pre-validate a user-supplied topology before
   // forwarding it to the renderer.
-  const resolved = resolveTopologyObject(syntheticTopology, "countries");
+  const resolved = ChartClassic.Backend.resolveTopologyObject(syntheticTopology, "countries");
   console.log(
-    `resolveTopologyObject — ${resolved.length} features: ${resolved.map(f => f.id).join(", ")}`
+    `ChartClassic.Backend.resolveTopologyObject — ${resolved.length} features: ${resolved.map(f => f.id).join(", ")}`
   );
 
   // Build a regionMap chart that uses the synthetic polygons at
   // render-time. The `categories` / `values` data identifies which
   // feature gets which value; the topology draws the boundary.
   const topoSheet = Workbook.addWorksheet(wb, "27-TopoJSON RegionMap");
-  Worksheet.addRow(topoSheet, ["Country", "Value"]);
-  Worksheet.addRow(topoSheet, ["Alphaland", 820]);
-  Worksheet.addRow(topoSheet, ["Betaland", 430]);
-  Chart.addEx(
-    topoSheet,
-    {
-      type: "regionMap",
-      title: "RegionMap with synthetic TopoJSON polygons",
-      categories: "'27-TopoJSON RegionMap'!$A$2:$A$3",
-      series: [{ name: "Value", values: "'27-TopoJSON RegionMap'!$B$2:$B$3" }],
-      layout: { projection: "mercator", regionLabels: "showAll" }
-    },
-    "D1:L20"
-  );
+  Row.add(topoSheet, ["Country", "Value"]);
+  Row.add(topoSheet, ["Alphaland", 820]);
+  Row.add(topoSheet, ["Betaland", 430]);
+  Chart.place(topoSheet, "D1:L20", {
+    type: "regionMap",
+    title: "RegionMap with synthetic TopoJSON polygons",
+    categories: "'27-TopoJSON RegionMap'!$A$2:$A$3",
+    series: [{ name: "Value", values: "'27-TopoJSON RegionMap'!$B$2:$B$3" }],
+    layout: { projection: "mercator", regionLabels: "showAll" }
+  });
 
   // Render the region-map chart with the topology plumbed through.
   const regionMapOpts: RegionMapDataOptions = {
@@ -3561,22 +3337,22 @@ async function main(): Promise<void> {
     projection: "mercator",
     strokeColor: "#FFFFFF"
   };
-  const regionMapChart = Chart.get(topoSheet)[0];
-  const regionMapSvg = Chart.toSVG(regionMapChart, {
+  const regionMapChart = Chart.list(topoSheet)[0];
+  const regionMapSvg = Chart.toSvg(regionMapChart, {
     width: 640,
     height: 400,
     regionMap: regionMapOpts
   });
   writeFileSync(resolve(OUT_DIR, "charts-example-regionmap-topojson.svg"), regionMapSvg, "utf-8");
 
-  // --- 27.7 applyChartPreset / applyChartExPreset direct invocation
+  // --- 27.7 ChartClassic.applyPreset / ChartEx.applyPreset direct invocation
   //
-  // `worksheet.Chart.addPreset("lineMarkers", opts, range)` is a thin
-  // wrapper over `applyChartPreset("lineMarkers", opts)` +
-  // `worksheet.Chart.add(mergedOpts, range)`. Splitting the two lets
+  // `Chart.place(ws, range, Chart.applyPreset("lineMarkers", opts))` builds
+  // the preset's options first and then the chart; `ChartClassic.applyPreset`
+  // is the same step for a model-only caller. Keeping the two apart lets
   // you transform the merged options bag before it hits the builder
   // (e.g. to mutate colours, inject additional series, etc.).
-  const presetMerged: AddChartOptions = applyChartPreset("lineMarkers", {
+  const presetMerged: AddChartOptions = ChartClassic.applyPreset("lineMarkers", {
     title: "Applied preset, then further edited",
     series: [{ name: "Revenue", categories: "Sales!$A$2:$A$7", values: "Sales!$B$2:$B$7" }]
   });
@@ -3584,14 +3360,14 @@ async function main(): Promise<void> {
   presetMerged.grouping = "stacked";
   presetMerged.showMarker = true;
   const presetWs = Workbook.addWorksheet(wb, "27b-Applied Presets");
-  Chart.add(presetWs, presetMerged, "A1:L20");
+  Chart.place(presetWs, "A1:L20", presetMerged);
 
-  const presetExMerged = applyChartExPreset("boxAndWhisker", {
+  const presetExMerged = ChartEx.applyPreset("boxAndWhisker", {
     title: "Applied ChartEx preset",
     categories: "Distribution!$A$1:$A$1",
     series: [{ name: "Samples", values: "Distribution!$A$2:$A$41" }]
   });
-  Chart.addEx(presetWs, presetExMerged, "A22:L41");
+  Chart.place(presetWs, "A22:L41", presetExMerged);
 
   // ---------------------------------------------------------------------------
   // 28. Axis edge cases — every axis / label option Excel exposes that
@@ -3607,7 +3383,7 @@ async function main(): Promise<void> {
   // with the default skip=1 setting, so the demo clearly shows the
   // effect of thinning the tick labels.
   const dense = Workbook.addWorksheet(wb, "28-Dense Daily");
-  Worksheet.addRow(dense, ["Date", "Incidents"]);
+  Row.add(dense, ["Date", "Incidents"]);
   {
     const start = Date.UTC(2024, 0, 1);
     for (let i = 0; i < 90; i++) {
@@ -3615,7 +3391,7 @@ async function main(): Promise<void> {
       // Mild trend + sinusoidal noise so the line chart has visible
       // structure rather than a straight line.
       const value = 20 + Math.round(Math.sin(i / 7) * 5 + i / 10);
-      Worksheet.addRow(dense, [date, value]);
+      Row.add(dense, [date, value]);
     }
   }
   Column.setStyle(dense, 1, { numFmt: "yyyy-mm-dd" });
@@ -3626,8 +3402,8 @@ async function main(): Promise<void> {
   // (which is monotone-positive and is consumed by dozens of
   // upstream charts).
   const pnl = Workbook.addWorksheet(wb, "28-PnL");
-  Worksheet.addRow(pnl, ["Month", "Net"]);
-  Worksheet.addRows(pnl, [
+  Row.add(pnl, ["Month", "Net"]);
+  Row.addMany(pnl, [
     ["Jan", 120],
     ["Feb", -45],
     ["Mar", 85],
@@ -3638,7 +3414,7 @@ async function main(): Promise<void> {
   Column.setStyle(pnl, 2, { numFmt: "$#,##0;[Red]-$#,##0" });
 
   const axisEdge = Workbook.addWorksheet(wb, "28-Axis Edge Cases");
-  Worksheet.addRow(axisEdge, ["Axis edge cases"]);
+  Row.add(axisEdge, ["Axis edge cases"]);
   Cell.setStyle(axisEdge, "A1", { font: { bold: true } });
 
   // --- 28.1 `invertIfNegative` — bars flip fill colour when the value
@@ -3648,61 +3424,53 @@ async function main(): Promise<void> {
   //     positive-side colour to invert from.
   Cell.setValue(axisEdge, "A3", "28.1 — invertIfNegative (bar auto-flips colour on negatives)");
   Cell.setStyle(axisEdge, "A3", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Net P&L — invertIfNegative on",
-      series: [
-        {
-          name: "Net",
-          categories: "'28-PnL'!$A$2:$A$7",
-          values: "'28-PnL'!$B$2:$B$7",
-          fill: "4472C4",
-          invertIfNegative: true
-        }
-      ],
-      showLegend: false,
-      valueAxis: {
-        // `crossesAt: 0` and `crossBetween: "between"` just clarify
-        // the zero baseline — not strictly needed for the demo.
-        crosses: "autoZero",
-        numFmt: "$#,##0"
+  Chart.place(axisEdge, "A4:L23", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Net P&L — invertIfNegative on",
+    series: [
+      {
+        name: "Net",
+        categories: "'28-PnL'!$A$2:$A$7",
+        values: "'28-PnL'!$B$2:$B$7",
+        fill: "4472C4",
+        invertIfNegative: true
       }
-    },
-    "A4:L23"
-  );
+    ],
+    showLegend: false,
+    valueAxis: {
+      // `crossesAt: 0` and `crossBetween: "between"` just clarify
+      // the zero baseline — not strictly needed for the demo.
+      crosses: "autoZero",
+      numFmt: "$#,##0"
+    }
+  });
 
   // --- 28.2 `orientation: "maxMin"` — reverse the axis so values
   //     count down. Common on financial / ranking charts where the
   //     top rank sits at the top of the Y axis.
   Cell.setValue(axisEdge, "A26", "28.2 — orientation: 'maxMin' (reversed value axis)");
   Cell.setStyle(axisEdge, "A26", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "bar",
-      barDir: "bar",
-      grouping: "clustered",
-      title: "Reverse-ordered horizontal bars (highest at top)",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ],
-      categoryAxis: {
-        // `maxMin` flips the category axis so Jan ends up at the
-        // bottom (OOXML default is `minMax`).
-        orientation: "maxMin"
+  Chart.place(axisEdge, "A27:L46", {
+    type: "bar",
+    barDir: "bar",
+    grouping: "clustered",
+    title: "Reverse-ordered horizontal bars (highest at top)",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
       }
-    },
-    "A27:L46"
-  );
+    ],
+    categoryAxis: {
+      // `maxMin` flips the category axis so Jan ends up at the
+      // bottom (OOXML default is `minMax`).
+      orientation: "maxMin"
+    }
+  });
 
   // --- 28.3 `crosses: "max"` and `crossesAt: <number>` — make the
   //     X axis cross the Y axis at a specific value (here the monthly
@@ -3710,38 +3478,34 @@ async function main(): Promise<void> {
   //     charts where the bars hang off a non-zero baseline.
   Cell.setValue(axisEdge, "A49", "28.3 — crossesAt: target line at $180k");
   Cell.setStyle(axisEdge, "A49", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Deviation from $180k target",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4",
-          invertIfNegative: true
-        }
-      ],
-      showLegend: false,
-      valueAxis: {
-        crossesAt: 180,
-        numFmt: "$#,##0"
-      },
-      categoryAxis: {
-        // `crosses` on the category axis drives where the value axis
-        // "crosses" it. `min` / `max` pin the category axis to the
-        // corresponding end of the value axis — useful when the
-        // value axis is inverted and you want the baseline at the
-        // top of the plot.
-        crosses: "max"
+  Chart.place(axisEdge, "A50:L69", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Deviation from $180k target",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4",
+        invertIfNegative: true
       }
+    ],
+    showLegend: false,
+    valueAxis: {
+      crossesAt: 180,
+      numFmt: "$#,##0"
     },
-    "A50:L69"
-  );
+    categoryAxis: {
+      // `crosses` on the category axis drives where the value axis
+      // "crosses" it. `min` / `max` pin the category axis to the
+      // corresponding end of the value axis — useful when the
+      // value axis is inverted and you want the baseline at the
+      // top of the plot.
+      crosses: "max"
+    }
+  });
 
   // --- 28.4 `crossBetween: "midCat"` — value axis crosses the category
   //     axis at the midpoint of each category tick rather than between
@@ -3750,24 +3514,20 @@ async function main(): Promise<void> {
   //     it flush against the axis.
   Cell.setValue(axisEdge, "A72", "28.4 — crossBetween: 'midCat' (line flush against axis)");
   Cell.setStyle(axisEdge, "A72", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "line",
-      title: "crossBetween = midCat",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          line: "4472C4",
-          marker: { symbol: "circle", size: 7 }
-        }
-      ],
-      valueAxis: { crossBetween: "midCat" }
-    },
-    "A73:L92"
-  );
+  Chart.place(axisEdge, "A73:L92", {
+    type: "line",
+    title: "crossBetween = midCat",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        line: "4472C4",
+        marker: { symbol: "circle", size: 7 }
+      }
+    ],
+    valueAxis: { crossBetween: "midCat" }
+  });
 
   // --- 28.5 `tickLblSkip` / `tickMarkSkip` — on dense categorical
   //     axes Excel will overlap labels unless the author thins them
@@ -3776,30 +3536,26 @@ async function main(): Promise<void> {
   //     only one in ten carries a visible label.
   Cell.setValue(axisEdge, "A95", "28.5 — tickLblSkip=10 / tickMarkSkip=5 (90-day daily axis)");
   Cell.setStyle(axisEdge, "A95", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "line",
-      title: "90 days of incidents — labels every 10 days",
-      series: [
-        {
-          name: "Incidents",
-          categories: "'28-Dense Daily'!$A$2:$A$91",
-          values: "'28-Dense Daily'!$B$2:$B$91",
-          line: "ED7D31",
-          marker: { symbol: "none" }
-        }
-      ],
-      categoryAxis: {
-        tickLblSkip: 10,
-        tickMarkSkip: 5,
-        textRotation: -45,
-        numFmt: "mmm-dd"
-      },
-      showLegend: false
+  Chart.place(axisEdge, "A96:L115", {
+    type: "line",
+    title: "90 days of incidents — labels every 10 days",
+    series: [
+      {
+        name: "Incidents",
+        categories: "'28-Dense Daily'!$A$2:$A$91",
+        values: "'28-Dense Daily'!$B$2:$B$91",
+        line: "ED7D31",
+        marker: { symbol: "none" }
+      }
+    ],
+    categoryAxis: {
+      tickLblSkip: 10,
+      tickMarkSkip: 5,
+      textRotation: -45,
+      numFmt: "mmm-dd"
     },
-    "A96:L115"
-  );
+    showLegend: false
+  });
 
   // --- 28.6 `lblAlgn` / `lblOffset` — category axis label alignment
   //     and spacing. `lblAlgn: "l"` left-aligns labels against their
@@ -3807,30 +3563,26 @@ async function main(): Promise<void> {
   //     (default 100 = flush against tick marks).
   Cell.setValue(axisEdge, "A118", "28.6 — lblAlgn='l' + lblOffset=200 (left-aligned, pushed away)");
   Cell.setStyle(axisEdge, "A118", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Left-aligned category labels with extra offset",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ],
-      categoryAxis: {
-        lblAlgn: "l",
-        lblOffset: 200,
-        textRotation: 0
-      },
-      showLegend: false
+  Chart.place(axisEdge, "A119:L138", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Left-aligned category labels with extra offset",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      }
+    ],
+    categoryAxis: {
+      lblAlgn: "l",
+      lblOffset: 200,
+      textRotation: 0
     },
-    "A119:L138"
-  );
+    showLegend: false
+  });
 
   // --- 28.7 All 11 `lineDash` styles on one radar chart — one
   //     concentric ring per style so the reader can pick a dash they
@@ -3851,57 +3603,49 @@ async function main(): Promise<void> {
   ];
   Cell.setValue(axisEdge, "A141", "28.7 — every lineDash style (11 variants)");
   Cell.setStyle(axisEdge, "A141", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "line",
-      title: "Catalogue of line-dash presets",
-      showMarker: false,
-      series: dashStyles.map((dash, i) => ({
-        // Offset each series vertically so they don't overlap — we
-        // multiply the same Sales revenue by a per-series scale to
-        // spread them into a readable ladder.
-        name: dash,
-        categories: "Sales!$A$2:$A$7",
-        values: "Sales!$B$2:$B$7",
-        line: HEX_PALETTE[i % HEX_PALETTE.length],
-        lineWidth: 2,
-        lineDash: dash
-      })),
-      legendPosition: "r"
-    },
-    "A142:L175"
-  );
+  Chart.place(axisEdge, "A142:L175", {
+    type: "line",
+    title: "Catalogue of line-dash presets",
+    showMarker: false,
+    series: dashStyles.map((dash, i) => ({
+      // Offset each series vertically so they don't overlap — we
+      // multiply the same Sales revenue by a per-series scale to
+      // spread them into a readable ladder.
+      name: dash,
+      categories: "Sales!$A$2:$A$7",
+      values: "Sales!$B$2:$B$7",
+      line: HEX_PALETTE[i % HEX_PALETTE.length],
+      lineWidth: 2,
+      lineDash: dash
+    })),
+    legendPosition: "r"
+  });
 
   // --- 28.8 Log axis with an explicit `logBase: 2` (the Excel UI
   //     defaults to 10, but any integer >= 2 is valid). Showcases
   //     that our log axis isn't hardcoded to base-10.
   Cell.setValue(axisEdge, "A178", "28.8 — logBase=2 value axis (binary decade ticks)");
   Cell.setStyle(axisEdge, "A178", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "line",
-      title: "Log scale — base 2",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          line: "70AD47",
-          marker: { symbol: "diamond", size: 7 }
-        }
-      ],
-      valueAxis: {
-        logBase: 2,
-        min: 64,
-        max: 512,
-        numFmt: "0",
-        title: "Revenue (log₂)"
+  Chart.place(axisEdge, "A179:L198", {
+    type: "line",
+    title: "Log scale — base 2",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        line: "70AD47",
+        marker: { symbol: "diamond", size: 7 }
       }
-    },
-    "A179:L198"
-  );
+    ],
+    valueAxis: {
+      logBase: 2,
+      min: 64,
+      max: 512,
+      numFmt: "0",
+      title: "Revenue (log₂)"
+    }
+  });
 
   // --- 28.9 `showDLblsOverMax: true` — render data labels even when
   //     the label's value exceeds the value axis `max`. Without this
@@ -3910,28 +3654,24 @@ async function main(): Promise<void> {
   //     readable.
   Cell.setValue(axisEdge, "A201", "28.9 — showDLblsOverMax: clipped bars still label");
   Cell.setStyle(axisEdge, "A201", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Revenue clipped at $200 — labels still rendered",
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4",
-          dataLabels: { showVal: true, position: "outEnd", numFmt: "$#,##0" }
-        }
-      ],
-      valueAxis: { max: 200, numFmt: "$#,##0" },
-      showDLblsOverMax: true,
-      showLegend: false
-    },
-    "A202:L221"
-  );
+  Chart.place(axisEdge, "A202:L221", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Revenue clipped at $200 — labels still rendered",
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4",
+        dataLabels: { showVal: true, position: "outEnd", numFmt: "$#,##0" }
+      }
+    ],
+    valueAxis: { max: 200, numFmt: "$#,##0" },
+    showDLblsOverMax: true,
+    showLegend: false
+  });
 
   // --- 28.10 `showLeaderLines: true` — pie charts with external
   //     `outEnd` labels emit leader lines connecting each slice to
@@ -3939,29 +3679,25 @@ async function main(): Promise<void> {
   //     some Excel builds) leaves the labels visually detached.
   Cell.setValue(axisEdge, "A224", "28.10 — pie with explicit showLeaderLines");
   Cell.setStyle(axisEdge, "A224", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "pie",
-      title: "Revenue by month — leader lines on",
-      varyColors: true,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          dataLabels: {
-            showPercent: true,
-            showCatName: true,
-            position: "outEnd",
-            separator: " • ",
-            showLeaderLines: true
-          }
+  Chart.place(axisEdge, "A225:L244", {
+    type: "pie",
+    title: "Revenue by month — leader lines on",
+    varyColors: true,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        dataLabels: {
+          showPercent: true,
+          showCatName: true,
+          position: "outEnd",
+          separator: " • ",
+          showLeaderLines: true
         }
-      ]
-    },
-    "A225:L244"
-  );
+      }
+    ]
+  });
 
   // --- 28.11 Defined-name reference — `wb.definedNames.add(...)`
   //     lets callers reuse a named range as a series reference
@@ -3972,26 +3708,22 @@ async function main(): Promise<void> {
   DefinedNames.add(Workbook.getDefinedNames(wb), "Sales!$B$2:$B$7", "MonthRevenue");
   Cell.setValue(axisEdge, "A247", "28.11 — categories / values via defined names");
   Cell.setStyle(axisEdge, "A247", { font: { bold: true } });
-  Chart.add(
-    axisEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Series references via `=MonthCategories` / `=MonthRevenue`",
-      series: [
-        {
-          name: "Revenue",
-          categories: "MonthCategories",
-          values: "MonthRevenue",
-          fill: "5B9BD5"
-        }
-      ],
-      showLegend: false,
-      valueAxis: { numFmt: "$#,##0" }
-    },
-    "A248:L267"
-  );
+  Chart.place(axisEdge, "A248:L267", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Series references via `=MonthCategories` / `=MonthRevenue`",
+    series: [
+      {
+        name: "Revenue",
+        categories: "MonthCategories",
+        values: "MonthRevenue",
+        fill: "5B9BD5"
+      }
+    ],
+    showLegend: false,
+    valueAxis: { numFmt: "$#,##0" }
+  });
 
   // ---------------------------------------------------------------------------
   // 29. Data-handling edge cases — how charts deal with blanks,
@@ -4003,8 +3735,8 @@ async function main(): Promise<void> {
   // `displayBlanksAs` charts below to visualise each mode against
   // the same numbers.
   const sparse = Workbook.addWorksheet(wb, "29-Sparse");
-  Worksheet.addRow(sparse, ["Month", "Revenue"]);
-  Worksheet.addRows(sparse, [
+  Row.add(sparse, ["Month", "Revenue"]);
+  Row.addMany(sparse, [
     ["Jan", 120],
     ["Feb", null],
     ["Mar", 160],
@@ -4014,7 +3746,7 @@ async function main(): Promise<void> {
   ]);
 
   const dataEdge = Workbook.addWorksheet(wb, "29-Data Handling");
-  Worksheet.addRow(dataEdge, ["Data-handling edge cases"]);
+  Row.add(dataEdge, ["Data-handling edge cases"]);
   Cell.setStyle(dataEdge, "A1", { font: { bold: true } });
 
   // --- 29.1 `displayBlanksAs` variants side-by-side. `gap` (default)
@@ -4027,25 +3759,21 @@ async function main(): Promise<void> {
     const row = 3 + i * 22;
     Cell.setValue(dataEdge, `A${row}`, `29.1.${i + 1} — displayBlanksAs: '${mode}'`);
     Cell.setStyle(dataEdge, `A${row}`, { font: { bold: true } });
-    Chart.add(
-      dataEdge,
-      {
-        type: "line",
-        title: `Sparse data rendered with displayBlanksAs='${mode}'`,
-        series: [
-          {
-            name: "Revenue",
-            categories: "'29-Sparse'!$A$2:$A$7",
-            values: "'29-Sparse'!$B$2:$B$7",
-            line: HEX_PALETTE[i],
-            marker: { symbol: "circle", size: 7 }
-          }
-        ],
-        displayBlanksAs: mode,
-        showLegend: false
-      },
-      `A${row + 1}:L${row + 20}`
-    );
+    Chart.place(dataEdge, `A${row + 1}:L${row + 20}`, {
+      type: "line",
+      title: `Sparse data rendered with displayBlanksAs='${mode}'`,
+      series: [
+        {
+          name: "Revenue",
+          categories: "'29-Sparse'!$A$2:$A$7",
+          values: "'29-Sparse'!$B$2:$B$7",
+          line: HEX_PALETTE[i],
+          marker: { symbol: "circle", size: 7 }
+        }
+      ],
+      displayBlanksAs: mode,
+      showLegend: false
+    });
   }
 
   // --- 29.2 Negative values with `invertIfNegative` + `inBase` label
@@ -4055,32 +3783,28 @@ async function main(): Promise<void> {
   //     floating below the plot area.
   Cell.setValue(dataEdge, "A70", "29.2 — negative bars with invertIfNegative + dLblPos 'inBase'");
   Cell.setStyle(dataEdge, "A70", { font: { bold: true } });
-  Chart.add(
-    dataEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Quarterly P&L (loss months flipped red)",
-      series: [
-        {
-          name: "Net",
-          categories: "'28-PnL'!$A$2:$A$7",
-          values: "'28-PnL'!$B$2:$B$7",
-          fill: "4472C4",
-          invertIfNegative: true,
-          dataLabels: {
-            showVal: true,
-            position: "inBase",
-            numFmt: "$#,##0;[Red]-$#,##0"
-          }
+  Chart.place(dataEdge, "A71:L90", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Quarterly P&L (loss months flipped red)",
+    series: [
+      {
+        name: "Net",
+        categories: "'28-PnL'!$A$2:$A$7",
+        values: "'28-PnL'!$B$2:$B$7",
+        fill: "4472C4",
+        invertIfNegative: true,
+        dataLabels: {
+          showVal: true,
+          position: "inBase",
+          numFmt: "$#,##0;[Red]-$#,##0"
         }
-      ],
-      showLegend: false,
-      valueAxis: { numFmt: "$#,##0" }
-    },
-    "A71:L90"
-  );
+      }
+    ],
+    showLegend: false,
+    valueAxis: { numFmt: "$#,##0" }
+  });
 
   // --- 29.3 Mass-hide every data label via per-entry `delete: true`.
   //     OOXML's internal `c:dLbls/c:delete` shortcut isn't exposed on
@@ -4090,29 +3814,25 @@ async function main(): Promise<void> {
   //     chart style that otherwise turns them on.
   Cell.setValue(dataEdge, "A93", "29.3 — per-entry delete suppresses every auto-label");
   Cell.setStyle(dataEdge, "A93", { font: { bold: true } });
-  Chart.add(
-    dataEdge,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Style-19 wants labels; enumerate-delete silences them",
-      style: 19,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4",
-          dataLabels: {
-            entries: Array.from({ length: 6 }, (_, i) => ({ index: i, delete: true }))
-          }
+  Chart.place(dataEdge, "A94:L113", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Style-19 wants labels; enumerate-delete silences them",
+    style: 19,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4",
+        dataLabels: {
+          entries: Array.from({ length: 6 }, (_, i) => ({ index: i, delete: true }))
         }
-      ],
-      showLegend: false
-    },
-    "A94:L113"
-  );
+      }
+    ],
+    showLegend: false
+  });
 
   // ---------------------------------------------------------------------------
   // 30. Chart-type variants — extra flavours of stock / bubble /
@@ -4124,7 +3844,7 @@ async function main(): Promise<void> {
   // Low-Close, 4) and VOHLC (Volume-Open-High-Low-Close, 5). The
   // existing gallery covers OHLC — add the other three here.
   const stockMulti = Workbook.addWorksheet(wb, "30-Stock Variants");
-  Worksheet.addRow(stockMulti, ["Date", "Volume", "Open", "High", "Low", "Close"]);
+  Row.add(stockMulti, ["Date", "Volume", "Open", "High", "Low", "Close"]);
   const stockRows: Array<[Date, number, number, number, number, number]> = [
     [new Date("2024-02-01"), 2_400_000, 150, 156, 149, 154],
     [new Date("2024-02-02"), 2_900_000, 154, 158, 152, 157],
@@ -4132,51 +3852,47 @@ async function main(): Promise<void> {
     [new Date("2024-02-06"), 3_100_000, 159, 162, 156, 160],
     [new Date("2024-02-07"), 2_750_000, 160, 165, 158, 164]
   ];
-  Worksheet.addRows(stockMulti, stockRows);
+  Row.addMany(stockMulti, stockRows);
   Column.setStyle(stockMulti, 1, { numFmt: "yyyy-mm-dd" });
   Column.setStyle(stockMulti, 2, { numFmt: "#,##0" });
 
   const variants = Workbook.addWorksheet(wb, "30-Chart Variants");
-  Worksheet.addRow(variants, ["Chart-type variants"]);
+  Row.add(variants, ["Chart-type variants"]);
   Cell.setStyle(variants, "A1", { font: { bold: true } });
 
   // --- 30.1 Stock HLC (no Open series) — just High / Low / Close
   //     connected by hiLowLines. The thinnest stock variant.
   Cell.setValue(variants, "A3", "30.1 — Stock HLC (High-Low-Close)");
   Cell.setStyle(variants, "A3", { font: { bold: true } });
-  Chart.add(
-    variants,
-    {
-      type: "stock",
-      title: "HLC — 3-series stock chart",
-      hiLowLines: true,
-      series: [
-        {
-          name: "High",
-          categories: "'30-Stock Variants'!$A$2:$A$6",
-          values: "'30-Stock Variants'!$D$2:$D$6",
-          line: "70AD47",
-          marker: { symbol: "none" }
-        },
-        {
-          name: "Low",
-          categories: "'30-Stock Variants'!$A$2:$A$6",
-          values: "'30-Stock Variants'!$E$2:$E$6",
-          line: "C00000",
-          marker: { symbol: "none" }
-        },
-        {
-          name: "Close",
-          categories: "'30-Stock Variants'!$A$2:$A$6",
-          values: "'30-Stock Variants'!$F$2:$F$6",
-          line: "000000",
-          marker: { symbol: "none" }
-        }
-      ],
-      categoryAxis: { numFmt: "yyyy-mm-dd" }
-    },
-    "A4:L23"
-  );
+  Chart.place(variants, "A4:L23", {
+    type: "stock",
+    title: "HLC — 3-series stock chart",
+    hiLowLines: true,
+    series: [
+      {
+        name: "High",
+        categories: "'30-Stock Variants'!$A$2:$A$6",
+        values: "'30-Stock Variants'!$D$2:$D$6",
+        line: "70AD47",
+        marker: { symbol: "none" }
+      },
+      {
+        name: "Low",
+        categories: "'30-Stock Variants'!$A$2:$A$6",
+        values: "'30-Stock Variants'!$E$2:$E$6",
+        line: "C00000",
+        marker: { symbol: "none" }
+      },
+      {
+        name: "Close",
+        categories: "'30-Stock Variants'!$A$2:$A$6",
+        values: "'30-Stock Variants'!$F$2:$F$6",
+        line: "000000",
+        marker: { symbol: "none" }
+      }
+    ],
+    categoryAxis: { numFmt: "yyyy-mm-dd" }
+  });
 
   // --- 30.2 Stock VHLC — adds a Volume bar series on a secondary
   //     axis. The builder doesn't yet auto-split into combo groups
@@ -4184,140 +3900,132 @@ async function main(): Promise<void> {
   //     (bar + line groups, volume on primary / OHLC on secondary).
   Cell.setValue(variants, "A26", "30.2 — Stock VHLC (Volume + High-Low-Close) combo");
   Cell.setStyle(variants, "A26", { font: { bold: true } });
-  Chart.addCombo(
-    variants,
-    {
-      title: "VHLC — Volume bars + HLC line",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          grouping: "clustered",
-          series: [
-            {
-              name: "Volume",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$B$2:$B$6",
-              fill: "BFBFBF"
-            }
-          ],
-          // Put the category axis config on the primary group —
-          // `AddComboChartOptions` has no top-level categoryAxis
-          // slot (each group owns its own cat/val axes).
-          categoryAxis: { numFmt: "yyyy-mm-dd" },
-          valueAxis: { title: "Volume", numFmt: "#,##0" }
-        },
-        {
-          type: "stock",
-          hiLowLines: true,
-          series: [
-            {
-              name: "High",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$D$2:$D$6",
-              line: "70AD47",
-              marker: { symbol: "none" }
-            },
-            {
-              name: "Low",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$E$2:$E$6",
-              line: "C00000",
-              marker: { symbol: "none" }
-            },
-            {
-              name: "Close",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$F$2:$F$6",
-              line: "000000",
-              marker: { symbol: "none" }
-            }
-          ],
-          useSecondaryAxis: true,
-          valueAxis: { title: "Price", numFmt: "$0.00" }
-        }
-      ]
-    },
-    "A27:L46"
-  );
+  Chart.place(variants, "A27:L46", {
+    title: "VHLC — Volume bars + HLC line",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "clustered",
+        series: [
+          {
+            name: "Volume",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$B$2:$B$6",
+            fill: "BFBFBF"
+          }
+        ],
+        // Put the category axis config on the primary group —
+        // `AddComboChartOptions` has no top-level categoryAxis
+        // slot (each group owns its own cat/val axes).
+        categoryAxis: { numFmt: "yyyy-mm-dd" },
+        valueAxis: { title: "Volume", numFmt: "#,##0" }
+      },
+      {
+        type: "stock",
+        hiLowLines: true,
+        series: [
+          {
+            name: "High",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$D$2:$D$6",
+            line: "70AD47",
+            marker: { symbol: "none" }
+          },
+          {
+            name: "Low",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$E$2:$E$6",
+            line: "C00000",
+            marker: { symbol: "none" }
+          },
+          {
+            name: "Close",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$F$2:$F$6",
+            line: "000000",
+            marker: { symbol: "none" }
+          }
+        ],
+        useSecondaryAxis: true,
+        valueAxis: { title: "Price", numFmt: "$0.00" }
+      }
+    ]
+  });
 
   // --- 30.3 Stock VOHLC — Volume + full OHLC, the richest stock
   //     variant. Same combo idea as VHLC plus an Open series.
   Cell.setValue(variants, "A49", "30.3 — Stock VOHLC (Volume + Open-High-Low-Close)");
   Cell.setStyle(variants, "A49", { font: { bold: true } });
-  Chart.addCombo(
-    variants,
-    {
-      title: "VOHLC — Volume bars + OHLC with upDownBars",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          grouping: "clustered",
-          series: [
-            {
-              name: "Volume",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$B$2:$B$6",
-              fill: "BFBFBF"
-            }
-          ],
-          categoryAxis: { numFmt: "yyyy-mm-dd" },
-          valueAxis: { title: "Volume", numFmt: "#,##0" }
+  Chart.place(variants, "A50:L69", {
+    title: "VOHLC — Volume bars + OHLC with upDownBars",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "clustered",
+        series: [
+          {
+            name: "Volume",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$B$2:$B$6",
+            fill: "BFBFBF"
+          }
+        ],
+        categoryAxis: { numFmt: "yyyy-mm-dd" },
+        valueAxis: { title: "Volume", numFmt: "#,##0" }
+      },
+      {
+        type: "stock",
+        hiLowLines: true,
+        upDownBars: {
+          gapWidth: 150,
+          upBars: { fill: "FFFFFF", border: "70AD47" },
+          downBars: { fill: "C00000", border: "C00000" }
         },
-        {
-          type: "stock",
-          hiLowLines: true,
-          upDownBars: {
-            gapWidth: 150,
-            upBars: { fill: "FFFFFF", border: "70AD47" },
-            downBars: { fill: "C00000", border: "C00000" }
+        series: [
+          {
+            name: "Open",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$C$2:$C$6",
+            line: "70AD47",
+            marker: { symbol: "none" }
           },
-          series: [
-            {
-              name: "Open",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$C$2:$C$6",
-              line: "70AD47",
-              marker: { symbol: "none" }
-            },
-            {
-              name: "High",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$D$2:$D$6",
-              line: "70AD47",
-              marker: { symbol: "none" }
-            },
-            {
-              name: "Low",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$E$2:$E$6",
-              line: "C00000",
-              marker: { symbol: "none" }
-            },
-            {
-              name: "Close",
-              categories: "'30-Stock Variants'!$A$2:$A$6",
-              values: "'30-Stock Variants'!$F$2:$F$6",
-              line: "000000",
-              marker: { symbol: "none" }
-            }
-          ],
-          useSecondaryAxis: true,
-          valueAxis: { title: "Price", numFmt: "$0.00" }
-        }
-      ]
-    },
-    "A50:L69"
-  );
+          {
+            name: "High",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$D$2:$D$6",
+            line: "70AD47",
+            marker: { symbol: "none" }
+          },
+          {
+            name: "Low",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$E$2:$E$6",
+            line: "C00000",
+            marker: { symbol: "none" }
+          },
+          {
+            name: "Close",
+            categories: "'30-Stock Variants'!$A$2:$A$6",
+            values: "'30-Stock Variants'!$F$2:$F$6",
+            line: "000000",
+            marker: { symbol: "none" }
+          }
+        ],
+        useSecondaryAxis: true,
+        valueAxis: { title: "Price", numFmt: "$0.00" }
+      }
+    ]
+  });
 
   // --- 30.4 Bubble with negative bubble sizes + `showNegBubbles: true`
   //     + `bubble3D`. Negative sizes are common in scenario analysis
   //     (loss size) and Excel uses a hollow / inverted bubble glyph
   //     to represent them when the flag is on.
   const bubbleNeg = Workbook.addWorksheet(wb, "30-Bubble Neg");
-  Worksheet.addRow(bubbleNeg, ["Hours", "Score", "Impact"]);
-  Worksheet.addRows(bubbleNeg, [
+  Row.add(bubbleNeg, ["Hours", "Score", "Impact"]);
+  Row.addMany(bubbleNeg, [
     [1, 45, 3],
     [2, 55, -5],
     [3, 62, 4],
@@ -4327,35 +4035,31 @@ async function main(): Promise<void> {
   ]);
   Cell.setValue(variants, "A72", "30.4 — Bubble with negative sizes + showNegBubbles + bubble3D");
   Cell.setStyle(variants, "A72", { font: { bold: true } });
-  Chart.add(
-    variants,
-    {
-      type: "bubble",
-      title: "Impact bubbles — negatives shown as inverted markers",
-      bubbleScale: 100,
-      showNegBubbles: true,
-      sizeRepresents: "area",
-      series: [
-        {
-          name: "Scenarios",
-          xValues: "'30-Bubble Neg'!$A$2:$A$7",
-          values: "'30-Bubble Neg'!$B$2:$B$7",
-          bubbleSize: "'30-Bubble Neg'!$C$2:$C$7",
-          fill: "4472C4",
-          bubble3D: true
-        }
-      ],
-      categoryAxis: { title: "Hours" },
-      valueAxis: { title: "Score" }
-    },
-    "A73:L92"
-  );
+  Chart.place(variants, "A73:L92", {
+    type: "bubble",
+    title: "Impact bubbles — negatives shown as inverted markers",
+    bubbleScale: 100,
+    showNegBubbles: true,
+    sizeRepresents: "area",
+    series: [
+      {
+        name: "Scenarios",
+        xValues: "'30-Bubble Neg'!$A$2:$A$7",
+        values: "'30-Bubble Neg'!$B$2:$B$7",
+        bubbleSize: "'30-Bubble Neg'!$C$2:$C$7",
+        fill: "4472C4",
+        bubble3D: true
+      }
+    ],
+    categoryAxis: { title: "Hours" },
+    valueAxis: { title: "Score" }
+  });
 
   // --- 30.5 Radar with 12 categories + 3 series — wide radar for
   //     comparing skill / balance profiles.
   const radarWide = Workbook.addWorksheet(wb, "30-Radar Wide");
-  Worksheet.addRow(radarWide, ["Attribute", "Rookie", "Journeyman", "Expert"]);
-  Worksheet.addRows(radarWide, [
+  Row.add(radarWide, ["Attribute", "Rookie", "Journeyman", "Expert"]);
+  Row.addMany(radarWide, [
     ["Vision", 3, 6, 9],
     ["Tempo", 4, 7, 8],
     ["Precision", 2, 5, 10],
@@ -4371,64 +4075,56 @@ async function main(): Promise<void> {
   ]);
   Cell.setValue(variants, "A95", "30.5 — Radar with 12 axes × 3 series");
   Cell.setStyle(variants, "A95", { font: { bold: true } });
-  Chart.add(
-    variants,
-    {
-      type: "radar",
-      radarStyle: "marker",
-      title: "Skill profile radar",
-      series: [
-        {
-          name: "Rookie",
-          categories: "'30-Radar Wide'!$A$2:$A$13",
-          values: "'30-Radar Wide'!$B$2:$B$13",
-          line: "A5A5A5",
-          marker: { symbol: "circle", size: 5, fill: "A5A5A5" }
-        },
-        {
-          name: "Journeyman",
-          categories: "'30-Radar Wide'!$A$2:$A$13",
-          values: "'30-Radar Wide'!$C$2:$C$13",
-          line: "4472C4",
-          marker: { symbol: "square", size: 5, fill: "4472C4" }
-        },
-        {
-          name: "Expert",
-          categories: "'30-Radar Wide'!$A$2:$A$13",
-          values: "'30-Radar Wide'!$D$2:$D$13",
-          line: "70AD47",
-          marker: { symbol: "diamond", size: 6, fill: "70AD47" }
-        }
-      ],
-      valueAxis: { min: 0, max: 10, majorUnit: 2 }
-    },
-    "A96:L115"
-  );
+  Chart.place(variants, "A96:L115", {
+    type: "radar",
+    radarStyle: "marker",
+    title: "Skill profile radar",
+    series: [
+      {
+        name: "Rookie",
+        categories: "'30-Radar Wide'!$A$2:$A$13",
+        values: "'30-Radar Wide'!$B$2:$B$13",
+        line: "A5A5A5",
+        marker: { symbol: "circle", size: 5, fill: "A5A5A5" }
+      },
+      {
+        name: "Journeyman",
+        categories: "'30-Radar Wide'!$A$2:$A$13",
+        values: "'30-Radar Wide'!$C$2:$C$13",
+        line: "4472C4",
+        marker: { symbol: "square", size: 5, fill: "4472C4" }
+      },
+      {
+        name: "Expert",
+        categories: "'30-Radar Wide'!$A$2:$A$13",
+        values: "'30-Radar Wide'!$D$2:$D$13",
+        line: "70AD47",
+        marker: { symbol: "diamond", size: 6, fill: "70AD47" }
+      }
+    ],
+    valueAxis: { min: 0, max: 10, majorUnit: 2 }
+  });
 
   // --- 30.6 `ofPie splitType: "val"` — split secondary pie by value
   //     threshold. Every slice below the threshold goes into the
   //     second pie; larger slices stay in the main.
   Cell.setValue(variants, "A118", "30.6 — ofPie splitType='val' (threshold = $130)");
   Cell.setStyle(variants, "A118", { font: { bold: true } });
-  Chart.add(
-    variants,
-    {
-      type: "ofPie",
-      ofPieType: "pie",
-      title: "Bar-of-pie split by value threshold",
-      splitType: "val",
-      splitPos: 130,
-      serLines: true,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7"
-        }
-      ]
-    },
-    "A119:L138"
-  );
+  Chart.place(variants, "A119:L138", {
+    type: "ofPie",
+    ofPieType: "pie",
+    title: "Bar-of-pie split by value threshold",
+    splitType: "val",
+    splitPos: 130,
+    serLines: true,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7"
+      }
+    ]
+  });
 
   // --- 30.7 `ofPie splitType: "percent"` with a larger secondPieSize.
   //     Demonstrates the `secondPieSize` extreme — pushing it to 150
@@ -4440,26 +4136,22 @@ async function main(): Promise<void> {
     "30.7 — ofPie secondPieSize=150 (secondary pie larger than primary)"
   );
   Cell.setStyle(variants, "A141", { font: { bold: true } });
-  Chart.add(
-    variants,
-    {
-      type: "ofPie",
-      ofPieType: "pie",
-      title: "Oversized secondary pie",
-      splitType: "percent",
-      splitPos: 15,
-      secondPieSize: 150,
-      serLines: true,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7"
-        }
-      ]
-    },
-    "A142:L161"
-  );
+  Chart.place(variants, "A142:L161", {
+    type: "ofPie",
+    ofPieType: "pie",
+    title: "Oversized secondary pie",
+    splitType: "percent",
+    splitPos: 15,
+    secondPieSize: 150,
+    serLines: true,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7"
+      }
+    ]
+  });
 
   // --- 30.8 Surface with a richer 8×8 matrix — highlights band
   //     transitions better than the 4×4 default gallery surface.
@@ -4467,30 +4159,26 @@ async function main(): Promise<void> {
   // Build an 8×8 grid where z = sin(x/2) * cos(y/2) * 10 — a smooth
   // radial pattern that surface charts render as concentric bands.
   const headers = ["", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"];
-  Worksheet.addRow(surfaceBig, headers);
+  Row.add(surfaceBig, headers);
   for (let r = 0; r < 8; r++) {
     const row: Array<string | number> = [`R${r + 1}`];
     for (let c = 0; c < 8; c++) {
       row.push(Math.round(Math.sin(r / 2) * Math.cos(c / 2) * 10 + 20));
     }
-    Worksheet.addRow(surfaceBig, row);
+    Row.add(surfaceBig, row);
   }
   Cell.setValue(variants, "A164", "30.8 — Surface 8×8 matrix (smoother band transitions)");
   Cell.setStyle(variants, "A164", { font: { bold: true } });
-  Chart.add(
-    variants,
-    {
-      type: "surface3D",
-      title: "Surface3D — smooth radial z = sin·cos",
-      view3D: { rotX: 30, rotY: 30, perspective: 30 },
-      series: Array.from({ length: 8 }, (_, i) => ({
-        name: `R${i + 1}`,
-        categories: "'30-Surface Big'!$B$1:$I$1",
-        values: `'30-Surface Big'!$B$${i + 2}:$I$${i + 2}`
-      }))
-    },
-    "A165:L184"
-  );
+  Chart.place(variants, "A165:L184", {
+    type: "surface3D",
+    title: "Surface3D — smooth radial z = sin·cos",
+    view3D: { rotX: 30, rotY: 30, perspective: 30 },
+    series: Array.from({ length: 8 }, (_, i) => ({
+      name: `R${i + 1}`,
+      categories: "'30-Surface Big'!$B$1:$I$1",
+      values: `'30-Surface Big'!$B$${i + 2}:$I$${i + 2}`
+    }))
+  });
 
   // ---------------------------------------------------------------------------
   // 31. ChartEx deep-dive — extras for the Excel 2016+ modern
@@ -4500,7 +4188,7 @@ async function main(): Promise<void> {
   // 4-level hierarchical data for the deep treemap / sunburst demos.
   // `Region → Country → State → City` with a $Sales column.
   const deepHier = Workbook.addWorksheet(wb, "31-Deep Hierarchy");
-  Worksheet.addRows(deepHier, [
+  Row.addMany(deepHier, [
     ["Region", "Country", "State", "City", "Sales"],
     ["Americas", "USA", "CA", "San Francisco", 360],
     ["Americas", "USA", "CA", "Los Angeles", 220],
@@ -4527,7 +4215,7 @@ async function main(): Promise<void> {
   // Wide histogram dataset — 120 samples with long tails so the
   // `byWidth` / `overflow` bin modes show something interesting.
   const histoWide = Workbook.addWorksheet(wb, "31-Histogram Wide");
-  Worksheet.addRow(histoWide, ["Sample"]);
+  Row.add(histoWide, ["Sample"]);
   {
     const wideSamples: number[] = [];
     for (let i = 0; i < 100; i++) {
@@ -4538,12 +4226,12 @@ async function main(): Promise<void> {
       wideSamples.push(value);
     }
     wideSamples.push(3, 7, 210, 240); // explicit outliers for overflow/underflow demos
-    wideSamples.forEach(n => Worksheet.addRow(histoWide, [n]));
+    wideSamples.forEach(n => Row.add(histoWide, [n]));
   }
 
   // Conversion-funnel stages for the custom-label funnel.
   const funnelCustom = Workbook.addWorksheet(wb, "31-Funnel Stages");
-  Worksheet.addRows(funnelCustom, [
+  Row.addMany(funnelCustom, [
     ["Stage", "Visitors"],
     ["Landing page", 10_000],
     ["Viewed pricing", 4_200],
@@ -4554,7 +4242,7 @@ async function main(): Promise<void> {
   ]);
 
   const exDeep = Workbook.addWorksheet(wb, "31-ChartEx Deep");
-  Worksheet.addRow(exDeep, ["ChartEx deep-dive"]);
+  Row.add(exDeep, ["ChartEx deep-dive"]);
   Cell.setStyle(exDeep, "A1", { font: { bold: true } });
 
   // --- 31.1 Waterfall with explicit `total` bars. Marking specific
@@ -4564,7 +4252,7 @@ async function main(): Promise<void> {
   Cell.setValue(exDeep, "A3", "31.1 — Waterfall with total markers at quarter-ends");
   Cell.setStyle(exDeep, "A3", { font: { bold: true } });
   const wfSheet = Workbook.addWorksheet(wb, "31-Waterfall");
-  Worksheet.addRows(wfSheet, [
+  Row.addMany(wfSheet, [
     ["Step", "Delta"],
     ["Starting cash", 1_000],
     ["Q1 revenue", 450],
@@ -4574,106 +4262,90 @@ async function main(): Promise<void> {
     ["Q2 cost", -280],
     ["Q2 total", 1_480]
   ]);
-  Chart.addEx(
-    exDeep,
-    {
-      type: "waterfall",
-      title: "Waterfall — Q1/Q2 totals anchored at zero",
-      categories: "'31-Waterfall'!$A$2:$A$8",
-      series: [
-        {
-          name: "Cash",
-          values: "'31-Waterfall'!$B$2:$B$8",
-          // Flag specific indices as subtotals — the renderer draws
-          // them as wider anchored bars instead of floating deltas.
-          // Use the `subtotals` shortcut (array of 0-based indices)
-          // or the `subtotalPoints` form (`{ idx: number }`) when
-          // mixing with other OOXML-shaped builder code.
-          subtotals: [0, 3, 6]
-        }
-      ],
-      layout: { connectorLines: true }
-    },
-    "A4:L23"
-  );
+  Chart.place(exDeep, "A4:L23", {
+    type: "waterfall",
+    title: "Waterfall — Q1/Q2 totals anchored at zero",
+    categories: "'31-Waterfall'!$A$2:$A$8",
+    series: [
+      {
+        name: "Cash",
+        values: "'31-Waterfall'!$B$2:$B$8",
+        // Flag specific indices as subtotals — the renderer draws
+        // them as wider anchored bars instead of floating deltas.
+        // Use the `subtotals` shortcut (array of 0-based indices)
+        // or the `subtotalPoints` form (`{ idx: number }`) when
+        // mixing with other OOXML-shaped builder code.
+        subtotals: [0, 3, 6]
+      }
+    ],
+    layout: { connectorLines: true }
+  });
 
   // --- 31.2 Treemap with 4-level `parentLabelLayout: "overlapping"`.
   //     Deeper hierarchies exercise the label-wrapping / color
   //     cascade more than the gallery's 3-level demo.
   Cell.setValue(exDeep, "A26", "31.2 — Treemap 4 levels (Region → Country → State → City)");
   Cell.setStyle(exDeep, "A26", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "treemap",
-      title: "Sales — 4-level treemap with overlapping parent labels",
-      categories: "'31-Deep Hierarchy'!$D$2:$D$21",
-      series: [
-        {
-          name: "Sales",
-          values: "'31-Deep Hierarchy'!$E$2:$E$21",
-          hierarchy: [
-            "'31-Deep Hierarchy'!$A$2:$A$21",
-            "'31-Deep Hierarchy'!$B$2:$B$21",
-            "'31-Deep Hierarchy'!$C$2:$C$21"
-          ]
-        }
-      ],
-      layout: { parentLabelLayout: "overlapping" }
-    },
-    "A27:L50"
-  );
+  Chart.place(exDeep, "A27:L50", {
+    type: "treemap",
+    title: "Sales — 4-level treemap with overlapping parent labels",
+    categories: "'31-Deep Hierarchy'!$D$2:$D$21",
+    series: [
+      {
+        name: "Sales",
+        values: "'31-Deep Hierarchy'!$E$2:$E$21",
+        hierarchy: [
+          "'31-Deep Hierarchy'!$A$2:$A$21",
+          "'31-Deep Hierarchy'!$B$2:$B$21",
+          "'31-Deep Hierarchy'!$C$2:$C$21"
+        ]
+      }
+    ],
+    layout: { parentLabelLayout: "overlapping" }
+  });
 
   // --- 31.3 Sunburst with the same 4-level hierarchy — compare
   //     visual density vs the treemap.
   Cell.setValue(exDeep, "A53", "31.3 — Sunburst 4 levels (same hierarchy as 31.2)");
   Cell.setStyle(exDeep, "A53", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "sunburst",
-      title: "Sales — 4-ring sunburst",
-      categories: "'31-Deep Hierarchy'!$D$2:$D$21",
-      series: [
-        {
-          name: "Sales",
-          values: "'31-Deep Hierarchy'!$E$2:$E$21",
-          hierarchy: [
-            "'31-Deep Hierarchy'!$A$2:$A$21",
-            "'31-Deep Hierarchy'!$B$2:$B$21",
-            "'31-Deep Hierarchy'!$C$2:$C$21"
-          ]
-        }
-      ]
-    },
-    "A54:L77"
-  );
+  Chart.place(exDeep, "A54:L77", {
+    type: "sunburst",
+    title: "Sales — 4-ring sunburst",
+    categories: "'31-Deep Hierarchy'!$D$2:$D$21",
+    series: [
+      {
+        name: "Sales",
+        values: "'31-Deep Hierarchy'!$E$2:$E$21",
+        hierarchy: [
+          "'31-Deep Hierarchy'!$A$2:$A$21",
+          "'31-Deep Hierarchy'!$B$2:$B$21",
+          "'31-Deep Hierarchy'!$C$2:$C$21"
+        ]
+      }
+    ]
+  });
 
   // --- 31.4 Funnel with custom stage labels — annotating each stage
   //     with `text` on the data-label entry puts a richer, in-bar
   //     caption on top of the default stage name.
   Cell.setValue(exDeep, "A80", "31.4 — Funnel with per-stage custom labels");
   Cell.setStyle(exDeep, "A80", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "funnel",
-      title: "Conversion funnel — rich per-stage callouts",
-      categories: "'31-Funnel Stages'!$A$2:$A$7",
-      series: [
-        {
-          name: "Visitors",
-          values: "'31-Funnel Stages'!$B$2:$B$7",
-          dataLabels: {
-            showValue: true,
-            showCategory: true,
-            numFmt: "#,##0"
-          }
+  Chart.place(exDeep, "A81:L104", {
+    type: "funnel",
+    title: "Conversion funnel — rich per-stage callouts",
+    categories: "'31-Funnel Stages'!$A$2:$A$7",
+    series: [
+      {
+        name: "Visitors",
+        values: "'31-Funnel Stages'!$B$2:$B$7",
+        dataLabels: {
+          showValue: true,
+          showCategory: true,
+          numFmt: "#,##0"
         }
-      ]
-    },
-    "A81:L104"
-  );
+      }
+    ]
+  });
 
   // --- 31.5 Histogram with `binCount: 8` — force an explicit number
   //     of bins instead of letting Excel auto-choose. The `binning`
@@ -4681,49 +4353,41 @@ async function main(): Promise<void> {
   //     of `layout.binning`.
   Cell.setValue(exDeep, "A107", "31.5 — Histogram binCount=8 bins");
   Cell.setStyle(exDeep, "A107", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "histogram",
-      title: "Histogram — 8 auto-width bins",
-      categories: "'31-Histogram Wide'!$A$1:$A$1",
-      series: [
-        {
-          name: "Samples",
-          values: "'31-Histogram Wide'!$A$2:$A$105"
-        }
-      ],
-      binning: { binCount: 8, binType: "binCount" }
-    },
-    "A108:L127"
-  );
+  Chart.place(exDeep, "A108:L127", {
+    type: "histogram",
+    title: "Histogram — 8 auto-width bins",
+    categories: "'31-Histogram Wide'!$A$1:$A$1",
+    series: [
+      {
+        name: "Samples",
+        values: "'31-Histogram Wide'!$A$2:$A$105"
+      }
+    ],
+    binning: { binCount: 8, binType: "binCount" }
+  });
 
   // --- 31.6 Histogram with fixed-width bins (`binSize: 20`) and
   //     explicit overflow / underflow bounds. Outliers above 180
   //     collapse into a single ">" bin; below 20 into a "<" bin.
   Cell.setValue(exDeep, "A130", "31.6 — Histogram binSize=20 + overflow 180 / underflow 20");
   Cell.setStyle(exDeep, "A130", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "histogram",
-      title: "Histogram — fixed-width bins with overflow / underflow",
-      categories: "'31-Histogram Wide'!$A$1:$A$1",
-      series: [
-        {
-          name: "Samples",
-          values: "'31-Histogram Wide'!$A$2:$A$105"
-        }
-      ],
-      binning: {
-        binSize: 20,
-        binType: "binSize",
-        overflow: 180,
-        underflow: 20
+  Chart.place(exDeep, "A131:L150", {
+    type: "histogram",
+    title: "Histogram — fixed-width bins with overflow / underflow",
+    categories: "'31-Histogram Wide'!$A$1:$A$1",
+    series: [
+      {
+        name: "Samples",
+        values: "'31-Histogram Wide'!$A$2:$A$105"
       }
-    },
-    "A131:L150"
-  );
+    ],
+    binning: {
+      binSize: 20,
+      binType: "binSize",
+      overflow: 180,
+      underflow: 20
+    }
+  });
 
   // --- 31.7 Pareto — `layout.paretoLine: true` explicitly turns on
   //     the cumulative overlay line. The builder infers this from
@@ -4732,51 +4396,43 @@ async function main(): Promise<void> {
   //     a pareto-typed chart without the cumulative curve.
   Cell.setValue(exDeep, "A153", "31.7 — Pareto with explicit paretoLine toggle");
   Cell.setStyle(exDeep, "A153", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "pareto",
-      title: "Pareto — funnel stages with cumulative line",
-      categories: "'31-Funnel Stages'!$A$2:$A$7",
-      series: [
-        {
-          name: "Visitors",
-          values: "'31-Funnel Stages'!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ],
-      layout: { paretoLine: true }
-    },
-    "A154:L173"
-  );
+  Chart.place(exDeep, "A154:L173", {
+    type: "pareto",
+    title: "Pareto — funnel stages with cumulative line",
+    categories: "'31-Funnel Stages'!$A$2:$A$7",
+    series: [
+      {
+        name: "Visitors",
+        values: "'31-Funnel Stages'!$B$2:$B$7",
+        fill: "4472C4"
+      }
+    ],
+    layout: { paretoLine: true }
+  });
 
   // --- 31.8 BoxWhisker with every statistical flag on — inner
   //     points, outliers, mean marker and mean line. All flags live
   //     on `layout` for ChartEx, not on the series itself.
   Cell.setValue(exDeep, "A176", "31.8 — BoxWhisker all flags on (showInner/Outlier/Mean/MeanLine)");
   Cell.setStyle(exDeep, "A176", { font: { bold: true } });
-  Chart.addEx(
-    exDeep,
-    {
-      type: "boxWhisker",
-      title: "Distribution — full statistical detail",
-      categories: "Distribution!$A$1:$A$1",
-      series: [
-        {
-          name: "Samples",
-          values: "Distribution!$A$2:$A$41"
-        }
-      ],
-      layout: {
-        showInnerPoints: true,
-        showOutlierPoints: true,
-        showMeanMarker: true,
-        showMeanLine: true,
-        quartileMethod: "inclusive"
+  Chart.place(exDeep, "A177:L196", {
+    type: "boxWhisker",
+    title: "Distribution — full statistical detail",
+    categories: "Distribution!$A$1:$A$1",
+    series: [
+      {
+        name: "Samples",
+        values: "Distribution!$A$2:$A$41"
       }
-    },
-    "A177:L196"
-  );
+    ],
+    layout: {
+      showInnerPoints: true,
+      showOutlierPoints: true,
+      showMeanMarker: true,
+      showMeanLine: true,
+      quartileMethod: "inclusive"
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // 32. Style catalogue — advanced trendline / error-bar styling that
@@ -4784,7 +4440,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const styleCat = Workbook.addWorksheet(wb, "32-Style Catalogue");
-  Worksheet.addRow(styleCat, ["Style catalogue"]);
+  Row.add(styleCat, ["Style catalogue"]);
   Cell.setStyle(styleCat, "A1", { font: { bold: true } });
 
   // --- 32.1 Trendline with a custom rich-text label — label.txPr
@@ -4792,35 +4448,31 @@ async function main(): Promise<void> {
   //     caption with their own bold / coloured text.
   Cell.setValue(styleCat, "A3", "32.1 — Trendline with custom rich-text label");
   Cell.setStyle(styleCat, "A3", { font: { bold: true } });
-  Chart.add(
-    styleCat,
-    {
-      type: "scatter",
-      scatterStyle: "marker",
-      title: "Scatter with annotated trendline",
-      series: [
-        {
-          name: "Points",
-          xValues: "Scatter!$A$2:$A$8",
-          values: "Scatter!$B$2:$B$8",
-          marker: { symbol: "circle", size: 6, fill: "4472C4" },
-          trendline: {
-            type: "linear",
-            displayEq: true,
-            displayRSqr: true,
-            line: "ED7D31",
-            lineDash: "dash",
-            lineWidth: 2,
-            label: {
-              numFmt: "0.00",
-              txPr: { size: 1000, bold: true, color: { srgb: "C00000" } }
-            }
+  Chart.place(styleCat, "A4:L23", {
+    type: "scatter",
+    scatterStyle: "marker",
+    title: "Scatter with annotated trendline",
+    series: [
+      {
+        name: "Points",
+        xValues: "Scatter!$A$2:$A$8",
+        values: "Scatter!$B$2:$B$8",
+        marker: { symbol: "circle", size: 6, fill: "4472C4" },
+        trendline: {
+          type: "linear",
+          displayEq: true,
+          displayRSqr: true,
+          line: "ED7D31",
+          lineDash: "dash",
+          lineWidth: 2,
+          label: {
+            numFmt: "0.00",
+            txPr: { size: 1000, bold: true, color: { srgb: "C00000" } }
           }
         }
-      ]
-    },
-    "A4:L23"
-  );
+      }
+    ]
+  });
 
   // --- 32.2 Error bars with advanced `spPr` — structured line
   //     properties (explicit width + dash + compound style) instead
@@ -4832,38 +4484,34 @@ async function main(): Promise<void> {
   //     colour on the error-bar stroke.
   Cell.setValue(styleCat, "A26", "32.2 — Error bars with structured spPr (compound line)");
   Cell.setStyle(styleCat, "A26", { font: { bold: true } });
-  Chart.add(
-    styleCat,
-    {
-      type: "scatter",
-      scatterStyle: "marker",
-      title: "Error bars with a compound double line",
-      series: [
-        {
-          name: "Measurements",
-          xValues: "Scatter!$A$2:$A$8",
-          values: "Scatter!$B$2:$B$8",
-          marker: { symbol: "diamond", size: 7, fill: "4472C4" },
-          errorBars: {
-            type: "percentage",
-            value: 15,
-            direction: "y",
-            barDir: "both",
-            spPr: {
-              line: {
-                width: 28_575, // 3pt in EMU
-                color: { srgb: "C00000" },
-                dash: "dash",
-                compound: "dbl",
-                cap: "rnd"
-              }
+  Chart.place(styleCat, "A27:L46", {
+    type: "scatter",
+    scatterStyle: "marker",
+    title: "Error bars with a compound double line",
+    series: [
+      {
+        name: "Measurements",
+        xValues: "Scatter!$A$2:$A$8",
+        values: "Scatter!$B$2:$B$8",
+        marker: { symbol: "diamond", size: 7, fill: "4472C4" },
+        errorBars: {
+          type: "percentage",
+          value: 15,
+          direction: "y",
+          barDir: "both",
+          spPr: {
+            line: {
+              width: 28_575, // 3pt in EMU
+              color: { srgb: "C00000" },
+              dash: "dash",
+              compound: "dbl",
+              cap: "rnd"
             }
           }
         }
-      ]
-    },
-    "A27:L46"
-  );
+      }
+    ]
+  });
 
   // ---------------------------------------------------------------------------
   // 33. Stress & robustness — volume, long text, Unicode,
@@ -4873,10 +4521,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------------------
 
   const stressData = Workbook.addWorksheet(wb, "33-Stress Data");
-  Worksheet.addRow(stressData, [
-    "Category",
-    ...Array.from({ length: 20 }, (_, i) => `Series ${i + 1}`)
-  ]);
+  Row.add(stressData, ["Category", ...Array.from({ length: 20 }, (_, i) => `Series ${i + 1}`)]);
   for (let r = 0; r < 100; r++) {
     const row: Array<string | number> = [`C${r + 1}`];
     for (let s = 0; s < 20; s++) {
@@ -4884,11 +4529,11 @@ async function main(): Promise<void> {
       // pile visually separates rather than all overlapping.
       row.push(Math.round(50 + Math.sin(r / 8 + s / 3) * 20 + s));
     }
-    Worksheet.addRow(stressData, row);
+    Row.add(stressData, row);
   }
 
   const stress = Workbook.addWorksheet(wb, "33-Stress & Edge");
-  Worksheet.addRow(stress, ["Stress & robustness"]);
+  Row.add(stress, ["Stress & robustness"]);
   Cell.setStyle(stress, "A1", { font: { bold: true } });
 
   // --- 33.1 Single series with 100 data points — tests how the
@@ -4896,25 +4541,21 @@ async function main(): Promise<void> {
   //     tick skipping.
   Cell.setValue(stress, "A3", "33.1 — 100 data points on one series");
   Cell.setStyle(stress, "A3", { font: { bold: true } });
-  Chart.add(
-    stress,
-    {
-      type: "line",
-      title: "100 points — dense single series",
-      series: [
-        {
-          name: "Series 1",
-          categories: "'33-Stress Data'!$A$2:$A$101",
-          values: "'33-Stress Data'!$B$2:$B$101",
-          line: "4472C4",
-          marker: { symbol: "none" }
-        }
-      ],
-      categoryAxis: { tickLblSkip: 10, textRotation: -45 },
-      showLegend: false
-    },
-    "A4:L23"
-  );
+  Chart.place(stress, "A4:L23", {
+    type: "line",
+    title: "100 points — dense single series",
+    series: [
+      {
+        name: "Series 1",
+        categories: "'33-Stress Data'!$A$2:$A$101",
+        values: "'33-Stress Data'!$B$2:$B$101",
+        line: "4472C4",
+        marker: { symbol: "none" }
+      }
+    ],
+    categoryAxis: { tickLblSkip: 10, textRotation: -45 },
+    showLegend: false
+  });
 
   // --- 33.2 20 series on one chart — stresses the legend layout
   //     and the colour palette auto-selection. `varyColors` is
@@ -4922,25 +4563,21 @@ async function main(): Promise<void> {
   //     `line` just to make every series visibly distinct.
   Cell.setValue(stress, "A26", "33.2 — 20 series at once (palette stress)");
   Cell.setStyle(stress, "A26", { font: { bold: true } });
-  Chart.add(
-    stress,
-    {
-      type: "line",
-      title: "20-series line chart",
-      series: Array.from({ length: 20 }, (_, i) => {
-        const col = String.fromCharCode("B".charCodeAt(0) + i);
-        return {
-          name: `Series ${i + 1}`,
-          categories: "'33-Stress Data'!$A$2:$A$21",
-          values: `'33-Stress Data'!$${col}$2:$${col}$21`,
-          line: HEX_PALETTE[i % HEX_PALETTE.length],
-          marker: { symbol: "none" }
-        };
-      }),
-      legendPosition: "r"
-    },
-    "A27:L46"
-  );
+  Chart.place(stress, "A27:L46", {
+    type: "line",
+    title: "20-series line chart",
+    series: Array.from({ length: 20 }, (_, i) => {
+      const col = String.fromCharCode("B".charCodeAt(0) + i);
+      return {
+        name: `Series ${i + 1}`,
+        categories: "'33-Stress Data'!$A$2:$A$21",
+        values: `'33-Stress Data'!$${col}$2:$${col}$21`,
+        line: HEX_PALETTE[i % HEX_PALETTE.length],
+        marker: { symbol: "none" }
+      };
+    }),
+    legendPosition: "r"
+  });
 
   // --- 33.3 Extremely long titles and axis labels — exercises
   //     Excel's title auto-wrap and tests that the writer doesn't
@@ -4949,38 +4586,34 @@ async function main(): Promise<void> {
   Cell.setStyle(stress, "A49", { font: { bold: true } });
   const longTitle =
     "A comprehensive quarterly performance summary of the North American and EMEA revenue streams aligned against our strategic targets for fiscal year 2024";
-  Chart.add(
-    stress,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: longTitle,
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ],
-      categoryAxis: {
-        title: "Calendar months of the current reporting period (January through June)"
-      },
-      valueAxis: {
-        title: "Revenue measured in United States dollars (before rebates and chargebacks)",
-        numFmt: "$#,##0"
+  Chart.place(stress, "A50:L69", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: longTitle,
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
       }
+    ],
+    categoryAxis: {
+      title: "Calendar months of the current reporting period (January through June)"
     },
-    "A50:L69"
-  );
+    valueAxis: {
+      title: "Revenue measured in United States dollars (before rebates and chargebacks)",
+      numFmt: "$#,##0"
+    }
+  });
 
   // --- 33.4 Unicode / emoji / mixed-script text in titles and
   //     categories. Covers CJK, RTL-eligible scripts (Arabic,
   //     Hebrew) and emoji — text that historically tripped up
   //     XML serialisers or measurement code.
   const unicodeData = Workbook.addWorksheet(wb, "33-Unicode");
-  Worksheet.addRows(unicodeData, [
+  Row.addMany(unicodeData, [
     ["Category", "Count"],
     ["销售额 📈", 120],
     ["مبيعات 🌍", 180],
@@ -4995,25 +4628,21 @@ async function main(): Promise<void> {
     "33.4 — Unicode categories (CJK / Arabic / Hebrew / Cyrillic / emoji)"
   );
   Cell.setStyle(stress, "A72", { font: { bold: true } });
-  Chart.add(
-    stress,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "Global categories — 销售额 / مبيعات / 売上 🌐",
-      series: [
-        {
-          name: "Count",
-          categories: "'33-Unicode'!$A$2:$A$7",
-          values: "'33-Unicode'!$B$2:$B$7",
-          fill: "70AD47"
-        }
-      ],
-      showLegend: false
-    },
-    "A73:L92"
-  );
+  Chart.place(stress, "A73:L92", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "Global categories — 销售额 / مبيعات / 売上 🌐",
+    series: [
+      {
+        name: "Count",
+        categories: "'33-Unicode'!$A$2:$A$7",
+        values: "'33-Unicode'!$B$2:$B$7",
+        fill: "70AD47"
+      }
+    ],
+    showLegend: false
+  });
 
   // --- 33.5 Extreme view3D angles (rotX=75, rotY=340, perspective=100).
   //     The OOXML range is 0–90 for rotX, 0–360 for rotY, 0–100 for
@@ -5021,25 +4650,21 @@ async function main(): Promise<void> {
   //     writer's attribute serialisation.
   Cell.setValue(stress, "A95", "33.5 — extreme view3D (rotX=75 / rotY=340 / perspective=100)");
   Cell.setStyle(stress, "A95", { font: { bold: true } });
-  Chart.add(
-    stress,
-    {
-      type: "bar3D",
-      barDir: "col",
-      grouping: "clustered",
-      title: "3D bar — near-limit view3D",
-      view3D: { rotX: 75, rotY: 340, rAngAx: false, perspective: 100 },
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4"
-        }
-      ]
-    },
-    "A96:L115"
-  );
+  Chart.place(stress, "A96:L115", {
+    type: "bar3D",
+    barDir: "col",
+    grouping: "clustered",
+    title: "3D bar — near-limit view3D",
+    view3D: { rotX: 75, rotY: 340, rAngAx: false, perspective: 100 },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4"
+      }
+    ]
+  });
 
   // --- 33.6 Three-level data-label precedence: chart-level, series-
   //     level, and per-entry. Excel applies the most specific
@@ -5048,56 +4673,52 @@ async function main(): Promise<void> {
   //     "except point 3 which shows the value".
   Cell.setValue(stress, "A118", "33.6 — data-label cascade (chart > series > per-entry)");
   Cell.setStyle(stress, "A118", { font: { bold: true } });
-  Chart.add(
-    stress,
-    {
-      type: "bar",
-      barDir: "col",
-      grouping: "clustered",
-      title: "dLbls cascade",
-      // Chart-level default: show value + outEnd.
-      dataLabels: { showVal: true, position: "outEnd", numFmt: "$#,##0" },
-      series: [
-        {
-          name: "Revenue",
-          categories: "Sales!$A$2:$A$7",
-          values: "Sales!$B$2:$B$7",
-          fill: "4472C4",
-          // Series-level override: also show category name.
-          dataLabels: {
-            showVal: true,
-            showCatName: true,
-            position: "outEnd",
-            numFmt: "$#,##0",
-            separator: " • ",
-            entries: [
-              // Per-entry override: point 3 hides its label entirely.
-              { index: 3, delete: true },
-              // Per-entry override: point 5 uses a custom rich text
-              // and moves inside the bar.
-              {
-                index: 5,
-                text: {
-                  paragraphs: [
-                    {
-                      runs: [
-                        {
-                          text: "🏆 JUN MAX",
-                          properties: { bold: true, color: { srgb: "FFFFFF" }, size: 1100 }
-                        }
-                      ]
-                    }
-                  ]
-                },
-                position: "inEnd"
-              }
-            ]
-          }
+  Chart.place(stress, "A119:L138", {
+    type: "bar",
+    barDir: "col",
+    grouping: "clustered",
+    title: "dLbls cascade",
+    // Chart-level default: show value + outEnd.
+    dataLabels: { showVal: true, position: "outEnd", numFmt: "$#,##0" },
+    series: [
+      {
+        name: "Revenue",
+        categories: "Sales!$A$2:$A$7",
+        values: "Sales!$B$2:$B$7",
+        fill: "4472C4",
+        // Series-level override: also show category name.
+        dataLabels: {
+          showVal: true,
+          showCatName: true,
+          position: "outEnd",
+          numFmt: "$#,##0",
+          separator: " • ",
+          entries: [
+            // Per-entry override: point 3 hides its label entirely.
+            { index: 3, delete: true },
+            // Per-entry override: point 5 uses a custom rich text
+            // and moves inside the bar.
+            {
+              index: 5,
+              text: {
+                paragraphs: [
+                  {
+                    runs: [
+                      {
+                        text: "🏆 JUN MAX",
+                        properties: { bold: true, color: { srgb: "FFFFFF" }, size: 1100 }
+                      }
+                    ]
+                  }
+                ]
+              },
+              position: "inEnd"
+            }
+          ]
         }
-      ]
-    },
-    "A119:L138"
-  );
+      }
+    ]
+  });
 
   // --- 33.7 Many charts on one sheet — 12 small tile charts packed
   //     in a 3×4 grid to test the per-drawing anchor handling and
@@ -5111,24 +4732,20 @@ async function main(): Promise<void> {
       const startCol = 1 + c * 6;
       const startRow = 3 + r * 18;
       const range = `${cellAddr(startCol, startRow)}:${cellAddr(startCol + 5, startRow + 16)}`;
-      Chart.add(
-        manyCharts,
-        {
-          type: "line",
-          title: `Tile ${tileIndex}`,
-          series: [
-            {
-              name: "Revenue",
-              categories: "Sales!$A$2:$A$7",
-              values: "Sales!$B$2:$B$7",
-              line: HEX_PALETTE[tileIndex % HEX_PALETTE.length],
-              marker: { symbol: "circle", size: 4 }
-            }
-          ],
-          showLegend: false
-        },
-        range
-      );
+      Chart.place(manyCharts, range, {
+        type: "line",
+        title: `Tile ${tileIndex}`,
+        series: [
+          {
+            name: "Revenue",
+            categories: "Sales!$A$2:$A$7",
+            values: "Sales!$B$2:$B$7",
+            line: HEX_PALETTE[tileIndex % HEX_PALETTE.length],
+            marker: { symbol: "circle", size: 4 }
+          }
+        ],
+        showLegend: false
+      });
     }
   }
 
@@ -5142,35 +4759,38 @@ async function main(): Promise<void> {
   const pdfDoc = new Pdf.Builder();
   pdfDoc.setMetadata({ title: "Documonster chart previews", author: "charts example" });
   for (const ws of previewWorksheets) {
-    for (const chart of Chart.get(ws)) {
+    for (const chart of Chart.list(ws)) {
       previewCounter += 1;
-      const title = Chart.title(chart) ?? `chart-${previewCounter}`;
+      const title = Chart.getTitle(chart) ?? `chart-${previewCounter}`;
       const safe = title.replace(/[^\w\- ]+/g, "_").slice(0, 60);
-      const svg = Chart.toSVG(chart, { width: 640, height: 400 });
+      const svg = Chart.toSvg(chart, { width: 640, height: 400 });
       writeFileSync(resolve(OUT_DIR, `charts-example-${previewCounter}-${safe}.svg`), svg, "utf-8");
-      const png = await Chart.toPNG(chart, { width: 640, height: 400, scale: 2 });
+      const png = await Chart.toPng(chart, { width: 640, height: 400, scale: 2 });
       writeFileSync(resolve(OUT_DIR, `charts-example-${previewCounter}-${safe}.png`), png);
 
-      // Add a page to the combined PDF. Pick the renderer that matches
-      // the chart flavour — classic charts go vector via `drawChartPdf`,
-      // ChartEx via `drawChartExPdf`.
+      // Add a page to the combined PDF. A chart goes onto a page the way every display
+      // list does: its `toDrawList`, drawn through `Pdf.createDrawSurface` — vector, with
+      // selectable text, for both chart families.
       const page = pdfDoc.addPage({ width: 700, height: 500 });
-      const classic = Chart.chartModel(chart);
-      const chartEx = Chart.chartExModel(chart);
-      if (classic) {
-        drawChartPdf(page, classic, { x: 30, y: 60, width: 640, height: 400 });
-      } else if (chartEx) {
-        drawChartExPdf(page, chartEx, { x: 30, y: 60, width: 640, height: 400 });
+      const classic = Chart.getModel(chart);
+      const chartEx = Chart.getExModel(chart);
+      const list = classic
+        ? ChartClassic.toDrawList(classic, { width: 640, height: 400 })
+        : chartEx
+          ? ChartEx.toDrawList(chartEx, { width: 640, height: 400 })
+          : undefined;
+      if (list) {
+        Draw.render(list, Pdf.createDrawSurface(page, { x: 30, y: 60, width: 640, height: 400 }));
       }
     }
   }
-  const pdfBytes = await pdfDoc.build();
+  const pdfBytes = await pdfDoc.toBuffer();
   writeFileSync(PDF_PATH, pdfBytes);
 
-  // Single-chart PDF via the high-level `chartToPdf` helper — the
-  // canonical entry point from the `documonster/pdf` bundle.
-  const firstChart = Chart.get(gallery)[0];
-  const solo = await chartToPdf(firstChart, {
+  // Single-chart PDF via the high-level `Pdf.fromChart` helper — the
+  // canonical entry point from the `documonster/pdf` bundle. `title` is the PDF's metadata.
+  const firstChart = Chart.list(gallery)[0];
+  const solo = await Pdf.fromChart(firstChart, {
     title: "Solo chart PDF",
     width: 600,
     height: 400
@@ -5189,14 +4809,13 @@ async function main(): Promise<void> {
   // `readFile` is about to open. The pair of containers is written at the end, from the reloaded workbook.
   await Workbook.writeFile(wb, XLSX_PATH);
 
-  const reread = Workbook.create();
-  await Workbook.readFile(reread, XLSX_PATH);
+  const reread = await Workbook.readFile(XLSX_PATH);
   const firstSheet = Workbook.getWorksheet(reread, "1-Classic Gallery")!;
   if (!firstSheet) {
     throw new Error("Expected to read back the gallery worksheet.");
   }
-  const first = Chart.get(firstSheet)[0];
-  if (first && Chart.chartModel(first)) {
+  const first = Chart.list(firstSheet)[0];
+  if (first && Chart.getModel(first)) {
     Chart.mutate(
       first,
       model => {
@@ -5221,11 +4840,11 @@ async function main(): Promise<void> {
   // Done — summarise counts and paths.
   // ---------------------------------------------------------------------------
 
-  const chartCount = Workbook.getWorksheets(wb).reduce(
-    (total, ws) => total + Chart.get(ws).length,
+  const chartCount = Workbook.listWorksheets(wb).reduce(
+    (total, ws) => total + Chart.list(ws).length,
     0
   );
-  const chartsheetCount = Workbook.getChartsheets(wb).length;
+  const chartsheetCount = Workbook.listChartsheets(wb).length;
 
   console.log("");
   console.log(`XLSX  : ${XLSX_PATH}`);
@@ -5233,7 +4852,7 @@ async function main(): Promise<void> {
   console.log(`SVGs  : ${OUT_DIR}/charts-example-*.svg`);
   console.log(`PNGs  : ${OUT_DIR}/charts-example-*.png`);
   console.log("");
-  console.log(`Worksheets with charts: ${Workbook.getWorksheets(wb).length}`);
+  console.log(`Worksheets with charts: ${Workbook.listWorksheets(wb).length}`);
   console.log(`Charts embedded:       ${chartCount}`);
   console.log(`Chartsheets:           ${chartsheetCount}`);
   console.log(`Preset classic count:  ${EXCEL_CHART_PRESETS.length}`);

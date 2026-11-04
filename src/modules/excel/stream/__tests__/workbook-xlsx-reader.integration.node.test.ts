@@ -5,10 +5,10 @@ import { anchorCol, anchorRow, anchorColWidth, anchorRowHeight } from "@excel/co
 import { cellGetValue, cellType, cellText, cellGetModel, cellHyperlink } from "@excel/core/cell";
 import { columnIsCustomWidth } from "@excel/core/column";
 import { ValueType } from "@excel/core/enums";
-import { rowFont, rowSetFont, rowValues } from "@excel/core/row";
+import { rowValues } from "@excel/core/row";
 import { getWorksheets } from "@excel/core/workbook";
 import { getCell, rowCommit, getColumn } from "@excel/core/worksheet";
-import { Cell, Image, Workbook, Worksheet } from "@excel/index";
+import { Cell, Image, Row, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
 import type { CellHyperlinkValue } from "@excel/types";
@@ -120,33 +120,19 @@ describe("WorkbookReader", () => {
     it("edit styles of single row instead of all", () => {
       const ws = Workbook.getWorksheet(wb, 1)!;
 
-      Worksheet.eachRow(ws, (row, rowNo) => {
+      Row.each(ws, rowNo => {
         if (rowNo % 5 === 0) {
-          rowSetFont(row, { color: { argb: "00ff00" } });
+          Row.setFont(ws, rowNo, { color: { argb: "00ff00" } });
         }
       });
 
-      expect(rowFont(Worksheet.getRow(ws, 3))!.color!.argb).toBe(
-        rowFont(Worksheet.getRow(ws, 6))!.color!.argb
-      );
-      expect(rowFont(Worksheet.getRow(ws, 6))!.color!.argb).toBe(
-        rowFont(Worksheet.getRow(ws, 9))!.color!.argb
-      );
-      expect(rowFont(Worksheet.getRow(ws, 9))!.color!.argb).toBe(
-        rowFont(Worksheet.getRow(ws, 12))!.color!.argb
-      );
-      expect(rowFont(Worksheet.getRow(ws, 12))!.color!.argb).not.toBe(
-        rowFont(Worksheet.getRow(ws, 15))!.color!.argb
-      );
-      expect(rowFont(Worksheet.getRow(ws, 15))!.color!.argb).not.toBe(
-        rowFont(Worksheet.getRow(ws, 18))!.color!.argb
-      );
-      expect(rowFont(Worksheet.getRow(ws, 15))!.color!.argb).toBe(
-        rowFont(Worksheet.getRow(ws, 10))!.color!.argb
-      );
-      expect(rowFont(Worksheet.getRow(ws, 10))!.color!.argb).toBe(
-        rowFont(Worksheet.getRow(ws, 5))!.color!.argb
-      );
+      expect(Row.getFont(ws, 3)!.color!.argb).toBe(Row.getFont(ws, 6)!.color!.argb);
+      expect(Row.getFont(ws, 6)!.color!.argb).toBe(Row.getFont(ws, 9)!.color!.argb);
+      expect(Row.getFont(ws, 9)!.color!.argb).toBe(Row.getFont(ws, 12)!.color!.argb);
+      expect(Row.getFont(ws, 12)!.color!.argb).not.toBe(Row.getFont(ws, 15)!.color!.argb);
+      expect(Row.getFont(ws, 15)!.color!.argb).not.toBe(Row.getFont(ws, 18)!.color!.argb);
+      expect(Row.getFont(ws, 15)!.color!.argb).toBe(Row.getFont(ws, 10)!.color!.argb);
+      expect(Row.getFont(ws, 10)!.color!.argb).toBe(Row.getFont(ws, 5)!.color!.argb);
     });
   });
 
@@ -518,10 +504,10 @@ describe("WorkbookReader", () => {
         const ws = worksheet;
 
         Image.list(ws).forEach(image => {
-          const row = Worksheet.getRow(ws, image.range!.tl.nativeRow + 1);
+          const height = Row.getHeight(ws, image.range!.tl.nativeRow + 1);
 
-          if (row.height != null) {
-            expect(anchorRowHeight(image.range!.tl)).toBe(Math.floor(row.height * 10000));
+          if (height != null) {
+            expect(anchorRowHeight(image.range!.tl)).toBe(Math.floor(height * 10000));
           } else {
             expect(anchorRowHeight(image.range!.tl)).toBe(180000);
           }
@@ -561,10 +547,10 @@ describe("WorkbookReader", () => {
         const ws = worksheet;
 
         Image.list(ws).forEach(image => {
-          const row = Worksheet.getRow(ws, image.range!.br!.nativeRow + 1);
+          const height = Row.getHeight(ws, image.range!.br!.nativeRow + 1);
 
-          if (row.height != null) {
-            expect(anchorRowHeight(image.range!.br!)).toBe(Math.floor(row.height * 10000));
+          if (height != null) {
+            expect(anchorRowHeight(image.range!.br!)).toBe(Math.floor(height * 10000));
           } else {
             expect(anchorRowHeight(image.range!.br!)).toBe(180000);
           }

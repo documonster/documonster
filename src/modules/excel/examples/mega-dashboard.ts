@@ -47,6 +47,7 @@ import {
   Cell,
   Chart,
   Column,
+  ConditionalFormatting,
   DefinedNames,
   Image,
   Pivot,
@@ -451,7 +452,7 @@ async function main(): Promise<void> {
 
   // Add conditional formatting to the Revenue column — data bar that lives
   // inside the cells of the Table.
-  Worksheet.addConditionalFormatting(sales, {
+  ConditionalFormatting.add(sales, {
     ref: `J2:J${rows.length + 1}`,
     rules: [
       {
@@ -464,7 +465,7 @@ async function main(): Promise<void> {
   });
 
   // Colour-scale on margin.
-  Worksheet.addConditionalFormatting(sales, {
+  ConditionalFormatting.add(sales, {
     ref: `M2:M${rows.length + 1}`,
     rules: [
       {
@@ -477,7 +478,7 @@ async function main(): Promise<void> {
   });
 
   // 3-icon arrows on Profit.
-  Worksheet.addConditionalFormatting(sales, {
+  ConditionalFormatting.add(sales, {
     ref: `L2:L${rows.length + 1}`,
     rules: [
       {
@@ -494,7 +495,7 @@ async function main(): Promise<void> {
     ]
   });
 
-  console.log(`SalesData table: ${Table.model(salesTable).name} — ${rows.length} rows`);
+  console.log(`SalesData table: ${Table.getModel(salesTable).name} — ${rows.length} rows`);
 
   // =========================================================================
   // Sheet 3 — Pivot summaries (3 pivot tables on one sheet)
@@ -510,13 +511,16 @@ async function main(): Promise<void> {
   Cell.setStyle(pivots, "A1", { font: { size: 14, bold: true, color: { argb: "FF2F5496" } } });
   Cell.setStyle(pivots, "A1", { alignment: { horizontal: "left", indent: 1 } });
 
+  // Three pivot tables on one sheet, side by side: each needs its own anchor with room to grow, or Excel cannot
+  // refresh them ("There's already a PivotTable there") — Pivot.add refuses the ones that would overlap.
   // Pivot 1 — Region × Year revenue
   const p1Anchor = Pivot.add(pivots, {
     sourceTable: salesTable,
     rows: ["Region"],
     columns: ["Year"],
     values: ["Revenue"],
-    metric: "sum"
+    metric: "sum",
+    ref: "A3"
   });
 
   // Pivot 2 — Product × Quarter units
@@ -525,7 +529,8 @@ async function main(): Promise<void> {
     rows: ["Product"],
     columns: ["Quarter"],
     values: ["Units"],
-    metric: "sum"
+    metric: "sum",
+    ref: "J3"
   });
 
   // Pivot 3 — Channel × Region margin average, with page filter on Year.
@@ -535,7 +540,8 @@ async function main(): Promise<void> {
     columns: ["Region"],
     values: ["Margin"],
     pages: ["Year"],
-    metric: "average"
+    metric: "average",
+    ref: "T3"
   });
 
   console.log(
@@ -578,25 +584,25 @@ async function main(): Promise<void> {
     views: [{ state: "normal", style: "pageBreakPreview" }]
   });
   // --- by region
-  Worksheet.addRow(aggSheet, ["Region", "Revenue", "Profit", "Units"]);
+  Row.add(aggSheet, ["Region", "Revenue", "Profit", "Units"]);
   const byRegion = aggSumBy("Region");
   for (const region of REGIONS) {
     const v = byRegion.get(region)!;
-    Worksheet.addRow(aggSheet, [region, v.Revenue, v.Profit, v.Units]);
+    Row.add(aggSheet, [region, v.Revenue, v.Profit, v.Units]);
   }
   // --- by year
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Year", "Revenue", "Profit", "Units"]);
-  const yearStartRow = Worksheet.lastRow(aggSheet)!.number;
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Year", "Revenue", "Profit", "Units"]);
+  const yearStartRow = Row.getLast(aggSheet)!;
   const byYear = aggSumBy("Year");
   for (const year of [2023, 2024, 2025]) {
     const v = byYear.get(year)!;
-    Worksheet.addRow(aggSheet, [year, v.Revenue, v.Profit, v.Units]);
+    Row.add(aggSheet, [year, v.Revenue, v.Profit, v.Units]);
   }
   // --- by quarter (per year)
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Year", "Quarter", "Revenue", "Profit", "Units"]);
-  const quarterStartRow = Worksheet.lastRow(aggSheet)!.number;
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Year", "Quarter", "Revenue", "Profit", "Units"]);
+  const quarterStartRow = Row.getLast(aggSheet)!;
   for (const year of [2023, 2024, 2025]) {
     for (const q of QUARTERS) {
       const bucket = rows
@@ -610,35 +616,35 @@ async function main(): Promise<void> {
           },
           { Revenue: 0, Profit: 0, Units: 0 }
         );
-      Worksheet.addRow(aggSheet, [year, q, bucket.Revenue, bucket.Profit, bucket.Units]);
+      Row.add(aggSheet, [year, q, bucket.Revenue, bucket.Profit, bucket.Units]);
     }
   }
   // --- by product
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Product", "Revenue", "Profit", "Units"]);
-  const productStartRow = Worksheet.lastRow(aggSheet)!.number;
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Product", "Revenue", "Profit", "Units"]);
+  const productStartRow = Row.getLast(aggSheet)!;
   const byProduct = aggSumBy("Product");
   for (const product of PRODUCTS) {
     const v = byProduct.get(product)!;
-    Worksheet.addRow(aggSheet, [product, v.Revenue, v.Profit, v.Units]);
+    Row.add(aggSheet, [product, v.Revenue, v.Profit, v.Units]);
   }
   // --- by country
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Country", "Revenue"]);
-  const countryStartRow = Worksheet.lastRow(aggSheet)!.number;
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Country", "Revenue"]);
+  const countryStartRow = Row.getLast(aggSheet)!;
   const byCountry = aggSumBy("Country");
   const countriesList = Array.from(byCountry.keys());
   for (const country of countriesList) {
-    Worksheet.addRow(aggSheet, [country, byCountry.get(country)!.Revenue]);
+    Row.add(aggSheet, [country, byCountry.get(country)!.Revenue]);
   }
   // --- by channel
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Channel", "Revenue", "Profit"]);
-  const channelStartRow = Worksheet.lastRow(aggSheet)!.number;
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Channel", "Revenue", "Profit"]);
+  const channelStartRow = Row.getLast(aggSheet)!;
   const byChannel = aggSumBy("Channel");
   for (const channel of CHANNELS) {
     const v = byChannel.get(channel)!;
-    Worksheet.addRow(aggSheet, [channel, v.Revenue, v.Profit]);
+    Row.add(aggSheet, [channel, v.Revenue, v.Profit]);
   }
 
   // Strip-trim helper to get absolute ranges from an anchor row + count.
@@ -648,289 +654,251 @@ async function main(): Promise<void> {
   // ---- Chart 1: Revenue by region (column) ----
   Cell.setValue(charts, "A3", "1 — Revenue by region");
   Cell.setStyle(charts, "A3", { font: { bold: true } });
-  Chart.add(
-    charts,
-    {
-      type: "bar",
-      barDir: "col",
-      title: "Revenue by region",
-      style: 26,
-      series: [
-        {
-          name: "Revenue",
-          categories: agg(2, REGIONS.length, "A"),
-          values: agg(2, REGIONS.length, "B"),
-          dataLabels: { showVal: true, numFmt: "$#,##0", position: "outEnd" }
-        }
-      ],
-      categoryAxis: { title: "Region" },
-      valueAxis: { title: "Revenue (USD)", numFmt: "$#,##0" },
-      showLegend: false
-    },
-    "A4:H22"
-  );
+  Chart.place(charts, "A4:H22", {
+    type: "bar",
+    barDir: "col",
+    title: "Revenue by region",
+    style: 26,
+    series: [
+      {
+        name: "Revenue",
+        categories: agg(2, REGIONS.length, "A"),
+        values: agg(2, REGIONS.length, "B"),
+        dataLabels: { showVal: true, numFmt: "$#,##0", position: "outEnd" }
+      }
+    ],
+    categoryAxis: { title: "Region" },
+    valueAxis: { title: "Revenue (USD)", numFmt: "$#,##0" },
+    showLegend: false
+  });
 
   // ---- Chart 2: Profit trend by quarter × year (combo) ----
   Cell.setValue(charts, "I3", "2 — Revenue bars + Profit line (combo)");
   Cell.setStyle(charts, "I3", { font: { bold: true } });
-  Chart.addCombo(
-    charts,
-    {
-      title: "Revenue vs Profit by quarter",
-      groups: [
-        {
-          type: "bar",
-          barDir: "col",
-          grouping: "clustered",
-          series: [
-            {
-              name: "Revenue 2023",
-              categories: agg(quarterStartRow, 4, "B"),
-              values: agg(quarterStartRow, 4, "C"),
-              fill: "4472C4"
-            },
-            {
-              name: "Revenue 2024",
-              categories: agg(quarterStartRow + 4, 4, "B"),
-              values: agg(quarterStartRow + 4, 4, "C"),
-              fill: "5B9BD5"
-            },
-            {
-              name: "Revenue 2025",
-              categories: agg(quarterStartRow + 8, 4, "B"),
-              values: agg(quarterStartRow + 8, 4, "C"),
-              fill: "8FAADC"
-            }
-          ]
-        },
-        {
-          type: "line",
-          useSecondaryAxis: true,
-          series: [
-            {
-              name: "Profit 2025",
-              categories: agg(quarterStartRow + 8, 4, "B"),
-              values: agg(quarterStartRow + 8, 4, "D"),
-              line: "ED7D31",
-              lineWidth: 2.5,
-              marker: { symbol: "circle", size: 7, fill: "ED7D31", border: "FFFFFF" }
-            }
-          ]
-        }
-      ],
-      legendPosition: "b"
-    },
-    "I4:P22"
-  );
+  Chart.place(charts, "I4:P22", {
+    title: "Revenue vs Profit by quarter",
+    groups: [
+      {
+        type: "bar",
+        barDir: "col",
+        grouping: "clustered",
+        series: [
+          {
+            name: "Revenue 2023",
+            categories: agg(quarterStartRow, 4, "B"),
+            values: agg(quarterStartRow, 4, "C"),
+            fill: "4472C4"
+          },
+          {
+            name: "Revenue 2024",
+            categories: agg(quarterStartRow + 4, 4, "B"),
+            values: agg(quarterStartRow + 4, 4, "C"),
+            fill: "5B9BD5"
+          },
+          {
+            name: "Revenue 2025",
+            categories: agg(quarterStartRow + 8, 4, "B"),
+            values: agg(quarterStartRow + 8, 4, "C"),
+            fill: "8FAADC"
+          }
+        ]
+      },
+      {
+        type: "line",
+        useSecondaryAxis: true,
+        series: [
+          {
+            name: "Profit 2025",
+            categories: agg(quarterStartRow + 8, 4, "B"),
+            values: agg(quarterStartRow + 8, 4, "D"),
+            line: "ED7D31",
+            lineWidth: 2.5,
+            marker: { symbol: "circle", size: 7, fill: "ED7D31", border: "FFFFFF" }
+          }
+        ]
+      }
+    ],
+    legendPosition: "b"
+  });
 
   // ---- Chart 3: Product revenue share (doughnut) ----
   Cell.setValue(charts, "A24", "3 — Product revenue share");
   Cell.setStyle(charts, "A24", { font: { bold: true } });
-  Chart.add(
-    charts,
-    {
-      type: "doughnut",
-      holeSize: 55,
-      varyColors: true,
-      title: "Revenue share by product",
-      series: [
-        {
-          name: "Revenue",
-          categories: agg(productStartRow, PRODUCTS.length, "A"),
-          values: agg(productStartRow, PRODUCTS.length, "B"),
-          dataLabels: {
-            showPercent: true,
-            showCatName: true,
-            // Doughnut charts do not accept `c:dLblPos` in their
-            // series `c:dLbls` — Excel's UI exposes no label
-            // position picker for doughnut, and emitting any value
-            // causes the drawing part to be stripped on open. See
-            // `VALID_DLBL_POSITIONS_BY_TYPE` in chart-builder.ts.
-            separator: " • "
-          }
+  Chart.place(charts, "A25:H43", {
+    type: "doughnut",
+    holeSize: 55,
+    varyColors: true,
+    title: "Revenue share by product",
+    series: [
+      {
+        name: "Revenue",
+        categories: agg(productStartRow, PRODUCTS.length, "A"),
+        values: agg(productStartRow, PRODUCTS.length, "B"),
+        dataLabels: {
+          showPercent: true,
+          showCatName: true,
+          // Doughnut charts do not accept `c:dLblPos` in their
+          // series `c:dLbls` — Excel's UI exposes no label
+          // position picker for doughnut, and emitting any value
+          // causes the drawing part to be stripped on open. See
+          // `VALID_DLBL_POSITIONS_BY_TYPE` in chart-builder.ts.
+          separator: " • "
         }
-      ],
-      legendPosition: "r"
-    },
-    "A25:H43"
-  );
+      }
+    ],
+    legendPosition: "r"
+  });
 
   // ---- Chart 4: Channel contribution (stacked bar) ----
   Cell.setValue(charts, "I24", "4 — Channel contribution");
   Cell.setStyle(charts, "I24", { font: { bold: true } });
-  Chart.add(
-    charts,
-    {
-      type: "bar",
-      barDir: "bar",
-      grouping: "percentStacked",
-      title: "Channel contribution (100% stacked)",
-      series: [
-        {
-          name: "Revenue",
-          categories: agg(channelStartRow, CHANNELS.length, "A"),
-          values: agg(channelStartRow, CHANNELS.length, "B")
-        },
-        {
-          name: "Profit",
-          categories: agg(channelStartRow, CHANNELS.length, "A"),
-          values: agg(channelStartRow, CHANNELS.length, "C")
-        }
-      ]
-    },
-    "I25:P43"
-  );
+  Chart.place(charts, "I25:P43", {
+    type: "bar",
+    barDir: "bar",
+    grouping: "percentStacked",
+    title: "Channel contribution (100% stacked)",
+    series: [
+      {
+        name: "Revenue",
+        categories: agg(channelStartRow, CHANNELS.length, "A"),
+        values: agg(channelStartRow, CHANNELS.length, "B")
+      },
+      {
+        name: "Profit",
+        categories: agg(channelStartRow, CHANNELS.length, "A"),
+        values: agg(channelStartRow, CHANNELS.length, "C")
+      }
+    ]
+  });
 
   // ---- Chart 5: Revenue trend line with markers + trendline ----
   Cell.setValue(charts, "A45", "5 — Yearly revenue trend with linear trendline");
   Cell.setStyle(charts, "A45", { font: { bold: true } });
-  Chart.add(
-    charts,
-    {
-      type: "line",
-      title: "Revenue trend FY23–FY25",
-      showMarker: true,
-      series: [
-        {
-          name: "Revenue",
-          categories: agg(yearStartRow, 3, "A"),
-          values: agg(yearStartRow, 3, "B"),
-          line: "4472C4",
-          lineWidth: 2.5,
-          marker: { symbol: "circle", size: 8, fill: "4472C4", border: "FFFFFF" },
-          trendline: {
-            type: "linear",
-            displayEq: true,
-            displayRSqr: true,
-            forward: 1,
-            line: "ED7D31",
-            lineDash: "dash"
-          }
+  Chart.place(charts, "A46:H64", {
+    type: "line",
+    title: "Revenue trend FY23–FY25",
+    showMarker: true,
+    series: [
+      {
+        name: "Revenue",
+        categories: agg(yearStartRow, 3, "A"),
+        values: agg(yearStartRow, 3, "B"),
+        line: "4472C4",
+        lineWidth: 2.5,
+        marker: { symbol: "circle", size: 8, fill: "4472C4", border: "FFFFFF" },
+        trendline: {
+          type: "linear",
+          displayEq: true,
+          displayRSqr: true,
+          forward: 1,
+          line: "ED7D31",
+          lineDash: "dash"
         }
-      ],
-      valueAxis: { min: 0, numFmt: "$#,##0" }
-    },
-    "A46:H64"
-  );
+      }
+    ],
+    valueAxis: { min: 0, numFmt: "$#,##0" }
+  });
 
   // ---- Chart 6: Region map (ChartEx) ----
   Cell.setValue(charts, "I45", "6 — Revenue by country (ChartEx regionMap)");
   Cell.setStyle(charts, "I45", { font: { bold: true } });
-  Chart.addRegionMap(
-    charts,
-    {
-      title: "Revenue by country",
-      categories: agg(countryStartRow, countriesList.length, "A"),
-      series: [
-        {
-          name: "Revenue",
-          values: agg(countryStartRow, countriesList.length, "B")
-        }
-      ],
-      layout: { projection: "mercator", regionLabels: "bestFit", geoMappingLevel: "country" }
-    },
-    "I46:P64"
-  );
+  Chart.place(charts, "I46:P64", {
+    type: "regionMap",
+    title: "Revenue by country",
+    categories: agg(countryStartRow, countriesList.length, "A"),
+    series: [
+      {
+        name: "Revenue",
+        values: agg(countryStartRow, countriesList.length, "B")
+      }
+    ],
+    layout: { projection: "mercator", regionLabels: "bestFit", geoMappingLevel: "country" }
+  });
 
   // ---- Chart 7: Waterfall for profit bridge ----
   Cell.setValue(charts, "A66", "7 — Profit bridge (waterfall)");
   Cell.setStyle(charts, "A66", { font: { bold: true } });
-  Chart.addWaterfall(
-    charts,
-    {
-      title: "Quarterly profit bridge (2025)",
-      categories: agg(quarterStartRow + 8, 4, "B"),
-      series: [
-        {
-          name: "Profit",
-          values: agg(quarterStartRow + 8, 4, "D"),
-          subtotals: [0, 3]
-        }
-      ],
-      layout: { connectorLines: true }
-    },
-    "A67:H85"
-  );
+  Chart.place(charts, "A67:H85", {
+    type: "waterfall",
+    title: "Quarterly profit bridge (2025)",
+    categories: agg(quarterStartRow + 8, 4, "B"),
+    series: [
+      {
+        name: "Profit",
+        values: agg(quarterStartRow + 8, 4, "D"),
+        subtotals: [0, 3]
+      }
+    ],
+    layout: { connectorLines: true }
+  });
 
   // ---- Chart 8: Treemap for country revenue ----
   Cell.setValue(charts, "I66", "8 — Country revenue treemap");
   Cell.setStyle(charts, "I66", { font: { bold: true } });
-  Chart.addTreemap(
-    charts,
-    {
-      title: "Country revenue (treemap)",
-      categories: agg(countryStartRow, countriesList.length, "A"),
-      series: [
-        {
-          name: "Revenue",
-          values: agg(countryStartRow, countriesList.length, "B")
-        }
-      ],
-      layout: { parentLabelLayout: "banner" }
-    },
-    "I67:P85"
-  );
+  Chart.place(charts, "I67:P85", {
+    type: "treemap",
+    title: "Country revenue (treemap)",
+    categories: agg(countryStartRow, countriesList.length, "A"),
+    series: [
+      {
+        name: "Revenue",
+        values: agg(countryStartRow, countriesList.length, "B")
+      }
+    ],
+    layout: { parentLabelLayout: "banner" }
+  });
 
   // ---- Chart 9: Histogram of margins ----
   Cell.setValue(charts, "A87", "9 — Margin distribution (histogram)");
   Cell.setStyle(charts, "A87", { font: { bold: true } });
   // Need raw margins — materialise them in the Aggregates sheet.
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Margin"]);
-  const marginHeaderRow = Worksheet.lastRow(aggSheet)!.number;
-  rows.forEach(r => Worksheet.addRow(aggSheet, [r.Margin]));
-  Chart.addHistogram(
-    charts,
-    {
-      title: "Distribution of order margin",
-      series: [
-        {
-          name: "Margin",
-          values: `Aggregates!$A$${marginHeaderRow + 1}:$A$${marginHeaderRow + rows.length}`
-        }
-      ],
-      binning: { binType: "auto" }
-    },
-    "A88:H106"
-  );
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Margin"]);
+  const marginHeaderRow = Row.getLast(aggSheet)!;
+  rows.forEach(r => Row.add(aggSheet, [r.Margin]));
+  Chart.place(charts, "A88:H106", {
+    type: "histogram",
+    title: "Distribution of order margin",
+    series: [
+      {
+        name: "Margin",
+        values: `Aggregates!$A$${marginHeaderRow + 1}:$A$${marginHeaderRow + rows.length}`
+      }
+    ],
+    binning: { binType: "auto" }
+  });
 
   // ---- Chart 10: Box-whisker of margins by region ----
   Cell.setValue(charts, "I87", "10 — Margin by region (box-whisker)");
   Cell.setStyle(charts, "I87", { font: { bold: true } });
-  Chart.addBoxWhisker(
-    charts,
-    {
-      title: "Margin distribution by region",
-      categories: `Aggregates!$A$${marginHeaderRow + 1}:$A$${marginHeaderRow + rows.length}`,
-      series: [
-        {
-          name: "Margin",
-          values: `Aggregates!$A$${marginHeaderRow + 1}:$A$${marginHeaderRow + rows.length}`
-        }
-      ],
-      layout: {
-        quartileMethod: "inclusive",
-        showMeanLine: true,
-        showMeanMarker: true,
-        showInnerPoints: false,
-        showOutlierPoints: true
+  Chart.place(charts, "I88:P106", {
+    type: "boxWhisker",
+    title: "Margin distribution by region",
+    categories: `Aggregates!$A$${marginHeaderRow + 1}:$A$${marginHeaderRow + rows.length}`,
+    series: [
+      {
+        name: "Margin",
+        values: `Aggregates!$A$${marginHeaderRow + 1}:$A$${marginHeaderRow + rows.length}`
       }
-    },
-    "I88:P106"
-  );
+    ],
+    layout: {
+      quartileMethod: "inclusive",
+      showMeanLine: true,
+      showMeanMarker: true,
+      showInnerPoints: false,
+      showOutlierPoints: true
+    }
+  });
 
   // ---- Chart 11: Funnel of units sold by product ----
   Cell.setValue(charts, "A108", "11 — Sales funnel by product");
   Cell.setStyle(charts, "A108", { font: { bold: true } });
-  Chart.addFunnel(
-    charts,
-    {
-      title: "Units sold — product funnel",
-      categories: agg(productStartRow, PRODUCTS.length, "A"),
-      series: [{ name: "Units", values: agg(productStartRow, PRODUCTS.length, "D") }]
-    },
-    "A109:H127"
-  );
+  Chart.place(charts, "A109:H127", {
+    type: "funnel",
+    title: "Units sold — product funnel",
+    categories: agg(productStartRow, PRODUCTS.length, "A"),
+    series: [{ name: "Units", values: agg(productStartRow, PRODUCTS.length, "D") }]
+  });
 
   // ---- Chart 12: Sunburst hierarchy ----
   Cell.setValue(charts, "I108", "12 — Region → country sunburst");
@@ -938,32 +906,29 @@ async function main(): Promise<void> {
   // Need country + region mapping — we already have per-country revenue in
   // Aggregates. Also need region as the first hierarchy level; build a
   // small two-column block.
-  Worksheet.addRow(aggSheet, []);
-  Worksheet.addRow(aggSheet, ["Region", "Country", "Revenue"]);
-  const sunburstHeaderRow = Worksheet.lastRow(aggSheet)!.number;
+  Row.add(aggSheet, []);
+  Row.add(aggSheet, ["Region", "Country", "Revenue"]);
+  const sunburstHeaderRow = Row.getLast(aggSheet)!;
   for (const region of REGIONS) {
     for (const country of COUNTRIES[region]) {
-      Worksheet.addRow(aggSheet, [region, country, byCountry.get(country)!.Revenue]);
+      Row.add(aggSheet, [region, country, byCountry.get(country)!.Revenue]);
     }
   }
-  const sunburstCount = Worksheet.lastRow(aggSheet)!.number - sunburstHeaderRow;
-  Chart.addSunburst(
-    charts,
-    {
-      title: "Revenue by region → country",
-      categories: `Aggregates!$B$${sunburstHeaderRow + 1}:$B$${sunburstHeaderRow + sunburstCount}`,
-      series: [
-        {
-          name: "Revenue",
-          values: `Aggregates!$C$${sunburstHeaderRow + 1}:$C$${sunburstHeaderRow + sunburstCount}`,
-          hierarchy: [
-            `Aggregates!$A$${sunburstHeaderRow + 1}:$A$${sunburstHeaderRow + sunburstCount}`
-          ]
-        }
-      ]
-    },
-    "I109:P127"
-  );
+  const sunburstCount = Row.getLast(aggSheet)! - sunburstHeaderRow;
+  Chart.place(charts, "I109:P127", {
+    type: "sunburst",
+    title: "Revenue by region → country",
+    categories: `Aggregates!$B$${sunburstHeaderRow + 1}:$B$${sunburstHeaderRow + sunburstCount}`,
+    series: [
+      {
+        name: "Revenue",
+        values: `Aggregates!$C$${sunburstHeaderRow + 1}:$C$${sunburstHeaderRow + sunburstCount}`,
+        hierarchy: [
+          `Aggregates!$A$${sunburstHeaderRow + 1}:$A$${sunburstHeaderRow + sunburstCount}`
+        ]
+      }
+    ]
+  });
 
   // =========================================================================
   // Sheet 5 — KPI Sparklines (one row per product with trend sparklines)
@@ -1091,7 +1056,7 @@ async function main(): Promise<void> {
     properties: { tabColor: { argb: "FFC00000" } }
   });
 
-  Worksheet.setColumns(forecast, [
+  Column.setDefinitions(forecast, [
     { header: "Field", key: "field", width: 22 },
     { header: "Value", key: "value", width: 20 },
     { header: "Notes", key: "notes", width: 40 }
@@ -1111,7 +1076,7 @@ async function main(): Promise<void> {
     { field: "Forecast Code", notes: "Exactly 6 characters" },
     { field: "Confidence", notes: "Must match Low/Medium/High" }
   ];
-  formRows.forEach(r => Worksheet.addRow(forecast, r));
+  formRows.forEach(r => Row.add(forecast, r));
 
   // List validation (names referencing Excel defined name)
   DefinedNames.add(Workbook.getDefinedNames(wb), "Aggregates!$A$2:$A$4", "Regions");
@@ -1176,7 +1141,8 @@ async function main(): Promise<void> {
   for (let r = 2; r <= 7; r++) {
     Cell.setStyle(forecast, r, 2, { protection: { locked: false } });
   }
-  await Worksheet.protect(forecast, "forecast-password", {
+  await Worksheet.protect(forecast, {
+    password: "forecast-password",
     selectLockedCells: true,
     selectUnlockedCells: true,
     sort: false,
@@ -1301,7 +1267,7 @@ async function main(): Promise<void> {
       width: 30000,
       height: 18000,
       firstSheet: 0,
-      activeTab: Workbook.getWorksheets(wb).findIndex(ws => Worksheet.getName(ws) === "Index"),
+      activeTab: Workbook.listWorksheets(wb).findIndex(ws => Worksheet.getName(ws) === "Index"),
       visibility: "visible"
     }
   ];
@@ -1409,7 +1375,7 @@ async function main(): Promise<void> {
   console.log(`PDF → ${PDF_PATH}`);
 
   // Also emit a standalone PDF of the first chart on the Charts sheet.
-  const firstChart = Chart.get(charts)[0];
+  const firstChart = Chart.list(charts)[0];
   const chartPdf = await chartToPdf(firstChart, {
     title: "Revenue by region",
     width: 640,
@@ -1421,16 +1387,16 @@ async function main(): Promise<void> {
   // Summary
   console.log("");
   console.log("Workbook summary:");
-  console.log(`  worksheets  : ${Workbook.getWorksheets(wb).length}`);
-  console.log(`  chartsheets : ${Workbook.getChartsheets(wb).length}`);
+  console.log(`  worksheets  : ${Workbook.listWorksheets(wb).length}`);
+  console.log(`  chartsheets : ${Workbook.listChartsheets(wb).length}`);
   console.log(
-    `  charts      : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Chart.get(ws).length, 0)}`
+    `  charts      : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Chart.list(ws).length, 0)}`
   );
   console.log(
-    `  sparklines  : ${Workbook.getWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)} groups`
+    `  sparklines  : ${Workbook.listWorksheets(wb).reduce((n, ws) => n + Sparkline.list(ws).length, 0)} groups`
   );
   console.log(`  sales rows  : ${rows.length}`);
-  console.log(`  tables      : 1 Excel table (${Table.model(salesTable).name})`);
+  console.log(`  tables      : 1 Excel table (${Table.getModel(salesTable).name})`);
   console.log(`  pivots      : 3 pivot tables on '${Worksheet.getName(pivots)}'`);
   console.log(`  images      : 1 shared image`);
 }

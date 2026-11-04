@@ -3,11 +3,12 @@
  *
  * Covers:
  * - format → parse → format round-trip fidelity
- * - readMarkdown / writeMarkdown (bridge functions taking a workbook handle,
- *   not members of the `Workbook` namespace — it has none)
- * - readMarkdownAll (multi-table → worksheets)
- * - writeMarkdownBuffer
- * - Value mapper on readMarkdown
+ * - ExcelMarkdown.read / ExcelMarkdown.format (bridge functions — `read` returns a new
+ *   workbook, `format` takes one; not members of the `Workbook` namespace — it has none)
+ * - ExcelMarkdown.read({ tables: "all" }) (multi-table → a workbook with one worksheet per table)
+ * - ExcelMarkdown.addWorksheet (a table added to an existing workbook)
+ * - ExcelMarkdown.toBuffer / ExcelMarkdown.toBufferSync
+ * - Value mapper on ExcelMarkdown.read
  * - Multiline round-trip through Workbook
  * - Error handling with MarkdownParseError
  */
@@ -15,18 +16,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  readMarkdown,
-  readMarkdownAll,
-  writeMarkdown,
-  writeMarkdownBuffer
-} from "@excel/bridge/markdown-bridge";
-import {
-  readMarkdownAllFile,
-  readMarkdownFile,
-  writeMarkdownFile
-} from "@excel/bridge/markdown-bridge.node";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { ExcelMarkdown } from "@excel/bridge/markdown.node";
+import { Cell, Row, Workbook, Worksheet } from "@excel/index";
 
 import { Markdown, MarkdownParseError } from "../index";
 
@@ -71,10 +62,10 @@ fs.writeFileSync(path.join(outDir, "round-trip.md"), markdown1, "utf8");
 console.log();
 
 // =============================================================================
-// 2. readMarkdown / writeMarkdown
+// 2. ExcelMarkdown.read / ExcelMarkdown.format
 // =============================================================================
 
-console.log("=== 2. readMarkdown / writeMarkdown ===\n");
+console.log("=== 2. ExcelMarkdown.read / ExcelMarkdown.format ===\n");
 
 const markdownInput = `
 | Name  | Age | Department  |
@@ -84,26 +75,26 @@ const markdownInput = `
 | Carol | 35  | Engineering |
 `.trim();
 
-const wb1 = Workbook.create();
-const ws = readMarkdown(wb1, markdownInput, { sheetName: "Employees" });
+const wb1 = ExcelMarkdown.read(markdownInput, { sheetName: "Employees" });
+const ws = Workbook.getWorksheet(wb1, "Employees")!;
 
-console.log("Sheet:", Worksheet.getName(ws), "| Rows:", Worksheet.rowCount(ws));
-for (let r = 1; r <= Worksheet.rowCount(ws); r++) {
+console.log("Sheet:", Worksheet.getName(ws), "| Rows:", Row.getCount(ws));
+for (let r = 1; r <= Row.getCount(ws); r++) {
   console.log(
     `  Row ${r}: ${Cell.getValue(ws, r, 1)} | ${Cell.getValue(ws, r, 2)} | ${Cell.getValue(ws, r, 3)}`
   );
 }
 
-const mdOut = writeMarkdown(wb1, { sheetName: "Employees" });
+const mdOut = ExcelMarkdown.format(wb1, { sheetName: "Employees" });
 console.log("\nWritten back:");
 console.log(mdOut);
 fs.writeFileSync(path.join(outDir, "workbook-single.md"), mdOut, "utf8");
 
 // =============================================================================
-// 3. readMarkdownAll
+// 3. ExcelMarkdown.read({ tables: "all" })
 // =============================================================================
 
-console.log("=== 3. readMarkdownAll ===\n");
+console.log('=== 3. ExcelMarkdown.read({ tables: "all" }) ===\n');
 
 const multiDoc = `
 # Q1 Report
@@ -124,13 +115,13 @@ const multiDoc = `
 | Net     | -$28,000 |
 `.trim();
 
-const wb2 = Workbook.create();
-const sheets = readMarkdownAll(wb2, multiDoc, { sheetName: "Q1" });
+const wb2 = ExcelMarkdown.read(multiDoc, { sheetName: "Q1", tables: "all" });
+const sheets = Workbook.listWorksheets(wb2);
 
 console.log(`Created ${sheets.length} worksheets:`);
 const allMarkdown: string[] = [];
 for (const s of sheets) {
-  const markdown = writeMarkdown(wb2, { sheetName: Worksheet.getName(s) });
+  const markdown = ExcelMarkdown.format(wb2, { sheetName: Worksheet.getName(s) });
   console.log(`\n--- ${Worksheet.getName(s)} ---`);
   console.log(markdown);
   allMarkdown.push(`## ${Worksheet.getName(s)}\n\n${markdown}`);
@@ -142,12 +133,14 @@ fs.writeFileSync(
 );
 
 // =============================================================================
-// 4. writeMarkdownBuffer
+// 4. ExcelMarkdown.toBuffer
 // =============================================================================
 
-console.log("=== 4. writeMarkdownBuffer ===\n");
-const buffer = writeMarkdownBuffer(wb2, { sheetName: "Q1" });
+console.log("=== 4. ExcelMarkdown.toBuffer ===\n");
+const buffer = await ExcelMarkdown.toBuffer(wb2, { sheetName: "Q1" });
 console.log(`Buffer: ${buffer.length} bytes`);
+const bufferSync = ExcelMarkdown.toBufferSync(wb2, { sheetName: "Q1" });
+console.log(`toBufferSync: ${bufferSync.length} bytes (same bytes, no await)`);
 fs.writeFileSync(path.join(outDir, "workbook-buffer.md"), buffer);
 console.log();
 
@@ -157,14 +150,14 @@ console.log();
 
 console.log("=== 5. Value Mapper ===\n");
 
-const wb3 = Workbook.create();
-const ws3 = readMarkdown(wb3, markdownInput, {
+const wb3 = ExcelMarkdown.read(markdownInput, {
   sheetName: "Typed",
   map: (value: string, _col: number) => {
     const n = Number(value);
     return Number.isNaN(n) ? value : n;
   }
 });
+const ws3 = Workbook.getWorksheet(wb3, "Typed")!;
 console.log("Age type:", typeof Cell.getValue(ws3, 2, 2));
 console.log("Age value:", Cell.getValue(ws3, 2, 2));
 console.log();
@@ -177,16 +170,19 @@ console.log("=== 6. Multiline Workbook Round-Trip ===\n");
 
 const wb4 = Workbook.create();
 const ws4 = Workbook.addWorksheet(wb4, "Notes");
-Worksheet.addRow(ws4, ["Name", "Address"]);
-Worksheet.addRow(ws4, ["Alice", "123 Main St\nApt 4\nNew York"]);
-Worksheet.addRow(ws4, ["Bob", "456 Oak Ave\nLondon"]);
+Row.add(ws4, ["Name", "Address"]);
+Row.add(ws4, ["Alice", "123 Main St\nApt 4\nNew York"]);
+Row.add(ws4, ["Bob", "456 Oak Ave\nLondon"]);
 
-const markdownMultiline = writeMarkdown(wb4, { sheetName: "Notes" });
+const markdownMultiline = ExcelMarkdown.format(wb4, { sheetName: "Notes" });
 console.log("Written:");
 console.log(markdownMultiline);
 
-const wb5 = Workbook.create();
-const ws5 = readMarkdown(wb5, markdownMultiline, { sheetName: "Notes", convertBr: true });
+// The table goes onto the workbook it came from, beside the original sheet
+const ws5 = ExcelMarkdown.addWorksheet(wb4, markdownMultiline, {
+  sheetName: "NotesParsed",
+  convertBr: true
+});
 console.log("Parsed back (address):", JSON.stringify(Cell.getValue(ws5, 2, 2)));
 fs.writeFileSync(path.join(outDir, "multiline-workbook.md"), markdownMultiline, "utf8");
 console.log();
@@ -214,26 +210,24 @@ console.log();
 
 console.log("=== 8. File I/O ===\n");
 
-const wb6 = Workbook.create();
-readMarkdown(wb6, "| X | Y |\n| - | - |\n| 1 | 2 |", { sheetName: "Data" });
+const wb6 = ExcelMarkdown.read("| X | Y |\n| - | - |\n| 1 | 2 |", { sheetName: "Data" });
 const outFile = path.join(outDir, "file-io-output.md");
-await writeMarkdownFile(wb6, outFile, { sheetName: "Data" });
+await ExcelMarkdown.writeFile(wb6, outFile, { sheetName: "Data" });
 console.log("Wrote:", outFile);
 
-const wb7 = Workbook.create();
-await readMarkdownFile(wb7, outFile, { sheetName: "FromFile" });
+const wb7 = await ExcelMarkdown.readFile(outFile, { sheetName: "FromFile" });
 const fromFileSheet = Workbook.getWorksheet(wb7, "FromFile")!;
 if (fromFileSheet) {
   console.log("Read back:", Cell.getValue(fromFileSheet, 2, 1));
 }
 
-// readMarkdownAllFile
+// ExcelMarkdown.readFile({ tables: "all" })
 const multiFile = path.join(outDir, "multi-input.md");
 fs.writeFileSync(multiFile, multiDoc, "utf8");
-const wb8 = Workbook.create();
-const allSheets = await readMarkdownAllFile(wb8, multiFile, { sheetName: "Sheet" });
+const wb8 = await ExcelMarkdown.readFile(multiFile, { sheetName: "Sheet", tables: "all" });
+const allSheets = Workbook.listWorksheets(wb8);
 console.log(
-  `readMarkdownAllFile: ${allSheets.length} worksheets → ${allSheets.map(s => Worksheet.getName(s)).join(", ")}`
+  `ExcelMarkdown.readFile (all tables): ${allSheets.length} worksheets → ${allSheets.map(s => Worksheet.getName(s)).join(", ")}`
 );
 
 console.log("\nAll output files written to:", outDir);

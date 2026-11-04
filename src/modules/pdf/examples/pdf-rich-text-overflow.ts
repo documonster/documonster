@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 
 import { Pdf } from "../index";
 
@@ -41,7 +41,7 @@ const wb = Workbook.create();
 // =============================================================================
 
 const ws1 = Workbook.addWorksheet(wb, "RichText-Overflow");
-Worksheet.setColumns(ws1, [
+Column.setDefinitions(ws1, [
   { header: "Description", width: 18 },
   { header: "Narrow Single Cell", width: 12 },
   { header: "C (empty)", width: 12 },
@@ -97,7 +97,7 @@ Cell.setValue(ws1, "B4", "This plain text overflows into C4 and D4 correctly");
 // =============================================================================
 
 const ws2 = Workbook.addWorksheet(wb, "Overflow-Erase");
-Worksheet.setColumns(ws2, [
+Column.setDefinitions(ws2, [
   { header: "A", width: 12 },
   { header: "B", width: 8 },
   { header: "C", width: 8 },
@@ -142,7 +142,7 @@ Cell.setStyle(ws2, "B4", {
 // =============================================================================
 
 const ws3 = Workbook.addWorksheet(wb, "PerRun-WrapSize");
-Worksheet.setColumns(ws3, [
+Column.setDefinitions(ws3, [
   { header: "Case", width: 25 },
   { header: "Wrapped Rich Text", width: 25 },
   { header: "Expected Layout", width: 40 }
@@ -201,7 +201,7 @@ Cell.setStyle(ws3, "B4", { alignment: { wrapText: true } });
 // =============================================================================
 
 const ws4 = Workbook.addWorksheet(wb, "Alignment");
-Worksheet.setColumns(ws4, [
+Column.setDefinitions(ws4, [
   { header: "Vertical Align", width: 15 },
   { header: "Mixed Rich Text", width: 40 },
   { header: "Plain (reference)", width: 40 }

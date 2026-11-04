@@ -35,6 +35,7 @@ import {
   renderCustomProperties,
   renderTheme
 } from "@word/writer/parts-writer";
+import { closeStoryPart } from "@word/writer/render-context";
 import type { RenderHelpers } from "@word/writer/render-context";
 import { renderStyles } from "@word/writer/styles-writer";
 
@@ -65,6 +66,11 @@ export interface AuxiliaryPartsInput {
    * external links or remapped images.
    */
   readonly notesHelpers?: RenderHelpers;
+  /**
+   * Render helpers for endnotes, which have a `.rels` of their own and so
+   * their own image remap. Defaults to {@link notesHelpers}.
+   */
+  readonly endnotesHelpers?: RenderHelpers;
   /**
    * Raw XML output policy. When `"strip"` or `"reject"`, opaque rawXml
    * fields on settings/theme/numbering are skipped or cause an error
@@ -99,19 +105,26 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   // styles.xml (always written)
   parts.push({
     path: PartPath.Styles,
-    content: renderXml(xml => renderStyles(xml, input.docDefaults, input.styles))
+    content: renderXml(xml =>
+      renderStyles(xml, input.docDefaults, input.styles, undefined, input.rawXmlPolicy)
+    )
   });
 
   // settings.xml
   parts.push({
     path: PartPath.Settings,
-    content: renderXml(xml => renderSettings(xml, input.settings, input.rawXmlPolicy))
+    content: renderXml(xml =>
+      renderSettings(xml, input.settings, input.rawXmlPolicy, {
+        footnotes: input.footnotes,
+        endnotes: input.endnotes
+      })
+    )
   });
 
   // fontTable.xml
   parts.push({
     path: PartPath.FontTable,
-    content: renderXml(xml => renderFontTable(xml, input.fonts))
+    content: renderXml(xml => renderFontTable(xml, input.fonts, input.rawXmlPolicy))
   });
 
   // theme/theme1.xml
@@ -143,7 +156,10 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   if (input.footnotes && input.footnotes.length > 0) {
     parts.push({
       path: PartPath.Footnotes,
-      content: renderXml(xml => renderFootnotes(xml, input.footnotes!, input.notesHelpers))
+      content: closeStoryPart(
+        renderXml(xml => renderFootnotes(xml, input.footnotes!, input.notesHelpers)),
+        input.notesHelpers
+      )
     });
   }
 
@@ -151,7 +167,12 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   if (input.endnotes && input.endnotes.length > 0) {
     parts.push({
       path: PartPath.Endnotes,
-      content: renderXml(xml => renderEndnotes(xml, input.endnotes!, input.notesHelpers))
+      content: closeStoryPart(
+        renderXml(xml =>
+          renderEndnotes(xml, input.endnotes!, input.endnotesHelpers ?? input.notesHelpers)
+        ),
+        input.endnotesHelpers ?? input.notesHelpers
+      )
     });
   }
 
@@ -164,7 +185,7 @@ export function buildCommonAuxiliaryParts(input: AuxiliaryPartsInput): RenderedP
   // docProps/app.xml
   parts.push({
     path: PartPath.AppProps,
-    content: renderXml(xml => renderAppProperties(xml, input.appProperties))
+    content: renderXml(xml => renderAppProperties(xml, input.appProperties, input.rawXmlPolicy))
   });
 
   // docProps/custom.xml (conditional)

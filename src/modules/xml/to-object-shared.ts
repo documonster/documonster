@@ -5,7 +5,9 @@
  * `parseXmlToObject` (SAX-direct path). Not part of the public API.
  */
 
-import type { ToPlainObjectOptions } from "@xml/types";
+import { checkBooleanOptions, checkOptionsObject } from "@xml/arguments";
+import { XmlArgumentError } from "@xml/errors";
+import type { XmlToPlainObjectOptions } from "@xml/types";
 
 // =============================================================================
 // Resolved Options
@@ -22,7 +24,32 @@ export interface ResolvedOptions {
   readonly ignoreWS: boolean;
 }
 
-export function resolveOptions(options?: ToPlainObjectOptions): ResolvedOptions {
+export function resolveOptions(
+  options?: XmlToPlainObjectOptions,
+  where = "Xml.toPlainObject"
+): ResolvedOptions {
+  checkOptionsObject(where, options);
+  checkBooleanOptions(where, options as Record<string, unknown> | undefined, [
+    "ignoreAttributes",
+    "alwaysArray",
+    "preserveCData",
+    "ignoreWhitespaceText"
+  ]);
+  for (const key of ["attributePrefix", "textKey"] as const) {
+    const value = options?.[key];
+    if (value !== undefined && typeof value !== "string") {
+      throw new XmlArgumentError(
+        `options.${key}`,
+        `${where}: ${key} must be a string, got ${typeof value}`
+      );
+    }
+  }
+  if (options?.isArray !== undefined && typeof options.isArray !== "function") {
+    throw new XmlArgumentError(
+      "options.isArray",
+      `${where}: isArray must be a function, got ${typeof options.isArray}`
+    );
+  }
   return {
     ignoreAttributes: options?.ignoreAttributes ?? false,
     attrPrefix: options?.attributePrefix ?? "@_",

@@ -1,11 +1,25 @@
+import { createDocxStreamReader as createDocxStreamReaderImpl } from "@word/reader/streaming-reader";
 /**
  * `Streaming` namespace surface — streaming DOCX writer + reader.
  *
  * `import { Streaming } from "documonster/word"` →
- *   `Streaming.createDocxStream(opts)`, `new Streaming.StreamingDocxWriter(...)`,
- *   `Streaming.createDocxStreamReader(bytes)`,
- *   `new Streaming.StreamingDocxReader(...)`
- *   — tree-shaken via `export * as Streaming`.
+ *   `Streaming.createWriter(opts)`, `Streaming.createReader(bytes)`
+ *   (or `new Streaming.StreamingDocxWriter(...)` /
+ *   `new Streaming.StreamingDocxReader(...)`) — tree-shaken via
+ *   `export * as Streaming`.
  */
-export { StreamingDocxWriter, createDocxStream } from "@word/writer/streaming-writer";
-export { StreamingDocxReader, createDocxStreamReader } from "@word/reader/streaming-reader";
+import { createDocxStream as createDocxStreamImpl } from "@word/writer/streaming-writer";
+
+export {
+  StreamingDocxWriter,
+  createDocxStream as createWriter
+} from "@word/writer/streaming-writer";
+export {
+  StreamingDocxReader,
+  createDocxStreamReader as createReader
+} from "@word/reader/streaming-reader";
+
+/** @deprecated Use {@link createWriter}. Removed in 1.0. */
+export const createDocxStream = createDocxStreamImpl;
+/** @deprecated Use {@link createReader}. Removed in 1.0. */
+export const createDocxStreamReader = createDocxStreamReaderImpl;

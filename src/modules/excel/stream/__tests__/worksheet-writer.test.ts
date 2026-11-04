@@ -1,6 +1,6 @@
 import { cellGetValue, cellSetValue } from "@excel/core/cell";
 import { rowCellCount } from "@excel/core/row";
-import { rowCommit, rowGetCell, getCell, getColumn } from "@excel/core/worksheet";
+import { rowCommit, rowGetCell, getCell, getColumn, getLastRow } from "@excel/core/worksheet";
 import { ExcelStreamStateError } from "@excel/errors";
 import { Stream, Worksheet } from "@excel/index";
 import { WorkbookWriter } from "@excel/stream/workbook-writer";
@@ -124,7 +124,7 @@ describe("WorksheetWriter", () => {
         });
 
         writer.autoFilter = { from: "A1", to: "C1" };
-        writer.protect("", {});
+        writer.protect({ password: "" });
         writer.commit();
       }));
   });
@@ -246,12 +246,12 @@ describe("WorksheetWriter", () => {
 
     it("lastRow returns the last non-empty row", () => {
       const { ws } = createRealWriter();
-      expect(Worksheet.lastRow(ws)).toBeUndefined();
+      expect(getLastRow(ws)).toBeUndefined();
 
       ws.addRow(["first"]);
       ws.addRow(["second"]);
 
-      expect(Worksheet.lastRow(ws)).toBeDefined();
+      expect(getLastRow(ws)).toBeDefined();
     });
   });
 
@@ -427,14 +427,35 @@ describe("WorksheetWriter", () => {
 
     it("protect() with password and options", async () => {
       const { ws } = createRealWriter();
-      await ws.protect("secret", { formatColumns: true });
+      await ws.protect({ password: "secret", formatColumns: true });
       expect(ws.sheetProtection).toBeDefined();
       expect(ws.sheetProtection!.sheet).toBe(true);
+      expect(ws.sheetProtection!.formatColumns).toBe(true);
+      expect(ws.sheetProtection!.hashValue).toBeDefined();
+      expect("password" in ws.sheetProtection!).toBe(false);
+    });
+
+    it("the deprecated (password, options) form still protects", async () => {
+      const { ws } = createRealWriter();
+      await ws.protect("secret", { formatColumns: true });
+      expect(ws.sheetProtection!.formatColumns).toBe(true);
+      expect(ws.sheetProtection!.hashValue).toBeDefined();
+    });
+
+    it("getWatermark() answers null without a watermark and the settings with one", () => {
+      const { wb, ws } = createRealWriter();
+      expect(ws.getWatermark()).toBeNull();
+      const imageId = wb.addImage({
+        extension: "png",
+        buffer: new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+      });
+      ws.addWatermark({ imageId, mode: "overlay", opacity: 0.25 });
+      expect(ws.getWatermark().mode).toBe("overlay");
     });
 
     it("unprotect() clears sheet protection", async () => {
       const { ws } = createRealWriter();
-      await ws.protect("secret");
+      await ws.protect({ password: "secret" });
       expect(ws.sheetProtection).toBeDefined();
 
       ws.unprotect();
@@ -579,7 +600,7 @@ describe("WorksheetWriter", () => {
       cellSetValue(getCell(ws, "A1"), 1);
       cellSetValue(getCell(ws, "C5"), 2);
 
-      const dims = Worksheet.dimensions(ws);
+      const dims = Worksheet.getDimensions(ws)!;
       expect(dims).toBeDefined();
       // Note: WorksheetWriter._dimensions is initialized as empty and is not
       // expanded by getCell(). This is a known limitation of the streaming writer.

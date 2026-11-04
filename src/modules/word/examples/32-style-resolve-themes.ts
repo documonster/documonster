@@ -73,7 +73,7 @@ Document.addStyle(d, {
   runProperties: { bold: true, color: "C00000" }
 });
 
-// Numbering definitions — for resolveNumberingLevel
+// Numbering definitions — for Query.getNumberingLevel
 const numAbs: AbstractNumbering = {
   abstractNumId: 50,
   multiLevelType: "multilevel",
@@ -96,7 +96,7 @@ const numAbs: AbstractNumbering = {
 };
 const numInst: NumberingInstance = { numId: 50, abstractNumId: 50 };
 
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.paragraph(
     [
@@ -107,14 +107,11 @@ Document.addParagraphElement(
   )
 );
 
-Document.addParagraphElement(
+Document.addParagraph(
   d,
   Build.textParagraph("List item one", { numbering: { numId: 50, level: 0 } })
 );
-Document.addParagraphElement(
-  d,
-  Build.textParagraph("Sub-item a", { numbering: { numId: 50, level: 1 } })
-);
+Document.addParagraph(d, Build.textParagraph("Sub-item a", { numbering: { numId: 50, level: 1 } }));
 
 // Add custom theme so resolveThemeColor returns a useful colour
 const theme: DocumentTheme = {
@@ -144,59 +141,58 @@ const theme: DocumentTheme = {
 };
 
 // Build with theme attached and numbering merged in
-const built = Document.build(d);
 const docModel = {
-  ...built,
-  abstractNumberings: [...(built.abstractNumberings ?? []), numAbs],
-  numberingInstances: [...(built.numberingInstances ?? []), numInst],
+  ...d,
+  abstractNumberings: [...(d.abstractNumberings ?? []), numAbs],
+  numberingInstances: [...(d.numberingInstances ?? []), numInst],
   theme
 };
 
 // ---------------------------------------------------------------------------
-// 1. resolveStyle on a paragraph — walks the chain and merges
+// 1. Query.getParagraphStyle on a paragraph — walks the chain and merges
 // ---------------------------------------------------------------------------
 const leadPara = docModel.body.find(
   b => "type" in b && b.type === "paragraph" && b.properties?.style === "Lead"
 );
 if (leadPara && leadPara.type === "paragraph") {
-  const resolved = Query.resolveStyle(docModel, leadPara);
-  console.log(`  resolveStyle("Lead") chain: ${resolved.chain.join(" → ")}`);
+  const resolved = Query.getParagraphStyle(docModel, leadPara);
+  console.log(`  Query.getParagraphStyle("Lead") chain: ${resolved.chain.join(" → ")}`);
   console.log(`    paragraphProperties: ${JSON.stringify(resolved.paragraphProperties)}`);
   console.log(`    runProperties:       ${JSON.stringify(resolved.runProperties)}`);
 }
 
 // ---------------------------------------------------------------------------
-// 2. resolveRunStyle — character style chain + paragraph fallback
+// 2. Query.getRunStyle — character style chain + paragraph fallback
 // ---------------------------------------------------------------------------
 if (leadPara && leadPara.type === "paragraph") {
   const strongRun = leadPara.children.find(
     c => "properties" in c && c.properties?.style === "Strong"
   );
   if (strongRun && "content" in strongRun) {
-    const resolved = Query.resolveRunStyle(docModel, strongRun);
-    console.log(`  resolveRunStyle("Strong") chain: ${resolved.chain.join(" → ")}`);
+    const resolved = Query.getRunStyle(docModel, strongRun);
+    console.log(`  Query.getRunStyle("Strong") chain: ${resolved.chain.join(" → ")}`);
     console.log(`    runProperties: ${JSON.stringify(resolved.runProperties)}`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// 3. resolveNumberingLevel — turn { numId, level } into the level definition
+// 3. Query.getNumberingLevel — turn { numId, level } into the level definition
 // ---------------------------------------------------------------------------
 const listPara = docModel.body.find(
   b => "type" in b && b.type === "paragraph" && b.properties?.numbering?.numId === 50
 );
 if (listPara && listPara.type === "paragraph") {
-  const lvl = Query.resolveNumberingLevel(docModel, listPara);
+  const lvl = Query.getNumberingLevel(docModel, listPara);
   console.log(
     `  resolveNumberingLevel: level=${lvl?.level}, format=${lvl?.format}, text="${lvl?.text}"`
   );
 }
 
 // ---------------------------------------------------------------------------
-// 4. resolveTableStyle — walks the basedOn chain of a table style and
+// 4. Query.getTableStyle — walks the basedOn chain of a table style and
 //    merges its paragraph / run / table properties.  Conditional formats
 //    (firstRow / banding) are stored on the StyleDef but applied at render
-//    time; resolveTableStyle returns the base merged properties.
+//    time; Query.getTableStyle returns the base merged properties.
 // ---------------------------------------------------------------------------
 const customTableStyle: StyleDef = {
   type: "table",
@@ -219,8 +215,8 @@ const customTableStyle: StyleDef = {
   ]
 };
 const docWithTableStyle = { ...docModel, styles: [...(docModel.styles ?? []), customTableStyle] };
-const resolvedTbl = Query.resolveTableStyle(docWithTableStyle, "BandedGrid");
-console.log(`  resolveTableStyle("BandedGrid") chain: ${resolvedTbl.chain.join(" → ")}`);
+const resolvedTbl = Query.getTableStyle(docWithTableStyle, "BandedGrid");
+console.log(`  Query.getTableStyle("BandedGrid") chain: ${resolvedTbl.chain.join(" → ")}`);
 console.log(`    runProperties: ${JSON.stringify(resolvedTbl.runProperties)}`);
 console.log(`    tableProperties.width: ${JSON.stringify(resolvedTbl.tableProperties?.width)}`);
 

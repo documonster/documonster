@@ -81,6 +81,17 @@ describe("graphemeClusters", () => {
     }
   });
 
+  it("should split text below U+0300 exactly as Intl.Segmenter does", () => {
+    // The per-unit fast path for such text must give the native answer,
+    // CR LF included.
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    let text = "";
+    for (let a = 0; a < 0x300; a++) {
+      text += String.fromCharCode(a, 0x0d, a, 0x0a, a);
+    }
+    expect(graphemeClusters(text)).toEqual([...seg.segment(text)].map(s => s.segment));
+  });
+
   it("should never lose or reorder input", () => {
     for (const text of CASES) {
       expect(graphemeClusters(text).join("")).toBe(text);

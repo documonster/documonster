@@ -30,6 +30,7 @@ import type {
   ShapeTransform,
   Bevel
 } from "@excel/chart/model/types";
+import { readColorTransforms } from "@excel/chart/shared/color-transforms";
 
 // ============================================================================
 // Raw XML access helpers
@@ -168,8 +169,8 @@ function extractColorRegion(xml: string, openMatch: RegExpExecArray, closeTag: s
 }
 
 /**
- * Parse all DrawingML color modifiers from a region of XML.
- * Handles: alpha, tint, shade, satMod, lumMod, lumOff.
+ * Parse all DrawingML color modifiers from a region of XML: the six named fields (alpha, tint, shade, satMod,
+ * lumMod, lumOff) and the ordered list of every transform, `transforms`.
  *
  * Regexes accept `-?\d+(?:\.\d+)?` — negative and fractional values
  * are legal in third-party exports (e.g. `<a:tint val="-5000"/>`,
@@ -207,6 +208,12 @@ function parseColorModifiers(region: string, color: ChartColor): void {
   const lumOffVal = parseModifierValue(lumOffMatch);
   if (lumOffVal !== undefined) {
     color.lumOff = lumOffVal;
+  }
+  // Every transform, in document order — the six above are views of it (`ChartColor.transforms`). Most have no field
+  // of their own (`satOff`, `hueOff`, `comp`, `gamma`, `redMod`, …), and every one of them was dropped here.
+  const transforms = readColorTransforms(region);
+  if (transforms.length > 0) {
+    color.transforms = transforms;
   }
 }
 

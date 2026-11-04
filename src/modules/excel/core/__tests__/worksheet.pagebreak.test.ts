@@ -1,5 +1,5 @@
 import { getSheetModel } from "@excel/core/worksheet";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { describe, it, expect } from "vitest";
 
 /**
@@ -155,7 +155,7 @@ describe("Worksheet", () => {
     it("resolves a column key to its number", () => {
       const ws = sheet();
 
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Name", key: "name", width: 20 },
         { header: "Total", key: "total", width: 12 }
       ]);

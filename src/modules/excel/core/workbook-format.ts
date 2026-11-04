@@ -68,13 +68,22 @@ export function normalizeBytes(
   if (data instanceof Uint8Array) {
     return data;
   }
-  if (data instanceof ArrayBuffer) {
+  if (isArrayBufferLike(data)) {
     return new Uint8Array(data);
   }
   if (ArrayBuffer.isView(data)) {
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   }
   return undefined;
+}
+
+/**
+ * Whether `value` is an `ArrayBuffer` (or `SharedArrayBuffer`), from this realm or another. `instanceof` fails for one
+ * made by an iframe, a worker or `node:vm`, and the read then reported the bytes as "not a supported type".
+ */
+export function isArrayBufferLike(value: unknown): value is ArrayBuffer {
+  const tag = Object.prototype.toString.call(value);
+  return tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]";
 }
 
 /**
@@ -215,7 +224,12 @@ export async function writeXlsbBytes(
   }
   // Loaded only now, so an unchanged package — which returns above — never pays for the writer.
   const { writeXlsbPackage } = await import("@excel/xlsb/write/package");
-  const written = await writeXlsbPackage(model);
+  const written = await writeXlsbPackage(model, {
+    releasedMedia: workbook._releasedMedia,
+    registeredFunctions: workbook.userFunctions,
+    // The same stamp the XLSX writer uses, so one workbook written twice gives identical bytes.
+    modTime: model.modified ?? model.created
+  });
   refuseUnsupported(written.unsupported, options);
   return written.bytes;
 }
@@ -262,18 +276,22 @@ export async function writeXlsbToStream(
   }
   // The policy is applied *inside*, before the archive is finalised — see `streamXlsbPackage`'s `refuse`. Applying it
   // here, after the call returned, meant the destination already held a complete package when the error was thrown.
-  await streamXlsbPackage(model, stream as never, createXlsbZipWriter, unsupported =>
-    refuseUnsupported(unsupported, options)
-  );
+  const modTime = model.modified ?? model.created;
+  await streamXlsbPackage(model, stream as never, () => createXlsbZipWriter({ modTime }), {
+    refuse: unsupported => refuseUnsupported(unsupported, options),
+    releasedMedia: workbook._releasedMedia,
+    registeredFunctions: workbook.userFunctions
+  });
 }
 
 /**
- * The original package, handed to whatever stream shape the caller supplied.
+ * A finished package — the original one of an unchanged XLSB, or an encrypted one — handed to whatever stream shape
+ * the caller supplied.
  *
  * `writeStream` accepts a Node writable, a web `WritableStream` and this library's own sink, so the passthrough has to
  * reach all three — which is why this is a small adapter rather than a `write` call.
  */
-async function writeBytesToStream(stream: unknown, bytes: Uint8Array): Promise<void> {
+export async function writeBytesToStream(stream: unknown, bytes: Uint8Array): Promise<void> {
   const candidate = stream as {
     write?: (chunk: Uint8Array) => unknown;
     end?: (callback?: () => void) => unknown;
@@ -291,6 +309,11 @@ async function writeBytesToStream(stream: unknown, bytes: Uint8Array): Promise<v
   if (typeof candidate.write !== "function") {
     throw new TypeError("writeStream needs a writable stream");
   }
+  // Loaded before anything is written: once `end()` is called a sink may report `finish` within a few microtasks — the
+  // Web-stream adapter does — and `settled` must be listening by then. Importing it after `end()` let that event go by
+  // and the write wait forever. Imported here rather than at the top, because every other reach into this module in
+  // this file is dynamic: the XLSB path is loaded on demand so an XLSX-only consumer does not pay for it.
+  const { settled } = await import("@excel/core/xlsb-stream");
   // **`write` is called with one argument, and completion is settled separately.**
   //
   // This used to pass a second, callback argument and resolve only when it was invoked — but `XlsxWritable.write` is
@@ -309,8 +332,5 @@ async function writeBytesToStream(stream: unknown, bytes: Uint8Array): Promise<v
   if (typeof candidate.end === "function" && candidate.end.length === 0) {
     candidate.end();
   }
-  // Imported here rather than at the top, because every other reach into this module in this file is dynamic: the
-  // XLSB path is loaded on demand so an XLSX-only consumer does not pay for it.
-  const { settled } = await import("@excel/core/xlsb-stream");
   await settled(candidate);
 }

@@ -14,7 +14,17 @@
  * close the gap. These tests are what those comments were owed.
  */
 import { Workbook, Worksheet } from "@excel";
+import { autoFilter } from "@excel/core/worksheet-core";
 import { describe, expect, it } from "vitest";
+
+/**
+ * The sheet's first view as the file holds it — `xSplit`, `topLeftCell`, `activePane` — which is what `freeze` and
+ * `split` are responsible for. (`Worksheet.getPanes` reports the panes in the setters' own words; see
+ * `surface/__tests__/r4-contracts.test.ts`.)
+ */
+function view(ws: Worksheet.Handle): Record<string, unknown> | undefined {
+  return ws.views[0] as Record<string, unknown> | undefined;
+}
 
 /** A sheet with a little data, so a pane has something to hold. */
 function sheet(): Worksheet.Handle {
@@ -31,39 +41,39 @@ function sheet(): Worksheet.Handle {
 describe("Worksheet.freeze", () => {
   it("holds the given number of columns and rows", () => {
     const target = sheet();
-    Worksheet.freeze(target, 1, 1);
-    expect(Worksheet.panes(target)).toMatchObject({ state: "frozen", xSplit: 1, ySplit: 1 });
+    Worksheet.freeze(target, { columns: 1, rows: 1 });
+    expect(view(target)).toMatchObject({ state: "frozen", xSplit: 1, ySplit: 1 });
   });
 
   it("derives topLeftCell as the first cell outside the frozen region", () => {
     // Not a parameter, because any other value scrolls the sheet somewhere the author did not ask for.
     const target = sheet();
-    Worksheet.freeze(target, 2, 3);
-    expect(Worksheet.panes(target)).toMatchObject({ topLeftCell: "C4", activeCell: "C4" });
+    Worksheet.freeze(target, { columns: 2, rows: 3 });
+    expect(view(target)).toMatchObject({ topLeftCell: "C4", activeCell: "C4" });
   });
 
   it("omits the axis that is not frozen", () => {
     // `xSplit: 0` and "no horizontal freeze" are the same intent and Excel spells the second by omission.
     const target = sheet();
-    Worksheet.freeze(target, 0, 1);
-    const found = Worksheet.panes(target) as Record<string, unknown>;
+    Worksheet.freeze(target, { rows: 1 });
+    const found = view(target) as Record<string, unknown>;
     expect(found.ySplit).toBe(1);
     expect("xSplit" in found).toBe(false);
   });
 
   it("treats freezing nothing as unfreezing", () => {
     const target = sheet();
-    Worksheet.freeze(target, 1, 1);
-    Worksheet.freeze(target, 0, 0);
-    expect(Worksheet.panes(target)).toBeUndefined();
+    Worksheet.freeze(target, { columns: 1, rows: 1 });
+    Worksheet.freeze(target, {});
+    expect(view(target)).toBeUndefined();
   });
 
   it("replaces a previous pane rather than adding one", () => {
     // `views` is a list, and two entries is a workbook with two sheet views — not what a second call means.
     const target = sheet();
-    Worksheet.freeze(target, 1, 1);
-    Worksheet.freeze(target, 2, 2);
-    expect(Worksheet.panes(target)).toMatchObject({ xSplit: 2, ySplit: 2 });
+    Worksheet.freeze(target, { columns: 1, rows: 1 });
+    Worksheet.freeze(target, { columns: 2, rows: 2 });
+    expect(view(target)).toMatchObject({ xSplit: 2, ySplit: 2 });
     expect(Worksheet.getModel(target).views).toHaveLength(1);
   });
 });
@@ -72,8 +82,8 @@ describe("Worksheet.split", () => {
   it("is a split view, not a frozen one", () => {
     // A different record and a different behaviour: a split pane can be dragged, a frozen one cannot.
     const target = sheet();
-    Worksheet.split(target, 2000, 1000);
-    expect(Worksheet.panes(target)).toMatchObject({
+    Worksheet.split(target, { x: 2000, y: 1000 });
+    expect(view(target)).toMatchObject({
       state: "split",
       xSplit: 2000,
       ySplit: 1000
@@ -86,8 +96,8 @@ describe("Worksheet.split", () => {
     [0, 1000, "bottomLeft"]
   ])("puts the cursor in the pane Excel does for (%i, %i)", (x, y, pane) => {
     const target = sheet();
-    Worksheet.split(target, x, y);
-    expect(Worksheet.panes(target)).toMatchObject({ activePane: pane });
+    Worksheet.split(target, { x, y });
+    expect(view(target)).toMatchObject({ activePane: pane });
   });
 });
 
@@ -95,13 +105,13 @@ describe("Worksheet.setAutoFilter", () => {
   it("sets and clears the range", () => {
     const target = sheet();
     Worksheet.setAutoFilter(target, "A1:C3");
-    expect(Worksheet.autoFilter(target)).toBe("A1:C3");
+    expect(autoFilter(target)).toBe("A1:C3");
     Worksheet.setAutoFilter(target, null);
-    expect(Worksheet.autoFilter(target)).toBeNull();
+    expect(autoFilter(target)).toBeNull();
   });
 
   it("reports null rather than undefined for a sheet with none", () => {
-    expect(Worksheet.autoFilter(sheet())).toBeNull();
+    expect(autoFilter(sheet())).toBeNull();
   });
 });
 
@@ -113,11 +123,11 @@ describe("through both containers", () => {
       ["a", "b"],
       [1, 2]
     ]);
-    Worksheet.freeze(created, 1, 1);
+    Worksheet.freeze(created, { columns: 1, rows: 1 });
 
     const back = Workbook.create();
     await Workbook.read(back, await Workbook.toBuffer(handle, { format }));
-    expect(Worksheet.panes(Workbook.getWorksheets(back)[0]!)).toMatchObject({
+    expect(view(Workbook.listWorksheets(back)[0]!)).toMatchObject({
       state: "frozen",
       xSplit: 1,
       ySplit: 1,
@@ -136,7 +146,7 @@ describe("through both containers", () => {
 
     const back = Workbook.create();
     await Workbook.read(back, await Workbook.toBuffer(handle, { format }));
-    expect(Worksheet.autoFilter(Workbook.getWorksheets(back)[0]!)).toBe("A1:B2");
+    expect(autoFilter(Workbook.listWorksheets(back)[0]!)).toBe("A1:B2");
   });
 
   it("agrees between the containers about the pane", async () => {
@@ -148,12 +158,12 @@ describe("through both containers", () => {
       ["a", "b"],
       [1, 2]
     ]);
-    Worksheet.freeze(created, 2, 1);
+    Worksheet.freeze(created, { columns: 2, rows: 1 });
 
     const read = async (format: "xlsx" | "xlsb") => {
       const back = Workbook.create();
       await Workbook.read(back, await Workbook.toBuffer(handle, { format }));
-      const found = Worksheet.panes(Workbook.getWorksheets(back)[0]!) as Record<string, unknown>;
+      const found = view(Workbook.listWorksheets(back)[0]!) as Record<string, unknown>;
       return {
         state: found.state,
         xSplit: found.xSplit,

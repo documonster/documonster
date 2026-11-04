@@ -38,6 +38,8 @@ import {
   renderChartExPng
 } from "@excel/chart/render/chart-ex-renderer";
 import { drawChartPdf, renderChartPng } from "@excel/chart/render/chart-renderer";
+import { checkChartRenderOptions } from "@excel/chart/render/render-options";
+import { workbookThemeColors } from "@excel/chart/render/workbook-theme";
 import { anchorCol, anchorRow } from "@excel/core/anchor";
 import {
   cellCol,
@@ -89,6 +91,7 @@ import {
   getSparklineGroups
 } from "@excel/core/worksheet";
 import type { Worksheet } from "@excel/core/worksheet";
+import { ChartOptionsError } from "@excel/errors";
 import type {
   Style,
   Font,
@@ -102,7 +105,7 @@ import type {
 } from "@excel/types";
 import { formatCellValue } from "@excel/utils/cell-format";
 import { PdfDocumentBuilder } from "@pdf/builder/document-builder";
-import type { PdfFontConfig } from "@pdf/font/font-config";
+import { PdfArgumentError } from "@pdf/errors";
 import { exportPdf } from "@pdf/render/pdf-exporter";
 import type {
   PdfWorkbook,
@@ -128,11 +131,11 @@ import type {
   PdfSheetComment,
   PdfCommentAnchor,
   PdfAnchorRange,
+  PdfDocumentOptions,
   PdfExportOptions,
   PdfCellTypeValue
 } from "@pdf/types";
 import { PdfCellType } from "@pdf/types";
-import type { CjkLanguage } from "@utils/cjk";
 import { normalizeLoneCarriageReturns } from "@utils/text-measure";
 import { hexToRgb01 } from "@utils/theme-colors";
 import { emuToPx } from "@utils/units";
@@ -159,7 +162,7 @@ export type { ChartHandle } from "@excel/core/worksheet-core";
 export interface ExcelToPdfOptions extends PdfExportOptions {
   /**
    * Optional formula recalculator, injected to avoid a static dependency on
-   * the ~200 KB formula engine. Pass `calculateFormulas` from
+   * the ~200 KB formula engine. Pass `ExcelFormula.calculate` from
    * `documonster/excel/formula` to recompute formula results before export;
    * omit it to use the workbook's existing cached results. Explicit
    * replacement for the old formula host-registry — only opt-in callers pull
@@ -173,7 +176,7 @@ export interface ExcelToPdfOptions extends PdfExportOptions {
  *
  * This is a convenience function that converts the Workbook to the PDF module's
  * data model and then generates the PDF.
- * Yields to the event loop between each output page during layout and rendering.
+ * Yields to the event loop between output pages during layout and rendering.
  *
  * @param workbook - An Excel Workbook instance
  * @param options  - PDF export options
@@ -187,20 +190,22 @@ export async function excelToPdf(
   // reflect the latest cell values (fixes stale cached results from XLSX).
   //
   // The formula engine is opt-in via explicit injection: callers pass
-  // `{ recalculate: calculateFormulas }` (from `documonster/excel/formula`) to
+  // `{ recalculate: ExcelFormula.calculate }` (from `documonster/excel/formula`) to
   // recompute; callers who don't fall back to the cached results the XLSX
   // shipped with. This keeps the ~200 KB engine out of bundles that only
   // export already-computed workbooks — no host-registry needed.
   options?.recalculate?.(workbook);
 
   const pdfWorkbook = await excelWorkbookToPdf(workbook, options);
-  return exportPdf(pdfWorkbook, options);
+  return exportPdf(pdfWorkbook, options, "Pdf.fromExcel");
 }
 
 /**
- * Options for {@link chartToPdf}.
+ * Options for {@link chartToPdf}: the {@link PdfDocumentOptions} every converter takes —
+ * metadata (`title` names the PDF, not the chart), fixed dates, encryption, fonts — and the
+ * chart's size and placement.
  */
-export interface ChartToPdfOptions {
+export interface ChartToPdfOptions extends PdfDocumentOptions {
   /** PDF page width in points. Default: max(chart width + 72, 400). */
   pageWidth?: number;
   /** PDF page height in points. Default: max(chart height + 72, 300). */
@@ -225,42 +230,6 @@ export interface ChartToPdfOptions {
   forceRaster?: boolean;
   /** PNG raster scale multiplier when rasterising. Default: 2 (for crisp text). */
   rasterScale?: number;
-  /** Document metadata forwarded to the resulting PDF. */
-  title?: string;
-  author?: string;
-  /** Embedded typefaces used by selectable vector-chart text. */
-  fonts?: PdfFontConfig;
-  /**
-   * System font families auto-discovery should prefer, in order.
-   *
-   * A standalone chart's category and value labels are text like any other, so a
-   * Chinese chart needs the same regional control the workbook and document
-   * exporters offer. Without these two options it was the one entry point that
-   * could not ask for a face, and fell back to whatever coverage found first.
-   *
-   * @see `PdfExportOptions.preferSystemFonts`
-   */
-  preferSystemFonts?: readonly string[];
-
-  /**
-   * Turn off the host font scan entirely, for byte-stable output across hosts.
-   *
-   * @see `PdfExportOptions.disableFontAutoDiscovery`
-   */
-  disableFontAutoDiscovery?: boolean;
-  /**
-   * The East Asian written language of the chart's labels, so auto-discovery
-   * picks a face drawn in that regional hand.
-   *
-   * @see `PdfExportOptions.textLanguage`
-   */
-  textLanguage?: CjkLanguage;
-  /**
-   * Receive non-fatal font diagnostics raised while rendering.
-   *
-   * @see `PdfExportOptions.onWarning`
-   */
-  onWarning?: (message: string) => void;
   /**
    * ChartEx `regionMap` data. When supplied, the vector PDF path
    * uses the TopoJSON polygons (matched via `match` rules) instead
@@ -308,6 +277,29 @@ export async function chartToPdf(
   const pageWidth = options.pageWidth ?? Math.max(width + margin * 2, 400);
   const pageHeight = options.pageHeight ?? Math.max(height + margin * 2, 300);
 
+  // A removed chart has neither model left; it used to fail half-way with a plain `Error`
+  // (vector path) or a `TypeError` (raster path).
+  if (chartChartExModel(chart) === undefined && chartChartModel(chart) === undefined) {
+    throw new PdfArgumentError(
+      "chart",
+      "Pdf.fromChart: the chart has nothing to render — it was removed from its sheet"
+    );
+  }
+
+  // The region map's topology is the caller's data: one that cannot be read is refused here,
+  // with the path, rather than drawn as the built-in preview. The chart engine reports it as a
+  // `ChartOptionsError`; this call is a PDF one, so it says so in the PDF module's class.
+  if (options.regionMap !== undefined) {
+    try {
+      checkChartRenderOptions("Pdf.fromChart", { regionMap: options.regionMap });
+    } catch (err) {
+      if (err instanceof ChartOptionsError) {
+        throw new PdfArgumentError(err.field, err.message, { cause: err });
+      }
+      throw err;
+    }
+  }
+
   const doc = new PdfDocumentBuilder({
     fonts: options.fonts,
     preferSystemFonts: options.preferSystemFonts,
@@ -317,14 +309,26 @@ export async function chartToPdf(
   if (options.onWarning) {
     doc.onWarning(options.onWarning);
   }
-  if (options.title || options.author) {
-    doc.setMetadata({
-      title: options.title,
-      author: options.author
-    });
+  // The document's properties. `title` names the PDF and nothing else: the chart draws its
+  // own title on every path (the Office 2016 vector path used to draw this one instead).
+  doc.setMetadata({
+    ...(options.title ? { title: options.title } : {}),
+    ...(options.author ? { author: options.author } : {}),
+    ...(options.subject ? { subject: options.subject } : {}),
+    ...(options.keywords ? { keywords: options.keywords } : {}),
+    creator: options.creator ?? "documonster",
+    ...(options.creationDate === undefined ? {} : { creationDate: options.creationDate }),
+    ...(options.modDate === undefined ? {} : { modDate: options.modDate })
+  });
+  if (options.encryption) {
+    doc.setEncryption(options.encryption);
   }
   const page = doc.addPage({ width: pageWidth, height: pageHeight });
 
+  // The chart's scheme colours resolve against its workbook's theme, as in Excel.
+  const themeColors = workbookThemeColors(
+    (chart.worksheet as { _workbook?: unknown } | undefined)?._workbook as never
+  );
   const isChartEx = chartChartExModel(chart) !== undefined;
   // ChartEx charts whose every series has a layoutId in
   // VECTOR_PDF_CHART_EX_LAYOUT_IDS take the vector route alongside
@@ -348,24 +352,29 @@ export async function chartToPdf(
           width,
           height
         },
-        { title: options.title, regionMap: options.regionMap }
+        {
+          ...(options.regionMap === undefined ? {} : { regionMap: options.regionMap }),
+          ...(themeColors === undefined ? {} : { themeColors })
+        }
       );
-      return doc.build();
+      return doc.toBuffer();
     }
     // Vector path for classic charts.
     const model = chartChartModel(chart);
     if (!model) {
-      throw new Error(
-        "chartToPdf: Chart has neither a classic model nor a ChartEx model to render"
+      throw new PdfArgumentError(
+        "chart",
+        "Pdf.fromChart: the chart has neither a classic model nor an Office 2016 model to render"
       );
     }
     drawChartPdf(page, model, {
       x: margin,
       y: pageHeight - margin - height,
       width,
-      height
+      height,
+      ...(themeColors === undefined ? {} : { themeColors })
     });
-    return doc.build();
+    return doc.toBuffer();
   }
 
   // Raster path: produce a PNG, then embed it on the page. Uses scale
@@ -377,9 +386,15 @@ export async function chartToPdf(
     ? await renderChartExPng(chartChartExModel(chart)!, {
         width,
         height,
-        scale
+        scale,
+        ...(themeColors === undefined ? {} : { themeColors })
       })
-    : await renderChartPng(chartChartModel(chart)!, { width, height, scale });
+    : await renderChartPng(chartChartModel(chart)!, {
+        width,
+        height,
+        scale,
+        ...(themeColors === undefined ? {} : { themeColors })
+      });
   page.drawImage({
     data: pngBytes,
     format: "png",
@@ -388,7 +403,7 @@ export async function chartToPdf(
     width,
     height
   });
-  return doc.build();
+  return doc.toBuffer();
 }
 
 /**
@@ -425,6 +440,7 @@ async function excelWorkbookToPdf(
     title: workbook.title || undefined,
     creator: workbook.creator || undefined,
     subject: workbook.subject || undefined,
+    keywords: workbook.keywords || undefined,
     sourceFilePath: workbook.sourceFilePath ? dirname(workbook.sourceFilePath) : undefined,
     sourceFileName: workbook.sourceFilePath ? basename(workbook.sourceFilePath) : undefined,
     locale: workbook.language,
@@ -1202,16 +1218,16 @@ function formatCellValueSafe(
   numFmt: string | { formatCode: string } | undefined,
   date1904: boolean
 ): string {
-  const fmt = typeof numFmt === "string" ? numFmt : numFmt?.formatCode;
-  if (fmt && (typeof value === "number" || value instanceof Date || typeof value === "boolean")) {
+  // A cell without a number format is shown in "General", as Excel, `Cell.getDisplayText` and
+  // `WordExcel.toDocx` show it. Rendering a date through `toLocaleDateString` here made the page
+  // depend on the machine: a date cell read as 2024-03-10 printed 3/9/2024 west of UTC.
+  const fmt = (typeof numFmt === "string" ? numFmt : numFmt?.formatCode) || "General";
+  if (typeof value === "number" || value instanceof Date || typeof value === "boolean") {
     try {
       return formatCellValue(value, fmt, undefined, date1904);
     } catch {
       // Fall through to default
     }
-  }
-  if (value instanceof Date) {
-    return value.toLocaleDateString();
   }
   return String(value);
 }
@@ -1426,6 +1442,8 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
   if (wsCharts.length === 0) {
     return undefined;
   }
+  // The charts' scheme colours resolve against the workbook's theme, as in Excel.
+  const themeColors = workbookThemeColors(ws._workbook);
 
   const charts: PdfSheetChart[] = [];
   for (const chart of wsCharts) {
@@ -1444,7 +1462,8 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
           x: rect.x,
           y: rect.y,
           width: rect.width,
-          height: rect.height
+          height: rect.height,
+          ...(themeColors === undefined ? {} : { themeColors })
         });
       };
       charts.push({ range, drawVector });
@@ -1465,7 +1484,8 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
           drawChartExPdf(
             surface as unknown as ChartPdfDrawingSurface,
             chartExModel as ChartExModel,
-            { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+            { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            themeColors === undefined ? {} : { themeColors }
           );
         };
         charts.push({ range, drawVector });
@@ -1475,7 +1495,8 @@ async function collectCharts(ws: Worksheet): Promise<PdfSheetChart[] | undefined
         const png = await renderChartExPng(chartExModel, {
           width: widthPx,
           height: heightPx,
-          scale: 2
+          scale: 2,
+          ...(themeColors === undefined ? {} : { themeColors })
         });
         charts.push({
           range,
@@ -1850,6 +1871,8 @@ async function convertChartsheet(
 ): Promise<PdfChartsheetData> {
   const classicModel = chartsheetChartModel(cs);
   const chartExModel = chartsheetChartExModel(cs);
+  // The chart's scheme colours resolve against the workbook's theme, as in Excel.
+  const themeColors = workbookThemeColors(workbook);
 
   // Resolve draft before touching the chart: a ChartEx outside the vector
   // whitelist would otherwise be rasterised at cost — and could fail — for a
@@ -1867,7 +1890,8 @@ async function convertChartsheet(
           x: rect.x,
           y: rect.y,
           width: rect.width,
-          height: rect.height
+          height: rect.height,
+          ...(themeColors === undefined ? {} : { themeColors })
         });
       }
     };
@@ -1876,19 +1900,20 @@ async function convertChartsheet(
       const model = chartExModel;
       chart = {
         drawVector: (surface, rect) => {
-          drawChartExPdf(surface as unknown as ChartPdfDrawingSurface, model as ChartExModel, {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height
-          });
+          drawChartExPdf(
+            surface as unknown as ChartPdfDrawingSurface,
+            model as ChartExModel,
+            { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            themeColors === undefined ? {} : { themeColors }
+          );
         }
       };
     } else {
       const png = await renderChartExPng(chartExModel, {
         width: CHARTSHEET_RASTER_PX.width,
         height: CHARTSHEET_RASTER_PX.height,
-        scale: 2
+        scale: 2,
+        ...(themeColors === undefined ? {} : { themeColors })
       });
       chart = { raster: { data: png, format: "png" } };
     }

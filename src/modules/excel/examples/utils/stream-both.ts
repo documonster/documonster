@@ -49,7 +49,7 @@ export async function streamBothFormats(
     await writer.commit();
     written[format] = target;
     const size = fs.statSync(target).size;
-    const dropped = writer.xlsbUnsupported;
+    const dropped = writer.unsupported;
     const suffix =
       dropped.length === 0
         ? ""

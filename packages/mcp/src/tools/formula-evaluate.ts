@@ -12,7 +12,7 @@
  */
 
 import { Address, Cell, Workbook } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
 import { toolError } from "../errors.js";
@@ -91,7 +91,7 @@ export const formulaEvaluateTool = defineTool({
     Cell.setValue(ws, probe, { formula: normalizeFormula(args.formula) });
 
     try {
-      calculateFormulas(wb);
+      ExcelFormula.calculate(wb);
     } catch (cause) {
       throw toolError.invalidInput(
         `the formula could not be evaluated: ${cause instanceof Error ? cause.message : String(cause)}`,

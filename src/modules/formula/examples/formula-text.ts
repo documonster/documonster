@@ -1,4 +1,4 @@
-import { calculateFormulas } from "@excel/bridge/formula";
+import { ExcelFormula } from "@excel/bridge/formula";
 import { Cell, Workbook } from "@excel/index";
 
 /**
@@ -46,7 +46,7 @@ Cell.setValue(ws, "F2", { formula: 'VALUE("42.5")' }); // 42.5
 Cell.setValue(ws, "G1", { formula: 'REGEXTEST(A2, "^[^@]+@[^@]+$")' }); // TRUE
 Cell.setValue(ws, "G2", { formula: 'REGEXEXTRACT(A3, "[0-9]{3}-[0-9]{3}-[0-9]{4}")' }); // "415-555-0123"
 
-calculateFormulas(wb);
+ExcelFormula.calculate(wb);
 
 for (const addr of [
   "B1",

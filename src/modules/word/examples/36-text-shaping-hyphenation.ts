@@ -103,10 +103,10 @@ console.log(`    visible: ${hyphenated.replace(/\u00AD/g, "·")}`);
 const doc = Document.create();
 Document.useDefaultStyles(doc);
 Document.addHeading(doc, "Hyphenated paragraph (with soft hyphens)", 1);
-Document.addParagraphElement(doc, Build.paragraph([Build.text(hyphenated)]));
+Document.addParagraph(doc, Build.paragraph([Build.text(hyphenated)]));
 Document.addHeading(doc, "Same paragraph without hyphenation", 2);
-Document.addParagraphElement(doc, Build.paragraph([Build.text(sample)]));
+Document.addParagraph(doc, Build.paragraph([Build.text(sample)]));
 
-const buf = await Io.toBuffer(Document.build(doc));
+const buf = await Io.toBuffer(doc);
 fs.writeFileSync(path.join(outDir, "36-shaping.docx"), buf);
 console.log(`\n  → 36-shaping.docx (${buf.length} bytes)`);

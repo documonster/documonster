@@ -477,6 +477,7 @@ export interface PdfWorkbook {
   title?: string;
   creator?: string;
   subject?: string;
+  keywords?: string;
   sourceFileName?: string;
   sourceFilePath?: string;
   locale?: string;
@@ -503,16 +504,17 @@ export interface PdfPageSize {
 export type PageSizeName = "A3" | "A4" | "A5" | "LETTER" | "LEGAL" | "TABLOID";
 
 /**
- * Predefined page sizes.
+ * Predefined page sizes, in points. Frozen: every export that names a size reads this table,
+ * so a write to it would change every later document in the process.
  */
-export const PageSizes: Record<PageSizeName, PdfPageSize> = {
-  A3: { width: 841.89, height: 1190.55 },
-  A4: { width: 595.28, height: 841.89 },
-  A5: { width: 419.53, height: 595.28 },
-  LETTER: { width: 612, height: 792 },
-  LEGAL: { width: 612, height: 1008 },
-  TABLOID: { width: 792, height: 1224 }
-};
+export const PageSizes: Readonly<Record<PageSizeName, Readonly<PdfPageSize>>> = Object.freeze({
+  A3: Object.freeze({ width: 841.89, height: 1190.55 }),
+  A4: Object.freeze({ width: 595.28, height: 841.89 }),
+  A5: Object.freeze({ width: 419.53, height: 595.28 }),
+  LETTER: Object.freeze({ width: 612, height: 792 }),
+  LEGAL: Object.freeze({ width: 612, height: 1008 }),
+  TABLOID: Object.freeze({ width: 792, height: 1224 })
+});
 
 // =============================================================================
 // PDF Export Options
@@ -617,9 +619,238 @@ export interface PdfHeaderFooterOptions {
 }
 
 /**
- * Options for controlling PDF export behavior.
+ * The document-level options every converter to PDF takes — `Pdf.fromTable`, `Pdf.fromExcel`,
+ * `Pdf.fromDocx` and `Pdf.fromChart` — with the same names and the same checks: the
+ * document's metadata (fixed dates make the bytes reproducible), its encryption, and the font
+ * settings, named as `Pdf.Builder` names them.
  */
-export interface PdfExportOptions {
+export interface PdfDocumentOptions {
+  /**
+   * PDF document title metadata. `Pdf.fromExcel` defaults it to the workbook's title and
+   * `Pdf.fromDocx` to the document's (its core properties); an empty string falls back too.
+   * For `Pdf.fromChart` it is metadata only — the chart keeps its own title.
+   */
+  title?: string;
+
+  /**
+   * PDF document author metadata. Defaults to the workbook's or the document's creator.
+   */
+  author?: string;
+
+  /**
+   * PDF document subject metadata. Defaults to the workbook's or the document's subject.
+   */
+  subject?: string;
+
+  /**
+   * PDF document keywords metadata (`/Keywords`). `Pdf.fromExcel` defaults to the workbook's
+   * own keywords and `Pdf.fromDocx` to the document's.
+   */
+  keywords?: string;
+
+  /**
+   * PDF document creator metadata.
+   * @default "documonster"
+   */
+  creator?: string;
+
+  /**
+   * Written as /CreationDate. Defaults to the time of export; supply a fixed
+   * date for byte-reproducible output.
+   */
+  creationDate?: Date;
+
+  /** Written as /ModDate when given. */
+  modDate?: Date;
+
+  /**
+   * Embedded TrueType typefaces used by PDF text planning.
+   *
+   * `default` serves document font names that are not explicitly configured.
+   * Named families are matched case-insensitively through `name` and
+   * `aliases`; only families listed in `fallbackFamilies` participate in
+   * missing-glyph fallback. This keeps fallback deterministic instead of
+   * borrowing from whichever configured font happens to come next.
+   *
+   * `fallbackFamilies` applies to text served by `default` as well as to text
+   * that named a configured family. That matters because a document names the
+   * fonts it was authored with — `Calibri`, `Courier New` — which a caller
+   * configuring a CJK face has no reason to have configured, so `default` is the
+   * common case rather than the exception.
+   *
+   * Each family requires `regular`. Missing style slots fall back to that
+   * family's regular face. A source may select a face inside a TrueType
+   * Collection through `collectionIndex`.
+   *
+   * The current renderer performs grapheme-safe font fallback but does not
+   * perform OpenType shaping (GSUB/GPOS), bidi reordering, or color-emoji
+   * rendering. A missing glyph is visibly rendered as `.notdef`, while its
+   * original Unicode sequence remains in ToUnicode for copy, search, and text
+   * extraction. Each embedded face is limited to 65,535 distinct Unicode
+   * sequences in one PDF.
+   *
+   * Cannot be combined with `Pdf.fromExcel`'s legacy `font` option.
+   */
+  fonts?: PdfFontConfig;
+
+  /**
+   * Turn off the host font scan entirely.
+   *
+   * When {@link fonts} is not given (nor `Pdf.fromExcel`'s legacy `font`) and the document
+   * contains characters WinAnsi cannot encode, the exporter scans the host's font
+   * directories and borrows glyphs from whatever it finds. That is the difference
+   * between a readable page and a row of `.notdef` boxes, but it makes the output
+   * a function of the machine: a workbook exported on a Mac embeds Heiti SC, the
+   * same workbook on a bare CI container embeds nothing and renders tofu.
+   *
+   * Not every character does, and {@link onWarning} distinguishes the two. Arrows,
+   * box-drawing characters, dingbats, enclosed numerals and the rest of the symbol
+   * blocks are drawn by built-in Type3 glyphs whether or not a face was found — those
+   * are reported as a typeface inconsistency, not a loss. Ideographs, kana and Hangul
+   * have no such substitute, and those are the ones that become `.notdef`.
+   *
+   * Set this when identical bytes across hosts matter more than legibility — a
+   * golden-file test, a reproducible build, a signed document whose digest must
+   * match. The characters keep their Unicode for copy and search either way; only
+   * the glyphs are lost, and {@link onWarning} reports exactly which blocks.
+   *
+   * ```typescript
+   * // Deterministic: either this font can draw the text or nothing can.
+   * Pdf.fromExcel(workbook, {
+   *   disableFontAutoDiscovery: true,
+   *   fonts: { default: { regular: myFontBytes } }
+   * });
+   * ```
+   *
+   * Ignored when {@link fonts} (or the legacy `font`) is supplied, since no discovery
+   * runs in that case. Node-only, like the scan it disables.
+   *
+   * @default false
+   */
+  disableFontAutoDiscovery?: boolean;
+
+  /**
+   * System font families that auto-discovery should prefer, in order, ahead of
+   * its built-in preference list.
+   *
+   * When {@link fonts} is not given (nor `Pdf.fromExcel`'s legacy `font`) and the document
+   * contains characters WinAnsi cannot encode, a best-effort scan of the host's
+   * font directories picks a face to borrow glyphs from. The built-in order has
+   * to choose something for every platform; naming families here says which
+   * installed face you would rather have:
+   *
+   * ```typescript
+   * Pdf.fromExcel(workbook, { preferSystemFonts: ["Heiti SC", "Songti SC"] });
+   * ```
+   *
+   * Names are matched against the font's family name, case-insensitively, and
+   * are also how a specific face inside a TrueType Collection is reached
+   * (`"Heiti SC"` and `"Heiti TC"` are two faces of one `.ttc`). A family that
+   * is not installed, cannot be parsed, or does not cover the document's
+   * characters is skipped and the built-in order applies — this steers a
+   * best-effort search rather than constraining it. Use {@link fonts} when a
+   * specific face is a requirement.
+   *
+   * ## This is a priority order, not a fallback chain
+   *
+   * The first named family that covers the text wins, so **a pan-Unicode face at the
+   * head of the list wins for every language** and the regional choice this search
+   * would otherwise make never happens. `["Arial Unicode MS", "Songti SC"]` sets a
+   * Chinese document in `Arial Unicode MS`, whose Han glyphs follow Japanese
+   * conventions — 者 gains a dot, and 径, 前 and 母 are drawn with a different number
+   * of strokes — and a Japanese document in the same face, when the point of detecting
+   * the language is that the two should differ. `Songti SC` is never reached, because
+   * nothing was left for it to cover.
+   *
+   * So list families that are alternatives to each other, not a broad face followed by
+   * narrow ones. For a document whose language varies, naming nothing is usually right:
+   * the search reads the language off the text and picks the regional face itself.
+   *
+   * Node-only, and ignored when a font is supplied explicitly.
+   */
+  preferSystemFonts?: readonly string[];
+
+  /**
+   * The East Asian written language of the content, so auto-discovery picks a
+   * face drawn in that regional hand.
+   *
+   * Unicode Han Unification gives Chinese, Japanese and Korean the same code
+   * points for shared characters but not the same shapes — 「者」「骨」「今」
+   * 「青」「每」are each drawn differently — so a font chosen purely by coverage
+   * can be *correct and still wrong*: a Japanese face draws Chinese text that a
+   * Chinese reader sees as malformed.
+   *
+   * ```typescript
+   * Pdf.fromExcel(workbook, { textLanguage: "zh-Hans" });
+   * ```
+   *
+   * Left unset, the language is inferred from the content's own characters (kana
+   * settles Japanese, Hangul Korean, and characters unique to Simplified or
+   * Traditional Chinese settle those). Text made only of forms common to all of
+   * CJK carries no evidence and Chinese is preferred — a default rather than a
+   * detection, which is the reason to state the language when you know it.
+   *
+   * Node-only, and ignored when a font is supplied explicitly.
+   */
+  textLanguage?: CjkLanguage;
+
+  /**
+   * Receive non-fatal font diagnostics raised while exporting.
+   *
+   * Currently raised for:
+   *
+   * - **characters no configured typeface covers.** They still carry their original
+   *   Unicode for copy and search, but the page shows the `.notdef` glyph, and only
+   *   the caller can decide which fallback family to add.
+   * - **a system font auto-embedded on this host.** The page is readable, but the
+   *   output is now a function of what the machine has installed — the same input
+   *   on a bare container embeds nothing. Supply the font, or set
+   *   {@link disableFontAutoDiscovery}, if the bytes have to be reproducible.
+   *
+   * Without this callback neither condition is visible.
+   *
+   * The callback is synchronous and may fire more than once per export.
+   */
+  onWarning?: (message: string) => void;
+
+  /**
+   * Encryption options for password-protecting the PDF.
+   *
+   * @example
+   * ```typescript
+   * Pdf.fromExcel(workbook, {
+   *   encryption: {
+   *     ownerPassword: "secret",
+   *     userPassword: "open",
+   *     permissions: { print: true, copy: false }
+   *   }
+   * });
+   * ```
+   */
+  encryption?: {
+    /** User password (required to open). Empty string = no open password. */
+    userPassword?: string;
+    /** Owner password (grants full access). Required. */
+    ownerPassword: string;
+    /** Permissions when opened with user password. */
+    permissions?: Partial<{
+      print: boolean;
+      modify: boolean;
+      copy: boolean;
+      annotate: boolean;
+      fillForms: boolean;
+      accessibility: boolean;
+      assemble: boolean;
+      printHighQuality: boolean;
+    }>;
+  };
+}
+
+/**
+ * Options for controlling PDF export behavior: the {@link PdfDocumentOptions} every converter
+ * takes, and the page, grid and print settings of a table or a workbook.
+ */
+export interface PdfExportOptions extends PdfDocumentOptions {
   /**
    * Page size. Can be a predefined name or custom dimensions.
    * @default "A4"
@@ -633,16 +864,28 @@ export interface PdfExportOptions {
   orientation?: PdfOrientation;
 
   /**
-   * Page margins in points (1/72 inch).
-   * @default { top: 72, right: 72, bottom: 72, left: 72 }
+   * Page margins in **points** (1/72 inch), as one object. A side left out takes the
+   * sheet's own page-setup margin — which Excel stores in **inches** and is converted
+   * (`0.75` in → 54 pt) — or 72 pt (1 inch) when the sheet has none.
+   *
+   * `Pdf.fromDocx` takes the same `margins` object, also in points.
    */
   margins?: Partial<PdfMargins>;
 
   /**
-   * Which sheets to include. Accepts sheet names or 1-based positions.
-   * If omitted, all visible sheets are included.
+   * Which sheets to include, in this order. Default — and with an empty list — all visible
+   * ones.
+   *
+   * Pass sheet names. Numeric positions are deprecated (removed in 1.0): they
+   * are 1-based here but 0-based in `WordExcel.toDocx` and sheet ids in
+   * `Workbook.getWorksheet`.
+   *
+   * A name is compared as Excel compares names (ignoring case). A number is a
+   * 1-based position in tab order, worksheets and chartsheets together; `0` is refused. A
+   * selected sheet is exported even when it is hidden. A name or position that matches no
+   * sheet is refused with `PdfArgumentError` (field `options.sheets[i]`).
    */
-  sheets?: (string | number)[];
+  sheets?: readonly (string | number)[];
 
   /**
    * Whether to ignore each worksheet's print area when exporting.
@@ -821,7 +1064,9 @@ export interface PdfExportOptions {
   defaultFontFamily?: string;
 
   /**
-   * Default font size in points for cells without an explicit font size.
+   * Default font size in **points** for cells without an explicit font size (`Pdf.fromDocx`'s
+   * `defaultFontSize` is points too; Word's `WordHtml.toDocx` / `WordMarkdown.toDocx` take
+   * half-points).
    * @default 11
    */
   defaultFontSize?: number;
@@ -845,36 +1090,6 @@ export interface PdfExportOptions {
   headerFooter?: PdfHeaderFooterOptions;
 
   /**
-   * PDF document title metadata.
-   */
-  title?: string;
-
-  /**
-   * PDF document author metadata.
-   */
-  author?: string;
-
-  /**
-   * PDF document subject metadata.
-   */
-  subject?: string;
-
-  /**
-   * PDF document creator metadata.
-   * @default "documonster"
-   */
-  creator?: string;
-
-  /**
-   * Written as /CreationDate. Defaults to the time of export; supply a fixed
-   * date for byte-reproducible output.
-   */
-  creationDate?: Date;
-
-  /** Written as /ModDate when given. */
-  modDate?: Date;
-
-  /**
    * Legacy single-font shortcut for TrueType font file (.ttf) data.
    * When provided, all text rendering uses this font. Prefer {@link fonts} for
    * named families, style faces, TrueType Collections, and fallback.
@@ -889,188 +1104,6 @@ export interface PdfExportOptions {
    * Cannot be combined with {@link fonts}.
    */
   font?: Uint8Array;
-
-  /**
-   * Embedded TrueType typefaces used by PDF text planning.
-   *
-   * `default` serves document font names that are not explicitly configured.
-   * Named families are matched case-insensitively through `name` and
-   * `aliases`; only families listed in `fallbackFamilies` participate in
-   * missing-glyph fallback. This keeps fallback deterministic instead of
-   * borrowing from whichever configured font happens to come next.
-   *
-   * `fallbackFamilies` applies to text served by `default` as well as to text
-   * that named a configured family. That matters because a document names the
-   * fonts it was authored with — `Calibri`, `Courier New` — which a caller
-   * configuring a CJK face has no reason to have configured, so `default` is the
-   * common case rather than the exception.
-   *
-   * Each family requires `regular`. Missing style slots fall back to that
-   * family's regular face. A source may select a face inside a TrueType
-   * Collection through `collectionIndex`.
-   *
-   * The current renderer performs grapheme-safe font fallback but does not
-   * perform OpenType shaping (GSUB/GPOS), bidi reordering, or color-emoji
-   * rendering. A missing glyph is visibly rendered as `.notdef`, while its
-   * original Unicode sequence remains in ToUnicode for copy, search, and text
-   * extraction. Each embedded face is limited to 65,535 distinct Unicode
-   * sequences in one PDF.
-   *
-   * Cannot be combined with the legacy {@link PdfExportOptions.font} option.
-   */
-  fonts?: PdfFontConfig;
-
-  /**
-   * Turn off the host font scan entirely.
-   *
-   * When neither {@link font} nor {@link fonts} is given and the document contains
-   * characters WinAnsi cannot encode, the exporter scans the host's font
-   * directories and borrows glyphs from whatever it finds. That is the difference
-   * between a readable page and a row of `.notdef` boxes, but it makes the output
-   * a function of the machine: a workbook exported on a Mac embeds Heiti SC, the
-   * same workbook on a bare CI container embeds nothing and renders tofu.
-   *
-   * Not every character does, and {@link onWarning} distinguishes the two. Arrows,
-   * box-drawing characters, dingbats, enclosed numerals and the rest of the symbol
-   * blocks are drawn by built-in Type3 glyphs whether or not a face was found — those
-   * are reported as a typeface inconsistency, not a loss. Ideographs, kana and Hangul
-   * have no such substitute, and those are the ones that become `.notdef`.
-   *
-   * Set this when identical bytes across hosts matter more than legibility — a
-   * golden-file test, a reproducible build, a signed document whose digest must
-   * match. The characters keep their Unicode for copy and search either way; only
-   * the glyphs are lost, and {@link onWarning} reports exactly which blocks.
-   *
-   * ```typescript
-   * // Deterministic: either this font can draw the text or nothing can.
-   * Pdf.fromExcel(workbook, {
-   *   disableFontAutoDiscovery: true,
-   *   fonts: { default: { regular: myFontBytes } }
-   * });
-   * ```
-   *
-   * Ignored when {@link font} or {@link fonts} is supplied, since no discovery
-   * runs in that case. Node-only, like the scan it disables.
-   *
-   * @default false
-   */
-  disableFontAutoDiscovery?: boolean;
-
-  /**
-   * System font families that auto-discovery should prefer, in order, ahead of
-   * its built-in preference list.
-   *
-   * When neither {@link font} nor {@link fonts} is given and the document
-   * contains characters WinAnsi cannot encode, a best-effort scan of the host's
-   * font directories picks a face to borrow glyphs from. The built-in order has
-   * to choose something for every platform; naming families here says which
-   * installed face you would rather have:
-   *
-   * ```typescript
-   * Pdf.fromExcel(workbook, { preferSystemFonts: ["Heiti SC", "Songti SC"] });
-   * ```
-   *
-   * Names are matched against the font's family name, case-insensitively, and
-   * are also how a specific face inside a TrueType Collection is reached
-   * (`"Heiti SC"` and `"Heiti TC"` are two faces of one `.ttc`). A family that
-   * is not installed, cannot be parsed, or does not cover the document's
-   * characters is skipped and the built-in order applies — this steers a
-   * best-effort search rather than constraining it. Use {@link fonts} when a
-   * specific face is a requirement.
-   *
-   * ## This is a priority order, not a fallback chain
-   *
-   * The first named family that covers the text wins, so **a pan-Unicode face at the
-   * head of the list wins for every language** and the regional choice this search
-   * would otherwise make never happens. `["Arial Unicode MS", "Songti SC"]` sets a
-   * Chinese document in `Arial Unicode MS`, whose Han glyphs follow Japanese
-   * conventions — 者 gains a dot, and 径, 前 and 母 are drawn with a different number
-   * of strokes — and a Japanese document in the same face, when the point of detecting
-   * the language is that the two should differ. `Songti SC` is never reached, because
-   * nothing was left for it to cover.
-   *
-   * So list families that are alternatives to each other, not a broad face followed by
-   * narrow ones. For a document whose language varies, naming nothing is usually right:
-   * the search reads the language off the text and picks the regional face itself.
-   *
-   * Node-only, and ignored when a font is supplied explicitly.
-   */
-  preferSystemFonts?: readonly string[];
-
-  /**
-   * The East Asian written language of the content, so auto-discovery picks a
-   * face drawn in that regional hand.
-   *
-   * Unicode Han Unification gives Chinese, Japanese and Korean the same code
-   * points for shared characters but not the same shapes — 「者」「骨」「今」
-   * 「青」「每」are each drawn differently — so a font chosen purely by coverage
-   * can be *correct and still wrong*: a Japanese face draws Chinese text that a
-   * Chinese reader sees as malformed.
-   *
-   * ```typescript
-   * Pdf.fromExcel(workbook, { textLanguage: "zh-Hans" });
-   * ```
-   *
-   * Left unset, the language is inferred from the content's own characters (kana
-   * settles Japanese, Hangul Korean, and characters unique to Simplified or
-   * Traditional Chinese settle those). Text made only of forms common to all of
-   * CJK carries no evidence and Chinese is preferred — a default rather than a
-   * detection, which is the reason to state the language when you know it.
-   *
-   * Node-only, and ignored when a font is supplied explicitly.
-   */
-  textLanguage?: CjkLanguage;
-
-  /**
-   * Receive non-fatal font diagnostics raised while exporting.
-   *
-   * Currently raised for:
-   *
-   * - **characters no configured typeface covers.** They still carry their original
-   *   Unicode for copy and search, but the page shows the `.notdef` glyph, and only
-   *   the caller can decide which fallback family to add.
-   * - **a system font auto-embedded on this host.** The page is readable, but the
-   *   output is now a function of what the machine has installed — the same input
-   *   on a bare container embeds nothing. Supply the font, or set
-   *   {@link disableFontAutoDiscovery}, if the bytes have to be reproducible.
-   *
-   * Without this callback neither condition is visible.
-   *
-   * The callback is synchronous and may fire more than once per export.
-   */
-  onWarning?: (message: string) => void;
-
-  /**
-   * Encryption options for password-protecting the PDF.
-   *
-   * @example
-   * ```typescript
-   * Pdf.fromExcel(workbook, {
-   *   encryption: {
-   *     ownerPassword: "secret",
-   *     userPassword: "open",
-   *     permissions: { print: true, copy: false }
-   *   }
-   * });
-   * ```
-   */
-  encryption?: {
-    /** User password (required to open). Empty string = no open password. */
-    userPassword?: string;
-    /** Owner password (grants full access). Required. */
-    ownerPassword: string;
-    /** Permissions when opened with user password. */
-    permissions?: Partial<{
-      print: boolean;
-      modify: boolean;
-      copy: boolean;
-      annotate: boolean;
-      fillForms: boolean;
-      accessibility: boolean;
-      assemble: boolean;
-      printHighQuality: boolean;
-    }>;
-  };
 
   /**
    * Watermark to render on every page.
@@ -1274,14 +1307,15 @@ export interface PdfWatermarkFilter {
   /**
    * Restrict the watermark to specific page numbers (1-based, document-global).
    * When set, only pages whose number is in this array get the watermark.
-   * If omitted, all pages receive the watermark.
+   * If omitted, all pages receive the watermark. A number past the last page matches no page
+   * and is skipped (the document's length is only known once it is laid out).
    *
    * @example Only on the first page:
    * ```typescript
    * watermark: { type: "text", text: "COVER", pages: [1] }
    * ```
    */
-  pages?: number[];
+  pages?: readonly number[];
 
   /**
    * Restrict the watermark to specific sheet names (case-insensitive).
@@ -1292,8 +1326,11 @@ export interface PdfWatermarkFilter {
    * ```typescript
    * watermark: { type: "text", text: "DRAFT", sheets: ["Summary"] }
    * ```
+   *
+   * A name that matches no sheet of the workbook is refused with `PdfArgumentError` (field
+   * `options.watermark.sheets[i]`), as an unknown name in `sheets` is.
    */
-  sheets?: string[];
+  sheets?: readonly string[];
 
   /**
    * Watermark layering relative to page content.

@@ -102,3 +102,18 @@ export function parseXsdFloat(value: string | undefined): number | undefined {
   const n = parseFloat(trimmed);
   return Number.isFinite(n) ? n : undefined;
 }
+
+/**
+ * A numeric attribute of a setting the readers check against its vocabulary (see `sheet-settings-checks`): the
+ * number, or the attribute's own text when it is not one. The text is what the check then sets aside, so a value
+ * that is not a number is written back exactly as the file had it rather than as `NaN`, or as the number a lenient
+ * `parseInt` found at the front of it.
+ */
+export function parseXsdIntOrText(value: string | undefined): number | string | undefined {
+  return parseXsdInt(value) ?? value;
+}
+
+/** {@link parseXsdIntOrText} for `xsd:double`. */
+export function parseXsdFloatOrText(value: string | undefined): number | string | undefined {
+  return parseXsdFloat(value) ?? value;
+}

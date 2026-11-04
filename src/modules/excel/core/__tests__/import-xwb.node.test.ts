@@ -21,7 +21,7 @@ describe("importSheet across workbooks with an image", () => {
     // Import into a DIFFERENT workbook.
     const dest = Workbook.create();
     Workbook.addWorksheet(dest, "Existing");
-    Workbook.importSheet(dest, srcSheet, "Imported");
+    Workbook.importWorksheet(dest, srcSheet, "Imported");
 
     const imported = Workbook.getWorksheet(dest, "Imported")!;
     expect(getImages(imported)).toHaveLength(1);

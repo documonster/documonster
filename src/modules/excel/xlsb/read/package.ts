@@ -19,17 +19,21 @@ import { cellGetValue, cellSetNote } from "@excel/core/cell";
 import { dataValidationAdd } from "@excel/core/data-validations";
 // The public cell surface, on purpose: setting a value through it is what keeps dimensions,
 // row materialisation and shared-string bookkeeping consistent.
-import { definedNamesAdd } from "@excel/core/defined-names";
-import { loadWorkbookModel } from "@excel/core/model-load";
+import type { FormCheckboxModel, LegacyControlModel } from "@excel/core/form-control";
+import { formCheckboxFromModel } from "@excel/core/form-control";
+import { imageCreate } from "@excel/core/image";
+import { loadDefinedNamesModel, loadWorkbookModel } from "@excel/core/model-load";
 import type { OpaqueSourceRelationship } from "@excel/core/opaque-part";
 import { applyPrintName, isPrintName, type PrintSetup } from "@excel/core/print-names";
 import { adoptLoadedTotals, createTable, tableSetModel, type TableModel } from "@excel/core/table";
 import type { WorkbookData } from "@excel/core/workbook-core";
 import {
-  addWorkbookImage,
-  defineCellStyle,
+  registerWorkbookImage,
+  addCellStyle,
+  findCellStyleEntry,
   getDefinedNames,
-  getWorksheets
+  getWorksheets,
+  isNormalCellStyleName
 } from "@excel/core/workbook-core";
 import type { WorkbookModel } from "@excel/core/workbook.browser";
 import { addWorksheet, createWorkbook, getWorkbookModel } from "@excel/core/workbook.browser";
@@ -48,14 +52,21 @@ import { setStyle as setColumnStyle, setWidth as setColumnWidth } from "@excel/s
 import { setHeight as setRowHeight, setStyle as setRowStyle } from "@excel/surface/row";
 import type { Alignment, Borders, Fill, Font, Protection } from "@excel/types";
 import { decodeRange, encodeCol } from "@excel/utils/address";
+import { containerReadError } from "@excel/utils/container-errors";
+import { mediaFromDrawingAnchors } from "@excel/utils/drawing-utils";
 import {
   attrByLocalName,
   findChildrenLocal,
   tryParseXml
 } from "@excel/utils/ooxml-validator/xml-utils";
+import { setAsideInvalidSheetSettings } from "@excel/utils/sheet-settings-checks";
+import { markStoredOrdinaryFormula } from "@excel/utils/stored-formulas";
+import { slideValidation, validationAnchor } from "@excel/utils/validation-anchor";
 import { iterateInterpretableRecords } from "@excel/xlsb/binary";
 import { readCommentsPart } from "@excel/xlsb/comments";
 import { XLSB_WORKBOOK_PART as WORKBOOK_PART } from "@excel/xlsb/detect";
+import { formulaText } from "@excel/xlsb/formula/ptg";
+import { readDynamicArrayCellMetadata } from "@excel/xlsb/metadata";
 import { modelHash } from "@excel/xlsb/model-hash";
 import {
   readSharedStrings,
@@ -79,6 +90,7 @@ import {
   parsePersonList,
   parseThreadedComments
 } from "@excel/xlsx/xform/comment/threaded-comments-parse";
+import { pairCtrlProps } from "@excel/xlsx/xform/drawing/ctrl-prop-pairing";
 import { parseXformStream } from "@excel/xlsx/xform/parse-xform";
 import { excelToDate, isDateFmt } from "@utils/utils";
 
@@ -231,6 +243,12 @@ export interface XlsbReadOptions {
    * changing an existing caller's behaviour.
    */
   readonly formulas?: "preserve" | "cached" | "error";
+  /**
+   * Container options. Every part is checked against the CRC-32 the package records for
+   * it, failing with an `ExcelFileError` whose `cause` is the archive's `Crc32MismatchError`;
+   * `checkCrc32: false` reads a damaged package as far as it goes.
+   */
+  readonly zip?: { readonly checkCrc32?: boolean };
 }
 
 export async function parseXlsbPackage(
@@ -291,7 +309,20 @@ async function readInto(
   source: string,
   options: XlsbReadOptions
 ): Promise<XlsbReadDiagnostics> {
-  const entries = await extractAll(bytes);
+  let entries: Awaited<ReturnType<typeof extractAll>>;
+  try {
+    entries = await extractAll(bytes, { checkCrc32: options.zip?.checkCrc32 });
+  } catch (error) {
+    // A damaged package, or bytes that are not one, reported as the XLSX reader reports them.
+    throw containerReadError(error, source, "XLSB", bytes);
+  }
+  // A folder entry is not a part (OPC §9.1.1.1): carried through, it would be
+  // written back and declared in [Content_Types].xml, which Excel refuses.
+  for (const [path, file] of entries) {
+    if (file.type === "directory" || /[/\\]$/.test(path)) {
+      entries.delete(path);
+    }
+  }
 
   const workbookPart = findPart(entries, WORKBOOK_PART);
   if (!workbookPart) {
@@ -305,12 +336,11 @@ async function readInto(
 
   const {
     sheets,
-    sheetNames,
-    definedNames,
+    formulaContext: workbookFormulaContext,
     namedRanges,
-    namedExpressions,
+    names: readNames,
+    undecodableNames,
     undefinedNames,
-    externSheets,
     malformedSheets,
     date1904,
     calcProperties,
@@ -365,41 +395,39 @@ async function readInto(
   /** Losses in the order they were found, as `Sheet!A1: reason` or `Sheet: reason`. */
   const lost: string[] = [];
 
-  // Applied through the public `DefinedNames` surface rather than assigned to the model, for the
-  // same reason cell values go through `Cell.setValue`: the invariants a caller gets are the ones
-  // a read should produce. Only the user-visible names are added — the raw table also carries
-  // hidden function stubs like `_xlfn.CONCAT`, which no user created.
-  const names = getDefinedNames(workbook);
-  /** `_xlnm.*` names, applied after the sheets exist. */
-  const printNames: { name: string; ranges: readonly string[]; localSheetId?: number }[] = [];
-  for (const named of namedRanges) {
-    // `_xlnm.Print_Area` and `_xlnm.Print_Titles` are not user-visible names — they are how Excel stores
-    // a sheet's print area and print titles, in XLSX and XLSB alike. Adding them as ordinary names would
-    // put `_xlnm.Print_Area` in a caller's name list *and* leave `pageSetup.printArea` empty, so the
-    // feature would look absent while the artefact of it was visible.
-    if (isPrintName(named.name)) {
-      // Deferred, not applied here: the sheets do not exist yet — they are created further down, from
-      // the workbook's own sheet table — so `getWorksheets` is empty at this point and every print area
-      // silently went nowhere. Collected now, applied once the sheets are there.
-      printNames.push(named);
-      continue;
-    }
-    for (const range of named.ranges) {
-      definedNamesAdd(names, range, named.name);
-    }
-  }
-  // Names whose definition is an expression rather than a reference — `=TRUE`, `=OFFSET(…)`. They cannot
-  // go through `definedNamesAdd`, which takes an A1 reference and *throws* on anything else: a workbook
-  // carrying one used to fail the entire read with `ColumnOutOfBoundsError: Column TRUE is out of
-  // bounds`. Losing the name is a gap; failing the read is a different and worse thing.
+  // **Through the same classification the XLSX reader uses.** A name arrives as the text Excel shows for its
+  // definition — exactly what `<definedName>` holds in the XLSX form of the same workbook — so a reference, a
+  // formula (`SUM(S!$A$1:$A$3)*2`), a constant (`0.2`) and something opaque are told apart the same way in both
+  // formats, and a sheet-local name keeps its `localSheetId`. Names used to enter one at a time through
+  // `definedNamesAdd`, which takes an A1 reference: every formula or constant name was dropped and reported, and
+  // every local one became global.
+  //
+  // `_xlnm.Print_Area` and `_xlnm.Print_Titles` are the exception, as they are in XLSX: they are how a sheet's print
+  // area and print titles are stored, and they are applied to the sheets below rather than listed as names. A
+  // workbook-scoped one belongs to no sheet, so it stays a name — Excel leaves `_xlnm.Print_Area` = `#REF!` behind
+  // when the sheet it described is deleted, and reporting it lost dropped it from every rewrite.
+  const isSheetPrintName = (named: { name: string; localSheetId?: number }): boolean =>
+    isPrintName(named.name) && named.localSheetId !== undefined;
+  const printNames = namedRanges.filter(isSheetPrintName);
+  loadDefinedNamesModel(
+    getDefinedNames(workbook),
+    readNames
+      .filter(named => !isSheetPrintName(named))
+      .map(named => ({
+        name: named.name,
+        ranges: [],
+        rawText: named.text,
+        ...(named.localSheetId === undefined ? {} : { localSheetId: named.localSheetId }),
+        ...(named.hidden === true ? { hidden: true } : {})
+      }))
+  );
   for (const position of malformedSheets) {
     lost.push(`sheet ${position}: the workbook's record for it could not be decoded`);
   }
-  for (const named of namedExpressions) {
-    lost.push(`${named.name}: defined name defined by an expression (${named.expression})`);
+  for (const name of undecodableNames) {
+    lost.push(`${name}: defined name whose definition could not be decoded`);
   }
-  // A name whose record defines nothing. It cannot enter the model — `definedNamesAdd` needs a reference and there is
-  // none — but it was leaving without a word, and a formula that names one loses its expression on the way back out.
+  // A name whose record defines nothing. It cannot enter the model, and a formula that names one keeps the name.
   for (const name of undefinedNames) {
     lost.push(`${name}: defined name with no definition`);
   }
@@ -422,13 +450,25 @@ async function readInto(
   }
 
   // Read before any worksheet, because a cell's style index means nothing without it.
+  // Which `BrtCellMeta` indices mark a dynamic array — the same reading the XLSX reader gives `cm` through
+  // `metadata.xml`. Interpreted rather than preserved, so the writer regenerates it from the cells that need it.
+  const metadataPart = findPart(entries, "xl/metadata.bin");
+  const dynamicArrayCellMetadata =
+    metadataPart === undefined
+      ? new Set<number>()
+      : readDynamicArrayCellMetadata(metadataPart, "xl/metadata.bin");
   const stylesPart = findPart(entries, "xl/styles.bin");
   const styles = stylesPart ? readStyles(stylesPart, "xl/styles.bin") : undefined;
   // Named cell styles, through the public setter so that the name validation and the `_cellStyles` map
   // a caller reads are both the ones a fresh definition would produce.
+  // Names compare without regard to case, as Excel compares them: of two that differ only in case the first is kept,
+  // as Excel keeps it, and a custom style spelt like "normal" is the built-in.
   for (const named of styles?.namedStyles ?? []) {
     const { name, ...facets } = named;
-    defineCellStyle(workbook, name, facets as never);
+    if (isNormalCellStyleName(name) || findCellStyleEntry(workbook, name) !== undefined) {
+      continue;
+    }
+    addCellStyle(workbook, name, facets as never);
   }
   // The differential-format table at its source indices: a preserved `<colorFilter>` names its format by
   // position in it, and the rules resolved below hold these same objects. See `WorkbookCore._dxfs`.
@@ -483,7 +523,114 @@ async function readInto(
   // sheet is read. A sheet with a `Comments` relationship will have its notes parsed, which is all this needs to
   // know — and a sheet *without* one keeps its VML untouched, which is what leaves a form control's drawing alone.
   const regeneratedVml = new Set<string>();
+  // The same holds for a sheet's legacy checkboxes: they are read into the model from its VML (below), and
+  // both writers compose that VML and the controls' ctrlProp parts again. Parsed here rather than when the
+  // sheet is read for the reason above — the opaque set has to be settled first — and kept by VML path so
+  // the sheet loop does not parse it twice.
+  const vmlCheckboxes = new Map<string, FormCheckboxModel[]>();
+  /** The same part's other controls (buttons, list boxes, …), kept as read. */
+  const vmlLegacyControls = new Map<string, LegacyControlModel[]>();
+  /** `sheetPath#rId` of each drawing regenerated from the model rather than preserved. */
+  const bridgeOnlyDrawings = new Set<string>();
+  /** The same drawings when they hold pictures, which the sheet loop reads into the model. */
+  const pictureDrawings = new Map<string, { path: string; xml: string }>();
+  /** Workbook media read from those drawings, by part path, so sheets sharing an image share one. */
+  const drawingMedia = new Map<string, number>();
+  /** The image parts those drawings name: no longer preserved once nothing that is preserved names them. */
+  const pictureMedia = new Set<string>();
   for (const [source, relationships] of relationshipsBySource) {
+    /** The shape ids of this sheet's controls, whose bridge anchors a drawing may hold. */
+    const controlIds = new Set<number>();
+    for (const relationship of relationships) {
+      if (relationship.type !== RelType.VmlDrawing) {
+        continue;
+      }
+      const target = resolveRelationshipTarget(
+        source,
+        relationship.target,
+        relationship.targetMode
+      );
+      const bytes = target === undefined ? undefined : findPart(entries, target);
+      if (bytes === undefined || vmlCheckboxes.has(target!.toLowerCase())) {
+        continue;
+      }
+      const parsed = await parseVmlDrawing(bytes);
+      const checkboxes = parsed?.formControls ?? [];
+      const legacyControls = parsed?.legacyControls ?? [];
+      if (checkboxes.length === 0 && legacyControls.length === 0) {
+        continue;
+      }
+      vmlCheckboxes.set(target!.toLowerCase(), checkboxes);
+      vmlLegacyControls.set(target!.toLowerCase(), legacyControls);
+      regeneratedVml.add(target!.toLowerCase());
+      for (const control of [...checkboxes, ...legacyControls]) {
+        controlIds.add(control.shapeId);
+      }
+      // The other controls' properties are written again with them. An XLSB names no ctrlProp part from
+      // any record, so each is matched to the shape whose own `<x:ClientData>` it agrees with — see
+      // `pairCtrlProps`, which also says what the format does and does not carry. A part no shape agrees
+      // with describes nothing on the sheet and is not kept.
+      const ctrlProps: { xml: string; attributes: Record<string, string> }[] = [];
+      for (const ctrlProp of relationships) {
+        const ctrlPropTarget =
+          ctrlProp.type === RelType.CtrlProp
+            ? resolveRelationshipTarget(source, ctrlProp.target, ctrlProp.targetMode)
+            : undefined;
+        if (ctrlPropTarget === undefined) {
+          continue;
+        }
+        regeneratedVml.add(ctrlPropTarget.toLowerCase());
+        const ctrlPropBytes = findPart(entries, ctrlPropTarget);
+        const attributes =
+          ctrlPropBytes === undefined
+            ? undefined
+            : (await parseCtrlProp(ctrlPropBytes))?.attributes;
+        if (attributes !== undefined) {
+          ctrlProps.push({ xml: new TextDecoder().decode(ctrlPropBytes), attributes });
+        }
+      }
+      pairCtrlProps(legacyControls, ctrlProps);
+    }
+    // **The sheet's DrawingML part is read into the model when the model can carry all of it** — when
+    // every anchor is a picture, or the hidden bridge anchor of one of the sheet's controls. Both writers
+    // build those again (pictures from the sheet's images, bridges from its controls), so preserving the
+    // part as well would leave the sheet unable to take a drawing of its own, keep the bridge of a control
+    // since removed, and hide its pictures from `Image.list`. A drawing with anything else in it — a chart,
+    // a shape, a group — stays preserved, byte for byte.
+    for (const drawingRel of relationships) {
+      const drawingTarget =
+        drawingRel.type === RelType.Drawing
+          ? resolveRelationshipTarget(source, drawingRel.target, drawingRel.targetMode)
+          : undefined;
+      const drawingBytes =
+        drawingTarget === undefined ? undefined : findPart(entries, drawingTarget);
+      if (drawingBytes === undefined) {
+        continue;
+      }
+      const xml = new TextDecoder().decode(drawingBytes);
+      const kind = classifyDrawing(xml, controlIds, id =>
+        pictureTarget(drawingTarget!, relationshipsBySource.get(drawingTarget!) ?? [], id, entries)
+      );
+      if (kind === undefined) {
+        continue;
+      }
+      regeneratedVml.add(drawingTarget!.toLowerCase());
+      regeneratedVml.add(relationshipsPartOf(drawingTarget!).toLowerCase());
+      const key = `${source.toLowerCase()}#${drawingRel.id}`;
+      bridgeOnlyDrawings.add(key);
+      if (kind === "pictures") {
+        pictureDrawings.set(key, { path: drawingTarget!, xml });
+        for (const imageRel of relationshipsBySource.get(drawingTarget!) ?? []) {
+          const imageTarget =
+            imageRel.type === RelType.Image
+              ? resolveRelationshipTarget(drawingTarget!, imageRel.target, imageRel.targetMode)
+              : undefined;
+          if (imageTarget !== undefined) {
+            pictureMedia.add(imageTarget.toLowerCase());
+          }
+        }
+      }
+    }
     if (!relationships.some(relationship => relationship.type === RelType.Comments)) {
       continue;
     }
@@ -501,27 +648,32 @@ async function readInto(
       }
     }
   }
-  const opaque = collectOpaqueParts({
-    unknownEntries: opaqueCandidates(
-      entries,
-      interpretedPaths(sheetParts, entries, regeneratedVml)
-    ),
-    contentTypeOverrides: contentTypes.overrides,
-    relationshipsBySource
-  });
-  workbook._opaqueParts = [...opaque.parts];
-  workbook._opaqueDrops = [...opaque.drops];
-  // Relationships declared by a *worksheet* rather than by the workbook. `picture.xlsb` reaches its
-  // drawings this way, and without distributing them the drawing survives the round trip with
-  // nothing pointing at it — a dangling part, which is one of the things Excel offers to repair.
-  const inboundBySource = groupOpaqueRelationshipsBySource(opaque.parts);
-  // Kept so a preserved part that relied on a `Default` for its extension keeps its type.
-  workbook._opaqueContentTypeDefaults = contentTypes.defaults;
-
+  // An image the model now carries is written by the writer under a name of its own; preserving the part
+  // as well would keep a second copy, and hold the name the writer would otherwise give it back. One
+  // that a preserved part also names — a chart's picture fill, say — stays preserved for that part.
+  for (const [source, relationships] of relationshipsBySource) {
+    if (regeneratedVml.has(source.toLowerCase())) {
+      continue;
+    }
+    for (const relationship of relationships) {
+      const target = resolveRelationshipTarget(
+        source,
+        relationship.target,
+        relationship.targetMode
+      );
+      if (target !== undefined) {
+        pictureMedia.delete(target.toLowerCase());
+      }
+    }
+  }
+  for (const target of pictureMedia) {
+    regeneratedVml.add(target);
+  }
   // Tables, read ahead of the sheets. A `PtgList` in *any* sheet's formula names a table by its `idList`,
   // and resolving it back to a name and a column needs the table definitions — which live in their own
   // parts, reached from the sheets. So they are collected first rather than as each sheet is walked,
   // because a formula on sheet 1 may reference a table on sheet 3.
+  const readTableParts = new Set<string>();
   const tableContext = new Map<string, { id: number; columns: readonly string[]; sheet: string }>();
   for (const [index] of sheets.entries()) {
     const sheetPath = sheetParts[index]?.path ?? `xl/worksheets/sheet${index + 1}.bin`;
@@ -540,6 +692,9 @@ async function readInto(
           ? undefined
           : readTablePart(bytes, target!, iterateInterpretableRecords, id => recordSpec(id)?.name);
       if (table !== undefined) {
+        // Modelled, so both writers author it again: preserving the original as well left a second table part
+        // behind — a `.bin` one inside an XLSX conversion, beside the `table1.xml` written from the model.
+        readTableParts.add(target!.toLowerCase());
         tableContext.set(table.name, {
           id: table.id,
           columns: table.columns.map(column => column.name),
@@ -551,6 +706,23 @@ async function readInto(
       }
     }
   }
+
+  const opaque = collectOpaqueParts({
+    unknownEntries: opaqueCandidates(
+      entries,
+      interpretedPaths(sheetParts, entries, new Set([...regeneratedVml, ...readTableParts]))
+    ),
+    contentTypeOverrides: contentTypes.overrides,
+    relationshipsBySource
+  });
+  workbook._opaqueParts = [...opaque.parts];
+  workbook._opaqueDrops = [...opaque.drops];
+  // Relationships declared by a *worksheet* rather than by the workbook. `picture.xlsb` reaches its
+  // drawings this way, and without distributing them the drawing survives the round trip with
+  // nothing pointing at it — a dangling part, which is one of the things Excel offers to repair.
+  const inboundBySource = groupOpaqueRelationshipsBySource(opaque.parts);
+  // Kept so a preserved part that relied on a `Default` for its extension keeps its type.
+  workbook._opaqueContentTypeDefaults = contentTypes.defaults;
 
   // `for…of` rather than `forEach`, because the header/footer VML has to be parsed and the xform's
   // parser is async. A `forEach` callback cannot await, so the images were written and never read.
@@ -584,7 +756,7 @@ async function readInto(
       // when it is not), while an XLSB→XLSX conversion turns the tab into an empty worksheet and reports it. The chart,
       // drawing, style and colour parts still travel — they are container-neutral — so the chart data is not destroyed;
       // it is unreferenced. The one part that must *not* travel is the `.bin` sheet itself, which
-      // `isForeignSheetPart` drops with its own reason.
+      // `isForeignContainerPart` drops with its own reason.
       //
       // A caller editing this placeholder is the sharp edge: it is an ordinary worksheet on the public surface, and the
       // XLSB writer skips it, so cells written into it are discarded. That is the strongest argument for doing the
@@ -621,7 +793,7 @@ async function readInto(
       sharedStrings,
       // `externSheets` is what a 3D reference's `ixti` indexes; without it every cross-sheet
       // reference in this workbook silently resolves to the wrong sheet.
-      { sheetNames, definedNames, externSheets, tables: tableContext },
+      { ...workbookFormulaContext, sheetIndex: index, tables: tableContext },
       styles,
       // The formatting runs read off the shared-string table, so a cell pointing at a styled entry can be
       // given its `richText` back. Read once for the workbook and handed to every sheet.
@@ -629,7 +801,8 @@ async function readInto(
       options.blankCells === "collapse",
       options.formulas === "cached" ? "cached" : "preserve",
       // The same epoch the cells are read against, so a date bound and the cells it constrains agree.
-      date1904
+      date1904,
+      dynamicArrayCellMetadata
     );
     // **`"error"` is enforced per sheet, as soon as that sheet is read.** Checking the accumulated diagnostics at the
     // end would work, but it would first build the whole workbook the caller has just said they do not want, and the
@@ -647,6 +820,11 @@ async function readInto(
     cachedOnlyFormulas.push(...read.cachedOnlyFormulas.map(address => `${name}!${address}`));
     lost.push(...read.undecodedFormulas.map(address => `${name}!${address}: formula expression`));
     lost.push(...read.errorCells.map(address => `${name}!${address}: error value`));
+    lost.push(
+      ...read.unreadConditionalFormats.map(
+        entry => `${name}!${entry} (conditional formatting rule)`
+      )
+    );
     // Counted rather than listed: a sheet whose every cell uses an unimplemented record would
     // otherwise produce one line per cell and bury the rest of the report.
     for (const [record, count] of read.unreadRecords) {
@@ -657,8 +835,27 @@ async function readInto(
     // sheet rather than with its position, exactly as `opaqueRels` does — and so a rewrite reproduces
     // the one part of a picture that is binary. Without it the drawing XML and the media both survived
     // and the sheet pointed at neither, which is a workbook whose images have silently vanished.
-    if (read.drawingRelationshipId !== undefined) {
+    if (
+      read.drawingRelationshipId !== undefined &&
+      !bridgeOnlyDrawings.has(`${path.toLowerCase()}#${read.drawingRelationshipId}`)
+    ) {
       worksheet._xlsbDrawingRelationshipId = read.drawingRelationshipId;
+    }
+    // A drawing of pictures, read the way the XLSX reader reads one — so `Image.list`, `Image.remove`
+    // and the sheet model see them, and the writer draws them again.
+    const pictures =
+      read.drawingRelationshipId === undefined
+        ? undefined
+        : pictureDrawings.get(`${path.toLowerCase()}#${read.drawingRelationshipId}`);
+    if (pictures !== undefined) {
+      await readDrawingPictures(
+        workbook,
+        worksheet,
+        pictures,
+        relationshipsBySource.get(pictures.path) ?? [],
+        entries,
+        drawingMedia
+      );
     }
 
     // Row and column formatting go on **before** the cells, and the order is the whole point:
@@ -682,8 +879,9 @@ async function readInto(
         // write then had nothing to write, which is how "hidden column" stayed on the loss list while the
         // record's own field had room for it all along.
         const target = worksheetColumn(worksheet, index) as unknown as Record<string, unknown>;
+        // Only a clear `fUserSet` says anything: this writer, like Excel, sets it on every record it writes.
         if (column.customWidth === false) {
-          target.isCustomWidth = false;
+          target.customWidth = false;
         }
         if (column.hidden === true) {
           target.hidden = true;
@@ -784,9 +982,18 @@ async function readInto(
       // distinguishes a range (`range:A1:B2`) from a single address. Writing the record directly put a
       // plain object where the wrapper belonged, and the validations vanished on the next `getModel`,
       // which reads `.model` off it.
+      //
+      // The record's formulae are relative to the top-left of all its ranges, and each entry is relative to its own,
+      // so a relative reference is slid to every range it is stored under — see `@excel/utils/validation-anchor`.
       for (const validation of read.validations) {
+        const anchor = validationAnchor(validation.ranges);
         for (const reference of validation.ranges) {
-          dataValidationAdd(worksheet.dataValidations, reference, validation.rule);
+          const corner = validationAnchor([reference]);
+          const rule =
+            anchor === undefined || corner === undefined
+              ? validation.rule
+              : (slideValidation(validation.rule, anchor, corner) ?? validation.rule);
+          dataValidationAdd(worksheet.dataValidations, reference, rule);
         }
       }
     }
@@ -818,9 +1025,12 @@ async function readInto(
     }
     // Views beyond the first, which carry no pane. Appended rather than replacing, so a frozen sheet's
     // pane survives alongside them.
-    if (read.viewSettings.length > 1 && worksheet.views !== undefined) {
+    // The first entry is the one set above, or — when neither branch set one, because the first view departs from
+    // nothing — the first view itself. Reading `views[0]` off the sheet's empty default put a hole in the list, and
+    // the writer threw a raw `TypeError` on it.
+    if (read.viewSettings.length > 1) {
       worksheet.views = [
-        worksheet.views[0],
+        worksheet.views?.[0] ?? { state: "normal", ...read.viewSettings[0] },
         ...read.viewSettings.slice(1).map(view => ({ state: "normal", ...view }))
       ] as never;
     }
@@ -864,16 +1074,7 @@ async function readInto(
           : resolveRelationshipTarget(path, relationship.target, relationship.targetMode);
       const vmlBytes = vmlTarget === undefined ? undefined : findPart(entries, vmlTarget);
       if (vmlBytes !== undefined) {
-        const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
-        // Through the same xform the XLSX reader uses. `parseStream` takes an async iterable, and the
-        // bytes are already in hand — so a one-chunk iterable is the adapter, rather than a second VML
-        // parser appearing here.
-        const shapes = await parseXformStream(
-          new VmlDrawingXform(),
-          (async function* () {
-            yield new TextDecoder().decode(vmlBytes);
-          })()
-        );
+        const shapes = await parseVmlDrawing(vmlBytes);
         const byRelId = new Map(
           (relationshipsBySource.get(vmlTarget!) ?? []).map(entry => [entry.id, entry])
         );
@@ -888,7 +1089,7 @@ async function readInto(
             lost.push(`${name}: header image, whose part the package does not contain`);
             continue;
           }
-          const imageId = addWorkbookImage(workbook, {
+          const imageId = registerWorkbookImage(workbook, {
             buffer: imageBytes,
             extension: (imageTarget!.split(".").pop() ?? "png").toLowerCase()
           } as never);
@@ -898,6 +1099,11 @@ async function readInto(
             ...(shape.width === undefined ? {} : { width: shape.width }),
             ...(shape.height === undefined ? {} : { height: shape.height })
           } as never);
+          // The shape as read, so the picture keeps its title, washout and crop — see `vmlShape`.
+          const placed = worksheet._media.at(-1);
+          if (placed?.type === "headerImage" && shape.shape !== undefined) {
+            placed.vmlShape = shape.shape;
+          }
         }
       }
     }
@@ -915,7 +1121,7 @@ async function readInto(
       const bytes = target === undefined ? undefined : findPart(entries, target);
       if (bytes !== undefined) {
         const extension = (target!.split(".").pop() ?? "png").toLowerCase();
-        const imageId = addWorkbookImage(workbook, {
+        const imageId = registerWorkbookImage(workbook, {
           buffer: bytes,
           extension
         } as never);
@@ -962,7 +1168,18 @@ async function readInto(
           tablePart,
           target!,
           iterateInterpretableRecords,
-          id => recordSpec(id)?.name
+          id => recordSpec(id)?.name,
+          // A calculated column's formula is encoded like a cell formula on this sheet, and names its own table.
+          (rgce, extra) => {
+            const text = formulaText(
+              rgce,
+              { ...workbookFormulaContext, sheetIndex: index, tables: tableContext },
+              target!,
+              extra
+            );
+            // A `PtgExp` has no place in a table part; one is not a formula this column can carry.
+            return typeof text === "string" ? text : undefined;
+          }
         );
         if (table !== undefined) {
           // `id` is the workbook-unique `idList`, reassigned on the next write, so it does not travel
@@ -998,6 +1215,23 @@ async function readInto(
         const handle = createTable(worksheet, model);
         tableSetModel(handle, model);
         (worksheet.tables as Record<string, unknown>)[model.name] = handle;
+      }
+    }
+
+    // Legacy checkboxes, read from the VML parsed above. An XLSB has no `<controls>` element and therefore
+    // nothing tying a ctrlProp part to its shape, so the VML — which carries the state, link, caption and
+    // anchor itself — is the whole source; the XLSX reader refines it from the other two where they exist.
+    for (const relationship of relationshipsBySource.get(path) ?? []) {
+      if (relationship.type !== RelType.VmlDrawing) {
+        continue;
+      }
+      const target = resolveRelationshipTarget(path, relationship.target, relationship.targetMode);
+      for (const checkbox of vmlCheckboxes.get(target?.toLowerCase() ?? "") ?? []) {
+        worksheet.formControls.push(formCheckboxFromModel(worksheet, checkbox));
+      }
+      const legacyControls = vmlLegacyControls.get(target?.toLowerCase() ?? "") ?? [];
+      if (legacyControls.length > 0) {
+        (worksheet._legacyControls ??= []).push(...legacyControls);
       }
     }
 
@@ -1140,6 +1374,9 @@ async function readInto(
         ...read.sheetProperties
       };
     }
+    // A setting outside the format's vocabulary is read as absent and kept as read, so that writing the sheet back
+    // neither refuses a value the caller never set nor loses one the file had; `unrecognizedValues` reports it.
+    lost.push(...setAsideInvalidSheetSettings(name, worksheet));
   }
 
   // Print areas and print titles, now that the sheets exist. They arrived as `_xlnm.*` defined names
@@ -1212,6 +1449,7 @@ function applyCell(
       sharedFormula: `${encodeCol(cell.sharedFormulaOrigin.column)}${cell.sharedFormulaOrigin.row + 1}`,
       result: asDateIfFormatted(cell.value, cell.numberFormat, date1904) ?? undefined
     } as never);
+    markStoredOrdinaryFormula(getCell(worksheet, address)._value.model);
     applyCellFormat(worksheet, address, cell, styles);
     return;
   }
@@ -1242,8 +1480,17 @@ function applyCell(
       address,
       (cell.formula === undefined
         ? { error: cell.value }
-        : { formula: cell.formula, result: { error: cell.value } }) as never
+        : {
+            formula: cell.formula,
+            result: { error: cell.value },
+            // A master with a cached error is still a master: dropping these read an array or dynamic-array formula
+            // whose value was `#REF!` back as an ordinary one, which Excel then intersects.
+            ...formulaRange(cell)
+          }) as never
     );
+    if (cell.formula !== undefined && cell.shareType !== "array" && cell.isDynamicArray !== true) {
+      markStoredOrdinaryFormula(getCell(worksheet, address)._value.model);
+    }
     applyCellFormat(worksheet, address, cell, styles);
     return;
   }
@@ -1252,11 +1499,11 @@ function applyCell(
     setValue(worksheet, address, {
       formula: cell.formula,
       result: asDateIfFormatted(cell.value, cell.numberFormat, date1904) ?? undefined,
-      // The master of a filled range: the kind and the range come from the `BrtShrFmla`/`BrtArrFmla` that
-      // followed it, and both are what the XLSX reader puts on such a cell.
-      ...(cell.shareType === undefined ? {} : { shareType: cell.shareType }),
-      ...(cell.ref === undefined ? {} : { ref: cell.ref })
+      ...formulaRange(cell)
     } as never);
+    if (cell.shareType !== "array" && cell.isDynamicArray !== true) {
+      markStoredOrdinaryFormula(getCell(worksheet, address)._value.model);
+    }
     applyCellFormat(worksheet, address, cell, styles);
     return;
   }
@@ -1299,6 +1546,22 @@ function asDateIfFormatted(
  * Written as one call rather than three because `setStyle` merges: three calls would each read
  * and rewrite the style, and the last would win on any field the earlier ones also touched.
  */
+/**
+ * The model fields of a shared or array formula's master — the kind and the range from the `BrtShrFmla`/`BrtArrFmla`
+ * that followed it, and whether it is a dynamic array — which is what the XLSX reader puts on such a cell.
+ */
+function formulaRange(cell: ReadCell): {
+  shareType?: "shared" | "array";
+  ref?: string;
+  isDynamicArray?: true;
+} {
+  return {
+    ...(cell.shareType === undefined ? {} : { shareType: cell.shareType }),
+    ...(cell.ref === undefined ? {} : { ref: cell.ref }),
+    ...(cell.isDynamicArray === true ? { isDynamicArray: true as const } : {})
+  };
+}
+
 /**
  * Apply the style a cell's format index names.
  *
@@ -1404,6 +1667,204 @@ interface SheetPart {
   readonly isChartsheet: boolean;
 }
 
+/**
+ * A VML drawing, through the same xform the XLSX reader uses. `parseStream` takes an async iterable, and
+ * the bytes are already in hand — so a one-chunk iterable is the adapter, rather than a second VML parser
+ * appearing here.
+ */
+/** An anchor of a drawing, start tag to end tag, whatever prefix the part gives the namespace. */
+const DRAWING_ANCHOR =
+  /<((?:\w+:)?(?:twoCellAnchor|oneCellAnchor|absoluteAnchor))\b[\s\S]*?<\/\1>/g;
+
+/**
+ * Whether a drawing can be carried by the model: `"bridges"` when every anchor is the hidden bridge of
+ * one of `controlIds`, `"pictures"` when every other anchor is a plain picture whose every relationship
+ * (`pictureTarget`) is in hand, and `undefined` when anything else is in it. Text-level, and conservative
+ * on purpose: an anchor it cannot place keeps the whole part preserved, which is what happened before.
+ */
+function classifyDrawing(
+  xml: string,
+  controlIds: ReadonlySet<number>,
+  pictureTarget: (relationshipId: string) => boolean
+): "bridges" | "pictures" | undefined {
+  const anchors = [...xml.matchAll(DRAWING_ANCHOR)].map(match => match[0]);
+  const opened = xml.match(/<(?:\w+:)?(?:twoCellAnchor|oneCellAnchor|absoluteAnchor)\b/g) ?? [];
+  if (anchors.length === 0 || anchors.length !== opened.length) {
+    return undefined;
+  }
+  let pictures = 0;
+  for (const anchor of anchors) {
+    const isPicture = /<(?:\w+:)?pic\b/.test(anchor);
+    const bridge = /<(?:\w+:)?compatExt\b[^>]*\bspid="_x0000_s(\d+)"/.exec(anchor);
+    if (bridge && !isPicture && controlIds.has(parseInt(bridge[1], 10))) {
+      continue;
+    }
+    if (
+      !isPicture ||
+      /<(?:\w+:)?(?:sp|grpSp|cxnSp|graphicFrame|contentPart|AlternateContent)\b/.test(anchor) ||
+      // Every relationship the picture names — the blip, an SVG companion, a hyperlink — must be one the
+      // reader can follow, or the rebuilt picture would lose it.
+      [...anchor.matchAll(/\br:(?:embed|link|id)="([^"]*)"/g)].some(([, id]) => !pictureTarget(id))
+    ) {
+      return undefined;
+    }
+    pictures++;
+  }
+  return pictures === 0 ? "bridges" : "pictures";
+}
+
+/**
+ * Whether the drawing relationship `id` is one a picture can be rebuilt from: an image in the package,
+ * whose file name no other image of the drawing shares (the media are matched by it), or a hyperlink.
+ */
+function pictureTarget(
+  drawingPath: string,
+  relationships: readonly { id: string; type: string; target: string; targetMode?: string }[],
+  id: string,
+  entries: Awaited<ReturnType<typeof extractAll>>
+): boolean {
+  const relationship = relationships.find(entry => entry.id === id);
+  if (relationship === undefined) {
+    return false;
+  }
+  if (relationship.type === RelType.Hyperlink) {
+    return true;
+  }
+  // The drawing reconcile finds a picture's medium by the name after `/media/`.
+  if (
+    relationship.type !== RelType.Image ||
+    relationship.targetMode === "External" ||
+    !/\/media\/[^/]+[.][a-zA-Z]{3,4}$/.test(relationship.target)
+  ) {
+    return false;
+  }
+  const target = resolveRelationshipTarget(
+    drawingPath,
+    relationship.target,
+    relationship.targetMode
+  );
+  const name = target?.split("/").pop()?.toLowerCase();
+  return (
+    target !== undefined &&
+    findPart(entries, target) !== undefined &&
+    relationships.filter(
+      entry => entry.type === RelType.Image && entry.target.split("/").pop()?.toLowerCase() === name
+    ).length === 1
+  );
+}
+
+/**
+ * Read a drawing of pictures into the sheet's media, through the XLSX reader's own drawing xform and
+ * the media helper it uses, so a picture read from XLSB is the same model a picture read from XLSX is.
+ * Each image part becomes one workbook medium, shared by every sheet whose drawing names it.
+ */
+async function readDrawingPictures(
+  workbook: WorkbookData,
+  worksheet: WorksheetData,
+  drawing: { path: string; xml: string },
+  relationships: readonly { id: string; type: string; target: string; targetMode?: string }[],
+  entries: Awaited<ReturnType<typeof extractAll>>,
+  drawingMedia: Map<string, number>
+): Promise<void> {
+  const { DrawingXform } = await import("@excel/xlsx/xform/drawing/drawing-xform");
+  const xform = new DrawingXform();
+  const parsed = (await parseXformStream(xform, [drawing.xml])) as {
+    anchors: {
+      picture?: {
+        rId?: string;
+        svgRId?: string;
+        hyperlinks?: { rId?: string; hyperlink?: string };
+      };
+    }[];
+  };
+  // Only the images a picture draws become workbook media: one the part merely lists would be written
+  // with nothing referencing it.
+  const drawn = new Set(
+    parsed.anchors.flatMap(anchor => [anchor.picture?.rId, anchor.picture?.svgRId])
+  );
+  // Media matched by file name, as the XLSX reconcile matches them; `index` is the workbook medium.
+  const media: { index: number; svgMediaId?: number }[] = [];
+  const mediaIndex: Record<string, number> = {};
+  const rels: Record<string, { Target?: string; TargetMode?: string }> = {};
+  for (const relationship of relationships) {
+    rels[relationship.id] = {
+      Target: relationship.target,
+      ...(relationship.targetMode ? { TargetMode: relationship.targetMode } : {})
+    };
+    if (
+      relationship.type !== RelType.Image ||
+      relationship.targetMode === "External" ||
+      !drawn.has(relationship.id)
+    ) {
+      continue;
+    }
+    const target = resolveRelationshipTarget(
+      drawing.path,
+      relationship.target,
+      relationship.targetMode
+    );
+    const bytes = target === undefined ? undefined : findPart(entries, target);
+    if (bytes === undefined) {
+      continue;
+    }
+    const key = target!.toLowerCase();
+    let id = drawingMedia.get(key);
+    if (id === undefined) {
+      id = Number(
+        registerWorkbookImage(workbook, {
+          buffer: bytes,
+          extension: (target!.split(".").pop() ?? "png").toLowerCase()
+        } as never)
+      );
+      drawingMedia.set(key, id);
+    }
+    // Keyed as the reconcile reads a target: the file name after `/media/`.
+    mediaIndex[relationship.target.replace(/^.*\/media\//, "")] = media.length;
+    media.push({ index: id });
+  }
+  for (const anchor of parsed.anchors) {
+    const hyperlinks = anchor.picture?.hyperlinks;
+    if (hyperlinks?.rId !== undefined && rels[hyperlinks.rId]) {
+      hyperlinks.hyperlink = rels[hyperlinks.rId].Target;
+      delete hyperlinks.rId;
+    }
+  }
+  xform.reconcile(parsed as never, { rels, media, mediaIndex } as never);
+  // An SVG companion is recorded on the raster medium by its index *here*; the workbook wants its id.
+  for (const medium of media) {
+    if (medium.svgMediaId !== undefined) {
+      (workbook.media[medium.index] as { svgMediaId?: number }).svgMediaId =
+        media[medium.svgMediaId].index;
+    }
+  }
+  for (const model of mediaFromDrawingAnchors(parsed.anchors as never)) {
+    worksheet._media.push(imageCreate(worksheet as never, model as never));
+  }
+}
+
+async function parseCtrlProp(bytes: Uint8Array) {
+  const { CtrlPropXform } = await import("@excel/xlsx/xform/drawing/ctrl-prop-xform");
+  const xform = new CtrlPropXform();
+  await parseXformStream(xform, [bytes]);
+  return xform.parsed;
+}
+
+async function parseVmlDrawing(bytes: Uint8Array) {
+  const { VmlDrawingXform } = await import("@excel/xlsx/xform/drawing/vml-drawing-xform");
+  return parseXformStream(
+    new VmlDrawingXform(),
+    (async function* () {
+      yield new TextDecoder().decode(bytes);
+    })()
+  );
+}
+
+/** `xl/drawings/drawing1.xml` → `xl/drawings/_rels/drawing1.xml.rels`. */
+function relationshipsPartOf(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return `${path.slice(0, slash + 1)}_rels/${path.slice(slash + 1)}.rels`;
+}
+
 function findPart(
   entries: Awaited<ReturnType<typeof extractAll>>,
   path: string
@@ -1475,7 +1936,7 @@ function interpretedPaths(
     | undefined
   )[],
   entries: Awaited<ReturnType<typeof extractAll>>,
-  /** Legacy VML drawings a writer here will compose again — see the call site. */
+  /** Legacy VML drawings and table parts a writer here will compose again — see the call site. */
   regeneratedVml: ReadonlySet<string> = new Set()
 ): Set<string> {
   const interpreted = new Set<string>([
@@ -1483,6 +1944,7 @@ function interpretedPaths(
     WORKBOOK_PART,
     "xl/sharedstrings.bin",
     "xl/styles.bin",
+    "xl/metadata.bin",
     // The document properties are *modelled*, by both writers, from `WorkbookModel` — so preserving
     // them verbatim as well produces a package that declares each of them twice. Reading an XLSB and
     // writing it back as XLSX made exactly that file, and Excel rejected it: a duplicate

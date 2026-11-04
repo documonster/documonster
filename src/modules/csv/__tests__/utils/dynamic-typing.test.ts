@@ -165,9 +165,9 @@ describe("tryParseDate", () => {
     it("parses YYYY-MM-DD format", () => {
       const date = tryParseDate("2024-01-15");
       expect(date).toBeInstanceOf(Date);
-      expect(date!.getFullYear()).toBe(2024);
-      expect(date!.getMonth()).toBe(0); // January
-      expect(date!.getDate()).toBe(15);
+      expect(date!.getUTCFullYear()).toBe(2024);
+      expect(date!.getUTCMonth()).toBe(0); // January; a date-only value is UTC midnight
+      expect(date!.getUTCDate()).toBe(15);
     });
 
     it("parses YYYY-MM-DDTHH:mm:ss format", () => {

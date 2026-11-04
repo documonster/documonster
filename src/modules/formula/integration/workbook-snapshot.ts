@@ -17,6 +17,12 @@
  *    hosts own snapshot capture and writeback outside the formula module.
  */
 
+import { excelNameKey, sheetNameKey } from "@utils/name-key";
+
+// The key a spilled cell names its master by — used by the spill engine for persistent tracking. Defined at Layer 0,
+// where the Excel host shares it without loading the engine.
+export { spillCellKeyFromId } from "@utils/spill-key";
+
 // ============================================================================
 // Error Value (self-contained, mirrors CellErrorValue)
 // ============================================================================
@@ -113,8 +119,12 @@ export interface CellSnapshot {
    */
   readonly ref?: string;
   /**
-   * Whether this is a dynamic array formula (explicit `isDynamicArray` flag
-   * from the XLSX model, or inferred from the top-level function name).
+   * Whether this is a dynamic array formula, which spills an array result.
+   * - `true` — a dynamic array (the XLSX `cm` / XLSB dynamic flag, or the host's decision).
+   * - `false` — an ordinary formula, as the host decided: its result is intersected with its cell, even where the
+   *   formula produces an array. This is how a host keeps an ordinary `=SEQUENCE(3)` read from a file computed as
+   *   Excel computes it — its top-left value.
+   * - omitted — inferred from the formula: a dynamic array when it produces an array (`producesArray`).
    */
   readonly isDynamicArray?: boolean;
 }
@@ -301,19 +311,19 @@ export interface WorkbookSnapshot {
   /** All worksheets in workbook order. */
   readonly worksheets: readonly WorksheetSnapshot[];
 
-  /** Quick lookup: worksheet name (lowercase) → WorksheetSnapshot. */
+  /** Quick lookup: `sheetNameKey(worksheet name)` → WorksheetSnapshot. */
   readonly worksheetsByName: ReadonlyMap<string, WorksheetSnapshot>;
 
   /** Quick lookup: worksheet id → WorksheetSnapshot. */
   readonly worksheetsById: ReadonlyMap<number, WorksheetSnapshot>;
 
-  /** All defined names in the workbook. Keyed by uppercase name for global
-   *  names, or `"SHEETNAME\0NAME"` for sheet-scoped names. Use the
-   *  `resolveDefinedNameKey()` helper to find the correct entry. */
+  /** All defined names in the workbook. Keyed by `excelNameKey(name)` for
+   *  global names, or `scopedNameKey(sheet, name)` for sheet-scoped names.
+   *  Use `resolveDefinedName()` to find the correct entry. */
   readonly definedNames: ReadonlyMap<string, DefinedNameSnapshot>;
 
   /**
-   * Quick lookup: table name (lowercase) → table + sheet info.
+   * Quick lookup: `excelNameKey(table name)` → table + sheet info.
    * Built at snapshot creation time to avoid O(sheets × tables) scans
    * in the binder and evaluator.
    */
@@ -346,24 +356,17 @@ export function formulaCellKey(sheet: string, row: number, col: number): string 
   return `${sheet}!${row}:${col}`;
 }
 
-/**
- * Build a spill cell key using the worksheet id (stable across renames).
- * Used by the spill engine for persistent tracking.
- */
-export function spillCellKeyFromId(worksheetId: number, row: number, col: number): string {
-  return `ws:${worksheetId}!${row}:${col}`;
-}
-
 // ============================================================================
 // Defined Name Resolution
 // ============================================================================
 
 /**
  * Build the key used to store a sheet-scoped defined name.
- * Format: `"SHEETNAME\0NAME"` (null character separator ensures no collisions).
+ * Format: `"sheetKey\0nameKey"` — the sheet as Excel compares sheet names, the name as it compares defined names
+ * (null character separator ensures no collisions).
  */
 export function scopedNameKey(sheetName: string, name: string): string {
-  return `${sheetName.toUpperCase()}\0${name.toUpperCase()}`;
+  return `${sheetNameKey(sheetName)}\0${excelNameKey(name)}`;
 }
 
 /**
@@ -392,5 +395,5 @@ export function resolveDefinedName(
     }
   }
   // 2. Fall back to global name
-  return definedNames.get(name.toUpperCase());
+  return definedNames.get(excelNameKey(name));
 }

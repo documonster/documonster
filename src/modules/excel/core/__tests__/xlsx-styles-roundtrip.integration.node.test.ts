@@ -1,5 +1,5 @@
 import { expectValidXlsx } from "@excel/__tests__/helpers/expect-valid-xlsx";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook } from "@excel/index";
 import { getUniqueTestFilePath } from "@test/utils";
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +10,7 @@ describe("xlsx styles roundtrip", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "blort");
 
-    Worksheet.setColumns(ws, [
+    Column.setDefinitions(ws, [
       { header: "Col 1", key: "key", width: 25 },
       { header: "Col 2", key: "name", width: 32 },
       { header: "Col 3", key: "age" }
@@ -69,8 +69,8 @@ describe("xlsx styles roundtrip", () => {
     expect(ws2).toBeTruthy();
 
     expect(Column.getWidth(ws2, 1)).toBe(25);
-    expect(Column.getHidden(ws2, 9)).toBe(true);
-    expect(Row.getHidden(ws2, 16)).toBe(true);
+    expect(Column.isHidden(ws2, 9)).toBe(true);
+    expect(Row.isHidden(ws2, 16)).toBe(true);
 
     expect(Cell.getValue(ws2, "A2")).toBe(7);
     expect(Cell.getValue(ws2, "B2")).toBe("Hello, World!");

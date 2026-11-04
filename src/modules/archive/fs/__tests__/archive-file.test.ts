@@ -677,11 +677,13 @@ describe("ArchiveFile", () => {
   });
 
   describe("ZIP-specific methods", () => {
-    it("should throw for TAR when using has()", () => {
+    it("answers has() and getEntry() for TAR as for ZIP (read-only)", () => {
       const archive = new ArchiveFile({ format: "tar" });
-      expect(() => (archive as any).has("test.txt")).toThrow(
-        "has() is only available for ZIP archives"
-      );
+      expect(archive.has("test.txt")).toBe(false);
+      expect(archive.getEntry("test.txt")).toBeNull();
+      archive.addText("one", "test.txt").addText("two", "test.txt");
+      expect(archive.has("test.txt")).toBe(true);
+      expect(archive.getEntry("test.txt")).toMatchObject({ path: "test.txt", size: 3 });
     });
 
     it("should throw for TAR when using delete()", () => {

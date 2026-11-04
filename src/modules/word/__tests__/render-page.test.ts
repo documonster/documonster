@@ -158,6 +158,8 @@ describe("renderPageToSvg", () => {
       },
       {
         type: "table",
+        // Fixed, so the one column spans the measure; auto-fit sizes it by its text.
+        properties: { layout: "fixed" },
         rows: [
           {
             properties: { height: { value: 200, rule: "exact" } },

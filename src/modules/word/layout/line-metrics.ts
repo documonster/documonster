@@ -12,6 +12,18 @@ export interface WordLineMetricsInput extends WordFontMetrics {
   readonly imageAscent?: number;
   /** Whether `nominalHeight` came from `w:lineRule="exact"`. */
   readonly exact?: boolean;
+  /**
+   * The band of the line box the text is centred in, from the box's top, when
+   * it is not the whole box: Word sets `auto` spacing's extra below the text,
+   * `atLeast` spacing's above it, and on a document grid centres the text in
+   * the pitches it needs. Absent, the text is centred in the whole box.
+   */
+  readonly textBand?: { readonly top: number; readonly height: number };
+  /**
+   * Whether the box may be shorter than the text, as `auto` spacing under
+   * single is (the text then overlaps the lines around it, as with `exact`).
+   */
+  readonly shrink?: boolean;
 }
 
 export interface WordLineMetrics {
@@ -49,11 +61,16 @@ export function resolveWordLineMetrics(input: WordLineMetricsInput): WordLineMet
   const ascent = Math.max(0, input.ascent, input.imageAscent ?? 0);
   const descent = Math.min(0, input.descent);
   const inkHeight = ascent - descent;
-  const halfLeading = Math.max(0, (nominalHeight - inkHeight) / 2);
-  const baseline = halfLeading + ascent;
+  const band = input.textBand;
+  const baseline = band
+    ? Math.max(0, band.top + (band.height - inkHeight) / 2) + ascent
+    : Math.max(0, (nominalHeight - inkHeight) / 2) + ascent;
 
   return {
     baseline,
-    height: input.exact ? nominalHeight : Math.max(nominalHeight, baseline - descent)
+    height:
+      input.exact || (input.shrink && (input.imageAscent ?? 0) <= ascent)
+        ? nominalHeight
+        : Math.max(nominalHeight, baseline - descent)
   };
 }

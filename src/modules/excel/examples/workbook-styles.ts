@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { HrStopwatch } from "@excel/examples/utils/hr-stopwatch";
 import { writeBothFormats } from "@excel/examples/utils/write-both";
-import { Cell, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
 import type { Fill } from "@excel/types";
 
 const outDir = path.resolve(
@@ -193,7 +193,7 @@ const fills = {
   }
 } satisfies Record<string, Fill>;
 
-Worksheet.setColumns(ws, [
+Column.setDefinitions(ws, [
   { header: "Col 1", key: "key", width: 25 },
   { header: "Col 2", key: "name", width: 32 },
   { header: "Col 3", key: "age", width: 21 },

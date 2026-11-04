@@ -20,6 +20,7 @@
  */
 
 import { StyledBlankRuns, type StyledBlankRange } from "@excel/core/styled-blanks";
+import { XlsbParseError } from "@excel/errors";
 import type { Font, HeaderFooter, IgnoredError, Margins } from "@excel/types";
 import { encodeCol } from "@excel/utils/address";
 import {
@@ -29,10 +30,15 @@ import {
   NAME_FLAG_HIDDEN,
   iterateInterpretableRecords,
   type BiffRange,
+  checkSheetIndex,
+  checkSheetRange,
   readCell,
+  readSheetRange,
   readWideString,
   sheetStateName,
-  type BiffRecord
+  type BiffRecord,
+  XLSB_MAX_ROWS,
+  XlsbReader
 } from "@excel/xlsb/binary";
 import { readColor } from "@excel/xlsb/color";
 import {
@@ -69,7 +75,13 @@ import {
   readFilterCriteria,
   type FilterCriteriaRecord
 } from "@excel/xlsb/filter-criteria";
-import { decodePtg, type PtgContext } from "@excel/xlsb/formula/ptg";
+import {
+  decodeFormula,
+  formulaText,
+  printDecoded,
+  type PtgContext,
+  type SupportingLink
+} from "@excel/xlsb/formula/ptg";
 import { readHeaderFooter } from "@excel/xlsb/header-footer";
 import { readBreak, type SheetBreak } from "@excel/xlsb/page-breaks";
 import {
@@ -99,7 +111,6 @@ import type { StyleTable } from "@excel/xlsb/styles";
 import { ROW_FLAG_UNSYNCED } from "@excel/xlsb/write/rows";
 import { NodeType } from "@formula/syntax/ast";
 import { printAst } from "@formula/syntax/print";
-import { BinaryReader } from "@utils/binary";
 
 /** A cell as read from a worksheet part. */
 /** One `BrtBeginPivotCacheID`: a cache identifier and the workbook relationship naming its definition. */
@@ -156,6 +167,8 @@ export interface ReadCell {
   readonly shareType?: "shared" | "array";
   /** The range that shared or array formula covers, from the following record's `RfX`. */
   readonly ref?: string;
+  /** Whether a `BrtCellMeta` naming dynamic-array cell metadata preceded the cell's record. */
+  readonly isDynamicArray?: boolean;
   /** Whether `value` is an error text rather than a string, so the model's `{ error }` shape can be rebuilt. */
   readonly isError?: boolean;
   /**
@@ -241,6 +254,8 @@ export interface ReadWorksheet {
    * hex, which is what a future spec-table entry would be keyed by.
    */
   readonly unknownRecords: ReadonlyMap<number, number>;
+  /** Conditional-formatting rules dropped because a formula they depend on did not decode, as `ref: reason`. */
+  readonly unreadConditionalFormats: readonly string[];
   /**
    * Formulas that could not be decoded, by address.
    *
@@ -432,15 +447,17 @@ export interface ReadWorkbook {
    * Needed before any worksheet is read, because every `PtgRef3d` in every formula resolves
    * through it. See `PtgContext.externSheets` for why treating `ixti` as a sheet index is wrong.
    */
-  readonly externSheets: readonly { readonly first: number; readonly last: number }[];
+  readonly externSheets: NonNullable<PtgContext["externSheets"]>;
   /**
-   * Names a caller would recognise, with the range each points at.
+   * The context every formula in this workbook is decoded against: sheets, the `BrtExternSheet` table, the
+   * supporting links it points into, and every defined name with its scope. A worksheet adds its own position.
+   */
+  readonly formulaContext: PtgContext;
+  /**
+   * Reference names, with the areas each points at — the shape a print area or print title needs.
    *
-   * Separate from `definedNames`, which is the raw table in declaration order because `PtgName`
-   * is a one-based index into it and must include the hidden entries. This list drops those: a
-   * workbook carrying `_xlfn.CONCAT` — a stub Excel writes so an older consumer degrades
-   * gracefully — has a defined name no user ever created, and reporting it as one would be
-   * wrong. The two lists therefore differ in both length and purpose.
+   * Separate from `definedNames`, which is the raw table in declaration order because `PtgName` is a one-based
+   * index into it and must include the hidden entries.
    */
   readonly namedRanges: readonly {
     readonly name: string;
@@ -449,6 +466,14 @@ export interface ReadWorkbook {
     readonly localSheetId?: number;
   }[];
   /**
+   * Every defined name a caller would see, with its definition as the text Excel shows — the shape the XLSX reader
+   * produces from `<definedName>`, so the two formats classify a name the same way.
+   *
+   * Excludes future-function stubs (`_xlfn.CONCAT`), which are machinery no user created, and the empty
+   * placeholders Excel adds for a name a formula uses and nothing defines.
+   */
+  readonly names: readonly ReadDefinedName[];
+  /**
    * One-based positions of sheet records this reader could not decode.
    *
    * The sheet keeps its position — every 3D reference indexes sheets by it — but its name, visibility
@@ -456,31 +481,34 @@ export interface ReadWorkbook {
    * workbook whose sheets are quietly named `Sheet1`, `Sheet2`, `Sheet3`.
    */
   readonly malformedSheets: readonly number[];
-  /**
-   * Names whose definition is an expression rather than a reference, as `name: expression`.
-   *
-   * Kept apart from `namedRanges` because they cannot go through `definedNamesAdd`, which takes an A1
-   * reference. Reported rather than dropped: a workbook whose `Sales` is `OFFSET(…)` comes back without
-   * it, and a formula built on that name then resolves to nothing.
-   */
-  readonly namedExpressions: readonly { readonly name: string; readonly expression: string }[];
+  /** Names whose definition could not be decoded, as `name: reason`. */
+  readonly undecodableNames: readonly string[];
   /**
    * Names whose record carried no definition at all.
    *
-   * Separate from `namedExpressions`, which have one this library cannot express as a reference. These have none to
-   * express: the token stream is empty. They were dropped in silence — see `undefinedName` in `parseDefinedName`.
+   * A `BrtName` with an empty token stream defines nothing. Excel writes one as a placeholder for a name a formula
+   * uses and nothing defines; `poi-bug66682` carries a visible `unknownFunction` like this.
    */
   readonly undefinedNames: readonly string[];
+}
+
+/** One defined name as the reader found it. */
+export interface ReadDefinedName {
+  readonly name: string;
+  /** The definition, as Excel would show it. */
+  readonly text: string;
+  /** The sheet position of a sheet-local name; absent means workbook scope. */
+  readonly localSheetId?: number;
+  readonly hidden?: boolean;
 }
 
 /** Read `xl/workbook.bin`. */
 export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook {
   const sheets: ReadSheet[] = [];
-  const definedNames: string[] = [];
-  const namedRanges: { name: string; ranges: string[]; localSheetId?: number }[] = [];
-  const namedExpressions: { name: string; expression: string }[] = [];
-  const undefinedNames: string[] = [];
-  const externSheets: { first: number; last: number }[] = [];
+  /** `BrtName` records, decoded once the whole part is read — a name's definition may use a later name. */
+  const rawNames: RawName[] = [];
+  const externSheets: { first: number; last: number; supportingLink?: number }[] = [];
+  const supportingLinks: SupportingLink[] = [];
   /** One-based positions of `BrtBundleSh` records that did not decode. */
   const malformedSheets: number[] = [];
   let date1904 = false;
@@ -507,7 +535,7 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
       case "BrtBeginPivotCacheID": {
         // `idSx` then a `RelID`. The relationship it names is itself an opaque-part edge that the writer
         // replays with its original id, so the pair still matches after a round trip.
-        const reader = new BinaryReader(record.payload, 0, part);
+        const reader = new XlsbReader(record.payload, 0, part);
         const cacheId = reader.readUint32();
         const relationshipId = readWideString(reader, "BrtBeginPivotCacheID");
         if (relationshipId.length > 0) {
@@ -534,6 +562,35 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
       }
       case "BrtExternSheet": {
         externSheets.push(...readExternSheets(record.payload, part));
+        continue;
+      }
+      // The supporting links, in the order `BrtExternSheet` entries index them. Only this workbook and add-ins can
+      // be resolved; an external workbook is recorded so a reference into one fails by name rather than resolving
+      // into this workbook.
+      case "BrtSupSelf":
+        supportingLinks.push({ kind: "self" });
+        continue;
+      case "BrtSupSame":
+        supportingLinks.push({ kind: "same" });
+        continue;
+      case "BrtSupAddin":
+        supportingLinks.push({ kind: "addin", names: [] });
+        continue;
+      case "BrtSupBookSrc":
+        supportingLinks.push({ kind: "external" });
+        continue;
+      case "BrtPlaceholderName": {
+        // An add-in function's name; a `PtgNameX` through the add-in's link indexes these one-based.
+        const link = supportingLinks[supportingLinks.length - 1];
+        if (link?.kind === "addin") {
+          try {
+            (link.names as string[]).push(
+              readWideString(new XlsbReader(record.payload, 0, part), part)
+            );
+          } catch {
+            (link.names as string[]).push("");
+          }
+        }
         continue;
       }
       case "BrtBundleSh": {
@@ -565,31 +622,18 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
         continue;
       }
       case "BrtName": {
-        // Every name enters `definedNames`, hidden ones included, because `PtgName` is a
-        // one-based index into the record order and skipping an entry shifts every later index.
-        const parsed = readName(record.payload, part, {
-          sheetNames: sheets.map(sheet => sheet.name),
-          externSheets
-        });
-        if (parsed === undefined) {
-          continue;
-        }
-        definedNames.push(parsed.name);
-        if (!parsed.hidden && (parsed.range !== undefined || parsed.ranges !== undefined)) {
-          namedRanges.push({
-            name: parsed.name,
-            ranges: parsed.ranges ?? [parsed.range!],
-            ...(parsed.localSheetId === undefined ? {} : { localSheetId: parsed.localSheetId })
-          });
-        }
-        if (!parsed.hidden && parsed.expression !== undefined) {
-          namedExpressions.push({ name: parsed.name, expression: parsed.expression });
-        }
-        // Reported whether hidden or not: a hidden one is machinery a formula may still name, and a visible one is a
-        // name the caller would expect to find. Both leave the model, so both are said out loud.
-        if (parsed.undefinedName) {
-          undefinedNames.push(parsed.name);
-        }
+        // Every name enters the table, hidden ones included, because `PtgName` is a one-based index into the
+        // record order and skipping an entry shifts every later index.
+        const raw = readRawName(record.payload, part);
+        rawNames.push(
+          raw ?? {
+            name: "",
+            flags: 0,
+            sheetIndex: undefined,
+            tokens: new Uint8Array(0),
+            extra: new Uint8Array(0)
+          }
+        );
         continue;
       }
       default:
@@ -597,12 +641,58 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
     }
   }
 
+  const sheetNames = sheets.map(sheet => sheet.name);
+  const formulaContext: PtgContext = {
+    sheetNames,
+    externSheets,
+    ...(supportingLinks.length === 0 ? {} : { supportingLinks }),
+    definedNames: rawNames.map(raw => raw.name),
+    definedNameScopes: rawNames.map(raw => raw.sheetIndex),
+    definedNameEmpty: rawNames.map(raw => raw.tokens.length === 0)
+  };
+  const namedRanges: { name: string; ranges: string[]; localSheetId?: number }[] = [];
+  const names: ReadDefinedName[] = [];
+  const undecodableNames: string[] = [];
+  const undefinedNames: string[] = [];
+  rawNames.forEach(raw => {
+    if (
+      raw.name === "" ||
+      (raw.flags & NAME_FLAG_FUNCTION) !== 0 ||
+      /^_xl(pm|eta)\./i.test(raw.name)
+    ) {
+      // A future-function stub, a `LET`/`LAMBDA` parameter (`_xlpm.x`) or a function passed by name (`_xleta.SUM`):
+      // machinery, not something a user named — Excel's XLSX lists none of them.
+      return;
+    }
+    if (raw.tokens.length === 0) {
+      undefinedNames.push(raw.name);
+      return;
+    }
+    const decoded = decodeName(raw, formulaContext, part);
+    if (decoded === undefined) {
+      undecodableNames.push(raw.name);
+      return;
+    }
+    const scope = raw.sheetIndex === undefined ? {} : { localSheetId: raw.sheetIndex };
+    names.push({
+      name: raw.name,
+      text: decoded.text,
+      ...scope,
+      ...((raw.flags & NAME_FLAG_HIDDEN) !== 0 ? { hidden: true } : {})
+    });
+    if (decoded.ranges !== undefined) {
+      namedRanges.push({ name: raw.name, ranges: decoded.ranges, ...scope });
+    }
+  });
+
   return {
     sheets,
-    sheetNames: sheets.map(sheet => sheet.name),
-    definedNames,
+    sheetNames,
+    definedNames: formulaContext.definedNames!,
+    formulaContext,
     namedRanges,
-    namedExpressions,
+    names,
+    undecodableNames,
     undefinedNames,
     externSheets,
     malformedSheets,
@@ -616,15 +706,25 @@ export function readWorkbookPart(bytes: Uint8Array, part: string): ReadWorkbook 
   };
 }
 
-/** `BrtExternSheet`: a count, then that many `{ iSupBook, itabFirst, itabLast }` triples. */
-function readExternSheets(payload: Uint8Array, part: string): { first: number; last: number }[] {
-  const reader = new BinaryReader(payload, 0, part);
-  const entries: { first: number; last: number }[] = [];
+/**
+ * `BrtExternSheet`: a count, then that many `Xti` — `{ externalLink, firstSheet, lastSheet }` (MS-XLSB 2.5.173).
+ *
+ * The two sheet fields are *signed*: -2 is a workbook-level entry and -1 a sheet that no longer exists. Read as
+ * unsigned they became sheet 4294967294, which no workbook has.
+ */
+function readExternSheets(
+  payload: Uint8Array,
+  part: string
+): { first: number; last: number; supportingLink?: number }[] {
+  const reader = new XlsbReader(payload, 0, part);
+  const entries: { first: number; last: number; supportingLink?: number }[] = [];
   try {
     const count = reader.readUint32();
     for (let index = 0; index < count; index++) {
-      reader.readUint32(); // iSupBook — only the self-reference (0) is meaningful here
-      entries.push({ first: reader.readUint32(), last: reader.readUint32() });
+      const supportingLink = reader.readUint32();
+      const first = reader.readInt32();
+      const last = reader.readInt32();
+      entries.push({ first, last, ...(supportingLink === 0 ? {} : { supportingLink }) });
     }
   } catch {
     // A truncated table costs the 3D references, not the workbook.
@@ -632,113 +732,85 @@ function readExternSheets(payload: Uint8Array, part: string): { first: number; l
   return entries;
 }
 
+/** A `BrtName` record before its definition is decoded. */
+interface RawName {
+  readonly name: string;
+  readonly flags: number;
+  /** The sheet a locally scoped name belongs to, or `undefined` for workbook scope. */
+  readonly sheetIndex: number | undefined;
+  readonly tokens: Uint8Array;
+  /** The `RgbExtra` after the tokens, where an array constant keeps its values. */
+  readonly extra: Uint8Array;
+}
+
 /**
- * `BrtName`, including the token stream that says what the name points at.
- *
- * `fProc` selects a longer tail — four extra nullable strings — but nothing after the token
- * stream is read, so the tail only matters for the record's length and is not walked.
+ * `BrtName`: flags, a keyboard shortcut, the scope, the name, then a `NameParsedFormula` — `cce`, the tokens,
+ * `cb`, and the `RgbExtra` (MS-XLSB 2.4.718). `fProc` selects a longer tail, which is not walked.
  */
-function readName(
-  payload: Uint8Array,
-  part: string,
-  context: PtgContext
-):
-  | {
-      name: string;
-      /** The definition, when it is a reference `DefinedNames` can take. */
-      range: string | undefined;
-      /** The definition split into areas, when it is a union of several. */
-      ranges: string[] | undefined;
-      /** The definition, when it is an expression rather than a reference. */
-      expression: string | undefined;
-      hidden: boolean;
-      /** `true` when the record carried no token stream — see the return statement. */
-      undefinedName: boolean;
-      /**
-       * The sheet a locally scoped name belongs to, or `undefined` for workbook scope.
-       *
-       * Read but discarded until print areas needed it: `_xlnm.Print_Area` is a *sheet-local* name and
-       * carries no other indication of which sheet it belongs to, so dropping this made every print area
-       * unattributable.
-       */
-      localSheetId: number | undefined;
-    }
-  | undefined {
-  const reader = new BinaryReader(payload, 0, part);
+function readRawName(payload: Uint8Array, part: string): RawName | undefined {
+  const reader = new XlsbReader(payload, 0, part);
   try {
     const flags = reader.readUint32();
     reader.skip(1); // keyboard shortcut
     const sheetIndex = reader.readUint32(); // 0xFFFFFFFF for a workbook-scoped name
     const name = readWideString(reader, part);
     const tokens = reader.readBytes(reader.readUint32());
-    // A hidden or function-stub name is machinery, not something a user named.
-    const hidden = (flags & (NAME_FLAG_HIDDEN | NAME_FLAG_FUNCTION)) !== 0;
-    let range: string | undefined;
-    /** Several ranges, when the definition is a union. */
-    let ranges: string[] | undefined;
-    let expression: string | undefined;
-    if (!hidden && tokens.length > 0) {
-      try {
-        const ast = decodePtg(tokens, context, `${part} name ${name}`);
-        // A shared-formula reference cannot appear in a name, but the decoder's return type
-        // admits one, so it is discriminated the same way the cell path does it.
-        if (!("sharedRow" in ast)) {
-          const printed = printAst(ast);
-          // **Asked of the AST, not of the string.** A name's definition is an expression, and only some
-          // expressions are references: `=TRUE` and `=OFFSET(#REF!,0,0,COUNTA(#REF!),1)` are ordinary
-          // defined names. `definedNamesAdd` takes an A1 reference and *throws* on anything else, so the
-          // caller needs to know which it has before offering it — and the node type says so for free.
-          //
-          // Printing it and then re-parsing to find out would be a second grammar to keep in step with
-          // `colCache`, and catching the throw instead costs an exception per name: the
-          // `many-defined-names` fixture holds 35,422 of them, most of them `OFFSET(…)`, and 35,422
-          // stack captures is the difference between a read and a hang.
-          if (ast.type === NodeType.UnionRef) {
-            // A union is *several* ranges, and the model holds them as several. Printing it whole gave
-            // `(S1!$A$1,S1!$C$1)` as a single range string, which `definedNamesAdd` then parsed with
-            // `(S1` as the sheet name — so a multi-range name came back as one range on a sheet that does
-            // not exist. Each area is printed on its own instead.
-            // Filtered, because a union's area is not guaranteed to print as an address: the
-            // `many-defined-names` fixture holds unions containing `#REF!` areas, and handing one to
-            // `definedNamesAdd` threw `InvalidAddressError: Invalid address:` and failed the whole read.
-            // A name that loses one area of a union is a gap; a read that fails is worse.
-            const areas = ast.areas
-              .map(area => printAst(area as never))
-              .filter(text => text !== "" && !text.includes("#REF!"));
-            if (areas.length > 0) {
-              ranges = areas;
-            } else {
-              expression = printed;
-            }
-          } else if (isReferenceNode(ast)) {
-            range = printed;
-          } else {
-            expression = printed;
-          }
-        }
-      } catch {
-        // A definition this library cannot express is reported as a name with no range rather
-        // than as no name: the name still exists, and `PtgName` still has to index it.
-        range = undefined;
-      }
+    let extra: Uint8Array = new Uint8Array(0);
+    try {
+      extra = reader.readBytes(reader.readUint32());
+    } catch {
+      // A name ending at its tokens has no `RgbExtra` to read.
     }
     return {
       name,
-      range,
-      ranges,
-      expression,
-      hidden,
-      // **Whether the record carried a definition at all.**
-      //
-      // A `BrtName` with an empty token stream defines nothing, and such a name reached neither `namedRanges` nor
-      // `namedExpressions` — so it left the model without a word. `poi-testVarious` carries a hidden `NA` like this and
-      // `poi-bug66682` a *visible* `unknownFunction`; the second is a name a caller would see in Excel, vanishing in
-      // silence. Excel does not write these (it gives a name a `#NAME?` body at least), but real files hold them, and
-      // reporting one is the difference between a gap and a secret.
-      undefinedName: tokens.length === 0,
-      // `0xFFFFFFFF` is workbook scope, which the model expresses as an absent `localSheetId`.
-      localSheetId: sheetIndex === 0xffffffff ? undefined : sheetIndex
+      flags,
+      sheetIndex: sheetIndex === 0xffffffff ? undefined : sheetIndex,
+      tokens,
+      extra
     };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A name's definition as text, and as areas when it is a reference.
+ *
+ * The text is what Excel shows — and what the XLSX form of the same workbook carries in `<definedName>` — so the
+ * model classifies it the way it classifies an XLSX name. The areas are what a print area or print title needs.
+ */
+function decodeName(
+  raw: RawName,
+  context: PtgContext,
+  part: string
+): { text: string; ranges: string[] | undefined } | undefined {
+  try {
+    const decoded = decodeFormula(
+      raw.tokens,
+      {
+        ...context,
+        role: "name",
+        ...(raw.sheetIndex === undefined ? {} : { sheetIndex: raw.sheetIndex })
+      },
+      `${part} name ${raw.name}`,
+      raw.extra
+    );
+    // A shared-formula reference cannot appear in a name, but the decoder's return type admits one.
+    if ("sharedRow" in decoded) {
+      return undefined;
+    }
+    const { ast } = decoded;
+    // A union is *several* ranges. Filtered, because a union's area is not guaranteed to print as an address — the
+    // `many-defined-names` fixture holds unions containing `#REF!` areas.
+    const ranges =
+      ast.type === NodeType.UnionRef
+        ? ast.areas
+            .map(area => printAst(area))
+            .filter(text => text !== "" && !text.includes("#REF!"))
+        : isReferenceNode(ast)
+          ? [printAst(ast)]
+          : undefined;
+    return { text: printDecoded(decoded), ranges: ranges?.length === 0 ? undefined : ranges };
   } catch {
     return undefined;
   }
@@ -794,7 +866,9 @@ export function readWorksheetPart(
    * Cell values get theirs from the caller's `asDateIfFormatted`; a bound is read here, and without this it
    * came back as the serial's text where the XLSX reader returns a `Date`.
    */
-  date1904 = false
+  date1904 = false,
+  /** The `BrtCellMeta` indices that mark a dynamic array, from the metadata part. */
+  dynamicArrayCellMetadata: ReadonlySet<number> = new Set()
 ): ReadWorksheet {
   const cells: ReadCell[] = [];
   const blankRuns = new StyledBlankRuns();
@@ -803,6 +877,7 @@ export function readWorksheetPart(
   const rowHeights = new Map<number, number>();
   const unreadRecords = new Map<string, number>();
   const unknownRecords = new Map<number, number>();
+  const unreadConditionalFormats: string[] = [];
   const rowStyles = new Map<number, number>();
   /** `iOutLevel`, `fCollapsed` and `fDyZero` per one-based row, only where something is set. */
   const rowSettings = new Map<
@@ -844,6 +919,8 @@ export function readWorksheetPart(
   // that says whether the first one is a row or a column.
   let breakAxis: "row" | "column" | undefined;
   let currentRow: number | undefined;
+  // The `BrtCellMeta` index applying to the next cell record, which it immediately precedes.
+  let cellMetadata: number | undefined;
 
   for (const record of iterateInterpretableRecords(bytes, part)) {
     const spec = recordSpec(record.id);
@@ -856,8 +933,13 @@ export function readWorksheetPart(
       continue;
     }
 
+    if (spec.name === "BrtCellMeta") {
+      cellMetadata = numberField(decodeRecord(record, part), "icmb");
+      continue;
+    }
     if (spec.name === "BrtMergeCell") {
-      const range = rangeField(decodeRecord(record, part), "ref");
+      const decodedRange = rangeField(decodeRecord(record, part), "ref");
+      const range = decodedRange && checkSheetRange(decodedRange, part, "BrtMergeCell");
       if (range) {
         merges.push(
           `${encodeCol(range.firstColumn)}${range.firstRow + 1}:` +
@@ -929,7 +1011,18 @@ export function readWorksheetPart(
     }
 
     if (spec.name === "BrtBeginCFRule") {
-      const rule = readCfRule(record.payload, part);
+      let rule: ReturnType<typeof readCfRule>;
+      try {
+        rule = readCfRule(record.payload, part, formulaContext, conditionalFormatting?.ref);
+      } catch (error) {
+        // Dropped and reported, rather than kept without the formula it depends on: a comparison with no
+        // operand looks complete and evaluates differently.
+        unreadConditionalFormats.push(
+          `${conditionalFormatting?.ref ?? "?"}: ${error instanceof Error ? error.message : String(error)}`
+        );
+        rule = undefined;
+      }
+      graphicalRule = undefined;
       if (rule !== undefined && conditionalFormatting !== undefined) {
         conditionalFormatting.rules.push(rule);
         // Held so the graphical collection that may follow can fill in its thresholds and colours.
@@ -962,10 +1055,16 @@ export function readWorksheetPart(
       continue;
     }
     if (spec.name === "BrtColor" && graphicalRule !== undefined) {
-      const colour = readColor(new BinaryReader(record.payload, 0, part));
+      const colour = readColor(new XlsbReader(record.payload, 0, part));
       if (colour !== undefined) {
-        const existing = graphicalRule.color;
-        graphicalRule.color = Array.isArray(existing) ? [...existing, colour] : [colour];
+        // A data bar has one colour and the model holds it as one (`DataBarRuleType.color`); a colour scale has
+        // one per threshold and holds a list. Reading the bar's as a list put `[{…}]` where XLSX reads `{…}`.
+        if (graphicalRule.type === "dataBar") {
+          graphicalRule.color ??= colour;
+        } else {
+          const existing = graphicalRule.color;
+          graphicalRule.color = Array.isArray(existing) ? [...existing, colour] : [colour];
+        }
       }
       continue;
     }
@@ -1028,7 +1127,8 @@ export function readWorksheetPart(
 
     if (spec.name === "BrtHLink") {
       const decoded = decodeRecord(record, part);
-      const ref = rangeField(decoded, "ref");
+      const decodedRef = rangeField(decoded, "ref");
+      const ref = decodedRef && checkSheetRange(decodedRef, part, "BrtHLink");
       if (ref !== undefined) {
         hyperlinks.push({
           ref,
@@ -1096,6 +1196,11 @@ export function readWorksheetPart(
       const decoded = decodeRecord(record, part);
       const first = numberField(decoded, "colFirst");
       const last = numberField(decoded, "colLast");
+      for (const column of [first, last]) {
+        if (column !== undefined) {
+          checkSheetIndex(column, "column", part, "BrtColInfo");
+        }
+      }
       const width = numberField(decoded, "width");
       if (first !== undefined && last !== undefined && width !== undefined) {
         const ixfe = numberField(decoded, "ixfe") ?? 0;
@@ -1123,6 +1228,14 @@ export function readWorksheetPart(
     if (spec.category === "row") {
       const decoded = decodeRecord(record, part);
       currentRow = numberField(decoded, "rw");
+      // `rw` is at most 1,048,575 (MS-XLSB 2.4.726). Past it the row has no cell to hold, and modelling it put a row
+      // at that index of the row array — a length of a billion that every later walk over the rows paid for.
+      if (currentRow !== undefined && currentRow >= XLSB_MAX_ROWS) {
+        throw new XlsbParseError(
+          part,
+          `BrtRowHdr names row ${currentRow + 1}, past the sheet's ${XLSB_MAX_ROWS} rows`
+        );
+      }
       const height = numberField(decoded, "miyRw");
       const flags = numberField(decoded, "flags") ?? 0;
       // Only a height the author set is recorded. Excel writes the default into every row
@@ -1196,6 +1309,8 @@ export function readWorksheetPart(
     // Decoded **once**. This used to call `decodeRecord` here and again inside `readCellValue`, so
     // every cell in the sheet was parsed against its layout twice — on the hottest path in the reader,
     // for a result that cannot differ between the two calls.
+    const isDynamicArray = cellMetadata !== undefined && dynamicArrayCellMetadata.has(cellMetadata);
+    cellMetadata = undefined;
     const decodedCell = decodeRecord(record, part);
     const value = readCellValue(decodedCell, spec.name, sharedStrings);
     if (value === undefined) {
@@ -1206,6 +1321,7 @@ export function readWorksheetPart(
     if (cell === undefined || currentRow === undefined) {
       continue;
     }
+    checkSheetIndex(cell.column, "column", part, spec.name);
     // An error cell reads as a blank, which is the honest outcome and not a silent one: the address
     // is recorded so the caller can be told the difference between "empty" and "was an error".
     // Counted only when the code could not be resolved — the value is then `null`, indistinguishable from a
@@ -1269,6 +1385,7 @@ export function readWorksheetPart(
       ...(numberFormat === undefined ? {} : { numberFormat }),
       ...(formula === undefined ? {} : { formula }),
       ...(sharedFormulaOrigin === undefined ? {} : { sharedFormulaOrigin }),
+      ...(isDynamicArray ? { isDynamicArray: true } : {}),
       ...(richText === undefined ? {} : { richText }),
       // Flagged so the applying step can rebuild the model's `{ error }` shape. Without it the text would go
       // back as an ordinary string, and `#N/A` would become the four characters "#N/A" — which displays the
@@ -1298,6 +1415,7 @@ export function readWorksheetPart(
     formatInfo,
     unreadRecords,
     unknownRecords,
+    unreadConditionalFormats,
     undecodedFormulas,
     cachedOnlyFormulas,
     errorCells,
@@ -1339,7 +1457,7 @@ function readFormula(
 ): string | { row: number; column: number } | undefined {
   const where = `${part} ${encodeCol(column)}${row + 1}`;
   try {
-    const reader = new BinaryReader(record.payload, 0, part);
+    const reader = new XlsbReader(record.payload, 0, part);
     readCell(reader);
     switch (name) {
       case "BrtFmlaNum":
@@ -1364,10 +1482,10 @@ function readFormula(
     // `PtgExtraCol` here. Skipping it made every such formula undecodable, silently, since the `catch` below
     // reports the same outcome for a genuine parse failure.
     const extra = reader.readBytes(reader.readUint32());
-    const decoded = decodePtg(tokens, { ...context, origin: { row, column } }, where, extra);
-    return "sharedRow" in decoded
-      ? { row: decoded.sharedRow, column: decoded.sharedColumn }
-      : printAst(decoded);
+    const decoded = formulaText(tokens, { ...context, origin: { row, column } }, where, extra);
+    return typeof decoded === "string"
+      ? decoded
+      : { row: decoded.sharedRow, column: decoded.sharedColumn };
   } catch {
     // Every failure mode is the same outcome for the caller: the cached value stands and
     // the expression is reported. Distinguishing them here would put codec detail in the
@@ -1455,31 +1573,36 @@ function readSharedFormula(
   context: PtgContext
 ): ReadCell | undefined {
   try {
-    const reader = new BinaryReader(record.payload, 0, part);
-    const firstRow = reader.readUint32();
-    const lastRow = reader.readUint32();
-    const firstColumn = reader.readUint32();
-    const lastColumn = reader.readUint32();
+    const reader = new XlsbReader(record.payload, 0, part);
+    const { firstRow, lastRow, firstColumn, lastColumn } = readSheetRange(reader, name);
     if (name === "BrtArrFmla") {
       reader.readUint8(); // `fAlwaysCalc`, a recalculation hint rather than expression structure.
     }
     const tokens = reader.readBytes(reader.readUint32());
     const extra = reader.readBytes(reader.readUint32());
-    const decoded = decodePtg(
+    const decoded = formulaText(
       tokens,
-      { ...context, origin: { row: master.row, column: master.column } },
+      {
+        ...context,
+        origin: { row: master.row, column: master.column },
+        role: name === "BrtArrFmla" ? "array" : "cell"
+      },
       `${part} ${encodeCol(master.column)}${master.row + 1}`,
       extra
     );
-    if ("sharedRow" in decoded) {
+    if (typeof decoded !== "string") {
       return undefined;
     }
     const { sharedFormulaOrigin: _dropped, ...rest } = master;
     return {
       ...rest,
-      formula: printAst(decoded),
+      formula: decoded,
       shareType: name === "BrtArrFmla" ? ("array" as const) : ("shared" as const),
-      ref: `${encodeCol(firstColumn)}${firstRow + 1}` + `:${encodeCol(lastColumn)}${lastRow + 1}`
+      // A single cell as one address, as XLSX states it: `ref="N1"`, not `N1:N1`.
+      ref:
+        firstRow === lastRow && firstColumn === lastColumn
+          ? `${encodeCol(firstColumn)}${firstRow + 1}`
+          : `${encodeCol(firstColumn)}${firstRow + 1}` + `:${encodeCol(lastColumn)}${lastRow + 1}`
     };
   } catch {
     return undefined;

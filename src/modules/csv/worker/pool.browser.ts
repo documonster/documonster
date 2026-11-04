@@ -33,7 +33,7 @@
  */
 
 import { CsvWorkerError } from "@csv/errors";
-import type { Row } from "@csv/types";
+import type { CsvFormatData } from "@csv/format/formatter";
 import type {
   CsvWorkerPoolOptions,
   CsvWorkerPoolStats,
@@ -199,7 +199,7 @@ class CsvWorkerPool {
   }
 
   async format(
-    data: Row[] | Record<string, unknown>[],
+    data: CsvFormatData,
     options?: CsvFormatOptions,
     taskOptions?: CsvTaskOptions
   ): Promise<CsvTaskResult<string>> {
@@ -829,7 +829,7 @@ export async function parseWithPool(
 
 /** Format data to CSV using worker pool */
 export async function formatWithPool(
-  data: Row[] | Record<string, unknown>[],
+  data: CsvFormatData,
   options?: CsvFormatOptions,
   taskOptions?: CsvTaskOptions
 ): Promise<CsvTaskResult<string>> {

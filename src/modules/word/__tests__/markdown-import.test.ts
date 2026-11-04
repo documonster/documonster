@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 
 import type { MarkdownImageData } from "../convert/markdown/markdown-import";
 import { markdownToDocx, markdownToDocxBody } from "../convert/markdown/markdown-import";
-import { Io } from "../index";
+import { Io, Package } from "../index";
 import type { BodyContent, Hyperlink, InlineImageContent, Paragraph, Run, Table } from "../types";
 
 /** Convenience: return just the body content array. */
@@ -573,7 +573,7 @@ describe("East Asian proofing language", () => {
 
   it("writes the language into styles.xml, not just the model", async () => {
     const doc = await markdownToDocx("# 第一章\n\n销售业绩概述。\n");
-    const styles = await Io.readDocxPart(await Io.toBuffer(doc), "word/styles.xml");
+    const styles = await Package.readPart(await Io.toBuffer(doc), "word/styles.xml");
     const xml = new TextDecoder().decode(styles!);
 
     expect(xml).toContain('<w:lang w:val="en-US" w:eastAsia="zh-CN"/>');

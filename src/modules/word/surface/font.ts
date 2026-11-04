@@ -4,7 +4,8 @@
  *
  * `import { Font } from "documonster/word"` →
  *   `Font.embed(opts)`, `Font.subset(data, chars)`, `Font.shapeText(...)`,
- *   `Font.hyphenateWord(...)`, … — tree-shaken via `export * as Font`.
+ *   `Font.hyphenateWord(...)`, `Font.obfuscate(data, key)` (ODTTF embedding),
+ *   … — tree-shaken via `export * as Font`.
  */
 export {
   embedFont as embed,
@@ -19,3 +20,8 @@ export {
   hyphenateText,
   ENGLISH_US_PATTERNS
 } from "@word/font/hyphenation";
+export {
+  obfuscateFont as obfuscate,
+  deobfuscateFont as deobfuscate,
+  generateFontKey as generateObfuscationKey
+} from "@word/font/font-obfuscation";

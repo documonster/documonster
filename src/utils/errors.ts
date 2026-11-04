@@ -7,7 +7,7 @@
  * ```typescript
  * // Catching and identifying errors
  * try {
- *   await Workbook.readFile(workbook, 'test.xlsx');
+ *   await Workbook.readFile('test.xlsx');
  * } catch (e) {
  *   if (isExcelError(e)) {
  *     console.error(`Excel error: ${e.message}`);
@@ -56,15 +56,27 @@ export class BaseError extends Error {
 
   /**
    * Serialize error for logging/transmission.
-   * Includes cause chain for debugging.
+   * Includes cause chain for debugging, and the error's own data fields
+   * (`field`, `line`, `position`, `path`, …) — the details a typed error exists
+   * to carry, which a log line would otherwise lose.
    */
   toJSON(): Record<string, unknown> {
-    return {
+    const json: Record<string, unknown> = {
       name: this.name,
       message: this.message,
       stack: this.stack,
       cause: this.cause instanceof Error ? errorToJSON(this.cause) : this.cause
     };
+    for (const key of Object.keys(this)) {
+      if (key in json) {
+        continue;
+      }
+      const value = (this as Record<string, unknown>)[key];
+      if (typeof value !== "function") {
+        json[key] = value instanceof Error ? errorToJSON(value) : value;
+      }
+    }
+    return json;
   }
 }
 

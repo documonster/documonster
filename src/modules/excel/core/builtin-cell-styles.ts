@@ -76,4 +76,6 @@ export const BUILTIN_CELL_STYLES = {
 } as const satisfies Record<string, BuiltinCellStyleDef>;
 
 /** Identifier keys for {@link BUILTIN_CELL_STYLES}. */
-export type BuiltinCellStyle = keyof typeof BUILTIN_CELL_STYLES;
+export type BuiltInCellStyle = keyof typeof BUILTIN_CELL_STYLES;
+/** @deprecated Use {@link BuiltInCellStyle}. Removed in 1.0. */
+export type BuiltinCellStyle = BuiltInCellStyle;

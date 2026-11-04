@@ -15,8 +15,8 @@
 
 import { stat } from "node:fs/promises";
 
-import { Cell, ExcelNotSupportedError, Workbook, Worksheet } from "documonster/excel";
-import { calculateFormulas } from "documonster/excel/formula";
+import { Cell, ExcelNotSupportedError, Row, Workbook, Worksheet } from "documonster/excel";
+import { ExcelFormula } from "documonster/excel/formula";
 import { z } from "zod";
 
 import type { ServerConfig } from "../config.js";
@@ -186,9 +186,9 @@ export const sheetEditTool = defineTool({
       );
     }
 
-    const wb = Workbook.create();
+    let wb: Workbook.Handle;
     try {
-      await Workbook.readFile(wb, resolved);
+      wb = await Workbook.readFile(resolved);
     } catch (cause) {
       throw toolError.unsupported(
         `could not read ${args.path} as a workbook`,
@@ -227,7 +227,7 @@ export const sheetEditTool = defineTool({
     let formulaNote = "formulas not re-evaluated (recalculate: false)";
     if (recalculate) {
       try {
-        calculateFormulas(wb);
+        ExcelFormula.calculate(wb);
         formulaNote = "formulas re-evaluated";
       } catch (cause) {
         formulaNote = `formula re-evaluation failed: ${cause instanceof Error ? cause.message : String(cause)}`;
@@ -386,11 +386,11 @@ function applyOp(
     // coordinates. That is a limitation of the underlying operation, not
     // something this tool can paper over, so it is reported rather than hidden.
     case "insert_rows":
-      Worksheet.insertRows(ws, op.at, op.rows as unknown[][] as never);
+      Row.insertMany(ws, op.at, op.rows as unknown[][] as never);
       return `inserted ${op.rows.length} row(s) before row ${op.at} — references to shifted cells elsewhere in the workbook are NOT adjusted; verify any formulas or charts that pointed below row ${op.at}`;
 
     case "delete_rows":
-      Worksheet.spliceRows(ws, op.at, op.count);
+      Row.splice(ws, op.at, op.count);
       return `deleted ${op.count} row(s) from row ${op.at} — references to those cells elsewhere in the workbook are NOT adjusted and may now be wrong; verify any formulas or charts that pointed at them`;
 
     case "set_style": {

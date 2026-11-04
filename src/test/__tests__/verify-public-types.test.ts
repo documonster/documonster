@@ -120,6 +120,49 @@ describe("the public type surface gate", () => {
     expect(output).toContain("Detail");
   });
 
+  it("R2 — reads a browser entry the way the browser build resolves it", () => {
+    // A shared surface that imports a module with a `.browser.ts` sibling reaches the
+    // sibling's declarations in the browser build (`#platform/*`), so the browser entry
+    // must export the sibling's type — and exporting it is enough.
+    file("src/modules/demo/codec.ts", "export interface Stream {\n  node: true;\n}\n");
+    file("src/modules/demo/codec.browser.ts", "export interface Stream {\n  web: true;\n}\n");
+    file(
+      "src/modules/demo/surface.ts",
+      'import type { Stream } from "@demo/codec";\nexport function open(): Stream {\n  return null!;\n}\n'
+    );
+    file(
+      "src/modules/demo/index.ts",
+      'export * as Codec from "@demo/surface";\nexport type { Stream } from "@demo/codec";\n'
+    );
+    const browserEntry = (typeExport: string) =>
+      file(
+        "src/modules/demo/index.browser.ts",
+        `export * as Codec from "@demo/surface";\n${typeExport}`
+      );
+    file("src/modules/demo/types.ts", "export interface Widget {\n  id: string;\n}\n");
+    const entries = {
+      entries: {
+        demo: { file: "src/modules/demo/index.ts", platform: "node" },
+        "demo (browser)": { file: "src/modules/demo/index.browser.ts", platform: "browser" }
+      },
+      vocabularyEntries: []
+    };
+
+    browserEntry('export type { Stream } from "@demo/codec.browser";\n');
+    expect(run(config(entries)).code).toBe(0);
+
+    // The specifier the build rewrites to the sibling counts as the sibling.
+    browserEntry('export type { Stream } from "@demo/codec";\n');
+    expect(run(config(entries)).code).toBe(0);
+
+    browserEntry("");
+    const { code, output } = run(config(entries));
+    expect(code).toBe(1);
+    expect(output).toContain(
+      "demo (browser) exposes `Stream` (declared in modules/demo/codec.browser.ts)"
+    );
+  });
+
   it("R2 — accepts a type re-exported under a different name", () => {
     // The check matches declarations, not spellings: an established alias is fine.
     soundTree();

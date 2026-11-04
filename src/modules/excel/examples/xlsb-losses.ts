@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ExcelNotSupportedError } from "@excel/errors";
-import { Cell, DefinedNames, Workbook, Worksheet } from "@excel/index";
+import { Cell, DefinedNames, Row, Workbook, Worksheet } from "@excel/index";
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.resolve(exampleDir, "../../../../tmp/excel-examples");
@@ -36,10 +36,10 @@ const ws = Workbook.addWorksheet(wb, "Report", {
   // A frozen header row: `BrtPane`, whose layout no reference workbook establishes.
   views: [{ state: "frozen", xSplit: 0, ySplit: 1 }]
 });
-Worksheet.addRow(ws, ["Region", "Units", "Revenue"]);
-Worksheet.addRow(ws, ["North", 120, 4800]);
-Worksheet.addRow(ws, ["South", 95, 3610]);
-Worksheet.addRow(ws, ["Total", { formula: "SUM(B2:B3)", result: 215 }]);
+Row.add(ws, ["Region", "Units", "Revenue"]);
+Row.add(ws, ["North", 120, 4800]);
+Row.add(ws, ["South", 95, 3610]);
+Row.add(ws, ["Total", { formula: "SUM(B2:B3)", result: 215 }]);
 
 // Borders: the corpus establishes `BrtBorder`'s size and not one of its fields, so a border cannot be
 // written without guessing — and a border silently removed from a table of figures is noticed at once.
@@ -82,8 +82,7 @@ console.log(`\nwrote ${filename} (${(bytes.byteLength / 1024).toFixed(1)} KiB)`)
 // Reading: accepted by default, refusable on request.
 // ---------------------------------------------------------------------------
 
-const reopened = Workbook.create();
-await Workbook.read(reopened, bytes);
+const reopened = await Workbook.read(bytes);
 const readSheet = Workbook.getWorksheet(reopened, "Report")!;
 console.log(`\nread back: ${Worksheet.getName(readSheet)}`);
 // What survived: the values, the bold, the number, the formula.
@@ -95,9 +94,8 @@ console.log(`  B4 formula = ${JSON.stringify(Cell.getFormula(readSheet, "B4"))}`
 // The same read, asked to be strict. This package was written by this library and loses nothing on
 // the way back in, so it is accepted — the option earns its keep on files from elsewhere, where a
 // record whose layout is unestablished would otherwise cost cells silently.
-const strict = Workbook.create();
 try {
-  await Workbook.read(strict, bytes, { unsupported: "error" });
+  await Workbook.read(bytes, { unsupported: "error" });
   console.log("\nstrict read: nothing was lost coming back in");
 } catch (error) {
   if (!(error instanceof ExcelNotSupportedError)) {
@@ -108,16 +106,3 @@ try {
     console.log(`  - ${item}`);
   }
 }
-
-// ---------------------------------------------------------------------------
-// And reading replaces, atomically.
-// ---------------------------------------------------------------------------
-
-const target = Workbook.create();
-Cell.setValue(Workbook.addWorksheet(target, "Leftover"), "A1", "from a previous life");
-await Workbook.read(target, bytes);
-console.log(
-  `\nafter reading into a non-empty workbook: ${Workbook.getWorksheets(target)
-    .map(sheet => Worksheet.getName(sheet))
-    .join(", ")}`
-);

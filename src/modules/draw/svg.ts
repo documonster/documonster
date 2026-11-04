@@ -36,8 +36,12 @@ export interface ToSvgOptions {
    */
   readonly width?: number;
   readonly height?: number;
-  /** Background fill. Omitted means transparent. */
-  readonly background?: string;
+  /**
+   * Background fill: a CSS colour string or an IR colour `{ r, g, b, a }` — the same two forms
+   * `RasterizeOptions.background` takes. Omitted, `"none"` or `"transparent"` means
+   * transparent.
+   */
+  readonly background?: string | Rgba01;
   /**
    * XML comment placed at the top of the document, before any drawing.
    *
@@ -65,9 +69,10 @@ export function toSvg(list: DrawList, options: ToSvgOptions = {}): string {
     // `--` cannot appear inside an XML comment; collapse any run of dashes.
     parts.push(`<!-- ${options.comment.replace(/-{2,}/g, "-")} -->`);
   }
-  if (options.background !== undefined) {
+  const background = backgroundAttrs(options.background);
+  if (background !== undefined) {
     parts.push(
-      `<rect x="0" y="0" width="${num(list.width)}" height="${num(list.height)}" fill="${escapeXmlAttribute(options.background)}"/>`
+      `<rect x="0" y="0" width="${num(list.width)}" height="${num(list.height)}"${background}/>`
     );
   }
   parts.push(surface.markup());
@@ -295,6 +300,25 @@ function num(value: number): string {
   }
   const rounded = Math.round(value * 100) / 100;
   return Object.is(rounded, -0) ? "0" : String(rounded);
+}
+
+/**
+ * The fill attributes of the background rectangle, or `undefined` for none. A string is
+ * written as given, as it always was (the public entry has checked that it is a colour); an
+ * IR colour is written as `fill` and `fill-opacity`, and a fully transparent one draws
+ * nothing.
+ */
+function backgroundAttrs(background: string | Rgba01 | undefined): string | undefined {
+  if (background === undefined) {
+    return undefined;
+  }
+  if (typeof background === "string") {
+    return ` fill="${escapeXmlAttribute(background)}"`;
+  }
+  return background.a <= 0
+    ? undefined
+    : ` fill="${colour(background)}"` +
+        (background.a < 1 ? ` fill-opacity="${num(background.a)}"` : "");
 }
 
 /** `#rrggbb` for a colour's channels. */

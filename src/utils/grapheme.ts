@@ -73,7 +73,24 @@ function fallbackClusters(text: string): string[] {
   return out;
 }
 
+/**
+ * Below U+0300 no character extends, prepends to or joins a neighbour, so
+ * every UTF-16 unit is its own cluster — except CR LF, which is one.
+ */
+function isSingleUnitClusters(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c >= 0x0300 || (c === 0x0d && text.charCodeAt(i + 1) === 0x0a)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function graphemeClusters(text: string): string[] {
+  if (isSingleUnitClusters(text)) {
+    return text.split("");
+  }
   const segmenter = nativeSegmenter();
   return segmenter
     ? [...segmenter.segment(text)].map(item => item.segment)

@@ -87,4 +87,16 @@ export interface ZipEntryRecord {
 
   /** DOS time field (used for ZipCrypto verification fallback) */
   dosTime?: number;
+
+  /**
+   * DOS date field as stored, so an entry copied unchanged keeps its exact wall-clock stamp.
+   * @internal
+   */
+  dosDate?: number;
+
+  /**
+   * General-purpose flags as stored in the central directory.
+   * @internal
+   */
+  flags?: number;
 }

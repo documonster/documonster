@@ -21,6 +21,7 @@
  * ```
  */
 
+import { checkHandle, checkRecord } from "@word/core/argument-checks";
 import { extractRunText } from "@word/core/text-utils";
 import { walkDocument } from "@word/core/walker";
 import type { DocxVisitor, WalkPath } from "@word/core/walker";
@@ -92,6 +93,8 @@ export interface FormatSearchResult {
  * @returns Array of matching results.
  */
 export function searchByFormat(doc: DocxDocument, criteria: FormatCriteria): FormatSearchResult[] {
+  checkHandle(doc, "document", "doc", "Query.searchByFormat");
+  checkRecord(criteria, "criteria", "Query.searchByFormat");
   const results: FormatSearchResult[] = [];
   let currentBodyIndex = 0;
   let currentParaIndex = 0;
@@ -200,6 +203,8 @@ export function searchByFormat(doc: DocxDocument, criteria: FormatCriteria): For
  * @returns The count of matching runs.
  */
 export function countByFormat(doc: DocxDocument, criteria: FormatCriteria): number {
+  checkHandle(doc, "document", "doc", "Query.getCountByFormat");
+  checkRecord(criteria, "criteria", "Query.getCountByFormat");
   return searchByFormat(doc, criteria).length;
 }
 
@@ -211,6 +216,7 @@ export function countByFormat(doc: DocxDocument, criteria: FormatCriteria): numb
  * @returns Array of unique RunProperties objects found.
  */
 export function getUsedFormats(doc: DocxDocument): RunProperties[] {
+  checkHandle(doc, "document", "doc", "Query.listUsedFormats");
   const formatSet = new Map<string, RunProperties>();
 
   const visitor: DocxVisitor = {

@@ -13,6 +13,7 @@
  * to. Every case below is a read, so every case must be a no-op.
  */
 import { captureFormulaSnapshot } from "@excel/core/formula-capture";
+import { getColumns, getSheetDimensions } from "@excel/core/worksheet";
 import {
   Anchor,
   Cell,
@@ -32,12 +33,12 @@ import { describe, it, expect } from "vitest";
  * serialisation happens to hide.
  */
 async function fingerprint(wb: ReturnType<typeof Workbook.create>) {
-  const sheets = Workbook.getWorksheets(wb).map(ws => ({
+  const sheets = Workbook.listWorksheets(wb).map(ws => ({
     name: Worksheet.getName(ws),
-    rowCount: Worksheet.rowCount(ws),
-    columnCount: Worksheet.columnCount(ws),
-    columns: Worksheet.columns(ws).length,
-    dimensions: { ...Worksheet.dimensions(ws) }
+    rowCount: Row.getCount(ws),
+    columnCount: Column.getCount(ws),
+    columns: getColumns(ws).length,
+    dimensions: { ...getSheetDimensions(ws) }
   }));
   const bytes = new Uint8Array(await Workbook.toBuffer(wb));
   return { sheets, bytes };
@@ -133,7 +134,7 @@ describe("reads do not mutate the workbook", () => {
 
     it("leaves the sheet alone when rows have been spliced out", async () => {
       const { wb, ws } = styledSheet();
-      Worksheet.spliceRows(ws, 2, 1);
+      Row.splice(ws, 2, 1);
       await expectNoMutation(wb, () => void Worksheet.toAoa(ws));
     });
 
@@ -159,7 +160,7 @@ describe("reads do not mutate the workbook", () => {
       Cell.setValue(ws, "A1", 1);
       Cell.setValue(ws, "A2", 2);
       Cell.setValue(ws, "A3", 3);
-      Worksheet.spliceRows(ws, 2, 1);
+      Row.splice(ws, 2, 1);
 
       let values: ReturnType<typeof Worksheet.toAoa> | undefined;
       await expectNoMutation(wb, () => {
@@ -176,7 +177,7 @@ describe("reads do not mutate the workbook", () => {
       Cell.setValue(ws, "A1", 1);
       Cell.setValue(ws, "A2", 2);
       Cell.setValue(ws, "A3", 3);
-      Worksheet.spliceRows(ws, 2, 1);
+      Row.splice(ws, 2, 1);
 
       // The materialising version of `toAoa` created the trailing row that the
       // splice had emptied, so reading the sheet one way changed what reading it
@@ -195,11 +196,11 @@ describe("reads do not mutate the workbook", () => {
   });
 
   describe("column reads", () => {
-    it("Column.values does not materialise cells down the column", async () => {
+    it("Column.getValues with base 1 does not materialise cells down the column", async () => {
       const { wb, ws } = styledSheet();
-      let values: ReturnType<typeof Column.values> | undefined;
+      let values: ReturnType<typeof Column.getValues> | undefined;
       await expectNoMutation(wb, () => {
-        values = Column.values(ws, 3);
+        values = Column.getValues(ws, 3, { base: 1 });
       });
       expect(values).toEqual([, "h3", , , 4]);
     });
@@ -218,7 +219,7 @@ describe("reads do not mutate the workbook", () => {
       // Every other `Column.*` member resolves its reference through
       // `getColumn`, which would pad `ws._columns` out to column 26 here.
       await expectNoMutation(wb, () => {
-        expect(Column.values(ws, "Z")).toEqual([]);
+        expect(Column.getValues(ws, "Z", { base: 1 })).toEqual([]);
         expect(Column.getValues(ws, 100)).toEqual([]);
       });
     });
@@ -232,7 +233,7 @@ describe("reads do not mutate the workbook", () => {
 
     it("captures without materialising after a splice leaves row holes", async () => {
       const { wb, ws } = styledSheet();
-      Worksheet.spliceRows(ws, 2, 1);
+      Row.splice(ws, 2, 1);
       await expectNoMutation(wb, () => void captureFormulaSnapshot(wb));
     });
   });
@@ -262,7 +263,7 @@ describe("reads do not mutate the workbook", () => {
           expect(Cell.getComment(ws, a)).toBeUndefined();
           expect(Cell.getNames(ws, a)).toEqual([]);
           expect(Cell.getValidation(ws, a)).toBeUndefined();
-          expect(Cell.find(ws, a)).toBeUndefined();
+          expect(Cell.has(ws, a)).toBe(false);
         }
       });
     });
@@ -320,10 +321,12 @@ describe("reads do not mutate the workbook", () => {
 
     it("reject a malformed reference exactly as a writer does", () => {
       const { ws } = styledSheet();
-      for (const bad of ["a1", "1", "A", ""]) {
+      // Lowercase is not malformed: `a1` is `A1`, as Excel's UI reads it.
+      expect(Cell.getValue(ws, "a1")).toBe(Cell.getValue(ws, "A1"));
+      for (const bad of ["1", "A", ""]) {
         expect(() => Cell.setValue(ws, bad, 1)).toThrow();
         expect(() => Cell.getValue(ws, bad)).toThrow();
-        expect(() => Cell.find(ws, bad)).toThrow();
+        expect(() => Cell.has(ws, bad)).toThrow();
       }
       expect(() => Cell.getValue(ws, "XFE1")).toThrow();
     });
@@ -337,9 +340,9 @@ describe("reads do not mutate the workbook", () => {
 
     it("style-facet readers still create the cell, because their result is edited in place", () => {
       const { ws } = styledSheet();
-      expect(Cell.find(ws, "D9")).toBeUndefined();
+      expect(Cell.has(ws, "D9")).toBe(false);
       Cell.getStyle(ws, "D9").font = { bold: true };
-      expect(Cell.find(ws, "D9")).toBeDefined();
+      expect(Cell.has(ws, "D9")).toBe(true);
       expect(Cell.getFont(ws, "D9")).toEqual({ bold: true });
     });
   });
@@ -349,11 +352,76 @@ describe("reads do not mutate the workbook", () => {
       const { wb, ws } = styledSheet();
       const anchor = Anchor.create(ws, { col: 40, row: 60 });
       await expectNoMutation(wb, () => {
-        Anchor.colWidth(anchor);
-        Anchor.rowHeight(anchor);
-        Anchor.col(anchor);
-        Anchor.row(anchor);
+        Anchor.getColWidth(anchor);
+        Anchor.getRowHeight(anchor);
+        Anchor.getCol(anchor);
+        Anchor.getRow(anchor);
       });
     });
+  });
+});
+
+describe("Row / Column readers create nothing", () => {
+  it("row readers on a row that does not exist", async () => {
+    const { wb, ws } = styledSheet();
+    await expectNoMutation(wb, () => {
+      expect(Row.getHeight(ws, 50)).toBeUndefined();
+      expect(Row.isHidden(ws, 50)).toBe(false);
+      expect(Row.getOutlineLevel(ws, 50)).toBe(0);
+      expect(Row.getValues(ws, 50)).toEqual([]);
+      expect(Row.getValues(ws, 50, { base: 1 })).toEqual([]);
+      expect(Row.getFont(ws, 50)).toBeUndefined();
+      expect(Row.getNumFmt(ws, 50)).toBeUndefined();
+      expect(Row.getFill(ws, 50)).toBeUndefined();
+    });
+    expect(Row.getCount(ws)).toBe(4);
+  });
+
+  it("row facet readers on an existing styled row", async () => {
+    const { wb, ws } = styledSheet();
+    await expectNoMutation(wb, () => {
+      expect(Row.getFont(ws, 3)).toEqual({ bold: true });
+    });
+    // A copy: editing it does not reach the row.
+    Row.getFont(ws, 3)!.bold = false;
+    expect(Row.getFont(ws, 3)).toEqual({ bold: true });
+  });
+
+  it("column readers on a column that was never declared", async () => {
+    const { wb, ws } = styledSheet();
+    await expectNoMutation(wb, () => {
+      expect(Column.getWidth(ws, "Z")).toBeUndefined();
+      expect(Column.getHeader(ws, "Z")).toBeUndefined();
+      expect(Column.getKey(ws, "Z")).toBeUndefined();
+      expect(Column.isHidden(ws, "Z")).toBe(false);
+      expect(Column.getOutlineLevel(ws, "Z")).toBe(0);
+      expect(Column.getNumber(ws, "Z")).toBe(26);
+      expect(Column.getLetter(ws, 26)).toBe("Z");
+      expect(Column.getFont(ws, "Z")).toBeUndefined();
+      expect(Column.getNumFmt(ws, "Z")).toBeUndefined();
+      expect(Column.getDefinition(ws, "Z")).toMatchObject({ hidden: false, outlineLevel: 0 });
+    });
+  });
+
+  it("column facet readers return a copy of the column's own style", async () => {
+    const { wb, ws } = styledSheet();
+    await expectNoMutation(wb, () => {
+      expect(Column.getNumFmt(ws, 2)).toBe("0.00%");
+    });
+  });
+
+  it("facet readers leave style sharing alone; getStyle, which hands out the live object, does not", () => {
+    const { ws } = styledSheet();
+    Cell.setValue(ws, "A3", 1);
+    const shared = Cell.getView(ws, "A3")!.font;
+    Row.getFont(ws, 3);
+    Row.getFill(ws, 3);
+    Cell.setValue(ws, "B3", 2);
+    expect(Cell.getView(ws, "B3")!.font).toBe(shared);
+
+    Row.getStyle(ws, 3);
+    Cell.setValue(ws, "D3", 3);
+    expect(Cell.getView(ws, "D3")!.font).not.toBe(shared);
+    expect(Cell.getView(ws, "D3")!.font).toEqual(shared);
   });
 });

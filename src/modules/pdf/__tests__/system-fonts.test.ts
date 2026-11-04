@@ -377,7 +377,7 @@ describe("preferSystemFonts end to end", () => {
     const doc = new PdfDocumentBuilder({ preferSystemFonts: ["CallerChoice"] });
     doc.addPage().drawText("中", { x: 72, y: 700 });
 
-    expect(embeddedName(await doc.build())).toBe("CallerChoice-Regular");
+    expect(embeddedName(await doc.toBuffer())).toBe("CallerChoice-Regular");
   });
 
   it("should reach the builder through the chained method", async () => {
@@ -386,7 +386,7 @@ describe("preferSystemFonts end to end", () => {
     const doc = new PdfDocumentBuilder().preferSystemFonts(["CallerChoice"]);
     doc.addPage().drawText("中", { x: 72, y: 700 });
 
-    expect(embeddedName(await doc.build())).toBe("CallerChoice-Regular");
+    expect(embeddedName(await doc.toBuffer())).toBe("CallerChoice-Regular");
   });
 
   it("should use the built-in order when the builder names nothing", async () => {
@@ -395,7 +395,7 @@ describe("preferSystemFonts end to end", () => {
     const doc = new PdfDocumentBuilder();
     doc.addPage().drawText("中", { x: 72, y: 700 });
 
-    expect(embeddedName(await doc.build())).toBe("BuiltInChoice-Regular");
+    expect(embeddedName(await doc.toBuffer())).toBe("BuiltInChoice-Regular");
   });
 
   it("should reach the spreadsheet exporter through its options", async () => {

@@ -227,15 +227,20 @@ describe("what the codec refuses", () => {
     }
   });
 
-  it("marks a whole-axis reference absolute, so it does not drift when copied", () => {
-    // `A:A` means every row. Leaving the bounds relative would make it shift with the formula, which for
-    // a print title is the difference between "repeat row 1" and "repeat the row above me".
-    const tokens = encodePtg(parse(tokenize("1:1")), CONTEXT, "A1");
-    const view = new DataView(tokens.buffer, tokens.byteOffset, tokens.byteLength);
-    // Past the one-byte token id: two `u32` rows, then two `u16` columns whose top two bits are the
-    // relative markers. Both clear means absolute.
-    expect(view.getUint16(9, true) & 0xc000).toBe(0);
-    expect(view.getUint16(11, true) & 0xc000).toBe(0);
+  it("marks the pinned axis of a whole-axis reference absolute, and the named axis as written", () => {
+    // `$1:$1` means every column of row 1 and does not move: all four relative bits clear. The bits live in the
+    // two `ColRelShort` words — `fColRel` at 0x4000, `fRwRel` at 0x8000 — past the token id and the two rows.
+    const flags = (source: string): number[] => {
+      const tokens = encodePtg(parse(tokenize(source)), CONTEXT, "A1");
+      const view = new DataView(tokens.buffer, tokens.byteOffset, tokens.byteLength);
+      return [view.getUint16(9, true) & 0xc000, view.getUint16(11, true) & 0xc000];
+    };
+    expect(flags("$1:$1")).toEqual([0, 0]);
+    // `1:1` copied down a row is `2:2`, so its rows are relative — but its columns, the pinned axis, are not:
+    // "every column" does not shift. This used to write `1:1` absolute and read `$1:$1` back as `1:1`.
+    expect(flags("1:1")).toEqual([0x8000, 0x8000]);
+    expect(flags("A:A")).toEqual([0x4000, 0x4000]);
+    expect(flags("$A:$A")).toEqual([0, 0]);
   });
 
   it("rejects a sheet the workbook does not have", () => {
@@ -374,13 +379,14 @@ describe("formulas through a whole package", () => {
     // is what answers the trust concern. See `write/worksheet.ts`.
     const workbook = Workbook.create();
     const sheet = Workbook.addWorksheet(workbook, "Hard");
-    Cell.setValue(sheet, "A1", { formula: "MATCH(1,{1,2,3},0)", result: 1 });
+    // A table the workbook does not define — an array constant was the example here until `PtgArray` was written.
+    Cell.setValue(sheet, "A1", { formula: "SUM(Missing[Qty])", result: 1 });
     Cell.setValue(sheet, "A2", { formula: "1+1", result: 2 });
 
     const written = await writeXlsbPackage(Workbook.getModel(workbook));
     await expectValidXlsb(written.bytes, { includeWarnings: true });
     expect(written.unsupported).toEqual([
-      "Hard!A1: formula (an array constant is not supported yet)"
+      "Hard!A1: formula (a structured reference to the unknown table Missing is not supported yet)"
     ]);
 
     const entries = await extractAll(written.bytes);
@@ -532,10 +538,10 @@ describe("3D references and defined names resolve through the tables that carry 
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     expect(Cell.getValue(read, "A1")).toMatchObject({ formula: "SUM(Two!A1:A2)" });
     expect(Cell.getValue(read, "A2")).toMatchObject({ formula: "SUM(Vals)" });
-    expect(DefinedNames.getAllEntries(Workbook.getDefinedNames(reopened))).toEqual([
+    expect(DefinedNames.list(Workbook.getDefinedNames(reopened))).toEqual([
       { name: "Vals", ranges: ["Two!$A$1:$A$2"] }
     ]);
   });
@@ -579,7 +585,7 @@ describe("a formula the encoder refuses", () => {
       reopened,
       await Workbook.toBuffer(source, { format: "xlsb", unsupported: "ignore" })
     );
-    const style = Cell.getStyle(Workbook.getWorksheets(reopened)[0]!, "A1");
+    const style = Cell.getStyle(Workbook.listWorksheets(reopened)[0]!, "A1");
     expect(style?.numFmt).toBe("0.00%");
     expect(style?.font?.bold).toBe(true);
   });
@@ -608,7 +614,7 @@ describe("a formula's cached result", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const value = Cell.getValue(Workbook.getWorksheets(reopened)[0]!, "A1");
+    const value = Cell.getValue(Workbook.listWorksheets(reopened)[0]!, "A1");
     expect(value).toMatchObject({ formula: "TODAY()" });
     expect((value as { result: Date }).result).toBeInstanceOf(Date);
     expect((value as { result: Date }).result.toISOString()).toBe(when.toISOString());
@@ -626,7 +632,7 @@ describe("a formula's cached result", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const value = Cell.getValue(Workbook.getWorksheets(reopened)[0]!, "A1");
+    const value = Cell.getValue(Workbook.listWorksheets(reopened)[0]!, "A1");
     expect((value as { result: Date }).result.toISOString()).toBe(when.toISOString());
   });
 
@@ -639,7 +645,7 @@ describe("a formula's cached result", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(source, { format: "xlsb" }));
-    const read = Workbook.getWorksheets(reopened)[0]!;
+    const read = Workbook.listWorksheets(reopened)[0]!;
     expect(Cell.getValue(read, "A1")).toMatchObject({ result: 2 });
     expect(Cell.getValue(read, "A2")).toMatchObject({ result: false });
     expect(Cell.getValue(read, "A3")).toMatchObject({ result: "ab" });
@@ -670,7 +676,9 @@ describe("3D sheet spans", () => {
 
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(workbook, { format: "xlsb" }));
-    expect(Cell.getFormula(Workbook.getWorksheet(reopened, "S1")!, "C1")).toBe("SUM(S1:S3!A1)");
+    // A sheet named like a cell (`S0`, `S1`) is quoted, as Excel writes it: `S1!A1` is not a sheet
+    // reference. The shared rule in @utils/sheet-name; these used to print unquoted.
+    expect(Cell.getFormula(Workbook.getWorksheet(reopened, "S1")!, "C1")).toBe("SUM('S1:S3'!A1)");
   });
 
   it("appends the span entry without disturbing the identity table", async () => {
@@ -687,8 +695,10 @@ describe("3D sheet spans", () => {
     const reopened = Workbook.create();
     await Workbook.read(reopened, await Workbook.toBuffer(workbook, { format: "xlsb" }));
     const read = Workbook.getWorksheet(reopened, "S1")!;
-    expect(Cell.getFormula(read, "B1")).toBe("S3!A1");
-    expect(Cell.getFormula(read, "C1")).toBe("SUM(S1:S3!A1)");
+    // A sheet named like a cell (`S0`, `S1`) is quoted, as Excel writes it: `S1!A1` is not a sheet
+    // reference. The shared rule in @utils/sheet-name; these used to print unquoted.
+    expect(Cell.getFormula(read, "B1")).toBe("'S3'!A1");
+    expect(Cell.getFormula(read, "C1")).toBe("SUM('S1:S3'!A1)");
   });
 });
 

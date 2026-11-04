@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Cell, Column, DefinedNames, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, DefinedNames, Row, Workbook } from "@excel/index";
 
 const outDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -25,11 +25,11 @@ const filename = process.argv[2] ?? path.join(outDir, "xlsb-formulas.xlsb");
 const wb = Workbook.create();
 
 const data = Workbook.addWorksheet(wb, "Data");
-Worksheet.addRow(data, ["Quarter", "Units", "Price"]);
-Worksheet.addRow(data, ["Q1", 120, 19.99]);
-Worksheet.addRow(data, ["Q2", 84, 24.5]);
-Worksheet.addRow(data, ["Q3", 203, 12.75]);
-Worksheet.addRow(data, ["Q4", 156, 18.0]);
+Row.add(data, ["Quarter", "Units", "Price"]);
+Row.add(data, ["Q1", 120, 19.99]);
+Row.add(data, ["Q2", 84, 24.5]);
+Row.add(data, ["Q3", 203, 12.75]);
+Row.add(data, ["Q4", 156, 18.0]);
 for (const row of [2, 3, 4, 5]) {
   Cell.setStyle(data, `C${row}`, { numFmt: '"$"#,##0.00' });
 }
@@ -39,7 +39,7 @@ const calc = Workbook.addWorksheet(wb, "Calc");
 Column.setWidth(calc, 1, 34);
 Column.setWidth(calc, 2, 30);
 Column.setWidth(calc, 3, 16);
-Worksheet.addRow(calc, ["What it demonstrates", "Formula", "Result"]);
+Row.add(calc, ["What it demonstrates", "Formula", "Result"]);
 for (const column of ["A1", "B1", "C1"]) {
   Cell.setStyle(calc, column, { font: { bold: true } });
 }
@@ -92,9 +92,8 @@ console.log(`wrote ${filename}`);
 
 // Read back and compare the *expressions*, not the numbers. A reader that lost the expression and
 // kept the cached result looks correct until someone edits a cell.
-const reopened = Workbook.create();
-await Workbook.readFile(reopened, filename);
-const read = Workbook.getWorksheets(reopened)[1]!;
+const reopened = await Workbook.readFile(filename);
+const read = Workbook.listWorksheets(reopened)[1]!;
 let survived = 0;
 formulas.forEach(({ formula }, index) => {
   const value = Cell.getValue(read, `C${index + 2}`);

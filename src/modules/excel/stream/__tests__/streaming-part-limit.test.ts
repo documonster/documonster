@@ -1,14 +1,11 @@
+import { FileTooLargeError } from "@archive/core/errors";
 /**
  * The streaming reader holds the workbook, styles, shared strings and
  * relationship parts in memory, so it bounds each of them like the buffered
  * reader does — counting bytes as they inflate, since a streamed ZIP may not
  * declare sizes. Worksheets are streamed and not bounded by it.
  */
-
-import { FileTooLargeError } from "@archive/core/errors";
-import { cellSetValue } from "@excel/core/cell";
-import { rowGetCell } from "@excel/core/worksheet";
-import { Workbook, Worksheet } from "@excel/index";
+import { Cell, Workbook } from "@excel/index";
 import { WorkbookReader } from "@excel/stream/workbook-reader";
 import { describe, it, expect } from "vitest";
 
@@ -16,7 +13,7 @@ async function workbookWithStrings(count: number): Promise<Uint8Array> {
   const wb = Workbook.create();
   const ws = Workbook.addWorksheet(wb, "S");
   for (let i = 1; i <= count; i++) {
-    cellSetValue(rowGetCell(Worksheet.getRow(ws, i), 1), `distinct string number ${i}`);
+    Cell.setValue(ws, i, 1, `distinct string number ${i}`);
   }
   return Workbook.toBuffer(wb);
 }
@@ -42,6 +39,12 @@ describe("streaming reader part-size limit", () => {
   it("rejects a cached part larger than maxEntrySize while it inflates", async () => {
     const buffer = await workbookWithStrings(2000);
     await expect(readAll(buffer, 4096)).rejects.toBeInstanceOf(FileTooLargeError);
+    // It says which limit and what it allows, as the archive's own refusal of the same entry does.
+    await expect(readAll(buffer, 4096)).rejects.toMatchObject({
+      limit: "maxEntrySize",
+      allowed: 4096,
+      path: "xl/sharedStrings.xml"
+    });
   });
 
   it("reads the same workbook under the default limit", async () => {
@@ -53,7 +56,7 @@ describe("streaming reader part-size limit", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "S");
     for (let i = 1; i <= 3000; i++) {
-      cellSetValue(rowGetCell(Worksheet.getRow(ws, i), 1), i);
+      Cell.setValue(ws, i, 1, i);
     }
     expect(await readAll(await Workbook.toBuffer(wb), 16 * 1024)).toBe(3000);
   });

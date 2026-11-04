@@ -201,3 +201,47 @@ export function deepMerge<T = Record<string, unknown>>(...args: unknown[]): T {
   }
   return target as T;
 }
+
+/** What {@link isRecordArgument} rejects, as a type, so it narrows a union to its record members. */
+type NotARecordArgument =
+  | null
+  | undefined
+  | string
+  | number
+  | bigint
+  | boolean
+  | symbol
+  | Iterable<unknown>
+  | ArrayBufferLike
+  | ArrayBufferView
+  | Date;
+
+/**
+ * True when `value` is a record argument — an options object, or a document node passed in
+ * place of the text it would be built from — rather than a value of an older positional form.
+ *
+ * An overload that accepts both `(x, { a, b })` and a deprecated `(x, a, b)` must not dispatch on
+ * `typeof value === "object"`: that is also true of `null`, which plain JavaScript passes as a
+ * positional placeholder (`freeze(ws, null, 2)`), and of arrays, typed arrays and dates. Each of
+ * those keeps the meaning the positional form gave it, so only a non-null object that is not
+ * iterable, not binary data and not a `Date` counts. Iterability rather than `Array.isArray`
+ * also excludes a `Set` or a boxed string, which a positional slot read as a sequence.
+ */
+export function isRecordArgument<T>(value: T): value is Exclude<T, NotARecordArgument> {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  if (typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function") {
+    return false;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return false;
+  }
+  // Tag rather than `instanceof`, so a buffer or date from another realm is recognised too.
+  const tag = Object.prototype.toString.call(value);
+  return (
+    tag !== "[object ArrayBuffer]" &&
+    tag !== "[object SharedArrayBuffer]" &&
+    tag !== "[object Date]"
+  );
+}

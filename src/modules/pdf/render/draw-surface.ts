@@ -38,7 +38,7 @@ import type { Rgba01 } from "@utils/svg-lex";
 export interface PdfDrawPage {
   drawRect(options: DrawRectOptions): unknown;
   drawEllipse(options: DrawEllipseOptions): unknown;
-  drawPath(ops: PathOp[], options?: DrawPathOptions): unknown;
+  drawPath(ops: readonly PathOp[], options?: DrawPathOptions): unknown;
   drawLine(options: DrawLineOptions): unknown;
   drawText(text: string, options: DrawTextOptions): unknown;
   /**
@@ -57,25 +57,56 @@ export interface PdfClipTarget {
   endPath(): void;
 }
 
-/** Where on the page a display list should land. */
+/**
+ * Where on the page a display list should land.
+ *
+ * The list's top-left corner is placed at the box's top-left (`x`, `y + height`) and its
+ * coordinates are multiplied by `PdfDrawSurfaceOptions.scale`. The box does **not** clip
+ * or fit the drawing — a PDF content stream has to balance its `q`/`Q`, and a surface
+ * is handed no "end of list" from which to close a clip — so size it as the list's size
+ * times the scale: `{ x, y, width: list.width * scale, height: list.height * scale }`.
+ */
 export interface DrawSurfaceRect {
   /** Left edge in PDF points. */
   readonly x: number;
   /** **Bottom** edge in PDF points, matching PDF's own convention. */
   readonly y: number;
+  /** Width in PDF points. Not used for placement; see the type's description. */
   readonly width: number;
+  /** Height in PDF points: with `y`, it places the list's top edge at `y + height`. */
   readonly height: number;
 }
 
+/** How {@link createPdfDrawSurface} maps a list into its box. */
+export interface PdfDrawSurfaceOptions {
+  /**
+   * Uniform factor applied to the list's coordinates. Pass the result of fitting the
+   * list into the destination box; the caller decides whether to letterbox. Defaults to 1.
+   */
+  readonly scale?: number;
+}
+
 /**
- * Build a surface that draws onto `page` inside `rect`.
+ * Build a surface that draws onto `page`, with the list's top-left at `rect`'s top-left and
+ * scaled by `options.scale`. Nothing is clipped to `rect` — see {@link DrawSurfaceRect}.
  *
  * @param page - Target page builder.
  * @param rect - Destination box in PDF points.
- * @param scale - Uniform factor applied to the list's coordinates. Pass the
- *   result of fitting the list into `rect`; the caller decides whether to letterbox.
  */
 export function createPdfDrawSurface(
+  page: PdfDrawPage,
+  rect: DrawSurfaceRect,
+  options: PdfDrawSurfaceOptions = {}
+): DrawSurface {
+  return createScaledPdfDrawSurface(page, rect, options.scale ?? 1);
+}
+
+/**
+ * {@link createPdfDrawSurface} with the factor as its own argument — the signature the deprecated
+ * `createPdfDrawSurface(page, rect, scale)` of `documonster/pdf` had, defaults included, so that
+ * forward behaves exactly as before for any `scale` it was given.
+ */
+export function createScaledPdfDrawSurface(
   page: PdfDrawPage,
   rect: DrawSurfaceRect,
   scale = 1

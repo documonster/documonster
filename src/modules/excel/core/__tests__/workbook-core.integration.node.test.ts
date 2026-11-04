@@ -27,9 +27,11 @@ import {
   getColumn,
   getLastColumn,
   getSheetName,
-  rowGetCell
+  rowGetCell,
+  duplicateRow
 } from "@excel/core/worksheet";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Column, ExcelArgumentError, Row, Workbook, Worksheet } from "@excel/index";
 import { makeTestDataPath, testFilePath } from "@test/utils";
 import { describe, it, expect } from "vitest";
 
@@ -159,7 +161,7 @@ describe("Workbook", () => {
 
       for (let i = 0; i < specialValues.length; i++) {
         const value = specialValues[i];
-        Worksheet.addRow(ws, [value]);
+        Row.add(ws, [value]);
         Cell.setValue(ws, `B${i + 1}`, value);
       }
 
@@ -245,14 +247,14 @@ describe("Workbook", () => {
 
         const ws = getWorksheets(wb)[0];
         expect(ws).toBeDefined();
-        expect(Worksheet.rowCount(ws)).toBe(2);
+        expect(Row.getCount(ws)).toBe(2);
 
-        const row1 = Worksheet.getRow(ws, 1);
+        const row1 = getRow(ws, 1);
         expect(cellGetValue(rowGetCell(row1, 1))).toBeDefined();
         expect(cellGetValue(rowGetCell(row1, 2))).toBeDefined();
         expect(cellGetValue(rowGetCell(row1, 3))).toBeDefined();
 
-        const row2 = Worksheet.getRow(ws, 2);
+        const row2 = getRow(ws, 2);
         expect(cellGetValue(rowGetCell(row2, 1))).toBe(1);
         expect(cellGetValue(rowGetCell(row2, 2))).toBeDefined();
         expect(cellGetValue(rowGetCell(row2, 3))).toBeDefined();
@@ -427,7 +429,7 @@ describe("Workbook", () => {
         // The file contains 35000+ defined names, most of which are garbage
         // (array constants, error values, etc.). With the two-phase classifier,
         // garbage entries are preserved as opaque (for round-trip) but do NOT
-        // expand into CellMatrix objects. Verify that matrixMap stays small.
+        // expand into per-cell objects. Verify that matrixMap stays small.
         const matrixCount = Object.keys(getDefinedNames(wb).matrixMap).length;
         expect(matrixCount).toBeLessThan(1000);
       }, 60000);
@@ -474,7 +476,7 @@ describe("Workbook", () => {
         await Workbook.readFile(wb, excelTestDataPath("hidden-worksheet-state.xlsx"));
 
         const expected: Record<number, string> = { 1: "visible", 2: "hidden", 3: "visible" };
-        Workbook.eachSheet(wb, (ws, sheetId) => {
+        Workbook.eachWorksheet(wb, (ws, sheetId) => {
           expect(ws.state).toBe(expected[sheetId]);
         });
       });
@@ -727,7 +729,7 @@ describe("Workbook", () => {
       Cell.setValue(ws, "B2", "This is a header row too");
 
       for (let i = 0; i < 100; i++) {
-        Worksheet.addRow(ws, ["not header row"]);
+        Row.add(ws, ["not header row"]);
       }
 
       ws.pageSetup.printTitlesRow = "1:2";
@@ -785,7 +787,7 @@ describe("Workbook", () => {
       ws.pageSetup.printTitlesRow = "1:2";
 
       for (let i = 0; i < 100; i++) {
-        Worksheet.addRow(ws, [
+        Row.add(ws, [
           "repeated column, not repeated row",
           "repeated column, not repeated row",
           "no repeat",
@@ -1508,12 +1510,12 @@ describe("Workbook", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb);
 
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { key: "id", width: 10 },
         { key: "name", width: 32 }
       ]);
 
-      Worksheet.addRow(ws, { id: 1, name: "" });
+      Row.add(ws, { id: 1, name: "" });
 
       await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
     });
@@ -1549,7 +1551,8 @@ describe("Workbook", () => {
     it("CSV file and its configuration", async function () {
       const writeOptions = {
         dateFormat: "DD/MM/YYYY HH:mm:ss",
-        dateUTC: false,
+        // The default: a named format states no timezone, and both sides take its fields as UTC wall-clock time.
+        dateUTC: true,
         encoding: "utf-8",
         includeEmptyRows: false,
         sheetName: "sheet1",
@@ -1694,7 +1697,7 @@ describe("Workbook", () => {
 
         Cell.setValue(ws, "A1", "OneInfo");
         Cell.setValue(ws, "A2", "TwoInfo");
-        Worksheet.duplicateRow(ws, 1, 2);
+        duplicateRow(ws, 1, 2);
 
         await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
@@ -1715,7 +1718,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A2", "TwoInfo");
         Cell.setValue(ws, "A3", "ThreeInfo");
         Cell.setValue(ws, "A4", "FourInfo");
-        Worksheet.duplicateRow(ws, 1, 2, false);
+        duplicateRow(ws, 1, 2, false);
 
         await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
@@ -1735,7 +1738,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A2", "TwoInfo");
         Cell.setValue(ws, "A3", "ThreeInfo");
         Cell.setValue(ws, "A4", "FourInfo");
-        Worksheet.duplicateRow(ws, 1, 2, true);
+        duplicateRow(ws, 1, 2, true);
 
         await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
@@ -1755,7 +1758,7 @@ describe("Workbook", () => {
         Cell.setValue(ws, "A2", "TwoInfo");
         Row.setHeight(ws, 1, 25);
         Row.setHeight(ws, 2, 15);
-        Worksheet.duplicateRow(ws, 1, 1, true);
+        duplicateRow(ws, 1, 1, true);
 
         await Workbook.writeFile(wb, TEST_XLSX_FILE_NAME);
         const wb2 = Workbook.create();
@@ -1894,8 +1897,10 @@ describe("Workbook", () => {
       await Workbook.read(wb, {} as unknown as Uint8Array);
       expect.fail("should fail for given argument");
     } catch (e) {
-      expect((e as Error).message).toContain(
-        "Can't read the data of 'the loaded zip file'. Is it in a supported JavaScript type (String, Blob, ArrayBuffer, etc) ?"
+      // Not bytes: refused as an argument, as `readStream` refuses a non-stream, saying what it was given.
+      expect(e).toBeInstanceOf(ExcelArgumentError);
+      expect((e as Error).message).toBe(
+        "Workbook.read: data must be bytes (Uint8Array, ArrayBuffer, a typed-array view, a Blob) or a base64 string with { base64: true }, got object"
       );
     }
   });

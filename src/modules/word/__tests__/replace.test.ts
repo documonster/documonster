@@ -365,9 +365,9 @@ describe("template engine prototype pollution guard", () => {
       { type: "paragraph", children: [textRun("{{/each}}")] } as any
     ]);
     const items = JSON.parse('[{"__proto__":{"injected":"OOPS"},"name":"a"}]');
-    Template.fillTemplate(doc, { items }, { strict: false });
+    const filled = Template.fill(doc, { items }, { strict: false });
     let allText = "";
-    for (const block of doc.body) {
+    for (const block of filled.body) {
       if ((block as any).type === "paragraph") {
         for (const child of (block as any).children) {
           if ("content" in child) {
@@ -392,9 +392,9 @@ describe("template engine prototype pollution guard", () => {
     // strict:false so that an unresolved placeholder doesn't throw —
     // we want the resolver to *return undefined*, not synthesise a
     // value from Object.prototype.
-    Template.fillTemplate(doc, {}, { strict: false });
+    const filled = Template.fill(doc, {}, { strict: false });
     let allText = "";
-    for (const block of doc.body) {
+    for (const block of filled.body) {
       if ((block as any).type === "paragraph") {
         for (const child of (block as any).children) {
           if ("content" in child) {

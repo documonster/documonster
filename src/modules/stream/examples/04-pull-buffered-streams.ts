@@ -2,9 +2,9 @@
  * Example: PullStream + BufferedStream (cross-platform pull/buffer primitives)
  *
  * Demonstrates:
- * - createPullStream() / PullStream: pull-based reading with size and
+ * - Streams.createPullStream() / PullStream: pull-based reading with size and
  *   pattern matching (e.g. read up to the next newline)
- * - createBufferedStream() / BufferedStream: accumulate writes and drain the
+ * - Streams.createBufferedStream() / BufferedStream: accumulate writes and drain the
  *   whole buffer as a single Uint8Array
  *
  * These are the stream module's signature primitives: instead of the
@@ -14,7 +14,7 @@
  * Usage: pnpm example --filter 04-pull-buffered-streams
  */
 
-import { createBufferedStream, createPullStream } from "@stream";
+import { Streams } from "@stream";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -24,18 +24,18 @@ const decoder = new TextDecoder();
  */
 export async function examplePullStream(): Promise<void> {
   // highWaterMark opts into bounded-memory backpressure (default Infinity).
-  const stream = createPullStream({ highWaterMark: 64 });
+  const stream = Streams.createPullStream({ highWaterMark: 64 });
 
   stream.write(encoder.encode("Line1\nLine2\nLine3\n"));
   stream.end();
 
-  // Pull until the newline pattern (exclude the delimiter from the result).
-  const line1 = await stream.pull(encoder.encode("\n"), false);
+  // Pull until the newline pattern (the delimiter is consumed but left out of the result).
+  const line1 = await stream.pullUntil(encoder.encode("\n"));
   console.log("PullStream line 1:", decoder.decode(line1));
 
-  // pullUntil is an alias for pull(pattern, includePattern).
-  const line2 = await stream.pullUntil(encoder.encode("\n"), false);
-  console.log("PullStream line 2:", decoder.decode(line2));
+  // { includePattern: true } keeps the delimiter at the end of the result.
+  const line2 = await stream.pullUntil(encoder.encode("\n"), { includePattern: true });
+  console.log("PullStream line 2:", JSON.stringify(decoder.decode(line2)));
   console.log("PullStream last match position:", stream.matchPosition);
 
   // Pull an exact number of bytes ("Line3").
@@ -48,7 +48,7 @@ export async function examplePullStream(): Promise<void> {
  * BufferedStream: accumulate string/byte writes, then drain as one Uint8Array.
  */
 export function exampleBufferedStream(): void {
-  const buffered = createBufferedStream({ batchSize: 1024 });
+  const buffered = Streams.createBufferedStream({ batchSize: 1024 });
 
   // Accepts both strings and Uint8Array chunks.
   buffered.write("Hello ");
@@ -61,8 +61,8 @@ export function exampleBufferedStream(): void {
   const head = buffered.read(5);
   console.log("BufferedStream read(5):", head ? decoder.decode(head) : null);
 
-  // toUint8Array() drains everything that remains in a single allocation.
-  const rest = buffered.toUint8Array();
+  // readAll() drains everything that remains in a single allocation.
+  const rest = buffered.readAll();
   console.log("BufferedStream drained rest:", decoder.decode(rest));
   console.log("BufferedStream bufferedLength after drain:", buffered.bufferedLength);
 }

@@ -13,11 +13,10 @@
  * the batch parser (parse.ts) and the streaming parser (csv-stream.ts).
  */
 
-import { CsvError } from "@csv/errors";
+import { CsvArgumentError } from "@csv/errors";
 import type { CsvRecordError, OnSkipCallback } from "@csv/types";
 import type { HeaderArray } from "@csv/utils/row";
 import { deduplicateHeadersWithRenames } from "@csv/utils/row";
-import { isSafeDynamicKey } from "@utils/object";
 
 // =============================================================================
 // Types
@@ -106,7 +105,8 @@ export function processHeaders(
     rawHeaders = headers(row);
     // Validate returned array length matches the row
     if (rawHeaders.length !== row.length) {
-      throw new CsvError(
+      throw new CsvArgumentError(
+        "options.headers",
         `Header function returned ${rawHeaders.length} headers but row has ${row.length} columns. ` +
           `The header function must return an array with the same length as the input row.`
       );
@@ -237,14 +237,32 @@ export function createOnSkipHandler(
 }
 
 /**
+ * The record error for text found after a closing quote (`"a"b,c`). RFC 4180 gives that text
+ * no meaning, so the record is reported instead of returned with the text silently dropped.
+ */
+export function textAfterQuoteError(line: number, raw: string): CsvRecordError {
+  return {
+    code: "ParseError",
+    message: "Unexpected text after a closing quote",
+    line,
+    raw
+  };
+}
+
+/**
  * Convert a row array to an object using headers.
  * Internal helper for convertRowToObject.
+ *
+ * Every header is kept, whatever its name: the record has no prototype, so a column named
+ * `constructor` or `__proto__` is an ordinary property of it, and a name holding a line break
+ * or a tab is as much the file's data as any other. Filtering them dropped the column from
+ * every record while `headers` still listed it.
  */
 function rowToObject(row: string[], headers: HeaderArray): Record<string, string> {
   const obj: Record<string, string> = Object.create(null) as Record<string, string>;
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
-    if (header !== null && header !== undefined && isSafeDynamicKey(header)) {
+    if (header !== null && header !== undefined) {
       obj[header] = row[i] ?? "";
     }
   }
@@ -287,7 +305,7 @@ function rowToObjectGrouped(
   >;
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i];
-    if (header !== null && header !== undefined && isSafeDynamicKey(header)) {
+    if (header !== null && header !== undefined) {
       const value = row[i] ?? "";
       if (header in obj) {
         // Column name already exists - convert to array or push to existing array

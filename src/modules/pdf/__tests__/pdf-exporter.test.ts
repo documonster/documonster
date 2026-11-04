@@ -1,14 +1,4 @@
-import {
-  cellSetAlignment,
-  cellSetBorder,
-  cellSetFill,
-  cellSetFont,
-  cellSetValue
-} from "@excel/core/cell";
-import { rowSetHidden } from "@excel/core/row";
-import { addWorkbookImage } from "@excel/core/workbook-core";
-import { addImage, addWatermark, getCell } from "@excel/core/worksheet";
-import { Cell, Column, Row, Workbook, Worksheet } from "@excel/index";
+import { Cell, Column, Image, Row, Watermark, Workbook, Worksheet } from "@excel/index";
 import { PdfError } from "@pdf/errors";
 import { excelToPdf } from "@pdf/excel-bridge";
 import { resetFontDiscoveryCache, _setCandidatesForTest } from "@pdf/font/system-fonts";
@@ -180,9 +170,8 @@ describe("excelToPdf", () => {
     it("should render bold text", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Styles");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Bold Text");
-      cellSetFont(cell, { bold: true });
+      Cell.setValue(ws, "A1", "Bold Text");
+      Cell.setFont(ws, "A1", { bold: true });
 
       const pdf = await excelToPdf(wb);
 
@@ -195,9 +184,8 @@ describe("excelToPdf", () => {
     it("should render italic text", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Styles");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Italic Text");
-      cellSetFont(cell, { italic: true });
+      Cell.setValue(ws, "A1", "Italic Text");
+      Cell.setFont(ws, "A1", { italic: true });
 
       const pdf = await excelToPdf(wb);
 
@@ -209,9 +197,8 @@ describe("excelToPdf", () => {
     it("should render colored text", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Styles");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Red Text");
-      cellSetFont(cell, { color: { argb: "FFFF0000" } });
+      Cell.setValue(ws, "A1", "Red Text");
+      Cell.setFont(ws, "A1", { color: { argb: "FFFF0000" } });
 
       const pdf = await excelToPdf(wb);
 
@@ -223,9 +210,8 @@ describe("excelToPdf", () => {
     it("should render background fill", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Styles");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Filled");
-      cellSetFill(cell, {
+      Cell.setValue(ws, "A1", "Filled");
+      Cell.setFill(ws, "A1", {
         type: "pattern",
         pattern: "solid",
         fgColor: { argb: "FFFFFF00" }
@@ -242,9 +228,8 @@ describe("excelToPdf", () => {
     it("should render cell borders", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Styles");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Bordered");
-      cellSetBorder(cell, {
+      Cell.setValue(ws, "A1", "Bordered");
+      Cell.setBorder(ws, "A1", {
         top: { style: "thin", color: { argb: "FF000000" } },
         bottom: { style: "thin", color: { argb: "FF000000" } },
         left: { style: "thin", color: { argb: "FF000000" } },
@@ -436,7 +421,7 @@ describe("excelToPdf", () => {
       const ws = Workbook.addWorksheet(wb, "Picture");
       Cell.setValue(ws, "A1", "Data");
       ws.headerFooter.oddHeader = "&L&[Tab]&C&[Picture]&R&[Page]/&[Pages]";
-      const imageId = addWorkbookImage(wb, {
+      const imageId = Image.add(wb, {
         buffer: new Uint8Array([
           0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0,
           0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0x90, 0x77, 0x53, 0xde, 0, 0, 0, 0x0c, 0x49, 0x44,
@@ -445,7 +430,7 @@ describe("excelToPdf", () => {
         ]),
         extension: "png"
       });
-      addWatermark(ws, { imageId, mode: "header", headerWidth: 12, headerHeight: 12 });
+      Watermark.add(ws, { imageId, mode: "header", headerWidth: 12, headerHeight: 12 });
 
       const pdf = await excelToPdf(wb);
       const result = await readPdf(pdf);
@@ -465,7 +450,7 @@ describe("excelToPdf", () => {
         }
         if (withWatermark) {
           ws.headerFooter.oddHeader = "&C&G";
-          const imageId = addWorkbookImage(wb, {
+          const imageId = Image.add(wb, {
             buffer: new Uint8Array([
               0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52,
               0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0x90, 0x77, 0x53, 0xde, 0, 0, 0, 0x0c, 0x49,
@@ -474,7 +459,7 @@ describe("excelToPdf", () => {
             ]),
             extension: "png"
           });
-          addWatermark(ws, {
+          Watermark.add(ws, {
             imageId,
             mode: "header",
             headerWidth: 300,
@@ -691,8 +676,8 @@ describe("excelToPdf", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "FooterImage");
       Cell.setValue(ws, "A1", "Data");
-      const imageId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
-      addWatermark(ws, {
+      const imageId = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
+      Watermark.add(ws, {
         imageId,
         mode: "header",
         position: "RF",
@@ -719,10 +704,10 @@ describe("excelToPdf", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Idempotent");
       Cell.setValue(ws, "A1", "Data");
-      const imageId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
+      const imageId = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
 
-      addWatermark(ws, { imageId, mode: "header", position: "LH" });
-      addWatermark(ws, { imageId, mode: "header", position: "LH" });
+      Watermark.add(ws, { imageId, mode: "header", position: "LH" });
+      Watermark.add(ws, { imageId, mode: "header", position: "LH" });
 
       expect(ws.headerFooter.oddHeader).toBe("&L&G");
       expect((await readPdf(await excelToPdf(wb))).pages[0].images).toHaveLength(1);
@@ -732,10 +717,10 @@ describe("excelToPdf", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Moved");
       Cell.setValue(ws, "A1", "Data");
-      const imageId = addWorkbookImage(wb, { buffer: TINY_PNG, extension: "png" });
+      const imageId = Image.add(wb, { buffer: TINY_PNG, extension: "png" });
 
-      addWatermark(ws, { imageId, mode: "header", position: "LH" });
-      addWatermark(ws, { imageId, mode: "header", position: "CF" });
+      Watermark.add(ws, { imageId, mode: "header", position: "LH" });
+      Watermark.add(ws, { imageId, mode: "header", position: "CF" });
 
       expect(ws.headerFooter.oddHeader).toBeNull();
       expect(ws.headerFooter.oddFooter).toBe("&C&G");
@@ -747,7 +732,7 @@ describe("excelToPdf", () => {
       for (let row = 1; row <= 110; row++) {
         Cell.setValue(ws, `A${row}`, `Row ${row}`);
       }
-      const imageId = addWorkbookImage(wb, {
+      const imageId = Image.add(wb, {
         buffer: new Uint8Array([
           0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0,
           0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0x90, 0x77, 0x53, 0xde, 0, 0, 0, 0x0c, 0x49, 0x44,
@@ -756,7 +741,7 @@ describe("excelToPdf", () => {
         ]),
         extension: "png"
       });
-      addWatermark(ws, {
+      Watermark.add(ws, {
         imageId,
         mode: "header",
         applyTo: "even",
@@ -843,7 +828,7 @@ describe("excelToPdf", () => {
     it("should respect custom column widths", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Widths");
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { header: "Narrow", width: 5 },
         { header: "Wide", width: 30 }
       ]);
@@ -925,9 +910,8 @@ describe("excelToPdf", () => {
     it("should handle center-aligned text", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Align");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Centered");
-      cellSetAlignment(cell, { horizontal: "center" });
+      Cell.setValue(ws, "A1", "Centered");
+      Cell.setAlignment(ws, "A1", { horizontal: "center" });
 
       const pdf = await excelToPdf(wb);
 
@@ -939,9 +923,8 @@ describe("excelToPdf", () => {
     it("should handle right-aligned text", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Align");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "Right");
-      cellSetAlignment(cell, { horizontal: "right" });
+      Cell.setValue(ws, "A1", "Right");
+      Cell.setAlignment(ws, "A1", { horizontal: "right" });
 
       const pdf = await excelToPdf(wb);
 
@@ -987,7 +970,7 @@ describe("excelToPdf", () => {
       Cell.setValue(ws, "A1", "Row1");
       Cell.setValue(ws, "A2", "SecretRow");
       Cell.setValue(ws, "A3", "Row3");
-      rowSetHidden(Worksheet.getRow(ws, 2), true);
+      Row.setHidden(ws, 2, true);
 
       const pdf = await excelToPdf(wb);
 
@@ -1090,7 +1073,7 @@ describe("excelToPdf", () => {
       const ws = Workbook.addWorksheet(wb, "MergeHidden");
       Cell.setValue(ws, "A1", "Tall Merge");
       Worksheet.merge(ws, "A1:A4");
-      rowSetHidden(Worksheet.getRow(ws, 2), true); // hide row 2
+      Row.setHidden(ws, 2, true); // hide row 2
       Cell.setValue(ws, "B1", "Side");
 
       const pdf = await excelToPdf(wb);
@@ -1108,8 +1091,8 @@ describe("excelToPdf", () => {
       const ws = Workbook.addWorksheet(wb, "Outline");
       Worksheet.merge(ws, "A2:A4");
       Cell.setValue(ws, "A2", "Collapsed Merge");
-      rowSetHidden(Worksheet.getRow(ws, 2), true);
-      rowSetHidden(Worksheet.getRow(ws, 3), true);
+      Row.setHidden(ws, 2, true);
+      Row.setHidden(ws, 3, true);
       Cell.setValue(ws, "B4", "Sub Total");
 
       const text = pdfToString(await excelToPdf(wb));
@@ -1153,9 +1136,12 @@ describe("excelToPdf", () => {
     it("should wrap long text when wrapText is enabled", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "Wrap");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, "This is a very long text that should wrap to multiple lines in the cell");
-      cellSetAlignment(cell, { wrapText: true });
+      Cell.setValue(
+        ws,
+        "A1",
+        "This is a very long text that should wrap to multiple lines in the cell"
+      );
+      Cell.setAlignment(ws, "A1", { wrapText: true });
       Column.setWidth(ws, 1, 15); // narrow column
 
       const pdfBytes = await excelToPdf(wb);
@@ -1399,14 +1385,13 @@ describe("excelToPdf", () => {
     it("should wrap rich text cells when wrapText is enabled", async () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "RichWrap");
-      const cell = getCell(ws, "A1");
-      cellSetValue(cell, {
+      Cell.setValue(ws, "A1", {
         richText: [
           { text: "This is bold text ", font: { bold: true } },
           { text: "and this is normal text that should wrap to multiple lines" }
         ]
       });
-      cellSetAlignment(cell, { wrapText: true });
+      Cell.setAlignment(ws, "A1", { wrapText: true });
       Column.setWidth(ws, 1, 15);
 
       const pdf = await excelToPdf(wb);
@@ -1810,7 +1795,7 @@ describe("exportPdf vector chart preparation", () => {
     // The case above embeds a font, so the code point is recorded while routing
     // through that face's cmap. With *no* embedded font there is no cmap to route
     // through, and this pipeline never ran the builder's separate check — so
-    // `Pdf.create` and `Pdf.fromExcel` wrote a PDF with Type3 NOTDEF boxes in it
+    // `Pdf.fromTable` and `Pdf.fromExcel` wrote a PDF with Type3 NOTDEF boxes in it
     // and reported nothing, which is precisely the condition
     // `PdfExportOptions.onWarning` documents.
     //
@@ -2120,8 +2105,8 @@ describe("Image integration", () => {
     }
 
     const jpegData = buildMinimalJpeg();
-    const imageId = addWorkbookImage(wb, { buffer: jpegData, extension: "jpeg" });
-    addImage(ws, imageId, {
+    const imageId = Image.add(wb, { buffer: jpegData, extension: "jpeg" });
+    Image.place(ws, imageId, {
       tl: { col: 0, row: 1 },
       br: { col: 2, row: 4 }
     });
@@ -2143,8 +2128,8 @@ describe("Image integration", () => {
     }
 
     const pngData = buildMinimalPng();
-    const imageId = addWorkbookImage(wb, { buffer: pngData, extension: "png" });
-    addImage(ws, imageId, {
+    const imageId = Image.add(wb, { buffer: pngData, extension: "png" });
+    Image.place(ws, imageId, {
       tl: { col: 0, row: 1 },
       ext: { width: 100, height: 100 }
     });
@@ -2169,8 +2154,8 @@ describe("Image integration", () => {
     }
 
     const jpegData = buildMinimalJpeg();
-    const imageId = addWorkbookImage(wb, { buffer: jpegData, extension: "jpeg" });
-    addImage(ws, imageId, {
+    const imageId = Image.add(wb, { buffer: jpegData, extension: "jpeg" });
+    Image.place(ws, imageId, {
       tl: { col: 1, row: 0 },
       br: { col: 3, row: 3 }
     });
@@ -2192,9 +2177,9 @@ describe("Image integration", () => {
     Cell.setValue(ws, "A1", "Hello");
 
     const jpegData = buildMinimalJpeg();
-    const imageId = addWorkbookImage(wb, { buffer: jpegData, extension: "jpeg" });
+    const imageId = Image.add(wb, { buffer: jpegData, extension: "jpeg" });
     // Image br extends well beyond the single data cell
-    addImage(ws, imageId, {
+    Image.place(ws, imageId, {
       tl: { col: 1, row: 1 },
       br: { col: 5, row: 8 }
     });
@@ -2440,9 +2425,9 @@ describe("auto-discovered fallback font in a workbook", () => {
     const wb = Workbook.create();
     const ws = Workbook.addWorksheet(wb, "Sheet1");
     Cell.setValue(ws, "A1", "Bold");
-    cellSetFont(getCell(ws, "A1"), { bold: true });
+    Cell.setFont(ws, "A1", { bold: true });
     Cell.setValue(ws, "A2", "Italic");
-    cellSetFont(getCell(ws, "A2"), { italic: true });
+    Cell.setFont(ws, "A2", { italic: true });
     Cell.setValue(ws, "A3", "\u4e2d\u6587");
 
     const pdf = await excelToPdf(wb);
@@ -2468,7 +2453,7 @@ describe("widening a discovered face for text reported after layout", () => {
   // finished document — and this pipeline used to return as soon as *some*
   // fallback existed, leaving the late character as a Type3 NOTDEF box. The
   // builder already reconsidered an incomplete face, so the same document came out
-  // correct through `Pdf.Builder` and with tofu through `Pdf.create`.
+  // correct through `Pdf.Builder` and with tofu through `Pdf.fromTable`.
   const BODY = 0x4e2d; // 中 — in the cell
   const LATE = 0x9fa6; // 龦 — only in the watermark
 

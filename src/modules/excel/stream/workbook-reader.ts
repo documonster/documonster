@@ -19,6 +19,7 @@ import {
   handOut
 } from "@excel/stream/workbook-reader.browser";
 import { WorksheetReader } from "@excel/stream/worksheet-reader";
+import { containerReadError } from "@excel/utils/container-errors";
 import { iterateStream } from "@excel/utils/iterate-stream";
 import type { Readable } from "@stream";
 import { createReadStream, createWriteStream, createTempDirSync, remove } from "@utils/fs";
@@ -60,6 +61,11 @@ interface WaitingWorksheet {
   isXlsb: boolean;
 }
 
+/**
+ * Read a workbook — a file path, a stream, bytes or a Web stream — one part at a time: `parse()` yields an event per
+ * worksheet (and, by the options, shared strings and hyperlinks), each worksheet a {@link WorksheetReader} whose
+ * rows are read as they arrive. `read()` does the same and raises the events instead.
+ */
 class WorkbookReader extends WorkbookReaderBase<
   WorkbookReaderInput,
   WorksheetReader,
@@ -144,7 +150,12 @@ class WorkbookReader extends WorkbookReaderBase<
     waitingWorksheets: WaitingWorksheet[]
   ): AsyncIterableIterator<WorksheetReadyEvent<WorksheetReader>> {
     for (const ws of waitingWorksheets) {
-      await ws.writePromise;
+      // Spooling the sheet read its part through, so a damaged part fails here — reported as every reader does.
+      try {
+        await ws.writePromise;
+      } catch (error) {
+        throw containerReadError(error);
+      }
       const fileStream = createReadStream(ws.path);
       const part = handOut(iterateStream<Uint8Array>(fileStream), `worksheet ${ws.sheetNo}`);
       try {

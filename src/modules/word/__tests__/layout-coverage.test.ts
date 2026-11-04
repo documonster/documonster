@@ -54,8 +54,10 @@ describe("layoutDocumentFull — full BodyContent coverage", () => {
     const layout = layoutDocumentFull(minimalDoc([fi]));
     expect(layout.pages).toHaveLength(1);
     const items = layout.pages[0].content;
-    expect(items).toHaveLength(1);
+    // The float, and the empty paragraph holding its anchor.
+    expect(items).toHaveLength(2);
     expect(items[0].type).toBe("float");
+    expect(items[1].type).toBe("paragraph");
     expect(items[0].rect.width).toBeCloseTo(72); // 1 inch = 72pt
     expect(items[0].rect.height).toBeCloseTo(72);
   });
@@ -118,10 +120,14 @@ describe("layoutDocumentFull — full BodyContent coverage", () => {
     };
     const layout = layoutDocumentFull(minimalDoc([anchored, para]));
     const items = layout.pages[0].content;
-    expect(items).toHaveLength(2);
-    const paraItem = items[1];
+    // The float, the empty paragraph holding its anchor, then the text — right
+    // below that one line, not below the float.
+    expect(items).toHaveLength(3);
+    const carrier = items[1];
+    const paraItem = items[2];
     expect(paraItem.type).toBe("paragraph");
-    expect(paraItem.rect.y).toBeCloseTo(0);
+    expect(paraItem.rect.y).toBeCloseTo(carrier.rect.y + carrier.rect.height);
+    expect(paraItem.rect.y).toBeLessThan(72);
   });
 
   it("topAndBottom wrap pushes the body cursor below the float", () => {
@@ -140,8 +146,10 @@ describe("layoutDocumentFull — full BodyContent coverage", () => {
     };
     const layout = layoutDocumentFull(minimalDoc([fi, para]));
     const items = layout.pages[0].content;
-    expect(items).toHaveLength(2);
-    const paraItem = items[1];
+    // The float, the empty paragraph holding its anchor (below the float),
+    // then the text.
+    expect(items).toHaveLength(3);
+    const paraItem = items[2];
     expect(paraItem.type).toBe("paragraph");
     // Float top=0, height=72pt (1in), no margin: cursor must be ≥72.
     expect(paraItem.rect.y).toBeGreaterThanOrEqual(72);
@@ -166,10 +174,14 @@ describe("layoutDocumentFull — full BodyContent coverage", () => {
       children: [{ content: [{ type: "text" as const, text: "x" }] }]
     };
     const layout = layoutDocumentFull(minimalDoc([fi, para]));
-    const paraItem = layout.pages[0].content[1];
+    // The float, the empty paragraph holding its anchor, then the text.
+    const paraItem = layout.pages[0].content.at(-1)!;
     expect(paraItem.type).toBe("paragraph");
-    // Float bottom = 72pt; +0.5in pad = 36pt → paragraph at y ≥ 108.
-    expect(paraItem.rect.y).toBeGreaterThanOrEqual(108);
+    // Float bottom = 72pt; +0.5in pad = 36pt → the paragraph's text at y ≥ 108.
+    if (paraItem.type !== "paragraph") {
+      throw new Error("expected a paragraph");
+    }
+    expect(paraItem.rect.y + paraItem.lines[0]!.y).toBeGreaterThanOrEqual(108);
   });
 
   it("preserves wrap info on LayoutFloat for renderers (square style)", () => {
@@ -340,7 +352,9 @@ describe("layoutDocumentFull — full BodyContent coverage", () => {
     const item = layout.pages[0].content[0];
     expect(item.type).toBe("tableOfContents");
     if (item.type === "tableOfContents") {
-      expect(item.entries).toHaveLength(2);
+      // The two entries, then the paragraph the field ends in, as it is written.
+      expect(item.entries).toHaveLength(3);
+      expect(item.entries[2]!.lines.flatMap(line => line.runs)).toEqual([]);
     }
   });
 

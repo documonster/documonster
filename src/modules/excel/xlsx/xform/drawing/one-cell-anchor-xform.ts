@@ -1,8 +1,12 @@
-import { BaseCellAnchorXform } from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
+import {
+  BaseCellAnchorXform,
+  preservedObjectXforms
+} from "@excel/xlsx/xform/drawing/base-cell-anchor-xform";
 import { CellPositionXform } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import type { PositionModel } from "@excel/xlsx/xform/drawing/cell-position-xform";
 import { ExtXform } from "@excel/xlsx/xform/drawing/ext-xform";
 import type { ExtModel } from "@excel/xlsx/xform/drawing/ext-xform";
+import type { EchoNode } from "@excel/xlsx/xform/drawing/generic-echo-xform";
 import { GraphicFrameXform } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import type { GraphicFrameModel } from "@excel/xlsx/xform/drawing/graphic-frame-xform";
 import { PicXform } from "@excel/xlsx/xform/drawing/pic-xform";
@@ -22,6 +26,8 @@ interface OneCellModel {
   shape?: ShapeRenderModel;
   /** Graphic frame model (for charts and other embedded objects) */
   graphicFrame?: GraphicFrameModel;
+  /** A group, shape or connector read from a file and written back verbatim. */
+  preserved?: EchoNode;
   medium?: unknown;
 }
 
@@ -35,6 +41,7 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
       "xdr:pic": new PicXform(),
       "xdr:userShape": new ShapeXform(),
       "xdr:graphicFrame": new GraphicFrameXform(),
+      ...preservedObjectXforms(),
       "xdr:clientData": new StaticXform({ tag: "xdr:clientData" })
     };
   }
@@ -70,6 +77,8 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
       this.map["xdr:pic"].render(xmlStream, model.picture);
     } else if (model.graphicFrame) {
       this.map["xdr:graphicFrame"].render(xmlStream, model.graphicFrame);
+    } else if (model.preserved) {
+      this.renderPreserved(xmlStream, model.preserved);
     } else if (model.shape?.kind === "userShape") {
       this.map["xdr:userShape"].render(xmlStream, model.shape);
     }
@@ -91,6 +100,7 @@ class OneCellAnchorXform extends BaseCellAnchorXform {
         this.model.range.ext = this.map["xdr:ext"].model;
         this.model.picture = this.map["xdr:pic"].model;
         this.model.graphicFrame = this.map["xdr:graphicFrame"].model;
+        this.model.preserved = this.takePreserved();
         // **Derived from the element, not read from an attribute.** A one-cell anchor *is* `editAs="oneCell"`
         // — move with the cells, keep a fixed size — so the tag already states it and `CT_OneCellAnchor`
         // rightly has nowhere to repeat it. `AbsoluteAnchorXform`'s consumers do the same thing for

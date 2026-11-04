@@ -93,12 +93,15 @@ function checkSingleDrawing(ctx: ValidationContext, path: string): void {
         hasDescendantLocal(child, "oneCellAnchor") ||
         hasDescendantLocal(child, "absoluteAnchor")
       ) {
-        // Look for a Choice with Requires="cx1" / "cx" — those mean
-        // chartEx, which is the bug this rule flags. If the Choice
-        // uses any other prefix ("a14" for form controls, etc.) the
-        // outer wrap is the Microsoft-sanctioned shape and we skip.
+        // A wrapped anchor that holds a `<cx:chart>`, or a Choice that
+        // requires a ChartEx revision (`cx`, `cx1` … `cx8`), is the bug
+        // this rule flags. Any other Choice ("a14" for form controls,
+        // etc.) is the Microsoft-sanctioned shape and we skip.
         const choiceRequires = findChoiceRequires(child);
-        if (choiceRequires === "cx" || choiceRequires === "cx1") {
+        const holdsChartEx = collectDescendantsLocal(child, "chart").some(el =>
+          el.name.startsWith("cx:")
+        );
+        if (holdsChartEx || (choiceRequires !== undefined && /^cx\d?$/.test(choiceRequires))) {
           ctx.reporter.error(
             "drawing-chartEx-alternateContent-outer-wrap",
             `${path}: <mc:AlternateContent> wraps the entire anchor. ` +

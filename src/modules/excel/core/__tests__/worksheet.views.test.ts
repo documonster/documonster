@@ -1,7 +1,8 @@
 import { columnCollapsed, columnOutlineLevel, columnSetOutlineLevel } from "@excel/core/column";
 import { rowCollapsed, rowSetOutlineLevel } from "@excel/core/row";
 import { getColumn } from "@excel/core/worksheet";
-import { Cell, Workbook, Worksheet } from "@excel/index";
+import { getRow } from "@excel/core/worksheet-core";
+import { Cell, Column, Workbook } from "@excel/index";
 import type { WorksheetViewFrozen, WorksheetViewSplit } from "@excel/types";
 import { describe, it, expect } from "vitest";
 
@@ -48,9 +49,9 @@ describe("Worksheet", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "sheet1");
 
-      const row1 = Worksheet.getRow(ws, 1);
-      const row2 = Worksheet.getRow(ws, 2);
-      const row3 = Worksheet.getRow(ws, 3);
+      const row1 = getRow(ws, 1);
+      const row2 = getRow(ws, 2);
+      const row3 = getRow(ws, 3);
       expect(rowCollapsed(row1)).toBe(false);
       expect(rowCollapsed(row2)).toBe(false);
       expect(rowCollapsed(row3)).toBe(false);
@@ -77,7 +78,7 @@ describe("Worksheet", () => {
       const wb = Workbook.create();
       const ws = Workbook.addWorksheet(wb, "sheet1");
 
-      Worksheet.setColumns(ws, [
+      Column.setDefinitions(ws, [
         { key: "id", width: 10, outlineLevel: 1 },
         { key: "name", width: 32, outlineLevel: 2 },
         { key: "dob", width: 10, outlineLevel: 3 }

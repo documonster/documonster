@@ -387,19 +387,28 @@ type _NonClassExport_streamToUint8Array = Assert<
 // ============================================================================
 
 type _NormalizeWritableParams = Assert<
-  ParamsEqual<typeof NodeStreams.toWritable, typeof BrowserStreams.toWritable>
+  ParamsEqual<typeof NodeStreams.Streams.toWritable, typeof BrowserStreams.Streams.toWritable>
 >;
 
 type _CreateReadableParams = Assert<
-  ParamsEqual<typeof NodeStreams.createReadable, typeof BrowserStreams.createReadable>
+  ParamsEqual<
+    typeof NodeStreams.Streams.createReadable,
+    typeof BrowserStreams.Streams.createReadable
+  >
 >;
 
 type _CreateWritableParams = Assert<
-  ParamsEqual<typeof NodeStreams.createWritable, typeof BrowserStreams.createWritable>
+  ParamsEqual<
+    typeof NodeStreams.Streams.createWritable,
+    typeof BrowserStreams.Streams.createWritable
+  >
 >;
 
 type _CreateTransformParams = Assert<
-  ParamsEqual<typeof NodeStreams.createTransform, typeof BrowserStreams.createTransform>
+  ParamsEqual<
+    typeof NodeStreams.Streams.createTransform,
+    typeof BrowserStreams.Streams.createTransform
+  >
 >;
 
 type _PipelineParams = Assert<
@@ -410,20 +419,16 @@ type _FinishedParams = Assert<
   ParamsEqual<typeof NodeStreams.finished, typeof BrowserStreams.finished>
 >;
 
-type _StreamToPromiseParams = Assert<
-  ParamsEqual<typeof NodeStreams.streamToPromise, typeof BrowserStreams.streamToPromise>
+type _BytesReturns = Assert<
+  ReturnsEqual<typeof NodeStreams.Streams.bytes, typeof BrowserStreams.Streams.bytes>
 >;
 
-type _StreamToBufferReturns = Assert<
-  ReturnsEqual<typeof NodeStreams.streamToBuffer, typeof BrowserStreams.streamToBuffer>
+type _TextParams = Assert<
+  ParamsEqual<typeof NodeStreams.Streams.text, typeof BrowserStreams.Streams.text>
 >;
 
-type _StreamToStringParams = Assert<
-  ParamsEqual<typeof NodeStreams.streamToString, typeof BrowserStreams.streamToString>
->;
-
-type _StreamToUint8ArrayParams = Assert<
-  ParamsEqual<typeof NodeStreams.streamToUint8Array, typeof BrowserStreams.streamToUint8Array>
+type _BytesParams = Assert<
+  ParamsEqual<typeof NodeStreams.Streams.bytes, typeof BrowserStreams.Streams.bytes>
 >;
 
 // `await using` needs Symbol.asyncDispose on the instance type, on both builds.

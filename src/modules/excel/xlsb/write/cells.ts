@@ -24,17 +24,16 @@ import {
 } from "@excel/xlsb/binary";
 import { errorCodeOf } from "@excel/xlsb/error-values";
 import {
+  encodeFormula,
   encodeParsedFormula,
-  encodePtg,
   encodeSharedFormulaReference,
+  type EncodedFormula,
   type PtgContext
 } from "@excel/xlsb/formula/ptg";
 import type { CellFormatTable } from "@excel/xlsb/styles";
 import { record, type Emitted } from "@excel/xlsb/write/emit";
 import type { RichTextRun, SharedStringTable } from "@excel/xlsb/write/shared-strings";
 import { type CellLike, type SheetCell, type SheetRow } from "@excel/xlsb/write/types";
-import { parse } from "@formula/syntax/parser";
-import { tokenize } from "@formula/syntax/tokenizer";
 import { BinaryWriter, concatUint8Arrays } from "@utils/binary";
 import { dateToExcel } from "@utils/utils";
 
@@ -166,9 +165,9 @@ function formulaReason(message: string): string {
  * be a second encoder for the same grammar, and this module's most repeated defect is two encoders agreeing with
  * each other and not with Excel.
  */
-function sharedTemplateTokens(cell: SheetCell, context: PtgContext): Uint8Array {
-  return encodePtg(
-    parse(tokenize(cell.formula!)),
+function sharedTemplateTokens(cell: SheetCell, context: PtgContext): EncodedFormula {
+  return encodeFormula(
+    cell.formula!,
     { ...context, origin: { row: cell.row, column: cell.column }, relativeToOrigin: true },
     `${encodeCol(cell.column)}${cell.row + 1}`
   );
@@ -179,10 +178,40 @@ function encodeFormulaCell(
   head: Uint8Array,
   context: PtgContext
 ): readonly Emitted[] | RefusedCell | undefined {
+  const records = encodeFormulaRecords(cell, head, context);
+  // A dynamic array's master is preceded by `BrtCellMeta` naming cell metadata 1 — the one `XLDAPR` entry the
+  // metadata part declares (`writeDynamicArrayMetadata`). Excel writes it before the master only: the other cells
+  // of the spill are ordinary `PtgExp` followers.
+  if (
+    cell.isDynamicArray === true &&
+    sharedRange(cell)?.kind === "array" &&
+    Array.isArray(records)
+  ) {
+    return [
+      record("BrtCellMeta", new BinaryWriter().writeUint32(1).toUint8Array()),
+      ...(records as readonly Emitted[])
+    ];
+  }
+  return records;
+}
+
+function encodeFormulaRecords(
+  cell: SheetCell,
+  head: Uint8Array,
+  context: PtgContext
+): readonly Emitted[] | RefusedCell | undefined {
   const where = `${encodeCol(cell.column)}${cell.row + 1}`;
-  let tokens: Uint8Array;
+  const shared = sharedRange(cell);
+  let tokens: EncodedFormula;
+  let template: EncodedFormula | undefined;
   try {
-    tokens = encodePtg(parse(tokenize(cell.formula!)), context, where);
+    // An array formula is evaluated over its range, which decides the class an unconverted value takes.
+    tokens = encodeFormula(
+      cell.formula!,
+      shared?.kind === "array" ? { ...context, role: "array" } : context,
+      where
+    );
+    template = shared?.kind === "shared" ? sharedTemplateTokens(cell, context) : undefined;
   } catch (cause) {
     // **The reason travels with the refusal.** This used to swallow the error and the caller reported a
     // bare `A1: formula`, which tells a caller that something about the formula could not be written and
@@ -196,12 +225,11 @@ function encodeFormulaCell(
   // A master cell of a shared or array formula stores a `PtgExp` where its expression would go, and the
   // expression itself follows in a `BrtShrFmla` or `BrtArrFmla`. Which of the two, and over what range, is
   // decided by `sharedRange` below; `undefined` means an ordinary single-cell formula.
-  const shared = sharedRange(cell);
   const reference =
     shared === undefined ? undefined : encodeSharedFormulaReference(cell.row, cell.column);
   const formula =
     reference === undefined
-      ? encodeParsedFormula(tokens)
+      ? encodeParsedFormula(tokens.rgce, tokens.extra)
       : encodeParsedFormula(reference.rgce, reference.rgbExtra);
   const follower =
     shared === undefined
@@ -235,8 +263,8 @@ function encodeFormulaCell(
               // The same mistake, in the same operand, was fixed for conditional formatting earlier — and
               // nothing went back to ask which *other* callers write a template. This is that caller.
               shared.kind === "array"
-                ? encodeParsedFormula(tokens)
-                : encodeParsedFormula(sharedTemplateTokens(cell, context))
+                ? encodeParsedFormula(tokens.rgce, tokens.extra)
+                : encodeParsedFormula(template!.rgce, template!.extra)
             ])
           )
         ];
@@ -419,7 +447,9 @@ function isRichText(value: unknown): value is { readonly richText: readonly Rich
  * reports what was lost.
  */
 export function writableValue(cell: CellLike): CellValue {
-  if (unsupportedKind(cell) !== undefined) {
+  // A formula cell's cached result survives whatever stops its formula being written: the loss reported is the
+  // formula, and taking the value with it — as this did for an array formula with no range — lost more than that.
+  if (unsupportedKind(cell) !== undefined && cell.formula === undefined) {
     return null;
   }
   // A formula cell's model value is undefined and its cached result lives in `result`. **A cell that follows
@@ -555,9 +585,7 @@ export function unsupportedKind(cell: CellLike): string | undefined {
   if (cell.shareType !== undefined && cell.ref === undefined) {
     return "array formula without a range";
   }
-  if (cell.isDynamicArray === true) {
-    return "dynamic array formula";
-  }
+  // A dynamic array is no longer a loss: it is written as Excel writes it — see `encodeFormulaCell`.
   // The value of a shared-string cell is an index into the string table, not a number. Passing it
   // through the numeric path writes the index as the cell's content — a plausible-looking small
   // integer where text belongs.

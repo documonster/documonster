@@ -1,0 +1,47 @@
+/**
+ * `ExcelCsv.read` / `addWorksheet` take the inputs `CsvInput` names, and `CsvInput` names what they
+ * take: a Web `ReadableStream` of bytes (also one that is not async-iterable, as in browsers
+ * without `ReadableStream` iteration) and any async iterable of text or bytes.
+ */
+import { Cell, Workbook } from "@excel";
+import { ExcelCsv, type CsvInput } from "@excel/bridge/csv";
+import { describe, expect, expectTypeOf, it } from "vitest";
+
+const bytes = new TextEncoder().encode("a,b\n1,2\n");
+
+function webStream(iterable: boolean): ReadableStream<Uint8Array> {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    }
+  });
+  if (!iterable) {
+    // A browser `ReadableStream` without async iteration: only `getReader()`
+    Object.defineProperty(stream, Symbol.asyncIterator, { value: undefined });
+  }
+  return stream;
+}
+
+async function* chunks(): AsyncGenerator<string> {
+  yield "a,b\n";
+  yield "1,2\n";
+}
+
+describe("ExcelCsv.read takes what CsvInput names", () => {
+  it.each([
+    ["an async-iterable ReadableStream", () => webStream(true)],
+    ["a ReadableStream with only getReader()", () => webStream(false)],
+    ["an async generator of strings", () => chunks()]
+  ])("%s", async (_name, make) => {
+    const wb = await ExcelCsv.read(make() as CsvInput);
+    const ws = Workbook.getWorksheets(wb)[0]!;
+    expect(Cell.getValue(ws, "A1")).toBe("a");
+    expect(Cell.getValue(ws, "B2")).toBe(2);
+  });
+
+  it("CsvInput includes them", () => {
+    expectTypeOf<ReadableStream<Uint8Array>>().toMatchTypeOf<CsvInput>();
+    expectTypeOf<AsyncIterable<Uint8Array | string>>().toMatchTypeOf<CsvInput>();
+  });
+});

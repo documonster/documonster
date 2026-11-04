@@ -11,7 +11,16 @@
  * and both were added. An example that has to go through the model is a missing public member, not a pattern
  * to copy; treat any future one the same way.
  */
-import { Cell, DefinedNames, Form, Sparkline, Table, Workbook, Worksheet } from "@excel/index";
+import {
+  Cell,
+  ConditionalFormatting,
+  DefinedNames,
+  Form,
+  Sparkline,
+  Table,
+  Workbook,
+  Worksheet
+} from "@excel/index";
 
 /** A small sheet of numbers every feature can point at. Three regions, a quantity, a date. */
 export function sampleSheet(workbook: Workbook.Handle, name = "Data"): Worksheet.Handle {
@@ -41,7 +50,7 @@ export const PNG = Uint8Array.from([
  * looked covered.
  */
 export function buildConditionalFormatting(sheet: Worksheet.Handle): void {
-  Worksheet.addConditionalFormatting(sheet, {
+  ConditionalFormatting.add(sheet, {
     ref: "B2:B4",
     rules: [
       {
@@ -52,7 +61,7 @@ export function buildConditionalFormatting(sheet: Worksheet.Handle): void {
       }
     ]
   } as never);
-  Worksheet.addConditionalFormatting(sheet, {
+  ConditionalFormatting.add(sheet, {
     ref: "C2:C4",
     rules: [
       {
@@ -63,7 +72,7 @@ export function buildConditionalFormatting(sheet: Worksheet.Handle): void {
       }
     ]
   } as never);
-  Worksheet.addConditionalFormatting(sheet, {
+  ConditionalFormatting.add(sheet, {
     ref: "A2:A4",
     rules: [
       {
@@ -168,10 +177,10 @@ export function buildDefinedNames(workbook: Workbook.Handle): void {
  * A frozen pane: one header row and one label column held in place.
  *
  * This used to go through `getModel`/`setModel` with the OOXML field names, and said so — "a
- * `Worksheet.freeze(sheet, …)` would be the member to add". It was added; this is what an example is for.
+ * `Worksheet.freeze(sheet, { columns: … })` would be the member to add". It was added; this is what an example is for.
  */
 export function buildFrozenPane(sheet: Worksheet.Handle): void {
-  Worksheet.freeze(sheet, 1, 1);
+  Worksheet.freeze(sheet, { columns: 1, rows: 1 });
 }
 
 /**

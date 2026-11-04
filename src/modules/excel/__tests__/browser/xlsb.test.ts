@@ -115,13 +115,13 @@ describe("Documonster.Excel XLSB in the browser", () => {
     const wb = Workbook.create();
     const sheet = Workbook.addWorksheet(wb, "S1");
     Cell.setValue(sheet, "A1", 1);
-    // An array constant: still refused, and refused by the same writer in a browser. This case used to
-    // use a border, which the writer now carries — so it was asserting that a *supported* feature was
-    // rejected, and the browser suite is where that surfaced.
-    Cell.setValue(sheet, "A2", { formula: "SUM({1,2;3,4})" } as never);
+    // A name the workbook does not define: still refused, and refused by the same writer in a browser.
+    // Keep this on something the writer genuinely cannot express — it used a border, then an array
+    // constant, and each became supported, leaving the test asserting that a working feature failed.
+    Cell.setValue(sheet, "A2", { formula: "NoSuchNameAnywhere+1", result: 1 } as never);
     // The default is to refuse, and that has to hold in a browser too — the rejection is what makes the
     // loss discoverable, and it is produced by the same writer.
-    await expect(Workbook.toBuffer(wb, { format: "xlsb" })).rejects.toThrow(/array constant/);
+    await expect(Workbook.toBuffer(wb, { format: "xlsb" })).rejects.toThrow(/S1!A2: formula/);
     expect(
       (await Workbook.toBuffer(wb, { format: "xlsb", unsupported: "ignore" })).byteLength
     ).toBeGreaterThan(0);

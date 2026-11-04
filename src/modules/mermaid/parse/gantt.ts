@@ -21,7 +21,7 @@ import {
   parseDuration,
   parseWithFormat
 } from "@mermaid/parse/dates";
-import { decodeLabel, splitStatements } from "@mermaid/parse/lex";
+import { SkipLog, decodeLabel, splitStatementsAt } from "@mermaid/parse/lex";
 import type { GanttDiagram, GanttTask, TaskState } from "@mermaid/types";
 
 const STATES: ReadonlySet<string> = new Set(["active", "done", "crit"]);
@@ -40,7 +40,9 @@ export function parseGantt(source: string): GanttDiagram {
   /** Weekday numbers the plan excludes, so duration counts working time only. */
   const excluded = new Set<number>();
 
-  for (const text of splitStatements(source)) {
+  const skipped = new SkipLog();
+  for (const statement of splitStatementsAt(source)) {
+    const { text } = statement;
     if (/^gantt\b/i.test(text)) {
       continue;
     }
@@ -92,6 +94,7 @@ export function parseGantt(source: string): GanttDiagram {
 
     const colon = text.indexOf(":");
     if (colon === -1) {
+      skipped.add(statement);
       continue;
     }
     const label = decodeLabel(text.slice(0, colon));
@@ -101,7 +104,11 @@ export function parseGantt(source: string): GanttDiagram {
       .map(field => field.trim())
       .filter(field => field !== "");
 
-    const task = readTask(label, section, fields, byId, cursor, dateFormat, excluded);
+    const read = readTask(label, section, fields, byId, cursor, dateFormat, excluded);
+    if (!read.complete) {
+      skipped.add(statement);
+    }
+    const task = read.task;
     if (!task) {
       continue;
     }
@@ -120,7 +127,8 @@ export function parseGantt(source: string): GanttDiagram {
     kind: "gantt",
     ...(title === undefined ? {} : { title }),
     sections,
-    tasks
+    tasks,
+    ...skipped.report()
   };
 }
 
@@ -135,7 +143,19 @@ const WEEKDAYS: Record<string, number> = {
   saturday: 6
 };
 
-/** Classify the fields after the colon and build the bar they describe. */
+/**
+ * A field made only of digits and date separators: written as a date, whatever it reads as.
+ * One that is not a real date (`2024-13-45`) must not become the task's identifier.
+ */
+const DATE_SHAPED = /^\d[\d\s:./-]*[:./-][\d\s:./-]*\d$/;
+
+/**
+ * Classify the fields after the colon and build the bar they describe.
+ *
+ * `complete` is `false` when a field could not be read. A task with a date that does not
+ * exist is not drawn at all — placing it at the previous task's end would be a confident
+ * picture of a schedule the author did not write.
+ */
 function readTask(
   label: string,
   section: string,
@@ -144,7 +164,8 @@ function readTask(
   cursor: number | undefined,
   dateFormat: string | undefined,
   excluded: ReadonlySet<number>
-): GanttTask | undefined {
+): { task: GanttTask | undefined; complete: boolean } {
+  let complete = true;
   let state: TaskState = "default";
   let milestone = false;
   let id: string | undefined;
@@ -173,6 +194,8 @@ function readTask(
         const previous = byId.get(name);
         if (previous) {
           after = after === undefined ? previous.end : Math.max(after, previous.end);
+        } else {
+          complete = false;
         }
       }
       continue;
@@ -183,6 +206,8 @@ function readTask(
         const other = byId.get(name);
         if (other) {
           end = end === undefined ? other.start : Math.min(end, other.start);
+        } else {
+          complete = false;
         }
       }
       continue;
@@ -212,16 +237,21 @@ function readTask(
       months = calendar.months;
       continue;
     }
+    if (DATE_SHAPED.test(field)) {
+      return { task: undefined, complete: false };
+    }
     // Anything left is the task's identifier.
     if (id === undefined) {
       id = field;
+    } else {
+      complete = false;
     }
   }
 
   const from = start ?? after ?? cursor;
   if (from === undefined) {
     // A chart whose first task says nothing about when it starts has no timeline at all.
-    return undefined;
+    return { task: undefined, complete: false };
   }
   const to =
     end ??
@@ -234,12 +264,15 @@ function readTask(
   const at = milestone ? from + (Math.max(from, to) - from) / 2 : from;
 
   return {
-    ...(id === undefined ? {} : { id }),
-    label,
-    section,
-    start: milestone ? at : from,
-    end: milestone ? at : Math.max(from, to),
-    state,
-    milestone
+    task: {
+      ...(id === undefined ? {} : { id }),
+      label,
+      section,
+      start: milestone ? at : from,
+      end: milestone ? at : Math.max(from, to),
+      state,
+      milestone
+    },
+    complete
   };
 }

@@ -15,7 +15,7 @@ describe("parse threshold optimization (browser)", () => {
       const smallContent = "Hello, World! This is a test file.";
       const smallContentBytes = new TextEncoder().encode(smallContent);
 
-      const zipBuffer = zip({ level: 6 }).add("small.txt", smallContentBytes).bytesSync();
+      const zipBuffer = zip({ level: 6 }).add("small.txt", smallContentBytes).toBufferSync();
 
       // Create a readable stream from the buffer
       const readable = new Readable();
@@ -42,7 +42,7 @@ describe("parse threshold optimization (browser)", () => {
       const content = "Uncompressed content for STORE mode test.";
       const contentBytes = new TextEncoder().encode(content);
 
-      const zipBuffer = zip({ level: 0 }).add("store.txt", contentBytes).bytesSync();
+      const zipBuffer = zip({ level: 0 }).add("store.txt", contentBytes).toBufferSync();
 
       const readable = new Readable();
       readable.push(zipBuffer);
@@ -74,7 +74,7 @@ describe("parse threshold optimization (browser)", () => {
       for (const f of files) {
         z.add(f.name, new TextEncoder().encode(f.content));
       }
-      const zipBuffer = z.bytesSync();
+      const zipBuffer = z.toBufferSync();
 
       const readable = new Readable();
       readable.push(zipBuffer);
@@ -98,7 +98,7 @@ describe("parse threshold optimization (browser)", () => {
       const content = "x".repeat(1000); // 1KB
       const contentBytes = new TextEncoder().encode(content);
 
-      const zipBuffer = zip({ level: 6 }).add("test.txt", contentBytes).bytesSync();
+      const zipBuffer = zip({ level: 6 }).add("test.txt", contentBytes).toBufferSync();
 
       const readable = new Readable();
       readable.push(zipBuffer);
@@ -128,7 +128,7 @@ describe("parse threshold optimization (browser)", () => {
         binaryData[i] = i;
       }
 
-      const zipBuffer = zip({ level: 6 }).add("binary.bin", binaryData).bytesSync();
+      const zipBuffer = zip({ level: 6 }).add("binary.bin", binaryData).toBufferSync();
 
       const readable = new Readable();
       readable.push(zipBuffer);
@@ -156,7 +156,7 @@ describe("parse threshold optimization (browser)", () => {
 
   describe("threshold boundary conditions", () => {
     it("should handle empty files", async () => {
-      const zipBuffer = zip({ level: 6 }).add("empty.txt", new Uint8Array(0)).bytesSync();
+      const zipBuffer = zip({ level: 6 }).add("empty.txt", new Uint8Array(0)).toBufferSync();
 
       const readable = new Readable();
       readable.push(zipBuffer);
@@ -184,7 +184,7 @@ describe("parse threshold optimization (browser)", () => {
       const content = "x".repeat(thresholdBytes);
       const contentBytes = new TextEncoder().encode(content);
 
-      const zipBuffer = zip({ level: 6 }).add("boundary.txt", contentBytes).bytesSync();
+      const zipBuffer = zip({ level: 6 }).add("boundary.txt", contentBytes).toBufferSync();
 
       const readable = new Readable();
       readable.push(zipBuffer);

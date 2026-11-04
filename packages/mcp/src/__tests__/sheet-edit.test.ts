@@ -201,7 +201,7 @@ describe("sheet_edit — operations", () => {
       ops: [{ op: "add_sheet", name: "Summary", rows: [["total"], [42]] }]
     });
     const wb = await reopen(fx, file);
-    const names = Workbook.getWorksheets(wb).map(ws => Worksheet.getModel(ws).name);
+    const names = Workbook.listWorksheets(wb).map(ws => Worksheet.getModel(ws).name);
     expect(names).toContain("Summary");
     expect(names).toContain("Notes");
     expect(Cell.getValue(Workbook.getWorksheet(wb, "Summary")!, "A2")).toBe(42);

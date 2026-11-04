@@ -112,6 +112,9 @@ export interface RowScanResult {
   /** Whether there was an unterminated quoted field (EOF inside quotes) */
   unterminatedQuote?: boolean;
 
+  /** Whether text followed a closing quote before the next delimiter (`"a"b,c`) */
+  textAfterQuote?: boolean;
+
   /**
    * Start position of the raw row in the input string.
    * Used for zero-copy raw row extraction: `input.slice(rawStart, rawEnd)`.

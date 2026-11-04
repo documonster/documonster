@@ -1,7 +1,7 @@
 import { addSheetTo } from "@excel/__tests__/shared/add-sheet-to";
 import conditionalFormattingJson from "@excel/__tests__/shared/data/conditional-formatting.json" with { type: "json" };
 import { fix } from "@excel/__tests__/shared/tools";
-import { Workbook, Worksheet } from "@excel/index";
+import { ConditionalFormatting, Workbook } from "@excel/index";
 import { expect } from "vitest";
 
 const self = {
@@ -18,7 +18,7 @@ const self = {
         if (typeof (ws as any).addConditionalFormatting === "function") {
           (ws as any).addConditionalFormatting(conditionalFormatting);
         } else {
-          Worksheet.addConditionalFormatting(ws, conditionalFormatting);
+          ConditionalFormatting.add(ws, conditionalFormatting);
         }
       }
     });
